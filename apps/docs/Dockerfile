@@ -18,7 +18,7 @@ RUN pnpm --filter @i10/docs build
 
 # A static site needs a static server. No Node in the runtime stage means no
 # Node CVEs to patch on a container that only reads files off disk.
-FROM nginx:1.29-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 COPY --from=build /repo/apps/docs/dist /usr/share/nginx/html
 COPY apps/docs/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080
