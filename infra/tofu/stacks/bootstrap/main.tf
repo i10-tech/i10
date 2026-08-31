@@ -24,6 +24,17 @@ module "labels" {
   durable = true
 }
 
+# The bucket was created by hand before this stack ran, so it is IMPORTED
+# rather than created. An import block is checked during `plan`, which is
+# read-only — so a wrong id fails safely, before anything is touched.
+#
+# The id format is `<account_id>/<bucket_name>`. If plan rejects it, that is
+# the provider telling you the format, not a reason to apply anyway.
+import {
+  to = cloudflare_r2_bucket.tofu_state
+  id = "${var.cloudflare_account_id}/${var.state_bucket_name}"
+}
+
 resource "cloudflare_r2_bucket" "tofu_state" {
   account_id    = var.cloudflare_account_id
   name          = var.state_bucket_name

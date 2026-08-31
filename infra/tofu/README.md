@@ -79,11 +79,31 @@ state object on every apply. A lock on the state bucket breaks the second apply.
 expired WAL and base backups itself, on its own schedule, and would fail
 silently underneath a lock tuned to something else's horizon.
 
-## The one thing to back up
+## Who owns the zone
 
-PSL's durable stratum is import-only, so its committed tfvars is a complete
-recipe for rebuilding state. **i10's is not** — this stack creates its buckets
-rather than importing them, so Tofu is the only thing that knows it owns them.
+`i10.tech` has **two owners on purpose**. A proxied wildcard `*.i10.tech`
+covers every web surface — `dash`, `auth`, `api`, `docs` — and stays
+hand-managed in Cloudflare. Tofu owns the mail half: `mail.i10.tech`, the MX,
+SPF, DMARC, and the `spf.i10.tech` include customers point at.
 
-Add `i10-tofu-state` to the nightly backup job: timestamped copies, never
-overwritten. Losing that state means importing every bucket by hand.
+The split is by blast radius. A wrong web record is a 522 somebody notices in a
+minute. A wrong SPF or DKIM record fails DMARC **silently**, while damaging
+sender reputation, and the first symptom is mail landing in spam days later.
+Those are the records that want a reviewed plan.
+
+**`stacks/dns` is not ready to apply.** Its MX, SPF and DMARC describe mail
+that does not flow yet, and publishing an MX for a host with nothing listening
+on 25 produces bounces rather than nothing. Apply it when Stalwart is up.
+
+## Every stratum imports rather than creates
+
+Both R2 buckets and the state bucket were made by hand before these stacks
+existed, so all three are adopted through `import` blocks. Keep it that way: a
+stack that creates nothing means its committed tfvars **is** the recipe for
+rebuilding state — lose the state file, re-run init, and the imports put it
+back. Import blocks are evaluated during `plan`, which is read-only, so a wrong
+id fails before anything is touched.
+
+That property weakens the moment a stratum creates rather than imports. When
+`stacks/platform` holds a real machine, add `i10-tofu-state` to the nightly
+backup job — timestamped copies, never overwritten.

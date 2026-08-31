@@ -64,7 +64,7 @@ metadata:
 spec:
   entryPoints: [websecure]
   routes:
-    - match: Host(`app.i10.tech`)
+    - match: Host(`dash.i10.tech`)
       kind: Rule
       services:
         - name: i10-console

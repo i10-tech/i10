@@ -4,17 +4,18 @@
 # rebuild. Nothing here may be destroyed by an apply: every resource carries
 # `prevent_destroy`, and the CI policy gate refuses a plan that deletes one.
 #
-# ⚠ i10 DIVERGES FROM PSL HERE, DELIBERATELY. PSL's durable stratum is
-# import-only, because its buckets and IPs pre-dated OpenTofu. i10 is
-# greenfield, so this stack CREATES its durable resources and then protects
-# them. That is the better shape — but it costs the property PSL relies on for
-# recovery: its committed tfvars is a complete recipe for rebuilding state,
-# and ours is not, because Tofu here is the thing that knows it owns these
-# buckets.
+# ⚠ IMPORT-ONLY, LIKE PSL'S. Both buckets were created by hand before this
+# stack existed, so it adopts them rather than creating them — and that is the
+# shape to keep, not a temporary accommodation.
 #
-# The consequence, and it is not optional: THIS STACK'S STATE MUST BE BACKED
-# UP. Timestamped copies of i10-tofu-state into the nightly job, never
-# overwritten. Losing it means every bucket has to be imported by hand.
+# What it buys is the recovery property: this stack creates nothing, so the
+# committed tfvars listing what to import IS a complete recipe for rebuilding
+# the state. Lose the state file, re-run init, and the import blocks put it
+# back. A stratum that CREATES loses that — forgetting it owns a bucket means
+# importing every one by hand.
+#
+# An import block is evaluated during `plan`, which is read-only. A wrong id
+# therefore fails before anything is touched.
 
 provider "cloudflare" {}
 
@@ -33,6 +34,11 @@ module "labels" {
 # shared bucket is unenforceable — a token scoped to a bucket reads all of it.
 # Buckets are free; R2 bills storage and operations.
 
+import {
+  to = cloudflare_r2_bucket.files
+  id = "${var.cloudflare_account_id}/i10"
+}
+
 resource "cloudflare_r2_bucket" "files" {
   account_id    = var.cloudflare_account_id
   name          = "i10"
@@ -40,6 +46,11 @@ resource "cloudflare_r2_bucket" "files" {
   storage_class = "Standard"
 
   lifecycle { prevent_destroy = true }
+}
+
+import {
+  to = cloudflare_r2_bucket.backups
+  id = "${var.cloudflare_account_id}/i10-backups"
 }
 
 resource "cloudflare_r2_bucket" "backups" {

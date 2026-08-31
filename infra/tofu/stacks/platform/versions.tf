@@ -6,10 +6,6 @@ terraform {
       source  = "hetznercloud/hcloud"
       version = "~> 1.50"
     }
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "~> 5.0"
-    }
   }
 
   # Partial config — the rest comes from backend.hcl, because a backend block

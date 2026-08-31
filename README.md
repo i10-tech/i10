@@ -14,6 +14,18 @@ error semantics. Only the key _format_ is ours: `i10_live_…`.
 
 ---
 
+## Hosts
+
+|                   |                                                  |
+| ----------------- | ------------------------------------------------ |
+| `i10.tech`, `www` | marketing — `apps/web`, not being built yet      |
+| `dash.i10.tech`   | the console                                      |
+| `auth.i10.tech`   | `apps/auth` — Clerk, prebuilt components for now |
+| `api.i10.tech`    | the send API                                     |
+| `docs.i10.tech`   | the docs                                         |
+| `mail.i10.tech`   | Stalwart — grey-cloud, the one unproxied name    |
+| `spf.i10.tech`    | the SPF include customers point at               |
+
 ## Layout
 
 ```
@@ -21,7 +33,7 @@ apps/
   api        Hono — the send API. Not Next: it returns a message id in
              single-digit ms, holds long-lived Postgres and Redis pools, runs
              BullMQ workers from the same code, and receives SES webhooks.
-  console    Next — app.i10.tech. Domains, DNS onboarding, keys, message log.
+  console    Next — dash.i10.tech. Domains, DNS onboarding, keys, message log.
   web        Next — i10.tech. Scaffold only; the marketing site is not being
              built yet.
   docs       Nimbus (Astro) — docs.i10.tech. Pagefind search, Scalar for the
@@ -136,6 +148,8 @@ two-secret Doppler pattern, and what deliberately lives in the PSL repo.
   behind latest; read every migration note.
 - **ESLint is held at 9.x** — every plugin supports 10 except
   `eslint-plugin-react`.
-- **`mx.i10.tech` must stay grey-cloud.** Cloudflare's proxy carries only
+- **`mail.i10.tech` must stay grey-cloud.** Cloudflare's proxy carries only
   HTTP/HTTPS. Publishing that record also publishes the origin IP, which is
   unavoidable for mail.
+- **The zone has two owners.** A proxied `*.i10.tech` wildcard covers the web
+  surfaces by hand; OpenTofu owns only the mail records.

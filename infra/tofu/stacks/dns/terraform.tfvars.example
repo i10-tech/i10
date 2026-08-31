@@ -5,7 +5,10 @@ zone_id = "<i10.tech zone id — from stacks/data output>"
 # dual-stack on 2026-08-31 so the mail host can answer on IPv6.
 mail_host_ipv4 = "178.105.164.132"
 mail_host_ipv6 = "2a01:4f8:1c18:45fb::1"
-edge_ipv4      = "178.105.164.132"
-edge_ipv6      = "2a01:4f8:1c18:45fb::1"
+
+# Existing records, imported rather than recreated — see variables.tf for the
+# lookup that produces these.
+mail_a_record_id    = "<record id>"
+mail_aaaa_record_id = "<record id>"
 
 dmarc_rua = "dmarc@i10.tech"
