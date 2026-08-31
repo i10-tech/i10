@@ -18,3 +18,27 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+  # ⚠ WITHOUT THIS, THE APP IS PERMANENTLY OutOfSync. The API server writes
+  # ~6 defaulted fields into the object after creation; Argo reads them as
+  # drift, selfHeal rewrites the object, the controller defaults it again.
+  #
+  # Measured before the fix: syncs at 2s, 6s, 18s, 54s, 162s — Argo's
+  # exponential backoff, so it is not a hot loop and the CPU cost is small.
+  # The real damage is to the signal. An Application that can never reach
+  # Synced means OutOfSync stops distinguishing "drifted" from "normal", and
+  # the one status worth alerting on becomes noise.
+  #
+  # `managedFieldsManagers` is the right instrument rather than listing paths.
+  # Under ServerSideApply, argocd-controller owns exactly the fields we wrote
+  # and the controller owns the rest — so this says "git owns our fields, the
+  # controller owns its own", which is the actual intent. A jsonPointers list
+  # would need extending every time the API server gains a default.
+  #
+  # RespectIgnoreDifferences makes selfHeal honour the list. Without it the
+  # ignores affect only the displayed diff and the rewrites continue.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      managedFieldsManagers:
+        - k3s
