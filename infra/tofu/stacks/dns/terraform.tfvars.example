@@ -1,14 +1,21 @@
 # cp terraform.tfvars.example terraform.tfvars && edit
-zone_id = "<i10.tech zone id — from stacks/data output>"
+#
+# ⚠ DO NOT APPLY THIS STACK YET. Its MX, SPF and DMARC describe mail that does
+# not flow. An MX pointing at a host with nothing listening on 25 produces
+# bounces, not silence. Apply it when Stalwart is up.
+zone_id = "1b1638f11a5a0f893aef4fdca30c048e"
 
 # psl-vps while i10 shares the box. Both families: the cluster was rebuilt
 # dual-stack on 2026-08-31 so the mail host can answer on IPv6.
 mail_host_ipv4 = "178.105.164.132"
 mail_host_ipv6 = "2a01:4f8:1c18:45fb::1"
 
-# Existing records, imported rather than recreated — see variables.tf for the
-# lookup that produces these.
-mail_a_record_id    = "<record id>"
-mail_aaaa_record_id = "<record id>"
+# The two records already exist, created by hand, grey-cloud. Imported rather
+# than recreated so an apply never has a window where the mail host does not
+# resolve. Confirmed 2026-08-31 — both proxied=false, as they must be.
+mail_a_record_id    = "4af1641d1831e9f2d520e920f049efba"
+mail_aaaa_record_id = "6cde5b0a53ed9832ac39b08c8f393ee0"
 
+# Must be RECEIVING before the DMARC policy tightens past p=none — which means
+# it depends on Stalwart, like everything else in this stack.
 dmarc_rua = "dmarc@i10.tech"

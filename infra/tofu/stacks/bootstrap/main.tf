@@ -28,11 +28,17 @@ module "labels" {
 # rather than created. An import block is checked during `plan`, which is
 # read-only — so a wrong id fails safely, before anything is touched.
 #
-# The id format is `<account_id>/<bucket_name>`. If plan rejects it, that is
-# the provider telling you the format, not a reason to apply anyway.
+# ⚠ THE ID IS THREE SEGMENTS: `<account_id>/<bucket_name>/<jurisdiction>`.
+# Two segments fails with `expected urlencoded segments ... got ...`, which is
+# the provider telling you the format — found by running plan, which is exactly
+# what import blocks being plan-time checks is for.
+#
+# `default` is the jurisdiction unless a bucket was deliberately created under
+# `eu` or `fedramp`. The buckets list endpoint does not report jurisdiction at
+# all, so it cannot be read back — it has to be known.
 import {
   to = cloudflare_r2_bucket.tofu_state
-  id = "${var.cloudflare_account_id}/${var.state_bucket_name}"
+  id = "${var.cloudflare_account_id}/${var.state_bucket_name}/default"
 }
 
 resource "cloudflare_r2_bucket" "tofu_state" {

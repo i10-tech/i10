@@ -15,7 +15,10 @@
 # importing every one by hand.
 #
 # An import block is evaluated during `plan`, which is read-only. A wrong id
-# therefore fails before anything is touched.
+# therefore fails before anything is touched — which is how the three-segment
+# format `<account>/<bucket>/<jurisdiction>` was found. `default` unless a
+# bucket was deliberately created under `eu` or `fedramp`; the API does not
+# report it, so it has to be known rather than read back.
 
 provider "cloudflare" {}
 
@@ -36,7 +39,7 @@ module "labels" {
 
 import {
   to = cloudflare_r2_bucket.files
-  id = "${var.cloudflare_account_id}/i10"
+  id = "${var.cloudflare_account_id}/i10/default"
 }
 
 resource "cloudflare_r2_bucket" "files" {
@@ -50,7 +53,7 @@ resource "cloudflare_r2_bucket" "files" {
 
 import {
   to = cloudflare_r2_bucket.backups
-  id = "${var.cloudflare_account_id}/i10-backups"
+  id = "${var.cloudflare_account_id}/i10-backups/default"
 }
 
 resource "cloudflare_r2_bucket" "backups" {
