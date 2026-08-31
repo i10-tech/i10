@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: i10-stalwart
+  namespace: i10-prod
+spec:
+  serviceName: i10-stalwart
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-stalwart
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-stalwart
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: stalwart
+          # ⚠ PINNED ONE RELEASE BEHIND LATEST, DELIBERATELY. Stalwart is
+          # pre-1.0 and its maintainers describe the schema as still being
+          # finalized. The data here is a never-lose-a-byte promise: a dropped
+          # order can be re-placed, a lost archive ends the relationship. Read
+          # every migration note before moving this line.
+          image: stalwartlabs/stalwart:v0.16.19-alpine
+          ports:
+            - { name: smtp, containerPort: 25 }
+            - { name: submissions, containerPort: 465 }
+            - { name: submission, containerPort: 587 }
+            - { name: imaps, containerPort: 993 }
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            # TWO SECRETS, ALWAYS — the root config's shared base does not
+            # reach a consumer on its own, and a workload mounting only its own
+            # config loses observability silently. See doppler/dopplersecrets.yaml.
+            - secretRef: { name: i10-shared }
+            - secretRef: { name: i10-stalwart }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { memory: 1Gi }
+          volumeMounts:
+            - { name: config, mountPath: /opt/stalwart/etc, readOnly: true }
+            - { name: data, mountPath: /opt/stalwart/data }
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: smtp }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: i10-stalwart-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: psl-zfs
+        resources:
+          requests:
+            storage: 2Gi

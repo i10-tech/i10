@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "lib": ["es2023"],
+    "types": ["node"]
+  }
+  // ⚠ NO `outDir` AND NO `rootDir` HERE, DELIBERATELY.
+  //
+  // Both are PATHS, and a path in an extended config resolves relative to the
+  // file that DECLARES it — not to the file doing the extending. Putting
+  // `"rootDir": "src"` in this file means `packages/typescript-config/src`,
+  // and every consumer fails with TS6059 naming its own source file as being
+  // outside a directory it has never heard of.
+  //
+  // So each emitting package pins its own. TypeScript 6 removed rootDir
+  // inference, which makes pinning mandatory rather than optional — and the
+  // right value is the common ancestor of everything EMITTED, which is not the
+  // same as `include`. Do not guess it: set a candidate and run `tsc`, because
+  // a wrong one fails loudly with TS6059 naming the file that broke.
+}

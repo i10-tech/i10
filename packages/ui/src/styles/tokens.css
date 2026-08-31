@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+/*
+ * i10 design tokens.
+ *
+ * The system is shadcn/ui following Uber Base's principles — the same standard
+ * PSL holds itself to, and for the same reason: the interface is a first-order
+ * product claim here, not polish applied at the end. i10's whole competitive
+ * case is that it feels better to use than Resend, Clerk, Attio, Twenty and
+ * Cloudflare's dashboard. Those are the comparison set.
+ *
+ * ⚠ NOTHING HERE IS GENERATED OR APPROXIMATED. Two rules hold:
+ *
+ *   1. THERE IS NO BRAND ACCENT YET. `--brand` is deliberately unset. Do not
+ *      pick one — focus and emphasis use the neutral ring until the accent is
+ *      chosen by a person. A colour invented here becomes a default that is
+ *      hard to argue with later.
+ *
+ *   2. MOTION VALUES ARE NOT INVENTED. The durations and easing curves below
+ *      are PLACEHOLDERS carrying obvious round numbers so they read as
+ *      unfinished. Real values come from Uber Base's motion page, which is a
+ *      JS-rendered portal that WebFetch returns empty — they have to be pasted
+ *      in by hand. Approximating them from memory is the exact failure this
+ *      standard exists to prevent.
+ *
+ * Names match shadcn's contract so its CLI output drops in unmodified.
+ */
+
+@theme {
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+  --color-primary: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.97 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-accent: oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.922 0 0);
+  --color-input: oklch(0.922 0 0);
+  --color-ring: oklch(0.708 0 0);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+
+  /* PLACEHOLDER — see rule 2 above. */
+  --duration-fast: 100ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  .dark {
+    --color-background: oklch(0.145 0 0);
+    --color-foreground: oklch(0.985 0 0);
+    --color-card: oklch(0.205 0 0);
+    --color-card-foreground: oklch(0.985 0 0);
+    --color-popover: oklch(0.205 0 0);
+    --color-popover-foreground: oklch(0.985 0 0);
+    --color-primary: oklch(0.985 0 0);
+    --color-primary-foreground: oklch(0.205 0 0);
+    --color-secondary: oklch(0.269 0 0);
+    --color-secondary-foreground: oklch(0.985 0 0);
+    --color-muted: oklch(0.269 0 0);
+    --color-muted-foreground: oklch(0.708 0 0);
+    --color-accent: oklch(0.269 0 0);
+    --color-accent-foreground: oklch(0.985 0 0);
+    --color-border: oklch(1 0 0 / 10%);
+    --color-input: oklch(1 0 0 / 15%);
+    --color-ring: oklch(0.556 0 0);
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

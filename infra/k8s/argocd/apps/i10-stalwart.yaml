@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: i10-stalwart
+  namespace: argocd
+spec:
+  project: i10
+  source:
+    repoURL: git@github.com:i10-tech/i10.git
+    targetRevision: main
+    path: infra/k8s/i10/stalwart
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: i10-prod
+  syncPolicy:
+    # DELIBERATELY NOT AUTOMATED. The images this references do not exist
+    # until the first Build run publishes them, and an automated sync would
+    # leave Argo permanently red on ImagePullBackOff. Turn automation on in
+    # the same commit that first tags an image.
+    syncOptions:
+      - ServerSideApply=true

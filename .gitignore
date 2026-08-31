@@ -1,0 +1,51 @@
+node_modules/
+.pnpm-store/
+
+# Build output
+.next/
+out/
+dist/
+build/
+.astro/
+.turbo/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Local kubeconfig or credentials must never land here.
+kubeconfig
+*.kubeconfig
+*.pem
+*.key
+!infra/**/*.example.key
+
+# Next generates this on every build and rewrites it; committing it produces a
+# diff on every developer's first `next dev`.
+next-env.d.ts
+
+# ⚠ A BARE `tsc` IN A PACKAGE WITH NO outDir SCATTERS .js AND .d.ts THROUGH
+# src/. Every emitting tsconfig here pins outDir for exactly that reason, and
+# apps/api/tsconfig.json sets noEmit so the type-check config cannot emit at
+# all — but a stray run against the wrong config still happens, and the
+# artifacts then get linted as if they were sources.
+apps/*/src/**/*.js
+apps/*/src/**/*.d.ts
+apps/*/src/**/*.js.map
+apps/*/src/**/*.d.ts.map

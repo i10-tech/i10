@@ -1,0 +1,106 @@
+# i10's Redis. BullMQ's queues live here.
+#
+# ⚠ A SEPARATE INSTANCE, NOT PSL'S WITH A PREFIX. Queues are product data. A
+# shared Redis is the kind of coupling that survives every review because it
+# works — right up to extraction, when it turns a migration into a rewrite.
+#
+# RDB + AOF with appendfsync everysec, plus idempotent handlers on our side.
+# That pairing is the decision: neither persistence mode alone bounds loss the
+# way the two together do, and neither removes the need for handlers that can
+# run twice.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: i10-redis-config
+  namespace: i10-prod
+data:
+  redis.conf: |
+    appendonly yes
+    appendfsync everysec
+    save 900 1
+    save 300 10
+    save 60 10000
+    # BullMQ holds job state in Redis. Evicting a key to make room silently
+    # loses a job, so the instance must refuse writes instead of choosing a
+    # victim — `noeviction` turns a data-loss bug into a visible error.
+    maxmemory-policy noeviction
+    maxmemory 384mb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-redis
+  namespace: i10-prod
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: i10-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: i10-redis
+  namespace: i10-prod
+spec:
+  serviceName: i10-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: redis
+          image: redis:8.10-alpine
+          args: ["/etc/redis/redis.conf"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: i10-redis-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # psl-zfs, not psl-zfs-db: the 16k recordsize on the db class is tuned
+        # for Postgres pages. AOF is an append stream and wants the 128k default.
+        #
+        # ⚠ The StorageClasses are named psl-* because they are PLATFORM
+        # objects, cluster-scoped and owned by the platform Argo project — not
+        # because they belong to PSL. Renaming them is a psl-repo change and is
+        # worth doing before i10 leaves the box, so nothing reads as borrowed.
+        storageClassName: psl-zfs
+        resources:
+          requests:
+            storage: 1Gi

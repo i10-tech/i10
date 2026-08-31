@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: i10-prod
+
+resources:
+  - statefulset.yaml
+  - service.yaml
+
+# The generated name carries a content hash, so editing config.toml rolls the
+# pods. A plain ConfigMap would update in place and leave Stalwart running the
+# old configuration until something happened to restart it — the class of bug
+# where the fix is deployed and the symptom persists.
+configMapGenerator:
+  - name: i10-stalwart-config
+    files:
+      - config/config.toml

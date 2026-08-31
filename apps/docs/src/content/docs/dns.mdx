@@ -1,0 +1,67 @@
+---
+title: DNS setup
+description: The three records, what each one does, and why the order matters.
+---
+
+# DNS setup
+
+Every email carries **two** From addresses. One is printed on the letter and
+shown to humans; one is written on the envelope and used by mail servers to
+route bounces. Almost all confusion about SPF, DKIM and DMARC comes from
+treating them as one address.
+
+| | Asks | Looks at |
+| --- | --- | --- |
+| **SPF** | Is this server allowed to send for the domain? | The **envelope** (Return-Path) |
+| **DKIM** | Does the signature verify against the published key? | The signing domain (`d=`) |
+| **DMARC** | Does **either** of those match the From: domain? | Both — one match is enough |
+
+That "one is enough" is why i10 has two onboarding tiers rather than one.
+
+## Tier 1 — the quick start
+
+One record. You are sending in two minutes.
+
+```
+i10._domainkey.yourdomain.com   TXT   p=<your public key>
+```
+
+DKIM passes and aligns, so DMARC passes. The envelope stays on i10's relay, so
+recipients in Gmail see `mailed-by: amazonses.com` in the message details.
+Nothing is broken; the envelope simply is not yours yet.
+
+## Tier 2 — the complete setup
+
+Two more records make the envelope yours.
+
+```
+send.yourdomain.com             MX    10 feedback-smtp.eu-central-1.amazonses.com
+send.yourdomain.com             TXT   "v=spf1 include:spf.i10.tech ~all"
+```
+
+Now SPF aligns as well as DKIM, and Gmail shows `mailed-by: yourdomain.com`.
+Google's bulk-sender requirements — which apply above 5,000 messages a day —
+ask for SPF **and** DKIM to exist and pass, so this is the setup to be on
+before volume, not after.
+
+<Aside type="note">
+You can send from your apex domain or any subdomain. DMARC's relaxed alignment
+covers both, and nothing in the design cares which you choose.
+</Aside>
+
+## Why one record names Amazon
+
+That MX has to point at `feedback-smtp.<region>.amazonses.com` directly. It is
+where delivery failures are returned, the relay re-verifies it continuously,
+and RFC 2181 forbids pointing an MX at a CNAME — so it cannot be hidden behind
+an i10 hostname without breaking bounce handling.
+
+The SPF record is a different story. `include:spf.i10.tech` resolves on our
+side, which means changing how i10 delivers mail never requires you to edit
+DNS again.
+
+## Automatic setup
+
+The console can write these records for you: sign in with Cloudflare, GoDaddy
+or Namecheap and i10 publishes them directly. Manual instructions stay
+available for anyone who would rather hold the pen.

@@ -1,0 +1,24 @@
+# TLS for every i10 web surface.
+#
+# ⚠ BOTH NAMES. A `*.i10.tech` wildcard covers exactly ONE label, so it matches
+# app.i10.tech and does NOT match the apex i10.tech — nor a two-label name like
+# pr-42.preview.i10.tech. DNS wildcards match one or more labels (RFC 4592) and
+# TLS wildcards match exactly one; that asymmetry is the trap.
+#
+# Issued by DNS-01 through Cloudflare, using i10's OWN zone-scoped API token —
+# a separate credential from PSL's, so a leak of one cannot take the other's
+# DNS. The token needs Zone:DNS:Edit AND Zone:Zone:Read; DNS:Edit alone fails
+# because the zone id is resolved first.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: i10-tech-wildcard
+  namespace: i10-prod
+spec:
+  secretName: i10-tech-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - i10.tech
+    - "*.i10.tech"

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "ui": "tui",
+
+  // RUNTIME variables, deliberately passThrough rather than listed in a task's
+  // `env`.
+  //
+  // Anything in `env` becomes part of the cache key, and the whole point of
+  // these is that they do NOT affect the build: a promotion re-tags the staging
+  // image byte-for-byte, so one artifact has to serve both environments and
+  // learn which one it is at runtime. Listing them as build inputs would make
+  // staging and production produce different images, which is exactly what the
+  // promotion model exists to avoid.
+  //
+  // They are listed at all — rather than left out — because
+  // `turbo/no-undeclared-env-vars` is an error here, and that rule is a
+  // correctness guard, not style: reading an undeclared variable produces a
+  // build cached against the wrong key and silently reused with stale values.
+  "globalPassThroughEnv": [
+    "I10_API_KEY",
+    "I10_BASE_URL",
+    "SENTRY_ENVIRONMENT",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_SERVICE_NAME"
+  ],
+
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      // Baked into the artifact and reported by /version, so they ARE build
+      // inputs — unlike the passThrough list above.
+      "env": ["GIT_SHA", "GIT_BRANCH", "BUILD_TIME", "NODE_ENV"]
+    },
+    "lint": { "dependsOn": ["^lint"] },
+    // `^build` because a package's `exports` point at dist/, which does not
+    // exist until its build has run. Without it a consumer fails with TS2307
+    // on a package sitting right there in the workspace.
+    "check-types": { "dependsOn": ["^build", "^check-types"] },
+    "test": { "dependsOn": ["^build"], "outputs": [] },
+    "dev": { "cache": false, "persistent": true }
+  }
+}

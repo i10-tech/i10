@@ -1,0 +1,29 @@
+# PgBouncer in front of the primary.
+#
+# ⚠ NEVER NAME A Pooler `<cluster>-rw`, `-ro` OR `-r`. A Pooler creates a
+# Service named after itself and the Cluster already owns those three. The
+# collision does not fail loudly: the Pooler sits at `phase: inactive` with
+# `AuthUserSecret not found`, which points at entirely the wrong thing. The
+# real cause (`notOwnedServiceName`) appears only in the operator log.
+#
+# ⚠ TRANSACTION POOLING DROPS `search_path`. PgBouncer accepts the SET and
+# silently ignores it, because a pooled connection is not the same backend
+# twice. Schema-qualify every statement, or use SET LOCAL inside an explicit
+# transaction. The same applies to prepared statements across transactions,
+# LISTEN/NOTIFY, and session advisory locks — use pg_advisory_xact_lock, which
+# releases at commit and therefore survives pooling.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: i10-platform-pooler
+  namespace: i10-prod
+spec:
+  cluster:
+    name: i10-platform
+  instances: 1
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "200"
+      default_pool_size: "20"

@@ -1,0 +1,39 @@
+# cp backend.hcl.example backend.hcl && edit
+#   tofu init -backend-config=backend.hcl
+
+key    = "platform/global.tfstate"
+
+# R2 speaks S3, but it is not S3 — every skip_* below turns off an AWS-only
+# preflight R2 has no answer for. Without them, init fails with errors that
+# point at credentials rather than at the real cause.
+
+bucket = "i10-tofu-state"
+region = "auto"
+
+endpoints = {
+  s3 = "https://<32-hex-account-id>.r2.cloudflarestorage.com"
+}
+
+# Native state locking via R2 conditional writes — what replaces the DynamoDB
+# table an AWS setup would need. Requires OpenTofu >= 1.10.
+use_lockfile = true
+
+skip_credentials_validation = true
+skip_metadata_api_check     = true
+skip_region_validation      = true
+skip_requesting_account_id  = true
+skip_s3_checksum            = true
+
+# Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, set to an
+# R2 API token's key pair.
+#
+# ⚠ PROVE THE KEY PAIR BEFORE WIRING IT IN. An R2 token's dashboard label can
+# say it is bucket-scoped while its actual policy is not, and the symptom is
+# AccessDenied on both ListObjectsV2 and HeadObject — which reads as a
+# missing-object 403. Set the permission FIRST, then pick the bucket:
+#
+#   curl -s --aws-sigv4 "aws:amz:auto:s3" \
+#     --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+#     "https://<account>.r2.cloudflarestorage.com/i10-tofu-state?list-type=2"
+#
+# Want <ListBucketResult>, not <Error>.

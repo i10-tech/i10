@@ -1,0 +1,72 @@
+---
+title: Quickstart
+description: Send your first email with i10 in about two minutes.
+---
+
+# Quickstart
+
+## 1. Verify a domain
+
+Add your sending domain in the console. i10 gives you one record:
+
+```
+i10._domainkey.yourdomain.com   TXT   p=<your public key>
+```
+
+That single record is enough to start sending. DKIM carries DMARC on its own,
+so your mail authenticates from the first message. Adding the other two records
+later moves the bounce address onto your domain — see [DNS](/dns) for what that
+changes and why you want it before volume matters.
+
+## 2. Install the SDK
+
+```bash
+pnpm add @i10/node
+```
+
+## 3. Send
+
+```ts
+import { I10 } from "@i10/node"
+
+const i10 = new I10(process.env.I10_API_KEY!)
+
+await i10.emails.send({
+  from: "hello@yourdomain.com",
+  to: "someone@example.com",
+  subject: "Hello",
+  html: "<p>It works.</p>",
+})
+```
+
+## Idempotency
+
+Anything a retry could duplicate should carry an idempotency key. A replay with
+the same key returns the **first** result rather than sending again — which is
+the difference between a flaky network and a customer receiving four password
+reset emails.
+
+```ts
+await i10.emails.send(email, { idempotencyKey: `reset-${userId}-${tokenId}` })
+```
+
+## Errors
+
+Every non-2xx throws an `I10Error` carrying the API's machine-readable name.
+`retryable` is computed for you, because the distinction that matters most is
+easy to get wrong:
+
+```ts
+import { I10Error } from "@i10/node"
+
+try {
+  await i10.emails.send(email)
+} catch (error) {
+  if (error instanceof I10Error && error.retryable) {
+    // rate_limit_exceeded — back off and try again.
+  }
+  // daily_quota_exceeded is NOT retryable. It is a billing state, and
+  // retrying it is a hot loop against something that will not change on
+  // its own.
+}
+```

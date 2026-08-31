@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per ecosystem rather than per package. Twenty separate patch
+      # PRs is a review queue nobody reads, which is worse for security than
+      # one grouped PR that actually gets looked at.
+      dev-dependencies:
+        dependency-type: development
+      production:
+        dependency-type: production
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly }
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: docker
+    directories:
+      - "/apps/api"
+      - "/apps/console"
+      - "/apps/web"
+      - "/apps/docs"
+    schedule: { interval: weekly }
+    commit-message:
+      prefix: "chore(deps)"

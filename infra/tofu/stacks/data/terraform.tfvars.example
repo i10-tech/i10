@@ -1,0 +1,6 @@
+# ⚠ terraform.tfvars IS COMMITTED for this stack — see infra/tofu/.gitignore.
+# It holds a Cloudflare account id and zone id: public identifiers that
+# authenticate nothing, and the only record of what this stratum owns.
+cloudflare_account_id = "0ccd9b8cd89606709f1c867a1f64d840"
+cloudflare_zone_id    = "<i10.tech zone id>"
+r2_location           = "eeur"

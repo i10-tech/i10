@@ -1,0 +1,90 @@
+# Lint, types, tests, build. Runs on every PR and on both long-lived branches.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, staging]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned rather than read from packageManager, because the setup action runs
+  # before the checkout is parsed. Four places hold this version — here,
+  # package.json, and any Dockerfile that installs it — and they move together.
+  PNPM_VERSION: "11.24.0"
+  NODE_VERSION: "22.20.0"
+
+jobs:
+  commits:
+    name: Commit messages
+    # Only on PRs: a push to main is already-merged history, and failing there
+    # blocks nothing while making the branch look broken.
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with: { version: "${{ env.PNPM_VERSION }}" }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # ⚠ THIS GUARD IS LOAD-BEARING, not style enforcement. Release versions
+      # are derived from `feat:` / `fix:` / `!` in the commit log, and
+      # next-version.mjs SKIPS a non-conventional subject rather than failing
+      # on it. Without this check a release silently bumps patch when it should
+      # have bumped minor.
+      - name: Lint commit messages in this PR
+        run: |
+          pnpm exec commitlint \
+            --from "${{ github.event.pull_request.base.sha }}" \
+            --to "${{ github.event.pull_request.head.sha }}" \
+            --verbose
+
+  verify:
+    name: ${{ matrix.task }}
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    # GitHub's default is 360 minutes. A job that hangs — a wedged pull, a step
+    # waiting on input that never arrives — holds a runner for six hours and
+    # reports nothing until it does. This is the bound at which that becomes a
+    # red run instead.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, check-types, test, build]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with: { version: "${{ env.PNPM_VERSION }}" }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run ${{ matrix.task }}
+
+  format:
+    name: Format
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with: { version: "${{ env.PNPM_VERSION }}" }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check

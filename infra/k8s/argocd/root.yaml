@@ -1,0 +1,40 @@
+# i10's app-of-apps root.
+#
+# This is the ONLY Application applied by hand. Everything else is a file in
+# argocd/apps/, so adding a component is a commit rather than a kubectl apply.
+#
+#   kubectl apply -f infra/k8s/argocd/root.yaml
+#
+# ⚠ THE AppProject IS NOT DEFINED HERE. `i10` is declared in the PSL repo's
+# platform project, alongside `psl` and `platform`, because an AppProject is a
+# cluster-scoped trust boundary and i10's own project is deliberately forbidden
+# from creating cluster resources. That is the enforced half of the extraction
+# discipline: i10 can deploy into i10-* and nowhere else, and it cannot widen
+# its own permissions by committing to its own repo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: i10-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: i10
+  source:
+    repoURL: git@github.com:i10-tech/i10.git
+    targetRevision: main
+    path: infra/k8s/argocd/apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # CRDs can exceed kubectl's 262144-byte last-applied-configuration
+      # annotation limit. Server-side apply has no such limit, and the error
+      # without it names the annotation rather than the resource that broke.
+      - ServerSideApply=true

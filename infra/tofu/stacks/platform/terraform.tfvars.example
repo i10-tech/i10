@@ -1,0 +1,11 @@
+# Empty on purpose. i10 has no machine of its own yet — it shares psl-vps.
+# The first real entry looks like:
+#
+# nodes = {
+#   mail-01 = {
+#     server_type = "cx33"
+#     image       = "ubuntu-24.04"
+#     location    = "nbg1"
+#   }
+# }
+nodes = {}

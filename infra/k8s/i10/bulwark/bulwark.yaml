@@ -1,0 +1,111 @@
+# Bulwark — JMAP webmail over the same Stalwart instance.
+#
+# This is the half that makes i10 a mail SERVICE rather than a sending API,
+# and therefore the half that distinguishes it from Resend rather than
+# matching it.
+#
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠ BULWARK IS AGPL-3.0-ONLY. READ THIS BEFORE EDITING ANY OF IT.
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# github.com/bulwarkmail/webmail is licensed AGPL-3.0-only (with MIT-licensed
+# material in its fork lineage, preserved in its NOTICE). Section 13 is the
+# clause that matters: anyone who interacts with the software REMOTELY OVER A
+# NETWORK must be offered the corresponding source of the version they are
+# using — including our modifications.
+#
+# So the position this deployment takes, deliberately:
+#
+#   RUNNING IT UNMODIFIED IS FINE. Users are offered upstream's source, which
+#   upstream already publishes. Nothing is owed beyond attribution.
+#
+#   MODIFYING IT IS A DECISION, NOT A TASK. The moment an i10 change ships
+#   here, §13 obliges publishing that change. That is tolerable for a client;
+#   it is exactly the reflex the PSL Mail read called fatal if it reaches the
+#   server — and Bulwark IS a server, a Next.js app we would be hosting.
+#
+# Which is also why this runs the published upstream image rather than a build
+# from a fork in this monorepo. Keeping i10 source and Bulwark source in
+# separate trees is what keeps the boundary legible.
+#
+# If Bulwark has to be modified: fork it in its own repository with an
+# `upstream` remote and a long-lived branch, publish the fork, and minimise
+# the diff — every patched line is a permanent merge tax as well as a
+# permanent publication obligation. Ask upstream about commercial terms first;
+# that is the cheaper conversation.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-bulwark
+  namespace: i10-prod
+spec:
+  selector:
+    app.kubernetes.io/name: i10-bulwark
+  ports:
+    - { name: http, port: 3000, targetPort: http }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: i10-bulwark
+  namespace: i10-prod
+spec:
+  serviceName: i10-bulwark
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-bulwark
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-bulwark
+    spec:
+      containers:
+        - name: bulwark
+          # Pinned, never :latest. An unpinned webmail is a silent upgrade of
+          # the thing holding people's mail sessions.
+          image: ghcr.io/bulwarkmail/webmail:1.9.2
+          env:
+            - { name: HOSTNAME, value: "::" } # dual-stack bind
+            - { name: PORT, value: "3000" }
+          envFrom:
+            - secretRef: { name: i10-shared }
+            - secretRef: { name: i10-bulwark }
+          ports:
+            - { name: http, containerPort: 3000 }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: settings, mountPath: /app/data/settings }
+            - { name: admin, mountPath: /app/data/admin }
+            - { name: admin-state, mountPath: /app/data/admin-state }
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+  volumeClaimTemplates:
+    # Three volumes because upstream separates three lifetimes: encrypted user
+    # settings, admin configuration written by the setup wizard, and admin
+    # runtime state. Collapsing them into one loses the ability to mount the
+    # config read-only after setup, which is upstream's own recommendation.
+    - metadata: { name: settings }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: psl-zfs
+        resources: { requests: { storage: 512Mi } }
+    - metadata: { name: admin }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: psl-zfs
+        resources: { requests: { storage: 256Mi } }
+    - metadata: { name: admin-state }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: psl-zfs
+        resources: { requests: { storage: 256Mi } }

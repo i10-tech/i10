@@ -1,0 +1,35 @@
+# Provider binaries. The .terraform.lock.hcl IS committed — it pins provider
+# checksums, which is the whole point of it.
+.terraform/
+*.tfplan
+*.tfplan.json
+plan.json
+# Bare `tfplan`, no extension — what `tofu plan -out=tfplan` produces, and what
+# every README here tells you to run. `*.tfplan` does NOT match it, so without
+# this line a saved plan sits untracked waiting to be swept into a commit. A
+# plan file carries the full resource diff and, for stacks that read lower
+# strata, their outputs too.
+tfplan
+
+# Partial backend config — carries the R2 account id. Not secret, but
+# environment-specific and generated from backend.hcl.example.
+backend.hcl
+
+# Local state. The ONE exception is stacks/bootstrap, committed on purpose.
+*.tfstate
+*.tfstate.*
+!stacks/bootstrap/terraform.tfstate
+
+*.auto.tfvars
+terraform.tfvars
+!*.tfvars.example
+
+# EXCEPTION — the durable stratum's tfvars IS committed. It holds a Cloudflare
+# zone id, public DNS record ids and bucket names: identifiers anyone can
+# discover, none of which authenticates anything. And it is the recovery path,
+# because S1 creates nothing and imports only what this file lists. A recipe
+# that lives on one laptop is not a recovery path.
+!stacks/data/terraform.tfvars
+
+crash.log
+crash.*.log

@@ -1,0 +1,22 @@
+# Nightly base backup. Continuous WAL archiving is separate and always on —
+# that is the plugin's `isWALArchiver: true`, and it is what makes PITR to an
+# arbitrary second possible. This only bounds how much WAL a restore replays.
+#
+# ⚠ SIX-FIELD CRON, SECONDS FIRST. CNPG is not Kubernetes CronJob syntax; a
+# five-field expression is silently misread as a different time.
+# `0 45 2 * * *` is 02:45:00 UTC — offset from PSL's 02:30 so the two clusters
+# do not compete for the same box's IO.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: i10-platform-nightly
+  namespace: i10-prod
+spec:
+  schedule: "0 45 2 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: i10-platform
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

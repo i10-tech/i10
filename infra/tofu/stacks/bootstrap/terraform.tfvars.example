@@ -1,0 +1,4 @@
+# cp terraform.tfvars.example terraform.tfvars && edit
+cloudflare_account_id = "0ccd9b8cd89606709f1c867a1f64d840"
+state_bucket_name     = "i10-tofu-state"
+r2_location           = "eeur"

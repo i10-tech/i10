@@ -1,0 +1,23 @@
+{
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "moduleResolution": "Bundler",
+    "module": "ESNext",
+    // DOM, in a Node SDK, on purpose. The client uses global fetch and nothing
+    // else — that is what keeps it at zero runtime dependencies — so it needs
+    // types for Response, Headers and AbortSignal. Taking them from `lib`
+    // rather than @types/node keeps the emitted .d.ts free of Node-specific
+    // references, which matters because this package is published and its
+    // consumers may bundle it for a browser or an edge runtime.
+    "lib": ["es2023", "DOM"],
+    // tsup's dts step (rollup-plugin-dts) sets `baseUrl` internally, which
+    // TypeScript 6 deprecates and errors on. Nothing in this package uses
+    // baseUrl; the flag exists only to stop a bundler's internal config from
+    // failing the build. Remove it when tsup stops setting baseUrl.
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

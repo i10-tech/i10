@@ -1,0 +1,47 @@
+# OpenTofu: format, validate, and plan. It never applies.
+#
+# ⚠ APPLY IS A HUMAN ACTION, DELIBERATELY. Tofu owns SHAPE — buckets, machines,
+# DNS. An automated apply on merge means a bad plan reaches production DNS with
+# nobody having read it, and a DNS mistake on a mail domain is a deliverability
+# incident rather than a rollback.
+name: Tofu
+
+on:
+  pull_request:
+    paths: ["infra/tofu/**", ".github/workflows/tofu.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/tofu/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.stack }}
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [bootstrap, data, platform, dns]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.10.6"
+
+      - name: Format
+        run: tofu fmt -check -recursive infra/tofu
+
+      # `-backend=false` initialises providers without touching R2. Validation
+      # needs the schemas, not the state — and this way a fork PR with no
+      # credentials still gets a real syntax and type check instead of a red
+      # run nobody can act on.
+      - name: Validate
+        working-directory: infra/tofu/stacks/${{ matrix.stack }}
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate

@@ -1,0 +1,64 @@
+# Tag a release when something lands on main.
+#
+# THE GIT TAG IS THE VERSION. No version file, no bump commit, no release PR —
+# nothing in the repo consumes a version number, so a tag is the whole record.
+# See .github/scripts/next-version.mjs for why this replaces release-please.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Cut a prerelease candidate (vX.Y.Z-rc.N) instead of a stable tag"
+        type: boolean
+        default: false
+
+concurrency:
+  # Never cancel a release in flight. Tagging and publishing should complete
+  # rather than be interrupted by a second push to main.
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history AND tags. next-version.mjs reads both — a shallow
+          # clone silently makes every release look like the first one.
+          fetch-depth: 0
+
+      - name: Compute the next version
+        id: version
+        run: |
+          node .github/scripts/next-version.mjs \
+            ${{ inputs.prerelease && '--prerelease rc' || '' }} \
+            --github-output
+
+      - name: Refuse to re-tag
+        run: |
+          if git rev-parse -q --verify "refs/tags/${{ steps.version.outputs.version }}" >/dev/null; then
+            echo "::error::${{ steps.version.outputs.version }} already exists. A release must never move an existing tag — deployments and signatures reference it."
+            exit 1
+          fi
+
+      - name: Tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.version }}" \
+            -m "${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.version }}"
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ inputs.prerelease }}

@@ -1,0 +1,46 @@
+# Two Services, because the traffic has two shapes.
+#
+# HTTP (JMAP + web admin) goes through Traefik like everything else. SMTP and
+# IMAP do not: Cloudflare's proxy carries only HTTP/HTTPS, so nothing on
+# 25/465/587/993 can pass through it.
+#
+# ⚠ THIS NEEDS A CHANGE IN THE PSL REPO BEFORE IT WORKS. Traefik must gain TCP
+# entrypoints for these ports, and the Traefik chart nests the Service spec
+# under `service.spec` — keys placed directly on `service` are accepted and
+# then SILENTLY IGNORED. That is how a dual-stack rebuild left the Service
+# IPv4-only while every value looked correct. Set `ipFamilyPolicy` under
+# `service.spec` and verify with `kubectl get svc -o yaml`, not by reading values.
+#
+# ⚠ AND A DNS CONSEQUENCE. mx.i10.tech must be a GREY-CLOUD (DNS-only) A *and*
+# AAAA record pointing straight at the box, with the MX pointing at that name.
+# Grey-clouding publishes the origin IP — unavoidable for mail, and worth
+# knowing: the box stops being hidden the day i10's MX goes live.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-stalwart
+  namespace: i10-prod
+spec:
+  selector:
+    app.kubernetes.io/name: i10-stalwart
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-stalwart-mail
+  namespace: i10-prod
+spec:
+  selector:
+    app.kubernetes.io/name: i10-stalwart
+  # Both families. The cluster was rebuilt dual-stack on 2026-08-31 precisely
+  # so mail can answer on IPv6 — receivers increasingly prefer it and score its
+  # reputation separately from IPv4.
+  ipFamilyPolicy: PreferDualStack
+  ports:
+    - { name: smtp, port: 25, targetPort: smtp }
+    - { name: submissions, port: 465, targetPort: submissions }
+    - { name: submission, port: 587, targetPort: submission }
+    - { name: imaps, port: 993, targetPort: imaps }

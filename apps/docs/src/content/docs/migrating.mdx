@@ -1,0 +1,42 @@
+---
+title: Migrating from Resend
+description: Change one import. The transport is identical on purpose.
+---
+
+# Migrating from Resend
+
+```diff
+- import { Resend } from "resend"
++ import { I10 } from "@i10/node"
+
+- const client = new Resend(process.env.RESEND_API_KEY)
++ const client = new I10(process.env.I10_API_KEY)
+```
+
+Your call sites do not change. The header is `Authorization: Bearer`, the
+request and response bodies are the same shapes, and the error names are the
+same strings — that is a constraint i10 accepted up front rather than a
+coincidence.
+
+## What is different
+
+**The key format.** i10 keys are `i10_live_…` and `i10_test_…`, so they are
+recognisable in your logs and greppable in a secret scan.
+
+**Fewer records to start.** Resend asks for three DNS records before your first
+send. i10's quick start is one; the other two are an upgrade you make before
+volume matters. See [DNS setup](/dns).
+
+**Quota and rate limit are separate errors.** `rate_limit_exceeded` means too
+fast and is worth retrying. `daily_quota_exceeded` means the account is out of
+sending budget and retrying will never help. Resend's clients often collapse
+both into one 429 handler; `@i10/node` exposes `error.retryable` so you do not
+have to.
+
+## What is not built yet
+
+This SDK is pre-1.0 and the send path is still being implemented. The wire
+contract in this documentation is the target, and it has not yet been diffed
+against live Resend traffic field by field. Treat compatibility as an intent
+under active verification rather than a guarantee, and please report anything
+that differs.

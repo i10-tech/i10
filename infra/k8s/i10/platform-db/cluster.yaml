@@ -1,0 +1,64 @@
+# i10's Postgres.
+#
+# ⚠ ONE CNPG CLUSTER PER PRODUCT — never one Cluster holding a database for
+# each. That single choice is the difference between extracting i10 being a
+# `bootstrap.recovery` from its own archive (a documented operation) and being
+# a dump-and-restore with a write freeze. The CNPG *operator* is shared; this
+# object is not.
+#
+# ⚠ SIZING IS THE POOL, NOT THIS FILE. zpool `psl-data` is 9.5 G and PSL's
+# cluster already claims 4+2 of it. ZFS-LocalPV thin-provisions, so these are
+# ceilings rather than reservations, but 4+2 here over-commits. Grow the
+# Hetzner volume (`zpool online -e`) before either database holds real data.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: i10-platform
+  namespace: i10-prod
+spec:
+  instances: 1
+  # 18.5 does not exist upstream — 18.4 and 18.6 do. Probe a tag before pinning.
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookworm
+
+  enableSuperuserAccess: false
+
+  storage:
+    size: 4Gi
+    storageClass: psl-zfs-db
+  # WAL on its own volume. A stuck archiver then fills this instead of the data
+  # volume, which turns "backups broke" into a bounded problem rather than a
+  # database that stops accepting writes.
+  walStorage:
+    size: 2Gi
+    storageClass: psl-zfs-db
+
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 1Gi }
+
+  postgresql:
+    parameters:
+      # SAFE ONLY BECAUSE THIS IS ZFS. Copy-on-write makes a page write atomic,
+      # so torn pages cannot happen. On ext4/xfs this risks unrecoverable
+      # corruption — the setting travels with the storage class, not the cluster.
+      full_page_writes: "off"
+
+  # The fast, LOCAL copy — not a backup. It dies with the pool. What it buys is
+  # instant CoW clones: prod cloned in ~23s for under 2 MB, which is the whole
+  # preview-database mechanism. Barman below is the durable, offsite copy.
+  backup:
+    volumeSnapshot:
+      className: psl-zfs-snapshot
+      online: true
+      snapshotOwnerReference: backup
+
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: i10-backups
+
+  bootstrap:
+    initdb:
+      database: i10
+      owner: i10

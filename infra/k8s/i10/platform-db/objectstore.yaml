@@ -1,0 +1,41 @@
+# Where i10's Postgres archives to.
+#
+# ⚠ ITS OWN BUCKET, not a prefix inside PSL's. R2 API tokens scope per BUCKET
+# and never per prefix, so "own prefix, own credentials" is not enforceable —
+# a token scoped to psl-backups reads all of it. Buckets are free; R2 bills
+# storage and operations, not bucket count.
+#
+# ⚠ TWO CLUSTERS MUST NEVER SHARE A destinationPath/serverName. Their WAL
+# interleaves and corrupts the timeline for both. This is also why a preview
+# or branch Cluster gets NO backup block and NO plugins at all.
+#
+# `barmancloud.cnpg.io/v1` from the CNPG-I plugin, NOT `spec.backup.
+# barmanObjectStore` on the Cluster — that in-tree form is deprecated as of
+# CNPG 1.26 and cannot coexist with a WAL-archiver plugin.
+#
+# endpointURL is inline because the CRD takes a plain string and has no secret
+# reference for it. A Cloudflare account id is an identifier, not a credential:
+# it appears in every S3 URL R2 issues. Only the key pair is secret.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: i10-backups
+  namespace: i10-prod
+spec:
+  retentionPolicy: 30d
+  configuration:
+    destinationPath: s3://i10-backups/cnpg
+    endpointURL: https://0ccd9b8cd89606709f1c867a1f64d840.r2.cloudflarestorage.com
+    s3Credentials:
+      accessKeyId:
+        name: r2-backups
+        key: R2_ACCESS_KEY_ID
+      secretAccessKey:
+        name: r2-backups
+        key: R2_SECRET_ACCESS_KEY
+    # gzip, not lz4/snappy — always present in the barman image. At this WAL
+    # volume the codec's speed is irrelevant next to being certain it exists.
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
