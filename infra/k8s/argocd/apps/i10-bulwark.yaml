@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: i10-bulwark
-  namespace: argocd
+  namespace: i10-prod
 spec:
   project: i10
   source:

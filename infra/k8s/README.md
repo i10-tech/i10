@@ -94,6 +94,24 @@ the wrong key set **without erroring**.
 kubectl apply -f infra/k8s/argocd/root.yaml
 ```
 
+⚠ This creates an Application **in `i10-prod`**, not `argocd`. That needs two
+platform settings which live in the PSL repo, and it needs **both**:
+
+```
+argocd-cmd-params-cm    application.namespaces: i10-prod
+AppProject i10          sourceNamespaces: [i10-prod]
+```
+
+The application controller and server must be restarted after the ConfigMap
+changes. With only one of the two in place, Applications in `i10-prod` are
+**silently ignored** — no error, no event, they simply never reconcile.
+
+Why not the ordinary app-of-apps in `argocd`: the `i10` project's destinations
+are `i10-*`, so a root in `argocd` is rejected by the very boundary that makes
+i10 extractable. Of the three ways out, this is the only one where the boundary
+still holds — Argo refuses to let an Application outside `argocd` claim a
+project that does not list its namespace.
+
 **3. Verify the secrets actually arrived.**
 
 ```bash

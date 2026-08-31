@@ -5,17 +5,33 @@
 #
 #   kubectl apply -f infra/k8s/argocd/root.yaml
 #
+# ⚠ THIS APPLICATION LIVES IN i10-prod, NOT argocd. So do all its children.
+#
+# That is not a style choice. An app-of-apps root creates its child Application
+# objects somewhere, and `argocd` does not match the `i10-*` destination the
+# i10 AppProject allows — so a root in `argocd` is rejected by the very
+# boundary that makes i10 extractable. Argo's apps-in-any-namespace feature is
+# the way through, and it is the only one where the boundary actually holds:
+# Argo refuses to let an Application outside `argocd` claim a project that does
+# not list its namespace in `sourceNamespaces`. i10 therefore cannot widen its
+# own trust boundary by committing to its own repo.
+#
+# ⚠ IT DEPENDS ON TWO PLATFORM SETTINGS, BOTH IN THE PSL REPO:
+#     argocd-cmd-params-cm   application.namespaces: i10-prod
+#     AppProject i10         sourceNamespaces: [i10-prod]
+# With only one of the two, Applications here are SILENTLY IGNORED — no error,
+# no event, they simply never reconcile. The application controller and server
+# must be restarted after the ConfigMap changes.
+#
 # ⚠ THE AppProject IS NOT DEFINED HERE. `i10` is declared in the PSL repo's
 # platform project, alongside `psl` and `platform`, because an AppProject is a
-# cluster-scoped trust boundary and i10's own project is deliberately forbidden
-# from creating cluster resources. That is the enforced half of the extraction
-# discipline: i10 can deploy into i10-* and nowhere else, and it cannot widen
-# its own permissions by committing to its own repo.
+# cluster-scoped trust boundary. i10 can deploy into i10-* and nowhere else,
+# and it cannot grant itself more by editing this repo.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: i10-root
-  namespace: argocd
+  namespace: i10-prod
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -28,7 +44,9 @@ spec:
       recurse: true
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd
+    # Where the CHILD Application objects are created — not where the workloads
+    # land. Each child names its own destination.
+    namespace: i10-prod
   syncPolicy:
     automated:
       prune: true
