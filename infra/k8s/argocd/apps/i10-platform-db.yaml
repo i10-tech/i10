@@ -18,27 +18,29 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
-      - RespectIgnoreDifferences=true
-  # ⚠ WITHOUT THIS, THE APP IS PERMANENTLY OutOfSync. CNPG's operator writes
-  # ~15 defaulted fields into the object after creation; Argo reads them as
-  # drift, selfHeal rewrites the object, the controller defaults it again.
-  #
-  # Measured before the fix: syncs at 2s, 6s, 18s, 54s, 162s — Argo's
-  # exponential backoff, so it is not a hot loop and the CPU cost is small.
-  # The real damage is to the signal. An Application that can never reach
-  # Synced means OutOfSync stops distinguishing "drifted" from "normal", and
-  # the one status worth alerting on becomes noise.
-  #
-  # `managedFieldsManagers` is the right instrument rather than listing paths.
-  # Under ServerSideApply, argocd-controller owns exactly the fields we wrote
-  # and the controller owns the rest — so this says "git owns our fields, the
-  # controller owns its own", which is the actual intent. A jsonPointers list
-  # would need extending every time CNPG gains a default.
-  #
-  # RespectIgnoreDifferences makes selfHeal honour the list. Without it the
-  # ignores affect only the displayed diff and the rewrites continue.
-  ignoreDifferences:
-    - group: postgresql.cnpg.io
-      kind: Cluster
-      managedFieldsManagers:
-        - manager
+      # ⚠ WITHOUT ServerSideDiff THIS APP CAN NEVER REACH Synced.
+      #
+      # Every remaining difference is an additive default INSIDE A LIST:
+      # `Service.spec.ports` gains `protocol: TCP`, a pod `volumes` entry gains
+      # `configMap.defaultMode: 420`, `volumeClaimTemplates` gains apiVersion /
+      # kind / volumeMode, and a CNPG `Cluster.spec.plugins` entry gains
+      # `enabled: true`. Structured merge reconciles those by key; Argo's
+      # CLIENT-side differ treats a list as one atomic value and reports the
+      # whole list as changed.
+      #
+      # The sync therefore succeeds (`serverside-applied`, `all tasks run`) and
+      # the app stays OutOfSync, so Argo backs off — measured at 2s, 6s, 18s,
+      # 54s, then capping near 5 minutes. Not a hot loop, but OutOfSync stops
+      # distinguishing real drift from normal, which is the status worth
+      # alerting on.
+      #
+      # ⚠ THIS OPTION IS A NO-OP ON ITS OWN. The controller gates it behind
+      # `controller.diff.server.side: "true"` in argocd-cmd-params-cm, which
+      # defaults to false and lives in the PSL repo. With the option set here
+      # and the flag off, nothing changes and nothing says why.
+      #
+      # Tried first and REJECTED: ignoreDifferences with managedFieldsManagers.
+      # It matches nothing, because `manager` (CNPG) and `k3s` own no fields in
+      # spec at all — the defaults come from a mutating webhook and end up
+      # unowned. Verified by reading managedFields directly.
+      - ServerSideDiff=true
