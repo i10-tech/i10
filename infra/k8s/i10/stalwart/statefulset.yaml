@@ -1,3 +1,11 @@
+# Stalwart, with i10-authd as a sidecar.
+#
+# ⚠ THE SIDECAR IS THE POINT, AND IT MUST STAY A SIDECAR. authd answers
+# Stalwart's LDAP binds by asking Clerk whether a password is correct. It speaks
+# plaintext LDAP and will verify any password handed to it, so it binds to
+# loopback only and the two containers share a network namespace precisely so
+# that connection never crosses a pod boundary. There is deliberately no Service
+# selecting it and no port published for it.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -14,48 +22,161 @@ spec:
       labels:
         app.kubernetes.io/name: i10-stalwart
     spec:
+      # ⚠ UID 2000, NOT 65534. The Stalwart image creates a `stalwart` user at
+      # UID 2000 and owns its directories to it. Running as nobody leaves the
+      # server unable to write its own data directory.
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65534
-        fsGroup: 65534
+        runAsUser: 2000
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+
       containers:
         - name: stalwart
-          # ⚠ PINNED ONE RELEASE BEHIND LATEST, DELIBERATELY. Stalwart is
-          # pre-1.0 and its maintainers describe the schema as still being
-          # finalized. The data here is a never-lose-a-byte promise: a dropped
-          # order can be re-placed, a lost archive ends the relationship. Read
-          # every migration note before moving this line.
           image: stalwartlabs/stalwart:v0.16.19-alpine
+          # ⚠ THE FLAG IS NOT OPTIONAL. Without --config the server looks
+          # elsewhere, finds nothing, and enters bootstrap mode — serving a setup
+          # wizard instead of mail.
+          args: ["--config", "/etc/stalwart/config.json"]
+
+          # ⚠ NET_BIND_SERVICE IS REQUIRED WHILE ANY LISTENER IS BELOW 1024.
+          # The image runs `setcap cap_net_bind_service=+ep` on the binary. When
+          # the kernel execs a file with effective capabilities, they must also be
+          # in the caller's bounding set — `drop: [ALL]` empties it and the exec
+          # fails outright with "operation not permitted", before any log line.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [NET_BIND_SERVICE]
+
           ports:
             - { name: smtp, containerPort: 25 }
             - { name: submissions, containerPort: 465 }
             - { name: submission, containerPort: 587 }
             - { name: imaps, containerPort: 993 }
             - { name: http, containerPort: 8080 }
+
           envFrom:
-            # TWO SECRETS, ALWAYS — the root config's shared base does not
-            # reach a consumer on its own, and a workload mounting only its own
-            # config loses observability silently. See doppler/dopplersecrets.yaml.
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-stalwart }
+
+          env:
+            # ⚠ READ FROM CNPG'S SECRET, NOT FROM DOPPLER. CNPG owns the
+            # `stalwart` role and reconciles its password from
+            # i10-stalwart-db-role. Copying that value into Doppler would give
+            # one credential two sources of truth, and a rotation on either side
+            # would silently break the other. config.json names this variable in
+            # its authSecret.
+            - name: STALWART_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-stalwart-db-role, key: password }
+
           resources:
             requests: { cpu: 200m, memory: 512Mi }
             limits: { memory: 1Gi }
+
           volumeMounts:
-            - { name: config, mountPath: /opt/stalwart/etc, readOnly: true }
-            - { name: data, mountPath: /opt/stalwart/data }
+            - { name: config, mountPath: /etc/stalwart, readOnly: true }
+            - { name: data, mountPath: /var/lib/stalwart }
+            # readOnlyRootFilesystem means anything written outside those two
+            # paths needs a writable volume of its own.
+            - { name: tmp, mountPath: /tmp }
+
+          # ⚠ HTTP, NOT tcpSocket. A TCP probe against the mail ports reports
+          # healthy for a server that is accepting connections and failing every
+          # request — which is exactly what a Stalwart with an unreachable
+          # DataStore looks like. These endpoints answer for the server's own
+          # view of itself.
+          startupProbe:
+            httpGet: { path: /healthz/live, port: http }
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
-            tcpSocket: { port: http }
-            initialDelaySeconds: 10
+            httpGet: { path: /healthz/ready, port: http }
             periodSeconds: 10
           livenessProbe:
-            tcpSocket: { port: smtp }
-            initialDelaySeconds: 30
+            httpGet: { path: /healthz/live, port: http }
             periodSeconds: 30
+
+        # ── the identity bridge ──────────────────────────────────────────────
+        - name: authd
+          # Built from services/authd by .github/workflows/build.yml. `prod-latest`
+          # matches every other i10 workload: the Build job tags prod-<sha> and
+          # prod-latest only on main, so staging can never publish over it.
+          image: ghcr.io/i10-tech/i10-authd:prod-latest
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+
+          env:
+            # Loopback only. authd's own config validation refuses to start on
+            # anything else, so this is belt and braces rather than the guard.
+            - { name: AUTHD_LISTEN, value: "127.0.0.1:3893" }
+            - { name: AUTHD_BASE_DN, value: "dc=i10,dc=tech" }
+            - {
+                name: AUTHD_SERVICE_BIND_DN,
+                value: "cn=stalwart,ou=services,dc=i10,dc=tech",
+              }
+            # ⚠ THE SAME VALUE STALWART READS AS STALWART_LDAP_BIND_SECRET.
+            # One secret, two names, because each side names it for its own role.
+            # They come from the same Doppler config so they cannot drift.
+            - name: AUTHD_SERVICE_BIND_SECRET
+              valueFrom:
+                secretKeyRef: { name: i10-stalwart, key: STALWART_LDAP_BIND_SECRET }
+            # Same single source of truth as Stalwart's own password. Kubernetes
+            # expands $(VAR) from env vars declared earlier in this list, so the
+            # DSN is assembled here rather than stored anywhere.
+            #
+            # ⚠ THE PASSWORD MUST BE URL-SAFE. It lands inside a DSN, so a `@`,
+            # `/` or `:` in it silently truncates the connection string into
+            # something that parses but points elsewhere. Generate it
+            # alphanumeric.
+            - name: AUTHD_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-stalwart-db-role, key: password }
+            - name: AUTHD_DATABASE_URL
+              value: postgres://stalwart:$(AUTHD_DB_PASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/stalwart
+            - name: AUTHD_CLERK_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: i10-shared, key: CLERK_SECRET_KEY }
+            # Protects the shared Clerk budget (1000 req/10s across all of i10)
+            # from one mail client stuck in a retry loop. NOT lockout protection —
+            # the backend verify_password endpoint does not feed Clerk's counter.
+            - { name: AUTHD_BINDS_PER_MINUTE, value: "30" }
+            - { name: AUTHD_LOG_LEVEL, value: "info" }
+
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+
+          # LDAP has no health endpoint, so the probe opens the port. That is a
+          # meaningful check here: authd binds only after its projection pool
+          # connects, so an accepting socket means the database answered.
+          readinessProbe:
+            tcpSocket: { port: 3893 }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 3893 }
+            periodSeconds: 30
+
       volumes:
         - name: config
           configMap:
             name: i10-stalwart-config
+        - name: tmp
+          emptyDir: {}
+
+  # Metadata lives in Postgres and blobs in R2, so this volume holds only what
+  # the server keeps locally. It is small on purpose; growing it is not the
+  # answer to a full mail store.
   volumeClaimTemplates:
     - metadata:
         name: data

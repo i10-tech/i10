@@ -1,0 +1,565 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "i10 API",
+    "version": "0.0.0",
+    "description": "Transactional email. The document is generated from the same Zod schemas the server validates with and the SDKs are built from, so it cannot drift from the implementation."
+  },
+  "servers": [
+    {
+      "url": "https://api.i10.tech",
+      "description": "Production"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Emails",
+      "description": "Sending mail."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Your i10 API key. Keys are prefixed `i10_live_` or `i10_test_` so they are recognisable in your own logs and greppable in a leak scan."
+      }
+    },
+    "schemas": {
+      "SendEmailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "enum": [
+              "validation_error",
+              "missing_required_field",
+              "invalid_access",
+              "not_found",
+              "method_not_allowed",
+              "rate_limit_exceeded",
+              "daily_quota_exceeded",
+              "invalid_from_address",
+              "invalid_to_address",
+              "domain_not_verified",
+              "internal_server_error"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "statusCode",
+          "name",
+          "message"
+        ]
+      },
+      "SendEmail": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 320
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 320
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "bcc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 320
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            ]
+          },
+          "cc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 320
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            ]
+          },
+          "reply_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 320
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            ]
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "content_type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "filename"
+              ]
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,256}$"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,256}$"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ]
+            }
+          },
+          "scheduled_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "subject"
+        ]
+      },
+      "BatchSendResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "BatchSend": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 320
+            },
+            "to": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 320
+                  },
+                  "minItems": 1,
+                  "maxItems": 50
+                }
+              ]
+            },
+            "subject": {
+              "type": "string"
+            },
+            "bcc": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 320
+                  },
+                  "minItems": 1,
+                  "maxItems": 50
+                }
+              ]
+            },
+            "cc": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 320
+                  },
+                  "minItems": 1,
+                  "maxItems": 50
+                }
+              ]
+            },
+            "reply_to": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 320
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 320
+                  },
+                  "minItems": 1,
+                  "maxItems": 50
+                }
+              ]
+            },
+            "html": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "content_type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "filename"
+                ]
+              }
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,256}$"
+                  },
+                  "value": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,256}$"
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ]
+              }
+            },
+            "scheduled_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "subject"
+          ]
+        },
+        "minItems": 1,
+        "maxItems": 100
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/emails": {
+      "post": {
+        "summary": "Send an email",
+        "description": "Queues a single message and returns its id immediately. The id is minted in the same transaction as the caller's own work, so a rollback never sends.",
+        "tags": [
+          "Emails"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendEmail"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The message was accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendEmailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sending too fast, or the daily quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The send path is not implemented yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/batch": {
+      "post": {
+        "summary": "Send up to 100 emails",
+        "description": "One response id per element, in the order submitted.",
+        "tags": [
+          "Emails"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchSend"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Every message was accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchSendResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sending too fast, or the daily quota is exhausted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Batch send is not implemented yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

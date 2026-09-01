@@ -22,6 +22,12 @@ export default {
         "sdk",
         "ui",
         "contracts",
+        // services/authd — the LDAP bridge that delegates password checks to
+        // Clerk. Its own scope rather than `stalwart`: it is a separate Go
+        // service with a separate release surface, and the release notes read
+        // better when a change to the bridge is not filed under the mail server
+        // it happens to run beside.
+        "authd",
         "stalwart",
         "bulwark",
         "infra",

@@ -1,0 +1,26 @@
+# Stalwart's own database, inside the shared CNPG cluster.
+#
+# ⚠ ITS OWN DATABASE, NOT ITS OWN SCHEMA IN `i10`. Stalwart creates and migrates
+# its own tables on upgrade, and it is pre-1.0 — its schema moves. Sharing a
+# database with the transactional product would mean one server's migration can
+# take a lock, or fail, against tables the other owns. Separating them now also
+# keeps the door open to moving Stalwart to its own Cluster later without a data
+# migration, which was the stated design intent.
+#
+# The cluster bootstraps only the `i10` database; this adds the second one
+# declaratively (CNPG 1.30, databases.postgresql.cnpg.io/v1).
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: i10-stalwart-db
+  namespace: i10-prod
+spec:
+  cluster:
+    name: i10-platform
+  name: stalwart
+  owner: stalwart
+
+  # ⚠ RETAIN, NOT DELETE. `delete` would drop the database when this object is
+  # removed — every mailbox's metadata with it. Deleting mail must never be a
+  # side effect of a manifest change; it should require someone to mean it.
+  databaseReclaimPolicy: retain

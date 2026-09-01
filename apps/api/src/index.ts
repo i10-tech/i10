@@ -1,12 +1,27 @@
 import { serve } from "@hono/node-server"
 import pino from "pino"
 import { createApp } from "./app.js"
+import { createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
 
-const server = serve({ fetch: createApp().fetch, port: env.PORT }, (info) => {
+const { sql, db } = createDb(env.DATABASE_URL)
+
+const app = createApp({
+  clerkWebhooks: {
+    db,
+    signingSecret: env.CLERK_WEBHOOK_SECRET,
+    hostedDomains: env.MAIL_DOMAINS,
+    log,
+  },
+  pingDb: async () => {
+    await sql`select 1`
+  },
+})
+
+const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   log.info({ port: info.port, env: env.NODE_ENV }, "i10 api listening")
 })
 
@@ -16,6 +31,10 @@ const server = serve({ fetch: createApp().fetch, port: env.PORT }, (info) => {
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     log.info({ signal }, "shutting down")
-    server.close(() => process.exit(0))
+    server.close(() => {
+      // Close the pool after the listener, so in-flight requests can finish
+      // their queries rather than failing on a pool that vanished under them.
+      void sql.end({ timeout: 5 }).finally(() => process.exit(0))
+    })
   })
 }

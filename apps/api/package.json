@@ -5,26 +5,37 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "openapi": "tsx scripts/generate-openapi.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@hono/zod-openapi": "^1.6.1",
     "@hono/zod-validator": "^0.9.0",
     "@repo/contracts": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.13.5",
     "pino": "^10.3.1",
+    "postgres": "^3.4.9",
     "zod": "^4.5.4"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/node": "^22.15.0",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.5",
+    "tsx": "^4.23.13",
     "typescript": "6.0.3",
     "vitest": "^4.1.11"
+  },
+  "exports": {
+    "./openapi.json": "./openapi.json"
   }
 }
