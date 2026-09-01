@@ -74,6 +74,23 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      # ⚠ MUST COME BEFORE ANY `pnpm run <task>`. It starts a local cache server
+      # on 41230 and exports TURBO_API/TURBO_TOKEN/TURBO_TEAM; a turbo
+      # invocation earlier in the job just misses the cache, with no error to
+      # say so.
+      #
+      # Turborepo's cache was the one layer this workflow lacked — Docker
+      # layers, the pnpm store and the Go build cache were already covered. The
+      # four matrix tasks each rebuild the same shared packages from cold:
+      # check-types depends on ^build, so @repo/contracts and the SDKs are built
+      # in every job, and again in the OpenAPI job. This lets the second job to
+      # need a package restore it instead of rebuilding it.
+      #
+      # It backs onto the same GitHub Actions cache the Docker layers use, so
+      # there is no external service and no Vercel account. ⚠ That cache is
+      # 10 GB per repository and evicts LRU, so `mode=max` Docker caching in
+      # build.yml competes with these entries for the same budget.
+      - uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm run ${{ matrix.task }}
 
@@ -89,6 +106,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      # Turbo remote cache — see the note in the `verify` job.
+      - uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
       - run: pnpm install --frozen-lockfile
       # ⚠ THIS GUARD IS WHY INLINING THE SPEC IS SAFE. apps/api/openapi.json is a
       # committed artifact: docs.i10.tech/api inlines it at build time so the
@@ -147,5 +166,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      # Turbo remote cache — see the note in the `verify` job.
+      - uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm run format:check
