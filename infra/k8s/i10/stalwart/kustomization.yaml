@@ -6,6 +6,7 @@ resources:
   - database.yaml
   - statefulset.yaml
   - service.yaml
+  - networkpolicy.yaml
 
 # The generated name carries a content hash, so editing either file rolls the
 # pods. A plain ConfigMap would update in place and leave Stalwart running the
