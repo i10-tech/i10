@@ -19,10 +19,15 @@ COPY . .
 
 # CGO off gives a genuinely static binary. -trimpath keeps build paths out of
 # the artifact so the same source produces the same bytes anywhere.
-ARG VERSION=dev
+#
+# ⚠ THE ARG NAME MUST MATCH THE ONE build.yml PASSES. A build-arg the Dockerfile
+# does not declare is silently ignored, and `-X` against a symbol that does not
+# exist is silently ignored too — so a mismatch here produces an image that
+# builds, runs, and reports its version as "dev" forever.
+ARG GIT_SHA=dev
 RUN CGO_ENABLED=0 go build \
         -trimpath \
-        -ldflags="-s -w -X main.version=${VERSION}" \
+        -ldflags="-s -w -X main.version=${GIT_SHA}" \
         -o /out/authd ./cmd/authd
 
 FROM gcr.io/distroless/static-debian12:nonroot

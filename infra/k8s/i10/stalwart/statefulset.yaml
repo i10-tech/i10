@@ -64,6 +64,17 @@ spec:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-stalwart }
 
+          env:
+            # ⚠ READ FROM CNPG'S SECRET, NOT FROM DOPPLER. CNPG owns the
+            # `stalwart` role and reconciles its password from
+            # i10-stalwart-db-role. Copying that value into Doppler would give
+            # one credential two sources of truth, and a rotation on either side
+            # would silently break the other. config.json names this variable in
+            # its authSecret.
+            - name: STALWART_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-stalwart-db-role, key: password }
+
           resources:
             requests: { cpu: 200m, memory: 512Mi }
             limits: { memory: 1Gi }
@@ -93,9 +104,10 @@ spec:
 
         # ── the identity bridge ──────────────────────────────────────────────
         - name: authd
-          # ⚠ BUILT FROM services/authd IN THIS REPO. The tag is pinned rather
-          # than :latest so a rollout is a deliberate change to this file.
-          image: ghcr.io/i10-tech/i10-authd:0.1.0
+          # Built from services/authd by .github/workflows/build.yml. `prod-latest`
+          # matches every other i10 workload: the Build job tags prod-<sha> and
+          # prod-latest only on main, so staging can never publish over it.
+          image: ghcr.io/i10-tech/i10-authd:prod-latest
 
           securityContext:
             allowPrivilegeEscalation: false
@@ -116,9 +128,19 @@ spec:
             - name: AUTHD_SERVICE_BIND_SECRET
               valueFrom:
                 secretKeyRef: { name: i10-stalwart, key: STALWART_LDAP_BIND_SECRET }
-            - name: AUTHD_DATABASE_URL
+            # Same single source of truth as Stalwart's own password. Kubernetes
+            # expands $(VAR) from env vars declared earlier in this list, so the
+            # DSN is assembled here rather than stored anywhere.
+            #
+            # ⚠ THE PASSWORD MUST BE URL-SAFE. It lands inside a DSN, so a `@`,
+            # `/` or `:` in it silently truncates the connection string into
+            # something that parses but points elsewhere. Generate it
+            # alphanumeric.
+            - name: AUTHD_DB_PASSWORD
               valueFrom:
-                secretKeyRef: { name: i10-stalwart, key: AUTHD_DATABASE_URL }
+                secretKeyRef: { name: i10-stalwart-db-role, key: password }
+            - name: AUTHD_DATABASE_URL
+              value: postgres://stalwart:$(AUTHD_DB_PASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/stalwart
             - name: AUTHD_CLERK_SECRET_KEY
               valueFrom:
                 secretKeyRef: { name: i10-shared, key: CLERK_SECRET_KEY }

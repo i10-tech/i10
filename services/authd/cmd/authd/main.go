@@ -29,6 +29,10 @@ import (
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
 )
 
+// version is stamped at build time with -ldflags "-X main.version=<sha>".
+// Without this declaration that flag is silently ignored.
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("authd exited", "err", err)
@@ -48,6 +52,8 @@ func run() error {
 	// The library logs through a package-level standard logger. Route it into
 	// slog so pod output is one stream in one format.
 	ldap.Logger = slog.NewLogLogger(log.Handler(), slog.LevelDebug)
+
+	log.Info("starting", "version", version)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
