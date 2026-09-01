@@ -1,0 +1,141 @@
+# `i10-authd`
+
+The bridge that lets Clerk be the only place i10 keeps users, while Apple Mail,
+Outlook and every other IMAP client still authenticate with a plain password.
+
+**The rule it exists to serve:** a user has one identity they know of — one
+email, one password — and that pair opens both the dashboard and the mailbox.
+No app passwords, no second credential, ever.
+
+## Why LDAP
+
+Stalwart offers four directory backends. Only one of them delegates the password
+check at request time:
+
+| Backend                              | Why not                                                                                                                                                                                                                                                                            |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Internal                             | Stalwart owns the rows. Clerk owns users.                                                                                                                                                                                                                                          |
+| SQL                                  | `queryLogin` is `SELECT name, secret … WHERE name = $1` — the password is never passed to the query. Stalwart reads a hash and compares it itself, which means holding a credential Clerk should own.                                                                              |
+| OIDC                                 | Stalwart never runs the OIDC flow; it expects the _mail client_ to present a token over `OAUTHBEARER` SASL. Stalwart's own docs state twice that Outlook, Thunderbird and Apple Mail don't support that with third-party providers — so this means no working mail clients at all. |
+| **LDAP, `bindAuthentication: true`** | Stalwart locates the DN with a search, then **binds as the user**. Whatever answers that bind is the authority. That is the door.                                                                                                                                                  |
+
+## How a login works
+
+```
+Apple Mail ──IMAP──▶ Stalwart ──LDAP search──▶ authd ──▶ Postgres projection
+                          │                                (0 Clerk calls)
+                          └────LDAP bind─────▶ authd ──▶ Clerk verify_password
+                                                          (1 call per auth)
+```
+
+Searches are answered entirely from a local projection of Clerk, maintained by
+webhook. Only the bind reaches Clerk. That split is load-bearing: Clerk allows
+1000 requests per 10 seconds across all of i10, and IMAP clients are chatty.
+
+It also buys the thing the OIDC directory could not do — `filterMailbox`
+resolves a recipient **on demand**, so an account that has never signed in still
+accepts mail. That limitation was what forced pre-creating every mailbox.
+
+## The one rule you must not break
+
+> A Clerk outage must never be reported as `invalidCredentials`.
+
+| Clerk                                  | LDAP                      |
+| -------------------------------------- | ------------------------- |
+| `200 {"verified":true}`                | `success` (0)             |
+| `422`                                  | `invalidCredentials` (49) |
+| `400 no_password_set`                  | `invalidCredentials` (49) |
+| `429`, `5xx`, timeout, transport error | **`unavailable` (52)**    |
+| local throttle exceeded                | `busy` (51)               |
+
+Return 49 during an outage and every mail client in the fleet concludes the
+stored password is wrong. Apple Mail and Outlook respond by prompting the user,
+and people start _changing their passwords_ to fix an outage that was never
+theirs. `unavailable` makes clients back off and retry.
+
+`TestUserBindOutcomes` and `TestProjectionDownIsUnavailableNotInvalidCredentials`
+exist to keep that true.
+
+## What was measured, not assumed
+
+None of this is documented; it came from probing a live Clerk instance.
+
+- **The Backend API `verify_password` endpoint does not feed Clerk's
+  account-lockout counter.** Fifteen consecutive wrong passwords left
+  `verification_attempts_remaining` at 10 and the account unlocked. So a mail
+  client retrying a stale saved password **cannot** lock a user out of their
+  dashboard and billing. This was the largest risk in the design.
+- A passwordless (OAuth-only) user returns `400` with code `no_password_set`.
+- `PATCH /users/{id}` **can** set a password on a user who never had one, so
+  onboarding can force one when a user chooses human mail.
+
+⚠ **Re-run that probe against the production Clerk instance before launch.** The
+above was measured on a development instance, which may relax attack protection.
+
+## Design notes
+
+**Read-only, on purpose.** Only Bind and Search are implemented. Add, Modify,
+Delete, ModifyDN and Compare do not exist — every operation absent from the mux
+is one that cannot be abused. `TestWriteOperationsAreRefused` asserts it.
+
+**Loopback only.** `config.Validate` refuses to start on a non-loopback address.
+authd speaks plaintext LDAP and will verify any password handed to it; off-pod
+reachability would make it an open oracle.
+
+**No password material anywhere.** Not a hash, not a verifier, not a salt —
+neither in the schema nor in an LDAP attribute. With `bindAuthentication: true`
+Stalwart never reads a password attribute, so there is nothing to serve.
+
+**The throttle protects the Clerk budget, not the user.** Since lockout is not
+in play (measured above), its job is to stop one misconfigured client from
+spending the shared 1000 req/10s budget and taking authentication down for
+everyone else. It answers `busy`, not `unavailable`, so logs stay diagnosable.
+
+**Filters are evaluated, not pattern-matched.** authd extracts the values being
+searched for, fetches a candidate superset from Postgres, then evaluates the
+real filter against each candidate. Stalwart's filters are configurable, so
+matching on their exact shape would break the first time someone edited one.
+
+**⚠ Upstream data race.** `ldapserver` assigns `s.Listener` inside `Serve` while
+`Stop` reads it, unsynchronised (`server.go:82` vs `:186`). `main.go` owns the
+listener and waits until the server is provably accepting before it can act on a
+signal; the tests shut down by closing the listener rather than calling `Stop`.
+Worth reporting upstream.
+
+## Configuration
+
+| Variable                    | Default                    |                                                     |
+| --------------------------- | -------------------------- | --------------------------------------------------- |
+| `AUTHD_LISTEN`              | `127.0.0.1:3893`           | Must be loopback.                                   |
+| `AUTHD_BASE_DN`             | `dc=i10,dc=tech`           |                                                     |
+| `AUTHD_SERVICE_BIND_DN`     | —                          | Stalwart's own bind, needed even in bind-auth mode. |
+| `AUTHD_SERVICE_BIND_SECRET` | —                          |                                                     |
+| `AUTHD_DATABASE_URL`        | —                          | The projection. Goes through PgBouncer.             |
+| `AUTHD_CLERK_SECRET_KEY`    | —                          |                                                     |
+| `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                     |
+| `AUTHD_CLERK_TIMEOUT`       | `5s`                       |                                                     |
+| `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                  |
+| `AUTHD_LOG_LEVEL`           | `info`                     |                                                     |
+
+## Layout
+
+```
+cmd/authd            entrypoint, signal handling, readiness
+internal/config      env loading, the loopback guard
+internal/directory   the LDAP view: entries, DNs, filter evaluation
+internal/clerkauth   verify_password and the status mapping
+internal/projection  the Clerk read model (Store interface + Postgres)
+internal/ldapsrv     Bind and Search handlers
+internal/throttle    per-DN token bucket
+migrations           projection schema
+```
+
+```bash
+go test -race ./...
+```
+
+## Still to build
+
+- The Clerk webhook receiver that maintains the projection (`apps/api`).
+- Stalwart's `directory.*` block pointing at this service.
+- The sidecar container in the Stalwart StatefulSet.

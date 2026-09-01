@@ -19,6 +19,9 @@ env:
   # package.json, and any Dockerfile that installs it — and they move together.
   PNPM_VERSION: "11.24.0"
   NODE_VERSION: "22.20.0"
+  # services/authd is a Go module and is deliberately outside the pnpm
+  # workspace, so Turborepo never sees it and it needs its own lane below.
+  GO_VERSION: "1.26.5"
 
 jobs:
   commits:
@@ -73,6 +76,37 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run ${{ matrix.task }}
+
+  authd:
+    name: authd (Go)
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/authd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/authd/go.sum
+      # gofmt has no --check, so this asserts the list of unformatted files is
+      # empty. `go vet` catches the mistakes the compiler does not.
+      - name: Format
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change:"; echo "$unformatted"; exit 1
+          fi
+      - run: go vet ./...
+      # ⚠ -race IS NOT OPTIONAL HERE. authd answers every bind on its own
+      # goroutine and shares a rate limiter and a connection pool across all of
+      # them. It also found a real data race in the LDAP library on first run.
+      - run: go test -race -count=1 ./...
+      - name: Verify go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
   format:
     name: Format
