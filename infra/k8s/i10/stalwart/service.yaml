@@ -35,6 +35,36 @@ metadata:
 spec:
   selector:
     app.kubernetes.io/name: i10-stalwart
+  # ⚠ A LoadBalancer, NOT AN IngressRouteTCP THROUGH TRAEFIK. Two reasons, and
+  # the second is the one that matters.
+  #
+  # Traefik on this cluster has exactly two entrypoints, `web:80` and
+  # `websecure:443`. Mail ports would need new ones, which means editing
+  # Traefik's args, container ports and its own LoadBalancer Service — and
+  # Traefik is an Argo Application owned by the platform, outside the `i10-*`
+  # destinations this repo's AppProject may write to. Every mail port would be a
+  # commit to the PSL repository.
+  #
+  # And mail is not HTTP. Putting an HTTP-first reverse proxy in front of SMTP
+  # and IMAP buys no routing — there is nothing to route, one backend answers
+  # every connection — while costing TLS passthrough config and Proxy Protocol
+  # v2 purely to recover the client IP that the proxy discarded. Exposing the
+  # Service directly removes the proxy and the problem together.
+  type: LoadBalancer
+
+  # ⚠ `Local`, AND IT IS NOT A PERFORMANCE SETTING. With the default `Cluster`,
+  # kube-proxy SNATs the source address and every connection appears to arrive
+  # from a node. For a mail server that is not a metrics inconvenience, it is
+  # broken behaviour: inbound SPF is evaluated against the connecting IP,
+  # greylisting and rate limits key on it, and every sender would look like one
+  # client. `Local` keeps the real address.
+  #
+  # ⚠ VERIFY THIS RATHER THAN TRUST IT. k3s ServiceLB reaches the Service
+  # through a klipper-lb pod, and whether the client address survives that hop
+  # depends on the DNAT path. Check an inbound connection's logged remote
+  # address before believing SPF works.
+  externalTrafficPolicy: Local
+
   # Both families. The cluster was rebuilt dual-stack on 2026-08-31 precisely
   # so mail can answer on IPv6 — receivers increasingly prefer it and score its
   # reputation separately from IPv4.
