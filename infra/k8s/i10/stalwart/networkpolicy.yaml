@@ -1,0 +1,37 @@
+# The one policy that lets mail in from the internet.
+#
+# ⚠ WITHOUT THIS, EVERY MAIL CONNECTION IS DROPPED WITH NO LOG ANYWHERE. The
+# namespace carries `default-deny-ingress`, and the only allows are for
+# `cnpg-system`, `i10-prod` itself, and `traefik`. HTTP works because Traefik is
+# an allowed namespace — it proxies from inside the cluster. Mail does not go
+# through Traefik: it arrives from the internet straight onto the pod's
+# hostPorts, matches no allow rule, and kube-router drops it in FORWARD.
+#
+# The symptom is exceptionally misleading. The port accepts a TCP handshake from
+# the node, `CNI-HOSTPORT-DNAT` counts the packets arriving, the firewall is
+# correct, the server is listening — and the client times out while the mail
+# server's log stays completely empty, because the packet never reaches it.
+#
+# ⚠ THE INGRESS RULE HAS `ports` AND NO `from`, DELIBERATELY. An empty `from`
+# means every source, which is what a public mail server needs, and it covers
+# IPv4 and IPv6 in one rule — an `ipBlock` would need `0.0.0.0/0` and `::/0` as
+# separate entries, and forgetting the second is how you ship a server that
+# works until a client prefers the AAAA record.
+#
+# Scoped to the Stalwart pod and to three ports. 587 is absent because nothing
+# listens there yet, and 8080 because the management API belongs behind Traefik.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-public-mail
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-stalwart
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - { protocol: TCP, port: 25 }
+        - { protocol: TCP, port: 465 }
+        - { protocol: TCP, port: 993 }
