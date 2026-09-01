@@ -48,6 +48,36 @@ stalwart-cli create Action/ReloadSettings
 
 Every object in this plan is in that category, so the reload is not optional.
 
+### ⚠ And a reload is not enough for TLS certificates
+
+`Action/ReloadSettings` does **not** make Stalwart serve a newly registered
+certificate. This was established the hard way, and the intermediate state is
+convincing enough to fool you: the `Certificate` object applied cleanly, and
+querying it back showed `subjectAlternativeNames` of `*.i10.tech, i10.tech` —
+which are **server-derived from the PEM**, so the server had demonstrably read,
+parsed and validated the material. It went on presenting
+`CN=rcgen self signed cert` to every client regardless.
+
+Only restarting the pod switched it. Certificate selection is part of the
+boot-time snapshot, not something the reload rebuilds.
+
+That has a consequence beyond first setup. cert-manager renews the wildcard
+roughly every 60 days, and **two** independent things then stop the new
+certificate from being served: the PEM arrives as an environment variable, which
+is fixed for the life of a container, and Stalwart would not switch certificates
+without a restart even if it were not. `cert-reload.yaml` in the parent
+directory is what closes both — a daily CronJob that compares the certificate's
+`notBefore` against the running pod's start time and deletes the pod when the
+certificate is the newer of the two.
+
+### The certificate only applies to SNI clients unless you say otherwise
+
+`SystemSettings.defaultCertificateId` is what a connection with **no SNI** gets.
+Mail clients send SNI; a sending MTA connecting to port 25 generally does not.
+Leaving it null means inbound mail is offered a self-signed certificate on
+STARTTLS while every client you test with sees the real one — a failure that is
+invisible from the direction you are looking.
+
 ## First boot
 
 `config.json` is always present here, so Stalwart never enters bootstrap mode —

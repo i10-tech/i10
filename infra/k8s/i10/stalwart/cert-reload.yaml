@@ -1,0 +1,134 @@
+# Restarts Stalwart when cert-manager renews the wildcard certificate.
+#
+# ⚠ TWO INDEPENDENT REASONS A RENEWAL DOES NOT TAKE EFFECT ON ITS OWN, AND
+# FIXING ONLY ONE OF THEM CHANGES NOTHING.
+#
+# First, the PEM reaches the container as an environment variable, and env vars
+# are fixed for the life of a container — kubelet rewrites a mounted file when a
+# Secret changes, but never an env var.
+#
+# Second, and this is the one that is easy to miss: even with fresh material,
+# Stalwart does not switch certificates on `Action/ReloadSettings`. That was
+# established the hard way — the Certificate object applied cleanly and the
+# server derived the SANs from the PEM, proving it had parsed it, and it went on
+# serving `CN=rcgen self signed cert` until the pod was restarted. Certificate
+# selection is part of the boot-time snapshot.
+#
+# So the only thing that actually rotates the served certificate is a restart.
+#
+# ⚠ IT DELETES THE POD RATHER THAN PATCHING THE StatefulSet. `kubectl rollout
+# restart` works by stamping an annotation on the pod template — which is drift
+# the moment Argo compares this Application against git, and Argo would revert
+# it. Deleting the pod changes no manifest: the StatefulSet controller simply
+# recreates it, and there is nothing for a sync to disagree with.
+#
+# The trigger is stateless on purpose. Rather than remembering what it last saw,
+# it compares the certificate's `notBefore` against the running pod's start
+# time: if the certificate is newer than the process serving it, that process is
+# serving something stale. No ConfigMap of state to drift, and it self-corrects
+# if the job is ever missed.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: i10-stalwart-cert-reload
+  namespace: i10-prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: i10-stalwart-cert-reload
+  namespace: i10-prod
+rules:
+  # Read the renewal timestamps cert-manager publishes.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get"]
+    resourceNames: ["i10-tech-wildcard"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  # ⚠ Delete is scoped to the one pod by name. This role can restart Stalwart
+  # and nothing else — a cron job that could delete arbitrary pods in the
+  # namespace would be a much larger thing than the problem it solves.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+    resourceNames: ["i10-stalwart-0"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: i10-stalwart-cert-reload
+  namespace: i10-prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: i10-stalwart-cert-reload
+subjects:
+  - kind: ServiceAccount
+    name: i10-stalwart-cert-reload
+    namespace: i10-prod
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-stalwart-cert-reload
+  namespace: i10-prod
+spec:
+  # Daily. cert-manager renews at two thirds of the certificate's life, so a
+  # renewal has weeks of validity left when it lands — checking hourly would buy
+  # nothing and run 24x the jobs.
+  schedule: "17 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: i10-stalwart-cert-reload
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: reload
+              image: registry.k8s.io/kubectl:v1.34.1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 128Mi }
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  cert_not_before=$(kubectl get certificate i10-tech-wildcard \
+                    -o jsonpath='{.status.notBefore}')
+                  pod_started=$(kubectl get pod i10-stalwart-0 \
+                    -o jsonpath='{.status.startTime}')
+
+                  if [ -z "$cert_not_before" ] || [ -z "$pod_started" ]; then
+                    echo "could not read timestamps; refusing to guess" >&2
+                    exit 1
+                  fi
+
+                  # Both are RFC3339 in UTC, so a string comparison is a
+                  # chronological one — no date parsing in a distroless image.
+                  if [ "$cert_not_before" \> "$pod_started" ]; then
+                    echo "certificate issued $cert_not_before is newer than the"
+                    echo "pod started at $pod_started; restarting to pick it up"
+                    kubectl delete pod i10-stalwart-0 --wait=false
+                  else
+                    echo "certificate $cert_not_before predates pod start"
+                    echo "$pod_started; nothing to do"
+                  fi
