@@ -8,15 +8,12 @@ CREATE TYPE "core"."tenant_status" AS ENUM('active', 'suspended', 'deleted');-->
 CREATE TABLE "core"."api_keys" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
 	"tenant_id" uuid NOT NULL,
+	"clerk_key_id" text NOT NULL,
 	"name" text NOT NULL,
 	"prefix" text NOT NULL,
-	"hash" text NOT NULL,
 	"mode" text NOT NULL,
-	"scopes" text[] DEFAULT '{}'::text[] NOT NULL,
-	"last_used_at" timestamp with time zone,
-	"revoked_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "api_keys_hash_unique" UNIQUE("hash")
+	CONSTRAINT "api_keys_clerk_key_id_unique" UNIQUE("clerk_key_id")
 );
 --> statement-breakpoint
 CREATE TABLE "core"."domains" (
@@ -226,47 +223,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA core TO i10_api;
 --> statement-breakpoint
 ALTER DEFAULT PRIVILEGES IN SCHEMA core
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO i10_api;
---> statement-breakpoint
-
--- ⚠ THE KEY HASHES ARE NOT READABLE, EVEN INSIDE THE RIGHT TENANT. Revoking
--- SELECT on that one column means an injection or a query bug in a tenant's own
--- request cannot exfiltrate the material that authenticates it. INSERT still
--- covers every column, so a key can be created; it just cannot be read back —
--- which is the same promise the API makes to the customer.
-REVOKE SELECT ON "core"."api_keys" FROM i10_api;
---> statement-breakpoint
-GRANT SELECT ("id", "tenant_id", "name", "prefix", "mode", "scopes",
-              "last_used_at", "revoked_at", "created_at")
-  ON "core"."api_keys" TO i10_api;
---> statement-breakpoint
-
--- Authenticating a request has to find a key with NO tenant context, because
--- the tenant is the answer rather than the question. RLS cannot express that,
--- and widening the policy to allow it would open the table to every request.
---
--- A SECURITY DEFINER function runs as the owner, so it sees past the policy —
--- but it can only ever answer this one question, and it returns the three
--- fields the middleware needs and nothing else. `search_path` is pinned because
--- a definer function that resolves names through the CALLER's search_path is a
--- privilege-escalation primitive.
-CREATE FUNCTION "core"."resolve_api_key"(key_hash text)
-RETURNS TABLE (api_key_id uuid, tenant_id uuid, scopes text[], mode text)
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = core, pg_temp
-AS $$
-  SELECT k.id, k.tenant_id, k.scopes, k.mode
-    FROM core.api_keys k
-    JOIN core.tenants t ON t.id = k.tenant_id
-   WHERE k.hash = key_hash
-     AND k.revoked_at IS NULL
-     AND t.status = 'active';
-$$;
---> statement-breakpoint
-REVOKE EXECUTE ON FUNCTION "core"."resolve_api_key"(text) FROM PUBLIC;
---> statement-breakpoint
-GRANT EXECUTE ON FUNCTION "core"."resolve_api_key"(text) TO i10_api;
 --> statement-breakpoint
 
 -- The sweeper is the other query that is legitimately cross-tenant: finding
