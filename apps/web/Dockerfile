@@ -28,7 +28,13 @@ FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3002
 
-RUN addgroup -S i10 && adduser -S -G i10 -h /home/i10 i10 \
+# ⚠ THE UID IS PINNED, AND NUMERICALLY. `adduser -S` without -u picks the first
+# free system UID, which is a property of the base image rather than of us — it
+# moves when the base image does. More importantly kubelet cannot verify a
+# NAMED user against `runAsNonRoot`: it has no way to resolve the name without
+# reading the image's /etc/passwd, so it refuses to start the container with
+# "image has non-numeric user". A number is the only form both sides agree on.
+RUN addgroup -S -g 1001 i10 && adduser -S -u 1001 -G i10 -h /home/i10 i10 \
     && mkdir -p /home/i10 && chown -R i10:i10 /home/i10
 ENV HOME=/home/i10
 
@@ -39,7 +45,7 @@ COPY --from=build --chown=i10:i10 /repo/apps/web/.next/standalone ./
 COPY --from=build --chown=i10:i10 /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build --chown=i10:i10 /repo/apps/web/public ./apps/web/public
 
-USER i10
+USER 1001:1001
 EXPOSE 3002
 
 ARG GIT_SHA=dev
