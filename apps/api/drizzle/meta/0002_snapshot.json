@@ -1,5 +1,5 @@
 {
-  "id": "c133571b-1a21-4b39-af6b-173dd31d6175",
+  "id": "818c9704-c852-4c54-a353-aa41e5ffe9a1",
   "prevId": "bc34b15a-6a01-406f-84e6-d2edae7de27b",
   "version": "7",
   "dialect": "postgresql",
@@ -285,6 +285,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "clerk_key_id": {
+          "name": "clerk_key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -297,36 +303,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "hash": {
-          "name": "hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "mode": {
           "name": "mode",
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "scopes": {
-          "name": "scopes",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "last_used_at": {
-          "name": "last_used_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -367,10 +348,10 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "api_keys_hash_unique": {
-          "name": "api_keys_hash_unique",
+        "api_keys_clerk_key_id_unique": {
+          "name": "api_keys_clerk_key_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["hash"]
+          "columns": ["clerk_key_id"]
         }
       },
       "policies": {},

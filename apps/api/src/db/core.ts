@@ -193,17 +193,18 @@ export const domains = core.table(
 )
 
 /**
- * API keys, stored as hashes.
+ * A thin index of the keys Clerk holds for a tenant.
  *
- * ⚠ LOOKUP HAPPENS BEFORE THE TENANT IS KNOWN, WHICH IS WHY RLS CANNOT ANSWER
- * IT. Authenticating a request means finding a row by hash with no tenant
- * context at all — the tenant is the ANSWER, not the question. Widening the
- * policy to allow that would open the table to every authenticated request.
+ * ⚠ NO SECRET, NO HASH, NO SCOPES, NO `revoked`, NO `last_used_at`. Clerk owns
+ * every one of those and answers for them — `apiKeys.verify()` returns scopes,
+ * revocation and expiry, and Clerk maintains `lastUsedAt` itself. Copying any of
+ * it here would create a second source of truth for authentication, which is the
+ * one kind of duplication that fails silently and in the customer's favour.
  *
- * The migration resolves it with `core.resolve_api_key(text)`, a SECURITY
- * DEFINER function that runs as the owner, returns only the tenant id, key id
- * and scopes, and is the sole privilege `i10_api` has on this table. The rows
- * stay unreadable; one narrow question about them is answerable.
+ * What is left is the part Clerk cannot answer: which i10 tenant a key belongs
+ * to, in one place, when a tenant's keys may be split between a Clerk
+ * organization and its owning user. The tenant also travels in the key's own
+ * claims, so the request path never reads this table — only the dashboard does.
  */
 export const apiKeys = core.table(
   "api_keys",
@@ -215,6 +216,9 @@ export const apiKeys = core.table(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
 
+    /** Clerk's own id for the key, `ak_…`. The join key to everything real. */
+    clerkKeyId: text("clerk_key_id").notNull().unique(),
+
     name: text("name").notNull(),
 
     /**
@@ -225,28 +229,12 @@ export const apiKeys = core.table(
     prefix: text("prefix").notNull(),
 
     /**
-     * SHA-256 of the whole key. The key itself is returned once at creation and
-     * is not recoverable, so there is nothing here for a database leak to use
-     * directly. Unique because a hash collision would be an authentication
-     * bypass, and the constraint is free.
+     * ⚠ FOR DISPLAY ONLY. The authoritative mode is the `mode` claim Clerk
+     * returns from verify(), because `i10_live_` and `i10_test_` are the same
+     * length and unwrap to the same secret — see src/auth/api-key.ts. Trusting
+     * this column to decide behaviour would reintroduce exactly that hole.
      */
-    hash: text("hash").notNull().unique(),
-
-    /** `live` and `test` keys resolve to the same tenant but not the same behaviour. */
     mode: text("mode").notNull(),
-
-    scopes: text("scopes")
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
-
-    /**
-     * Written by a background flush, never in the request path — an UPDATE per
-     * authenticated request would serialise every caller of the same key on one
-     * row lock.
-     */
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-    revokedAt: timestamp("revoked_at", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

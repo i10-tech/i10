@@ -1,5 +1,6 @@
 import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
+import type { VerifyDeps } from "./auth/api-key.js"
 import { emails } from "./routes/emails.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 
@@ -15,12 +16,31 @@ const { version: API_VERSION } = createRequire(import.meta.url)("../package.json
 
 export interface AppDeps {
   clerkWebhooks?: ClerkWebhookDeps
+  /**
+   * How API keys are verified. Omitted in tests and in the OpenAPI generator,
+   * where requireApiKey then refuses every well-formed key with a 501 rather
+   * than letting an unauthenticated caller through.
+   */
+  apiKeyAuth?: VerifyDeps
   /** Answers whether the database is reachable, for the readiness probe. */
   pingDb?: () => Promise<void>
 }
 
 export function createApp(deps: AppDeps = {}) {
   const app = new OpenAPIHono()
+
+  // ⚠ INJECTED THROUGH THE CONTEXT, NOT CLOSED OVER. The email routes are
+  // declared at module scope and `middleware:` on a createRoute() is resolved
+  // at import time, so the middleware cannot capture anything createApp knows.
+  // Setting it per request is what lets one process serve a configured app and
+  // the tests serve an unconfigured one.
+  if (deps.apiKeyAuth) {
+    const auth = deps.apiKeyAuth
+    app.use("*", async (c, next) => {
+      c.set("apiKeyAuth", auth)
+      await next()
+    })
+  }
 
   // Liveness vs readiness are deliberately different endpoints.
   //

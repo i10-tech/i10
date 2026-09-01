@@ -39,6 +39,17 @@ const schema = z.object({
   // forged event could create a mailbox on a domain we host or silence one.
   CLERK_WEBHOOK_SECRET: z.string().min(1),
 
+  // Issues and verifies customer API keys. Clerk owns the secret; what a
+  // customer holds is that secret rewritten under our own prefix — see
+  // src/auth/api-key.ts.
+  CLERK_SECRET_KEY: z.string().min(1),
+
+  // ⚠ THIS NUMBER IS HOW LONG A REVOKED KEY KEEPS WORKING. Verification is a
+  // network call to Clerk on every send, so it is cached — and the TTL is the
+  // whole trade. Longer means less Clerk on the critical path and a longer
+  // window where a key someone revoked in a panic still sends mail.
+  API_KEY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
+
   // ⚠ THE DOMAINS i10 ACTUALLY HOSTS MAIL FOR. Only addresses in these domains
   // may enter the projection, because a row there makes Stalwart treat the
   // address as a LOCAL RECIPIENT. Most users sign up with a Gmail or a work

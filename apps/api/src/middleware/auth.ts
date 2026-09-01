@@ -1,19 +1,30 @@
 import type { MiddlewareHandler } from "hono"
+import { verifyApiKey, type Mode, type VerifyDeps } from "../auth/api-key.js"
 
 export interface AuthContext {
   apiKeyId: string
-  accountId: string
+  /**
+   * i10's own tenant id, taken from Clerk's claims on the key.
+   *
+   * NOT Clerk's `subject`, which is a `user_…` or `org_…`. A tenant may
+   * reference either, or neither — see core.tenants.
+   */
+  tenantId: string
   scopes: readonly string[]
+  mode: Mode
 }
 
 declare module "hono" {
   interface ContextVariableMap {
     auth: AuthContext
+    /**
+     * Injected once by createApp rather than closed over by the route module,
+     * because the routes are declared at import time and `middleware:` on a
+     * createRoute() is resolved then.
+     */
+    apiKeyAuth?: VerifyDeps
   }
 }
-
-/** Matches `i10_live_…` and `i10_test_…`. */
-const KEY_PATTERN = /^i10_(live|test)_[A-Za-z0-9]{24,}$/
 
 /**
  * Bearer-token authentication.
@@ -39,7 +50,7 @@ const KEY_PATTERN = /^i10_(live|test)_[A-Za-z0-9]{24,}$/
  *
  * And it is annotated as `MiddlewareHandler` rather than built with
  * `createMiddleware`, because that helper infers the return type from the
- * handler — so returning a 401 in one branch and a 501 in another produces two
+ * handler — so returning a 401 in one branch and a 503 in another produces two
  * incompatible `JSONRespondReturn` types and the whole thing stops assigning.
  */
 export const requireApiKey: MiddlewareHandler = async (c, next) => {
@@ -55,37 +66,53 @@ export const requireApiKey: MiddlewareHandler = async (c, next) => {
     )
   }
 
-  const key = header.slice("Bearer ".length).trim()
-  if (!KEY_PATTERN.test(key)) {
+  const deps = c.get("apiKeyAuth")
+  if (!deps) {
+    // No verifier configured. Refusing is the only safe answer: falling through
+    // would let an unauthenticated caller reach the send path.
     return c.json(
       {
-        statusCode: 401,
-        name: "invalid_access",
-        message: "Malformed API key.",
+        statusCode: 501,
+        name: "internal_server_error",
+        message: "API key verification is not wired up yet.",
       },
-      401,
+      501,
     )
   }
 
-  // TODO(phase-2): resolve the key through Clerk's API keys feature —
-  // long-lived, opaque, owned by a user or organization, carrying scope
-  // strings, with the secret returned once at creation and never retrievable.
-  //
-  // Verify by HASH, never by comparing plaintext, and never log the key. Then
-  // set the resolved identity and fall through:
-  //
-  //   c.set("auth", { apiKeyId, accountId, scopes })
-  //   await next()
-  //
-  // Until then a well-formed key is still refused, so that nothing can
-  // accidentally send while the send path is unbuilt.
-  void next
-  return c.json(
-    {
-      statusCode: 501,
-      name: "internal_server_error",
-      message: "API key verification is not wired up yet.",
-    },
-    501,
-  )
+  const outcome = await verifyApiKey(header.slice("Bearer ".length).trim(), deps)
+
+  switch (outcome.status) {
+    case "verified":
+      c.set("auth", outcome.key)
+      await next()
+      return
+
+    case "rejected":
+      return c.json(
+        {
+          statusCode: 401,
+          name: "invalid_access",
+          message: "Invalid API key.",
+        },
+        401,
+      )
+
+    default:
+      // ⚠ 503, NEVER 401. Clerk did not answer, so we do not know whether the
+      // key is good — and a 401 tells the customer their key is wrong. They
+      // respond by rotating a key that was fine, during an outage that was
+      // never theirs. Same rule as services/authd answering LDAP `unavailable`
+      // rather than `invalidCredentials`. `Retry-After` is what makes an SDK
+      // back off instead of hammering.
+      c.header("Retry-After", "5")
+      return c.json(
+        {
+          statusCode: 503,
+          name: "service_unavailable",
+          message: "Could not verify the API key right now. Retry shortly.",
+        },
+        503,
+      )
+  }
 }

@@ -1,6 +1,8 @@
 import { serve } from "@hono/node-server"
+import { createClerkClient } from "@clerk/backend"
 import pino from "pino"
 import { createApp } from "./app.js"
+import { createCacheClient, redisKeyCache } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 
@@ -22,7 +24,21 @@ try {
   process.exit(1)
 }
 
+const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+
+// ⚠ A SEPARATE CLIENT FROM THE QUEUES'. The queue connection is a dependency —
+// a job that cannot be enqueued has not been accepted. This one is a cache, and
+// its errors are swallowed. Sharing a client would mean one set of retry and
+// offline-queue settings serving two opposite failure policies.
+const cache = createCacheClient(env.REDIS_URL)
+cache.on("error", (err: Error) => log.warn({ err }, "api key cache unavailable"))
+
 const app = createApp({
+  apiKeyAuth: {
+    verify: (secret) => clerk.apiKeys.verify(secret),
+    cache: redisKeyCache(cache),
+    ttlSeconds: env.API_KEY_CACHE_TTL_SECONDS,
+  },
   clerkWebhooks: {
     db,
     signingSecret: env.CLERK_WEBHOOK_SECRET,
@@ -47,7 +63,9 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     server.close(() => {
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
-      void sql.end({ timeout: 5 }).finally(() => process.exit(0))
+      void Promise.allSettled([sql.end({ timeout: 5 }), cache.quit()]).finally(() =>
+        process.exit(0),
+      )
     })
   })
 }
