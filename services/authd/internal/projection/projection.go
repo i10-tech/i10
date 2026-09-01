@@ -11,14 +11,14 @@ import (
 
 // Account is one mailbox as authd knows it.
 type Account struct {
-	ClerkUserID       string
-	Email             string
-	DisplayName       string
-	Description       string
-	Active            bool
-	PasswordUpdatedAt *time.Time
-	Aliases           []string
-	MemberOf          []string // group names, not DNs; the caller renders DNs
+	ClerkUserID    string
+	Email          string
+	DisplayName    string
+	Description    string
+	Active         bool
+	ClerkUpdatedAt *time.Time
+	Aliases        []string
+	MemberOf       []string // group names, not DNs; the caller renders DNs
 }
 
 // Group is a mail-enabled group.

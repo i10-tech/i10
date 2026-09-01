@@ -40,7 +40,7 @@ func (p *Postgres) Close() { p.pool.Close() }
 func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
-	coalesce(a.description, ''), a.active, a.password_updated_at`
+	coalesce(a.description, ''), a.active, a.clerk_updated_at`
 
 func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([]Account, error) {
 	norm := normalise(addresses)
@@ -125,7 +125,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	for rows.Next() {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
-			&a.Description, &a.Active, &a.PasswordUpdatedAt); err != nil {
+			&a.Description, &a.Active, &a.ClerkUpdatedAt); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

@@ -154,8 +154,8 @@ func (s *Server) accountEntry(a projection.Account) *directory.Entry {
 	// Stalwart reads this as attrSecretChanged to expire cached OAuth tokens.
 	// Absent when Clerk has never recorded a password change, which is correct:
 	// no value means nothing to compare against, not "changed at the epoch".
-	if a.PasswordUpdatedAt != nil {
-		e.Set(directory.AttrPwdChangeTime, directory.GeneralizedTime(*a.PasswordUpdatedAt))
+	if a.ClerkUpdatedAt != nil {
+		e.Set(directory.AttrPwdChangeTime, directory.GeneralizedTime(*a.ClerkUpdatedAt))
 	}
 	return e
 }

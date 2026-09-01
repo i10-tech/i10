@@ -17,6 +17,9 @@
   // correctness guard, not style: reading an undeclared variable produces a
   // build cached against the wrong key and silently reused with stale values.
   "globalPassThroughEnv": [
+    // Read by drizzle.config.ts at migrate time only. Passed through rather
+    // than hashed: the connection string does not change what gets built.
+    "DATABASE_URL",
     "I10_API_KEY",
     "I10_BASE_URL",
     "SENTRY_ENVIRONMENT",

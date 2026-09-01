@@ -175,13 +175,13 @@ func defaultStore() *fakeStore {
 	changed := time.Date(2026, 8, 30, 9, 0, 0, 0, time.UTC)
 	return &fakeStore{
 		accounts: []projection.Account{{
-			ClerkUserID:       "user_alice",
-			Email:             aliceEmail,
-			DisplayName:       "Alice Example",
-			Active:            true,
-			PasswordUpdatedAt: &changed,
-			Aliases:           []string{"a@i10.tech", "alice.example@i10.tech"},
-			MemberOf:          []string{"support"},
+			ClerkUserID:    "user_alice",
+			Email:          aliceEmail,
+			DisplayName:    "Alice Example",
+			Active:         true,
+			ClerkUpdatedAt: &changed,
+			Aliases:        []string{"a@i10.tech", "alice.example@i10.tech"},
+			MemberOf:       []string{"support"},
 		}, {
 			ClerkUserID: "user_suspended",
 			Email:       "gone@i10.tech",

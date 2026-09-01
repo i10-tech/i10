@@ -33,6 +33,27 @@ const schema = z.object({
   // CNAME — so it cannot be aliased behind an i10 hostname. Changing region
   // means every customer edits DNS. Chosen once, deliberately: eu-central-1.
   AWS_REGION: z.literal("eu-central-1").default("eu-central-1"),
+
+  // Signs Clerk's webhooks, via Svix. This is an authentication boundary, not
+  // a checksum: everything downstream writes to the mailbox projection, so a
+  // forged event could create a mailbox on a domain we host or silence one.
+  CLERK_WEBHOOK_SECRET: z.string().min(1),
+
+  // ⚠ THE DOMAINS i10 ACTUALLY HOSTS MAIL FOR. Only addresses in these domains
+  // may enter the projection, because a row there makes Stalwart treat the
+  // address as a LOCAL RECIPIENT. Most users sign up with a Gmail or a work
+  // address; projecting one would have Stalwart accept and swallow mail
+  // addressed to somebody else's domain.
+  MAIL_DOMAINS: z
+    .string()
+    .min(1)
+    .transform((v) =>
+      v
+        .split(",")
+        .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+        .filter(Boolean),
+    )
+    .refine((d) => d.length > 0, "must list at least one domain"),
 })
 
 export type Env = z.infer<typeof schema>

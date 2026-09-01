@@ -127,12 +127,22 @@ internal/clerkauth   verify_password and the status mapping
 internal/projection  the Clerk read model (Store interface + Postgres)
 internal/ldapsrv     Bind and Search handlers
 internal/throttle    per-DN token bucket
-migrations           projection schema
 ```
 
 ```bash
 go test -race ./...
 ```
+
+## The schema lives elsewhere
+
+authd is a **reader**. The `authd.*` tables are defined in Drizzle at
+`apps/api/src/db/schema.ts` and migrated from `apps/api/drizzle/`, because the
+webhook receiver that writes them lives there and two sources of truth for one
+schema is how drift starts.
+
+⚠ authd's queries are plain SQL against those tables, so a column renamed in
+Drizzle will **not** fail to compile here — it will fail at runtime, on a bind.
+Rename in both, in the same change.
 
 ## Still to build
 
