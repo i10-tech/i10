@@ -9,7 +9,10 @@ async function spec() {
   return (await res.json()) as {
     openapi: string
     paths: Record<string, Record<string, unknown>>
-    components?: { securitySchemes?: Record<string, unknown> }
+    components?: {
+      securitySchemes?: Record<string, unknown>
+      schemas?: Record<string, unknown>
+    }
   }
 }
 
@@ -40,23 +43,45 @@ describe("the published OpenAPI document", () => {
   it("carries the request body schema, so SDKs can be generated from it", async () => {
     const doc = await spec()
     const post = doc.paths["/emails"]!.post as {
-      requestBody: { content: Record<string, { schema: { properties?: object } }> }
+      requestBody: { content: Record<string, { schema: { $ref?: string } }> }
       responses: Record<string, unknown>
     }
-    const schema = post.requestBody.content["application/json"]!.schema
-    expect(Object.keys(schema.properties ?? {})).toEqual(
+
+    // ⚠ A $ref, not an inline object. Without named components a generator
+    // emits an anonymous type per endpoint, and the same Error shape lands four
+    // times under four different names.
+    const ref = post.requestBody.content["application/json"]!.schema.$ref
+    expect(ref).toBe("#/components/schemas/SendEmail")
+
+    const component = doc.components?.schemas?.SendEmail as { properties?: object }
+    expect(Object.keys(component.properties ?? {})).toEqual(
       expect.arrayContaining(["from", "to", "subject"]),
     )
+
     // Error responses are part of the contract an SDK codes against.
     expect(Object.keys(post.responses)).toEqual(
       expect.arrayContaining(["200", "401", "422", "429"]),
     )
   })
 
-  it("serves the Scalar reference", async () => {
+  it("names every shared schema as a reusable component", async () => {
+    const doc = await spec()
+    expect(Object.keys(doc.components?.schemas ?? {})).toEqual(
+      expect.arrayContaining([
+        "SendEmail",
+        "SendEmailResponse",
+        "BatchSend",
+        "BatchSendResponse",
+        "Error",
+      ]),
+    )
+  })
+
+  // The human-readable reference lives at docs.i10.tech/api. This origin serves
+  // machines; two rendered copies would be two things to keep in sync.
+  it("does not render HTML on the API origin", async () => {
     const res = await app.request("/reference")
-    expect(res.status).toBe(200)
-    expect(res.headers.get("content-type")).toContain("text/html")
+    expect(res.status).toBe(404)
   })
 })
 

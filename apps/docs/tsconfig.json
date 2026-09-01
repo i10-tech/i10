@@ -7,5 +7,9 @@
     }
   },
   "include": [".astro/types.d.ts", "**/*"],
-  "exclude": ["dist"]
+  // `public` holds static assets that are copied verbatim, never compiled.
+  // Leaving it in the include glob makes tsc walk everything served from the
+  // site — the vendored Scalar bundle is 8.8 MB across 180 files, and
+  // `astro check` exhausts a 4 GB heap and aborts on it.
+  "exclude": ["dist", "public"]
 }

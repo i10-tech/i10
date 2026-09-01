@@ -33,3 +33,8 @@ minimumReleaseAge: 1440
 # Astro (the docs build) both need it.
 allowBuilds:
   esbuild: true
+  # vue-demi's postinstall picks the Vue 2 or Vue 3 shim for the installed Vue.
+  # Scalar's API-reference component is Vue-based, so the docs build needs the
+  # right one selected; without it the postinstall is skipped and the shim can
+  # resolve against the wrong major.
+  vue-demi: true

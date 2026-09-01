@@ -1,6 +1,5 @@
 import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
-import { Scalar } from "@scalar/hono-api-reference"
 import { emails } from "./routes/emails.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 
@@ -88,7 +87,10 @@ export function createApp(deps: AppDeps = {}) {
     tags: [{ name: "Emails", description: "Sending mail." }],
   })
 
-  app.get("/reference", Scalar({ url: "/openapi.json", pageTitle: "i10 API" }))
+  // The human-readable reference lives at docs.i10.tech/api, not here. This
+  // origin serves machines; rendering HTML on it would mean two places to keep
+  // in sync and a Scalar bundle in the API image for no reason. The document
+  // itself stays, because SDK users and tooling expect it at the API origin.
 
   app.notFound((c) =>
     c.json({ statusCode: 404, name: "not_found", message: "Not found." }, 404),

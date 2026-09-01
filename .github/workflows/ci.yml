@@ -77,6 +77,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run ${{ matrix.task }}
 
+  openapi:
+    name: OpenAPI document
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with: { version: "${{ env.PNPM_VERSION }}" }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # ⚠ THIS GUARD IS WHY INLINING THE SPEC IS SAFE. apps/api/openapi.json is a
+      # committed artifact: docs.i10.tech/api inlines it at build time so the
+      # reference needs no CORS header and renders even when the API is down, and
+      # SDK generation reads it from the tree rather than from a running service.
+      # Both of those are only sound while the file matches the Zod schemas it
+      # came from. Regenerating and diffing is what keeps that true.
+      #
+      # A failure here means someone changed the API contract without committing
+      # the regenerated document — run `pnpm --filter @i10/api openapi`.
+      - name: Regenerate and check for drift
+        run: |
+          pnpm --filter @i10/api openapi
+          git diff --exit-code -- apps/api/openapi.json
+
   authd:
     name: authd (Go)
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}

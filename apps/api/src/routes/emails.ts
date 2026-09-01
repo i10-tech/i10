@@ -25,10 +25,26 @@ import { requireApiKey } from "../middleware/auth.js"
  */
 export const emails = new OpenAPIHono()
 
+/**
+ * Named components, so the document carries `$ref`s instead of inlining every
+ * schema at every use site.
+ *
+ * This is what makes generated SDKs usable: without names, a generator emits an
+ * anonymous type per endpoint — `SendEmailsPostRequestBody` and friends — and
+ * the same Error object appears four times under four different names. `.openapi()`
+ * comes from @hono/zod-openapi's extension of Zod's prototype, so it applies to
+ * the plain-Zod schemas in @repo/contracts without those needing to know it exists.
+ */
+const SendEmail = sendEmailSchema.openapi("SendEmail")
+const SendEmailResponse = sendEmailResponseSchema.openapi("SendEmailResponse")
+const BatchSend = batchSendSchema.openapi("BatchSend")
+const BatchSendResponse = batchSendResponseSchema.openapi("BatchSendResponse")
+const ApiError = errorSchema.openapi("Error")
+
 /** Shorthand for the error responses every route shares. */
 const errorResponse = (description: string) => ({
   description,
-  content: { "application/json": { schema: errorSchema } },
+  content: { "application/json": { schema: ApiError } },
 })
 
 const send = createRoute({
@@ -44,13 +60,13 @@ const send = createRoute({
   request: {
     body: {
       required: true,
-      content: { "application/json": { schema: sendEmailSchema } },
+      content: { "application/json": { schema: SendEmail } },
     },
   },
   responses: {
     200: {
       description: "The message was accepted.",
-      content: { "application/json": { schema: sendEmailResponseSchema } },
+      content: { "application/json": { schema: SendEmailResponse } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     422: errorResponse("The request body failed validation."),
@@ -113,13 +129,13 @@ const sendBatch = createRoute({
   request: {
     body: {
       required: true,
-      content: { "application/json": { schema: batchSendSchema } },
+      content: { "application/json": { schema: BatchSend } },
     },
   },
   responses: {
     200: {
       description: "Every message was accepted.",
-      content: { "application/json": { schema: batchSendResponseSchema } },
+      content: { "application/json": { schema: BatchSendResponse } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     422: errorResponse("The request body failed validation."),
