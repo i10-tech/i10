@@ -1,13 +1,26 @@
 import { serve } from "@hono/node-server"
 import pino from "pino"
 import { createApp } from "./app.js"
-import { createDb } from "./db/client.js"
+import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
 
 const { sql, db } = createDb(env.DATABASE_URL)
+
+// ⚠ BEFORE THE LISTENER, NOT AFTER, AND NOT IN A HEALTH CHECK. Connecting as a
+// role that bypasses row level security is the one misconfiguration in this
+// service that produces no error and no wrong answer — it removes the tenant
+// boundary and everything keeps working. Checked here, it fails the rollout
+// while the previous pod is still serving.
+try {
+  await assertRlsSubject(sql)
+} catch (error) {
+  log.fatal({ err: error }, "refusing to start")
+  await sql.end({ timeout: 5 })
+  process.exit(1)
+}
 
 const app = createApp({
   clerkWebhooks: {

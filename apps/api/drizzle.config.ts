@@ -13,9 +13,10 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },
-  // The projection lives in its own schema so it never collides with the
-  // transactional tables that will land in `public` later.
-  schemaFilter: ["authd"],
+  // Two schemas, two audiences. `authd` is the Clerk read model, queried by
+  // services/authd over LDAP; `core` is the transactional product. Nothing
+  // lands in `public`, so an unqualified table name is always a mistake.
+  schemaFilter: ["authd", "core"],
   strict: true,
   verbose: true,
 })

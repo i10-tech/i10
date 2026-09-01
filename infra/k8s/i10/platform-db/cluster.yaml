@@ -94,6 +94,27 @@ spec:
         passwordSecret:
           name: i10-authd-db-role
 
+      # What apps/api and apps/worker connect as.
+      #
+      # ⚠ NOT THE `i10` OWNER, AND THAT IS THE WHOLE POINT. Row level security
+      # does not apply to a table's owner. Every tenant policy in the `core`
+      # schema is a no-op for `i10`, silently — no error, no log line, just a
+      # boundary that is not there. This role owns nothing, so the policies bind
+      # to it. Migrations still run as the owner, because a backfill has to be
+      # able to cross tenants.
+      #
+      # apps/api/src/db/client.ts refuses to start if it finds itself connected
+      # as an owning, superuser or BYPASSRLS role, so a mistake here is a failed
+      # rollout rather than a leak.
+      - name: i10_api
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: i10-api-db-role
+
   bootstrap:
     initdb:
       database: i10
