@@ -139,11 +139,19 @@ spec:
             # `/` or `:` in it silently truncates the connection string into
             # something that parses but points elsewhere. Generate it
             # alphanumeric.
+            #
+            # Read-only role: authd never writes. See the cluster manifest.
             - name: AUTHD_DB_PASSWORD
               valueFrom:
-                secretKeyRef: { name: i10-stalwart-db-role, key: password }
+                secretKeyRef: { name: i10-authd-db-role, key: password }
+            # ⚠ THE `i10` DATABASE, NOT `stalwart`. The projection is i10's
+            # data — written by apps/api, read here — so it belongs with the
+            # product, not inside the mail server's database. Stalwart is
+            # pre-1.0 and migrates its own schema on upgrade; putting our tables
+            # in there is the same mistake as putting its tables in ours, just
+            # pointed the other way.
             - name: AUTHD_DATABASE_URL
-              value: postgres://stalwart:$(AUTHD_DB_PASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/stalwart
+              value: postgres://authd:$(AUTHD_DB_PASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
             - name: AUTHD_CLERK_SECRET_KEY
               valueFrom:
                 secretKeyRef: { name: i10-shared, key: CLERK_SECRET_KEY }
