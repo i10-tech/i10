@@ -80,6 +80,21 @@ the guidance below — not an oversight.
 is intended to rescue a server that has lost normal access, not to be a primary
 login.
 
+## App passwords are not disabled by configuration
+
+The plan originally set `maxAppPasswords: 0` on the Authentication singleton to
+enforce the one-email-one-password rule at the server. **Stalwart rejects it** —
+`validationFailed: maxAppPasswords: must be at least 1`. There is no setting
+that turns the feature off.
+
+It is close to moot in practice: Stalwart stores app passwords as a secret on
+the account in the **internal** directory, and i10 runs an external LDAP
+directory, so there is nowhere for one to live. The product boundary is held by
+never surfacing the feature in i10's own UI rather than by a server setting.
+
+If that ever needs real enforcement, the mechanism is a permission denial on a
+Role, not a limit — see `/docs/auth/authorization/permissions`.
+
 ## The database
 
 `config.json` points at database `stalwart`, not `i10`. The CNPG cluster

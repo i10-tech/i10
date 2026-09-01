@@ -144,6 +144,24 @@ schema is how drift starts.
 Drizzle will **not** fail to compile here — it will fail at runtime, on a bind.
 Rename in both, in the same change.
 
+## No health listener yet
+
+authd binds `127.0.0.1` only, and the kubelet runs probes against the pod IP, so
+**it cannot be probed by Kubernetes at all**. The StatefulSet therefore gives it
+no `livenessProbe` or `readinessProbe`; a tcpSocket probe on 3893 can never
+connect and simply kills a healthy process on a timer. Setting
+`host: 127.0.0.1` on the probe does not help — the kubelet resolves that against
+the node's loopback.
+
+That is acceptable today: authd has one consumer in the same network namespace,
+no Service selects it, and when it is down Stalwart's binds answer `unavailable`
+(52), which is visible in Stalwart's logs and is the designed behaviour.
+
+If real health checking is wanted, the answer is a **second listener** — a
+health-only HTTP endpoint bound to the pod IP, exposing liveness and the
+projection's reachability and nothing else. That is a deliberate addition with
+its own review, not a probe stanza someone can add back to the manifest.
+
 ## Still to build
 
 - The Clerk webhook receiver that maintains the projection (`apps/api`).
