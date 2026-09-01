@@ -32,6 +32,23 @@ RUN pnpm --filter @i10/docs build
 # names a path nobody put in any config. Pointing both at /tmp keeps the root
 # filesystem untouched.
 FROM caddy:2-alpine AS runtime
+
+# ⚠ STRIP THE BINARY'S FILE CAPABILITIES OR IT WILL NOT EXECUTE AT ALL.
+#
+# The upstream image runs `setcap cap_net_bind_service=+ep /usr/bin/caddy` so it
+# can bind :80 as a non-root user. We bind 8080 and do not need it — and worse,
+# executing a file that CARRIES file capabilities, as a non-root user, in a
+# container whose bounding set was emptied by `capabilities: {drop: ["ALL"]}`,
+# fails with `exec /usr/bin/caddy: operation not permitted`. The container dies
+# before Caddy prints a line, so there is nothing in the log but that sentence.
+#
+# It does not reproduce under a plain `docker run`, which keeps the default
+# capability set — only under the Deployment's securityContext. Removing the
+# capabilities from the file is what makes the two environments agree.
+RUN apk add --no-cache libcap \
+    && setcap -r /usr/bin/caddy \
+    && apk del libcap
+
 ENV XDG_DATA_HOME=/tmp XDG_CONFIG_HOME=/tmp
 COPY --from=build /repo/apps/docs/dist /srv
 COPY apps/docs/Caddyfile /etc/caddy/Caddyfile

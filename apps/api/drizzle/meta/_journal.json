@@ -22,6 +22,13 @@
       "when": 1788272262087,
       "tag": "0002_tenancy",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788282285651,
+      "tag": "0003_api_projection_grants",
+      "breakpoints": true
     }
   ]
 }
