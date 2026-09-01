@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit"
   },
@@ -18,5 +22,8 @@
     "@repo/typescript-config": "workspace:*",
     "eslint": "^9.39.5",
     "typescript": "6.0.3"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }
