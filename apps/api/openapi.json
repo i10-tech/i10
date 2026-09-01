@@ -34,7 +34,9 @@
             "format": "uuid"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       },
       "Error": {
         "type": "object",
@@ -62,7 +64,11 @@
             "type": "string"
           }
         },
-        "required": ["statusCode", "name", "message"]
+        "required": [
+          "statusCode",
+          "name",
+          "message"
+        ]
       },
       "SendEmail": {
         "type": "object",
@@ -182,7 +188,9 @@
                   "type": "string"
                 }
               },
-              "required": ["filename"]
+              "required": [
+                "filename"
+              ]
             }
           },
           "tags": {
@@ -199,14 +207,21 @@
                   "pattern": "^[A-Za-z0-9_-]{1,256}$"
                 }
               },
-              "required": ["name", "value"]
+              "required": [
+                "name",
+                "value"
+              ]
             }
           },
           "scheduled_at": {
             "type": "string"
           }
         },
-        "required": ["from", "to", "subject"]
+        "required": [
+          "from",
+          "to",
+          "subject"
+        ]
       },
       "BatchSendResponse": {
         "type": "object",
@@ -221,11 +236,15 @@
                   "format": "uuid"
                 }
               },
-              "required": ["id"]
+              "required": [
+                "id"
+              ]
             }
           }
         },
-        "required": ["data"]
+        "required": [
+          "data"
+        ]
       },
       "BatchSend": {
         "type": "array",
@@ -347,7 +366,9 @@
                     "type": "string"
                   }
                 },
-                "required": ["filename"]
+                "required": [
+                  "filename"
+                ]
               }
             },
             "tags": {
@@ -364,14 +385,21 @@
                     "pattern": "^[A-Za-z0-9_-]{1,256}$"
                   }
                 },
-                "required": ["name", "value"]
+                "required": [
+                  "name",
+                  "value"
+                ]
               }
             },
             "scheduled_at": {
               "type": "string"
             }
           },
-          "required": ["from", "to", "subject"]
+          "required": [
+            "from",
+            "to",
+            "subject"
+          ]
         },
         "minItems": 1,
         "maxItems": 100
@@ -384,7 +412,9 @@
       "post": {
         "summary": "Send an email",
         "description": "Queues a single message and returns its id immediately. The id is minted in the same transaction as the caller's own work, so a rollback never sends.",
-        "tags": ["Emails"],
+        "tags": [
+          "Emails"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -458,7 +488,9 @@
       "post": {
         "summary": "Send up to 100 emails",
         "description": "One response id per element, in the order submitted.",
-        "tags": ["Emails"],
+        "tags": [
+          "Emails"
+        ],
         "security": [
           {
             "bearerAuth": []

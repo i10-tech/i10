@@ -121,7 +121,10 @@ spec:
             # anything else, so this is belt and braces rather than the guard.
             - { name: AUTHD_LISTEN, value: "127.0.0.1:3893" }
             - { name: AUTHD_BASE_DN, value: "dc=i10,dc=tech" }
-            - { name: AUTHD_SERVICE_BIND_DN, value: "cn=stalwart,ou=services,dc=i10,dc=tech" }
+            - {
+                name: AUTHD_SERVICE_BIND_DN,
+                value: "cn=stalwart,ou=services,dc=i10,dc=tech",
+              }
             # ⚠ THE SAME VALUE STALWART READS AS STALWART_LDAP_BIND_SECRET.
             # One secret, two names, because each side names it for its own role.
             # They come from the same Doppler config so they cannot drift.

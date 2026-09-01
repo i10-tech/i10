@@ -46,10 +46,20 @@ jobs:
         # would ship the entire monorepo into the build.
         app:
           - { name: api, image: i10-api, context: ".", file: apps/api/Dockerfile }
-          - { name: console, image: i10-console, context: ".", file: apps/console/Dockerfile }
+          - {
+              name: console,
+              image: i10-console,
+              context: ".",
+              file: apps/console/Dockerfile,
+            }
           - { name: web, image: i10-web, context: ".", file: apps/web/Dockerfile }
           - { name: docs, image: i10-docs, context: ".", file: apps/docs/Dockerfile }
-          - { name: authd, image: i10-authd, context: services/authd, file: services/authd/Dockerfile }
+          - {
+              name: authd,
+              image: i10-authd,
+              context: services/authd,
+              file: services/authd/Dockerfile,
+            }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
