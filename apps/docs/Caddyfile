@@ -1,0 +1,37 @@
+# Serves the built Astro site behind Traefik.
+#
+# ⚠ NO `try_files ... {path}/` AND NO RELIANCE ON A REDIRECT TO ADD THE TRAILING
+# SLASH. Astro emits directory-style routes, so /api lives at /api/index.html.
+# nginx handled that by 301-ing to /api/ — and built the Location header as an
+# ABSOLUTE url from its own listen port and scheme, producing
+# `http://docs.i10.tech:8080/api/` behind a proxy that terminated TLS on 443.
+# The browser followed it to a port nothing exposes and hung.
+#
+# Rewriting internally sidesteps the whole class of bug: the request for /api is
+# answered with /api/index.html directly, no redirect, nothing for a proxy to
+# get wrong. Astro references its assets by absolute path, so the missing
+# trailing slash changes nothing on the page.
+:8080 {
+	root * /srv
+
+	encode zstd gzip
+
+	# Content-addressed filenames, so they can be cached forever. Everything
+	# else stays revalidating — a cached-forever HTML page is a doc that never
+	# updates.
+	@assets path /_astro/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	# Agent surfaces ship built in — markdown twins, llms.txt and llms-full.txt.
+	# They must render as text rather than download as attachments.
+	@text path *.md *.txt
+	header @text Content-Type "text/plain; charset=utf-8"
+
+	try_files {path} {path}/index.html {path}.html
+	file_server
+
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+}

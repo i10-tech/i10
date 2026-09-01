@@ -19,14 +19,23 @@ RUN pnpm --filter @i10/docs build
 # A static site needs a static server. No Node in the runtime stage means no
 # Node CVEs to patch on a container that only reads files off disk.
 #
-# ⚠ THE UNPRIVILEGED VARIANT, NOT STOCK nginx. Stock nginx declares no USER at
-# all, so it runs as root and kubelet rejects it outright under
-# `runAsNonRoot: true`. Making the stock image non-root by hand means chowning
-# the cache directories AND moving the pid file, because /var/run is root-owned
-# and nginx writes its pid before it drops privileges. This image is that work
-# already done: UID 101, pid under /tmp, and a default listener on 8080 — which
-# is the port nginx.conf and the Deployment already use.
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
-COPY --from=build /repo/apps/docs/dist /usr/share/nginx/html
-COPY apps/docs/nginx.conf /etc/nginx/conf.d/default.conf
+# ⚠ CADDY, NOT nginx, AND THE REASON IS A DEFAULT RATHER THAN A PREFERENCE.
+# nginx builds directory-index redirects as ABSOLUTE urls from its own listen
+# port and scheme, so behind a TLS-terminating proxy /api 301'd to
+# `http://docs.i10.tech:8080/api/` — a port nothing exposes. The fix there is a
+# `absolute_redirect off;` incantation you have to know about. Caddy resolves
+# routes internally and needs no such knowledge.
+#
+# ⚠ THE XDG VARIABLES ARE NOT OPTIONAL. Caddy writes its data and config
+# directories on startup, defaulting to $HOME — which for a numeric UID with no
+# passwd entry does not exist. It fails at boot with a permission error that
+# names a path nobody put in any config. Pointing both at /tmp keeps the root
+# filesystem untouched.
+FROM caddy:2-alpine AS runtime
+ENV XDG_DATA_HOME=/tmp XDG_CONFIG_HOME=/tmp
+COPY --from=build /repo/apps/docs/dist /srv
+COPY apps/docs/Caddyfile /etc/caddy/Caddyfile
+# Matches runAsUser/runAsGroup in infra/k8s/i10/workloads/docs.yaml. Numeric,
+# because kubelet refuses a named USER under `runAsNonRoot: true`.
+USER 1001:1001
 EXPOSE 8080
