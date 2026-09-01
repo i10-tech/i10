@@ -2,7 +2,7 @@
 
 # alpine, not slim. PSL tried node:slim across all three of its images and
 # reverted — alpine is the deliberate choice, not an oversight.
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable
 
