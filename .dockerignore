@@ -1,0 +1,45 @@
+# ⚠ WITHOUT THIS FILE, `COPY . .` SHIPS THE HOST'S node_modules INTO THE IMAGE.
+#
+# Every app Dockerfile installs dependencies in an earlier stage and then does
+# `COPY . .` for the sources. With no ignore file that copy also brings whatever
+# node_modules the machine running the build happens to have — on a Mac that
+# means darwin-arm64 binaries landing in a linux image, and pnpm noticing the
+# store no longer matches and trying to purge node_modules mid-build:
+#
+#   ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
+#
+# CI never hit it because a fresh checkout has no node_modules — which is worse,
+# not better: it means local builds and CI builds were producing different
+# images from the same commit.
+
+# Installed in the image, never copied in.
+node_modules
+**/node_modules
+
+# Build output, produced in the image.
+dist
+**/dist
+.next
+**/.next
+.astro
+**/.astro
+.turbo
+**/.turbo
+apps/docs/.nimbus
+
+# Vendored at build time by apps/docs/scripts/vendor-scalar.mjs — 8.8 MB that
+# would otherwise be sent to the daemon on every build.
+apps/docs/public/scalar
+
+# Never belongs in an image.
+.git
+.github
+.env
+.env.*
+!.env.example
+
+# Noise in the build context.
+.DS_Store
+*.log
+coverage
+**/coverage

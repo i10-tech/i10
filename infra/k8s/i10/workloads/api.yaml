@@ -1,3 +1,52 @@
+# Schema migrations, as an Argo PreSync hook.
+#
+# ⚠ A HOOK, NOT A STARTUP STEP. Migrating inside the API's own boot is simpler
+# until there are two replicas, at which point both race for the same schema
+# lock and one crash-loops. PreSync runs exactly once per sync and completes
+# before any new pod starts, which is the ordering a schema change needs.
+#
+# ⚠ IT USES THE PRIMARY, NOT THE POOLER. Migrations run DDL in a transaction and
+# take advisory locks; PgBouncer in transaction pooling mode can hand
+# consecutive statements to different backends, which breaks both. `uri` on the
+# CNPG-generated secret already points at i10-platform-rw.
+#
+# HookSucceeded deletes the Job once it passes, so a failed migration leaves its
+# pod behind with the logs still readable — which is when you actually want them.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: i10-api-migrate
+  namespace: i10-prod
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  backoffLimit: 2
+  # Bounded so a migration that hangs on a lock fails the sync rather than
+  # holding it open indefinitely.
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-api-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/i10-tech/i10-api:prod-latest
+          command: ["node", "dist/migrate.js"]
+          env:
+            - name: MIGRATE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: i10-platform-app, key: uri }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
 ---
 apiVersion: v1
 kind: Service
@@ -40,6 +89,24 @@ spec:
           envFrom:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }
+          env:
+            # ⚠ COMPOSED, NOT STORED. CNPG generates i10-platform-app with the
+            # owner's credentials, so that secret is the single source of truth;
+            # copying the password into Doppler would give it two, and a CNPG
+            # rotation would break the copy silently.
+            #
+            # It points at the POOLER, not the primary. The application holds
+            # many short connections and that is what PgBouncer is for — see the
+            # transaction-pooling warning in apps/api/src/env.ts. The migration
+            # Job below deliberately does the opposite.
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-platform-app, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-platform-app, key: password }
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 512Mi }

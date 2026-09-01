@@ -77,6 +77,23 @@ spec:
         passwordSecret:
           name: i10-stalwart-db-role
 
+      # Reads the Clerk projection, and nothing else.
+      #
+      # ⚠ SEPARATE FROM THE `i10` OWNER ON PURPOSE. authd parses
+      # attacker-influenced input — login strings and passwords from any IMAP
+      # client, recipient addresses from any sending MTA — and it only ever
+      # needs SELECT on the `authd` schema. Connecting as the database owner
+      # would mean a parser bug reaches every table in the product. The grants
+      # that scope it live in apps/api/drizzle, applied with the schema.
+      - name: authd
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: i10-authd-db-role
+
   bootstrap:
     initdb:
       database: i10
