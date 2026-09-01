@@ -94,6 +94,26 @@ spec:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-stalwart }
 
+          # The wildcard cert-manager already issues for *.i10.tech, handed to
+          # Stalwart as text so a Certificate object can reference it by
+          # variable name rather than carrying PEM in git.
+          #
+          # ⚠ ENV VARS DO NOT UPDATE IN A RUNNING POD. cert-manager rewrites this
+          # Secret when it renews (2026-10-31 for the current one), and this
+          # container will keep serving the old certificate until it restarts.
+          # A mounted file would refresh in place, but Stalwart wants the PEM as
+          # a value, not a path. So renewal REQUIRES a pod restart — today that
+          # is manual, and a watcher that rolls the StatefulSet when the Secret
+          # changes is the thing to add before the first renewal, not after the
+          # certificate has silently expired.
+          env:
+            - name: STALWART_TLS_CERT
+              valueFrom:
+                secretKeyRef: { name: i10-tech-tls, key: tls.crt }
+            - name: STALWART_TLS_KEY
+              valueFrom:
+                secretKeyRef: { name: i10-tech-tls, key: tls.key }
+
           env:
             # ⚠ READ FROM CNPG'S SECRET, NOT FROM DOPPLER. CNPG owns the
             # `stalwart` role and reconciles its password from
