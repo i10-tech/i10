@@ -55,13 +55,30 @@ an unreachable DataStore makes it exit rather than serve a setup wizard. The
 first administrator therefore comes from recovery mode:
 
 1. Start the pod with `STALWART_RECOVERY_MODE=1` and `STALWART_RECOVERY_ADMIN`
-   (`username:password`) sourced from Doppler.
-2. `stalwart-cli apply --file plan.ndjson` against the recovery listener.
-3. Restart **without** the recovery variables.
+   (`username:password`) sourced from Doppler. Recovery mode disables every
+   background service — no MTA, no task workers — and serves only the management
+   API on 8080.
+2. `stalwart-cli apply --file plan.ndjson`, then `Action/ReloadSettings`.
+3. Drop **`STALWART_RECOVERY_MODE`** and restart. Mail services come up.
 
-⚠ `STALWART_RECOVERY_ADMIN` is a backdoor. Remove it from the environment before
-the server restarts normally; the docs are explicit that it must not remain set
-on a production deployment.
+⚠ **DO NOT DROP `STALWART_RECOVERY_ADMIN` AT THE SAME TIME.** It is not an
+account — it is a built-in credential that bypasses the directory, and it exists
+only while the variable is set. Removing it leaves no way to administer the
+server and no way to run the next `apply`.
+
+It is honoured in normal mode as well as recovery mode, which is what makes the
+intermediate state workable: services running, backdoor still available.
+
+The backdoor comes out only once a real administrator can sign in — and with an
+LDAP directory that means a Clerk user with a hosted address, `active` in the
+projection, holding an admin role. That path needs the webhook receiver in
+`apps/api` deployed and a role assignment this plan does not yet make. Until
+then, `STALWART_RECOVERY_ADMIN` staying set is a known, temporary exception to
+the guidance below — not an oversight.
+
+⚠ It must not be left set permanently on production. The docs are explicit: it
+is intended to rescue a server that has lost normal access, not to be a primary
+login.
 
 ## The database
 
