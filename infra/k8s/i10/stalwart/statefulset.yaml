@@ -53,11 +53,41 @@ spec:
               drop: [ALL]
               add: [NET_BIND_SERVICE]
 
+          # ⚠ hostPort ON THE MAIL PORTS, DELIBERATELY BYPASSING THE SERVICE.
+          #
+          # A `type: LoadBalancer` Service on k3s is served by klipper-lb, and
+          # its path is two DNAT hops: the host DNATs :993 into the svclb pod,
+          # which DNATs again to nodeIP:<NodePort> and re-enters the host on a
+          # port in the 30000-32767 range. A firewall rule naming 993 is never
+          # consulted for that second leg, so the connection dies somewhere with
+          # no log line on either side — the mail server never sees a packet.
+          # Opening the NodePort range to the internet to fix it would be worse
+          # than the problem.
+          #
+          # hostPort is one hop: the CNI portmap plugin DNATs :993 straight to
+          # this container, port unchanged, so a `ufw route allow ... port 993`
+          # matches and the packet arrives.
+          #
+          # ⚠ AND IT IS WHAT MAKES THE CLIENT IP REAL. klipper-lb MASQUERADEs —
+          # every connection would reach Stalwart looking like it came from the
+          # node. For a mail server that is not cosmetic: inbound SPF is
+          # evaluated against the connecting address, and greylisting and rate
+          # limits key on it. portmap only rewrites the destination.
+          #
+          # The cost is that these ports are claimed on whichever node runs this
+          # pod, and a second replica could not schedule beside it. Stalwart is a
+          # single-writer StatefulSet on a single-node cluster, so that is a
+          # constraint we already have rather than one this adds.
           ports:
-            - { name: smtp, containerPort: 25 }
-            - { name: submissions, containerPort: 465 }
+            - { name: smtp, containerPort: 25, hostPort: 25 }
+            - { name: submissions, containerPort: 465, hostPort: 465 }
+            # No hostPort: nothing is listening on 587 yet, and claiming the
+            # port would answer connections with a hang instead of a refusal.
             - { name: submission, containerPort: 587 }
-            - { name: imaps, containerPort: 993 }
+            - { name: imaps, containerPort: 993, hostPort: 993 }
+            # Deliberately NOT exposed on the host. The management API reaches
+            # the internet through Traefik, which is where its TLS and its
+            # per-host gating live.
             - { name: http, containerPort: 8080 }
 
           envFrom:
