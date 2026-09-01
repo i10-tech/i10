@@ -58,6 +58,25 @@ spec:
       parameters:
         barmanObjectName: i10-backups
 
+  # Roles beyond the bootstrap `i10` owner.
+  #
+  # ⚠ MANAGED MEANS CNPG RECONCILES IT. Editing this role by hand in psql is
+  # undone on the next reconciliation loop; change it here instead.
+  managed:
+    roles:
+      # Owns the `stalwart` database declared in i10/stalwart/database.yaml.
+      # Not a superuser and not a member of `i10`: the whole reason Stalwart has
+      # its own database is that its pre-1.0 schema migrations must not be able
+      # to touch the transactional product's tables.
+      - name: stalwart
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: i10-stalwart-db-role
+
   bootstrap:
     initdb:
       database: i10
