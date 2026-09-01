@@ -6,7 +6,12 @@ import {
   primaryKey,
   text,
   timestamp,
+  uuid,
 } from "drizzle-orm/pg-core"
+
+// The transactional product. Re-exported so drizzle-kit and `import * as
+// schema` both see one entry point, rather than two that can disagree.
+export * from "./core.js"
 
 /**
  * The Clerk projection — a read model of Clerk's users, maintained by webhook.
@@ -58,6 +63,22 @@ export const accounts = authd.table("accounts", {
    * whether an invoice cleared.
    */
   active: boolean("active").notNull().default(false),
+
+  /**
+   * The tenant whose domain this mailbox is on, once mailboxes are sold to
+   * anyone but us.
+   *
+   * ⚠ NULLABLE, AND NOT YET WRITTEN. i10's own mailboxes on i10.tech predate
+   * tenancy and have no owner row; a NOT NULL column would have to invent one.
+   * It is here now because the table is empty now — adding a column to a
+   * populated projection means a backfill against Clerk, and adding it later is
+   * the only version of this change that costs anything.
+   *
+   * Not a foreign key to `core.tenants`: authd holds SELECT on this schema and
+   * nothing else, and an FK would make its inserts depend on a table it cannot
+   * see. The reference is enforced by the API, which owns both sides.
+   */
+  tenantId: uuid("tenant_id"),
 
   /**
    * Clerk's own `updated_at` for this user, and the column does two jobs.

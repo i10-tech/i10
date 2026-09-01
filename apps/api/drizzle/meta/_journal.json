@@ -15,6 +15,13 @@
       "when": 1788264266885,
       "tag": "0001_authd_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788270526433,
+      "tag": "0002_tenancy",
+      "breakpoints": true
     }
   ]
 }

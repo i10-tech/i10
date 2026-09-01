@@ -90,21 +90,26 @@ spec:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }
           env:
-            # ⚠ COMPOSED, NOT STORED. CNPG generates i10-platform-app with the
-            # owner's credentials, so that secret is the single source of truth;
-            # copying the password into Doppler would give it two, and a CNPG
-            # rotation would break the copy silently.
+            # ⚠ `i10_api`, NOT THE `i10` OWNER THE MIGRATION JOB USES. Row
+            # level security does not apply to a table's owner, so connecting as
+            # `i10` would turn every tenant policy in the `core` schema into a
+            # no-op — silently, with no error and nothing in the log. This role
+            # owns nothing, which is what makes the policies bind.
+            #
+            # assertRlsSubject() in apps/api/src/db/client.ts checks this at
+            # boot rather than trusting the manifest, so pointing it at the
+            # wrong secret fails the rollout instead of removing the boundary.
             #
             # It points at the POOLER, not the primary. The application holds
             # many short connections and that is what PgBouncer is for — see the
             # transaction-pooling warning in apps/api/src/env.ts. The migration
-            # Job below deliberately does the opposite.
+            # Job above deliberately does the opposite.
             - name: PGUSER
               valueFrom:
-                secretKeyRef: { name: i10-platform-app, key: username }
+                secretKeyRef: { name: i10-api-db-role, key: username }
             - name: PGPASSWORD
               valueFrom:
-                secretKeyRef: { name: i10-platform-app, key: password }
+                secretKeyRef: { name: i10-api-db-role, key: password }
             - name: DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
           resources:
