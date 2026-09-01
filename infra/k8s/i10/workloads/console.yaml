@@ -35,6 +35,7 @@ spec:
           # Inert until the first Build run — the i10-workloads Application is
           # deliberately not on automated sync for exactly this reason.
           image: ghcr.io/i10-tech/i10-console:prod-latest
+          imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 3000 }
           envFrom:
@@ -46,6 +47,9 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            runAsUser: 1001
+            runAsGroup: 1001
             capabilities: { drop: ["ALL"] }
           readinessProbe:
             httpGet: { path: /, port: http }

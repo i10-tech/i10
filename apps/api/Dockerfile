@@ -48,7 +48,13 @@ ENV NODE_ENV=production
 # A writable HOME. Node tooling and npm-family CLIs write to $HOME at startup,
 # and a non-root user without one exits EACCES at boot — a failure that reads
 # like a permissions bug in the app.
-RUN addgroup -S i10 && adduser -S -G i10 -h /home/i10 i10 \
+# ⚠ THE UID IS PINNED, AND NUMERICALLY. `adduser -S` without -u picks the first
+# free system UID, which is a property of the base image rather than of us — it
+# moves when the base image does. More importantly kubelet cannot verify a
+# NAMED user against `runAsNonRoot`: it has no way to resolve the name without
+# reading the image's /etc/passwd, so it refuses to start the container with
+# "image has non-numeric user". A number is the only form both sides agree on.
+RUN addgroup -S -g 1001 i10 && adduser -S -u 1001 -G i10 -h /home/i10 i10 \
     && mkdir -p /home/i10 && chown -R i10:i10 /home/i10
 ENV HOME=/home/i10
 
@@ -62,7 +68,7 @@ COPY --from=build --chown=i10:i10 /repo/apps/api/dist /app/dist
 # nothing — a silent no-op is the worst possible outcome for a migration step.
 COPY --from=build --chown=i10:i10 /repo/apps/api/drizzle /app/drizzle
 
-USER i10
+USER 1001:1001
 EXPOSE 3001
 
 # Baked at build time and reported by /version. Not part of turbo's cache key —

@@ -35,6 +35,7 @@ spec:
           # Inert until the first Build run — the i10-workloads Application is
           # deliberately not on automated sync for exactly this reason.
           image: ghcr.io/i10-tech/i10-docs:prod-latest
+          imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 8080 }
           # Only the shared root config. This surface has no secrets of
@@ -48,6 +49,9 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            # Numeric — 101 is the UID nginx-unprivileged runs as. See api.yaml.
+            runAsUser: 101
+            runAsGroup: 101
             capabilities: { drop: ["ALL"] }
           readinessProbe:
             httpGet: { path: /, port: http }

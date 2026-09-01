@@ -34,6 +34,13 @@ spec:
       containers:
         - name: migrate
           image: ghcr.io/i10-tech/i10-api:prod-latest
+          # ⚠ ALWAYS, BECAUSE THE TAG FLOATS. `prod-latest` is not the
+          # literal `:latest`, so Kubernetes defaults it to IfNotPresent: a node
+          # that has pulled the tag once keeps serving that layer forever while
+          # CI republishes underneath it. The symptom is a deploy that reports
+          # success and changes nothing. Harmless to keep once the Build
+          # workflow starts writing digests into these files.
+          imagePullPolicy: Always
           command: ["node", "dist/migrate.js"]
           env:
             - name: MIGRATE_DATABASE_URL
@@ -45,6 +52,14 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            # ⚠ NUMERIC, AND IT MUST MATCH THE Dockerfile'S `USER`. kubelet
+            # cannot check a named user against runAsNonRoot — it will not read
+            # the image's /etc/passwd — so a name gets the container rejected
+            # with "image has non-numeric user" before it ever runs. Setting it
+            # here as well as in the image means the guarantee survives a base
+            # image that quietly renumbers its users.
+            runAsUser: 1001
+            runAsGroup: 1001
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
 ---
@@ -84,6 +99,13 @@ spec:
           # Inert until the first Build run — the i10-workloads Application is
           # deliberately not on automated sync for exactly this reason.
           image: ghcr.io/i10-tech/i10-api:prod-latest
+          # ⚠ ALWAYS, BECAUSE THE TAG FLOATS. `prod-latest` is not the
+          # literal `:latest`, so Kubernetes defaults it to IfNotPresent: a node
+          # that has pulled the tag once keeps serving that layer forever while
+          # CI republishes underneath it. The symptom is a deploy that reports
+          # success and changes nothing. Harmless to keep once the Build
+          # workflow starts writing digests into these files.
+          imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 3001 }
           envFrom:
@@ -113,6 +135,9 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            runAsUser: 1001
+            runAsGroup: 1001
             capabilities: { drop: ["ALL"] }
           readinessProbe:
             httpGet: { path: /healthz, port: http }
