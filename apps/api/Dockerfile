@@ -35,7 +35,14 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM deps AS build
 WORKDIR /repo
 COPY . .
-RUN pnpm --filter @i10/api build
+# ⚠ THE `...` SUFFIX IS LOAD-BEARING: it means "and its workspace
+# dependencies", in topological order. @repo/contracts exports dist/, which does
+# not exist until its own build has run — and the failure does not surface here.
+# It surfaces at RUNTIME, as ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING, because
+# `pnpm deploy` happily copies a package whose entry point is a .ts file that
+# plain node cannot load from node_modules. The image builds, the tests pass, and
+# the container crash-loops.
+RUN pnpm --filter "@i10/api..." build
 # `pnpm deploy` flattens the workspace into a self-contained tree, which is
 # what makes the runtime stage free of symlinks into packages/ that would not
 # resolve once the repo is gone.

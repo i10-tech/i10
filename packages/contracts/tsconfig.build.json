@@ -1,0 +1,17 @@
+{
+  // ⚠ base, NOT node-library. These are Zod schemas and nothing here touches a
+  // node API — the package is consumed by the API server, by the browser SDK,
+  // and by generated clients. `node-library.json` sets `types: ["node"]`, which
+  // fails with TS2688 in a package that rightly has no @types/node, and adding
+  // the dependency to silence it would be declaring a runtime this package does
+  // not have.
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    // Local, not inherited — see the note in node-library.json about paths in
+    // an extended config resolving against the file that declares them.
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

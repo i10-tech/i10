@@ -46,6 +46,16 @@
     // on a package sitting right there in the workspace.
     "check-types": { "dependsOn": ["^build", "^check-types"] },
     "test": { "dependsOn": ["^build"], "outputs": [] },
+    // Regenerating the published document reads @repo/contracts at RUNTIME, so
+    // it needs the same `^build` as check-types — the package's exports point at
+    // dist/. Without it the script dies with ERR_MODULE_NOT_FOUND on a clean
+    // checkout, which looks like a broken dependency rather than a missing build.
+    //
+    // ⚠ `cache: false` BECAUSE THIS IS A DRIFT GUARD. Its whole job is to
+    // regenerate the file and let `git diff --exit-code` judge the result. A
+    // restored cache hit would skip the regeneration and pass unconditionally,
+    // turning the check that protects the committed spec into a no-op.
+    "openapi": { "dependsOn": ["^build"], "cache": false },
     "dev": { "cache": false, "persistent": true }
   }
 }

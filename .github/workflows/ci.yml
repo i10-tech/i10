@@ -117,10 +117,10 @@ jobs:
       # came from. Regenerating and diffing is what keeps that true.
       #
       # A failure here means someone changed the API contract without committing
-      # the regenerated document — run `pnpm --filter @i10/api openapi`.
+      # the regenerated document — run `pnpm turbo run openapi --filter=@i10/api`.
       - name: Regenerate and check for drift
         run: |
-          pnpm --filter @i10/api openapi
+          pnpm turbo run openapi --filter=@i10/api
           git diff --exit-code -- apps/api/openapi.json
 
   authd:
