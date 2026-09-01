@@ -114,7 +114,6 @@ spec:
               valueFrom:
                 secretKeyRef: { name: i10-tech-tls, key: tls.key }
 
-          env:
             # ⚠ READ FROM CNPG'S SECRET, NOT FROM DOPPLER. CNPG owns the
             # `stalwart` role and reconciles its password from
             # i10-stalwart-db-role. Copying that value into Doppler would give
