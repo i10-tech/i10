@@ -157,15 +157,27 @@ spec:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 128Mi }
 
-          # LDAP has no health endpoint, so the probe opens the port. That is a
-          # meaningful check here: authd binds only after its projection pool
-          # connects, so an accepting socket means the database answered.
-          readinessProbe:
-            tcpSocket: { port: 3893 }
-            periodSeconds: 10
-          livenessProbe:
-            tcpSocket: { port: 3893 }
-            periodSeconds: 30
+          # ⚠ NO PROBES, AND THAT IS NOT AN OVERSIGHT. authd binds 127.0.0.1
+          # only — the security property this whole sidecar arrangement exists
+          # for. The kubelet runs probes against the POD IP, so a tcpSocket
+          # probe on 3893 can never connect, and Kubernetes kills a perfectly
+          # healthy process every liveness period. That is exactly what
+          # happened on the first deploy: exitCode 0, reason Completed, three
+          # restarts in five minutes, with "listening" in every log.
+          #
+          # Setting `host: 127.0.0.1` on the probe does not fix it either: the
+          # kubelet resolves that against the NODE's loopback, not the pod's.
+          #
+          # Losing the probes costs little. authd is a sidecar with exactly one
+          # consumer in the same network namespace and no Service selecting it,
+          # so readiness gates nothing. If it dies the container exits and the
+          # kubelet restarts it; while it is down Stalwart's binds answer
+          # `unavailable` (52), which is the designed behaviour and is visible
+          # in Stalwart's own logs.
+          #
+          # Real health checking needs authd to serve a second, health-only
+          # listener on the pod IP. That is a deliberate addition, not a probe
+          # stanza — see services/authd/README.md.
 
       volumes:
         - name: config
