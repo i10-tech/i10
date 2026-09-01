@@ -49,9 +49,10 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            # Numeric — 101 is the UID nginx-unprivileged runs as. See api.yaml.
-            runAsUser: 101
-            runAsGroup: 101
+            # Numeric — matches the USER pinned in apps/docs/Dockerfile. See
+            # api.yaml for why a named user is not enough.
+            runAsUser: 1001
+            runAsGroup: 1001
             capabilities: { drop: ["ALL"] }
           readinessProbe:
             httpGet: { path: /, port: http }
