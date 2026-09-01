@@ -91,6 +91,9 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: i10-stalwart-cert-reload
+          volumes:
+            - name: tmp
+              emptyDir: {}
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
@@ -98,11 +101,25 @@ spec:
             seccompProfile: { type: RuntimeDefault }
           containers:
             - name: reload
-              image: registry.k8s.io/kubectl:v1.34.1
+              # ⚠ NOT registry.k8s.io/kubectl — THAT IMAGE IS DISTROLESS AND HAS
+              # NO SHELL. It runs `kubectl` as a direct binary perfectly well,
+              # which is exactly why the mistake survives a casual check; the
+              # container only fails once something asks for /bin/sh, and it
+              # fails at StartError with exit 128 before a single line of the
+              # script runs. This image carries busybox alongside kubectl.
+              image: alpine/k8s:1.34.1
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
                 capabilities: { drop: ["ALL"] }
+              # kubectl writes a discovery cache under $HOME. Unset, HOME is `/`
+              # — which readOnlyRootFilesystem makes unwritable — so point both
+              # it and the cache at the one writable mount.
+              env:
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
               resources:
                 requests: { cpu: 10m, memory: 32Mi }
                 limits: { memory: 128Mi }
@@ -112,9 +129,11 @@ spec:
                 - |
                   set -eu
 
-                  cert_not_before=$(kubectl get certificate i10-tech-wildcard \
+                  KUBECTL="kubectl --cache-dir=/tmp/.kube-cache"
+
+                  cert_not_before=$($KUBECTL get certificate i10-tech-wildcard \
                     -o jsonpath='{.status.notBefore}')
-                  pod_started=$(kubectl get pod i10-stalwart-0 \
+                  pod_started=$($KUBECTL get pod i10-stalwart-0 \
                     -o jsonpath='{.status.startTime}')
 
                   if [ -z "$cert_not_before" ] || [ -z "$pod_started" ]; then
@@ -127,7 +146,7 @@ spec:
                   if [ "$cert_not_before" \> "$pod_started" ]; then
                     echo "certificate issued $cert_not_before is newer than the"
                     echo "pod started at $pod_started; restarting to pick it up"
-                    kubectl delete pod i10-stalwart-0 --wait=false
+                    $KUBECTL delete pod i10-stalwart-0 --wait=false
                   else
                     echo "certificate $cert_not_before predates pod start"
                     echo "$pod_started; nothing to do"
