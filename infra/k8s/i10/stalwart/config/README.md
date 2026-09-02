@@ -106,11 +106,11 @@ Not one line since first boot — which is why every problem in this directory's
 history was diagnosed from the outside, by probing ports and reading authd's log
 instead of the mail server's own.
 
-The fix is a `Stdout` tracer, which is what a container should have had from the
-start. It is not in `plan.ndjson` because `Tracer` has **no filters**, so
-`matchOn` has nothing to key on and neither `upsert` nor `reconcile` can
-converge — a Tracer is a create-once object, like the first administrator. Run
-it by hand, once:
+**Done on 2026-09-02.** A `Stdout` tracer (`jcvq3ahgaaqa`, level `info`) now
+carries the logs, and the file tracer (`jcrkontuahqb`) is disabled. It is not in
+`plan.ndjson` because `Tracer` has **no filters**, so `matchOn` has nothing to
+key on and neither `upsert` nor `reconcile` can converge — a Tracer is a
+create-once object, like the first administrator. If it ever has to be rebuilt:
 
 ```sh
 stalwart-cli query Tracer --json                      # note the Log tracer's id
@@ -118,6 +118,57 @@ stalwart-cli update Tracer <id> --field enable=false
 stalwart-cli create Tracer --json '{"@type":"Stdout","enable":true,"level":"info","ansi":false,"multiline":false,"buffered":false,"lossy":false,"events":{},"eventsPolicy":"exclude"}'
 stalwart-cli create Action/ReloadSettings
 ```
+
+⚠ **And the tracer is part of the boot snapshot.** `Action/ReloadSettings` was
+not enough — the pod had to be restarted before a single line appeared. Same
+class as the certificate, two sections down. Budget a restart when changing it.
+
+⚠ **The account's permission set is cached, and the reload does not clear it
+either.** The log shows why: `store.cache-hit key = 1, collection = "accessToken"`.
+Assigning `defaultUserRoleIds` above therefore appeared to do nothing for twenty
+minutes — the role was in the database and the running server was still serving
+the account its old, empty token. A pod restart is what made it take effect.
+
+## ⚠ A PROXIED WILDCARD MAKES EVERY MAIL HOSTNAME HANG INSTEAD OF FAIL
+
+`*.i10.tech` is an A record proxied through Cloudflare, so **every name that is
+not explicitly declared resolves — to Cloudflare**. Cloudflare's proxy carries
+HTTP and HTTPS and nothing else, so a mail client connecting to
+`imap.i10.tech:993` gets a TCP connection that goes nowhere and sits until it
+times out.
+
+That is strictly worse than the name not existing. NXDOMAIN fails in
+milliseconds and the client moves on; this hangs.
+
+It matters because Apple Mail has no autoconfiguration to fall back on. The
+server log settles that — during a full account setup from a Mac and an iPhone,
+the autoconfig and autodiscover endpoints were requested **zero** times:
+
+```
+url = "/healthz/ready"  167
+url = "/healthz/live"    57
+(nothing else)
+```
+
+macOS and iOS Mail do not implement Thunderbird autoconfig, and they only speak
+Microsoft Autodiscover for account type _Exchange_, never for "Other Mail
+Account". So Apple guesses hostnames — `imap.<domain>`, `smtp.<domain>`, then
+`mail.<domain>` — and the wildcard turned the first two guesses into timeouts.
+The visible symptom was minutes of "Verifying" followed by a demand that the
+user type `mail.i10.tech` by hand.
+
+Fixed with two grey-cloud records, which must stay grey for the same reason
+`mail` is:
+
+```
+imap.i10.tech.  CNAME  mail.i10.tech.
+smtp.i10.tech.  CNAME  mail.i10.tech.
+```
+
+The general rule: **any hostname a mail client might guess needs an explicit
+grey-cloud record**, because the wildcard guarantees it will resolve either way.
+The `.mobileconfig` profile is the only path that does no guessing at all, which
+is why it connects noticeably faster than a hand-typed account.
 
 ## `SystemSettings.services` is the client-provisioning contract
 
