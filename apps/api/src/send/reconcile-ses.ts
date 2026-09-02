@@ -22,11 +22,29 @@ import { sql, type SQL } from "drizzle-orm"
  * downstream of a number that is already agreed, so reconciling against it
  * would be checking Autumn's arithmetic rather than our own.
  *
- * ⚠ AND SES HAS NO "WHAT DID I SEND" API. There is no endpoint to list
- * messages; CloudWatch offers counts with no identity. The event stream is the
- * only per-message evidence SES gives, which is why `core.message_events` is
- * the left-hand side here and why the ingestion of those events is a
- * correctness dependency rather than a reporting nicety.
+ * ⚠ THE LEFT-HAND SIDE IS OUR EVENT LOG, WHICH IS A PUSH FEED AND THEREFORE
+ * NOT INDEPENDENT EVIDENCE. `core.message_events` exists only because SES
+ * publishes to a configuration set destination and our webhook received it. So
+ * these three queries can find a message SES sent that we mis-recorded — but
+ * they cannot find one SES sent that we never heard about at all, because the
+ * absence of an event is exactly what a broken webhook also looks like.
+ *
+ * ⚠ SES CAN BE ASKED DIRECTLY, AND THAT IS THE MISSING FOURTH CHECK. There is
+ * no synchronous "list messages" call, which is what made this look impossible
+ * at first — but `CreateExportJob` with a `MessageInsightsDataSource` takes a
+ * `StartDate` and `EndDate` and writes the individual messages to S3, and
+ * `GetMessageInsights` looks one up by SES MessageId and returns its
+ * `EmailTags` — which carry `i10_message_id`, so SES hands our own id back.
+ *
+ * That is a genuine second source of truth, independent of whether our webhook
+ * ever ran, and it is what would close the orphan case properly. Not built yet,
+ * and it has a prerequisite worth confirming in the console FIRST: Message
+ * Insights is a Virtual Deliverability Manager feature, so with VDM disabled an
+ * export job plausibly returns nothing — and it would return nothing the same
+ * way a clean account does, which is the worst possible failure for a
+ * reconciler. Neither the VDM dependency nor the retention window is stated in
+ * the API reference; both need checking against the live account rather than
+ * assuming.
  */
 
 /**

@@ -57,6 +57,7 @@
               "invalid_from_address",
               "invalid_to_address",
               "domain_not_verified",
+              "idempotency_conflict",
               "internal_server_error"
             ]
           },
@@ -451,6 +452,16 @@
               }
             }
           },
+          "409": {
+            "description": "This Idempotency-Key was already used with a different request body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The request body failed validation.",
             "content": {
@@ -472,7 +483,7 @@
             }
           },
           "501": {
-            "description": "The send path is not implemented yet.",
+            "description": "The send path is not configured.",
             "content": {
               "application/json": {
                 "schema": {
@@ -527,6 +538,16 @@
               }
             }
           },
+          "409": {
+            "description": "This Idempotency-Key was already used with a different request body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The request body failed validation.",
             "content": {
@@ -548,7 +569,7 @@
             }
           },
           "501": {
-            "description": "Batch send is not implemented yet.",
+            "description": "The send path is not configured.",
             "content": {
               "application/json": {
                 "schema": {

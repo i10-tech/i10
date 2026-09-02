@@ -23,6 +23,15 @@ declare module "hono" {
      * createRoute() is resolved then.
      */
     apiKeyAuth?: VerifyDeps
+    /**
+     * The send path's persistence and queueing, injected the same way and for
+     * the same reason. Declared here rather than in routes/emails.ts because
+     * ContextVariableMap must be augmented once.
+     */
+    sendPath?: import("../send/accept.js").AcceptOps & {
+      metering: import("../send/metering.js").Metering
+      log: import("../send/accept.js").Logger
+    }
   }
 }
 
