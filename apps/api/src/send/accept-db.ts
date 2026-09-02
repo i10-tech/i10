@@ -9,7 +9,7 @@ import {
   suppressions,
 } from "../db/core.js"
 import { enqueueBatch, type SendClass, type SendJob } from "../queue/send-queue.js"
-import { addrSpec, asList, type AcceptOps, type PreparedMessage } from "./accept.js"
+import { addrSpec, asList, type AcceptOps } from "./accept.js"
 
 /**
  * The accept path, bound to Postgres and to the two queues.
@@ -140,13 +140,11 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
             bccAddresses: m.bcc,
             replyTo: asList(m.payload.reply_to),
             subject: m.payload.subject,
-            // ⚠ RECORDED, NOT HONOURED. Nothing reads this column yet: the rows
-            // are enqueued immediately and the worker sends them immediately,
-            // so a caller who sets `scheduled_at` gets their mail now. Until
-            // the enqueue defers on it, that field is a promise the API does
-            // not keep and must either be implemented or rejected in the
-            // contract's validation.
-            scheduledAt: scheduledAt(m),
+            // ⚠ AND THE CLAIM READS IT. The queue delays the job, but this
+            // column is what actually refuses an early send — see db/claim.ts.
+            // A row written without it would be sendable the moment anything
+            // re-enqueued it.
+            scheduledAt: m.scheduledAt,
           })),
         )
 
@@ -155,10 +153,10 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
         // through their scans — but a message whose body never committed sends
         // an empty email, so the split is physical and never transactional.
         //
-        // Attachments and tags are dropped here because nothing downstream
-        // carries them: `OutboundMessage` has no attachment field and the SES
-        // transport never builds raw MIME. The contract accepts them, so this
-        // is a gap to close, not a decision.
+        // Attachments live here rather than in object storage because the
+        // contract caps them, so the row cannot grow without limit — and the
+        // alternative would put a second store with its own lifecycle and its
+        // own access control in front of every send.
         await tx.insert(messageBodies).values(
           input.messages.map((m, i) => ({
             messageId: ids[i]!,
@@ -167,6 +165,8 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
             text: m.payload.text ?? null,
             html: m.payload.html ?? null,
             headers: m.payload.headers ?? null,
+            attachments: m.payload.attachments ?? null,
+            tags: m.payload.tags ?? null,
           })),
         )
 
@@ -208,20 +208,9 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
       })
     },
 
-    async enqueue(queue, job) {
-      await enqueueBatch(opts.queues[queue], job)
+    async enqueue(queue, job, options) {
+      await enqueueBatch(opts.queues[queue], job, options)
     },
   }
 }
 
-/**
- * `scheduled_at` is a string on the wire and may be anything the caller typed.
- * An unparseable one is stored as null rather than throwing: it is metadata for
- * a feature that does not exist yet, and rejecting a send over it would be a
- * worse answer than ignoring it.
- */
-function scheduledAt(m: PreparedMessage): Date | null {
-  if (!m.payload.scheduled_at) return null
-  const at = new Date(m.payload.scheduled_at)
-  return Number.isNaN(at.getTime()) ? null : at
-}

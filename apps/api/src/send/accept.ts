@@ -74,6 +74,14 @@ export interface PreparedMessage {
   to: string[]
   cc: string[]
   bcc: string[]
+  /**
+   * When it is due, parsed once here rather than at each of the three places
+   * that need it — the row, the queue delay and the claim.
+   *
+   * Null means now. A time in the past also means now: the contract says so,
+   * and a delayed job whose moment has passed is just a job.
+   */
+  scheduledAt: Date | null
 }
 
 /**
@@ -101,7 +109,21 @@ export function withoutSuppressed(
     to: keep(asList(payload.to)),
     cc: keep(asList(payload.cc)),
     bcc: keep(asList(payload.bcc)),
+    scheduledAt: scheduleOf(payload),
   }
+}
+
+/**
+ * The requested send time, or null for now.
+ *
+ * The contract has already validated the format, so an unparseable value here
+ * would be a bug rather than a bad request — and null (send now) is a safer
+ * answer to a bug than a crash or a message that silently never goes.
+ */
+function scheduleOf(payload: SendEmail): Date | null {
+  if (!payload.scheduled_at) return null
+  const at = new Date(payload.scheduled_at)
+  return Number.isNaN(at.getTime()) ? null : at
 }
 
 /**
@@ -167,8 +189,12 @@ export interface AcceptOps {
    */
   suppressedFor: (tenantId: string, addresses: string[]) => Promise<Set<string>>
 
-  /** Pushes the batch. Called only after the transaction commits. */
-  enqueue: (queue: SendClass, job: SendJob) => Promise<void>
+  /**
+   * Pushes the batch. Called only after the transaction commits.
+   *
+   * `runAt` delays the job — see the scheduling note in `acceptSend`.
+   */
+  enqueue: (queue: SendClass, job: SendJob, opts?: { runAt?: Date }) => Promise<void>
 }
 
 export interface Logger {
@@ -233,21 +259,60 @@ export async function acceptSend(
 
   // ⚠ ONLY MESSAGES WITH A SURVIVING RECIPIENT ARE QUEUED. The rest are
   // recorded so the dashboard can explain them, and never sent.
-  const sendable = written.refs.filter((_, i) => messages[i]!.to.length > 0)
-
-  if (sendable.length > 0) {
+  //
+  // ⚠ AND ONE JOB PER DUE TIME, NOT ONE JOB PER REQUEST. A job carries a single
+  // delay, so a batch whose elements are scheduled differently cannot be one
+  // job — the earliest due time would drag the rest forward, or the latest
+  // would hold the rest back. Partitioning is what keeps `scheduled_at` a
+  // per-message promise rather than a per-request one.
+  for (const [dueAt, refs] of byDueTime(written.refs, messages)) {
     try {
-      await deps.enqueue(queue, { tenantId: input.tenantId, messages: sendable })
+      // ⚠ THE DELAY IS THE OPTIMISATION; THE DATABASE IS THE GUARANTEE. Redis
+      // holding a job back is what keeps a scheduled message off the worker
+      // until it is due, but the claim ALSO refuses a row whose `scheduled_at`
+      // is in the future — so a promoted-early job, or a sweep that re-enqueues
+      // one, still cannot send it ahead of time.
+      const job = { tenantId: input.tenantId, messages: refs }
+      if (dueAt !== null && dueAt > Date.now()) {
+        await deps.enqueue(queue, job, { runAt: new Date(dueAt) })
+      } else {
+        await deps.enqueue(queue, job)
+      }
     } catch (err) {
       // The rows are committed. The stale-claim sweep will find them, so this
       // is late rather than lost — and reporting a failure would make an SDK
       // retry and send everything twice.
       deps.log.error(
-        { err, tenantId: input.tenantId, count: sendable.length },
+        { err, tenantId: input.tenantId, count: refs.length, dueAt },
         "enqueue failed after commit — the sweep will pick these up",
       )
     }
   }
 
   return { status: "accepted", ids: written.ids }
+}
+
+/**
+ * Groups the written refs by when they are due, dropping the ones with nothing
+ * left to send to.
+ *
+ * The key is `null` for "now" and a millisecond timestamp otherwise, so two
+ * messages asking for the same moment share one job and one delay.
+ */
+function byDueTime(
+  refs: SendJob["messages"],
+  messages: readonly PreparedMessage[],
+): Map<number | null, SendJob["messages"]> {
+  const groups = new Map<number | null, SendJob["messages"]>()
+
+  refs.forEach((ref, i) => {
+    const message = messages[i]!
+    if (message.to.length === 0) return
+    const key = message.scheduledAt ? message.scheduledAt.getTime() : null
+    const group = groups.get(key)
+    if (group) group.push(ref)
+    else groups.set(key, [ref])
+  })
+
+  return groups
 }

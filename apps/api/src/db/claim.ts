@@ -87,6 +87,14 @@ export interface ClaimOptions {
  * must be dropped rather than retried — retrying is how a lost race turns into
  * a duplicate send.
  *
+ * ⚠ AND IT IS WHAT ACTUALLY HONOURS `scheduled_at`. The queue delays the job,
+ * but Redis is a prompt and this is the record: a delayed job promoted early, a
+ * sweep that re-enqueues a waiting row, or a hand-run of the worker would all
+ * otherwise send a message before its time. The predicate makes an early send
+ * impossible rather than unlikely — and a row that is not yet due simply is not
+ * returned, which the handler already treats as "somebody else's", drops, and
+ * leaves for the delayed job to bring back.
+ *
  * ⚠ IT ALSO RECLAIMS STALE `sending` ROWS, AND THAT IS NOT AN EXTRA FEATURE.
  * Without it a worker that dies mid-send strands its messages in `sending`
  * forever, and the failure is invisible: no error, no retry, mail simply never
@@ -107,6 +115,7 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
       from (values ${sql.join(rows, sql`, `)}) as v (id, created_at)
      where m.id = v.id
        and m.created_at = v.created_at
+       and (m.scheduled_at is null or m.scheduled_at <= now())
        and (
              m.status = 'queued'
              or (m.status = 'sending' and m.claimed_at < now() - ${opts.staleAfter}::interval)
@@ -119,6 +128,13 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
 
 /**
  * Records that SES accepted the message.
+ *
+ * ⚠ AND IT RETURNS `sent_at`, WHICH IS NOT DECORATION. That timestamp is the
+ * billing clock: send/reconcile.ts buckets our side by it, and the meter is
+ * handed the same value so the two sides cannot disagree across a midnight
+ * boundary. Re-deriving it from the worker's own `Date.now()` would put the two
+ * a few milliseconds apart, which is enough to make one day short and the next
+ * long — and the reconciler tops up the short one on every run.
  *
  * ⚠ GUARDED ON `status = 'sending'` AND ON THE CLAIM. A worker whose lease
  * expired mid-send may still be alive and may still reach this line, by which
@@ -142,7 +158,7 @@ export function markSentStatement(
        and created_at = ${ref.createdAt.toISOString()}::timestamptz
        and status = 'sending'
        and claimed_by = ${workerId}
-    returning id
+    returning id, sent_at
   `
 }
 

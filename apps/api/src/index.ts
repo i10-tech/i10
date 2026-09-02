@@ -7,6 +7,7 @@ import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { createSendQueue } from "./queue/send-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
+import { autumnMetering } from "./send/autumn.js"
 import { resilient, unmetered } from "./send/metering.js"
 
 const log = pino({ name: "i10-api" })
@@ -41,6 +42,34 @@ cache.on("error", (err: Error) => log.warn({ err }, "api key cache unavailable")
 // through the sweep, so this client retries where the cache one gives up.
 const queueRedis = createQueueClient(env.REDIS_URL)
 queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+
+/**
+ * ⚠ THE ONE PLACE THAT DECIDES WHETHER SENDING IS METERED AT ALL, AND IT SAYS
+ * SO IN THE BOOT LOG. No key means `unmetered`: everything allowed, nothing
+ * counted. That is right for a local checkout and catastrophic to discover in
+ * production a month later, so it is a line you can grep for rather than a
+ * silent default.
+ *
+ * `resilient` wraps whichever it is, so a metering outage degrades to
+ * "unavailable" — which `shouldSend` turns into a send — instead of refusing a
+ * paying customer's password resets.
+ */
+const metering = resilient(
+  env.AUTUMN_SECRET_KEY
+    ? autumnMetering({
+        baseUrl: env.AUTUMN_URL,
+        secretKey: env.AUTUMN_SECRET_KEY,
+        featureId: env.AUTUMN_FEATURE_ID,
+        timeoutMs: env.AUTUMN_TIMEOUT_MS,
+        log,
+      })
+    : unmetered,
+  log,
+)
+log.info(
+  { metered: Boolean(env.AUTUMN_SECRET_KEY), feature: env.AUTUMN_FEATURE_ID },
+  env.AUTUMN_SECRET_KEY ? "metering via autumn" : "UNMETERED — no AUTUMN_SECRET_KEY",
+)
 
 const app = createApp({
   apiKeyAuth: {
@@ -86,11 +115,7 @@ const app = createApp({
         }),
       },
     }),
-    // ⚠ `unmetered` UNTIL AUTUMN IS WIRED, AND VISIBLY SO — the same stub the
-    // worker carries. `resilient` wraps it so that when a real Metering does
-    // arrive, an outage in it degrades to "allowed" rather than refusing a
-    // paying customer's mail.
-    metering: resilient(unmetered, log),
+    metering,
     log,
   },
   pingDb: async () => {

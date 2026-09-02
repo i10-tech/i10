@@ -175,10 +175,13 @@
             "items": {
               "type": "object",
               "properties": {
-                "content": {
-                  "type": "string"
-                },
                 "filename": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[^\\r\\n\"]+$"
+                },
+                "content": {
                   "type": "string"
                 },
                 "path": {
@@ -186,7 +189,8 @@
                   "format": "uri"
                 },
                 "content_type": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 }
               },
               "required": [
@@ -215,7 +219,8 @@
             }
           },
           "scheduled_at": {
-            "type": "string"
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -353,10 +358,13 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "content": {
-                    "type": "string"
-                  },
                   "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": "^[^\\r\\n\"]+$"
+                  },
+                  "content": {
                     "type": "string"
                   },
                   "path": {
@@ -364,7 +372,8 @@
                     "format": "uri"
                   },
                   "content_type": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                   }
                 },
                 "required": [
@@ -393,7 +402,8 @@
               }
             },
             "scheduled_at": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           "required": [

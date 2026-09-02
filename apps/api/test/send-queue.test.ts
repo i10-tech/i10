@@ -29,6 +29,43 @@ function fakeQueue() {
   }
 }
 
+describe("scheduling", () => {
+  // ⚠ THE DELAY IS THE OPTIMISATION, THE CLAIM IS THE GUARANTEE — but without
+  // this the worker would take a scheduled batch the moment it is enqueued.
+  it("hands groupmq the due time", async () => {
+    const queue = fakeQueue()
+    const runAt = new Date("2026-09-03T09:00:00.000Z")
+
+    await enqueueBatch(queue, job([A, B]), { runAt })
+
+    expect(queue.add).toHaveBeenCalledWith(
+      expect.objectContaining({ runAt, orderMs: runAt.getTime() }),
+    )
+  })
+
+  // ⚠ ORDERED BY WHEN IT IS DUE, NOT BY WHEN IT WAS ACCEPTED. Keeping the
+  // acceptance time would make a message scheduled for tomorrow jump ahead of
+  // everything accepted after it the moment it was promoted.
+  it("does not let a scheduled batch keep its acceptance order", async () => {
+    const queue = fakeQueue()
+    const runAt = new Date("2026-09-03T09:00:00.000Z")
+
+    await enqueueBatch(queue, job([B]), { runAt })
+
+    const opts = queue.add.mock.calls[0]![0] as { orderMs: number }
+    expect(opts.orderMs).not.toBe(B.createdAt.getTime())
+  })
+
+  it("stays immediate and acceptance-ordered without one", async () => {
+    const queue = fakeQueue()
+    await enqueueBatch(queue, job([A, B]))
+
+    const opts = queue.add.mock.calls[0]![0] as { orderMs: number; runAt?: Date }
+    expect(opts.runAt).toBeUndefined()
+    expect(opts.orderMs).toBe(B.createdAt.getTime())
+  })
+})
+
 describe("the queue namespace", () => {
   // ⚠ i10's Redis is its own instance, never PSL's under a prefix. The prefix
   // stays explicit because the failure if that changed is two products draining
@@ -139,7 +176,7 @@ describe("quota", () => {
       },
     }
     await expect(
-      resilient(broken, log).recordSent("ten-1", ["msg-a"]),
+      resilient(broken, log).recordSent("ten-1", [{ id: "msg-a", sentAt: new Date() }]),
     ).resolves.toBeUndefined()
     // ⚠ And it is NOT retried — Autumn's own docs say a retried batchTrack
     // double-deducts, and that "gaps are preferable to duplicates". The
@@ -150,17 +187,28 @@ describe("quota", () => {
   // ⚠ Ids, not a count. Autumn's single `track` 409s a replayed
   // Idempotency-Key, so an id can be resubmitted safely and a count cannot —
   // which is the only reason the reconciler can top up without double-billing.
-  it("passes message ids through, so a top-up can be idempotent", async () => {
+  //
+  // ⚠ And each id carries the database's own `sent_at`, because the reconciler
+  // buckets our side by that column and the meter's side by the timestamp we
+  // send it. A worker clock a millisecond off would split a message across two
+  // days and top it up on every run.
+  it("passes message ids and their stored sent_at through", async () => {
     const inner: Metering = { checkQuota: vi.fn(), recordSent: vi.fn() }
-    await resilient(inner).recordSent("ten-1", ["msg-a", "msg-b"])
+    const at = new Date("2026-09-02T23:59:59.900Z")
+    await resilient(inner).recordSent("ten-1", [
+      { id: "msg-a", sentAt: at },
+      { id: "msg-b", sentAt: at },
+    ])
     expect(inner.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
-      "msg-a",
-      "msg-b",
+      { id: "msg-a", sentAt: at },
+      { id: "msg-b", sentAt: at },
     ])
   })
 
   it("the unmetered stub allows and counts nothing", async () => {
     expect(await unmetered.checkQuota("ten-1", 10)).toEqual({ status: "allowed" })
-    await expect(unmetered.recordSent("ten-1", ["msg-a"])).resolves.toBeUndefined()
+    await expect(
+      unmetered.recordSent("ten-1", [{ id: "msg-a", sentAt: new Date() }]),
+    ).resolves.toBeUndefined()
   })
 })

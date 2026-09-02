@@ -1,3 +1,5 @@
+import type { Attachment, Tag } from "@repo/contracts"
+
 /**
  * The boundary between i10 and whoever actually relays the mail.
  *
@@ -30,6 +32,18 @@ export interface OutboundMessage {
   text?: string | null
   html?: string | null
   headers?: Record<string, string> | null
+  /**
+   * Files to send with the message, base64 in `content`.
+   *
+   * ⚠ THEIR PRESENCE CHANGES HOW THE MESSAGE IS BUILT, NOT JUST WHAT IS IN IT.
+   * SES's structured content cannot express an attachment, so a message with
+   * one is assembled as raw MIME instead — see send/mime.ts. Everything above
+   * this line behaves identically either way; this is the only field that
+   * switches the path.
+   */
+  attachments?: readonly Attachment[] | null
+  /** The caller's own labels, echoed back on every provider event. */
+  tags?: readonly Tag[] | null
 }
 
 export type SendOutcome =

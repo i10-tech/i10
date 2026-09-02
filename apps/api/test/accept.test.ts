@@ -270,6 +270,82 @@ describe("the order of operations", () => {
   })
 })
 
+describe("scheduling", () => {
+  const future = new Date(Date.now() + 60 * 60 * 1000)
+
+  // ⚠ DELAYED, NOT QUEUED NOW. Without the runAt the worker takes the batch
+  // immediately and the customer's `scheduled_at` is silently ignored.
+  it("delays a scheduled message", async () => {
+    const { deps, enqueue } = ops()
+
+    await accept(deps, {
+      payloads: [email({ scheduled_at: future.toISOString() })],
+    })
+
+    expect(enqueue).toHaveBeenCalledWith("transactional", expect.anything(), {
+      runAt: new Date(future.getTime()),
+    })
+  })
+
+  // A time that has already passed means now, which the contract says plainly —
+  // and a delayed job whose moment has gone is just a job.
+  it("treats a past time as immediate", async () => {
+    const { deps, enqueue } = ops()
+
+    await accept(deps, {
+      payloads: [email({ scheduled_at: "2020-01-01T00:00:00.000Z" })],
+    })
+
+    expect(enqueue).toHaveBeenCalledWith("transactional", expect.anything())
+  })
+
+  // ⚠ ONE JOB PER DUE TIME. A job carries a single delay, so a mixed batch in
+  // one job would drag the later messages forward or hold the earlier ones
+  // back — either way `scheduled_at` would stop being a per-message promise.
+  it("splits a mixed batch into one job per due time", async () => {
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000)
+    const { deps, enqueue } = ops()
+
+    await accept(deps, {
+      endpoint: "batch" as const,
+      payloads: [
+        email(),
+        email({ scheduled_at: future.toISOString() }),
+        email({ scheduled_at: later.toISOString() }),
+        email({ scheduled_at: future.toISOString() }),
+      ],
+    })
+
+    expect(enqueue).toHaveBeenCalledTimes(3)
+    // The two sharing a moment share a job.
+    const calls = enqueue.mock.calls as unknown as [
+      unknown,
+      { messages: unknown[] },
+      { runAt?: Date } | undefined,
+    ][]
+    const grouped = calls.find((c) => c[2]?.runAt?.getTime() === future.getTime())
+    expect(grouped?.[1].messages).toHaveLength(2)
+  })
+
+  // The rows are committed either way; one failed enqueue must not cost the
+  // other groups their jobs.
+  it("still queues the other groups when one enqueue fails", async () => {
+    const enqueue = vi.fn(async (_q: unknown, _j: unknown, o?: { runAt?: Date }) => {
+      if (o?.runAt) throw new Error("redis down")
+    })
+    const { deps, log } = ops({ enqueue } as never)
+
+    const result = await accept(deps, {
+      endpoint: "batch" as const,
+      payloads: [email(), email({ scheduled_at: future.toISOString() })],
+    })
+
+    expect(result.status).toBe("accepted")
+    expect(enqueue).toHaveBeenCalledTimes(2)
+    expect(log.error).toHaveBeenCalled()
+  })
+})
+
 describe("routing", () => {
   // ⚠ A thousand-message batch must never queue in front of a password reset.
   it("sends single messages to transactional and batches to bulk", () => {

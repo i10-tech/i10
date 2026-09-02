@@ -105,6 +105,90 @@ describe("what reaches SES", () => {
   })
 })
 
+describe("tags", () => {
+  // ⚠ OURS CANNOT BE OVERWRITTEN. `i10_message_id` matches an event back to the
+  // message it describes; a customer tag of the same name would detach every
+  // bounce and complaint for that send from the row that explains it — and
+  // suppression, built from those events, would stop working for it.
+  it("keeps i10's tag ahead of the caller's and refuses a collision", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send({
+      ...message,
+      tags: [
+        { name: "campaign", value: "spring" },
+        { name: "i10_message_id", value: "hijacked" },
+      ],
+    })
+
+    expect(inputOf(c).EmailTags).toEqual([
+      { Name: "i10_message_id", Value: message.id },
+      { Name: "campaign", Value: "spring" },
+    ])
+  })
+
+  it("forwards the caller's tags", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send({
+      ...message,
+      tags: [{ name: "campaign", value: "spring" }],
+    })
+    expect(inputOf(c).EmailTags).toContainEqual({ Name: "campaign", Value: "spring" })
+  })
+})
+
+describe("attachments", () => {
+  const withFile = {
+    ...message,
+    attachments: [
+      { filename: "receipt.pdf", content: Buffer.from("pdf").toString("base64") },
+    ],
+  }
+
+  // ⚠ `Content.Simple` CANNOT EXPRESS A FILE. Sending one through it would
+  // silently drop the attachment: SES accepts the call, the customer is billed,
+  // and the recipient gets a message with nothing attached.
+  it("switches to raw MIME when there is one", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send(withFile)
+
+    const content = inputOf(c).Content as unknown as {
+      Raw?: { Data: Uint8Array }
+      Simple?: unknown
+    }
+    expect(content.Simple).toBeUndefined()
+    expect(Buffer.from(content.Raw!.Data).toString("utf8")).toContain(
+      'filename="receipt.pdf"',
+    )
+  })
+
+  // ⚠ AND `Destination` STILL CARRIES THE RECIPIENTS, WHICH IS WHAT KEEPS BCC
+  // BLIND. The raw message has no Bcc header; SES delivers from this list.
+  it("still passes the destination alongside the raw bytes", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send({
+      ...withFile,
+      bcc: ["hidden@example.com"],
+    })
+
+    expect(inputOf(c).Destination).toMatchObject({
+      ToAddresses: ["a@example.com"],
+      BccAddresses: ["hidden@example.com"],
+    })
+    const raw = Buffer.from(
+      (inputOf(c).Content as unknown as { Raw: { Data: Uint8Array } }).Raw.Data,
+    ).toString("utf8")
+    expect(raw).not.toContain("hidden@example.com")
+  })
+
+  it("stays on the simple path without one", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send(message)
+    const content = inputOf(c).Content as unknown as { Raw?: unknown; Simple?: unknown }
+    expect(content.Raw).toBeUndefined()
+    expect(content.Simple).toBeDefined()
+  })
+})
+
 describe("the outcome", () => {
   it("reports the provider id on success", async () => {
     const result = await sesTransport({ client: client() }).send(message)

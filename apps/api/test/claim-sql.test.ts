@@ -55,6 +55,16 @@ describe("the claim", () => {
     expect(statement).toContain("m.claimed_at < now() -")
   })
 
+  // ⚠ THE GUARANTEE BEHIND `scheduled_at`, AND IT IS THIS RATHER THAN THE QUEUE.
+  // Redis delaying the job is an optimisation; a job promoted early, a sweep
+  // that re-enqueues a waiting row, or a worker run by hand would all otherwise
+  // send a scheduled message ahead of its time.
+  it("never claims a message before it is due", () => {
+    const { sql: statement } = claim()
+    const where = statement.slice(statement.indexOf("where"))
+    expect(where).toContain("m.scheduled_at is null or m.scheduled_at <= now()")
+  })
+
   // ⚠ THE PROPERTY THAT MAKES BATCHING SAFE. A worker dying 400 messages into a
   // batch of 500 leaves those 400 as `sent`; the job goes back to the queue and
   // is re-claimed in full, so the ONLY thing standing between that and 400

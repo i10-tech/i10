@@ -45,6 +45,21 @@ export type QuotaOutcome =
    */
   | { status: "unavailable"; message: string }
 
+/**
+ * One message that was sent, and when the database says it was.
+ *
+ * ⚠ `sentAt` IS THE STORED VALUE, NOT THE WORKER'S CLOCK, AND IT IS NOT
+ * COSMETIC. The reconciler buckets i10's side by `core.messages.sent_at` and
+ * the meter's side by the event timestamp we hand it. If those differ by even a
+ * millisecond across midnight, one day shows a deficit and the next a surplus —
+ * and the deficit gets topped up, every run, forever. Threading the value the
+ * UPDATE returned is what keeps the two sides on one clock.
+ */
+export interface SentMessage {
+  id: string
+  sentAt: Date
+}
+
 export interface Metering {
   /**
    * Called once per accepted request, before the rows are written.
@@ -67,7 +82,7 @@ export interface Metering {
    * has gone; throwing here would return the row to the queue and send it twice
    * to fix a billing record.
    */
-  recordSent(tenantId: string, messageIds: readonly string[]): Promise<void>
+  recordSent(tenantId: string, sent: readonly SentMessage[]): Promise<void>
 }
 
 /**
@@ -126,9 +141,9 @@ export function resilient(inner: Metering, log?: Logger): Metering {
         return { status: "unavailable", message: "Could not check the sending quota." }
       }
     },
-    async recordSent(tenantId, messageIds) {
+    async recordSent(tenantId, sent) {
       try {
-        await inner.recordSent(tenantId, messageIds)
+        await inner.recordSent(tenantId, sent)
       } catch (err) {
         // ⚠ NOT RETRIED HERE, ON PURPOSE, AND AUTUMN SAYS SO ITSELF. `batchTrack`
         // has no per-item idempotency, and its documentation is explicit:
@@ -136,7 +151,7 @@ export function resilient(inner: Metering, log?: Logger): Metering {
         // double-deduction", and "gaps are preferable to duplicates". So the hot
         // path takes the gap and the reconciler closes it — see send/reconcile.ts.
         log?.error(
-          { err, tenantId, count: messageIds.length },
+          { err, tenantId, count: sent.length },
           "usage not recorded — the reconciler will close the gap",
         )
       }

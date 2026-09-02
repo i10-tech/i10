@@ -29,6 +29,9 @@ const job = (count: number): SendJob => ({
   })),
 })
 
+/** The `sent_at` the database would have returned. */
+const SENT_AT = new Date("2026-09-02T10:00:01Z")
+
 function deps(over: Partial<BatchDeps> = {}) {
   const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
   const metering: Metering = {
@@ -37,7 +40,7 @@ function deps(over: Partial<BatchDeps> = {}) {
   }
   const base: BatchDeps = {
     claim: async (j) => j.messages.map((_, i) => outbound(i)),
-    markSent: vi.fn(async () => {}),
+    markSent: vi.fn(async () => SENT_AT),
     markFailed: vi.fn(async () => {}),
     transport: fakeTransport(),
     metering,
@@ -62,10 +65,38 @@ describe("the happy path", () => {
     expect(transport.sent).toHaveLength(3)
     expect(d.markSent).toHaveBeenCalledTimes(3)
     expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
-      "msg-0",
-      "msg-1",
-      "msg-2",
+      { id: "msg-0", sentAt: SENT_AT },
+      { id: "msg-1", sentAt: SENT_AT },
+      { id: "msg-2", sentAt: SENT_AT },
     ])
+  })
+
+  // ⚠ THE DATABASE'S `sent_at`, NOT THE WORKER'S CLOCK. The reconciler buckets
+  // our side by that column and the meter's side by what we send it; a
+  // millisecond apart across midnight puts one message in two different days,
+  // and the day that came up short is topped up on every run afterwards.
+  it("bills at the timestamp the write returned", async () => {
+    const stored = new Date("2026-09-02T23:59:59.900Z")
+    const { deps: d, metering } = deps({ markSent: vi.fn(async () => stored) })
+
+    await handleBatch(job(1), d)
+
+    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+      { id: "msg-0", sentAt: stored },
+    ])
+  })
+
+  // ⚠ NO WRITE, NO BILL. A null means the compare-and-swap did not take — the
+  // claim had already moved to another worker, which will record and bill the
+  // row itself. Billing it here too would charge the customer twice for one
+  // message.
+  it("does not bill a message whose write did not land", async () => {
+    const { deps: d, metering } = deps({ markSent: vi.fn(async () => null) })
+
+    const result = await handleBatch(job(2), d)
+
+    expect(result.sent).toBe(2)
+    expect(metering.recordSent).not.toHaveBeenCalled()
   })
 
   // ⚠ One metering call per batch, not one per message. Autumn rate-limits to
@@ -164,7 +195,9 @@ describe("failures", () => {
     const result = await handleBatch(job(3), d)
 
     expect(result).toEqual({ claimed: 3, sent: 1, rejected: 1, deferred: 1 })
-    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", ["msg-0"])
+    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+      { id: "msg-0", sentAt: SENT_AT },
+    ])
   })
 
   // ⚠ The mail has gone. A billing failure must not return sent rows to the
@@ -186,6 +219,7 @@ describe("failures", () => {
   it("finishes the batch even when recording one message throws", async () => {
     const markSent = vi.fn(async (m: OutboundMessage) => {
       if (m.id === "msg-0") throw new Error("deadlock")
+      return SENT_AT
     })
     const { deps: d } = deps({ markSent })
 

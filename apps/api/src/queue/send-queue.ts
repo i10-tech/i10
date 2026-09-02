@@ -100,6 +100,20 @@ export function batchJobId(job: SendJob): string {
   return `batch:${first.id}`
 }
 
+export interface EnqueueOptions {
+  /**
+   * When the job becomes eligible. Omitted means immediately.
+   *
+   * ⚠ groupmq's SCHEDULER IS WHAT PROMOTES IT, AND ONLY A RUNNING WORKER HAS
+   * ONE. Delayed jobs sit in a sorted set until `runSchedulerOnce` moves them
+   * to the ready queue, which the Worker does on `schedulerIntervalMs`. With
+   * every worker replica down, a due message is not merely late to be sent — it
+   * is not even queued, and what recovers it is the stale-message sweep rather
+   * than Redis.
+   */
+  runAt?: Date
+}
+
 /**
  * Enqueue a batch for one tenant.
  *
@@ -112,6 +126,7 @@ export function batchJobId(job: SendJob): string {
 export async function enqueueBatch(
   queue: Queue<SendJob>,
   job: SendJob,
+  opts: EnqueueOptions = {},
 ): Promise<string> {
   if (job.messages.length === 0) {
     throw new TypeError("refusing to enqueue an empty batch")
@@ -127,7 +142,12 @@ export async function enqueueBatch(
     groupId: job.tenantId,
     jobId: batchJobId(job),
     data: job,
-    orderMs,
+    // ⚠ ORDERED BY WHEN IT IS DUE, NOT BY WHEN IT WAS ACCEPTED. A message
+    // scheduled for tomorrow that kept its acceptance time would jump ahead of
+    // everything accepted after it the moment it was promoted, which is the
+    // opposite of what the group's FIFO ordering is for.
+    orderMs: opts.runAt ? opts.runAt.getTime() : orderMs,
+    ...(opts.runAt ? { runAt: opts.runAt } : {}),
   })
 
   return added.id

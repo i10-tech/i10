@@ -3,6 +3,7 @@ import {
   SESv2Client,
   type SendEmailCommandInput,
 } from "@aws-sdk/client-sesv2"
+import { buildRawMessage } from "./mime.js"
 import {
   messageIdHeader,
   type OutboundMessage,
@@ -20,6 +21,13 @@ import {
  * request would still spend fifty of the send rate. Throughput comes from
  * concurrency and connection reuse, which is why the batching lives in the
  * queue and the concurrency lives in the worker.
+ *
+ * ⚠ AND A MESSAGE WITH AN ATTACHMENT TAKES A DIFFERENT SHAPE THROUGH THE SAME
+ * CALL. `Content.Simple` has no room for a file, so those are built as raw MIME
+ * in send/mime.ts and sent as `Content.Raw` — same command, same tags, same
+ * configuration set, same classification of what came back. `Destination` is
+ * still supplied alongside the raw bytes, which is what keeps `Bcc` blind: the
+ * recipients come from there and the header is never written.
  *
  * ⚠ AND THE CLIENT IS CONSTRUCTED ONCE. Its connection pool and credential
  * cache are the reason repeated sends are fast; building one per message turns
@@ -85,19 +93,60 @@ function toSesInput(
     // ⚠ AND ITS VALUE IS CONSTRAINED. SES allows only letters, digits, hyphens
     // and underscores in a tag value, so a raw UUID with its dashes is fine and
     // anything prefixed like `msg_…` would be rejected at send time.
-    EmailTags: [{ Name: "i10_message_id", Value: m.id }],
+    EmailTags: buildTags(m),
 
-    Content: {
-      Simple: {
-        Subject: { Data: m.subject, Charset: "UTF-8" },
-        Body: {
-          ...(m.text ? { Text: { Data: m.text, Charset: "UTF-8" } } : {}),
-          ...(m.html ? { Html: { Data: m.html, Charset: "UTF-8" } } : {}),
-        },
-        Headers: buildHeaders(m),
+    Content: content(m),
+  }
+}
+
+/**
+ * ⚠ SIMPLE UNLESS THERE IS AN ATTACHMENT, AND THE CONDITION IS EXACTLY THAT.
+ * `Content.Simple` cannot express a file, so a message carrying one has to be
+ * assembled as raw MIME — but building every message that way would put a
+ * hand-written encoder on the path of every password reset in the product, to
+ * no benefit. The common case stays the one SES validates for us.
+ */
+function content(m: OutboundMessage): SendEmailCommandInput["Content"] {
+  const attachments = m.attachments ?? []
+
+  if (attachments.length > 0) {
+    return {
+      Raw: { Data: Buffer.from(buildRawMessage(m, attachments), "utf8") },
+    }
+  }
+
+  return {
+    Simple: {
+      Subject: { Data: m.subject, Charset: "UTF-8" },
+      Body: {
+        ...(m.text ? { Text: { Data: m.text, Charset: "UTF-8" } } : {}),
+        ...(m.html ? { Html: { Data: m.html, Charset: "UTF-8" } } : {}),
       },
+      Headers: buildHeaders(m),
     },
   }
+}
+
+/**
+ * i10's join key first, then the caller's own labels.
+ *
+ * ⚠ OURS CANNOT BE OVERWRITTEN. `i10_message_id` is what matches an SES event
+ * back to a row in `core.messages`; a customer tag of the same name would
+ * detach every delivery, bounce and complaint for that send from the message
+ * they describe — and suppression, which is built from those events, would stop
+ * working for exactly the sends that need it. The contract already refuses an
+ * `i10_` prefix; this is the second lock on the same door.
+ */
+function buildTags(m: OutboundMessage): { Name: string; Value: string }[] {
+  const tags = [{ Name: "i10_message_id", Value: m.id }]
+  const seen = new Set(["i10_message_id"])
+
+  for (const tag of m.tags ?? []) {
+    if (seen.has(tag.name)) continue
+    seen.add(tag.name)
+    tags.push({ Name: tag.name, Value: tag.value })
+  }
+  return tags
 }
 
 /**

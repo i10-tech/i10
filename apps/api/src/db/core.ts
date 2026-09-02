@@ -396,6 +396,35 @@ export const messageBodies = core.table(
     text: text("text"),
     html: text("html"),
     headers: jsonb("headers"),
+
+    /**
+     * Files to send with the message: `{ filename, content_type?, content }`
+     * with the content base64-encoded, exactly as the caller supplied it.
+     *
+     * ⚠ IN THE DATABASE RATHER THAN IN OBJECT STORAGE, AND THAT IS A BOUNDED
+     * DECISION. The contract caps a message's attachments, so a row cannot grow
+     * without limit — and the alternative, a bucket, would put a second store
+     * with its own lifecycle, its own access control and its own retention in
+     * front of every send. Here retention is the partition drop that already
+     * exists, and row level security already covers it.
+     *
+     * ⚠ AND IT IS WHY THIS TABLE IS SPLIT FROM `messages`. The claim, the
+     * sweeper and every dashboard list read the status row; none of them read
+     * this. A 10 MB column on the hot table would be a 10 MB column on the
+     * queue drain.
+     */
+    attachments: jsonb("attachments"),
+
+    /**
+     * The caller's own labels, forwarded to SES as `EmailTags` and echoed back
+     * on every event it publishes.
+     *
+     * ⚠ OURS WIN ON A COLLISION. `i10_message_id` is the join key between
+     * `core.message_events` and this message; a customer tag able to overwrite
+     * it would detach every event for that send from the row it describes.
+     * Names beginning `i10_` are refused at the contract.
+     */
+    tags: jsonb("tags"),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.createdAt] })],
 )

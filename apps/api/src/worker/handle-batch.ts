@@ -1,5 +1,5 @@
 import type { SendJob } from "../queue/send-queue.js"
-import type { Metering } from "../send/metering.js"
+import type { Metering, SentMessage } from "../send/metering.js"
 import type { OutboundMessage, SendOutcome, Transport } from "../send/transport.js"
 
 /**
@@ -48,8 +48,15 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
    * loaded with everything the transport needs.
    */
   claim: (job: SendJob) => Promise<M[]>
-  /** Records one message as sent. */
-  markSent: (message: M, providerMessageId: string) => Promise<void>
+  /**
+   * Records one message as sent, and returns the `sent_at` it stored.
+   *
+   * ⚠ THE RETURNED TIMESTAMP IS WHAT THE METER IS BILLED ON, so it has to be
+   * the database's value rather than the worker's clock — see send/metering.ts.
+   * Null means the write did not happen: the claim had moved on, and nothing
+   * about this message is ours to bill.
+   */
+  markSent: (message: M, providerMessageId: string) => Promise<Date | null>
   /** Records one attempt as failed. `permanent` stops further attempts. */
   markFailed: (message: M, reason: string, permanent: boolean) => Promise<void>
   transport: Transport
@@ -92,7 +99,7 @@ export async function handleBatch<M extends OutboundMessage>(
     return { claimed: 0, sent: 0, rejected: 0, deferred: 0 }
   }
 
-  const sentIds: string[] = []
+  const sent: SentMessage[] = []
   const result: BatchResult = {
     claimed: messages.length,
     sent: 0,
@@ -113,13 +120,16 @@ export async function handleBatch<M extends OutboundMessage>(
     }
 
     switch (outcome.status) {
-      case "sent":
+      case "sent": {
         // Immediately, before anything else. This statement is the whole of the
         // at-least-once window.
-        await deps.markSent(message, outcome.providerMessageId)
-        sentIds.push(message.id)
+        const at = await deps.markSent(message, outcome.providerMessageId)
+        // ⚠ ONLY BILLED IF THE ROW WAS ACTUALLY OURS TO RECORD. A null means
+        // another worker owns it and will record — and bill — it itself.
+        if (at) sent.push({ id: message.id, sentAt: at })
         result.sent++
         return
+      }
 
       case "rejected":
         await deps.markFailed(message, outcome.reason, true)
@@ -146,12 +156,12 @@ export async function handleBatch<M extends OutboundMessage>(
   // worker is wired correctly. It is here anyway because the cost of the
   // invariant being merely a convention is duplicate mail, and a raw Metering
   // passed straight in would break it silently. Depth is cheaper than the bug.
-  if (sentIds.length > 0) {
+  if (sent.length > 0) {
     try {
-      await deps.metering.recordSent(job.tenantId, sentIds)
+      await deps.metering.recordSent(job.tenantId, sent)
     } catch (err) {
       deps.log.error(
-        { err, tenantId: job.tenantId, count: sentIds.length },
+        { err, tenantId: job.tenantId, count: sent.length },
         "usage not recorded — the reconciler will close the gap",
       )
     }

@@ -6,6 +6,7 @@ import { createCacheClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { createSendQueue, type SendClass, type SendJob } from "./queue/send-queue.js"
+import { autumnMetering } from "./send/autumn.js"
 import { resilient, unmetered } from "./send/metering.js"
 import { sesTransport } from "./send/ses.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
@@ -64,11 +65,30 @@ const transport = sesTransport({
   configurationSetName: env.SES_CONFIGURATION_SET,
 })
 
-// ⚠ `unmetered` UNTIL AUTUMN IS WIRED, AND VISIBLY SO. Passing a real Metering
-// is a one-line change here; leaving it out is a stub with a name rather than a
-// silently absent call at the send site. `resilient` wraps whatever it is so a
-// billing failure can never fail a send.
-const metering = resilient(unmetered, log)
+// ⚠ THE WORKER METERS TOO, AND ITS HALF IS THE ONE THAT BILLS. The API checks
+// quota; this records what actually went. No key means `unmetered` — allowed,
+// uncounted — which is right locally and must be visible in the boot log rather
+// than inferred from an invoice.
+//
+// `resilient` is what makes a billing failure unable to fail a send: the mail
+// has already gone, and throwing here would return the row to the queue and
+// send it twice to fix a billing record.
+const metering = resilient(
+  env.AUTUMN_SECRET_KEY
+    ? autumnMetering({
+        baseUrl: env.AUTUMN_URL,
+        secretKey: env.AUTUMN_SECRET_KEY,
+        featureId: env.AUTUMN_FEATURE_ID,
+        timeoutMs: env.AUTUMN_TIMEOUT_MS,
+        log,
+      })
+    : unmetered,
+  log,
+)
+log.info(
+  { metered: Boolean(env.AUTUMN_SECRET_KEY) },
+  env.AUTUMN_SECRET_KEY ? "metering via autumn" : "UNMETERED — no AUTUMN_SECRET_KEY",
+)
 
 const ops = databaseOps({
   db,

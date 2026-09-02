@@ -1,3 +1,4 @@
+import type { Attachment, Tag } from "@repo/contracts"
 import { inArray } from "drizzle-orm"
 import {
   claimStatement,
@@ -74,6 +75,8 @@ export function databaseOps(
             text: messageBodies.text,
             html: messageBodies.html,
             headers: messageBodies.headers,
+            attachments: messageBodies.attachments,
+            tags: messageBodies.tags,
           })
           .from(messageBodies)
           .where(inArray(messageBodies.messageId, ids))
@@ -95,15 +98,23 @@ export function databaseOps(
             text: body?.text ?? null,
             html: body?.html ?? null,
             headers: (body?.headers as Record<string, string> | null) ?? null,
+            attachments: (body?.attachments as Attachment[] | null) ?? null,
+            tags: (body?.tags as Tag[] | null) ?? null,
           }
         })
       })
     },
 
+    // ⚠ RETURNS THE STORED `sent_at`, WHICH THE METER IS THEN BILLED ON. Null
+    // means the row was not ours to record — the claim moved on — and the caller
+    // must not invent a timestamp for a write that did not happen.
     async markSent(message, providerMessageId) {
-      await withTenant(opts.db, message.tenantId, (tx) =>
+      const rows = (await withTenant(opts.db, message.tenantId, (tx) =>
         tx.execute(markSentStatement(refOf(message), opts.workerId, providerMessageId)),
-      )
+      )) as unknown as Row[]
+
+      const at = rows[0]?.sent_at
+      return at ? new Date(at as string | Date) : null
     },
 
     async markFailed(message, reason, permanent) {

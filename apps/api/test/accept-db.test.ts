@@ -143,6 +143,7 @@ const prepared = (over: Partial<SendEmail> = {}): PreparedMessage => ({
   to: ["user@example.com"],
   cc: [],
   bcc: [],
+  scheduledAt: null,
 })
 
 type PersistInput = Parameters<AcceptOps["persist"]>[0]

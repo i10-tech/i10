@@ -150,6 +150,100 @@ describe("POST /emails", () => {
     expect(await res.json()).toMatchObject({ name: "validation_error" })
   })
 
+  // ⚠ THE VALIDATION THAT PROTECTS THE SEND PATH RATHER THAN THE CALLER. Each of
+  // these would otherwise reach the worker and fail somewhere it cannot be
+  // explained — or, worse, succeed in a way nobody wanted.
+  describe("attachments and tags", () => {
+    const file = {
+      filename: "receipt.pdf",
+      content: Buffer.from("pdf").toString("base64"),
+    }
+
+    it("accepts an inline attachment and caller tags", async () => {
+      const { app: a } = app()
+      const res = await post(a, "/emails", {
+        ...body,
+        attachments: [file],
+        tags: [{ name: "campaign", value: "spring" }],
+      })
+      expect(res.status).toBe(200)
+    })
+
+    // ⚠ Fetching a caller-supplied URL from the worker is the shape of every
+    // SSRF. Until there is an allowlist and a resolver that refuses private
+    // ranges, an explicit error beats a silent fetch.
+    it("refuses an attachment that only gives a path", async () => {
+      const { app: a } = app()
+      const res = await post(a, "/emails", {
+        ...body,
+        attachments: [{ filename: "x.pdf", path: "https://example.com/x.pdf" }],
+      })
+      expect(res.status).toBe(422)
+      expect(await res.json()).toMatchObject({ name: "validation_error" })
+    })
+
+    // A newline in a filename is header injection into the caller's own message.
+    it("refuses a filename with a newline in it", async () => {
+      const { app: a } = app()
+      const res = await post(a, "/emails", {
+        ...body,
+        attachments: [{ ...file, filename: "a.pdf\r\nBcc: leak@evil.test" }],
+      })
+      expect(res.status).toBe(422)
+    })
+
+    it("refuses attachments that total more than the cap", async () => {
+      const { app: a } = app()
+      // 8 MiB of base64 is 6 MiB decoded: each is under the per-file cap and
+      // the two together are over the per-message one.
+      const big = "A".repeat(8 * 1024 * 1024)
+      const res = await post(a, "/emails", {
+        ...body,
+        attachments: [
+          { ...file, content: big },
+          { ...file, content: big },
+        ],
+      })
+      expect(res.status).toBe(422)
+    })
+
+    // ⚠ `i10_message_id` is the join key between a delivery event and the
+    // message it describes. A tag able to overwrite it would detach every
+    // bounce and complaint for that send from the row that explains it.
+    it("refuses a tag in our reserved namespace", async () => {
+      const { app: a } = app()
+      const res = await post(a, "/emails", {
+        ...body,
+        tags: [{ name: "i10_message_id", value: "hijacked" }],
+      })
+      expect(res.status).toBe(422)
+    })
+  })
+
+  describe("scheduled_at", () => {
+    it("accepts an ISO timestamp", async () => {
+      const { app: a } = app()
+      const at = new Date(Date.now() + 3_600_000).toISOString()
+      expect((await post(a, "/emails", { ...body, scheduled_at: at })).status).toBe(200)
+    })
+
+    // ⚠ A known gap against Resend, which also accepts "in 1 min". An error
+    // that says what the field wants beats guessing a timezone.
+    it("refuses natural language", async () => {
+      const { app: a } = app()
+      const res = await post(a, "/emails", { ...body, scheduled_at: "in 1 min" })
+      expect(res.status).toBe(422)
+    })
+
+    // A scheduled message holds a row, a body and a delayed job for its whole
+    // wait — and its partition is dropped long before a date two years out.
+    it("refuses a time beyond the horizon", async () => {
+      const { app: a } = app()
+      const far = new Date(Date.now() + 400 * 24 * 3600 * 1000).toISOString()
+      expect((await post(a, "/emails", { ...body, scheduled_at: far })).status).toBe(422)
+    })
+  })
+
   it("still requires a key", async () => {
     const { app: a } = app()
     const res = await a.request("/emails", {
