@@ -1,8 +1,14 @@
 # cp terraform.tfvars.example terraform.tfvars && edit
 #
-# ⚠ DO NOT APPLY THIS STACK YET. Its MX, SPF and DMARC describe mail that does
-# not flow. An MX pointing at a host with nothing listening on 25 produces
-# bounces, not silence. Apply it when Stalwart is up.
+# Reconciled against the live zone on 2026-09-02. Every value below was read
+# back from the Cloudflare API, not written from intent — so a first
+# `tofu plan` against an untouched zone should be EMPTY. If it is not, read the
+# diff before applying: either somebody edited the zone by hand, or main.tf has
+# gone stale.
+#
+# ⚠ THIS STACK ADOPTS A LIVE MAIL DOMAIN. Mail flows through these records
+# today. The import blocks are what keep an apply from being a recreate, and a
+# recreate here is a window where i10 has no MX.
 zone_id = "1b1638f11a5a0f893aef4fdca30c048e"
 
 # psl-vps while i10 shares the box. Both families: the cluster was rebuilt
@@ -10,12 +16,47 @@ zone_id = "1b1638f11a5a0f893aef4fdca30c048e"
 mail_host_ipv4 = "178.105.164.132"
 mail_host_ipv6 = "2a01:4f8:1c18:45fb::1"
 
-# The two records already exist, created by hand, grey-cloud. Imported rather
-# than recreated so an apply never has a window where the mail host does not
-# resolve. Confirmed 2026-08-31 — both proxied=false, as they must be.
-mail_a_record_id    = "4af1641d1831e9f2d520e920f049efba"
-mail_aaaa_record_id = "6cde5b0a53ed9832ac39b08c8f393ee0"
+# ⚠ MUST BE A MAILBOX THAT EXISTS AND IS READ. DMARC aggregate reports arrive
+# here daily from every receiver, and they are the evidence for moving the
+# policy past p=none. A rua pointing at nothing means the policy can never be
+# tightened with confidence.
+dmarc_rua = "mohamed@i10.tech"
 
-# Must be RECEIVING before the DMARC policy tightens past p=none — which means
-# it depends on Stalwart, like everything else in this stack.
-dmarc_rua = "dmarc@i10.tech"
+# Read back from the API on 2026-09-02. See variables.tf for how to regenerate.
+record_ids = {
+  # the mail host, and the two names Apple Mail guesses before it
+  mail_v4 = "4af1641d1831e9f2d520e920f049efba"
+  mail_v6 = "6cde5b0a53ed9832ac39b08c8f393ee0"
+  imap    = "547c3339dd27b4852e557ac0241e96e8"
+  smtp    = "d5f6b056e458bc25e84539082bcafc35"
+
+  # routing
+  apex_mx = "82d9f40950d8412ef814477205f745b1"
+  send_mx = "7ed19fe688714f071eee22461f996599"
+
+  # spf
+  apex_spf = "f5a80e2e705bc81a812e47a9a3f7b267"
+  send_spf = "2e109aa40da9ee0770495990e065a408"
+
+  # dkim — i10's own pair, then SES's three, then Clerk's
+  dkim_rsa     = "853579773560c8391e9149a48432a988"
+  dkim_ed25519 = "8e11e2e7d67d20e4e39c26dfc09cd560"
+  ses_dkim_1   = "ca30dfb0d03211195662351ecdf7a7f0"
+  ses_dkim_2   = "bb4a1c44fb0052fcc52be6ee7a75dcf1"
+  ses_dkim_3   = "5739eea3f4abf23a5360270f8f4e03ff"
+  clerk_dkim_1 = "f2c0b7a0f57a32cdce8f021ef90b48c5"
+  clerk_dkim_2 = "0453fd39c89c5890b7c40dc12262654e"
+  clerk_mail   = "a9d9ec00ac4cbcfbd3d3e66aa4c00bb9"
+
+  # dmarc — exactly one, see main.tf
+  dmarc = "77ac80353991d2cd56850b1197aa0e2f"
+
+  # rfc 6186 client provisioning
+  srv_imaps           = "38e42b6114e9a841f0c3d0637ea5d177"
+  srv_submissions     = "ef2b91517cefd05452918e08b0d8466e"
+  srv_imap_none       = "bf47ab10a87110543b07b2145ab96d2c"
+  srv_submission_none = "22db9a2722e1203086f9086010929266"
+
+  # mta-sts
+  mta_sts = "c9de53799dcade99a200af49391a4774"
+}

@@ -83,17 +83,40 @@ silently underneath a lock tuned to something else's horizon.
 
 `i10.tech` has **two owners on purpose**. A proxied wildcard `*.i10.tech`
 covers every web surface — `dash`, `auth`, `api`, `docs` — and stays
-hand-managed in Cloudflare. Tofu owns the mail half: `mail.i10.tech`, the MX,
-SPF, DMARC, and the `spf.i10.tech` include customers point at.
+hand-managed in Cloudflare. Tofu owns the mail half: the host Stalwart answers
+on, the MX, SPF, DKIM, DMARC, the RFC 6186 client-provisioning records and the
+MTA-STS policy id — twenty-two records in all.
 
 The split is by blast radius. A wrong web record is a 522 somebody notices in a
 minute. A wrong SPF or DKIM record fails DMARC **silently**, while damaging
 sender reputation, and the first symptom is mail landing in spam days later.
 Those are the records that want a reviewed plan.
 
-**`stacks/dns` is not ready to apply.** Its MX, SPF and DMARC describe mail
-that does not flow yet, and publishing an MX for a host with nothing listening
-on 25 produces bounces rather than nothing. Apply it when Stalwart is up.
+### What the reconciliation changed (2026-09-02)
+
+`stacks/dns` had **never been applied** — no `backend.hcl`, no
+`terraform.tfvars`, only the examples. Every record in the zone had been created
+by hand, and the file had been written from intent months earlier. By the time
+mail actually flowed, the two had diverged, and applying it would have been
+worse than not having it:
+
+| the file said                      | the zone says                | applying it would have                                                      |
+| ---------------------------------- | ---------------------------- | --------------------------------------------------------------------------- |
+| `v=spf1 include:spf.i10.tech ~all` | `v=spf1 mx -all`             | dropped the `mx` mechanism, so **every message Stalwart sends fails SPF**   |
+| a `spf.i10.tech` include record    | does not exist               | created a record nothing references yet                                     |
+| `p=none; …; fo=1`                  | `p=none; …; adkim=s; aspf=s` | silently loosened alignment                                                 |
+| relative names (`name = "mail"`)   | fully qualified              | shown a diff on **every** record — provider v5 dropped the v4 relative form |
+| 5 records                          | 22                           | left 17 mail records unmanaged                                              |
+
+Every resource now carries an `import` block and every value was read back from
+the API rather than written from intent. **The contract is that `tofu plan` on
+an untouched zone is empty.** A non-empty plan means either the zone was edited
+by hand or the file is stale — both worth knowing before an apply.
+
+The SES portability record (`spf.i10.tech`) is deliberately still absent: it
+belongs with the apex SPF change, and both are noted in `main.tf` as the thing
+to do the day SES production access lands. Adding it now would break the
+empty-plan contract for no benefit.
 
 ## Every stratum imports rather than creates
 

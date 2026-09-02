@@ -19,24 +19,46 @@ variable "mail_host_ipv6" {
   type        = string
 }
 
-variable "mail_a_record_id" {
-  description = <<-EOT
-    Cloudflare record id of the EXISTING mail.i10.tech A record, for the import
-    block. Find it with:
-
-      curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-        "https://api.cloudflare.com/client/v4/zones/<zone>/dns_records?name=mail.i10.tech&type=A" \
-        | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"][0]["id"])'
-  EOT
-  type        = string
-}
-
-variable "mail_aaaa_record_id" {
-  description = "Record id of the existing mail.i10.tech AAAA record. Same lookup, type=AAAA."
-  type        = string
-}
-
 variable "dmarc_rua" {
   description = "Aggregate-report mailbox. Must be receiving before the DMARC policy tightens past p=none."
   type        = string
+}
+
+variable "record_ids" {
+  description = <<-EOT
+    Cloudflare record ids for the EXISTING records this stack adopts, keyed by
+    resource name. Every record in main.tf has an `import` block reading this
+    map, so the first apply adopts the zone rather than recreating it — which
+    matters because a recreate has a window where mail does not resolve.
+
+    ⚠ ONE MAP RATHER THAN ONE VARIABLE PER RECORD. There are twenty-two of
+    them; twenty-two variables would be twenty-two chances for a key and a
+    resource to drift apart silently.
+
+    They are facts about this zone, not secrets. Regenerate the whole map with:
+
+      curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+        "https://api.cloudflare.com/client/v4/zones/<zone>/dns_records?per_page=100" \
+        | python3 -c 'import sys,json;[print(r["type"],r["name"],r["id"]) for r in json.load(sys.stdin)["result"]]'
+
+    ⚠ AN ID THAT NO LONGER EXISTS FAILS THE PLAN, WHICH IS THE POINT. If a
+    record was deleted and recreated by hand, the import fails loudly instead of
+    the apply quietly making a second copy.
+  EOT
+  type        = map(string)
+
+  validation {
+    condition = length(setsubtract([
+      "mail_v4", "mail_v6", "imap", "smtp",
+      "apex_mx", "send_mx",
+      "apex_spf", "send_spf",
+      "dkim_rsa", "dkim_ed25519",
+      "ses_dkim_1", "ses_dkim_2", "ses_dkim_3",
+      "clerk_dkim_1", "clerk_dkim_2", "clerk_mail",
+      "dmarc",
+      "srv_imaps", "srv_submissions", "srv_imap_none", "srv_submission_none",
+      "mta_sts",
+    ], keys(var.record_ids))) == 0
+    error_message = "record_ids is missing a key. Every resource in main.tf has an import block, so a missing id is a record that would be CREATED alongside the live one rather than adopted."
+  }
 }
