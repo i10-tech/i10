@@ -86,6 +86,26 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 
+	// ⚠ AFTER THE ACCOUNT LOOKUP, BEFORE THE THROTTLE, AND BOTH HALVES MATTER.
+	//
+	// After, because the projection is what knows whether the account is still
+	// active. A suspended, unpaid or deprovisioned account has already been
+	// turned away above, so this can only ever skip the PASSWORD check — never
+	// the account check. And it needs `account.ClerkUpdatedAt`, which is the
+	// invalidation key: a password change moves it and the entry stops
+	// matching.
+	//
+	// Before, because the limiter exists to protect the Clerk request budget.
+	// A cache hit spends no budget, so it should spend no tokens either —
+	// otherwise Apple Mail opening six connections at once would still be
+	// throttled for calls it never makes. A wrong password still misses the
+	// cache and still meets the limiter.
+	if s.credCache.Lookup(account.ClerkUserID, password, account.ClerkUpdatedAt) {
+		s.log.Info("bind succeeded", "uid", uid, "mail", account.Email, "source", "cache")
+		w.Write(ldap.NewBindResponse(ldap.LDAPResultSuccess))
+		return
+	}
+
 	if s.limiter != nil && !s.limiter.Allow(dn) {
 		// Busy, not unavailable: the service is healthy, this identity is
 		// simply over its share. Clients back off on both, but the distinction
@@ -100,7 +120,12 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	outcome, err := s.verifier.Verify(ctx, account.ClerkUserID, password)
 	switch outcome {
 	case clerkauth.Verified:
-		s.log.Info("bind succeeded", "uid", uid, "mail", account.Email)
+		// ⚠ ONLY THIS BRANCH CACHES. Remembering a rejection would leave a
+		// corrected password broken for the rest of the TTL, and would let one
+		// failed attempt suppress a real one. Remembering an unavailable answer
+		// would be caching the absence of an answer.
+		s.credCache.Store(account.ClerkUserID, password, account.ClerkUpdatedAt)
+		s.log.Info("bind succeeded", "uid", uid, "mail", account.Email, "source", "clerk")
 		w.Write(ldap.NewBindResponse(ldap.LDAPResultSuccess))
 
 	case clerkauth.Rejected:

@@ -43,6 +43,17 @@ type Config struct {
 	// verify_password endpoint does not trigger.
 	BindsPerMinute int
 
+	// CredCacheTTL is how long a VERIFIED password is remembered, so that a
+	// mail client opening several connections at once pays for one Clerk call
+	// rather than one per connection. Zero disables the cache entirely.
+	//
+	// ⚠ IT IS ALSO THE WINDOW IN WHICH A ROTATED PASSWORD KEEPS WORKING, and
+	// sixty seconds is the number that was argued for and accepted. Raising it
+	// is a security decision, not a tuning knob — read the package comment in
+	// internal/credcache before changing it, and note that account deactivation
+	// is NOT affected either way, because the projection lookup runs first.
+	CredCacheTTL time.Duration
+
 	LogLevel string
 }
 
@@ -72,6 +83,18 @@ func (c Config) Validate() error {
 	if c.BindsPerMinute <= 0 {
 		errs = append(errs, errors.New("AUTHD_BINDS_PER_MINUTE must be positive"))
 	}
+	if c.CredCacheTTL < 0 {
+		errs = append(errs, errors.New("AUTHD_CRED_CACHE_TTL must not be negative"))
+	}
+	if c.CredCacheTTL > 5*time.Minute {
+		// A guard rather than a preference. Past a few minutes this stops being
+		// a latency optimisation and becomes a policy statement about how long
+		// a revoked password stays live, which does not belong in an
+		// environment variable nobody reviews.
+		errs = append(errs, fmt.Errorf(
+			"AUTHD_CRED_CACHE_TTL is %s: a verified-password cache longer than 5m is how "+
+				"a rotated credential keeps working; change the code and say why", c.CredCacheTTL))
+	}
 	return errors.Join(errs...)
 }
 
@@ -92,6 +115,9 @@ func Load() (Config, error) {
 		return c, err
 	}
 	if c.BindsPerMinute, err = envInt("AUTHD_BINDS_PER_MINUTE", 30); err != nil {
+		return c, err
+	}
+	if c.CredCacheTTL, err = envDuration("AUTHD_CRED_CACHE_TTL", 60*time.Second); err != nil {
 		return c, err
 	}
 	return c, c.Validate()

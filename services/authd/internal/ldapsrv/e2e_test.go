@@ -16,6 +16,7 @@ import (
 	ldap "github.com/vjeantet/ldapserver"
 
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
+	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
@@ -138,6 +139,13 @@ func (f *fakeVerifier) Verify(context.Context, string, string) (clerkauth.Outcom
 
 func newFixture(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMinute int) string {
 	t.Helper()
+	// No credential cache: every existing test asserts on how many times the
+	// verifier was called, and a cache would silently change those counts.
+	return newFixtureWith(t, store, v, perMinute, nil)
+}
+
+func newFixtureWith(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMinute int, cache *credcache.Cache) string {
+	t.Helper()
 
 	srv := ldap.NewServer()
 	srv.Handle(ldapsrv.New(ldapsrv.Options{
@@ -147,6 +155,7 @@ func newFixture(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMin
 		Store:             store,
 		Verifier:          v,
 		Limiter:           throttle.New(perMinute),
+		CredCache:         cache,
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OpTimeout:         2 * time.Second,
 	}).Routes())

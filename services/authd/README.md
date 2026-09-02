@@ -24,8 +24,9 @@ check at request time:
 ```
 Apple Mail ──IMAP──▶ Stalwart ──LDAP search──▶ authd ──▶ Postgres projection
                           │                                (0 Clerk calls)
-                          └────LDAP bind─────▶ authd ──▶ Clerk verify_password
-                                                          (1 call per auth)
+                          └────LDAP bind─────▶ authd ──▶ credential cache (60s)
+                                                          └▶ Clerk verify_password
+                                                             (only on a miss)
 ```
 
 Searches are answered entirely from a local projection of Clerk, maintained by
@@ -35,6 +36,63 @@ webhook. Only the bind reaches Clerk. That split is load-bearing: Clerk allows
 It also buys the thing the OIDC directory could not do — `filterMailbox`
 resolves a recipient **on demand**, so an account that has never signed in still
 accepts mail. That limitation was what forced pre-creating every mailbox.
+
+## The credential cache
+
+A bind is one HTTPS round trip to Clerk, measured at roughly a second against
+production. Mail clients do not bind once: Apple Mail opens several connections
+to set up an account and reconnects constantly after that, so reading your own
+mail meant paying that second over and over. `internal/credcache` remembers a
+**verified** password for 60 seconds, which collapses a client's connection
+burst to a single Clerk call.
+
+⚠ **It costs a property this service used to have.** `clerkauth` says authd holds
+no password material of any kind. It now holds one HMAC per recently
+authenticated user, under a key generated at startup, in memory, never
+persisted, and dead the moment the process restarts. That is weak material, but
+it is material, and it is stated here rather than left to be discovered.
+
+What makes 60 seconds defensible is that two other things are unaffected:
+
+- **Deactivation is not cached.** The projection lookup runs BEFORE the cache,
+  so a suspended, unpaid or deprovisioned account is refused on the very next
+  bind. The cache only ever short-circuits the password check.
+- **A password change invalidates it.** Each entry records the account's
+  `clerk_updated_at` and stops matching when it moves. Clerk publishes no
+  password-specific timestamp, so this fires on any profile change — more often
+  than strictly needed, never less, which is the only direction an
+  authentication cache may err in. The same reasoning already governs what authd
+  serves Stalwart as `pwdChangeTime`.
+
+Only `Verified` is ever stored. Caching a rejection would leave a corrected
+password broken for the rest of the TTL and would let one failed attempt
+suppress a real one; caching `unavailable` would be caching the absence of an
+answer.
+
+The cache is consulted **after** the projection lookup and **before** the
+throttle. Both halves are asserted by tests. Before, because the limiter exists
+to protect the Clerk request budget and a hit spends none of it — otherwise a
+client opening six connections at once would be throttled for calls it never
+made.
+
+`AUTHD_CRED_CACHE_TTL=0` disables it. The config refuses anything above five
+minutes: past that this stops being a latency optimisation and becomes a policy
+statement about how long a revoked credential stays live, which does not belong
+in an environment variable nobody reviews.
+
+### Not built: stale-while-unavailable
+
+The obvious next step, deliberately deferred. Today a Clerk outage means every
+mail client gets `unavailable` and nobody reads their mail — a hard dependency
+on a third party for access to your own inbox.
+
+The shape: a second, longer window (perhaps 15 minutes) whose entries are served
+**only** when Clerk answers `Unavailable`, never when Clerk is reachable and
+says no. That turns an outage into degraded-but-working for recently active
+users while leaving the normal-operation revocation window at 60 seconds.
+
+It is a different feature answering a different question, and it wants evidence
+about how often Clerk is actually unavailable before the risk is worth taking.
 
 ## The one rule you must not break
 
@@ -115,6 +173,7 @@ Worth reporting upstream.
 | `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                     |
 | `AUTHD_CLERK_TIMEOUT`       | `5s`                       |                                                     |
 | `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                  |
+| `AUTHD_CRED_CACHE_TTL`      | `60s`                      | Verified passwords only. `0` disables; max `5m`.    |
 | `AUTHD_LOG_LEVEL`           | `info`                     |                                                     |
 
 ## Layout
