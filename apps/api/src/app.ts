@@ -1,6 +1,8 @@
 import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { VerifyDeps } from "./auth/api-key.js"
+import type { AcceptOps, Logger as AcceptLogger } from "./send/accept.js"
+import type { Metering } from "./send/metering.js"
 import { createAutoconfig, type AutoconfigDeps } from "./routes/autoconfig.js"
 import { emails } from "./routes/emails.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
@@ -25,6 +27,12 @@ export interface AppDeps {
    * than letting an unauthenticated caller through.
    */
   apiKeyAuth?: VerifyDeps
+  /**
+   * Persistence and queueing for the send path. Omitted in tests and in the
+   * OpenAPI generator, where the routes then answer 501 rather than letting an
+   * unconfigured deployment silently accept mail it will never send.
+   */
+  sendPath?: AcceptOps & { metering: Metering; log: AcceptLogger }
   /** Answers whether the database is reachable, for the readiness probe. */
   pingDb?: () => Promise<void>
 }
@@ -37,10 +45,12 @@ export function createApp(deps: AppDeps = {}) {
   // at import time, so the middleware cannot capture anything createApp knows.
   // Setting it per request is what lets one process serve a configured app and
   // the tests serve an unconfigured one.
-  if (deps.apiKeyAuth) {
+  if (deps.apiKeyAuth || deps.sendPath) {
     const auth = deps.apiKeyAuth
+    const sendPath = deps.sendPath
     app.use("*", async (c, next) => {
-      c.set("apiKeyAuth", auth)
+      if (auth) c.set("apiKeyAuth", auth)
+      if (sendPath) c.set("sendPath", sendPath)
       await next()
     })
   }

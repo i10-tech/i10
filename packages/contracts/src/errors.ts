@@ -17,6 +17,15 @@ export const errorNames = [
   "invalid_from_address",
   "invalid_to_address",
   "domain_not_verified",
+  // ⚠ ADDITIVE, AND THE ONLY HONEST ANSWER FOR A REUSED Idempotency-Key. The
+  // same key with a DIFFERENT body cannot be a replay (the caller would get an
+  // id for an email they did not send) and cannot be a second send (the key
+  // says they did not mean to). It is not a validation error either — the body
+  // is fine, the key is ambiguous — so it needs a name of its own.
+  //
+  // Adding a name is safe in a way that changing one is not: an SDK switching
+  // on these already needs a default branch.
+  "idempotency_conflict",
   "internal_server_error",
 ] as const
 

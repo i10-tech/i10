@@ -2,9 +2,13 @@ import { serve } from "@hono/node-server"
 import { createClerkClient } from "@clerk/backend"
 import pino from "pino"
 import { createApp } from "./app.js"
-import { createCacheClient, redisKeyCache } from "./cache/redis.js"
+import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { createSendQueue } from "./queue/send-queue.js"
+import { acceptDatabaseOps } from "./send/accept-db.js"
+import { autumnMetering } from "./send/autumn.js"
+import { resilient, unmetered } from "./send/metering.js"
 
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
@@ -33,6 +37,40 @@ const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
 const cache = createCacheClient(env.REDIS_URL)
 cache.on("error", (err: Error) => log.warn({ err }, "api key cache unavailable"))
 
+// ⚠ THE QUEUE'S CONNECTION, NOT THE CACHE'S — see cache/redis.ts. An enqueue
+// that fails does not fail the request, but it does cost the message a trip
+// through the sweep, so this client retries where the cache one gives up.
+const queueRedis = createQueueClient(env.REDIS_URL)
+queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+
+/**
+ * ⚠ THE ONE PLACE THAT DECIDES WHETHER SENDING IS METERED AT ALL, AND IT SAYS
+ * SO IN THE BOOT LOG. No key means `unmetered`: everything allowed, nothing
+ * counted. That is right for a local checkout and catastrophic to discover in
+ * production a month later, so it is a line you can grep for rather than a
+ * silent default.
+ *
+ * `resilient` wraps whichever it is, so a metering outage degrades to
+ * "unavailable" — which `shouldSend` turns into a send — instead of refusing a
+ * paying customer's password resets.
+ */
+const metering = resilient(
+  env.AUTUMN_SECRET_KEY
+    ? autumnMetering({
+        baseUrl: env.AUTUMN_URL,
+        secretKey: env.AUTUMN_SECRET_KEY,
+        featureId: env.AUTUMN_FEATURE_ID,
+        timeoutMs: env.AUTUMN_TIMEOUT_MS,
+        log,
+      })
+    : unmetered,
+  log,
+)
+log.info(
+  { metered: Boolean(env.AUTUMN_SECRET_KEY), feature: env.AUTUMN_FEATURE_ID },
+  env.AUTUMN_SECRET_KEY ? "metering via autumn" : "UNMETERED — no AUTUMN_SECRET_KEY",
+)
+
 const app = createApp({
   apiKeyAuth: {
     verify: (secret) => clerk.apiKeys.verify(secret),
@@ -58,6 +96,28 @@ const app = createApp({
     smtpPort: 465,
     organization: "i10",
   },
+  sendPath: {
+    ...acceptDatabaseOps({
+      db,
+      // ⚠ ONE QUEUE PER CLASS, BOTH BUILT HERE. Constructing them lazily at the
+      // first send would put a Redis connection on the latency path of somebody
+      // waiting for a password reset.
+      queues: {
+        transactional: createSendQueue({
+          redis: queueRedis,
+          class: "transactional",
+          jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+        }),
+        bulk: createSendQueue({
+          redis: queueRedis,
+          class: "bulk",
+          jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+        }),
+      },
+    }),
+    metering,
+    log,
+  },
   pingDb: async () => {
     await sql`select 1`
   },
@@ -76,9 +136,11 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     server.close(() => {
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
-      void Promise.allSettled([sql.end({ timeout: 5 }), cache.quit()]).finally(() =>
-        process.exit(0),
-      )
+      void Promise.allSettled([
+        sql.end({ timeout: 5 }),
+        cache.quit(),
+        queueRedis.quit(),
+      ]).finally(() => process.exit(0))
     })
   })
 }

@@ -7,6 +7,7 @@ import {
   sendEmailSchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
+import { acceptSend, type AcceptOutcome } from "../send/accept.js"
 
 /**
  * The send path.
@@ -47,6 +48,47 @@ const errorResponse = (description: string) => ({
   content: { "application/json": { schema: ApiError } },
 })
 
+/**
+ * The error shape for every non-success outcome of `acceptSend`.
+ *
+ * ⚠ THE STATUS CODES ARE A COMPATIBILITY SURFACE, NOT A STYLE CHOICE. An SDK
+ * maps 429 to a retry and 4xx to a thrown error, so `daily_quota_exceeded`
+ * arriving as a 429 is what makes a client back off — and `idempotency_conflict`
+ * arriving as a 409 rather than a 422 is what stops it retrying a request that
+ * will never succeed unchanged.
+ */
+function acceptError(outcome: AcceptOutcome) {
+  if (outcome.status === "quota_exceeded") {
+    return {
+      body: {
+        statusCode: 429,
+        name: "daily_quota_exceeded" as const,
+        message: outcome.message,
+      },
+      status: 429 as const,
+    }
+  }
+  return {
+    body: {
+      statusCode: 409,
+      name: "idempotency_conflict" as const,
+      message: outcome.status === "conflict" ? outcome.message : "Conflict.",
+    },
+    status: 409 as const,
+  }
+}
+
+/**
+ * ⚠ 501 WHEN THE SEND PATH IS NOT WIRED, NEVER A SILENT SUCCESS. An
+ * unconfigured deployment that returned an id would be telling callers their
+ * mail was accepted while nothing existed to send it.
+ */
+const notWired = {
+  statusCode: 501,
+  name: "internal_server_error" as const,
+  message: "The send path is not configured.",
+}
+
 const send = createRoute({
   method: "post",
   path: "/",
@@ -70,37 +112,46 @@ const send = createRoute({
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     422: errorResponse("The request body failed validation."),
+    409: errorResponse(
+      "This Idempotency-Key was already used with a different request body.",
+    ),
     429: errorResponse("Sending too fast, or the daily quota is exhausted."),
-    501: errorResponse("The send path is not implemented yet."),
+    501: errorResponse("The send path is not configured."),
   },
 })
 
 emails.openapi(
   send,
-  (c) => {
-    const payload = c.req.valid("json")
+  async (c) => {
+    const sendPath = c.get("sendPath")
+    if (!sendPath) return c.json(notWired, 501)
 
-    // TODO(phase-2): record-then-send.
-    //   1. Persist the message and mint its id in the SAME transaction as the
-    //      caller's work, so a rollback never sends. That is the outbox pattern
-    //      and it is the reason this is a database write before it is a queue push.
-    //   2. Honour `Idempotency-Key` — a replay returns the FIRST id rather than
-    //      sending again.
-    //   3. Check the suppression list (bounce · complaint · unsubscribe) before
-    //      enqueueing, not after.
-    //   4. Enqueue for relay. Stalwart signs DKIM before handing to SES, so the
-    //      customer's record stays a plain TXT public key we rotate on our own
-    //      schedule rather than an amazonses CNAME.
-    void payload
-
-    return c.json(
+    const auth = c.get("auth")
+    const outcome = await acceptSend(
       {
-        statusCode: 501,
-        name: "internal_server_error" as const,
-        message: "The send path is not implemented yet.",
+        tenantId: auth.tenantId,
+        apiKeyId: auth.apiKeyId,
+        payloads: [c.req.valid("json")],
+        endpoint: "single",
+        // ⚠ THE HEADER IS THE CUSTOMER'S, NOT OURS TO INVENT. Absent, every
+        // request is distinct — which is correct: generating one here would
+        // make an accidental double-POST look like a replay and silently drop
+        // the second email.
+        idempotencyKey: c.req.header("Idempotency-Key"),
       },
-      501,
+      sendPath,
     )
+
+    if (outcome.status === "accepted" || outcome.status === "replayed") {
+      // ⚠ A REPLAY IS A 200 WITH THE ORIGINAL ID. That is the entire point of
+      // the header: the caller cannot tell whether their first attempt landed,
+      // and the answer that lets them stop worrying is the id they would have
+      // got the first time.
+      return c.json({ id: outcome.ids[0]! }, 200)
+    }
+
+    const error = acceptError(outcome)
+    return c.json(error.body, error.status)
   },
   // Validation failures must speak the API's own error shape. The default is
   // Zod's, which no SDK on the compatibility path knows how to read.
@@ -139,23 +190,45 @@ const sendBatch = createRoute({
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     422: errorResponse("The request body failed validation."),
+    409: errorResponse(
+      "This Idempotency-Key was already used with a different request body.",
+    ),
     429: errorResponse("Sending too fast, or the daily quota is exhausted."),
-    501: errorResponse("Batch send is not implemented yet."),
+    501: errorResponse("The send path is not configured."),
   },
 })
 
 emails.openapi(
   sendBatch,
-  (c) => {
-    void c.req.valid("json")
-    return c.json(
+  async (c) => {
+    const sendPath = c.get("sendPath")
+    if (!sendPath) return c.json(notWired, 501)
+
+    const auth = c.get("auth")
+    const outcome = await acceptSend(
       {
-        statusCode: 501,
-        name: "internal_server_error" as const,
-        message: "Batch send is not implemented yet.",
+        tenantId: auth.tenantId,
+        apiKeyId: auth.apiKeyId,
+        payloads: c.req.valid("json"),
+        // ⚠ `bulk`, WHICH IS A DIFFERENT QUEUE FROM /emails. A batch is by
+        // definition not the message somebody is watching a spinner for, and
+        // routing it alongside password resets is exactly the head-of-line
+        // blocking the two classes exist to prevent.
+        endpoint: "batch",
+        idempotencyKey: c.req.header("Idempotency-Key"),
       },
-      501,
+      sendPath,
     )
+
+    if (outcome.status === "accepted" || outcome.status === "replayed") {
+      // Ids come back in submission order, so element N of the response is
+      // element N of the request — which is the only thing that makes them
+      // usable to a caller iterating their own list.
+      return c.json({ data: outcome.ids.map((id) => ({ id })) }, 200)
+    }
+
+    const error = acceptError(outcome)
+    return c.json(error.body, error.status)
   },
   (result, c) => {
     if (!result.success) {

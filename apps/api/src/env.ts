@@ -66,6 +66,70 @@ const schema = z.object({
     )
     .refine((d) => d.length > 0, "must list at least one domain"),
 
+  // ── the worker ────────────────────────────────────────────────────────────
+
+  /**
+   * ⚠ WITHOUT IT SES PUBLISHES NO EVENTS, AND THE SES RECONCILER READS EXACTLY
+   * THOSE EVENTS. A missing configuration set does not fail a send; it silently
+   * removes half the safety net, so this is required rather than optional.
+   */
+  SES_CONFIGURATION_SET: z.string().min(1),
+
+  /**
+   * Provider calls in flight per worker replica.
+   *
+   * ⚠ IT IS A QUOTA KNOB AS MUCH AS A THROUGHPUT ONE. SES caps a send RATE in
+   * messages per second, and every replica spends from the same account budget,
+   * so what SES sees is this multiplied by the replica count. Derive it from the
+   * account's rate divided by replicas, not from what one process can manage.
+   */
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(8),
+
+  /**
+   * How long a row may sit in `sending` before another worker may take it.
+   *
+   * ⚠ IT MUST EXCEED groupmq's job timeout, or the two release the same job at
+   * different moments and the compare-and-swap stops being the tie-breaker.
+   * Postgres interval syntax.
+   */
+  WORKER_CLAIM_STALE_AFTER: z.string().min(1).default("5 minutes"),
+
+  /** groupmq's lease. Shorter than WORKER_CLAIM_STALE_AFTER, deliberately. */
+  WORKER_JOB_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
+  // ── metering ──────────────────────────────────────────────────────────────
+
+  /**
+   * Autumn, which owns balances, entitlements and usage.
+   *
+   * ⚠ SELF-HOSTED, SO THE BASE URL IS CONFIGURATION RATHER THAN A CONSTANT. The
+   * default is the SaaS, which is what a local checkout and the test
+   * environment talk to; production points at our own instance.
+   */
+  AUTUMN_URL: z.url().default("https://api.useautumn.com"),
+
+  /**
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS A DELIBERATE, VISIBLE STATE. Without it the
+   * services run `unmetered` — every send allowed, nothing counted — which is
+   * the correct behaviour for a local checkout and a loud one in the boot log.
+   * Making it required would mean no one can run the API without a billing
+   * account; making it silently default to metering would mean a misconfigured
+   * production looks identical to a working one.
+   */
+  AUTUMN_SECRET_KEY: z.string().min(1).optional(),
+
+  /** The metered feature. One email is one unit of it. */
+  AUTUMN_FEATURE_ID: z.string().min(1).default("emails"),
+
+  /**
+   * ⚠ THIS IS ADDED TO THE LATENCY OF EVERY `POST /emails` WHEN AUTUMN IS SLOW,
+   * because the quota check is synchronous. Short on purpose: a timeout is
+   * `unavailable`, and `unavailable` sends — so the cost of being impatient is
+   * a little unbilled usage, and the cost of being patient is every customer's
+   * password reset waiting on a billing service.
+   */
+  AUTUMN_TIMEOUT_MS: z.coerce.number().int().positive().max(10_000).default(2000),
+
   // ⚠ THE NAME ON THE CERTIFICATE AND IN THE SMTP GREETING, not a hostname we
   // are free to pick per environment. It is `SystemSettings.defaultHostname` in
   // Stalwart, the target of every SRV record in the zone, and the subject a
