@@ -45,6 +45,19 @@ const app = createApp({
     hostedDomains: env.MAIL_DOMAINS,
     log,
   },
+  autoconfig: {
+    hostedDomains: env.MAIL_DOMAINS,
+    mailHost: env.MAIL_HOSTNAME,
+    // ⚠ NOT CONFIGURABLE, BECAUSE THEY ARE NOT OURS TO CHOOSE. These are the
+    // two ports claimed with `hostPort` in the Stalwart StatefulSet and named
+    // in the SRV records — 993 implicit-TLS IMAP, 465 implicit-TLS submission.
+    // An environment variable here would let a profile advertise a port
+    // nothing is listening on, and the client's report of that is "cannot
+    // connect using SSL", which sends you looking at certificates.
+    imapPort: 993,
+    smtpPort: 465,
+    organization: "i10",
+  },
   pingDb: async () => {
     await sql`select 1`
   },

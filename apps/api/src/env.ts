@@ -65,6 +65,13 @@ const schema = z.object({
         .filter(Boolean),
     )
     .refine((d) => d.length > 0, "must list at least one domain"),
+
+  // ⚠ THE NAME ON THE CERTIFICATE AND IN THE SMTP GREETING, not a hostname we
+  // are free to pick per environment. It is `SystemSettings.defaultHostname` in
+  // Stalwart, the target of every SRV record in the zone, and the subject a
+  // client checks the TLS certificate against. Changing it here alone would
+  // hand out configuration profiles pointing at a name that fails verification.
+  MAIL_HOSTNAME: z.string().min(1).default("mail.i10.tech"),
 })
 
 export type Env = z.infer<typeof schema>
