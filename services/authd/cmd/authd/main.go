@@ -24,6 +24,7 @@ import (
 
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/config"
+	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
@@ -78,6 +79,7 @@ func run() error {
 		Store:             store,
 		Verifier:          clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout),
 		Limiter:           limiter,
+		CredCache:         credcache.New(cfg.CredCacheTTL),
 		Logger:            log,
 	}).Routes())
 

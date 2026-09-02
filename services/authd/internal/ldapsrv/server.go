@@ -20,6 +20,7 @@ import (
 	ldap "github.com/vjeantet/ldapserver"
 
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
+	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
 )
@@ -38,6 +39,11 @@ type Options struct {
 	Limiter           *throttle.Limiter
 	Logger            *slog.Logger
 
+	// CredCache short-circuits the Clerk call for a password verified in the
+	// last TTL. Nil disables it, and a nil *credcache.Cache is safe to call, so
+	// the bind path needs no branch of its own.
+	CredCache *credcache.Cache
+
 	// OpTimeout bounds the work behind a single LDAP operation — the projection
 	// query, and for a bind the Clerk call as well.
 	OpTimeout time.Duration
@@ -50,6 +56,7 @@ type Server struct {
 	store             projection.Store
 	verifier          Verifier
 	limiter           *throttle.Limiter
+	credCache         *credcache.Cache
 	log               *slog.Logger
 	opTimeout         time.Duration
 }
@@ -70,6 +77,7 @@ func New(opts Options) *Server {
 		store:             opts.Store,
 		verifier:          opts.Verifier,
 		limiter:           opts.Limiter,
+		credCache:         opts.CredCache,
 		log:               log,
 		opTimeout:         timeout,
 	}
