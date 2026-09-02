@@ -32,8 +32,12 @@ spec:
           # writes its digest into this file, so `git log infra/` is the
           # deployment history and a rollback is a revert.
           #
-          # Inert until the first Build run — the i10-workloads Application is
-          # deliberately not on automated sync for exactly this reason.
+          # ⚠ THE `prod-latest` BELOW IS A BOOTSTRAP VALUE AND SHOULD NOT
+          # SURVIVE. The Build workflow's deploy job rewrites this line to
+          # `:prod-<sha>@sha256:<digest>` for every app it actually rebuilt. An
+          # app still reading `prod-latest` long after its first build means
+          # either it has never changed since this line was written, or its
+          # path filter in build.yml does not match where its sources live.
           image: ghcr.io/i10-tech/i10-web:prod-latest
           imagePullPolicy: Always
           ports:

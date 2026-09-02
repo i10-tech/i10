@@ -1,6 +1,7 @@
 import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { VerifyDeps } from "./auth/api-key.js"
+import { createAutoconfig, type AutoconfigDeps } from "./routes/autoconfig.js"
 import { emails } from "./routes/emails.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 
@@ -16,6 +17,8 @@ const { version: API_VERSION } = createRequire(import.meta.url)("../package.json
 
 export interface AppDeps {
   clerkWebhooks?: ClerkWebhookDeps
+  /** Mail-client provisioning. See routes/autoconfig.ts. */
+  autoconfig?: AutoconfigDeps
   /**
    * How API keys are verified. Omitted in tests and in the OpenAPI generator,
    * where requireApiKey then refuses every well-formed key with a 501 rather
@@ -81,6 +84,11 @@ export function createApp(deps: AppDeps = {}) {
   // contract, not ours. Publishing it would invite customers to call it, and it
   // would show up in every generated SDK.
   app.route("/webhooks", createClerkWebhooks(deps.clerkWebhooks))
+
+  // Mounted for the same reason and with the same exclusion from the document.
+  // Traefik puts this path on `autoconfig.i10.tech` alongside Stalwart's own
+  // autoconfig endpoints, so a mail client meets one hostname rather than two.
+  app.route("/autoconfig", createAutoconfig(deps.autoconfig))
 
   // ⚠ THE HEADER IS PART OF THE COMPATIBILITY SURFACE. `Authorization: Bearer`
   // is what makes `resend/node` → `@i10/node` a one-line migration, so the

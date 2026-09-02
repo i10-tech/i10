@@ -48,6 +48,38 @@ stalwart-cli create Action/ReloadSettings
 
 Every object in this plan is in that category, so the reload is not optional.
 
+## `SystemSettings.services` is the client-provisioning contract
+
+One map, two consumers, and that is the reason it is worth understanding:
+
+- the autoconfig XML at `/mail/config-v1.1.xml` and the autodiscover response
+  list exactly the protocols in it, and
+- `Domain.dnsZoneFile` — the record set Stalwart says you should publish —
+  derives its `SRV` records from it too.
+
+It defaults to **all eight** protocols: jmap, imap, pop3, smtp, caldav, carddav,
+webdav, managesieve. i10 exposes three ports to the internet (25, 465, 993, via
+`hostPort` in the parent StatefulSet) and routes only the autoconfig paths over
+HTTPS, so seven of those eight were being advertised to every mail client and
+nominated for a DNS record while being unreachable. POP3 was the visible one:
+Thunderbird would offer a POP3 account on 995 that could never connect.
+
+The plan cuts it to `imap` and `smtp` — what actually answers. Verified after
+applying: the XML lost its `pop3` and DAV blocks, and the zone file dropped
+`_pop3s`, `_jmap`, `_caldavs` and `_carddavs`, leaving `_imaps._tcp` → 993 and
+`_submissions._tcp` → 465.
+
+Adding a protocol back is one entry in that map **and** the ingress or `hostPort`
+that makes it reachable. Doing only the first is how this got into the state
+above.
+
+`providerInfo` beside it is the provider's own identity — name, documentation
+URLs, a contact URI. Stalwart's own description is "information about the
+provider to advertise in auto configuration services". Note that v0.16.19 does
+not surface it in `config-v1.1.xml`, which still shows the address as the
+display name; it is stored and reported, so this is forward-looking rather than
+load-bearing.
+
 ### ⚠ And a reload is not enough for TLS certificates
 
 `Action/ReloadSettings` does **not** make Stalwart serve a newly registered
@@ -69,6 +101,49 @@ without a restart even if it were not. `cert-reload.yaml` in the parent
 directory is what closes both — a daily CronJob that compares the certificate's
 `notBefore` against the running pod's start time and deletes the pod when the
 certificate is the newer of the two.
+
+### ⚠ And `matchOn` compares against the STORED shape, not the one you wrote
+
+The Certificate upsert originally carried
+
+```json
+"subjectAlternativeNames": ["i10.tech", "*.i10.tech"]
+```
+
+which reads correctly, applies without error, and **matched nothing every time**.
+Each apply therefore created another Certificate object — four of them by
+2026-09-02, each holding its own copy of the private key, with
+`defaultCertificateId` quietly following the newest.
+
+Stalwart stores a `set<string>` as a map. `matchOn` compares the value in the
+plan against the value the server would return, so the plan has to be written in
+the stored shape:
+
+```json
+"subjectAlternativeNames": { "i10.tech": true, "*.i10.tech": true }
+```
+
+Proven by the error the map form produces: `ambiguous upsert; 4 existing objects
+match on subjectAlternativeNames`. The array form produced no error at all,
+which is exactly why it went unnoticed.
+
+Two things follow.
+
+**Duplicates already in the database must be deleted by hand, once.** With more
+than one match the upsert now fails loudly rather than adding a fifth — an
+improvement, but it means the next apply will not succeed until the extras are
+gone. Keep the id in `SystemSettings.defaultCertificateId`, delete the rest:
+
+```sh
+stalwart-cli query Certificate --json          # note the id you are keeping
+stalwart-cli delete Certificate <other-id>
+```
+
+**And `subjectAlternativeNames` is server-set, so this field is a match key and
+nothing else.** Writing it does not change what the certificate covers; the SANs
+come from the PEM. A `reconcile` operation rejects the object without it
+(`match property ... is missing from the object body`), which is the other reason
+it is present.
 
 ### The certificate only applies to SNI clients unless you say otherwise
 
