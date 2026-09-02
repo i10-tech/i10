@@ -73,9 +73,7 @@
         "accounts_email_unique": {
           "name": "accounts_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -122,12 +120,8 @@
           "tableFrom": "aliases",
           "tableTo": "accounts",
           "schemaTo": "authd",
-          "columnsFrom": [
-            "clerk_user_id"
-          ],
-          "columnsTo": [
-            "clerk_user_id"
-          ],
+          "columnsFrom": ["clerk_user_id"],
+          "columnsTo": ["clerk_user_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -178,12 +172,8 @@
           "tableFrom": "group_members",
           "tableTo": "groups",
           "schemaTo": "authd",
-          "columnsFrom": [
-            "group_name"
-          ],
-          "columnsTo": [
-            "name"
-          ],
+          "columnsFrom": ["group_name"],
+          "columnsTo": ["name"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -192,12 +182,8 @@
           "tableFrom": "group_members",
           "tableTo": "accounts",
           "schemaTo": "authd",
-          "columnsFrom": [
-            "clerk_user_id"
-          ],
-          "columnsTo": [
-            "clerk_user_id"
-          ],
+          "columnsFrom": ["clerk_user_id"],
+          "columnsTo": ["clerk_user_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -205,10 +191,7 @@
       "compositePrimaryKeys": {
         "group_members_group_name_clerk_user_id_pk": {
           "name": "group_members_group_name_clerk_user_id_pk",
-          "columns": [
-            "group_name",
-            "clerk_user_id"
-          ]
+          "columns": ["group_name", "clerk_user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -246,9 +229,7 @@
         "groups_email_unique": {
           "name": "groups_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -359,12 +340,8 @@
           "tableFrom": "api_keys",
           "tableTo": "tenants",
           "schemaTo": "core",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -374,9 +351,7 @@
         "api_keys_clerk_key_id_unique": {
           "name": "api_keys_clerk_key_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "clerk_key_id"
-          ]
+          "columns": ["clerk_key_id"]
         }
       },
       "policies": {},
@@ -501,12 +476,8 @@
           "tableFrom": "domains",
           "tableTo": "tenants",
           "schemaTo": "core",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -516,9 +487,7 @@
         "domains_name_unique": {
           "name": "domains_name_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "name"
-          ]
+          "columns": ["name"]
         }
       },
       "policies": {},
@@ -584,12 +553,8 @@
           "tableFrom": "idempotency_keys",
           "tableTo": "tenants",
           "schemaTo": "core",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -597,10 +562,7 @@
       "compositePrimaryKeys": {
         "idempotency_keys_tenant_id_key_pk": {
           "name": "idempotency_keys_tenant_id_key_pk",
-          "columns": [
-            "tenant_id",
-            "key"
-          ]
+          "columns": ["tenant_id", "key"]
         }
       },
       "uniqueConstraints": {},
@@ -667,10 +629,7 @@
       "compositePrimaryKeys": {
         "message_bodies_message_id_created_at_pk": {
           "name": "message_bodies_message_id_created_at_pk",
-          "columns": [
-            "message_id",
-            "created_at"
-          ]
+          "columns": ["message_id", "created_at"]
         }
       },
       "uniqueConstraints": {},
@@ -797,10 +756,7 @@
       "compositePrimaryKeys": {
         "message_events_id_occurred_at_pk": {
           "name": "message_events_id_occurred_at_pk",
-          "columns": [
-            "id",
-            "occurred_at"
-          ]
+          "columns": ["id", "occurred_at"]
         }
       },
       "uniqueConstraints": {},
@@ -1012,10 +968,7 @@
       "compositePrimaryKeys": {
         "messages_id_created_at_pk": {
           "name": "messages_id_created_at_pk",
-          "columns": [
-            "id",
-            "created_at"
-          ]
+          "columns": ["id", "created_at"]
         }
       },
       "uniqueConstraints": {},
@@ -1067,12 +1020,8 @@
           "tableFrom": "suppressions",
           "tableTo": "tenants",
           "schemaTo": "core",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1080,10 +1029,7 @@
       "compositePrimaryKeys": {
         "suppressions_tenant_id_address_pk": {
           "name": "suppressions_tenant_id_address_pk",
-          "columns": [
-            "tenant_id",
-            "address"
-          ]
+          "columns": ["tenant_id", "address"]
         }
       },
       "uniqueConstraints": {},
@@ -1172,16 +1118,12 @@
         "tenants_slug_unique": {
           "name": "tenants_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
+          "columns": ["slug"]
         },
         "tenants_clerk_org_id_unique": {
           "name": "tenants_clerk_org_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "clerk_org_id"
-          ]
+          "columns": ["clerk_org_id"]
         }
       },
       "policies": {},
@@ -1207,40 +1149,22 @@
     "core.message_queue": {
       "name": "message_queue",
       "schema": "core",
-      "values": [
-        "transactional",
-        "bulk"
-      ]
+      "values": ["transactional", "bulk"]
     },
     "core.message_status": {
       "name": "message_status",
       "schema": "core",
-      "values": [
-        "queued",
-        "sending",
-        "sent",
-        "failed",
-        "canceled"
-      ]
+      "values": ["queued", "sending", "sent", "failed", "canceled"]
     },
     "core.suppression_reason": {
       "name": "suppression_reason",
       "schema": "core",
-      "values": [
-        "hard_bounce",
-        "complaint",
-        "manual",
-        "unsubscribe"
-      ]
+      "values": ["hard_bounce", "complaint", "manual", "unsubscribe"]
     },
     "core.tenant_status": {
       "name": "tenant_status",
       "schema": "core",
-      "values": [
-        "active",
-        "suspended",
-        "deleted"
-      ]
+      "values": ["active", "suspended", "deleted"]
     }
   },
   "schemas": {

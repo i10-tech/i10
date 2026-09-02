@@ -39,22 +39,23 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 /** Base64 expands by 4/3, so this is the decoded size of an encoded string. */
 const decodedSize = (base64: string) => Math.floor((base64.length * 3) / 4)
 
-export const attachmentSchema = z.object({
-  /**
-   * ⚠ NO CR, NO LF, NO QUOTE. This goes into a `Content-Disposition` header,
-   * and a newline in it is header injection — a caller could otherwise append
-   * headers, or an entire second MIME part, to their own message.
-   */
-  filename: z
-    .string()
-    .min(1)
-    .max(255)
-    .regex(/^[^\r\n"]+$/, "`filename` may not contain quotes or newlines."),
-  /** The file itself, base64-encoded. */
-  content: z.base64().optional(),
-  path: z.url().optional(),
-  content_type: z.string().max(255).optional(),
-})
+export const attachmentSchema = z
+  .object({
+    /**
+     * ⚠ NO CR, NO LF, NO QUOTE. This goes into a `Content-Disposition` header,
+     * and a newline in it is header injection — a caller could otherwise append
+     * headers, or an entire second MIME part, to their own message.
+     */
+    filename: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[^\r\n"]+$/, "`filename` may not contain quotes or newlines."),
+    /** The file itself, base64-encoded. */
+    content: z.base64().optional(),
+    path: z.url().optional(),
+    content_type: z.string().max(255).optional(),
+  })
   .refine((a) => a.content !== undefined, {
     // ⚠ A DELIBERATE GAP AGAINST RESEND, AND THE REASON IS NOT EFFORT. Fetching
     // a caller-supplied URL means the worker makes an outbound request to an
@@ -73,10 +74,11 @@ export const attachmentSchema = z.object({
     path: ["content"],
   })
 
-export const tagSchema = z.object({
-  name: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
-  value: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
-})
+export const tagSchema = z
+  .object({
+    name: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
+    value: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
+  })
   // ⚠ `i10_` IS OURS AND CANNOT BE CLAIMED. `i10_message_id` is the join key
   // between a delivery event and the message it belongs to; a customer tag that
   // could overwrite it would detach every bounce, complaint and delivery for

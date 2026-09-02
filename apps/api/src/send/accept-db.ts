@@ -213,4 +213,3 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
     },
   }
 }
-

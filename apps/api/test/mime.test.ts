@@ -51,11 +51,7 @@ describe("the envelope", () => {
   // `Destination`; a Bcc header here would deliver the same mail and disclose
   // every hidden recipient to everyone else on it.
   it("never writes a Bcc header", () => {
-    const raw = buildRawMessage(
-      message({ bcc: ["secret@example.com"] }),
-      [file()],
-      AT,
-    )
+    const raw = buildRawMessage(message({ bcc: ["secret@example.com"] }), [file()], AT)
     expect(raw.toLowerCase()).not.toContain("bcc:")
     expect(raw).not.toContain("secret@example.com")
   })
@@ -64,9 +60,7 @@ describe("the envelope", () => {
   // show it twice instead of collapsing it.
   it("carries the derived Message-ID", () => {
     const raw = buildRawMessage(message(), [file()], AT)
-    expect(raw).toContain(
-      "Message-ID: <0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071@i10.tech>",
-    )
+    expect(raw).toContain("Message-ID: <0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071@i10.tech>")
   })
 
   it("is byte-identical when built twice", () => {

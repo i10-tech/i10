@@ -72,7 +72,8 @@ function fakeDb(canned: Canned = {}) {
       onConflictDoNothing: () => self,
       returning: () => Promise.resolve(answer()),
       limit: () => Promise.resolve(answer()),
-      then: (resolve: (v: unknown) => unknown) => Promise.resolve(answer()).then(resolve),
+      then: (resolve: (v: unknown) => unknown) =>
+        Promise.resolve(answer()).then(resolve),
     }
     return self
   }
@@ -293,7 +294,10 @@ describe("persist", () => {
     })
 
     it("conflicts rather than replaying an empty answer", async () => {
-      const o = ops({ ...lost, priorKey: [{ requestHash: "hash-1", messageIds: null }] })
+      const o = ops({
+        ...lost,
+        priorKey: [{ requestHash: "hash-1", messageIds: null }],
+      })
       expect(await o.persist(input({ idempotencyKey: "k-1" }))).toEqual({
         status: "conflict",
       })
@@ -319,7 +323,10 @@ describe("suppressedFor", () => {
 describe("enqueue", () => {
   it("pushes onto the queue for the class", async () => {
     const o = ops()
-    const job: SendJob = { tenantId: "ten-1", messages: [{ id: "id-a", createdAt: AT }] }
+    const job: SendJob = {
+      tenantId: "ten-1",
+      messages: [{ id: "id-a", createdAt: AT }],
+    }
     await o.enqueue("bulk", job)
     expect(o.add).toHaveBeenCalledWith(
       expect.objectContaining({ groupId: "ten-1", jobId: "batch:id-a" }),

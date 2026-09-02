@@ -240,7 +240,9 @@ describe("POST /emails", () => {
     it("refuses a time beyond the horizon", async () => {
       const { app: a } = app()
       const far = new Date(Date.now() + 400 * 24 * 3600 * 1000).toISOString()
-      expect((await post(a, "/emails", { ...body, scheduled_at: far })).status).toBe(422)
+      expect((await post(a, "/emails", { ...body, scheduled_at: far })).status).toBe(
+        422,
+      )
     })
   })
 
