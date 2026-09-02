@@ -48,6 +48,128 @@ stalwart-cli create Action/ReloadSettings
 
 Every object in this plan is in that category, so the reload is not optional.
 
+## ⚠ AN EXTERNAL DIRECTORY GIVES YOU AUTHENTICATION AND NOTHING ELSE
+
+`Authentication.defaultUserRoleIds` ships **empty**, and with the internal
+directory that is invisible because accounts created through the admin UI get a
+role along the way. An LDAP-backed account is created by nobody. It authenticates
+and then holds no permissions at all — not `emailReceive`, not a single
+`jmapMailbox*` or IMAP verb.
+
+The failure this produces is the most expensive kind, because **every signal you
+would reach for says the credentials worked**:
+
+```
+services/authd   "bind succeeded"  uid=user_… mail=mohamed@i10.tech   ← repeatedly
+Apple Mail       "Unable to verify account name or password"
+```
+
+The bind is genuinely succeeding — Stalwart → authd → Clerk `verify_password` is
+fine end to end. What fails is the first operation _after_ login, and mail
+clients almost universally report a post-login refusal as a credentials problem,
+because from their side the two are indistinguishable. Two days can go into the
+password.
+
+Fixed by assigning Stalwart's built-in **User** role as the default:
+
+```json
+"defaultUserRoleIds": { "b": true }
+```
+
+⚠ `"b"` is a literal id, and it is a literal id because a plan cannot reference
+an object it did not create — `#alias` only resolves within one plan, and the
+built-in roles predate ours. Re-derive it rather than trusting this line if it
+ever stops matching:
+
+```sh
+stalwart-cli query Role --json     # → {"description":"User","id":"b"}
+```
+
+The other three built-ins are `c` Group, `d` Tenant Administrator, `e` System
+Administrator. `defaultAdminRoleIds` stays empty deliberately: that is the
+mapping that would let a directory account administer the server, and it wants a
+group membership to key on — see the first-boot section on why
+`STALWART_RECOVERY_ADMIN` is still set.
+
+## ⚠ AND THE SERVER HAS BEEN LOGGING INTO A VOID
+
+The default `Tracer` is `@type: "Log"` writing to `/var/log/stalwart`. That
+directory **does not exist in the container**, and the root filesystem is
+read-only with only `/etc/stalwart`, `/var/lib/stalwart` and `/tmp` mounted. So
+the tracer is enabled, at `info`, and producing nothing:
+
+```sh
+kubectl logs -n i10-prod i10-stalwart-0 -c stalwart --since=24h | wc -l   # 0
+```
+
+Not one line since first boot — which is why every problem in this directory's
+history was diagnosed from the outside, by probing ports and reading authd's log
+instead of the mail server's own.
+
+**Done on 2026-09-02.** A `Stdout` tracer (`jcvq3ahgaaqa`, level `info`) now
+carries the logs, and the file tracer (`jcrkontuahqb`) is disabled. It is not in
+`plan.ndjson` because `Tracer` has **no filters**, so `matchOn` has nothing to
+key on and neither `upsert` nor `reconcile` can converge — a Tracer is a
+create-once object, like the first administrator. If it ever has to be rebuilt:
+
+```sh
+stalwart-cli query Tracer --json                      # note the Log tracer's id
+stalwart-cli update Tracer <id> --field enable=false
+stalwart-cli create Tracer --json '{"@type":"Stdout","enable":true,"level":"info","ansi":false,"multiline":false,"buffered":false,"lossy":false,"events":{},"eventsPolicy":"exclude"}'
+stalwart-cli create Action/ReloadSettings
+```
+
+⚠ **And the tracer is part of the boot snapshot.** `Action/ReloadSettings` was
+not enough — the pod had to be restarted before a single line appeared. Same
+class as the certificate, two sections down. Budget a restart when changing it.
+
+⚠ **The account's permission set is cached, and the reload does not clear it
+either.** The log shows why: `store.cache-hit key = 1, collection = "accessToken"`.
+Assigning `defaultUserRoleIds` above therefore appeared to do nothing for twenty
+minutes — the role was in the database and the running server was still serving
+the account its old, empty token. A pod restart is what made it take effect.
+
+## ⚠ A PROXIED WILDCARD MAKES EVERY MAIL HOSTNAME HANG INSTEAD OF FAIL
+
+`*.i10.tech` is an A record proxied through Cloudflare, so **every name that is
+not explicitly declared resolves — to Cloudflare**. Cloudflare's proxy carries
+HTTP and HTTPS and nothing else, so a mail client connecting to
+`imap.i10.tech:993` gets a TCP connection that goes nowhere and sits until it
+times out.
+
+That is strictly worse than the name not existing. NXDOMAIN fails in
+milliseconds and the client moves on; this hangs.
+
+It matters because Apple Mail has no autoconfiguration to fall back on. The
+server log settles that — during a full account setup from a Mac and an iPhone,
+the autoconfig and autodiscover endpoints were requested **zero** times:
+
+```
+url = "/healthz/ready"  167
+url = "/healthz/live"    57
+(nothing else)
+```
+
+macOS and iOS Mail do not implement Thunderbird autoconfig, and they only speak
+Microsoft Autodiscover for account type _Exchange_, never for "Other Mail
+Account". So Apple guesses hostnames — `imap.<domain>`, `smtp.<domain>`, then
+`mail.<domain>` — and the wildcard turned the first two guesses into timeouts.
+The visible symptom was minutes of "Verifying" followed by a demand that the
+user type `mail.i10.tech` by hand.
+
+Fixed with two grey-cloud records, which must stay grey for the same reason
+`mail` is:
+
+```
+imap.i10.tech.  CNAME  mail.i10.tech.
+smtp.i10.tech.  CNAME  mail.i10.tech.
+```
+
+The general rule: **any hostname a mail client might guess needs an explicit
+grey-cloud record**, because the wildcard guarantees it will resolve either way.
+The `.mobileconfig` profile is the only path that does no guessing at all, which
+is why it connects noticeably faster than a hand-typed account.
+
 ## `SystemSettings.services` is the client-provisioning contract
 
 One map, two consumers, and that is the reason it is worth understanding:
