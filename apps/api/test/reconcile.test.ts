@@ -2,6 +2,8 @@ import type { SQL } from "drizzle-orm"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
 import {
+  activeTenantsStatement,
+  missingCustomers,
   reconcile,
   sentUsageStatement,
   unbilledIdsStatement,
@@ -156,5 +158,39 @@ describe("comparing the two sides", () => {
     const ours = [bucket("a", "01", 10)]
     const theirs = [bucket("a", "01", 7)]
     expect(reconcile(ours, theirs)).toEqual(reconcile(ours, theirs))
+  })
+})
+
+describe("every tenant should exist as a customer", () => {
+  const tenants = [
+    { tenantId: "a", slug: "acme", name: "Acme" },
+    { tenantId: "b", slug: "globex", name: "Globex" },
+  ]
+
+  it("says nothing when they all do", () => {
+    expect(missingCustomers(tenants, ["a", "b", "c"])).toEqual([])
+  })
+
+  // ⚠ A DIFFERENT KIND OF ERROR FROM A DRIFTED NUMBER. A tenant Autumn has
+  // never heard of means every track call for it has been failing since the
+  // tenant was created — and the usage reconciler cannot see it, because both
+  // sides read zero and agree.
+  it("finds a tenant the billing side has never heard of", () => {
+    expect(missingCustomers(tenants, ["a"])).toEqual([
+      { tenantId: "b", slug: "globex", name: "Globex" },
+    ])
+  })
+
+  // The tenant you most want to find is the one that has not sent yet.
+  it("checks every active tenant, not only ones that sent something", () => {
+    expect(missingCustomers(tenants, [])).toHaveLength(2)
+  })
+})
+
+describe("the active-tenant list", () => {
+  it("excludes suspended tenants, which are not expected to be billable", () => {
+    const { sql: statement } = render(activeTenantsStatement())
+    expect(statement).toContain("t.status = 'active'")
+    expect(statement).toContain("core.tenants")
   })
 })
