@@ -1,4 +1,5 @@
-# Build and publish container images to GHCR, signed.
+# Build and publish container images to GHCR, signed, then pin them into the
+# manifests Argo reads.
 #
 # ONE IMAGE SERVES BOTH ENVIRONMENTS. Nothing environment-specific is baked in;
 # a promotion re-tags the same artifact rather than rebuilding, so what reaches
@@ -6,16 +7,50 @@
 # SENTRY_ENVIRONMENT and friends are turbo passThrough rather than build inputs
 # — listing them would make staging and prod produce different images, which is
 # exactly what this model avoids.
+#
+# ── ONLY WHAT CHANGED ────────────────────────────────────────────────────────
+#
+# `changes` runs dorny/paths-filter over the diff and emits a matrix containing
+# only the apps whose own sources — or a workspace package they consume —
+# actually moved. Everything else is not rebuilt AND NOT RETAGGED: the manifests
+# already carry that image's digest from the commit that last changed it, so
+# `infra/k8s/i10/**` at any revision is a complete description of what runs.
+#
+# ⚠ THAT IS A DELIBERATE DIVERGENCE FROM PSL, which retags every unchanged app
+# to the new sha so its promote workflow finds a per-sha tag for all of them.
+# i10 has no promote step — main publishes prod-* directly — and pins by digest
+# rather than by tag, so the retag would produce an alias with no consumer and
+# a NEW wrapper digest that would roll a pod whose contents did not change.
+#
+# ── AND THE COMMIT IS THE DEPLOY ─────────────────────────────────────────────
+#
+# `deploy` writes each freshly built digest into the manifest that references it
+# and pushes that to main. Argo is on automated sync, so the push is the
+# rollout: `git log infra/` is the deployment history and a rollback is a
+# revert. Nothing here talks to the cluster.
 name: Build
 
 on:
   push:
     branches: [main, staging]
+    # ⚠ THIS EXISTS BECAUSE THE DEPLOY JOB PUSHES TO THIS BRANCH. Its commit
+    # touches only `infra/k8s/i10/**`, so ignoring `infra/**` here is what stops
+    # a build from triggering the next build forever. The two must move
+    # together: if the deploy job is ever taught to write outside infra/, this
+    # list has to grow with it.
+    #
+    # It costs nothing else. No filter below maps an infra path to an image, so
+    # an infra-only commit would produce an empty matrix and do no work anyway.
+    paths-ignore:
+      - "infra/**"
   workflow_dispatch:
 
+# ⚠ NOT `cancel-in-progress`. A cancelled run can leave a signed image pushed
+# with nothing having pinned it, and worse, can interrupt the deploy job between
+# its commit and its push.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -31,35 +66,186 @@ env:
   NAMESPACE: i10-tech
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Decide what to build.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Decide what to build
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    outputs:
+      # A JSON array of matrix entries — `[]` when nothing needs building.
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so paths-filter can diff against the previous push.
+          fetch-depth: 0
+
+      # ⚠ SKIPPED ON workflow_dispatch, WHERE THERE IS NO DIFF TO READ. A manual
+      # run has no "before" commit, so the filter would either fail or report
+      # nothing changed — and a human pressing Run Workflow means "build it".
+      # The plan step turns that into every app.
+      - name: Filter paths per app
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        with:
+          filters: |
+            # Each app lists its OWN sources plus every workspace package it
+            # consumes, transitively. Read off the package.json files:
+            #   contracts → api, node
+            #   node      → next, console
+            #   next      → console
+            #   ui        → console, web
+            #   api       → docs   (docs generates its API reference from it)
+            api:
+              - 'apps/api/**'
+              - 'packages/contracts/**'
+            console:
+              - 'apps/console/**'
+              - 'packages/ui/**'
+              - 'packages/next/**'
+              - 'packages/node/**'
+              - 'packages/contracts/**'
+            web:
+              - 'apps/web/**'
+              - 'packages/ui/**'
+            # ⚠ docs DEPENDS ON apps/api. It is not a documentation site that
+            # happens to mention the API — it builds `@i10/api` to generate the
+            # OpenAPI document Scalar renders. An api-only change that did not
+            # rebuild docs would leave the published reference describing the
+            # previous release.
+            docs:
+              - 'apps/docs/**'
+              - 'apps/api/**'
+              - 'packages/contracts/**'
+            # A Go module with its own go.sum, deliberately outside the pnpm
+            # workspace. Nothing in the Node sentinel below can affect it.
+            authd:
+              - 'services/authd/**'
+            # Anything that changes how EVERY Node app installs or builds.
+            node:
+              # NO LEADING SLASH: paths-filter reports changed paths
+              # repo-relative, and picomatch matches the pattern against that
+              # string, so `/package.json` would match nothing. A bare
+              # `package.json` has no separator, so it matches ONLY the root
+              # file — each app's own is already covered above.
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              # turbo.json is in the same class as the lockfile: its `env` list
+              # is part of every task's cache key and decides which variables
+              # are visible to a build.
+              - 'turbo.json'
+              # Catch-all for any package NOT mapped to an app above —
+              # eslint-config, typescript-config, and anything added later.
+              # ONE positive extglob on purpose: paths-filter evaluates each
+              # pattern independently with .some() semantics, so a separate
+              # `!packages/ui/**` line would match every file outside
+              # packages/ui and fire on any change at all.
+              - 'packages/!(contracts|ui|next|node)/**'
+            # Changes how everything is built, Go included.
+            all:
+              - '.github/workflows/build.yml'
+
+      # ⚠ THE APP TABLE LIVES HERE AND NOWHERE ELSE. Every downstream step
+      # iterates it rather than repeating the names, because in PSL's version
+      # they were repeated and drifted: an app was built, pushed, and then
+      # silently neither signed nor deployed, because one loop still listed
+      # three apps out of four.
+      #
+      # `manifest` is the file whose image reference the deploy job rewrites.
+      # `node` marks the apps the Node sentinel applies to.
+      - name: Build the plan
+        id: plan
+        env:
+          FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' }}
+          SENTINEL_NODE: ${{ steps.filter.outputs.node }}
+          SENTINEL_ALL: ${{ steps.filter.outputs.all }}
+          CH_API: ${{ steps.filter.outputs.api }}
+          CH_CONSOLE: ${{ steps.filter.outputs.console }}
+          CH_WEB: ${{ steps.filter.outputs.web }}
+          CH_DOCS: ${{ steps.filter.outputs.docs }}
+          CH_AUTHD: ${{ steps.filter.outputs.authd }}
+        run: |
+          set -euo pipefail
+
+          # ⚠ `context` IS PER-ENTRY, NOT SHARED. The Node apps build from the
+          # REPO ROOT because their Dockerfiles install from the workspace
+          # lockfile and a per-app context would have no pnpm-lock.yaml to be
+          # frozen against. authd is a self-contained Go module with its own
+          # go.sum, so its context is its own directory — giving it the repo
+          # root would ship the entire monorepo into the build.
+          table=$(jq -nc \
+            --arg api "${CH_API:-false}" \
+            --arg console "${CH_CONSOLE:-false}" \
+            --arg web "${CH_WEB:-false}" \
+            --arg docs "${CH_DOCS:-false}" \
+            --arg authd "${CH_AUTHD:-false}" \
+            '[
+              {name:"api",     image:"i10-api",     context:".",              file:"apps/api/Dockerfile",     manifest:"infra/k8s/i10/workloads/api.yaml",             node:true,  changed:$api},
+              {name:"console", image:"i10-console", context:".",              file:"apps/console/Dockerfile", manifest:"infra/k8s/i10/workloads/console.yaml",         node:true,  changed:$console},
+              {name:"web",     image:"i10-web",     context:".",              file:"apps/web/Dockerfile",     manifest:"infra/k8s/i10/workloads/web.yaml",             node:true,  changed:$web},
+              {name:"docs",    image:"i10-docs",    context:".",              file:"apps/docs/Dockerfile",    manifest:"infra/k8s/i10/workloads/docs.yaml",            node:true,  changed:$docs},
+              {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", manifest:"infra/k8s/i10/stalwart/statefulset.yaml",    node:false, changed:$authd}
+            ]')
+
+          decided=$(jq -c \
+            --arg force "$FORCE_ALL" \
+            --arg node "${SENTINEL_NODE:-false}" \
+            --arg all "${SENTINEL_ALL:-false}" \
+            'map(. + {build: (
+               ($force == "true")
+               or ($all == "true")
+               or (.node and ($node == "true"))
+               or (.changed == "true")
+             )})' <<<"$table")
+
+          matrix=$(jq -c '[.[] | select(.build) | {name, image, context, file, manifest}]' <<<"$decided")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+          # Publish the plan as THIS job's summary, not the build job's.
+          # GitHub renders a summary when the job that wrote it finishes, and
+          # this one ends in seconds — so the plan is readable on the run page
+          # while the images are still building, rather than ten minutes later
+          # alongside the result it was meant to predict.
+          {
+            echo "## Build plan"
+            echo ""
+            echo "| Image | Own paths changed | Decision |"
+            echo "|-------|-------------------|----------|"
+            jq -r '.[] | "| `\(.image)` | \(.changed) | " +
+                   (if .build then "🔨 build" else "⏭️ unchanged — keeps its pinned digest" end) + " |"' <<<"$decided"
+            echo ""
+            # ⚠ `if`, NOT `[[ … ]] && echo`. Under `set -e` a false test at the
+            # end of a group is the group's exit status, so a run where no
+            # sentinel fired would fail this step for having nothing to say.
+            if [[ "$FORCE_ALL" == "true" ]]; then
+              echo "Manual run → everything builds."
+            fi
+            if [[ "${SENTINEL_ALL:-}" == "true" ]]; then
+              echo "\`build.yml\` changed → everything builds."
+            fi
+            if [[ "${SENTINEL_NODE:-}" == "true" ]]; then
+              echo "Root manifest, lockfile, turbo.json or an unmapped package changed → every Node app builds."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Build, push and sign — only the apps the plan named.
+  # ---------------------------------------------------------------------------
   build:
     name: ${{ matrix.app.image }}
+    needs: changes
+    if: ${{ needs.changes.outputs.matrix != '[]' }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        # ⚠ `context` IS PER-ENTRY, NOT SHARED. The Node apps build from the
-        # REPO ROOT because their Dockerfiles install from the workspace
-        # lockfile and a per-app context would have no pnpm-lock.yaml to be
-        # frozen against. authd is a self-contained Go module with its own
-        # go.sum, so its context is its own directory — giving it the repo root
-        # would ship the entire monorepo into the build.
-        app:
-          - { name: api, image: i10-api, context: ".", file: apps/api/Dockerfile }
-          - {
-              name: console,
-              image: i10-console,
-              context: ".",
-              file: apps/console/Dockerfile,
-            }
-          - { name: web, image: i10-web, context: ".", file: apps/web/Dockerfile }
-          - { name: docs, image: i10-docs, context: ".", file: apps/docs/Dockerfile }
-          - {
-              name: authd,
-              image: i10-authd,
-              context: services/authd,
-              file: services/authd/Dockerfile,
-            }
+        app: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -114,14 +300,144 @@ jobs:
           cosign sign --yes \
             "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.app.image }}@${DIGEST}"
 
+      # ⚠ AN ARTIFACT, NOT A JOB OUTPUT. A matrix leg writing to `outputs` is
+      # overwritten by every other leg — last one to finish wins — so four
+      # parallel builds would hand the deploy job one digest and three
+      # nothing. One artifact per image, merged downstream.
       - name: Record the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          printf '%s' "$DIGEST" > "/tmp/digests/${{ matrix.app.image }}"
           {
             echo "### ${{ matrix.app.image }}"
             echo ''
             echo '```'
-            echo "${{ steps.push.outputs.digest }}"
+            echo "$DIGEST"
             echo '```'
-            echo ''
-            echo 'Pin this digest in `infra/k8s/i10/workloads/` — the deploy is that commit.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: digest-${{ matrix.app.image }}
+          path: /tmp/digests/${{ matrix.app.image }}
+          retention-days: 7
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Pin the digests into the manifests. This is the deploy.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Pin digests and deploy
+    needs: [changes, build]
+    # main only. A staging push publishes staging-* images and stops there —
+    # there is no staging cluster for them to roll into yet.
+    if: ${{ github.ref == 'refs/heads/main' && needs.build.result == 'success' }}
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      # The only job that writes to the repository.
+      contents: write
+    # Records a GitHub Deployment against the production environment, so the
+    # repo's Environments page answers "what is live and since when" without
+    # anyone reading workflow logs.
+    environment:
+      name: production
+      url: https://i10.tech
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The push below needs a token that can write; the default one can,
+          # and persist-credentials leaves it configured for git.
+          persist-credentials: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      # ⚠ REPLACE THE WHOLE REFERENCE, INCLUDING ANY EXISTING `@sha256:`.
+      # The manifests start life pinned to `:prod-latest` and end up pinned to
+      # `:prod-<sha>@sha256:<digest>`; a pattern that only matched the tag
+      # would append a second digest to an already-pinned line and produce a
+      # reference Kubernetes rejects at pull time, not at apply time.
+      - name: Pin each built image
+        id: pin
+        env:
+          MATRIX: ${{ needs.changes.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          pinned=()
+          while read -r image manifest; do
+            digest_file="/tmp/digests/${image}"
+            if [[ ! -s "$digest_file" ]]; then
+              echo "::error::No digest artifact for ${image} — the build job did not record one."
+              exit 1
+            fi
+            digest=$(cat "$digest_file")
+            ref="${REGISTRY}/${NAMESPACE}/${image}:prod-${GITHUB_SHA}@${digest}"
+            # A repo name is a prefix of no other repo name here, so anchoring
+            # on `<registry>/<ns>/<image>:` is unambiguous. api.yaml carries the
+            # reference twice — the migration Job and the Deployment — and both
+            # must move together, hence a global substitution.
+            python3 - "$manifest" "${REGISTRY}/${NAMESPACE}/${image}" "$ref" <<'PY'
+          import re, sys
+          path, repo, ref = sys.argv[1], sys.argv[2], sys.argv[3]
+          src = open(path).read()
+          out, n = re.subn(rf"{re.escape(repo)}:\S+", ref, src)
+          if n == 0:
+              sys.exit(f"no reference to {repo} in {path}")
+          open(path, "w").write(out)
+          print(f"  {path}: {n} reference(s) → {ref}")
+          PY
+            pinned+=("$image")
+          done < <(jq -r '.[] | "\(.image) \(.manifest)"' <<<"$MATRIX")
+          echo "pinned=${pinned[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        env:
+          PINNED: ${{ steps.pin.outputs.pinned }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- infra/k8s
+
+          if git diff --cached --quiet; then
+            echo "Manifests already reference these digests — nothing to deploy."
+            exit 0
+          fi
+
+          git commit -m "chore(deploy): pin ${PINNED} at ${GITHUB_SHA:0:7}"
+
+          # ⚠ RETRY BY REBASE, NOT BY FORCE. Two merges landing close together
+          # each produce a deploy commit, and the second finds main moved. The
+          # change is confined to image lines in files nothing else edits, so a
+          # rebase is safe; a force push would silently drop the first deploy.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected — rebasing onto origin/${GITHUB_REF_NAME} and retrying."
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || { git rebase --abort; exit 1; }
+          done
+          echo "::error::Could not push the deploy commit after 3 attempts."
+          exit 1
+
+      - name: Summarise
+        env:
+          PINNED: ${{ steps.pin.outputs.pinned }}
+        run: |
+          {
+            echo "## Deployed"
+            echo ""
+            echo "Pinned at \`${GITHUB_SHA:0:7}\`: \`${PINNED:-nothing}\`"
+            echo ""
+            echo "Argo syncs \`main\` automatically, so the commit above IS the rollout."
+            echo "Rollback is \`git revert\` of that commit."
           } >> "$GITHUB_STEP_SUMMARY"

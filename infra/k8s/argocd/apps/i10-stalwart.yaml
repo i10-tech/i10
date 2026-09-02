@@ -13,9 +13,21 @@ spec:
     server: https://kubernetes.default.svc
     namespace: i10-prod
   syncPolicy:
-    # DELIBERATELY NOT AUTOMATED. The images this references do not exist
-    # until the first Build run publishes them, and an automated sync would
-    # leave Argo permanently red on ImagePullBackOff. Turn automation on in
-    # the same commit that first tags an image.
+    # ⚠ AUTOMATED, AND THAT IS WHAT MAKES A COMMIT A DEPLOY. The Build
+    # workflow's deploy job writes each freshly built image's digest into this
+    # path and pushes to main; without automation that push would publish a
+    # description of production that production was not obeying.
+    #
+    # It was deliberately OFF until 2026-09-02, because the images did not
+    # exist yet and an automated sync would have sat red on ImagePullBackOff.
+    # The instruction left here was to turn automation on in the same commit
+    # that first pins a digest, which is this one.
+    #
+    # selfHeal is the half worth knowing before debugging on the box: a
+    # hand-applied change to anything under this path is reverted within about
+    # 35 seconds. To test a fix live, remove `automated` first — and put it back.
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - ServerSideApply=true
