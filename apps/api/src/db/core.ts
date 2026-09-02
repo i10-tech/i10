@@ -246,8 +246,16 @@ export const apiKeys = core.table(
  *
  * A customer retrying `POST /emails` after a timeout must get the same message
  * id back, not a second email. `request_hash` separates a genuine retry from a
- * reused key carrying a different body; the latter is a 422, because silently
+ * reused key carrying a different body; the latter is a 409, because silently
  * returning the first message would be worse than either sending or refusing.
+ *
+ * ⚠ THE ROW IS INSERTED BEFORE THE MESSAGES, NOT AFTER, AND THE PRIMARY KEY IS
+ * WHAT SERIALISES A DOUBLE-POST. `insert … on conflict (tenant_id, key) do
+ * nothing` blocks on a conflicting row that is still uncommitted, so of two
+ * simultaneous retries one inserts and the other waits, then reads the ids the
+ * winner wrote. Deciding outside the transaction — read, then insert — would
+ * let both miss and both mint a full set of messages, which is the exact
+ * duplicate this table exists to prevent.
  *
  * Rows are pruned after 24 hours. A key is a retry window, not a permanent
  * record, and keeping them forever makes this table the largest thing in the
@@ -261,7 +269,16 @@ export const idempotencyKeys = core.table(
       .references(() => tenants.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     requestHash: text("request_hash").notNull(),
-    messageId: uuid("message_id"),
+    /**
+     * Every id the key minted, in the order the caller submitted them.
+     *
+     * ⚠ AN ARRAY BECAUSE `POST /emails/batch` IS ONE KEY OVER 100 MESSAGES. A
+     * single `message_id` can only replay a single send; a replayed batch would
+     * have to answer with 99 nulls or with nothing, and an SDK that got nothing
+     * back would send the batch again. Null only while the inserting
+     * transaction is still open — a committed row always carries its ids.
+     */
+    messageIds: uuid("message_ids").array(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

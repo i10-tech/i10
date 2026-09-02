@@ -2,6 +2,7 @@ import type { SendEmail } from "@repo/contracts"
 import { describe, expect, it, vi } from "vitest"
 import {
   acceptSend,
+  addrSpec,
   asList,
   classFor,
   hashRequest,
@@ -104,6 +105,22 @@ describe("suppression", () => {
       new Set(["bounced@example.com"]),
     )
     expect(prepared.to).toEqual([])
+  })
+
+  // ⚠ THE BYPASS THAT WOULD NEVER BE NOTICED. A display name around a
+  // suppressed address must not make it sendable again — the send would
+  // succeed, and the cost would land on the SES reputation every tenant shares.
+  it("sees through a display name", () => {
+    const prepared = withoutSuppressed(
+      email({ to: ["Bob Bounced <bob@x.com>"] }),
+      new Set(["bob@x.com"]),
+    )
+    expect(prepared.to).toEqual([])
+  })
+
+  it("reduces an address to its addr-spec", () => {
+    expect(addrSpec("Bob <Bob@X.com>")).toBe("bob@x.com")
+    expect(addrSpec("  bob@x.com ")).toBe("bob@x.com")
   })
 
   // ⚠ Accepted and recorded, never queued. The caller did nothing wrong and the

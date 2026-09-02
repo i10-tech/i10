@@ -94,7 +94,7 @@ export function withoutSuppressed(
   suppressed: ReadonlySet<string>,
 ): PreparedMessage {
   const keep = (list: readonly string[] | undefined) =>
-    (list ?? []).filter((a) => !suppressed.has(a.toLowerCase()))
+    (list ?? []).filter((a) => !suppressed.has(addrSpec(a)))
 
   return {
     payload,
@@ -102,6 +102,23 @@ export function withoutSuppressed(
     cc: keep(asList(payload.cc)),
     bcc: keep(asList(payload.bcc)),
   }
+}
+
+/**
+ * The bare address out of `Name <addr@example.com>`, lowercased.
+ *
+ * ⚠ SUPPRESSION IS COMPARED ON THIS, NOT ON THE RAW STRING. `to` accepts a
+ * display name, so a hard-bounced address that has been suppressed would
+ * otherwise become sendable again simply by writing `Bob <bob@x.com>` — a
+ * bypass that costs shared SES reputation and that nobody would ever notice,
+ * because the send succeeds.
+ *
+ * Deliberately not a full RFC 5322 parser: it is one angle-bracket pair or the
+ * whole string, which covers every form the contract's own validation admits.
+ */
+export function addrSpec(address: string): string {
+  const angled = /<([^>]*)>/.exec(address)
+  return (angled?.[1] ?? address).trim().toLowerCase()
 }
 
 /** The contract allows a single address or a list; downstream wants a list. */
@@ -144,7 +161,10 @@ export interface AcceptOps {
     | { status: "conflict" }
   >
 
-  /** Addresses this tenant may not send to. Lowercased. */
+  /**
+   * Addresses this tenant may not send to, in `addrSpec()` form — bare and
+   * lowercased, because that is what `withoutSuppressed` compares against.
+   */
   suppressedFor: (tenantId: string, addresses: string[]) => Promise<Set<string>>
 
   /** Pushes the batch. Called only after the transaction commits. */

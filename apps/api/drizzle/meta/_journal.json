@@ -29,6 +29,20 @@
       "when": 1788282285651,
       "tag": "0003_api_projection_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788373328084,
+      "tag": "0004_drop_idempotency_message_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788373334949,
+      "tag": "0005_add_idempotency_message_ids",
+      "breakpoints": true
     }
   ]
 }

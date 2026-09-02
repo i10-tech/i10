@@ -28,6 +28,28 @@ export function createCacheClient(url: string): Redis {
   })
 }
 
+/**
+ * The connection the send queues run on.
+ *
+ * ⚠ A SECOND CLIENT WITH THE OPPOSITE FAILURE POLICY, NOT A SHARED ONE. The
+ * cache above is allowed to fail — an error there is a miss. This one is a
+ * dependency: a batch that cannot be enqueued waits for the stale-message sweep
+ * instead of going out now, so it is worth retrying and worth queueing commands
+ * across a reconnect. One client cannot hold both policies, which is why there
+ * are two.
+ *
+ * groupmq's worker duplicates this client for its blocking `bzpopmin` with
+ * `maxRetriesPerRequest: null` of its own, so these settings govern the
+ * enqueue and bookkeeping commands rather than the block.
+ */
+export function createQueueClient(url: string): Redis {
+  return new Redis(url, {
+    maxRetriesPerRequest: 5,
+    enableOfflineQueue: true,
+    connectTimeout: 5000,
+  })
+}
+
 export function redisKeyCache(client: Redis): KeyCache {
   return {
     get: (key) => client.get(key),

@@ -55,6 +55,20 @@ describe("the claim", () => {
     expect(statement).toContain("m.claimed_at < now() -")
   })
 
+  // ⚠ THE PROPERTY THAT MAKES BATCHING SAFE. A worker dying 400 messages into a
+  // batch of 500 leaves those 400 as `sent`; the job goes back to the queue and
+  // is re-claimed in full, so the ONLY thing standing between that and 400
+  // duplicate emails is that this predicate cannot match a sent row.
+  it("can never re-claim a message that is already sent", () => {
+    const { sql: statement } = claim()
+    const where = statement.slice(statement.indexOf("where"))
+    expect(where).not.toContain("'sent'")
+    // Nor anything else terminal: a permanently failed message must stay failed,
+    // and a cancelled one must stay cancelled.
+    expect(where).not.toContain("'failed'")
+    expect(where).not.toContain("'canceled'")
+  })
+
   // The claim interval is a parameter, never interpolated text: it reaches the
   // statement as a bind so a value from configuration cannot become SQL.
   it("binds the stale interval rather than inlining it", () => {

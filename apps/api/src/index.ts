@@ -2,9 +2,12 @@ import { serve } from "@hono/node-server"
 import { createClerkClient } from "@clerk/backend"
 import pino from "pino"
 import { createApp } from "./app.js"
-import { createCacheClient, redisKeyCache } from "./cache/redis.js"
+import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { createSendQueue } from "./queue/send-queue.js"
+import { acceptDatabaseOps } from "./send/accept-db.js"
+import { resilient, unmetered } from "./send/metering.js"
 
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
@@ -33,6 +36,12 @@ const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
 const cache = createCacheClient(env.REDIS_URL)
 cache.on("error", (err: Error) => log.warn({ err }, "api key cache unavailable"))
 
+// ⚠ THE QUEUE'S CONNECTION, NOT THE CACHE'S — see cache/redis.ts. An enqueue
+// that fails does not fail the request, but it does cost the message a trip
+// through the sweep, so this client retries where the cache one gives up.
+const queueRedis = createQueueClient(env.REDIS_URL)
+queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+
 const app = createApp({
   apiKeyAuth: {
     verify: (secret) => clerk.apiKeys.verify(secret),
@@ -58,6 +67,32 @@ const app = createApp({
     smtpPort: 465,
     organization: "i10",
   },
+  sendPath: {
+    ...acceptDatabaseOps({
+      db,
+      // ⚠ ONE QUEUE PER CLASS, BOTH BUILT HERE. Constructing them lazily at the
+      // first send would put a Redis connection on the latency path of somebody
+      // waiting for a password reset.
+      queues: {
+        transactional: createSendQueue({
+          redis: queueRedis,
+          class: "transactional",
+          jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+        }),
+        bulk: createSendQueue({
+          redis: queueRedis,
+          class: "bulk",
+          jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+        }),
+      },
+    }),
+    // ⚠ `unmetered` UNTIL AUTUMN IS WIRED, AND VISIBLY SO — the same stub the
+    // worker carries. `resilient` wraps it so that when a real Metering does
+    // arrive, an outage in it degrades to "allowed" rather than refusing a
+    // paying customer's mail.
+    metering: resilient(unmetered, log),
+    log,
+  },
   pingDb: async () => {
     await sql`select 1`
   },
@@ -76,9 +111,11 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     server.close(() => {
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
-      void Promise.allSettled([sql.end({ timeout: 5 }), cache.quit()]).finally(() =>
-        process.exit(0),
-      )
+      void Promise.allSettled([
+        sql.end({ timeout: 5 }),
+        cache.quit(),
+        queueRedis.quit(),
+      ]).finally(() => process.exit(0))
     })
   })
 }
