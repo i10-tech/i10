@@ -32,6 +32,25 @@ The declarative configuration, applied with
 operation per line; `upsert` matches an existing object by a natural key and
 updates it in place, so re-applying converges rather than duplicating.
 
+In practice you do not run that by hand. `../bootstrap.sh` does the whole
+sequence — apply, ensure the tracer, reload, restart, verify, and print the DNS
+records the server expects — and it is idempotent, so it is also the thing to
+run after any edit to this file:
+
+```sh
+./infra/k8s/i10/stalwart/bootstrap.sh            # apply and roll
+./infra/k8s/i10/stalwart/bootstrap.sh --verify   # check, change nothing
+```
+
+⚠ **It reads the plan out of the DEPLOYED ConfigMap, not out of your working
+copy.** Argo carries this file into the pod under a content-hashed name; the
+script finds that ConfigMap and applies what it contains. So an uncommitted
+local edit does nothing until it is merged and synced — which is the point.
+Configuring the server from something nobody else can see is how a cluster ends
+up in a state no repository describes.
+
+The underlying command, for when the script is not what you want:
+
 ```sh
 stalwart-cli apply --file plan.ndjson
 ```
