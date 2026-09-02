@@ -1,0 +1,94 @@
+# The send worker.
+#
+# ⚠ THE SAME IMAGE AS THE API, WITH A DIFFERENT COMMAND. There is no
+# `i10-worker` image and no extra entry in build.yml's matrix — this runs
+# `node dist/worker.js` out of `i10-api`, exactly as the migration Job above it
+# runs `node dist/migrate.js`. One artifact means the worker cannot drift from
+# the API's schema, contracts or environment validation, and it means the deploy
+# job's digest pin applies to both without a second path filter to keep in step.
+#
+# ⚠ THIS FILE IS WHY build.yml NO LONGER MAPS ONE MANIFEST PER IMAGE. The deploy
+# job used to rewrite a single named file per built image; a second file
+# referencing `i10-api` would have been left on a stale digest, silently, with
+# nothing to notice it. The pin step now rewrites every reference under
+# `infra/k8s/` instead — so adding another manifest for an existing image needs
+# no change anywhere else, which is the property that was missing.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-worker
+  namespace: i10-prod
+spec:
+  # ⚠ ONE REPLICA UNTIL SES SAYS OTHERWISE, AND THE REASON IS QUOTA RATHER THAN
+  # LOAD. Every replica spends from the same SES send rate, so what SES sees is
+  # WORKER_CONCURRENCY multiplied by this number. Raising either without raising
+  # the account's rate converts throughput into a wall of 429s, which the
+  # transport correctly defers — turning a scaling change into a retry storm
+  # that looks like SES being slow.
+  replicas: 1
+  # Never two versions of the worker at once during a rollout: the old one may
+  # hold claims the new one would have to wait out. Cheap here because sending
+  # is asynchronous — nobody is watching an HTTP request.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-worker
+    spec:
+      # ⚠ LONGER THAN A SEND TAKES, SHORTER THAN THE STALE CLAIM. On SIGTERM the
+      # worker stops taking jobs and lets what is in flight finish. Killed
+      # sooner, its rows sit in `sending` until WORKER_CLAIM_STALE_AFTER expires
+      # — mail late by minutes, and a duplicate for anything SES had already
+      # accepted. This makes an ordinary deploy produce neither.
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: worker
+          image: ghcr.io/i10-tech/i10-api:prod-597975df2d253e19f1327050211a5ce6bbac08b8@sha256:e26c7547f046b31c289363654f8d09bceed2594c798f76ec332b4f7f32487ae9
+          imagePullPolicy: Always
+          command: ["node", "dist/worker.js"]
+          envFrom:
+            - secretRef: { name: i10-shared }
+            - secretRef: { name: i10-api }
+          env:
+            # ⚠ `i10_api`, NOT THE `i10` OWNER. Row level security does not
+            # apply to a table's owner, and the worker reads and writes message
+            # bodies for every tenant it serves — so it is the one process where
+            # losing the boundary would be worst and least visible.
+            # assertRlsSubject() refuses to start on the wrong role.
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-api-db-role, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-api-db-role, key: password }
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+            # Used to build the claim identity written to `claimed_by`. It must
+            # differ per replica, which the pod name guarantees.
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities: { drop: ["ALL"] }
+          # ⚠ NO HTTP PROBES, BECAUSE THERE IS NO LISTENER. The worker serves
+          # nothing; a readiness probe would need a port opened purely to answer
+          # it. Liveness is the process being alive, which the kubelet already
+          # knows — and a worker that is merely idle because the queue is empty
+          # must not be restarted for it.
+          #
+          # What failure looks like here is queue depth rising with no
+          # `batch complete` lines, which is a monitoring question rather than a
+          # probe. That monitoring does not exist yet.

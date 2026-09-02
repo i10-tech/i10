@@ -185,11 +185,11 @@ jobs:
             --arg docs "${CH_DOCS:-false}" \
             --arg authd "${CH_AUTHD:-false}" \
             '[
-              {name:"api",     image:"i10-api",     context:".",              file:"apps/api/Dockerfile",     manifest:"infra/k8s/i10/workloads/api.yaml",             node:true,  changed:$api},
-              {name:"console", image:"i10-console", context:".",              file:"apps/console/Dockerfile", manifest:"infra/k8s/i10/workloads/console.yaml",         node:true,  changed:$console},
-              {name:"web",     image:"i10-web",     context:".",              file:"apps/web/Dockerfile",     manifest:"infra/k8s/i10/workloads/web.yaml",             node:true,  changed:$web},
-              {name:"docs",    image:"i10-docs",    context:".",              file:"apps/docs/Dockerfile",    manifest:"infra/k8s/i10/workloads/docs.yaml",            node:true,  changed:$docs},
-              {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", manifest:"infra/k8s/i10/stalwart/statefulset.yaml",    node:false, changed:$authd}
+              {name:"api",     image:"i10-api",     context:".",              file:"apps/api/Dockerfile",       node:true,  changed:$api},
+              {name:"console", image:"i10-console", context:".",              file:"apps/console/Dockerfile",   node:true,  changed:$console},
+              {name:"web",     image:"i10-web",     context:".",              file:"apps/web/Dockerfile",       node:true,  changed:$web},
+              {name:"docs",    image:"i10-docs",    context:".",              file:"apps/docs/Dockerfile",      node:true,  changed:$docs},
+              {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", node:false, changed:$authd}
             ]')
 
           decided=$(jq -c \
@@ -203,7 +203,7 @@ jobs:
                or (.changed == "true")
              )})' <<<"$table")
 
-          matrix=$(jq -c '[.[] | select(.build) | {name, image, context, file, manifest}]' <<<"$decided")
+          matrix=$(jq -c '[.[] | select(.build) | {name, image, context, file}]' <<<"$decided")
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
           # Publish the plan as THIS job's summary, not the build job's.
@@ -364,6 +364,14 @@ jobs:
       # `:prod-<sha>@sha256:<digest>`; a pattern that only matched the tag
       # would append a second digest to an already-pinned line and produce a
       # reference Kubernetes rejects at pull time, not at apply time.
+      #
+      # ⚠ IT SCANS EVERY MANIFEST RATHER THAN A MAPPED FILE PER IMAGE. There
+      # used to be a `manifest:` column in the app table above; it broke the
+      # moment one image appeared in two files — `i10-api` runs both the API and
+      # the worker — and it broke SILENTLY, leaving the second file on a stale
+      # digest with nothing to notice. A mapping you must remember to update is
+      # a mapping that will be forgotten, so there is no mapping: every
+      # reference to a built image is rewritten wherever it appears.
       - name: Pin each built image
         id: pin
         env:
@@ -371,7 +379,7 @@ jobs:
         run: |
           set -euo pipefail
           pinned=()
-          while read -r image manifest; do
+          while read -r image; do
             digest_file="/tmp/digests/${image}"
             if [[ ! -s "$digest_file" ]]; then
               echo "::error::No digest artifact for ${image} — the build job did not record one."
@@ -379,22 +387,26 @@ jobs:
             fi
             digest=$(cat "$digest_file")
             ref="${REGISTRY}/${NAMESPACE}/${image}:prod-${GITHUB_SHA}@${digest}"
-            # A repo name is a prefix of no other repo name here, so anchoring
-            # on `<registry>/<ns>/<image>:` is unambiguous. api.yaml carries the
-            # reference twice — the migration Job and the Deployment — and both
-            # must move together, hence a global substitution.
-            python3 - "$manifest" "${REGISTRY}/${NAMESPACE}/${image}" "$ref" <<'PY'
-          import re, sys
-          path, repo, ref = sys.argv[1], sys.argv[2], sys.argv[3]
-          src = open(path).read()
-          out, n = re.subn(rf"{re.escape(repo)}:\S+", ref, src)
-          if n == 0:
-              sys.exit(f"no reference to {repo} in {path}")
-          open(path, "w").write(out)
-          print(f"  {path}: {n} reference(s) → {ref}")
+            python3 - "${REGISTRY}/${NAMESPACE}/${image}" "$ref" <<'PY'
+          import pathlib, re, sys
+          repo, ref = sys.argv[1], sys.argv[2]
+          # A repo name is a prefix of no other repo name here, so anchoring on
+          # `<registry>/<ns>/<image>:` is unambiguous.
+          pattern = re.compile(rf"{re.escape(repo)}:\S+")
+          total = 0
+          for path in sorted(pathlib.Path("infra/k8s").rglob("*.yaml")):
+              src = path.read_text()
+              out, n = pattern.subn(ref, src)
+              if n:
+                  path.write_text(out)
+                  total += n
+                  print(f"  {path}: {n} reference(s)")
+          if total == 0:
+              sys.exit(f"no reference to {repo} under infra/k8s — is the image still deployed?")
+          print(f"  → {ref}")
           PY
             pinned+=("$image")
-          done < <(jq -r '.[] | "\(.image) \(.manifest)"' <<<"$MATRIX")
+          done < <(jq -r '.[].image' <<<"$MATRIX")
           echo "pinned=${pinned[*]}" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push

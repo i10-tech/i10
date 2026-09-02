@@ -26,6 +26,10 @@
     "MIGRATE_DATABASE_URL",
     "I10_API_KEY",
     "I10_BASE_URL",
+    // The pod name, read by the worker to build a claim identity. Runtime only
+    // and per-replica by definition, so it could not be a build input even if
+    // it wanted to be.
+    "HOSTNAME",
     "SENTRY_ENVIRONMENT",
     "OTEL_EXPORTER_OTLP_ENDPOINT",
     "OTEL_SERVICE_NAME"
