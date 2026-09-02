@@ -138,20 +138,29 @@ describe("quota", () => {
         throw new Error("autumn down")
       },
     }
-    await expect(resilient(broken, log).recordSent("ten-1", 3)).resolves.toBeUndefined()
-    // Unrecorded usage is lost revenue until a reconciler exists, so it is an
-    // error rather than a warning.
+    await expect(
+      resilient(broken, log).recordSent("ten-1", ["msg-a"]),
+    ).resolves.toBeUndefined()
+    // ⚠ And it is NOT retried — Autumn's own docs say a retried batchTrack
+    // double-deducts, and that "gaps are preferable to duplicates". The
+    // reconciler closes the gap.
     expect(log.error).toHaveBeenCalled()
   })
 
-  it("counts a batch as one call, not one per message", async () => {
+  // ⚠ Ids, not a count. Autumn's single `track` 409s a replayed
+  // Idempotency-Key, so an id can be resubmitted safely and a count cannot —
+  // which is the only reason the reconciler can top up without double-billing.
+  it("passes message ids through, so a top-up can be idempotent", async () => {
     const inner: Metering = { checkQuota: vi.fn(), recordSent: vi.fn() }
-    await resilient(inner).recordSent("ten-1", 500)
-    expect(inner.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", 500)
+    await resilient(inner).recordSent("ten-1", ["msg-a", "msg-b"])
+    expect(inner.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+      "msg-a",
+      "msg-b",
+    ])
   })
 
   it("the unmetered stub allows and counts nothing", async () => {
     expect(await unmetered.checkQuota("ten-1", 10)).toEqual({ status: "allowed" })
-    await expect(unmetered.recordSent("ten-1", 10)).resolves.toBeUndefined()
+    await expect(unmetered.recordSent("ten-1", ["msg-a"])).resolves.toBeUndefined()
   })
 })

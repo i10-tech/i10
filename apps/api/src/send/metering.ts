@@ -55,15 +55,19 @@ export interface Metering {
   checkQuota(tenantId: string, count: number): Promise<QuotaOutcome>
 
   /**
-   * Called after the provider accepted the message.
+   * Called after the provider accepted the messages.
    *
-   * ⚠ IT MUST NOT BE ABLE TO FAIL A SEND THAT ALREADY HAPPENED. The mail has
-   * gone; throwing here would return the row to the queue and send it twice to
-   * fix a billing record. Implementations swallow their own errors and are
-   * responsible for their own durability — see the note on reconciliation
-   * below.
+   * ⚠ IT TAKES MESSAGE IDS, NOT A COUNT, AND THAT IS WHAT MAKES THE BOOKS
+   * FIXABLE. A count can only ever be added; an id can be checked. Autumn's
+   * single `track` accepts an `Idempotency-Key` header and answers 409 to a
+   * replay, so a message id is a key that cannot double-bill however many times
+   * it is presented. The reconciler below depends on that entirely.
+   *
+   * ⚠ AND IT MUST NOT BE ABLE TO FAIL A SEND THAT ALREADY HAPPENED. The mail
+   * has gone; throwing here would return the row to the queue and send it twice
+   * to fix a billing record.
    */
-  recordSent(tenantId: string, count: number): Promise<void>
+  recordSent(tenantId: string, messageIds: readonly string[]): Promise<void>
 }
 
 /**
@@ -106,12 +110,11 @@ export const unmetered: Metering = {
  * Wraps any Metering so that `recordSent` can never throw into the send path,
  * and a failed check degrades to `unavailable` rather than to an exception.
  *
- * ⚠ THE LOST-USAGE PATH NEEDS A RECONCILER, AND IT DOES NOT EXIST YET. A
- * swallowed `recordSent` is revenue that was never counted. The durable fix is
- * to derive usage from `core.messages` — every sent row is one billable unit,
- * with `sent_at` as the clock — and reconcile against Autumn on a schedule,
- * which also covers the fail-open window above. Until that exists, the log line
- * here is the only record, so it is an error rather than a warning.
+ * ⚠ A SWALLOWED `recordSent` IS REVENUE NEVER COUNTED, AND THAT IS ACCEPTABLE
+ * ONLY BECAUSE SOMETHING ELSE FINDS IT. `core.messages` is the billing source
+ * of truth — every `sent` row is one billable unit with `sent_at` as its clock —
+ * and send/reconcile.ts compares it against what Autumn actually recorded. The
+ * log line is a signal, not the record.
  */
 export function resilient(inner: Metering, log?: Logger): Metering {
   return {
@@ -123,13 +126,18 @@ export function resilient(inner: Metering, log?: Logger): Metering {
         return { status: "unavailable", message: "Could not check the sending quota." }
       }
     },
-    async recordSent(tenantId, count) {
+    async recordSent(tenantId, messageIds) {
       try {
-        await inner.recordSent(tenantId, count)
+        await inner.recordSent(tenantId, messageIds)
       } catch (err) {
+        // ⚠ NOT RETRIED HERE, ON PURPOSE, AND AUTUMN SAYS SO ITSELF. `batchTrack`
+        // has no per-item idempotency, and its documentation is explicit:
+        // "retrying re-enqueues the already-succeeded items, which causes
+        // double-deduction", and "gaps are preferable to duplicates". So the hot
+        // path takes the gap and the reconciler closes it — see send/reconcile.ts.
         log?.error(
-          { err, tenantId, count },
-          "usage not recorded — needs reconciliation",
+          { err, tenantId, count: messageIds.length },
+          "usage not recorded — the reconciler will close the gap",
         )
       }
     },
