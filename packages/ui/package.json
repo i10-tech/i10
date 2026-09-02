@@ -21,9 +21,9 @@
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/react": "^19.2.0",
-    "eslint": "^9.39.5",
+    "eslint": "^10.9.1",
     "react": "^19.2.8",
-    "typescript": "6.0.3"
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
     "react": "^19"
