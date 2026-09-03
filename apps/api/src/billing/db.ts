@@ -77,6 +77,20 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         // row, comparing timestamps and then writing is two statements with a
         // gap, and two webhook deliveries land in that gap regularly enough to
         // matter — Polar retries in parallel with its own next event.
+        //
+        // ⚠ THE SECOND DISJUNCT IS WHAT MAKES A DELIVERY RETRY ABLE TO REPAIR A
+        // FAILED GRANT, AND IT IS NOT DEFENSIVE. A redelivery carries the SAME
+        // `event_at`, so under `<` alone it answered "stale" and returned
+        // before `ensureCustomer` — meaning that when the Autumn call threw,
+        // every one of Polar's retries was discarded and the only repair left
+        // was the reconciler, up to half an hour later. Observed exactly that
+        // way on the first real payment: the row said `active`/`pro` while
+        // `granted_at` stayed null and three retries logged "ignored an
+        // out-of-order subscription event".
+        //
+        // `granted_at is null` is the precise condition — same event, not yet
+        // applied downstream. A genuinely OLDER event is still refused, and one
+        // already granted is still idempotent.
         const rows = (await tx.execute(sql`
           insert into core.subscriptions as s (
             tenant_id, polar_subscription_id, polar_customer_id, polar_product_id,
@@ -103,6 +117,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
             event_at              = excluded.event_at,
             updated_at            = now()
           where s.event_at < excluded.event_at
+             or (s.event_at = excluded.event_at and s.granted_at is null)
           returning s.tenant_id
         `)) as unknown as { tenant_id: string }[]
 

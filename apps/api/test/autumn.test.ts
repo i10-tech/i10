@@ -262,7 +262,10 @@ describe("entitlements", () => {
 
     expect(calls[0]?.url).toBe("https://autumn.internal/v1/customers.get_or_create")
     expect(calls[0]?.body).toMatchObject({
-      id: "ten-1",
+      // ⚠ `customer_id`. This assertion said `id` and passed for months, which
+      // is precisely how the bug survived: a fake accepts any shape, and only
+      // Autumn rejects it — with a 400, on the first real payment.
+      customer_id: "ten-1",
       create_in_stripe: false,
       // ⚠ In the SAME call. A separate attach afterwards can fail on its own
       // and leave a customer with no entitlement, which reads as an outage.
@@ -273,6 +276,23 @@ describe("entitlements", () => {
   it("throws when the customer cannot be created", async () => {
     const { autumn } = client({ status: 500 })
     await expect(autumn.ensureCustomer({ tenantId: "ten-1" })).rejects.toThrow(/500/)
+  })
+
+  // ⚠ THE STATUS ALONE IS NOT A DIAGNOSIS. A bare "failed with 400" sent us to
+  // replay the call by hand against production to learn the field name was
+  // wrong; Autumn had said so in the body all along.
+  it("carries Autumn's own message into the error", async () => {
+    const { autumn } = client({
+      status: 400,
+      body: {
+        code: "invalid_inputs",
+        message: "customer_id: must be a string (received undefined)",
+      },
+    })
+
+    await expect(autumn.ensureCustomer({ tenantId: "ten-1" })).rejects.toThrow(
+      /customer_id: must be a string/,
+    )
   })
 
   // ⚠ THE WHOLE DESIGN IN ONE ASSERTION. `no_billing_changes` is what makes
