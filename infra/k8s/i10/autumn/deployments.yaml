@@ -94,10 +94,13 @@ spec:
             - name: CRITICAL_DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
           resources:
-            requests: { cpu: 100m, memory: 320Mi }
-            # Measured, not guessed: 640Mi OOM-killed this on boot. The node has
-            # roughly 3.7Gi free, so headroom is cheaper than another crash loop.
-            limits: { memory: 1Gi }
+            # ⚠ MEASURED, NOT GUESSED. Primary plus one fork settles at
+            # 1315 MiB and stays flat; 640Mi and 1Gi both OOM-killed it. Roughly
+            # 40% of that is JS heap — the rest is Autumn's module graph, which
+            # is why capping the heap (`--smol`, BUN_JSC_forceRAMSize) changed
+            # nothing measurable.
+            requests: { cpu: 100m, memory: 640Mi }
+            limits: { memory: 1600Mi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
@@ -134,10 +137,21 @@ spec:
           image: ghcr.io/i10-tech/autumn:latest
           imagePullPolicy: Always
           command: ["bun", "src/workers.ts"]
+          # ⚠ ONE PROCESS, AND IT ONLY WORKS BECAUSE OUR IMAGE PATCHES THE
+          # CONSTANT. Upstream hard-codes four with no environment variable;
+          # infra/autumn/server.Dockerfile replaces that line with a read of
+          # AUTUMN_WORKER_PROCESSES. Measured: four processes hold 1875 MiB,
+          # one holds 630 MiB, and the work is a trickle of usage events.
+          #
+          # ⚠ RAISING THIS IS A MEMORY DECISION, NOT A THROUGHPUT ONE — each
+          # extra process is another ~470 MiB of identical module graph, and
+          # this box has about 1 GiB of slack once everything is running.
           workingDir: /app/server
           envFrom:
             - secretRef: { name: i10-autumn }
           env:
+            - name: AUTUMN_WORKER_PROCESSES
+              value: "1"
             - name: PGUSER
               valueFrom:
                 secretKeyRef: { name: i10-autumn-db-role, key: username }
@@ -149,11 +163,9 @@ spec:
             - name: CRITICAL_DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
           resources:
-            requests: { cpu: 100m, memory: 384Mi }
-            # ⚠ FOUR PROCESSES, AND UNLIKE THE SERVER THERE IS NO KNOB.
-            # workers.ts hard-codes `NUM_PROCESSES = 4` outside development, so
-            # the only lever here is the limit.
-            limits: { memory: 1Gi }
+            requests: { cpu: 50m, memory: 320Mi }
+            # Measured at 630 MiB with one process.
+            limits: { memory: 896Mi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
@@ -202,8 +214,11 @@ spec:
             - name: CRITICAL_DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
           resources:
-            requests: { cpu: 25m, memory: 160Mi }
-            limits: { memory: 512Mi }
+            # Measured at 411 MiB, which is 80% of the 512Mi it was first
+            # given — too close to a limit for something whose failure mode is
+            # "balances silently never reset".
+            requests: { cpu: 25m, memory: 256Mi }
+            limits: { memory: 640Mi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
