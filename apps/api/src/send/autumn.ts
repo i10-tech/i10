@@ -388,12 +388,45 @@ export function autumnClient(opts: AutumnOptions): AutumnClient {
         // caller that has no browser is a silently dropped flow.
         redirect_mode: "never",
 
+        // ⚠ WITHOUT THIS, REVOCATION DOES NOT REVOKE. Autumn's own schema says
+        // it plainly: "by default, upgrades are immediate and downgrades are
+        // scheduled" — so attaching `free` to a cancelled customer queues the
+        // change for the end of the billing cycle and leaves Pro ACTIVE until
+        // then. Observed live: a revoked tenant kept `pro` active with `free`
+        // merely scheduled, and 50,000 emails against a 100/day allowance,
+        // until the period end Polar reported as the year 2029.
+        //
+        // ⚠ AND IT IS SENT ON EVERY CALL, NOT JUST DOWNGRADES. Polar is the
+        // state of record: when it says entitled we want that now, and when it
+        // says revoked we want that now. Making the timing explicit means this
+        // no longer depends on Autumn inferring the direction of the change —
+        // an inference that is invisible, correct for upgrades, and wrong for
+        // exactly the case that costs money.
+        plan_schedule: "immediate",
+
         ...(input.subscriptionId ? { subscription_id: input.subscriptionId } : {}),
       })
 
+      // ⚠ 409 `duplicate_subscription_id` IS THE SUCCESS CONDITION, NOT A
+      // FAILURE — but ONLY because we send the id exclusively when attaching
+      // the plan that subscription bought (see grants.ts). Given that, "this
+      // subscription is already attached" means the entitlement we are asking
+      // for is already in force, which is what a retry after a crash between
+      // `attach` and `markGranted` looks like.
+      //
+      // ⚠ AND IT MUST NOT BE WIDENED TO ANY 409. Treating a conflict as success
+      // while asking for a DIFFERENT plan would leave the customer on the old
+      // one with our row claiming the new — silently, and in Autumn's favour
+      // rather than the customer's.
+      if (result.status === 409 && input.subscriptionId) {
+        const code = (result.body as { code?: unknown } | null)?.code
+        if (code === "duplicate_subscription_id") return
+      }
+
       if (result.status < 200 || result.status >= 300) {
         throw new Error(
-          `autumn billing.attach failed with ${result.status} for ${input.tenantId} -> ${input.planId}`,
+          `autumn billing.attach failed with ${result.status} for ` +
+            `${input.tenantId} -> ${input.planId}: ${describe(result.body)}`,
         )
       }
     },

@@ -83,14 +83,21 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         // `event_at`, so under `<` alone it answered "stale" and returned
         // before `ensureCustomer` — meaning that when the Autumn call threw,
         // every one of Polar's retries was discarded and the only repair left
-        // was the reconciler, up to half an hour later. Observed exactly that
-        // way on the first real payment: the row said `active`/`pro` while
-        // `granted_at` stayed null and three retries logged "ignored an
-        // out-of-order subscription event".
+        // was the reconciler, up to half an hour later. Observed twice on real
+        // events: once on the first payment, once on the first cancellation.
         //
-        // `granted_at is null` is the precise condition — same event, not yet
-        // applied downstream. A genuinely OLDER event is still refused, and one
-        // already granted is still idempotent.
+        // ⚠ AND THE CONDITION IS THE GRANT, NOT `granted_at is null`. That was
+        // the first attempt at this and it was wrong: it only catches a row
+        // that has NEVER been granted. A cancellation arrives on a row already
+        // granted to `pro`, so `granted_at` is set-but-stale and every retry of
+        // the DOWNGRADE was still discarded — the failure mode that leaves a
+        // revoked customer entitled.
+        //
+        // Comparing `granted_plan_id` to what this event entitles is exact: it
+        // is the same question the reconciler asks, asked at the webhook. Never
+        // granted is `null is distinct from 'free'` → true. Already granted to
+        // this plan → false, so a genuine duplicate stays idempotent. An older
+        // event is still refused by the first disjunct.
         const rows = (await tx.execute(sql`
           insert into core.subscriptions as s (
             tenant_id, polar_subscription_id, polar_customer_id, polar_product_id,
@@ -117,7 +124,8 @@ export function subscriptionOps(db: Database): SubscriptionOps {
             event_at              = excluded.event_at,
             updated_at            = now()
           where s.event_at < excluded.event_at
-             or (s.event_at = excluded.event_at and s.granted_at is null)
+             or (s.event_at = excluded.event_at
+                 and s.granted_plan_id is distinct from ${state.entitledPlanId})
           returning s.tenant_id
         `)) as unknown as { tenant_id: string }[]
 

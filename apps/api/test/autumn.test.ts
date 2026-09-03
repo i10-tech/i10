@@ -312,8 +312,29 @@ describe("entitlements", () => {
     })
   })
 
-  // ⚠ POLAR'S SUBSCRIPTION ID IS THE IDEMPOTENCY KEY. A webhook Polar retries
-  // must target the same subscription rather than mint a second one.
+  // ⚠ THE ASSERTION THAT KEEPS A REVOCATION FROM BEING A NO-OP. Autumn
+  // schedules downgrades to the end of the billing cycle unless told
+  // otherwise, so without this a cancelled customer keeps their paid
+  // allowance until the period Polar reported — which was the year 2029.
+  it("applies every plan change immediately, in both directions", async () => {
+    const { autumn, calls } = client({ status: 200, body: {} })
+
+    await autumn.grantPlan({ tenantId: "ten-1", planId: "free" })
+    expect(calls[0]?.body).toMatchObject({ plan_schedule: "immediate" })
+
+    await autumn.grantPlan({
+      tenantId: "ten-1",
+      planId: "pro",
+      subscriptionId: "polar_sub_123",
+    })
+    expect(calls[1]?.body).toMatchObject({ plan_schedule: "immediate" })
+  })
+
+  // ⚠ IT IS A UNIQUENESS KEY, NOT AN IDEMPOTENCY KEY — this comment used to
+  // claim the latter and it was wrong. Autumn rejects a repeated
+  // subscription_id with 409 `duplicate_subscription_id` rather than quietly
+  // accepting it, which is why grants.ts sends it only for the plan that
+  // subscription actually bought.
   it("passes the payment provider's subscription id through", async () => {
     const { autumn, calls } = client({ status: 200, body: {} })
 
@@ -324,6 +345,49 @@ describe("entitlements", () => {
     })
 
     expect(calls[0]?.body).toMatchObject({ subscription_id: "polar_sub_123" })
+  })
+
+  // ⚠ A RETRY AFTER A CRASH BETWEEN `attach` AND `markGranted`. The entitlement
+  // is already in force, so the only correct answer is to carry on and record
+  // it — throwing would strand the row one step short of the truth forever.
+  it("treats a duplicate subscription id as already granted", async () => {
+    const { autumn } = client({
+      status: 409,
+      body: { code: "duplicate_subscription_id", message: "already in use" },
+    })
+
+    await expect(
+      autumn.grantPlan({
+        tenantId: "ten-1",
+        planId: "pro",
+        subscriptionId: "polar_sub_123",
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  // ⚠ AND NOT ONE STEP FURTHER. Swallowing a 409 we did not cause by sending an
+  // id would let the row claim a plan Autumn never attached — the customer
+  // stays on the old one and nothing anywhere disagrees.
+  it("still throws on a 409 it did not send a subscription id for", async () => {
+    const { autumn } = client({
+      status: 409,
+      body: { code: "duplicate_subscription_id", message: "already in use" },
+    })
+
+    await expect(
+      autumn.grantPlan({ tenantId: "ten-1", planId: "free" }),
+    ).rejects.toThrow(/409/)
+  })
+
+  it("carries Autumn's message into an attach failure", async () => {
+    const { autumn } = client({
+      status: 400,
+      body: { code: "invalid_inputs", message: "plan_id: no such plan" },
+    })
+
+    await expect(
+      autumn.grantPlan({ tenantId: "ten-1", planId: "nope" }),
+    ).rejects.toThrow(/no such plan/)
   })
 
   it("omits it entirely when there is none", async () => {
