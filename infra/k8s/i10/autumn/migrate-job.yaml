@@ -51,11 +51,42 @@ spec:
           # `../server/.env` relative to `shared/` — the working directory is
           # part of the contract.
           workingDir: /app
+          # ⚠ THE WAIT LOOP IS NOT DEFENSIVE PADDING — IT IS FOR A RACE THAT
+          # FAILED THIS JOB FIVE TIMES IN A ROW. A short-lived pod that opens a
+          # connection within a second of starting can beat the CNI's
+          # programming of NetworkPolicy rules for its brand-new pod IP; this
+          # cluster has `default-deny-ingress`, and its enforcement REJECTS
+          # rather than drops, so the migration died instantly with
+          # `connect ECONNREFUSED` against a database that was up the whole
+          # time. An identical pod, exec'd into a minute later, connected fine.
+          #
+          # Retrying the Job does not help: every replacement pod is new and
+          # loses the same race. Waiting inside ONE pod does, because by the
+          # second attempt the rules exist.
+          #
+          # ⚠ AND IT DELIBERATELY DOES NOT RETRY THE MIGRATION ITSELF. Only
+          # reachability is retried; a migration that fails for a real reason
+          # must fail once, loudly, rather than ten times with the true error
+          # scrolled off the top.
+          #
           # `--env=prod` is cosmetic once AUTUMN_DB_DIRECT is set — it selects
           # which Infisical environment to wrap in, and we are not wrapping. It
           # is here because without it the job logs `env=dev` while migrating
           # production, which is a line someone will one day read at 3am.
-          command: ["bun", "db", "migrate", "--bootstrap", "--env=prod"]
+          command:
+            - bash
+            - -c
+            - |
+              host=i10-platform-rw.i10-prod.svc.cluster.local
+              for i in $(seq 1 30); do
+                if (echo > /dev/tcp/$host/5432) 2>/dev/null; then
+                  echo "postgres reachable after ${i} attempt(s)"
+                  exec bun db migrate --bootstrap --env=prod
+                fi
+                sleep 2
+              done
+              echo "postgres unreachable at ${host}:5432 after 60s" >&2
+              exit 1
           envFrom:
             - secretRef: { name: i10-autumn }
           env:
