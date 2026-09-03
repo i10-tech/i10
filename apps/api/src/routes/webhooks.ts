@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import type { Database } from "../db/client.js"
 import { applyClerkEvent } from "../projection/writer.js"
+import type { TenantProvisioning } from "../tenants/provision.js"
 import { readSvixHeaders, verifySvixSignature } from "../webhooks/svix.js"
 
 export interface Logger {
@@ -13,6 +14,12 @@ export interface ClerkWebhookDeps {
   db: Database
   signingSecret: string
   hostedDomains: readonly string[]
+  /**
+   * Creates tenants from Clerk organizations, and organizations for users who
+   * have none. Absent in tests and where Clerk cannot be reached, in which case
+   * sign-ups still update the mailbox projection and simply provision nothing.
+   */
+  provisioning?: TenantProvisioning
   log?: Logger
 }
 
@@ -94,11 +101,25 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
         event.data,
         deps.hostedDomains,
       )
+      // ⚠ RUN EVEN WHEN `applyClerkEvent` SAID `duplicate`, AND THAT IS THE
+      // WHOLE REASON IT IS OUT HERE RATHER THAN INSIDE THE SWITCH. That dedupe
+      // claims the Svix message id and discards a redelivery, which is right
+      // for the mailbox projection — the second copy has nothing new to say.
+      // Provisioning is the opposite: if it failed the first time, the retry is
+      // the only chance to fix it, and swallowing that leaves somebody with an
+      // account that can never send. Both halves are idempotent on their own.
+      const provisioned = await provision(deps, event.type, event.data)
+
       deps.log?.info(
-        { svixId: headers.id, type: event.type, outcome: result.outcome },
+        {
+          svixId: headers.id,
+          type: event.type,
+          outcome: result.outcome,
+          ...(provisioned ? { provisioned } : {}),
+        },
         "clerk webhook applied",
       )
-      return c.json({ ok: true, ...result })
+      return c.json({ ok: true, ...result, ...(provisioned ? { provisioned } : {}) })
     } catch (err) {
       deps.log?.error(
         { svixId: headers.id, type: event.type, err: String(err) },
@@ -116,4 +137,27 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
   })
 
   return app
+}
+
+/**
+ * ⚠ THROWS RATHER THAN SWALLOWS, so the caller answers 500 and Svix retries.
+ * A sign-up that produced no tenant is an account that cannot send, and the
+ * customer's only signal would be a 401 on their first API call — a retry is
+ * both free and the correct repair.
+ */
+async function provision(
+  deps: ClerkWebhookDeps,
+  type: string,
+  data: unknown,
+): Promise<string | null> {
+  if (!deps.provisioning) return null
+
+  switch (type) {
+    case "user.created":
+      return deps.provisioning.onUserCreated(data)
+    case "organization.created":
+      return deps.provisioning.onOrganizationCreated(data)
+    default:
+      return null
+  }
 }

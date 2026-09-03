@@ -5,6 +5,8 @@ import { createApp } from "./app.js"
 import { subscriptionOps } from "./billing/db.js"
 import { subscriptionGrants } from "./billing/grants.js"
 import { polarClient } from "./billing/polar.js"
+import { tenantStore } from "./tenants/db.js"
+import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
@@ -117,20 +119,44 @@ log.info(
  */
 const subscriptions = subscriptionOps(db)
 
-const grants = env.AUTUMN_SECRET_KEY
-  ? subscriptionGrants({
-      subscriptions,
-      entitlements: autumnClient({
-        baseUrl: env.AUTUMN_URL,
-        secretKey: env.AUTUMN_SECRET_KEY,
-        featureId: env.AUTUMN_FEATURE_ID,
-        freePlanId: env.AUTUMN_FREE_PLAN_ID,
-        timeoutMs: env.AUTUMN_TIMEOUT_MS,
-        log,
-      }),
+/**
+ * ⚠ THE ONLY OBJECT IN THIS PROCESS THAT CAN MOVE A CUSTOMER BETWEEN PLANS, and
+ * it reaches exactly two places: `subscriptionGrants`, which acts on verified
+ * Polar events, and tenant provisioning, which puts a brand-new tenant on the
+ * free plan. Nothing else is handed it.
+ */
+const entitlements = env.AUTUMN_SECRET_KEY
+  ? autumnClient({
+      baseUrl: env.AUTUMN_URL,
+      secretKey: env.AUTUMN_SECRET_KEY,
+      featureId: env.AUTUMN_FEATURE_ID,
+      freePlanId: env.AUTUMN_FREE_PLAN_ID,
+      timeoutMs: env.AUTUMN_TIMEOUT_MS,
       log,
     })
   : null
+
+const grants = entitlements
+  ? subscriptionGrants({ subscriptions, entitlements, log })
+  : null
+
+/**
+ * Sign-up: a Clerk organization becomes a tenant, and a user with no
+ * organization gets one made for them. See tenants/provision.ts.
+ */
+const provisioning = tenantProvisioning({
+  organizations: {
+    membershipCount: async (userId) =>
+      (await clerk.users.getOrganizationMembershipList({ userId, limit: 1 }))
+        .totalCount,
+    create: async ({ name, slug, createdBy }) => {
+      await clerk.organizations.createOrganization({ name, slug, createdBy })
+    },
+  },
+  tenants: tenantStore(db),
+  ...(entitlements ? { entitlements } : {}),
+  log,
+})
 
 const polar = env.POLAR_ACCESS_TOKEN
   ? polarClient({
@@ -193,6 +219,7 @@ const app = createApp({
     db,
     signingSecret: env.CLERK_WEBHOOK_SECRET,
     hostedDomains: env.MAIL_DOMAINS,
+    provisioning,
     log,
   },
   autoconfig: {

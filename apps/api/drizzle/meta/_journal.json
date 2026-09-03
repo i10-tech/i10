@@ -78,6 +78,13 @@
       "when": 1788430764293,
       "tag": "0010_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788430765293,
+      "tag": "0011_provision_tenant",
+      "breakpoints": true
     }
   ]
 }
