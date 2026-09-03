@@ -2,6 +2,10 @@ import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { VerifyDeps } from "./auth/api-key.js"
 import { createBilling, type BillingDeps } from "./routes/billing.js"
+import {
+  createCheckoutStatus,
+  type CheckoutStatusDeps,
+} from "./routes/checkout-status.js"
 import { createPolarWebhooks, type PolarWebhookDeps } from "./routes/polar-events.js"
 import type { AcceptOps, Logger as AcceptLogger } from "./send/accept.js"
 import type { Metering } from "./send/metering.js"
@@ -61,6 +65,11 @@ export interface AppDeps {
   polarWebhooks?: PolarWebhookDeps
   /** Starting a checkout, and reading back the plan in force. API-key authed. */
   billing?: BillingDeps
+  /**
+   * What the post-checkout page polls. Unauthenticated, and grants nothing:
+   * it reports the row the Polar webhook writes. See routes/checkout-status.ts.
+   */
+  checkoutStatus?: CheckoutStatusDeps
   /**
    * Queue depth, for the autoscaler and for whoever is asking why mail is slow.
    *
@@ -205,6 +214,13 @@ export function createApp(deps: AppDeps = {}) {
   // is a console action rather than part of the email API, and publishing it
   // would put "create a checkout session" in every generated SDK.
   app.route("/billing", createBilling(deps.billing))
+
+  // ⚠ SEPARATE FROM `/billing` BECAUSE IT IS THE ONE BILLING ROUTE A BROWSER
+  // MAY CALL UNAUTHENTICATED. `/billing` guards `*` with requireApiKey, which
+  // is fail-closed and worth keeping; an exception carved into that wildcard
+  // would be one refactor away from unguarding its neighbours. It grants
+  // nothing — it reads back a row only the Polar webhook can move.
+  app.route("/checkout-status", createCheckoutStatus(deps.checkoutStatus))
 
   // Mounted for the same reason and with the same exclusion from the document.
   // Traefik puts this path on `autoconfig.i10.tech` alongside Stalwart's own

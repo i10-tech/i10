@@ -297,6 +297,9 @@ const app = createApp({
           successUrl: env.POLAR_SUCCESS_URL,
           log,
         },
+        // Same two dependencies, no `products` and no `grants`: it can read a
+        // checkout and read our row, and there is nothing else it could do.
+        checkoutStatus: { polar, subscriptions, log },
       }
     : {}),
   ...(secrets && webhookQueue
