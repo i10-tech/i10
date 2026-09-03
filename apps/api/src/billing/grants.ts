@@ -81,10 +81,19 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
       await deps.entitlements.grantPlan({
         tenantId: state.tenantId,
         planId: state.entitledPlanId,
-        // ⚠ POLAR'S SUBSCRIPTION ID, WHICH IS WHAT MAKES A REDELIVERY A NO-OP
-        // RATHER THAN A SECOND GRANT — and what lets a row in Autumn be matched
-        // to a row in Polar without a lookup table.
-        subscriptionId: state.polarSubscriptionId,
+        // ⚠ ONLY WHEN THE PLAN IS THE ONE THAT SUBSCRIPTION BOUGHT, AND THE
+        // DOWNGRADE IS WHY. `subscription_id` tells Autumn "this attachment IS
+        // that Polar subscription", so sending it alongside `free` claims the
+        // free plan is a subscription that has just ended — which is both untrue
+        // and rejected: Autumn answers 409 `duplicate_subscription_id`, because
+        // the id is already bound to the paid attachment.
+        //
+        // Observed on the first real cancellation: every downgrade failed and
+        // the customer stayed entitled after revoking. A revocation that leaves
+        // Pro switched on is the worst direction for this to fail in.
+        ...(state.entitledPlanId === state.planId
+          ? { subscriptionId: state.polarSubscriptionId }
+          : {}),
       })
 
       await deps.subscriptions.markGranted(

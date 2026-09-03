@@ -65,7 +65,7 @@ describe("granting a plan", () => {
     expect(order).toEqual(["record", "ensure", "grant", "mark"])
   })
 
-  it("passes Polar's subscription id to Autumn as the idempotency key", async () => {
+  it("passes Polar's subscription id when granting the plan it bought", async () => {
     const grantPlan = vi.fn(async () => {})
     const grants = subscriptionGrants({
       subscriptions: ops(),
@@ -79,6 +79,23 @@ describe("granting a plan", () => {
       planId: "pro",
       subscriptionId: "sub_1",
     })
+  })
+
+  // ⚠ THE DOWNGRADE MUST NOT CARRY IT, AND THIS IS THE TEST THAT WOULD HAVE
+  // CAUGHT A REVOCATION LEAVING PRO SWITCHED ON. `subscription_id` asserts
+  // "this attachment IS that Polar subscription"; the free plan is not the
+  // subscription that just ended, and Autumn rejects the claim with 409
+  // `duplicate_subscription_id` — so every downgrade failed.
+  it("withholds it when dropping the tenant back to free", async () => {
+    const grantPlan = vi.fn(async () => {})
+    const grants = subscriptionGrants({
+      subscriptions: ops(),
+      entitlements: { ensureCustomer: async () => {}, grantPlan },
+      log,
+    })
+
+    await grants.apply(state({ status: "revoked", entitledPlanId: "free" }))
+    expect(grantPlan).toHaveBeenCalledWith({ tenantId: "ten-1", planId: "free" })
   })
 
   // ⚠ THE OUT-OF-ORDER GUARD. A delayed `active` arriving after `revoked` must
