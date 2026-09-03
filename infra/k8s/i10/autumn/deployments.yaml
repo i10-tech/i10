@@ -37,6 +37,9 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    # After the database (wave 0) and the migration (wave 1).
+    argocd.argoproj.io/sync-wave: "2"
   name: i10-autumn-server
   namespace: i10-prod
 spec:
@@ -92,6 +95,9 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    # After the database (wave 0) and the migration (wave 1).
+    argocd.argoproj.io/sync-wave: "2"
   name: i10-autumn-workers
   namespace: i10-prod
 spec:
@@ -138,6 +144,9 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    # After the database (wave 0) and the migration (wave 1).
+    argocd.argoproj.io/sync-wave: "2"
   name: i10-autumn-cron
   namespace: i10-prod
 spec:

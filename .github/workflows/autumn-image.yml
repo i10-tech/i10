@@ -27,12 +27,17 @@ on:
 
 env:
   # The upstream revision we build. Bump deliberately; see above.
-  AUTUMN_REF: main
+  #
+  # useautumn/autumn @ main as of 2026-09-03. Pinned rather than tracked: the
+  # image carries Drizzle migrations that our PreSync Job applies to the
+  # entitlement database, so `main` here would let an upstream merge migrate
+  # production on the next Argo sync with nobody deciding to.
+  AUTUMN_REF: e60fc94cd9c766610bca7cb62e2a601fce8c697b
   REGISTRY: ghcr.io
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -53,6 +58,23 @@ jobs:
         id: rev
         working-directory: autumn
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # ⚠ THE RUNNER RUNS OUT OF DISK WITHOUT THIS, AND THE FAILURE IS
+      # UNREADABLE. `ubuntu-latest` ships with ~14 GB free; Autumn is a large
+      # Bun monorepo and buildx writes both the image and its exported cache to
+      # the same disk. When it fills, what fails first is the runner's own
+      # logger — `No space left on device` writing Worker_*.log — so the job
+      # dies with NO LOGS AT ALL and only a check annotation to say why. It
+      # reads like the build failed for no reason.
+      #
+      # These are preinstalled toolchains this build never touches, and they
+      # are worth about 25 GB between them.
+      - name: Reclaim disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/.ghcup \
+                      "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
 
       - uses: docker/setup-buildx-action@v3
 
@@ -75,7 +97,10 @@ jobs:
             ${{ env.REGISTRY }}/i10-tech/autumn:${{ steps.rev.outputs.sha }}
             ${{ env.REGISTRY }}/i10-tech/autumn:latest
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # `min` rather than `max`: exporting every intermediate layer is
+          # the single largest consumer of the disk that ran out above, and
+          # it buys little for a build that runs by hand a few times a year.
+          cache-to: type=gha,mode=min
 
       # ⚠ THE URLS ARE BAKED IN HERE. Vite resolves `import.meta.env` at build
       # time, so these cannot be moved to the Deployment later — changing them
@@ -93,7 +118,10 @@ jobs:
             ${{ env.REGISTRY }}/i10-tech/autumn-dashboard:${{ steps.rev.outputs.sha }}
             ${{ env.REGISTRY }}/i10-tech/autumn-dashboard:latest
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # `min` rather than `max`: exporting every intermediate layer is
+          # the single largest consumer of the disk that ran out above, and
+          # it buys little for a build that runs by hand a few times a year.
+          cache-to: type=gha,mode=min
 
       - name: Say what was built
         run: |

@@ -1,4 +1,4 @@
-# Autumn's schema, as an Argo PreSync hook.
+# Autumn's schema, as an Argo Sync hook in wave 1.
 #
 # ⚠ THE SAME REASONING AS i10-api-migrate, AND MORE NECESSARY HERE. Autumn runs
 # three Deployments off one image; migrating on boot would have server, workers
@@ -17,10 +17,25 @@ metadata:
   name: i10-autumn-migrate
   namespace: i10-prod
   annotations:
-    argocd.argoproj.io/hook: PreSync
+    # ⚠ `Sync` IN WAVE 1, NOT `PreSync`, AND THE DIFFERENCE IS THE DATABASE
+    # ITSELF. PreSync hooks run before every normal resource in the
+    # Application — including database.yaml, the CNPG `Database` that creates
+    # the `autumn` database this Job connects to. As a PreSync hook it
+    # therefore ran first, failed to connect to a database that did not exist
+    # yet, and blocked the sync that would have created it. A deadlock that
+    # looks like a migration bug.
+    #
+    # Wave 0 is the Database; this is wave 1; the Deployments are wave 2.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
-  backoffLimit: 2
+  # ⚠ RETRIES ARE LOAD-BEARING HERE, NOT DEFENSIVE. Argo treats a CNPG
+  # `Database` as healthy the moment it is applied — it does not wait for the
+  # operator to actually CREATE the database — so this Job can start a second
+  # or two too early. Each retry is a fresh connection attempt, which is
+  # exactly what is needed while the operator catches up.
+  backoffLimit: 6
   template:
     metadata:
       labels:
