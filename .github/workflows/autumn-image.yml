@@ -87,19 +87,39 @@ jobs:
       # ⚠ THEIR DOCKERFILE, THEIR CONTEXT. `docker/Dockerfile` does `COPY . .`
       # from the repo root and lists every workspace manifest by hand — build it
       # from anywhere else and the install layer fails on a missing package.json.
-      - name: Build and push the server image
+      - name: Build and push the base server image
         uses: docker/build-push-action@v6
         with:
           context: autumn
           file: autumn/docker/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/i10-tech/autumn:${{ steps.rev.outputs.sha }}
-            ${{ env.REGISTRY }}/i10-tech/autumn:latest
+            ${{ env.REGISTRY }}/i10-tech/autumn-base:${{ steps.rev.outputs.sha }}
+            ${{ env.REGISTRY }}/i10-tech/autumn-base:latest
           cache-from: type=gha
           # `min` rather than `max`: exporting every intermediate layer is
           # the single largest consumer of the disk that ran out above, and
           # it buys little for a build that runs by hand a few times a year.
+          cache-to: type=gha,mode=min
+
+      # ⚠ ONE LINE CHANGED, AND THE BUILD FAILS IF IT CANNOT BE. See
+      # infra/autumn/server.Dockerfile: upstream hard-codes four worker
+      # processes at ~470 MB each, which does not fit on this box beside
+      # Postgres and a mail server. The patch is guarded, so an upstream
+      # rewording breaks the build here rather than quietly restoring four
+      # processes and OOM-killing something weeks later.
+      - name: Build and push the patched server image
+        uses: docker/build-push-action@v6
+        with:
+          context: i10/infra/autumn
+          file: i10/infra/autumn/server.Dockerfile
+          push: true
+          build-args: |
+            BASE=${{ env.REGISTRY }}/i10-tech/autumn-base:${{ steps.rev.outputs.sha }}
+          tags: |
+            ${{ env.REGISTRY }}/i10-tech/autumn:${{ steps.rev.outputs.sha }}
+            ${{ env.REGISTRY }}/i10-tech/autumn:latest
+          cache-from: type=gha
           cache-to: type=gha,mode=min
 
       # ⚠ THE URLS ARE BAKED IN HERE. Vite resolves `import.meta.env` at build
