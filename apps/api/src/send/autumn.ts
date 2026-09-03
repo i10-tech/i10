@@ -318,7 +318,12 @@ export function autumnClient(opts: AutumnOptions): AutumnClient {
 
     async ensureCustomer(input) {
       const result = await post("/v1/customers.get_or_create", {
-        id: input.tenantId,
+        // ⚠ `customer_id`, NOT `id` — every other endpoint on this client takes
+        // it under that name, and this one is no exception. Sending `id` is
+        // accepted by the type system and rejected by Autumn with a bare 400,
+        // which grants nothing and is invisible until a paying customer is
+        // still on the free plan.
+        customer_id: input.tenantId,
         ...(input.name ? { name: input.name } : {}),
         ...(input.email ? { email: input.email } : {}),
 
@@ -340,8 +345,15 @@ export function autumnClient(opts: AutumnOptions): AutumnClient {
       })
 
       if (result.status < 200 || result.status >= 300) {
+        // ⚠ CARRY AUTUMN'S OWN MESSAGE. A status alone says a customer could
+        // not be created and nothing about why; Autumn answers a malformed body
+        // with `{"code":"invalid_inputs","message":"customer_id: must be a
+        // string (received undefined)"}`, which names the mistake outright.
+        // Without it the only way to learn the reason is to replay the call by
+        // hand against production.
         throw new Error(
-          `autumn customers.get_or_create failed with ${result.status} for ${input.tenantId}`,
+          `autumn customers.get_or_create failed with ${result.status} for ` +
+            `${input.tenantId}: ${describe(result.body)}`,
         )
       }
     },
@@ -402,6 +414,24 @@ export function autumnClient(opts: AutumnOptions): AutumnClient {
  * ever sees in a log. `resilient` is the one place that decides a billing
  * failure cannot fail a send.
  */
+/**
+ * Autumn's error body, reduced to one loggable line.
+ *
+ * ⚠ BOUNDED, BECAUSE THE BODY IS NOT ALWAYS AUTUMN'S. A proxy or ingress in
+ * front of it answers a 502 with an HTML page, and an unbounded splice of that
+ * into an error message is a log line thousands of characters wide.
+ */
+function describe(body: unknown): string {
+  if (typeof body === "object" && body !== null) {
+    const message = (body as { message?: unknown }).message
+    if (typeof message === "string" && message.length > 0) {
+      return message.slice(0, 200)
+    }
+  }
+  if (typeof body === "string" && body.length > 0) return body.slice(0, 200)
+  return "no error body"
+}
+
 export function autumnMetering(opts: AutumnOptions): Metering {
   const client = autumnClient(opts)
   return {

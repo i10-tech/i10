@@ -160,7 +160,11 @@ describe("reconciling against Polar", () => {
   it("leaves a tenant alone when our record already agrees", async () => {
     const apply = vi.fn()
     const report = await reconcileSubscriptions({
-      polar: { listSubscriptions: async () => [polarSub()], createCheckout: vi.fn() },
+      polar: {
+        getCheckout: vi.fn(),
+        listSubscriptions: async () => [polarSub()],
+        createCheckout: vi.fn(),
+      },
       subscriptions: ops({ snapshot: async () => [row()] }),
       grants: { apply },
       options,
@@ -174,7 +178,11 @@ describe("reconciling against Polar", () => {
   it("grants a subscription we never received a webhook for", async () => {
     const apply = vi.fn(async () => ({ status: "applied" as const, planId: "pro" }))
     const report = await reconcileSubscriptions({
-      polar: { listSubscriptions: async () => [polarSub()], createCheckout: vi.fn() },
+      polar: {
+        getCheckout: vi.fn(),
+        listSubscriptions: async () => [polarSub()],
+        createCheckout: vi.fn(),
+      },
       subscriptions: ops({ snapshot: async () => [] }),
       grants: { apply },
       options,
@@ -190,7 +198,11 @@ describe("reconciling against Polar", () => {
   it("repairs a row whose entitlement never reached Autumn", async () => {
     const apply = vi.fn(async () => ({ status: "applied" as const, planId: "pro" }))
     await reconcileSubscriptions({
-      polar: { listSubscriptions: async () => [polarSub()], createCheckout: vi.fn() },
+      polar: {
+        getCheckout: vi.fn(),
+        listSubscriptions: async () => [polarSub()],
+        createCheckout: vi.fn(),
+      },
       subscriptions: ops({ snapshot: async () => [row({ grantedPlanId: null })] }),
       grants: { apply },
       options,
@@ -204,6 +216,7 @@ describe("reconciling against Polar", () => {
     const apply = vi.fn(async () => ({ status: "applied" as const, planId: "free" }))
     await reconcileSubscriptions({
       polar: {
+        getCheckout: vi.fn(),
         listSubscriptions: async () => [
           polarSub({ status: "canceled", modified_at: "2026-09-04T12:00:00Z" }),
         ],
@@ -227,6 +240,7 @@ describe("reconciling against Polar", () => {
     const apply = vi.fn()
     const report = await reconcileSubscriptions({
       polar: {
+        getCheckout: vi.fn(),
         listSubscriptions: async () => [polarSub({ id: "sub_other" })],
         createCheckout: vi.fn(),
       },
@@ -245,6 +259,7 @@ describe("reconciling against Polar", () => {
   it("keeps going after one tenant fails, and reports it", async () => {
     const report = await reconcileSubscriptions({
       polar: {
+        getCheckout: vi.fn(),
         listSubscriptions: async () => [
           polarSub({ id: "sub_1", customer: { external_id: "ten-1" } }),
           polarSub({ id: "sub_2", customer: { external_id: "ten-2" } }),
@@ -293,7 +308,7 @@ describe("POST /billing/checkout", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { createCheckout, listSubscriptions: vi.fn() },
+        polar: { getCheckout: vi.fn(), createCheckout, listSubscriptions: vi.fn() },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
         successUrl: "https://console.i10.tech/billing",
@@ -322,7 +337,7 @@ describe("POST /billing/checkout", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { createCheckout, listSubscriptions: vi.fn() },
+        polar: { getCheckout: vi.fn(), createCheckout, listSubscriptions: vi.fn() },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
         log,
@@ -343,7 +358,11 @@ describe("POST /billing/checkout", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { createCheckout: vi.fn(), listSubscriptions: vi.fn() },
+        polar: {
+          getCheckout: vi.fn(),
+          createCheckout: vi.fn(),
+          listSubscriptions: vi.fn(),
+        },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
         log,
@@ -368,7 +387,11 @@ describe("GET /billing/plan", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { createCheckout: vi.fn(), listSubscriptions: vi.fn() },
+        polar: {
+          getCheckout: vi.fn(),
+          createCheckout: vi.fn(),
+          listSubscriptions: vi.fn(),
+        },
         subscriptions: ops({
           current: async () => ({
             plan: "pro",

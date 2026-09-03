@@ -58,8 +58,29 @@ export interface Checkout {
   expiresAt: string
 }
 
+/**
+ * A checkout read back by id, reduced to the two things the status page needs.
+ *
+ * ⚠ `tenantId` COMES FROM `metadata`, NOT FROM THE CALLER. That is the whole
+ * point: the browser presents only a checkout id, and Polar is what says whose
+ * checkout it is. A tenant taken from the query string would let anybody read
+ * anybody's plan.
+ */
+export interface CheckoutState {
+  id: string
+  /** Polar's own: `open`, `expired`, `confirmed`, `succeeded`, `failed`. */
+  status: string
+  /** From `metadata.tenant_id`, or null on a checkout we did not create. */
+  tenantId: string | null
+}
+
 export interface PolarClient {
   createCheckout(input: CheckoutInput): Promise<Checkout>
+  /**
+   * One checkout, by id. `null` when Polar does not know it — which is the
+   * answer for a made-up id, and must not be confused with "not paid".
+   */
+  getCheckout(checkoutId: string): Promise<CheckoutState | null>
   /** Every subscription Polar holds for this organisation. The reconciler's view. */
   listSubscriptions(): Promise<PolarSubscription[]>
 }
@@ -110,6 +131,32 @@ export function polarClient(opts: PolarOptions): PolarClient {
         expires_at: string
       }
       return { id: body.id, url: body.url, expiresAt: body.expires_at }
+    },
+
+    async getCheckout(checkoutId) {
+      const response = await call(`/v1/checkouts/${encodeURIComponent(checkoutId)}`)
+
+      // ⚠ 404 IS AN ANSWER, NOT A FAILURE. The id arrives from a query string,
+      // so "Polar has never heard of this" is the ordinary case for a typo or a
+      // probe — and it is emphatically NOT "the payment failed". The caller
+      // renders those two differently.
+      if (response.status === 404) return null
+      if (!response.ok) {
+        throw new Error(`polar checkouts.get failed with ${response.status}`)
+      }
+
+      const body = (await response.json()) as {
+        id: string
+        status: string
+        metadata?: Record<string, unknown> | null
+      }
+      const tenantId = body.metadata?.tenant_id
+
+      return {
+        id: body.id,
+        status: body.status,
+        tenantId: typeof tenantId === "string" && tenantId ? tenantId : null,
+      }
     },
 
     async listSubscriptions() {
