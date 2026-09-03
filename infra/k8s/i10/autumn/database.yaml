@@ -30,6 +30,20 @@ spec:
   name: autumn
   owner: autumn
 
+  # ⚠ AUTUMN'S MIGRATIONS ASSUME `pg_trgm` IS ALREADY THERE AND NEVER CREATE IT.
+  # 532 of their index definitions use `gin_trgm_ops`, and not one migration
+  # issues a `CREATE EXTENSION` — their own development environment is Supabase,
+  # which ships the extension enabled, so upstream has never needed to.
+  #
+  # On a stock Postgres the very first migration dies with `operator class
+  # "gin_trgm_ops" does not exist for access method "gin"`, which reads like a
+  # corrupt migration rather than a missing extension. CNPG installs it
+  # declaratively here, in the same resource that creates the database and in
+  # the wave before anything tries to migrate it.
+  extensions:
+    - name: pg_trgm
+      ensure: present
+
   # ⚠ RETAIN, NOT DELETE. This database holds the entitlement state for every
   # paying customer — which plan they are on and how much of it they have used.
   # `delete` would drop it as a side effect of removing this manifest, and the
