@@ -20,6 +20,34 @@
 # reconciler would read a deficit for every tenant and top it up forever. With
 # no cron, balances never reset at the period boundary, so a monthly allowance
 # is really a lifetime one. Neither produces an error anywhere.
+#
+# ⚠ THE REST OF THE CONFIGURATION IS THE `i10-autumn` SECRET, FROM DOPPLER
+# `prod_autumn`. Three of those keys are not what their names suggest, and each
+# cost hours to find:
+#
+#   CACHE_V2_DRAGONFLY_URL           The Redis Autumn actually uses. Unset, it
+#                                    builds its client with an empty URL, ioredis
+#                                    falls back to 127.0.0.1:6379, and the pod
+#                                    logs `[Redis] Connection error: ECONNREFUSED
+#                                    127.0.0.1:6379` forever while reporting
+#                                    itself merely "degraded".
+#
+#   REDIS_URL                        Read by NOTHING in the pinned revision,
+#                                    despite being in their own .env.example.
+#                                    Setting it looks like configuring Redis and
+#                                    configures nothing.
+#
+#   MISC_CACHE_DRAGONFLY_PUBLIC_URL  A SECOND, separate cache. Cron refuses to
+#                                    start without it. Same address here, but it
+#                                    is not an alias — nothing derives one from
+#                                    the other.
+#
+#   CLIENT_URL                       https://billing.i10.tech, and it only takes
+#                                    effect because infra/autumn/server.Dockerfile
+#                                    patches it into two hard-coded origin
+#                                    allowlists. On the stock image, production
+#                                    ignores it and the dashboard cannot sign
+#                                    anyone in.
 ---
 apiVersion: v1
 kind: Service
@@ -44,6 +72,18 @@ metadata:
   namespace: i10-prod
 spec:
   replicas: 1
+  # ⚠ `Recreate`, AND IT IS A MEMORY DECISION, NOT AN AVAILABILITY ONE. Rolling
+  # would start the replacement before stopping the old one, and this pod holds
+  # 1315 MiB — two at once is 2.6 GiB against roughly 1 GiB of slack. The
+  # scheduler would allow it, because it places pods on REQUESTS (640Mi) and
+  # never on what they actually use; what stops it is the kernel OOM killer,
+  # which does not know Postgres matters more than a surge replica.
+  #
+  # The cost is a few seconds where `/billing/checkout` and `ensureCustomer`
+  # fail. Both are recoverable: grants land in core.subscriptions from the
+  # webhook regardless, and the reconciler repairs a missed customer.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: i10-autumn-server
