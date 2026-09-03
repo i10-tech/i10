@@ -18,6 +18,11 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: i10-autumn-db
+  annotations:
+    # ⚠ WAVE 0: BEFORE THE MIGRATION AND BEFORE THE PODS. Everything in this
+    # directory connects to the database this creates, so it has to exist
+    # first. See migrate-job.yaml for what went wrong when it did not.
+    argocd.argoproj.io/sync-wave: "0"
   namespace: i10-prod
 spec:
   cluster:
