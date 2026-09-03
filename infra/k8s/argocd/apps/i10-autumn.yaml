@@ -1,0 +1,31 @@
+# Autumn — entitlements, self-hosted.
+#
+# ⚠ NOT IN `workloads`, BECAUSE ITS IMAGE IS NOT BUILT BY build.yml. Everything
+# in workloads/ is pinned to a digest by the deploy job on every merge; Autumn's
+# image comes from a manual, separately-pinned upstream build, and having the
+# deploy job scan a directory it must never rewrite is the kind of adjacency
+# that goes wrong quietly. Its own Application keeps the two lifecycles apart.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: i10-autumn
+  namespace: i10-prod
+spec:
+  project: i10
+  source:
+    repoURL: git@github.com:i10-tech/i10.git
+    targetRevision: main
+    path: infra/k8s/i10/autumn
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: i10-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      # See i10-redis.yaml for why this is required rather than optional — the
+      # short version is that without it every additive default inside a list
+      # keeps the app permanently OutOfSync.
+      - ServerSideDiff=true

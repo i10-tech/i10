@@ -122,6 +122,16 @@ const schema = z.object({
   AUTUMN_FEATURE_ID: z.string().min(1).default("emails"),
 
   /**
+   * The plan a new tenant is auto-enabled onto.
+   *
+   * ⚠ IT MUST MATCH A PLAN IN infra/autumn/autumn.config.ts. A tenant enabled
+   * onto a plan id Autumn does not have is a customer with no entitlement —
+   * `check` refuses, our client reads that as unavailable, and the tenant sends
+   * unmetered forever with nothing in the logs to say why.
+   */
+  AUTUMN_FREE_PLAN_ID: z.string().min(1).default("free"),
+
+  /**
    * ⚠ THIS IS ADDED TO THE LATENCY OF EVERY `POST /emails` WHEN AUTUMN IS SLOW,
    * because the quota check is synchronous. Short on purpose: a timeout is
    * `unavailable`, and `unavailable` sends — so the cost of being impatient is
@@ -172,6 +182,93 @@ const schema = z.object({
   // client checks the TLS certificate against. Changing it here alone would
   // hand out configuration profiles pointing at a name that fails verification.
   MAIL_HOSTNAME: z.string().min(1).default("mail.i10.tech"),
+
+  // ── billing ───────────────────────────────────────────────────────────────
+  //
+  // Polar takes the money; Autumn holds the entitlement. The two never speak —
+  // see send/autumn.ts on `no_billing_changes` for why that separation is the
+  // design rather than a limitation.
+
+  /**
+   * ⚠ WHICH POLAR, AND IT IS A DIFFERENT DATABASE RATHER THAN A DIFFERENT MODE.
+   * Sandbox has its own tokens, its own webhook secrets and its own product
+   * ids; nothing crosses. Defaulting to `sandbox` means the mistake this can
+   * make is "a real customer's checkout did not charge them", which is
+   * recoverable and loud — rather than "test traffic took real money".
+   */
+  POLAR_SERVER: z.enum(["sandbox", "production"]).default("sandbox"),
+
+  /**
+   * An organization access token, `polar_oat_…`.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE DISABLES CHECKOUT RATHER THAN FAKING IT. The
+   * billing routes answer 501, which is a visible missing feature; the webhook
+   * receiver does not need it at all, because verifying and applying an event
+   * uses only the signing secret.
+   */
+  POLAR_ACCESS_TOKEN: z.string().min(1).optional(),
+
+  /**
+   * The endpoint secret from Polar's dashboard, `whsec_…`.
+   *
+   * ⚠ THIS IS THE ONLY THING GUARDING THE PLAN-GRANTING ENDPOINT. Polar has no
+   * API key of ours to present, so the signature is the whole of the access
+   * control — without this the receiver answers 503 and grants nothing, which
+   * is the correct way to be misconfigured.
+   */
+  POLAR_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  /**
+   * Our plan ids mapped to Polar product ids, as JSON: `{"pro":"<uuid>"}`.
+   *
+   * ⚠ CONFIGURATION RATHER THAN CODE BECAUSE THE IDS DIFFER PER ENVIRONMENT.
+   * The sandbox product and the production product are different objects with
+   * different ids, and a constant in the source would mean the sandbox grants
+   * nothing (an unrecognised product is ignored) while looking fine.
+   *
+   * ⚠ AND IT IS THE ALLOWLIST. `POST /billing/checkout` takes a plan name and
+   * looks the product up here; a caller cannot name a product id of their own,
+   * which would otherwise let anyone buy Pro at whatever price they chose.
+   */
+  POLAR_PRODUCTS: z
+    .string()
+    .default("{}")
+    .transform((raw, ctx) => {
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          throw new TypeError("not an object")
+        }
+        const out: Record<string, string> = {}
+        for (const [plan, product] of Object.entries(parsed)) {
+          if (typeof product !== "string" || product.length === 0) {
+            throw new TypeError(`product id for "${plan}" is not a string`)
+          }
+          out[plan] = product
+        }
+        return out
+      } catch (error) {
+        ctx.addIssue({
+          code: "custom",
+          message: `must be a JSON object of plan id to Polar product id (${
+            error instanceof Error ? error.message : String(error)
+          })`,
+        })
+        return z.NEVER
+      }
+    }),
+
+  /**
+   * Where Polar returns the browser after payment.
+   *
+   * ⚠ A PAGE THAT POLLS, NOT A PAGE THAT GRANTS. Anybody can navigate here —
+   * it is a plain redirect with no proof attached — so whatever is served must
+   * ask our own API what plan the tenant holds and wait. See routes/billing.ts.
+   */
+  POLAR_SUCCESS_URL: z.url().optional(),
+
+  /** Bounds the checkout call, which sits in front of a waiting customer. */
+  POLAR_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(5000),
 })
 
 export type Env = z.infer<typeof schema>

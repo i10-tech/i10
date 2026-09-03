@@ -1,0 +1,183 @@
+# Autumn, self-hosted.
+#
+# ⚠ WE BUILD THE IMAGE OURSELVES — upstream publishes none. `docker/Dockerfile`
+# in useautumn/autumn is built by their own deploy platform and never pushed to
+# a public registry, so .github/workflows/autumn-image.yml builds it from a
+# PINNED upstream commit into ghcr.io/i10-tech/autumn. Pinning is not caution:
+# Autumn ships schema migrations, and tracking `main` would mean an upstream
+# merge can migrate our entitlement database without anyone deciding to.
+#
+# ⚠ THREE COMMANDS, ONE IMAGE — exactly like i10-api and i10-worker. Their
+# Dockerfile documents the split:
+#
+#   server  -> bun start           the HTTP API i10 calls (:8080)
+#   workers -> bun src/workers.ts  drains the usage-event queue
+#   cron    -> bun src/cron.ts     resets balances at the billing period boundary
+#
+# ⚠ ALL THREE ARE REQUIRED, AND THE TWO QUIET ONES FAIL SILENTLY. `batch_track`
+# answers 202 the moment it has enqueued, so with no workers running every usage
+# event is accepted and never applied — balances simply never move, and our
+# reconciler would read a deficit for every tenant and top it up forever. With
+# no cron, balances never reset at the period boundary, so a monthly allowance
+# is really a lifetime one. Neither produces an error anywhere.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-autumn
+  namespace: i10-prod
+spec:
+  selector:
+    app.kubernetes.io/name: i10-autumn-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-autumn-server
+  namespace: i10-prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-autumn-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-autumn-server
+    spec:
+      containers:
+        - name: server
+          image: ghcr.io/i10-tech/autumn:latest
+          imagePullPolicy: Always
+          command: ["bun", "start"]
+          workingDir: /app/server
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef: { name: i10-autumn }
+          env:
+            # ⚠ THE ROLE THAT OWNS THE `autumn` DATABASE. Autumn migrates its
+            # own schema, so unlike i10_api this one is deliberately an owner.
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: password }
+            # ⚠ THROUGH THE POOLER, LIKE EVERYTHING ELSE THAT SERVES REQUESTS.
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/autumn
+            # ⚠ SET, BUT NOTHING READS IT IN THE PINNED REVISION. It is in their
+            # `.env.example` under REQUIRED and appears nowhere else in the
+            # source — vestigial rather than load-bearing. Pointed at the
+            # primary anyway, so that if a future revision starts using it for
+            # what the name suggests, it already has a non-pooled connection.
+            - name: CRITICAL_DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 640Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-autumn-workers
+  namespace: i10-prod
+spec:
+  replicas: 1
+  # One worker at a time: a second would double-drain the same queue while the
+  # old one is still applying deductions, and a deduction applied twice is a
+  # customer billed twice.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-autumn-workers
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-autumn-workers
+    spec:
+      containers:
+        - name: workers
+          image: ghcr.io/i10-tech/autumn:latest
+          imagePullPolicy: Always
+          command: ["bun", "src/workers.ts"]
+          workingDir: /app/server
+          envFrom:
+            - secretRef: { name: i10-autumn }
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: password }
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/autumn
+            - name: CRITICAL_DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-autumn-cron
+  namespace: i10-prod
+spec:
+  replicas: 1
+  # ⚠ EXACTLY ONE, AND NOT A CronJob. `src/cron.ts` is a long-running scheduler
+  # rather than a one-shot, so it is a Deployment — but two copies would run
+  # every period reset twice, and a balance reset twice is an allowance granted
+  # twice. Recreate keeps a rollout from briefly having two.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-autumn-cron
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-autumn-cron
+    spec:
+      containers:
+        - name: cron
+          image: ghcr.io/i10-tech/autumn:latest
+          imagePullPolicy: Always
+          command: ["bun", "src/cron.ts"]
+          workingDir: /app/server
+          envFrom:
+            - secretRef: { name: i10-autumn }
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: password }
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/autumn
+            - name: CRITICAL_DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }

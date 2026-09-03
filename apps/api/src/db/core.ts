@@ -633,3 +633,93 @@ export const suppressions = core.table(
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.address] })],
 )
+
+/**
+ * What a tenant is paying for, as Polar last told us.
+ *
+ * ⚠ THIS TABLE IS A COPY, NOT THE TRUTH. Polar is the state of record for
+ * subscriptions — it took the money and it is what a dispute is settled
+ * against. This row exists so the console can answer "what plan am I on"
+ * without a round trip to Polar, and so the reconciler has something to compare
+ * against; every value in it arrives from a signature-verified webhook.
+ *
+ * ⚠ AND IT IS WRITTEN BEFORE AUTUMN IS TOLD ANYTHING. The order is deliberate:
+ * row first, entitlement second. If the Autumn call then fails, the truth is
+ * already durable and the reconciler repairs the entitlement on its next pass.
+ * Reversed, a crash between the two leaves a customer holding a paid plan that
+ * nothing in our database records — invisible, and never revoked.
+ *
+ * ⚠ ONE ROW PER TENANT, NOT A HISTORY. `tenant_id` is unique so the upsert has
+ * something to conflict on; what the customer is entitled to today is a single
+ * question with a single answer. The audit trail lives in Polar, which keeps it
+ * properly and is the thing anyone would actually be asked to produce.
+ */
+export const subscriptions = core.table(
+  "subscriptions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .unique()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /**
+     * ⚠ ALSO UNIQUE, AND THAT IS A SAFETY PROPERTY. Two tenants pointing at one
+     * Polar subscription would mean one payment entitling two accounts, and the
+     * reconciler — which matches on this id — would flip the plan back and
+     * forth between them on every pass.
+     */
+    polarSubscriptionId: text("polar_subscription_id").notNull().unique(),
+    polarCustomerId: text("polar_customer_id").notNull(),
+    polarProductId: text("polar_product_id").notNull(),
+
+    /** Our plan id, from POLAR_PRODUCTS. What they bought. */
+    planId: text("plan_id").notNull(),
+
+    /**
+     * ⚠ `text`, NOT AN ENUM, AND THE REASON IS THE RETRY LOOP. Polar owns this
+     * vocabulary and can add to it; an enum would make an unrecognised status a
+     * failed INSERT, which is a 500, which Polar retries for hours while the
+     * customer's plan never lands. Storing what they said and deciding
+     * separately (billing/events.ts) keeps a vocabulary change from being an
+     * outage.
+     */
+    status: text("status").notNull(),
+
+    /**
+     * Set the moment a customer clicks cancel, while the subscription is still
+     * active and paid for. Recorded so the console can say "ends on the 4th",
+     * and deliberately not acted on — see billing/events.ts.
+     */
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+
+    /**
+     * ⚠ POLAR'S CLOCK, AND THE ONLY THING THAT ORDERS TWO EVENTS. Deliveries
+     * retry and overtake each other; a delayed `active` arriving after
+     * `revoked` would re-grant a plan to a customer who churned. The upsert
+     * refuses to move a row backwards past this value.
+     */
+    eventAt: timestamp("event_at", { withTimezone: true }).notNull(),
+
+    /**
+     * The plan Autumn was last successfully told about, and NULL until one
+     * lands.
+     *
+     * ⚠ THIS COLUMN IS THE ENTIRE POINT OF THE RECONCILER. It is what makes
+     * "the row was written but the entitlement never applied" a query rather
+     * than an invisible state — where it is out of step with the plan the
+     * subscription entitles, a customer is paying for something they do not
+     * have, or holding something they no longer pay for.
+     */
+    grantedPlanId: text("granted_plan_id"),
+    grantedAt: timestamp("granted_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("subscriptions_granted_idx").on(t.grantedPlanId, t.planId)],
+)

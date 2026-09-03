@@ -2,6 +2,9 @@ import { serve } from "@hono/node-server"
 import { createClerkClient } from "@clerk/backend"
 import pino from "pino"
 import { createApp } from "./app.js"
+import { subscriptionOps } from "./billing/db.js"
+import { subscriptionGrants } from "./billing/grants.js"
+import { polarClient } from "./billing/polar.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
@@ -9,7 +12,7 @@ import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
 import { emailLookup } from "./send/lookup.js"
-import { autumnMetering } from "./send/autumn.js"
+import { autumnClient, autumnMetering } from "./send/autumn.js"
 import { resilient, unmetered } from "./send/metering.js"
 import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
@@ -65,6 +68,7 @@ const metering = resilient(
         baseUrl: env.AUTUMN_URL,
         secretKey: env.AUTUMN_SECRET_KEY,
         featureId: env.AUTUMN_FEATURE_ID,
+        freePlanId: env.AUTUMN_FREE_PLAN_ID,
         timeoutMs: env.AUTUMN_TIMEOUT_MS,
         log,
       })
@@ -96,6 +100,62 @@ const webhookQueue = secrets
 log.info(
   { webhooks: Boolean(secrets) },
   secrets ? "webhooks enabled" : "WEBHOOKS DISABLED — no WEBHOOK_SECRET_KEY",
+)
+
+/**
+ * Billing: Polar takes the money, Autumn holds the entitlement.
+ *
+ * ⚠ THE AUTUMN CLIENT IS CONSTRUCTED HERE AND HANDED ONLY TO `subscriptionGrants`.
+ * Everything else in this process gets `metering`, which exposes quota and
+ * usage and nothing else. That is what keeps "only one code path grants a plan"
+ * a fact about the wiring rather than a rule somebody has to remember.
+ *
+ * ⚠ AND WITHOUT AUTUMN THERE IS NO GRANTING AT ALL, so the receiver answers 503
+ * and Polar keeps the event on its retry schedule. Recording subscription rows
+ * we cannot turn into entitlements would look like it was working and leave
+ * every paying customer on free-tier limits.
+ */
+const subscriptions = subscriptionOps(db)
+
+const grants = env.AUTUMN_SECRET_KEY
+  ? subscriptionGrants({
+      subscriptions,
+      entitlements: autumnClient({
+        baseUrl: env.AUTUMN_URL,
+        secretKey: env.AUTUMN_SECRET_KEY,
+        featureId: env.AUTUMN_FEATURE_ID,
+        freePlanId: env.AUTUMN_FREE_PLAN_ID,
+        timeoutMs: env.AUTUMN_TIMEOUT_MS,
+        log,
+      }),
+      log,
+    })
+  : null
+
+const polar = env.POLAR_ACCESS_TOKEN
+  ? polarClient({
+      accessToken: env.POLAR_ACCESS_TOKEN,
+      server: env.POLAR_SERVER,
+      timeoutMs: env.POLAR_TIMEOUT_MS,
+    })
+  : null
+
+const planOptions = {
+  planForProduct: (productId: string) =>
+    Object.entries(env.POLAR_PRODUCTS).find(([, id]) => id === productId)?.[0],
+  freePlanId: env.AUTUMN_FREE_PLAN_ID,
+}
+
+log.info(
+  {
+    server: env.POLAR_SERVER,
+    checkout: Boolean(polar),
+    events: Boolean(grants && env.POLAR_WEBHOOK_SECRET),
+    plans: Object.keys(env.POLAR_PRODUCTS),
+  },
+  polar && grants && env.POLAR_WEBHOOK_SECRET
+    ? "billing wired to polar"
+    : "BILLING INCOMPLETE — no paid plan can be sold or granted",
 )
 
 /**
@@ -188,6 +248,27 @@ const app = createApp({
               total: Object.values(pending).reduce((a, b) => a + b, 0),
             }
           },
+        },
+      }
+    : {}),
+  ...(grants && env.POLAR_WEBHOOK_SECRET
+    ? {
+        polarWebhooks: {
+          secret: env.POLAR_WEBHOOK_SECRET,
+          grants,
+          options: planOptions,
+          log,
+        },
+      }
+    : {}),
+  ...(polar
+    ? {
+        billing: {
+          polar,
+          subscriptions,
+          products: env.POLAR_PRODUCTS,
+          successUrl: env.POLAR_SUCCESS_URL,
+          log,
         },
       }
     : {}),

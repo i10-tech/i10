@@ -1,6 +1,8 @@
 import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { VerifyDeps } from "./auth/api-key.js"
+import { createBilling, type BillingDeps } from "./routes/billing.js"
+import { createPolarWebhooks, type PolarWebhookDeps } from "./routes/polar-events.js"
 import type { AcceptOps, Logger as AcceptLogger } from "./send/accept.js"
 import type { Metering } from "./send/metering.js"
 import { createAutoconfig, type AutoconfigDeps } from "./routes/autoconfig.js"
@@ -48,6 +50,17 @@ export interface AppDeps {
   webhookEndpoints?: WebhookEndpointStore
   /** SES delivery events over SNS. Unauthenticated; signature-verified. */
   sesWebhooks?: SesWebhookDeps
+  /**
+   * Polar subscription events. Unauthenticated; signature-verified.
+   *
+   * ⚠ THE ONLY WIRING IN THE APPLICATION THAT CAN GRANT A PAID PLAN. Everything
+   * it needs to do that is behind billing/grants.ts, which takes the two Autumn
+   * operations rather than the client — so no other route can reach `grantPlan`
+   * by way of something it happens to have been passed.
+   */
+  polarWebhooks?: PolarWebhookDeps
+  /** Starting a checkout, and reading back the plan in force. API-key authed. */
+  billing?: BillingDeps
   /**
    * Queue depth, for the autoscaler and for whoever is asking why mail is slow.
    *
@@ -181,6 +194,17 @@ export function createApp(deps: AppDeps = {}) {
   // document, and the same rule: nothing reaches the database before the
   // signature verifies — here it protects a tenant's suppression list.
   app.route("/webhooks", createSesWebhooks(deps.sesWebhooks))
+
+  // Polar subscription events, same prefix and the same rule. This is the one
+  // that moves money into entitlement, so the signature check is the whole of
+  // the authorisation — see routes/polar-events.ts.
+  app.route("/webhooks", createPolarWebhooks(deps.polarWebhooks))
+
+  // ⚠ ALSO OUTSIDE THE OPENAPI DOCUMENT, AND NOT FOR THE SAME REASON. The two
+  // routers above implement somebody else's contract; this one is ours, but it
+  // is a console action rather than part of the email API, and publishing it
+  // would put "create a checkout session" in every generated SDK.
+  app.route("/billing", createBilling(deps.billing))
 
   // Mounted for the same reason and with the same exclusion from the document.
   // Traefik puts this path on `autoconfig.i10.tech` alongside Stalwart's own

@@ -87,6 +87,7 @@ const metering = resilient(
         baseUrl: env.AUTUMN_URL,
         secretKey: env.AUTUMN_SECRET_KEY,
         featureId: env.AUTUMN_FEATURE_ID,
+        freePlanId: env.AUTUMN_FREE_PLAN_ID,
         timeoutMs: env.AUTUMN_TIMEOUT_MS,
         log,
       })
