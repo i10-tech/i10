@@ -1,11 +1,18 @@
 import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { VerifyDeps } from "./auth/api-key.js"
+import { createBilling, type BillingDeps } from "./routes/billing.js"
+import { createPolarWebhooks, type PolarWebhookDeps } from "./routes/polar-events.js"
 import type { AcceptOps, Logger as AcceptLogger } from "./send/accept.js"
 import type { Metering } from "./send/metering.js"
 import { createAutoconfig, type AutoconfigDeps } from "./routes/autoconfig.js"
 import { emails } from "./routes/emails.js"
+import { createSesWebhooks, type SesWebhookDeps } from "./routes/ses-events.js"
+import { webhookEndpoints } from "./routes/webhook-endpoints.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
+import type { EmailLookup } from "./send/lookup.js"
+import { equalSecrets } from "./webhooks/signing.js"
+import type { WebhookEndpointStore } from "./webhooks/store.js"
 
 /**
  * Read from package.json rather than `npm_package_version`, which pnpm only
@@ -33,8 +40,57 @@ export interface AppDeps {
    * unconfigured deployment silently accept mail it will never send.
    */
   sendPath?: AcceptOps & { metering: Metering; log: AcceptLogger }
+  /**
+   * Reads a message back for `GET /emails/{id}`. Omitted in tests and in the
+   * OpenAPI generator, where the route answers 501 rather than 404 — a 404
+   * would say the message does not exist, which is a different and wrong claim.
+   */
+  emailLookup?: EmailLookup
+  /** Customer-managed webhook destinations, for `/webhook-endpoints`. */
+  webhookEndpoints?: WebhookEndpointStore
+  /** SES delivery events over SNS. Unauthenticated; signature-verified. */
+  sesWebhooks?: SesWebhookDeps
+  /**
+   * Polar subscription events. Unauthenticated; signature-verified.
+   *
+   * ⚠ THE ONLY WIRING IN THE APPLICATION THAT CAN GRANT A PAID PLAN. Everything
+   * it needs to do that is behind billing/grants.ts, which takes the two Autumn
+   * operations rather than the client — so no other route can reach `grantPlan`
+   * by way of something it happens to have been passed.
+   */
+  polarWebhooks?: PolarWebhookDeps
+  /** Starting a checkout, and reading back the plan in force. API-key authed. */
+  billing?: BillingDeps
+  /**
+   * Queue depth, for the autoscaler and for whoever is asking why mail is slow.
+   *
+   * ⚠ TOKEN-GUARDED AND OUTSIDE THE OPENAPI DOCUMENT. It is not a customer
+   * endpoint: it answers for the whole deployment rather than for one tenant,
+   * and it touches Redis on every request, which makes an open one a free
+   * amplifier. KEDA sends a bearer token, so there is no reason to leave it
+   * open.
+   */
+  metrics?: {
+    token: string
+    queueDepth: () => Promise<QueueDepth>
+  }
   /** Answers whether the database is reachable, for the readiness probe. */
   pingDb?: () => Promise<void>
+}
+
+/**
+ * ⚠ `pending` IS THE SCALING SIGNAL AND `delayed` DELIBERATELY IS NOT. A send
+ * scheduled for next Tuesday sits in the delayed set for a week; counting it
+ * would hold every worker replica up for seven days waiting on one email. What
+ * needs capacity is work that is due now.
+ */
+export interface QueueDepth {
+  /** Per queue: work that is ready or in flight. */
+  pending: Record<string, number>
+  /** Per queue: jobs waiting for their moment. Reported, never scaled on. */
+  delayed: Record<string, number>
+  /** The sum of `pending`, which is what an autoscaler reads. */
+  total: number
 }
 
 export function createApp(deps: AppDeps = {}) {
@@ -45,12 +101,16 @@ export function createApp(deps: AppDeps = {}) {
   // at import time, so the middleware cannot capture anything createApp knows.
   // Setting it per request is what lets one process serve a configured app and
   // the tests serve an unconfigured one.
-  if (deps.apiKeyAuth || deps.sendPath) {
+  if (deps.apiKeyAuth || deps.sendPath || deps.emailLookup || deps.webhookEndpoints) {
     const auth = deps.apiKeyAuth
     const sendPath = deps.sendPath
+    const lookup = deps.emailLookup
+    const endpoints = deps.webhookEndpoints
     app.use("*", async (c, next) => {
       if (auth) c.set("apiKeyAuth", auth)
       if (sendPath) c.set("sendPath", sendPath)
+      if (lookup) c.set("emailLookup", lookup)
+      if (endpoints) c.set("webhookEndpoints", endpoints)
       await next()
     })
   }
@@ -77,6 +137,36 @@ export function createApp(deps: AppDeps = {}) {
     return c.json({ ok, checks }, ok ? 200 : 503)
   })
 
+  // ⚠ NOT IN THE OPENAPI DOCUMENT, ON PURPOSE. Publishing it would put an
+  // operational endpoint in every generated SDK and invite customers to call
+  // something that answers for the whole deployment rather than for them.
+  app.get("/internal/queue-depth", async (c) => {
+    const metrics = deps.metrics
+    if (!metrics) {
+      return c.json(
+        {
+          statusCode: 501,
+          name: "internal_server_error" as const,
+          message: "Metrics are not configured.",
+        },
+        501,
+      )
+    }
+
+    const header = c.req.header("Authorization") ?? ""
+    const given = header.startsWith("Bearer ") ? header.slice(7).trim() : ""
+    // ⚠ CONSTANT TIME. `===` on a token returns as soon as two bytes differ,
+    // and the time that takes is enough to recover it one byte at a time.
+    if (!equalSecrets(metrics.token, given)) {
+      return c.json(
+        { statusCode: 401, name: "invalid_access" as const, message: "Bad token." },
+        401,
+      )
+    }
+
+    return c.json(await metrics.queueDepth(), 200)
+  })
+
   app.get("/version", (c) =>
     c.json({
       sha: process.env.GIT_SHA ?? "dev",
@@ -86,6 +176,11 @@ export function createApp(deps: AppDeps = {}) {
 
   app.route("/emails", emails)
 
+  // Customer-facing, API-key authenticated. ⚠ Deliberately NOT under
+  // `/webhooks`, which is the inbound router below: one prefix for two opposite
+  // authentication models is how a middleware mistake exposes the wrong half.
+  app.route("/webhook-endpoints", webhookEndpoints)
+
   // Mounted unconditionally. Only mounting it when configured would turn a
   // missing secret into a 404 that looks like Clerk having the wrong URL,
   // rather than the 503 that says what is actually wrong.
@@ -94,6 +189,22 @@ export function createApp(deps: AppDeps = {}) {
   // contract, not ours. Publishing it would invite customers to call it, and it
   // would show up in every generated SDK.
   app.route("/webhooks", createClerkWebhooks(deps.clerkWebhooks))
+
+  // SES delivery events, over SNS. Same router prefix, same exclusion from the
+  // document, and the same rule: nothing reaches the database before the
+  // signature verifies — here it protects a tenant's suppression list.
+  app.route("/webhooks", createSesWebhooks(deps.sesWebhooks))
+
+  // Polar subscription events, same prefix and the same rule. This is the one
+  // that moves money into entitlement, so the signature check is the whole of
+  // the authorisation — see routes/polar-events.ts.
+  app.route("/webhooks", createPolarWebhooks(deps.polarWebhooks))
+
+  // ⚠ ALSO OUTSIDE THE OPENAPI DOCUMENT, AND NOT FOR THE SAME REASON. The two
+  // routers above implement somebody else's contract; this one is ours, but it
+  // is a console action rather than part of the email API, and publishing it
+  // would put "create a checkout session" in every generated SDK.
+  app.route("/billing", createBilling(deps.billing))
 
   // Mounted for the same reason and with the same exclusion from the document.
   // Traefik puts this path on `autoconfig.i10.tech` alongside Stalwart's own

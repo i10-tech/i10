@@ -1,0 +1,59 @@
+# Autumn's schema, as an Argo PreSync hook.
+#
+# ⚠ THE SAME REASONING AS i10-api-migrate, AND MORE NECESSARY HERE. Autumn runs
+# three Deployments off one image; migrating on boot would have server, workers
+# and cron race for the same schema lock on every rollout, and two of the three
+# would crash-loop until the winner finished. PreSync runs once per sync, before
+# any new pod starts.
+#
+# ⚠ `--bootstrap` IS FOR A FRESH DATABASE AND MUST BE REMOVED AFTER THE FIRST
+# SYNC. Their migrate command reads it as "skip the index-DDL safety check",
+# which exists to stop a migration taking a blocking lock on a populated table.
+# Correct exactly once — on an empty database — and a loaded gun on every sync
+# after that.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: i10-autumn-migrate
+  namespace: i10-prod
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-autumn-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/i10-tech/autumn:latest
+          imagePullPolicy: Always
+          # ⚠ FROM THE REPO ROOT, NOT /app/server. `bun db` is a root-level
+          # script (scripts/db/index.ts) and the Drizzle config it loads reads
+          # `../server/.env` relative to `shared/` — the working directory is
+          # part of the contract.
+          workingDir: /app
+          command: ["bun", "db", "migrate", "--bootstrap"]
+          envFrom:
+            - secretRef: { name: i10-autumn }
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-autumn-db-role, key: password }
+            # ⚠ THE PRIMARY, NOT THE POOLER. Migrations take advisory locks and
+            # run DDL in a transaction; PgBouncer in transaction pooling mode
+            # can hand consecutive statements to different backends and breaks
+            # both. Same rule as apps/api's own migrate Job.
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
+            - name: CRITICAL_DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }

@@ -1,0 +1,71 @@
+# KEDA, so the send worker scales on queue depth rather than on CPU.
+#
+# ⚠ APPLIED BY HAND, LIKE root.yaml, AND DELIBERATELY NOT IN argocd/apps/. The
+# i10 app-of-apps creates its children in `i10-prod` under the `i10` AppProject,
+# which is restricted to `i10-*` destinations — so a child Application targeting
+# the `keda` namespace is refused by the very boundary that makes i10
+# extractable, and one claiming `project: default` from outside `argocd` is
+# refused as a cross-project claim. Dropping this file into argocd/apps/ would
+# therefore not install KEDA; it would put the root Application into a
+# permanent error.
+#
+#   kubectl apply -f infra/k8s/argocd/keda.yaml
+#
+# ⚠ AND IT MUST BE SYNCED BEFORE infra/k8s/i10/workloads. That path contains a
+# ScaledObject, and until KEDA's CRDs exist the i10-workloads Application fails
+# to sync with `no matches for kind "ScaledObject"` — which looks like a broken
+# manifest rather than a missing operator.
+#
+# ⚠ THIS IS A CLUSTER-WIDE OPERATOR ON A CLUSTER SHARED WITH PSL. It installs
+# CRDs and a controller in `keda`, and it can scale any Deployment in any
+# namespace that carries a ScaledObject. Nothing in PSL gets one, so the blast
+# radius is a controller PSL does not use — but it is a shared-cluster change
+# rather than an i10 one, and the upgrade path is shared too.
+#
+# ⚠ AND IT IS HERE BECAUSE CPU IS THE WRONG SIGNAL, NOT BECAUSE THE HPA WAS
+# INADEQUATE. A send worker waiting on SES uses almost no CPU: a thousand
+# messages deep in the queue looks identical to an idle process, so a CPU-based
+# HPA would scale down under exactly the backlog it should scale up for. What
+# has to be measured is work waiting, which lives in Redis.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    chart: keda
+    repoURL: https://kedacore.github.io/charts
+    targetRevision: 2.17.2
+    helm:
+      releaseName: keda
+      values: |
+        # A single-node k3s box. The operator's defaults assume a cluster with
+        # room to spare, and this one is also running Postgres, Redis, Stalwart
+        # and two products.
+        resources:
+          operator:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          metricServer:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          webhooks:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The chart ships large CRDs; the annotation-based apply blows the
+      # metadata size limit on them.
+      - ServerSideApply=true

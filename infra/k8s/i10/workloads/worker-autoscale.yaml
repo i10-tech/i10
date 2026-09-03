@@ -1,0 +1,93 @@
+# Scaling the send worker on queue depth.
+#
+# ⚠ THE CEILING IS SES'S SEND RATE, NOT THE QUEUE'S LENGTH, AND GETTING THAT
+# BACKWARDS TURNS A BACKLOG INTO A RETRY STORM. What SES sees is
+# `maxReplicaCount × WORKER_CONCURRENCY` messages in flight. With concurrency at
+# 8, three replicas ask SES for 24 at once — fine at a production rate of 50/s
+# and catastrophic in the sandbox, where the rate is 1/s and every extra call
+# comes back 429. The transport correctly defers those, so the symptom is not an
+# error: it is the queue draining slower the more workers you add.
+#
+#   maxReplicaCount ≤ (SES messages/sec) ÷ WORKER_CONCURRENCY
+#
+# Three is right for a production rate of 25/s or better. ⚠ WHILE THE ACCOUNT
+# IS IN THE SANDBOX THIS SHOULD BE 1 — raise it in the same change that raises
+# the SES quota, never before.
+#
+# ⚠ AND THE METRIC IS `pending`, NOT THE WHOLE QUEUE. `/internal/queue-depth`
+# reports delayed jobs separately for exactly this reason: a send scheduled for
+# next Tuesday would otherwise hold three replicas up for a week.
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: i10-metrics
+  namespace: i10-prod
+spec:
+  # ⚠ THE DOPPLER-MANAGED SECRET THE API ALREADY MOUNTS, NOT A NEW ONE. A Secret
+  # declared in this directory would be owned by Argo, whose `selfHeal` re-applies
+  # it every ~35 seconds — so a placeholder committed here would overwrite the real
+  # token indefinitely, KEDA would authenticate with the placeholder, the API would
+  # answer 401, and the metric would read as unavailable rather than as an error.
+  # The scaling would simply never happen.
+  #
+  # ⚠ SO `METRICS_TOKEN` MUST EXIST IN THE DOPPLER `prod_api` CONFIG. A
+  # DopplerSecret naming a key that does not exist does not error — it produces a
+  # Secret without it and reports healthy — so check the managed Secret's key
+  # list, never the condition.
+  secretTargetRef:
+    - parameter: token
+      name: i10-api
+      key: METRICS_TOKEN
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: i10-worker
+  namespace: i10-prod
+spec:
+  scaleTargetRef:
+    name: i10-worker
+  # ⚠ NEVER TO ZERO. A password reset is the product; a cold start between the
+  # customer's API call and the send would be latency they can see, and the
+  # first request after a scale-to-zero pays for a pod pull, a database pool and
+  # a Redis handshake. Bulk could scale to zero; they share a Deployment.
+  minReplicaCount: 1
+  # ⚠ ONE, BECAUSE THE SES ACCOUNT IS STILL IN THE SANDBOX. At a 1/s account
+  # rate, three replicas × WORKER_CONCURRENCY=8 asks SES for 24 sends at once
+  # and gets 429s for almost all of them — which the transport correctly defers,
+  # so the queue drains SLOWER the more workers there are and nothing logs an
+  # error. Raise this to 3 in the same change that raises the SES quota, using
+  # the formula above, and never before.
+  maxReplicaCount: 1
+  pollingInterval: 15
+  # Long enough that a burst which drains in a minute does not immediately give
+  # its capacity back and then ask for it again.
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # ⚠ ONE POD AT A TIME, AND SLOWLY. The Deployment's strategy is
+          # Recreate and a terminating worker holds claims until it finishes;
+          # removing several at once maximises the number of messages waiting on
+          # the stale-claim timeout.
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+  triggers:
+    - type: metrics-api
+      metadata:
+        # ⚠ THE API, NOT REDIS DIRECTLY. KEDA's Redis scaler reads list length,
+        # and groupmq's ready structure is a sorted set of groups — so a Redis
+        # trigger would either not work or measure the number of tenants with
+        # work rather than the amount of work. The endpoint already computes the
+        # right number for the dashboard; the scaler reads the same one.
+        url: "http://i10-api.i10-prod.svc.cluster.local/internal/queue-depth"
+        valueLocation: "total"
+        targetValue: "50"
+        authMode: "bearer"
+      authenticationRef:
+        name: i10-metrics

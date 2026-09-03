@@ -247,6 +247,79 @@ describe("aggregateByCustomer", () => {
   })
 })
 
+describe("entitlements", () => {
+  // ⚠ THE TWO FLAGS THAT KEEP AUTUMN OUT OF PAYMENTS. Polar is the merchant of
+  // record; there is no Stripe account, so a customer created in Stripe is a
+  // call that fails on a credential we do not have.
+  it("creates a customer outside Stripe, on the free plan", async () => {
+    const { autumn, calls } = client({ status: 200, body: {} })
+
+    await autumn.ensureCustomer({
+      tenantId: "ten-1",
+      name: "Acme",
+      email: "billing@acme.test",
+    })
+
+    expect(calls[0]?.url).toBe("https://autumn.internal/v1/customers.get_or_create")
+    expect(calls[0]?.body).toMatchObject({
+      id: "ten-1",
+      create_in_stripe: false,
+      // ⚠ In the SAME call. A separate attach afterwards can fail on its own
+      // and leave a customer with no entitlement, which reads as an outage.
+      auto_enable_plan_id: "free",
+    })
+  })
+
+  it("throws when the customer cannot be created", async () => {
+    const { autumn } = client({ status: 500 })
+    await expect(autumn.ensureCustomer({ tenantId: "ten-1" })).rejects.toThrow(/500/)
+  })
+
+  // ⚠ THE WHOLE DESIGN IN ONE ASSERTION. `no_billing_changes` is what makes
+  // this entitlements-only: the plan attaches, nothing is charged, and Autumn
+  // never learns Polar exists — which is why it stays upstream and unforked.
+  it("attaches a plan without touching billing", async () => {
+    const { autumn, calls } = client({ status: 200, body: {} })
+
+    await autumn.grantPlan({ tenantId: "ten-1", planId: "pro" })
+
+    expect(calls[0]?.url).toBe("https://autumn.internal/v1/billing.attach")
+    expect(calls[0]?.body).toMatchObject({
+      customer_id: "ten-1",
+      plan_id: "pro",
+      no_billing_changes: true,
+      redirect_mode: "never",
+    })
+  })
+
+  // ⚠ POLAR'S SUBSCRIPTION ID IS THE IDEMPOTENCY KEY. A webhook Polar retries
+  // must target the same subscription rather than mint a second one.
+  it("passes the payment provider's subscription id through", async () => {
+    const { autumn, calls } = client({ status: 200, body: {} })
+
+    await autumn.grantPlan({
+      tenantId: "ten-1",
+      planId: "pro",
+      subscriptionId: "polar_sub_123",
+    })
+
+    expect(calls[0]?.body).toMatchObject({ subscription_id: "polar_sub_123" })
+  })
+
+  it("omits it entirely when there is none", async () => {
+    const { autumn, calls } = client({ status: 200, body: {} })
+    await autumn.grantPlan({ tenantId: "ten-1", planId: "free" })
+    expect(calls[0]?.body).not.toHaveProperty("subscription_id")
+  })
+
+  it("throws when the attach is refused", async () => {
+    const { autumn } = client({ status: 422 })
+    await expect(
+      autumn.grantPlan({ tenantId: "ten-1", planId: "pro" }),
+    ).rejects.toThrow(/422/)
+  })
+})
+
 describe("autumnMetering", () => {
   it("maps a send record onto a batch of events", async () => {
     const at = new Date("2026-09-02T10:00:00Z")

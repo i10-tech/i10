@@ -115,6 +115,23 @@ spec:
         passwordSecret:
           name: i10-api-db-role
 
+      # Owns the `autumn` database declared in i10/autumn/database.yaml.
+      #
+      # ⚠ IT OWNS ITS TABLES, WHICH IS WHY IT NEEDS ITS OWN DATABASE. Autumn
+      # generates and applies its own Drizzle migrations on every upgrade, so
+      # the role it connects as must be able to CREATE, ALTER and DROP. That is
+      # the exact opposite of `i10_api`, which owns nothing so that row level
+      # security binds to it — the two cannot share a database without one of
+      # them being wrong.
+      - name: autumn
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: i10-autumn-db-role
+
   bootstrap:
     initdb:
       database: i10

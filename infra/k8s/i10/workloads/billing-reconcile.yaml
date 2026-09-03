@@ -1,0 +1,83 @@
+# Reconciles i10's entitlements against Polar, on a schedule.
+#
+# ⚠ THE SAME IMAGE AND A THIRD COMMAND, like the worker and the migration Job.
+# `node dist/reconcile.js` runs one pass and exits; there is no separate
+# artifact, so it cannot drift from the schema or the environment validation the
+# API is built against.
+#
+# ⚠ WHY THIS EXISTS AT ALL. Autumn attaches plans with `no_billing_changes`,
+# which makes Polar the state of record and Autumn a downstream copy — and the
+# only thing carrying state between them is a webhook. One lost during a deploy
+# is a customer silently on the wrong plan, in either direction, with nothing in
+# either system that would ever notice. This is what notices.
+#
+# ⚠ A CronJob RATHER THAN AN INTERVAL IN THE WORKER, BECAUSE THE WORKER SCALES.
+# KEDA runs one to several replicas of it on queue depth; an interval inside
+# would issue one set of repairs per replica against the same rows, each one
+# calling Autumn. Kubernetes already owns "exactly once, on a schedule".
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-billing-reconcile
+  namespace: i10-prod
+spec:
+  # Every half hour. The upper bound on how long a customer who paid can be
+  # sitting on free-tier limits after a lost webhook — which is the number this
+  # schedule actually sets, and the reason it is not nightly.
+  schedule: "*/30 * * * *"
+  # ⚠ NEVER TWO AT ONCE. A run that overruns its slot would otherwise be joined
+  # by the next one, and both would read the same discrepancies and both would
+  # attach. Autumn's `subscription_id` makes that idempotent rather than
+  # double-billing, but two concurrent passes still race on `granted_plan_id`
+  # and leave the row recording whichever finished last.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # ⚠ FAILED RUNS ARE KEPT LONGER THAN SUCCESSFUL ONES. Until there is alerting,
+  # `kubectl get jobs` is the entire monitoring story for this, and a failed pod
+  # that has been garbage-collected leaves no evidence that entitlements drifted.
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      # One attempt per slot. A transient Polar or Autumn failure is picked up by
+      # the next run half an hour later, and retrying immediately inside the slot
+      # only compresses the same failure into a tighter loop.
+      backoffLimit: 0
+      # Nothing here should take five minutes; if it does, something is wrong
+      # enough that the next slot should start clean rather than wait behind it.
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: reconcile
+              image: ghcr.io/i10-tech/i10-api:prod-d3ad3d28c8065d3049a6697557154ccc7929b7f5@sha256:823c3d093edb98ee0644a8252ea6e8e92108800b011dc834a6e75c5a9acc206e
+              imagePullPolicy: Always
+              command: ["node", "dist/reconcile.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # This job writes entitlements for every tenant, and it reaches
+                # across them through one narrow SECURITY DEFINER function
+                # (`core.subscriptions_snapshot`) rather than by holding a role
+                # that can see everything.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

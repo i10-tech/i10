@@ -80,6 +80,37 @@ export const messageEventType = core.enum("message_event_type", [
   "failed",
 ])
 
+/**
+ * What a customer's endpoint can subscribe to.
+ *
+ * ⚠ THESE NAMES ARE A PUBLIC CONTRACT AND ARRIVE IN CUSTOMER CODE AS STRING
+ * LITERALS. A rename is a breaking change to every `if (event.type === …)` any
+ * customer has written, and it breaks silently — their handler stops matching
+ * and does nothing. Add, never rename.
+ *
+ * ⚠ AND EVERY ONE OF THEM ORIGINATES AT SES, INCLUDING `email.sent`. The send
+ * worker does not emit events: SES's configuration set publishes `Send` the
+ * moment it accepts a message, so one ingestion path produces all of them in
+ * one order from one source. Emitting `sent` ourselves and the rest from SES
+ * would give two clocks, two failure modes, and a `sent` that can arrive for a
+ * message SES later rejected.
+ */
+export const webhookEventType = core.enum("webhook_event_type", [
+  "email.sent",
+  "email.delivered",
+  "email.delivery_delayed",
+  "email.bounced",
+  "email.complained",
+  "email.failed",
+])
+
+export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
+  "pending",
+  "delivered",
+  /** Every attempt used. Terminal — the reconciler for this is a person. */
+  "failed",
+])
+
 export const suppressionReason = core.enum("suppression_reason", [
   "hard_bounce",
   "complaint",
@@ -465,6 +496,121 @@ export const messageEvents = core.table(
 )
 
 /**
+ * A customer's HTTP endpoint, and what it wants to hear about.
+ *
+ * ⚠ THE ENDPOINT IS THE UNIT OF ORDERING AND OF ISOLATION, WHICH IS WHY THE
+ * DELIVERY QUEUE IS GROUPED BY ITS ID RATHER THAN BY TENANT. One customer's
+ * staging endpoint timing out for an hour must not delay their production one,
+ * and events for a single endpoint must arrive in the order they happened —
+ * `email.sent` before `email.delivered`, or a customer's state machine reads
+ * backwards. Per-endpoint grouping gives both.
+ */
+export const webhookEndpoints = core.table(
+  "webhook_endpoints",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /** ⚠ https only, and never a private address — see webhooks/endpoints.ts. */
+    url: text("url").notNull(),
+    description: text("description"),
+
+    /**
+     * The signing secret, ENCRYPTED AT REST.
+     *
+     * ⚠ IT CANNOT BE A HASH, WHICH IS WHY IT IS ENCRYPTED INSTEAD. A signature
+     * is computed, not compared, so the worker needs the secret back — one-way
+     * hashing is not available here the way it is for a password. What is
+     * available is that a database dump alone is not enough: the key lives in
+     * the environment, so an exfiltrated backup yields ciphertext.
+     *
+     * ⚠ AND THE PLAINTEXT IS SHOWN EXACTLY ONCE, AT CREATION. Storing it
+     * retrievably would make "reveal my signing secret" an API call, and that
+     * call is a far better target than the database.
+     */
+    secretCiphertext: text("secret_ciphertext").notNull(),
+
+    events: webhookEventType("events").array().notNull(),
+
+    enabled: boolean("enabled").notNull().default(true),
+
+    /**
+     * ⚠ AN ENDPOINT THAT HAS FAILED LONG ENOUGH IS TURNED OFF, AND THAT IS A
+     * PROTECTION FOR US RATHER THAN A COURTESY TO THEM. A customer who deletes
+     * their receiver without deleting the endpoint would otherwise have every
+     * event they ever generate retried against a dead host, forever, at our
+     * expense — and the queue those retries sit in is shared.
+     */
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("webhook_endpoints_tenant_idx").on(t.tenantId)],
+)
+
+/**
+ * One attempt to tell one endpoint about one event.
+ *
+ * ⚠ A ROW PER (EVENT, ENDPOINT), WRITTEN BEFORE ANYTHING IS QUEUED. The same
+ * discipline as the send path: the database is the record and the queue is a
+ * prompt to look at it. A job whose row does not exist is dropped silently; a
+ * row no job points at is late, and a sweep can find it.
+ *
+ * ⚠ AND IT CARRIES ITS OWN PAYLOAD RATHER THAN REBUILDING IT AT DELIVERY TIME.
+ * A webhook says what was true when the event happened. Rebuilding from the
+ * message row at attempt four would describe the message as it is now — a
+ * `bounced` event whose body says `sent`, because a later retry succeeded.
+ */
+export const webhookDeliveries = core.table(
+  "webhook_deliveries",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id").notNull(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+
+    eventType: webhookEventType("event_type").notNull(),
+    /**
+     * When the event HAPPENED, which is not when we heard about it.
+     *
+     * ⚠ THIS IS WHAT THE CUSTOMER'S ENVELOPE CARRIES, SO IT CANNOT BE
+     * `created_at`. SNS can be delayed, and our ingestion can be down for an
+     * hour and catch up afterwards — publishing the row's own creation time
+     * would tell a customer a bounce from an hour ago happened just now, and
+     * anyone measuring delivery latency would be measuring our backlog.
+     */
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    /** The message this is about. No FK — see `messageEvents` for why. */
+    messageId: uuid("message_id"),
+    payload: jsonb("payload").notNull(),
+
+    status: webhookDeliveryStatus("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    /** The last HTTP status we saw, for "why is my endpoint not working". */
+    responseStatus: integer("response_status"),
+    lastError: text("last_error"),
+
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.createdAt),
+    index("webhook_deliveries_tenant_idx").on(t.tenantId, t.createdAt),
+    // The queue for "what has not been delivered and is not moving".
+    index("webhook_deliveries_pending_idx").on(t.status, t.createdAt),
+  ],
+)
+
+/**
  * Addresses this tenant may no longer send to.
  *
  * Enforced at our API before a send reaches SES, so a customer who keeps a dead
@@ -486,4 +632,94 @@ export const suppressions = core.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.address] })],
+)
+
+/**
+ * What a tenant is paying for, as Polar last told us.
+ *
+ * ⚠ THIS TABLE IS A COPY, NOT THE TRUTH. Polar is the state of record for
+ * subscriptions — it took the money and it is what a dispute is settled
+ * against. This row exists so the console can answer "what plan am I on"
+ * without a round trip to Polar, and so the reconciler has something to compare
+ * against; every value in it arrives from a signature-verified webhook.
+ *
+ * ⚠ AND IT IS WRITTEN BEFORE AUTUMN IS TOLD ANYTHING. The order is deliberate:
+ * row first, entitlement second. If the Autumn call then fails, the truth is
+ * already durable and the reconciler repairs the entitlement on its next pass.
+ * Reversed, a crash between the two leaves a customer holding a paid plan that
+ * nothing in our database records — invisible, and never revoked.
+ *
+ * ⚠ ONE ROW PER TENANT, NOT A HISTORY. `tenant_id` is unique so the upsert has
+ * something to conflict on; what the customer is entitled to today is a single
+ * question with a single answer. The audit trail lives in Polar, which keeps it
+ * properly and is the thing anyone would actually be asked to produce.
+ */
+export const subscriptions = core.table(
+  "subscriptions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .unique()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /**
+     * ⚠ ALSO UNIQUE, AND THAT IS A SAFETY PROPERTY. Two tenants pointing at one
+     * Polar subscription would mean one payment entitling two accounts, and the
+     * reconciler — which matches on this id — would flip the plan back and
+     * forth between them on every pass.
+     */
+    polarSubscriptionId: text("polar_subscription_id").notNull().unique(),
+    polarCustomerId: text("polar_customer_id").notNull(),
+    polarProductId: text("polar_product_id").notNull(),
+
+    /** Our plan id, from POLAR_PRODUCTS. What they bought. */
+    planId: text("plan_id").notNull(),
+
+    /**
+     * ⚠ `text`, NOT AN ENUM, AND THE REASON IS THE RETRY LOOP. Polar owns this
+     * vocabulary and can add to it; an enum would make an unrecognised status a
+     * failed INSERT, which is a 500, which Polar retries for hours while the
+     * customer's plan never lands. Storing what they said and deciding
+     * separately (billing/events.ts) keeps a vocabulary change from being an
+     * outage.
+     */
+    status: text("status").notNull(),
+
+    /**
+     * Set the moment a customer clicks cancel, while the subscription is still
+     * active and paid for. Recorded so the console can say "ends on the 4th",
+     * and deliberately not acted on — see billing/events.ts.
+     */
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+
+    /**
+     * ⚠ POLAR'S CLOCK, AND THE ONLY THING THAT ORDERS TWO EVENTS. Deliveries
+     * retry and overtake each other; a delayed `active` arriving after
+     * `revoked` would re-grant a plan to a customer who churned. The upsert
+     * refuses to move a row backwards past this value.
+     */
+    eventAt: timestamp("event_at", { withTimezone: true }).notNull(),
+
+    /**
+     * The plan Autumn was last successfully told about, and NULL until one
+     * lands.
+     *
+     * ⚠ THIS COLUMN IS THE ENTIRE POINT OF THE RECONCILER. It is what makes
+     * "the row was written but the entitlement never applied" a query rather
+     * than an invisible state — where it is out of step with the plan the
+     * subscription entitles, a customer is paying for something they do not
+     * have, or holding something they no longer pay for.
+     */
+    grantedPlanId: text("granted_plan_id"),
+    grantedAt: timestamp("granted_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("subscriptions_granted_idx").on(t.grantedPlanId, t.planId)],
 )

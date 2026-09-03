@@ -32,6 +32,10 @@ declare module "hono" {
       metering: import("../send/metering.js").Metering
       log: import("../send/accept.js").Logger
     }
+    /** Reads one message back for `GET /emails/{id}`. */
+    emailLookup?: import("../send/lookup.js").EmailLookup
+    /** Customer-managed webhook destinations. */
+    webhookEndpoints?: import("../webhooks/store.js").WebhookEndpointStore
   }
 }
 

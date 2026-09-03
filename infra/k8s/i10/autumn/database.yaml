@@ -1,0 +1,32 @@
+# Autumn's own database, inside the shared CNPG cluster.
+#
+# ⚠ ITS OWN DATABASE, NOT A SCHEMA IN `i10` — the same reasoning as Stalwart's,
+# and for a sharper reason. Autumn owns `public` in whatever database you point
+# it at: it generates its own Drizzle migrations, and `bun db migrate` will
+# create, alter and drop there on every upgrade. Pointed at the `i10` database
+# it would be one bad upstream migration away from taking a lock — or a DROP —
+# against `core.messages`. A separate database makes that impossible rather than
+# unlikely, and costs nothing: same Postgres server, same operator, same
+# backups, same pool of memory.
+#
+# It also keeps the row level security model intact. Every table in `core` is
+# protected by a policy reading `app.tenant_id`, and `assertRlsSubject()`
+# refuses to start as a role that bypasses them. Autumn's role owns its tables
+# and must be able to migrate them freely — the two models cannot share a
+# database without one of them being wrong.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: i10-autumn-db
+  namespace: i10-prod
+spec:
+  cluster:
+    name: i10-platform
+  name: autumn
+  owner: autumn
+
+  # ⚠ RETAIN, NOT DELETE. This database holds the entitlement state for every
+  # paying customer — which plan they are on and how much of it they have used.
+  # `delete` would drop it as a side effect of removing this manifest, and the
+  # first symptom would be every customer's quota reading zero.
+  databaseReclaimPolicy: retain

@@ -34,6 +34,15 @@ export interface AutumnOptions {
   /** The metered feature every email is one unit of. */
   featureId: string
   /**
+   * The plan a brand-new tenant lands on.
+   *
+   * ⚠ IT MUST EXIST IN AUTUMN BEFORE THE FIRST SIGNUP. Defined in
+   * infra/autumn/autumn.config.ts and pushed with `atmn push`; a tenant
+   * auto-enabled onto a plan id that is not there is a customer with no
+   * entitlement, which reads as an outage rather than as a misconfiguration.
+   */
+  freePlanId?: string
+  /**
    * ⚠ A BUDGET, NOT A TIMEOUT KNOB. `checkQuota` sits inside `POST /emails`, so
    * this number is added to the latency of every send when Autumn is slow. It
    * has to be short enough that a degraded Autumn costs a customer milliseconds
@@ -69,6 +78,48 @@ export interface AutumnClient {
   track(event: TrackEvent): Promise<"recorded" | "duplicate">
   /** What Autumn believes each tenant used, per day, in a window. */
   aggregateByCustomer(start: Date, end: Date): Promise<UsageBucket[]>
+
+  /**
+   * Makes sure the tenant exists as a customer, on the free plan.
+   *
+   * ⚠ WITHOUT THIS, EVERY `check` FOR THAT TENANT IS A 404. Autumn has no
+   * entitlement for a customer it has never heard of, so a tenant that is never
+   * registered has no quota at all — which our client reads as `unavailable`
+   * and fails open, meaning they send unmetered and unbilled forever with
+   * nothing in the logs. `missingCustomers()` in send/reconcile.ts is the sweep
+   * that finds the ones this did not reach.
+   */
+  ensureCustomer(input: EnsureCustomer): Promise<void>
+
+  /**
+   * Puts a tenant on a plan WITHOUT taking any money.
+   *
+   * ⚠ ENTITLEMENTS ONLY — POLAR IS THE PAYMENT RAIL AND THE STATE OF RECORD.
+   * See the note on `grantPlan` below for the whole of that argument.
+   */
+  grantPlan(input: GrantPlan): Promise<void>
+}
+
+export interface EnsureCustomer {
+  tenantId: string
+  name?: string
+  email?: string
+}
+
+export interface GrantPlan {
+  tenantId: string
+  /** A plan id from infra/autumn/autumn.config.ts. */
+  planId: string
+  /**
+   * ⚠ POLAR'S SUBSCRIPTION ID, AND IT IS THREE THINGS AT ONCE. It is the
+   * idempotency key — a webhook Polar retries targets the same subscription
+   * instead of creating a second. It is the correlation key, so a row in Polar
+   * and a row in Autumn can be matched without a lookup table. And it is what
+   * makes the reconciler between the two about twenty lines rather than a
+   * project. Omitting it is not an error, and every one of those properties is
+   * silently lost.
+   */
+  subscriptionId?: string
 }
 
 /**
@@ -263,6 +314,76 @@ export function autumnClient(opts: AutumnOptions): AutumnClient {
       }
 
       return buckets
+    },
+
+    async ensureCustomer(input) {
+      const result = await post("/v1/customers.get_or_create", {
+        id: input.tenantId,
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.email ? { email: input.email } : {}),
+
+        // ⚠ THE TWO FLAGS THAT KEEP AUTUMN OUT OF PAYMENTS ENTIRELY.
+        //
+        // `create_in_stripe: false` stops it minting a Stripe customer for
+        // every tenant. We have no Stripe account and want none — Polar is the
+        // merchant of record, and it is what takes the tax problem with it.
+        // Left at its default, this call fails on a Stripe credential that does
+        // not exist, and the failure arrives as "could not create customer"
+        // rather than as anything about Stripe.
+        create_in_stripe: false,
+
+        // ⚠ AND THIS IS WHAT PUTS A NEW TENANT ON THE FREE PLAN IN THE SAME
+        // ROUND TRIP. A separate attach afterwards would be a second call that
+        // can fail on its own, leaving a customer who exists with no
+        // entitlement — the one state that reads as "unavailable" forever.
+        auto_enable_plan_id: opts.freePlanId ?? "free",
+      })
+
+      if (result.status < 200 || result.status >= 300) {
+        throw new Error(
+          `autumn customers.get_or_create failed with ${result.status} for ${input.tenantId}`,
+        )
+      }
+    },
+
+    /**
+     * ⚠ `no_billing_changes: true` IS THE WHOLE DESIGN, NOT A FLAG. It is
+     * Autumn's own supported path for people who settle payment elsewhere: the
+     * plan is attached, entitlements move, and no subscription, invoice or
+     * charge is created anywhere. Autumn never learns Polar exists, which is
+     * why it stays entirely upstream and updatable — no fork, and plain
+     * `attach()` still works the day a payment provider is reachable from here.
+     *
+     * ⚠ AND IT INVERTS WHO OWNS THE TRUTH. With billing changes off, POLAR is
+     * the state of record for subscriptions and Autumn is a downstream copy.
+     * Polar's webhooks must be the only thing that moves a customer between
+     * paid plans — a webhook lost during a deploy is a customer silently on the
+     * wrong plan, and nothing in Autumn will ever notice. That is why the
+     * reconcile job is not optional.
+     *
+     * ⚠ POLAR IS DELIBERATELY NOT NAMED IN THIS FUNCTION. It takes a plan and a
+     * subscription id and knows nothing about where they came from, so the day
+     * a Stripe webhook calls it instead, it is unchanged.
+     */
+    async grantPlan(input) {
+      const result = await post("/v1/billing.attach", {
+        customer_id: input.tenantId,
+        plan_id: input.planId,
+        no_billing_changes: true,
+
+        // Belt and braces: with no billing changes there is nothing to redirect
+        // to, but the default is `if_required` and a checkout URL returned to a
+        // caller that has no browser is a silently dropped flow.
+        redirect_mode: "never",
+
+        ...(input.subscriptionId ? { subscription_id: input.subscriptionId } : {}),
+      })
+
+      if (result.status < 200 || result.status >= 300) {
+        throw new Error(
+          `autumn billing.attach failed with ${result.status} for ${input.tenantId} -> ${input.planId}`,
+        )
+      }
     },
   }
 }

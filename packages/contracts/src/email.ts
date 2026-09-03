@@ -163,6 +163,105 @@ export const batchSendResponseSchema = z.object({
   data: z.array(sendEmailResponseSchema),
 })
 
+/**
+ * `GET /emails/{id}` — what happened to one message.
+ *
+ * ⚠ THE ASYNCHRONOUS HALF OF A SYNCHRONOUS-LOOKING API. `POST /emails` returns
+ * an id before anything has been sent, which is what keeps a password reset off
+ * the mail server's latency — but it leaves the caller holding an identifier
+ * and no way to ask about it. Without this route the only answer to "did it
+ * arrive" is a webhook the caller may not have set up, and support has to read
+ * the database.
+ *
+ * ⚠ `last_event` IS A STATE, NOT A LOG. One value, the furthest the message has
+ * got, so a caller can branch on it — `delivered`, `bounced`, `queued`. The
+ * full sequence is what webhooks are for; putting it here would make a status
+ * check unbounded in size for a heavily retried message.
+ */
+export const emailEventName = z.enum([
+  "queued",
+  "scheduled",
+  "sending",
+  "sent",
+  "delivered",
+  "delivery_delayed",
+  "bounced",
+  "complained",
+  "failed",
+  "canceled",
+])
+
+export const getEmailResponseSchema = z.object({
+  object: z.literal("email"),
+  id: z.uuid(),
+  from: z.string(),
+  to: z.array(z.string()),
+  cc: z.array(z.string()),
+  bcc: z.array(z.string()),
+  reply_to: z.array(z.string()),
+  subject: z.string(),
+  html: z.string().nullable(),
+  text: z.string().nullable(),
+  created_at: z.string(),
+  scheduled_at: z.string().nullable(),
+  last_event: emailEventName,
+})
+
+/**
+ * The events a customer's endpoint can subscribe to.
+ *
+ * ⚠ THESE STRINGS APPEAR IN CUSTOMER CODE AS LITERALS, so a rename breaks every
+ * `if (event.type === …)` anyone has written — and breaks it silently, because
+ * their handler simply stops matching. Add, never rename. They mirror
+ * `core.webhook_event_type`; the two must be changed together.
+ */
+export const webhookEventName = z.enum([
+  "email.sent",
+  "email.delivered",
+  "email.delivery_delayed",
+  "email.bounced",
+  "email.complained",
+  "email.failed",
+])
+
+/** `POST /webhook-endpoints` — where a customer wants their events delivered. */
+export const createWebhookEndpointSchema = z.object({
+  /** ⚠ https, public, and not an IP literal — see webhooks/endpoints.ts. */
+  url: z.url(),
+  /** At least one, because an endpoint subscribed to nothing is a silent bug. */
+  events: z.array(webhookEventName).min(1),
+  description: z.string().max(255).optional(),
+})
+
+export const webhookEndpointSchema = z.object({
+  object: z.literal("webhook_endpoint"),
+  id: z.uuid(),
+  url: z.url(),
+  events: z.array(webhookEventName),
+  description: z.string().nullable(),
+  enabled: z.boolean(),
+  created_at: z.string(),
+})
+
+/**
+ * ⚠ THE SECRET IS RETURNED ONCE, ON CREATION AND ON ROTATION, AND NEVER AGAIN.
+ * There is no "show me my signing secret" endpoint on purpose: such a call is a
+ * far better target than the database it would read from, and every customer
+ * who needs it has it at the moment they need it.
+ */
+export const webhookEndpointWithSecretSchema = webhookEndpointSchema.extend({
+  secret: z.string(),
+})
+
+export const webhookEndpointListSchema = z.object({
+  data: z.array(webhookEndpointSchema),
+})
+
+export type EmailEventName = z.infer<typeof emailEventName>
+export type GetEmailResponse = z.infer<typeof getEmailResponseSchema>
+export type WebhookEventName = z.infer<typeof webhookEventName>
+export type CreateWebhookEndpoint = z.infer<typeof createWebhookEndpointSchema>
+export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>
 export type Address = z.infer<typeof addressSchema>
 export type Attachment = z.infer<typeof attachmentSchema>
 export type Tag = z.infer<typeof tagSchema>
