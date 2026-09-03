@@ -6,11 +6,12 @@
 # would crash-loop until the winner finished. PreSync runs once per sync, before
 # any new pod starts.
 #
-# ⚠ `--bootstrap` IS FOR A FRESH DATABASE AND MUST BE REMOVED AFTER THE FIRST
-# SYNC. Their migrate command reads it as "skip the index-DDL safety check",
-# which exists to stop a migration taking a blocking lock on a populated table.
-# Correct exactly once — on an empty database — and a loaded gun on every sync
-# after that.
+# ⚠ `--bootstrap` IS GONE, AND MUST NOT COME BACK. Their migrate command reads
+# it as "skip the index-DDL safety check" — the check that stops a migration
+# taking a blocking lock on a populated table. It was correct exactly once, on
+# the empty database this Job first created; the `autumn` database has rows in
+# it now, and re-adding the flag would let a future upstream migration lock a
+# live table for as long as it takes to build an index.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -81,7 +82,7 @@ spec:
               for i in $(seq 1 30); do
                 if (echo > /dev/tcp/$host/5432) 2>/dev/null; then
                   echo "postgres reachable after ${i} attempt(s)"
-                  exec bun db migrate --bootstrap --env=prod
+                  exec bun db migrate --env=prod
                 fi
                 sleep 2
               done
