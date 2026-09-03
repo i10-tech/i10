@@ -6,9 +6,17 @@ import { createCacheClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { createSendQueue, type SendClass, type SendJob } from "./queue/send-queue.js"
+import {
+  createWebhookQueue,
+  webhookBackoff,
+  type WebhookJob,
+} from "./queue/webhook-queue.js"
 import { autumnMetering } from "./send/autumn.js"
 import { resilient, unmetered } from "./send/metering.js"
 import { sesTransport } from "./send/ses.js"
+import { webhookDeliveryOps } from "./webhooks/db.js"
+import { deliverWebhook } from "./webhooks/deliver.js"
+import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
 import { handleBatch } from "./worker/handle-batch.js"
 
@@ -128,7 +136,67 @@ function startWorker(cls: SendClass) {
   return worker
 }
 
-const workers = (["transactional", "bulk"] as const).map(startWorker)
+/**
+ * The webhook delivery worker.
+ *
+ * ⚠ THE SAME PROCESS AS THE SEND WORKER, AND A DIFFERENT QUEUE. Both are
+ * I/O-bound waits on somebody else's server, so a second Deployment would cost
+ * a pod to save nothing — and one process means one place where a slow
+ * shutdown, a Redis reconnect or a database pool problem has to be got right.
+ *
+ * ⚠ AND IT IS ABSENT RATHER THAN BROKEN WHEN THERE IS NO KEY. Without
+ * `WEBHOOK_SECRET_KEY` the stored secrets cannot be decrypted, so there is
+ * nothing to sign with — starting a worker that would fail every delivery
+ * would fill the failure counters and disable every customer's endpoint.
+ */
+function startWebhookWorker() {
+  if (!env.WEBHOOK_SECRET_KEY) {
+    log.warn({}, "WEBHOOK DELIVERY DISABLED — no WEBHOOK_SECRET_KEY")
+    return null
+  }
+
+  const secrets = secretBox(env.WEBHOOK_SECRET_KEY)
+  const queue = createWebhookQueue({
+    redis,
+    maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
+  })
+  const ops = webhookDeliveryOps({ db, secrets })
+
+  const worker = new Worker<WebhookJob>({
+    queue,
+    name: `${workerId}:webhooks`,
+    handler: (job) =>
+      deliverWebhook(job.data, {
+        ...ops,
+        log,
+        maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
+      }),
+    maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
+    // ⚠ HOW MANY ENDPOINTS ARE IN FLIGHT AT ONCE, NOT HOW MANY EVENTS PER
+    // ENDPOINT. groupmq runs one job per group, so this is a count of distinct
+    // customer endpoints being POSTed to concurrently — every one of them a
+    // ten-second wait on somebody else's server, which is why it is worth
+    // being higher than the send worker's.
+    concurrency: env.WEBHOOK_CONCURRENCY,
+    // ⚠ ON THE WORKER, NOT THE QUEUE — groupmq ignores it on the latter. See
+    // queue/webhook-queue.ts.
+    backoff: webhookBackoff,
+    // Deliberately quiet: a customer's endpoint being down is their operational
+    // problem, recorded on the delivery row, and logging it as an error here
+    // would drown the log in other people's outages.
+    onError: (err, job) =>
+      log.warn({ err, jobId: job?.id }, "webhook delivery job failed"),
+  })
+
+  worker.run()
+  log.info({}, "webhook worker started")
+  return worker
+}
+
+const workers = [
+  ...(["transactional", "bulk"] as const).map(startWorker),
+  startWebhookWorker(),
+].filter((w) => w !== null)
 
 /**
  * ⚠ STOP TAKING WORK, THEN LET WHAT IS IN FLIGHT FINISH. Kubernetes sends

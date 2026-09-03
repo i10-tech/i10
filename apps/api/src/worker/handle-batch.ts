@@ -1,3 +1,4 @@
+import { describeError } from "../errors.js"
 import type { SendJob } from "../queue/send-queue.js"
 import type { Metering, SentMessage } from "../send/metering.js"
 import type { OutboundMessage, SendOutcome, Transport } from "../send/transport.js"
@@ -116,7 +117,7 @@ export async function handleBatch<M extends OutboundMessage>(
       // failing to give an answer — a socket, a timeout, a bug — and that is not
       // evidence the message is undeliverable. Treating it as permanent drops
       // real mail on the first network blip.
-      outcome = { status: "deferred", reason: describe(err) }
+      outcome = { status: "deferred", reason: describeError(err) }
     }
 
     switch (outcome.status) {
@@ -200,9 +201,4 @@ async function inBatches<T>(
   })
 
   await Promise.all(runners)
-}
-
-function describe(err: unknown): string {
-  if (err instanceof Error) return `${err.name}: ${err.message}`
-  return String(err)
 }

@@ -130,6 +130,42 @@ const schema = z.object({
    */
   AUTUMN_TIMEOUT_MS: z.coerce.number().int().positive().max(10_000).default(2000),
 
+  // ── webhooks ──────────────────────────────────────────────────────────────
+
+  /**
+   * Encrypts customers' webhook signing secrets at rest. 32 bytes, hex or
+   * base64 — `openssl rand -hex 32`.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE DISABLES WEBHOOKS RATHER THAN WEAKENING THEM.
+   * Without a key the endpoint routes answer 501 and no delivery is attempted,
+   * which is a visible missing feature. The alternative — falling back to
+   * storing secrets in plaintext — would be a silent downgrade of the one thing
+   * that makes a webhook trustworthy.
+   *
+   * ⚠ AND LOSING IT IS NOT RECOVERABLE. Every stored secret becomes
+   * undecryptable, so every customer has to rotate. It belongs in Doppler with
+   * the same care as CLERK_SECRET_KEY.
+   */
+  WEBHOOK_SECRET_KEY: z.string().min(32).optional(),
+
+  /**
+   * How many delivery attempts a webhook gets before the row is marked failed.
+   * The backoff is exponential and capped at eight minutes, so five attempts
+   * span roughly a quarter of an hour — enough for a deploy or a restart.
+   */
+  WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
+
+  /** Provider webhook deliveries in flight per worker replica. */
+  WEBHOOK_CONCURRENCY: z.coerce.number().int().positive().max(100).default(8),
+
+  /**
+   * ⚠ GUARDS THE QUEUE-DEPTH ENDPOINT THE AUTOSCALER READS. Queue depth is not
+   * secret in a damaging way, but an unauthenticated endpoint that touches
+   * Redis on every request is a free amplifier — and KEDA can send a bearer
+   * token, so there is no reason to leave it open.
+   */
+  METRICS_TOKEN: z.string().min(16).optional(),
+
   // ⚠ THE NAME ON THE CERTIFICATE AND IN THE SMTP GREETING, not a hostname we
   // are free to pick per environment. It is `SystemSettings.defaultHostname` in
   // Stalwart, the target of every SRV record in the zone, and the subject a

@@ -6,9 +6,14 @@ import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/red
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { createSendQueue } from "./queue/send-queue.js"
+import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
+import { emailLookup } from "./send/lookup.js"
 import { autumnMetering } from "./send/autumn.js"
 import { resilient, unmetered } from "./send/metering.js"
+import { webhookEventOps } from "./webhooks/db.js"
+import { secretBox } from "./webhooks/signing.js"
+import { webhookEndpointStore } from "./webhooks/store.js"
 
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
@@ -71,6 +76,53 @@ log.info(
   env.AUTUMN_SECRET_KEY ? "metering via autumn" : "UNMETERED — no AUTUMN_SECRET_KEY",
 )
 
+/**
+ * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
+ * `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a customer's signing
+ * secret, so the endpoint routes answer 501 and no SES event is ingested —
+ * visible, rather than a silent downgrade to unsigned or plaintext.
+ */
+const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
+// ⚠ `maxAttempts` HERE, NOT ONLY ON THE WORKER'S QUEUE. groupmq resolves the
+// budget at `add()` time and stores it on the job, so the ENQUEUING side is
+// what decides how many retries a delivery gets. Left to the default, raising
+// WEBHOOK_MAX_ATTEMPTS would make groupmq give up before `deliverWebhook`
+// considers the attempt final — and the row would sit `pending` forever with
+// the endpoint never disabled.
+const webhookQueue = secrets
+  ? createWebhookQueue({ redis: queueRedis, maxAttempts: env.WEBHOOK_MAX_ATTEMPTS })
+  : null
+
+log.info(
+  { webhooks: Boolean(secrets) },
+  secrets ? "webhooks enabled" : "WEBHOOKS DISABLED — no WEBHOOK_SECRET_KEY",
+)
+
+/**
+ * ⚠ THE SAME QUEUE OBJECTS THE ACCEPT PATH PUSHES TO, NOT NEW ONES. groupmq's
+ * Queue is a handle rather than a connection, but two handles on one namespace
+ * would be two places to keep the options in step — and an autoscaler reading a
+ * queue configured differently from the one being written to is a scaler that
+ * measures the wrong thing.
+ */
+const sendQueues = {
+  transactional: createSendQueue({
+    redis: queueRedis,
+    class: "transactional",
+    jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+  }),
+  bulk: createSendQueue({
+    redis: queueRedis,
+    class: "bulk",
+    jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+  }),
+}
+
+const depthSources = {
+  ...sendQueues,
+  ...(webhookQueue ? { webhooks: webhookQueue } : {}),
+}
+
 const app = createApp({
   apiKeyAuth: {
     verify: (secret) => clerk.apiKeys.verify(secret),
@@ -99,25 +151,55 @@ const app = createApp({
   sendPath: {
     ...acceptDatabaseOps({
       db,
-      // ⚠ ONE QUEUE PER CLASS, BOTH BUILT HERE. Constructing them lazily at the
-      // first send would put a Redis connection on the latency path of somebody
-      // waiting for a password reset.
-      queues: {
-        transactional: createSendQueue({
-          redis: queueRedis,
-          class: "transactional",
-          jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
-        }),
-        bulk: createSendQueue({
-          redis: queueRedis,
-          class: "bulk",
-          jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
-        }),
-      },
+      // ⚠ ONE QUEUE PER CLASS, BOTH BUILT AT BOOT. Constructing them lazily at
+      // the first send would put a Redis connection on the latency path of
+      // somebody waiting for a password reset.
+      queues: sendQueues,
     }),
     metering,
     log,
   },
+  emailLookup: emailLookup(db),
+  ...(env.METRICS_TOKEN
+    ? {
+        metrics: {
+          token: env.METRICS_TOKEN,
+          queueDepth: async () => {
+            const counts = await Promise.all(
+              Object.entries(depthSources).map(async ([name, queue]) => {
+                const c = await queue.getJobCounts()
+                return [name, c] as const
+              }),
+            )
+
+            const pending: Record<string, number> = {}
+            const delayed: Record<string, number> = {}
+            for (const [name, c] of counts) {
+              // ⚠ `waiting + active`, NOT `waiting + delayed`. A send scheduled
+              // for next week sits in the delayed set until it is due; counting
+              // it would hold replicas up for a week over one email.
+              pending[name] = (c.waiting ?? 0) + (c.active ?? 0)
+              delayed[name] = c.delayed ?? 0
+            }
+
+            return {
+              pending,
+              delayed,
+              total: Object.values(pending).reduce((a, b) => a + b, 0),
+            }
+          },
+        },
+      }
+    : {}),
+  ...(secrets && webhookQueue
+    ? {
+        webhookEndpoints: webhookEndpointStore(db, secrets),
+        sesWebhooks: {
+          events: webhookEventOps({ db, queue: webhookQueue }),
+          log,
+        },
+      }
+    : {}),
   pingDb: async () => {
     await sql`select 1`
   },

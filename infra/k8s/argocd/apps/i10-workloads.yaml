@@ -31,3 +31,17 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+  # ⚠ KEDA OWNS THE WORKER'S REPLICA COUNT, SO ARGO MUST NOT. `selfHeal` reverts
+  # anything under this path within about 35 seconds — including the replica
+  # count an autoscaler just changed. Without this the two fight every scaling
+  # event: KEDA scales to three, Argo puts it back to what the manifest says,
+  # KEDA scales up again, and the log fills with a rollout that never settles.
+  #
+  # The Deployment therefore declares no `replicas` at all; this stops the
+  # absence being re-applied as a reset to one.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: i10-worker
+      jsonPointers:
+        - /spec/replicas

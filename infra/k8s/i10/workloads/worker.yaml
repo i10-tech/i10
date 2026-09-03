@@ -20,13 +20,15 @@ metadata:
   name: i10-worker
   namespace: i10-prod
 spec:
-  # ⚠ ONE REPLICA UNTIL SES SAYS OTHERWISE, AND THE REASON IS QUOTA RATHER THAN
-  # LOAD. Every replica spends from the same SES send rate, so what SES sees is
-  # WORKER_CONCURRENCY multiplied by this number. Raising either without raising
-  # the account's rate converts throughput into a wall of 429s, which the
-  # transport correctly defers — turning a scaling change into a retry storm
-  # that looks like SES being slow.
-  replicas: 1
+  # ⚠ NO `replicas` HERE, BECAUSE KEDA OWNS IT — see worker-autoscale.yaml. A
+  # number in this file would be re-applied by Argo's selfHeal within about 35
+  # seconds of every scaling decision, and the two would fight indefinitely.
+  #
+  # The ceiling still belongs to SES rather than to load: what SES sees is
+  # `maxReplicaCount × WORKER_CONCURRENCY` messages in flight, so raising either
+  # without raising the account's send rate converts throughput into a wall of
+  # 429s, which the transport correctly defers — a scaling change that makes the
+  # queue drain slower and looks like SES being slow.
   # Never two versions of the worker at once during a rollout: the old one may
   # hold claims the new one would have to wait out. Cheap here because sending
   # is asynchronous — nobody is watching an HTTP request.
