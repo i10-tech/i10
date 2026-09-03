@@ -63,6 +63,18 @@ spec:
           envFrom:
             - secretRef: { name: i10-autumn }
           env:
+            # ⚠ FOUR IS THE UPSTREAM DEFAULT AND IT OOM-KILLS THIS POD. The
+            # server runs under `node:cluster` and forks `SERVER_FORK_COUNT`
+            # copies of itself — four, unset — each a full instance of a heavy
+            # application. Worse, the crash is unreadable: a forked worker is
+            # SIGKILLed by the cgroup, the primary sees the death and exits 1,
+            # and the container reports `Error` rather than `OOMKilled` with the
+            # log simply stopping mid-boot. It looks like a silent startup bug.
+            #
+            # One fork is right here regardless of memory: this instance serves
+            # our own API and a dashboard nobody is logged into.
+            - name: SERVER_FORK_COUNT
+              value: "1"
             # ⚠ THE ROLE THAT OWNS THE `autumn` DATABASE. Autumn migrates its
             # own schema, so unlike i10_api this one is deliberately an owner.
             - name: PGUSER
@@ -82,8 +94,10 @@ spec:
             - name: CRITICAL_DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { memory: 640Mi }
+            requests: { cpu: 100m, memory: 320Mi }
+            # Measured, not guessed: 640Mi OOM-killed this on boot. The node has
+            # roughly 3.7Gi free, so headroom is cheaper than another crash loop.
+            limits: { memory: 1Gi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
@@ -135,8 +149,11 @@ spec:
             - name: CRITICAL_DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
           resources:
-            requests: { cpu: 50m, memory: 192Mi }
-            limits: { memory: 512Mi }
+            requests: { cpu: 100m, memory: 384Mi }
+            # ⚠ FOUR PROCESSES, AND UNLIKE THE SERVER THERE IS NO KNOB.
+            # workers.ts hard-codes `NUM_PROCESSES = 4` outside development, so
+            # the only lever here is the limit.
+            limits: { memory: 1Gi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
@@ -185,8 +202,8 @@ spec:
             - name: CRITICAL_DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-rw.i10-prod.svc.cluster.local:5432/autumn
           resources:
-            requests: { cpu: 25m, memory: 128Mi }
-            limits: { memory: 384Mi }
+            requests: { cpu: 25m, memory: 160Mi }
+            limits: { memory: 512Mi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
