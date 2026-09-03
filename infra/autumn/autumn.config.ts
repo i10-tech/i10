@@ -1,4 +1,4 @@
-import { feature, plan, planFeature } from "atmn"
+import { feature, item, plan } from "atmn"
 
 /**
  * i10's entitlement catalogue, in version control.
@@ -16,9 +16,22 @@ import { feature, plan, planFeature } from "atmn"
  * does not have, our client reads that as `exceeded`, and every customer gets a
  * 429 with "you have used your sending allowance". Add features; never rename.
  *
- * Push with:
- *   atmn push            # sandbox
- *   atmn push -p         # production
+ * ⚠ PUSHING NEEDS `ATMN_BACKEND_URL`, AND FORGETTING IT DOES NOT FAIL. The CLI
+ * defaults to `https://api.useautumn.com` — Autumn's HOSTED service — so a bare
+ * `atmn push` authenticates against a different instance entirely and reports
+ * success for a catalogue nothing here reads. Point it at ours every time:
+ *
+ *   ATMN_BACKEND_URL=https://autumn.i10.tech atmn push        # sandbox
+ *   ATMN_BACKEND_URL=https://autumn.i10.tech atmn push -p     # production
+ *
+ * `AUTUMN_SECRET_KEY` is read from the environment; take it from Doppler
+ * (`doppler run --project i10 --config prod_api -- ...`) rather than a file.
+ *
+ * ⚠ AND THE BUILDER NAMES ARE VERSIONED. Written against atmn 1.1.23, whose
+ * exports are `feature`, `item`, `plan`, `billingControls`, `reward` and
+ * `referralProgram`. An earlier draft used `planFeature({ feature_id })`, which
+ * does not exist in this version and fails at load with
+ * "(0 , _atmn.planFeature) is not a function".
  */
 
 /**
@@ -56,8 +69,8 @@ export const free = plan({
   id: "free",
   name: "Free",
   items: [
-    planFeature({
-      feature_id: emails.id,
+    item({
+      featureId: emails.id,
       included: 100,
       reset: { interval: "day" },
     }),
@@ -84,8 +97,8 @@ export const pro = plan({
   name: "Pro",
   price: { amount: 2000, interval: "month" },
   items: [
-    planFeature({
-      feature_id: emails.id,
+    item({
+      featureId: emails.id,
       included: 50_000,
       reset: { interval: "month" },
     }),
