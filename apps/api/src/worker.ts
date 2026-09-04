@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { Worker } from "groupmq"
 import pino from "pino"
-import { createCacheClient } from "./cache/redis.js"
+import { createQueueClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, flushObservability, initObservability } from "./observability.js"
@@ -77,8 +77,20 @@ try {
   process.exit(1)
 }
 
-const redis = createCacheClient(env.REDIS_URL)
-redis.on("error", (err: Error) => log.error({ err }, "redis error"))
+// ⚠ THE QUEUE CLIENT, NOT THE CACHE ONE, AND THE DIFFERENCE IS THE WHOLE POINT
+// OF THERE BEING TWO. `createCacheClient` sets `enableOfflineQueue: false` so a
+// command issued while disconnected fails instead of waiting — correct for a
+// cache, where a miss costs nothing. This process exists to drain a queue, so
+// the same policy means a Redis blip drops queue commands on the floor.
+//
+// It was the cache client until Sentry caught it on its first day: groupmq
+// loads its Lua scripts the moment a Worker is constructed, that raced the
+// connection, and every worker restart threw "Stream isn't writeable and
+// enableOfflineQueue options is false" out of `startWorker`. The startup race
+// was the visible half; the silent half was every transient blip after it.
+// index.ts always had this right — see the note on `queueRedis` there.
+const queueRedis = createQueueClient(env.REDIS_URL)
+queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
 
 const transport = sesTransport({
   client: new SESv2Client({ region: env.AWS_REGION }),
@@ -119,7 +131,7 @@ const ops = databaseOps({
 
 function startWorker(cls: SendClass) {
   const queue = createSendQueue({
-    redis,
+    redis: queueRedis,
     class: cls,
     jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
   })
@@ -177,7 +189,7 @@ function startWebhookWorker() {
 
   const secrets = secretBox(env.WEBHOOK_SECRET_KEY)
   const queue = createWebhookQueue({
-    redis,
+    redis: queueRedis,
     maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
   })
   const ops = webhookDeliveryOps({ db, secrets })
@@ -239,7 +251,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     log.info({ signal }, "shutting down")
 
     void Promise.allSettled(workers.map((w) => w.close()))
-      .then(() => Promise.allSettled([sql.end({ timeout: 10 }), redis.quit()]))
+      .then(() => Promise.allSettled([sql.end({ timeout: 10 }), queueRedis.quit()]))
       .finally(() => process.exit(0))
   })
 }
