@@ -88,7 +88,7 @@ jobs:
       # from the repo root and lists every workspace manifest by hand — build it
       # from anywhere else and the install layer fails on a missing package.json.
       - name: Build and push the base server image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: autumn
           file: autumn/docker/Dockerfile
@@ -109,7 +109,7 @@ jobs:
       # rewording breaks the build here rather than quietly restoring four
       # processes and OOM-killing something weeks later.
       - name: Build and push the patched server image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: i10/infra/autumn
           file: i10/infra/autumn/server.Dockerfile
@@ -126,7 +126,7 @@ jobs:
       # time, so these cannot be moved to the Deployment later — changing them
       # means rebuilding this image.
       - name: Build and push the dashboard image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: autumn
           file: i10/infra/autumn/dashboard.Dockerfile
