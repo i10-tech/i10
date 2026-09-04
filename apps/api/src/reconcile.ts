@@ -20,6 +20,28 @@
  * schedule, or a node too full to place the pod produces no pod, no log line
  * and no exit code — Sentry knows the schedule, so an absence is the one
  * failure it can see that nothing in this file can.
+ *
+ * ⚠ THREE LEGS, IN THIS ORDER, AND THE ORDER IS LOAD-BEARING:
+ *
+ *   1. SES ↔ i10       did everything we marked sent actually go?  (correctness)
+ *   2. i10 ↔ Autumn    did we bill for everything we sent?         (books)
+ *   3. Polar ↔ Autumn  is every customer on the plan they paid for? (entitlements)
+ *
+ * The first repairs INTO `core.messages` and the second reads it, so a message
+ * SES sent that we recorded late is an ordinary `sent` row by the time the
+ * second leg counts — rather than waiting a whole cycle to be billed. The third
+ * is independent of both and runs last because it is the one that talks to
+ * Polar.
+ *
+ * ⚠ THE FIRST TWO WERE WRITTEN, TESTED AND NEVER CALLED. `send/reconcile.ts`
+ * and `send/reconcile-ses.ts` were imported by their own tests and by nothing
+ * else, so every promise made elsewhere about a reconciler closing a gap — the
+ * swallowed `recordSent` in handle-batch.ts most of all — was a promise about a
+ * job that did not run. `send/reconcile-run.ts` binds them; this calls it.
+ *
+ * ⚠ AND A LEG THAT FAILS DOES NOT STOP THE ONES AFTER IT. They repair three
+ * different things and share no state beyond the order above, so an Autumn
+ * outage must not also stop the SES leg from writing down mail that went.
  */
 import pino from "pino"
 import { subscriptionOps } from "./billing/db.js"
@@ -30,6 +52,7 @@ import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 import { autumnClient } from "./send/autumn.js"
+import { needsAttention, reconcileSes, reconcileUsage } from "./send/reconcile-run.js"
 
 const log = pino({ name: "i10-reconcile" })
 const env = loadEnv()
@@ -93,6 +116,91 @@ await withMonitor(
       return
     }
 
+    const entitlements = autumnClient({
+      baseUrl: env.AUTUMN_URL,
+      secretKey: env.AUTUMN_SECRET_KEY,
+      featureId: env.AUTUMN_FEATURE_ID,
+      freePlanId: env.AUTUMN_FREE_PLAN_ID,
+      timeoutMs: env.AUTUMN_TIMEOUT_MS,
+      log,
+    })
+
+    // ⚠ A WINDOW, NOT "EVERYTHING SINCE THE LAST RUN". Both legs are idempotent
+    // and both skip anything inside `EVENT_GRACE`, so overlapping windows cost
+    // a repeated read and nothing else — while a high-water mark would need
+    // storing, would be wrong after a restore, and would silently skip whatever
+    // it was wrong about.
+    const to = new Date()
+    const from = new Date(to.getTime() - env.RECONCILE_LOOKBACK_DAYS * 86_400_000)
+
+    // ── 1. SES ↔ i10 ────────────────────────────────────────────────────────
+    try {
+      const ses = await reconcileSes(db, from, log)
+      log.info(
+        {
+          repaired: ses.unbilled.length,
+          unconfirmed: ses.unconfirmed.length,
+          orphaned: ses.orphaned.length,
+        },
+        "ses reconciliation complete",
+      )
+
+      // ⚠ `unbilled` ALONE IS ROUTINE AND MUST NOT PAGE. The at-least-once
+      // design guarantees a trickle of them and the repair is the system
+      // working; alerting on it would train everyone to ignore this job. The
+      // other two are not routine — see `needsAttention`.
+      if (needsAttention(ses)) {
+        process.exitCode = 1
+        captureError(
+          new Error(
+            `ses reconciliation found ${ses.orphaned.length} orphaned event(s) ` +
+              `and ${ses.unconfirmed.length} message(s) billed but unconfirmed`,
+          ),
+          { orphaned: ses.orphaned, unconfirmed: ses.unconfirmed.slice(0, 20) },
+        )
+      }
+    } catch (error) {
+      log.error({ err: error }, "ses reconciliation failed")
+      captureError(error)
+      process.exitCode = 1
+    }
+
+    // ── 2. i10 ↔ Autumn ─────────────────────────────────────────────────────
+    try {
+      const usage = await reconcileUsage(db, entitlements, from, to, log)
+      log.info(
+        {
+          deficits: usage.deficits.length,
+          surpluses: usage.surpluses.length,
+          toppedUp: usage.toppedUp,
+          alreadyKnown: usage.alreadyKnown,
+          failed: usage.failed,
+        },
+        "usage reconciliation complete",
+      )
+
+      // ⚠ A SURPLUS IS THE ALARMING DIRECTION. A deficit is the hot path
+      // dropping usage exactly as it is designed to, and this leg closing it.
+      // A surplus means Autumn counted something we did not send, which is a
+      // customer being over-charged and has no automatic fix that would not
+      // also destroy the evidence.
+      if (usage.surpluses.length > 0 || usage.failed > 0) {
+        process.exitCode = 1
+        captureError(
+          new Error(
+            `usage reconciliation found ${usage.surpluses.length} surplus bucket(s) ` +
+              `and could not finish ${usage.failed}`,
+          ),
+          { surpluses: usage.surpluses.slice(0, 20) },
+        )
+      }
+    } catch (error) {
+      log.error({ err: error }, "usage reconciliation failed")
+      captureError(error)
+      process.exitCode = 1
+    }
+
+    // ── 3. Polar ↔ Autumn ───────────────────────────────────────────────────
     const subscriptions = subscriptionOps(db)
 
     try {
@@ -105,18 +213,9 @@ await withMonitor(
           timeoutMs: 30_000,
         }),
         subscriptions,
-        grants: subscriptionGrants({
-          subscriptions,
-          entitlements: autumnClient({
-            baseUrl: env.AUTUMN_URL,
-            secretKey: env.AUTUMN_SECRET_KEY,
-            featureId: env.AUTUMN_FEATURE_ID,
-            freePlanId: env.AUTUMN_FREE_PLAN_ID,
-            timeoutMs: env.AUTUMN_TIMEOUT_MS,
-            log,
-          }),
-          log,
-        }),
+        // The same client the usage leg reads through. Two would be two sets of
+        // timeouts and two connection pools against one service, for nothing.
+        grants: subscriptionGrants({ subscriptions, entitlements, log }),
         options: {
           planForProduct: (productId: string) =>
             Object.entries(env.POLAR_PRODUCTS).find(([, id]) => id === productId)?.[0],

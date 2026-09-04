@@ -61,7 +61,13 @@ describe("the happy path", () => {
 
     const result = await handleBatch(job(3), d)
 
-    expect(result).toEqual({ claimed: 3, sent: 3, rejected: 0, deferred: 0 })
+    expect(result).toEqual({
+      claimed: 3,
+      sent: 3,
+      rejected: 0,
+      deferred: 0,
+      stranded: 0,
+    })
     expect(transport.sent).toHaveLength(3)
     expect(d.markSent).toHaveBeenCalledTimes(3)
     expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
@@ -118,7 +124,13 @@ describe("losing the claim", () => {
 
     const result = await handleBatch(job(3), d)
 
-    expect(result).toEqual({ claimed: 0, sent: 0, rejected: 0, deferred: 0 })
+    expect(result).toEqual({
+      claimed: 0,
+      sent: 0,
+      rejected: 0,
+      deferred: 0,
+      stranded: 0,
+    })
     expect(transport.sent).toHaveLength(0)
     expect(metering.recordSent).not.toHaveBeenCalled()
   })
@@ -194,7 +206,13 @@ describe("failures", () => {
 
     const result = await handleBatch(job(3), d)
 
-    expect(result).toEqual({ claimed: 3, sent: 1, rejected: 1, deferred: 1 })
+    expect(result).toEqual({
+      claimed: 3,
+      sent: 1,
+      rejected: 1,
+      deferred: 1,
+      stranded: 0,
+    })
     expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
       { id: "msg-0", sentAt: SENT_AT },
     ])
@@ -284,5 +302,75 @@ describe("the Message-ID header", () => {
 
   it("falls back rather than emitting a malformed header", () => {
     expect(messageIdHeader("m", "not-an-address")).toBe("<m@i10.tech>")
+  })
+})
+
+describe("a failure to record the outcome", () => {
+  // ⚠ THE CASE THAT USED TO VANISH. `inBatches` caught everything with
+  // `.catch(() => {})`, so a Postgres failure right after SES accepted a
+  // message left the row `sending`, nothing billed, and not one line anywhere
+  // saying it had happened.
+  it("counts it, logs it and reports it", async () => {
+    const boom = new Error("connection terminated unexpectedly")
+    const reportError = vi.fn()
+    const { deps: d, log } = deps({
+      transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
+      markSent: vi.fn(async () => {
+        throw boom
+      }),
+      reportError,
+    })
+
+    const result = await handleBatch(job(2), d)
+
+    expect(result).toMatchObject({ claimed: 2, sent: 0, stranded: 2 })
+    expect(log.error).toHaveBeenCalledTimes(2)
+    expect(reportError).toHaveBeenCalledWith(
+      boom,
+      expect.objectContaining({ tenantId: "ten-1" }),
+    )
+  })
+
+  // The other half of the same guarantee: one message failing to record must
+  // not abandon the messages beside it, which is what an unhandled rejection
+  // escaping the runner would do.
+  it("does not abandon the rest of the batch", async () => {
+    const markSent = vi.fn(async (m: OutboundMessage) => {
+      if (m.id === "msg-1") throw new Error("deadlock detected")
+      return SENT_AT
+    })
+    const { deps: d, metering } = deps({
+      transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
+      markSent,
+      // Serial, so the failure is guaranteed to land mid-run rather than in
+      // parallel with the others.
+      concurrency: 1,
+    })
+
+    const result = await handleBatch(job(3), d)
+
+    expect(result).toMatchObject({ claimed: 3, sent: 2, stranded: 1 })
+    expect(markSent).toHaveBeenCalledTimes(3)
+    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+      { id: "msg-0", sentAt: SENT_AT },
+      { id: "msg-2", sentAt: SENT_AT },
+    ])
+  })
+
+  // ⚠ THE REPORTER IS OPTIONAL AND MUST NOT BE ABLE TO BREAK THE BATCH EITHER.
+  // A logger that throws inside the handler for a throw is the one way this
+  // could still lose the remaining messages.
+  it("survives a reporter that throws", async () => {
+    const { deps: d } = deps({
+      transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
+      markSent: vi.fn(async () => {
+        throw new Error("write failed")
+      }),
+      reportError: () => {
+        throw new Error("sentry is down too")
+      },
+    })
+
+    await expect(handleBatch(job(2), d)).resolves.toMatchObject({ stranded: 2 })
   })
 })

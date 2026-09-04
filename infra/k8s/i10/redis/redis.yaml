@@ -1,4 +1,4 @@
-# i10's Redis. BullMQ's queues live here.
+# i10's Redis. The send and webhook queues live here.
 #
 # ⚠ A SEPARATE INSTANCE, NOT PSL'S WITH A PREFIX. Queues are product data. A
 # shared Redis is the kind of coupling that survives every review because it
@@ -21,9 +21,17 @@ data:
     save 900 1
     save 300 10
     save 60 10000
-    # BullMQ holds job state in Redis. Evicting a key to make room silently
-    # loses a job, so the instance must refuse writes instead of choosing a
-    # victim — `noeviction` turns a data-loss bug into a visible error.
+    # groupmq holds job state in Redis — the job hash, the per-group sorted
+    # sets, the ready and delayed sets and the `:unique:` keys that make an
+    # enqueue idempotent. Evicting any of them to make room silently loses a
+    # job, so the instance must refuse writes instead of choosing a victim:
+    # `noeviction` turns a data-loss bug into a visible error.
+    #
+    # ⚠ AND A LOST JOB IS NOT A LOST MESSAGE, WHICH IS THE OTHER HALF OF THIS.
+    # The row in `core.messages` is the record; the message-sweep CronJob finds
+    # rows no job points at and enqueues them again. Redis refusing writes is
+    # still the right failure, because it is loud — but it is survivable rather
+    # than terminal.
     maxmemory-policy noeviction
     maxmemory 384mb
 ---

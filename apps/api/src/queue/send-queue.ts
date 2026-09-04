@@ -73,7 +73,13 @@ export function createSendQueue(opts: SendQueueOptions): Queue<SendJob> {
     redis: opts.redis,
     namespace: namespaceFor(opts.class),
     jobTimeoutMs: opts.jobTimeoutMs ?? 60_000,
-    maxAttempts: opts.maxAttempts ?? 5,
+    // ⚠ EVERY PROCESS THAT BUILDS ONE OF THESE PASSES `WORKER_MAX_ATTEMPTS`,
+    // and it has to: groupmq stamps this on the job at `add()` and `retry.lua`
+    // enforces it as a ceiling, while the Worker's own setting is what actually
+    // dead-letters. A queue built here with the fallback and a Worker built
+    // from the environment is the case where the effective budget is the
+    // smaller of two numbers nobody wrote down. The fallback is for tests.
+    maxAttempts: opts.maxAttempts ?? 3,
     // Keep a window of both for the dashboard and for answering "what happened
     // to this send" without going to the database.
     keepCompleted: 1_000,
@@ -112,6 +118,17 @@ export interface EnqueueOptions {
    * than Redis.
    */
   runAt?: Date
+  /**
+   * A name other than `batchJobId`. Only the sweep passes this.
+   *
+   * ⚠ AND IT HAS TO BE ABLE TO. `batchJobId` is stable by design, and
+   * `enqueue.lua` treats a name it has seen before as a duplicate — with
+   * `keepCompleted: 1000` the job hash of a completed batch is still present,
+   * so re-adding its id returns that id and enqueues NOTHING. Re-enqueueing a
+   * batch that already ran therefore has to say so with a different name; see
+   * `sweepJobId` in send/sweep.ts for why that name carries the sweep's clock.
+   */
+  jobId?: string
 }
 
 /**
@@ -140,7 +157,7 @@ export async function enqueueBatch(
 
   const added = await queue.add({
     groupId: job.tenantId,
-    jobId: batchJobId(job),
+    jobId: opts.jobId ?? batchJobId(job),
     data: job,
     // ⚠ ORDERED BY WHEN IT IS DUE, NOT BY WHEN IT WAS ACCEPTED. A message
     // scheduled for tomorrow that kept its acceptance time would jump ahead of

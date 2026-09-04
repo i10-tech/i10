@@ -1,0 +1,99 @@
+# Re-enqueues messages the queue has lost track of, on a schedule.
+#
+# ⚠ THE SAME IMAGE AND A FOURTH COMMAND, like the worker, the reconciler and the
+# migration Job. `node dist/sweep.js` runs one pass and exits.
+#
+# ⚠ WHY THIS EXISTS. Four files in apps/api described a stale-message sweep as
+# the reason a lost enqueue, an abandoned batch or a deferred send is "late, but
+# never lost". `core.sweep_stuck_messages` has been in the schema since
+# 0002_tenancy.sql and nothing ever called it — so none of that was true. The
+# ordinary path into it is not exotic: SES throttles a message, the worker puts
+# the row back to `queued` and clears its claim, the job that carried it
+# completes, and from that moment nothing anywhere points at the row.
+#
+# ⚠ A CronJob RATHER THAN AN INTERVAL IN THE WORKER, for the same reason as the
+# reconciler. KEDA scales the worker on queue depth; an interval inside it would
+# run once per replica, each reading the same stranded rows. The claim would make
+# that survivable rather than wrong, but it is N times the work to reach the same
+# place, and Kubernetes already owns "once, on a schedule".
+#
+# ⚠ AND IT IS SAFE TO RUN BESIDE A BUSY WORKER, WHICH IS WHY IT NEEDS NO LOCK.
+# It enqueues; it never sends and never writes to `core.messages`. A row it picks
+# up while a worker genuinely still holds it is refused by the compare-and-swap
+# in db/claim.ts and dropped there, exactly as a duplicate job would be.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-message-sweep
+  namespace: i10-prod
+spec:
+  # Every five minutes. With SWEEP_QUEUED_GRACE at five minutes, that puts the
+  # worst case for a throttled message at about ten — which is the number this
+  # schedule actually sets, and the reason it is not hourly.
+  #
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/sweep.ts, AND THEY MUST AGREE. Sentry
+  # decides a run is MISSING by comparing the clock against the schedule the job
+  # declares in its check-in, so changing it here alone leaves the job working
+  # and the alerting wrong.
+  schedule: "*/5 * * * *"
+  # ⚠ NEVER TWO AT ONCE, AND THE JOB ID DEPENDS ON IT. Every batch a pass
+  # enqueues is named with that pass's start time — see `sweepJobId` — so one
+  # pass collapses duplicates within itself and a later pass is a genuine retry.
+  # Two overlapping passes would each be internally consistent and would enqueue
+  # the same rows twice; harmless, because the claim decides, and pointless.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Failed runs kept longer than successful ones: the check-in says a run failed,
+  # the pod is where the reason is.
+  failedJobsHistoryLimit: 5
+  # ⚠ SHORTER THAN THE INTERVAL. A pass that could not be placed within two
+  # minutes should be abandoned rather than run late and collide with the next
+  # slot's window.
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      # One attempt per slot. Everything this job does is idempotent and the next
+      # slot is five minutes away, so an immediate retry only compresses the same
+      # failure into a tighter loop.
+      backoffLimit: 0
+      # ⚠ COMFORTABLY UNDER THE FIVE-MINUTE INTERVAL. A pass that hangs must be
+      # killed before the next one is due, or `Forbid` turns one stuck pod into a
+      # sweep that never runs again — and a killed run sends no check-in, so
+      # Sentry reports it as missed rather than as nothing at all.
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sweep
+              image: ghcr.io/i10-tech/i10-api:prod-612b1d5679b9f8c51bae051f91b4b21b7a1d823a@sha256:921af2cc3ad79774c6dcc3ec9866695b2dd64c662501ca4bf437792ba4c5a7b6
+              imagePullPolicy: Always
+              command: ["node", "dist/sweep.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # This pass reaches across every tenant, and it does it through
+                # one narrow SECURITY DEFINER function
+                # (`core.sweep_stuck_messages`) that returns four columns and no
+                # message content, rather than by holding a role that can see
+                # everything.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

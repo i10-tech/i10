@@ -47,6 +47,14 @@ spec:
       # sooner, its rows sit in `sending` until WORKER_CLAIM_STALE_AFTER expires
       # — mail late by minutes, and a duplicate for anything SES had already
       # accepted. This makes an ordinary deploy produce neither.
+      #
+      # ⚠ AND IT ONLY MEANS ANYTHING BECAUSE worker.ts NOW PASSES ITS OWN CLOSE
+      # TIMEOUT. groupmq's `close()` defaults to abandoning in-flight jobs after
+      # 30 seconds, so for as long as the worker called it with no argument this
+      # ninety was never reached: a batch still running at the thirty-second
+      # mark produced exactly the stranded `sending` rows described above, on
+      # every deploy. CLOSE_TIMEOUT_MS is 60s, leaving thirty here for the pool,
+      # the Redis quit and the Sentry flush.
       terminationGracePeriodSeconds: 90
       containers:
         - name: worker

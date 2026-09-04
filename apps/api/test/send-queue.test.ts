@@ -212,3 +212,28 @@ describe("quota", () => {
     ).resolves.toBeUndefined()
   })
 })
+
+describe("naming a job", () => {
+  // ⚠ THE DEFAULT NAME IS STABLE, WHICH IS THE SECOND IDEMPOTENCY LAYER — and
+  // is also why the sweep cannot use it. groupmq treats a name it has seen
+  // before as a duplicate and enqueues nothing.
+  it("uses the batch's own name by default", async () => {
+    const q = fakeQueue()
+
+    await enqueueBatch(q, job([A, B]))
+
+    expect(q.add).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: batchJobId(job([A, B])) }),
+    )
+  })
+
+  it("takes an override, which is how a swept batch is re-enqueued", async () => {
+    const q = fakeQueue()
+
+    await enqueueBatch(q, job([A, B]), { jobId: "sweep:1757000000000:x" })
+
+    expect(q.add).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "sweep:1757000000000:x" }),
+    )
+  })
+})

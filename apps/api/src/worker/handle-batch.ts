@@ -64,6 +64,14 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
   metering: Metering
   log: Logger
   /**
+   * Reports a failure that is ours rather than a provider's. Optional so tests
+   * and a local run need no Sentry.
+   *
+   * ⚠ IT EXISTS BECAUSE THE ONE FAILURE THIS FILE CANNOT HANDLE WAS THE ONE IT
+   * SWALLOWED. See `inBatches`.
+   */
+  reportError?: (error: unknown, context?: Record<string, unknown>) => void
+  /**
    * How many provider calls may be in flight at once.
    *
    * ⚠ IT IS A THROUGHPUT KNOB AND A QUOTA KNOB AT THE SAME TIME. SES caps a
@@ -80,6 +88,17 @@ export interface BatchResult {
   sent: number
   rejected: number
   deferred: number
+  /**
+   * Messages whose OUTCOME could not be written down.
+   *
+   * ⚠ THESE ARE THE EXPENSIVE ONES AND THEY USED TO BE INVISIBLE. Reaching here
+   * means the send itself returned but recording it threw — Postgres, in
+   * practice — so the row is still `sending`, the mail may well have gone, and
+   * nothing has been billed. Counted separately from `deferred` because a
+   * deferral is the provider saying "not now" and this is us failing to keep
+   * our own books.
+   */
+  stranded: number
 }
 
 export async function handleBatch<M extends OutboundMessage>(
@@ -97,7 +116,7 @@ export async function handleBatch<M extends OutboundMessage>(
       { tenantId: job.tenantId, batch: job.messages.length },
       "batch already claimed elsewhere",
     )
-    return { claimed: 0, sent: 0, rejected: 0, deferred: 0 }
+    return { claimed: 0, sent: 0, rejected: 0, deferred: 0, stranded: 0 }
   }
 
   const sent: SentMessage[] = []
@@ -106,47 +125,71 @@ export async function handleBatch<M extends OutboundMessage>(
     sent: 0,
     rejected: 0,
     deferred: 0,
+    stranded: 0,
   }
 
-  await inBatches(messages, deps.concurrency, async (message) => {
-    let outcome: SendOutcome
-    try {
-      outcome = await deps.transport.send(message)
-    } catch (err) {
-      // ⚠ A THROW IS `deferred`, NEVER `rejected`. An exception is the transport
-      // failing to give an answer — a socket, a timeout, a bug — and that is not
-      // evidence the message is undeliverable. Treating it as permanent drops
-      // real mail on the first network blip.
-      outcome = { status: "deferred", reason: describeError(err) }
-    }
-
-    switch (outcome.status) {
-      case "sent": {
-        // Immediately, before anything else. This statement is the whole of the
-        // at-least-once window.
-        const at = await deps.markSent(message, outcome.providerMessageId)
-        // ⚠ ONLY BILLED IF THE ROW WAS ACTUALLY OURS TO RECORD. A null means
-        // another worker owns it and will record — and bill — it itself.
-        if (at) sent.push({ id: message.id, sentAt: at })
-        result.sent++
-        return
+  await inBatches(
+    messages,
+    deps.concurrency,
+    async (message) => {
+      let outcome: SendOutcome
+      try {
+        outcome = await deps.transport.send(message)
+      } catch (err) {
+        // ⚠ A THROW IS `deferred`, NEVER `rejected`. An exception is the transport
+        // failing to give an answer — a socket, a timeout, a bug — and that is not
+        // evidence the message is undeliverable. Treating it as permanent drops
+        // real mail on the first network blip.
+        outcome = { status: "deferred", reason: describeError(err) }
       }
 
-      case "rejected":
-        await deps.markFailed(message, outcome.reason, true)
-        result.rejected++
-        deps.log.warn(
-          { messageId: message.id, tenantId: message.tenantId, reason: outcome.reason },
-          "message rejected permanently",
-        )
-        return
+      switch (outcome.status) {
+        case "sent": {
+          // Immediately, before anything else. This statement is the whole of the
+          // at-least-once window.
+          const at = await deps.markSent(message, outcome.providerMessageId)
+          // ⚠ ONLY BILLED IF THE ROW WAS ACTUALLY OURS TO RECORD. A null means
+          // another worker owns it and will record — and bill — it itself.
+          if (at) sent.push({ id: message.id, sentAt: at })
+          result.sent++
+          return
+        }
 
-      default:
-        await deps.markFailed(message, outcome.reason, false)
-        result.deferred++
-        return
-    }
-  })
+        case "rejected":
+          await deps.markFailed(message, outcome.reason, true)
+          result.rejected++
+          deps.log.warn(
+            {
+              messageId: message.id,
+              tenantId: message.tenantId,
+              reason: outcome.reason,
+            },
+            "message rejected permanently",
+          )
+          return
+
+        default:
+          await deps.markFailed(message, outcome.reason, false)
+          result.deferred++
+          return
+      }
+    },
+    // ⚠ THE ONE FAILURE THIS FILE COULD NOT HANDLE, AND IT USED TO BE DISCARDED
+    // WITHOUT A WORD. `transport.send` has its own try/catch above, so what
+    // reaches here is `markSent`, `markFailed` or the log call throwing —
+    // Postgres, in practice. The mail may already have gone: the row is left
+    // `sending`, nothing is billed, and until now there was no log line, no
+    // Sentry event and no count to notice it by. The stale sweep is what
+    // eventually recovers the row; this is what says it happened.
+    (error, message) => {
+      result.stranded++
+      deps.log.error(
+        { err: error, messageId: message.id, tenantId: message.tenantId },
+        "could not record the outcome of a send",
+      )
+      deps.reportError?.(error, { messageId: message.id, tenantId: message.tenantId })
+    },
+  )
 
   // ⚠ LAST, OUTSIDE THE PER-MESSAGE PATH, AND GUARDED HERE AS WELL AS IN
   // `resilient()`. The mail has gone. If a billing failure could propagate, the
@@ -181,14 +224,21 @@ export async function handleBatch<M extends OutboundMessage>(
  * throughput problem into a retry storm. Bounded concurrency is the only reason
  * batching helps rather than hurts.
  *
- * ⚠ AND IT NEVER REJECTS. Each unit already handles its own failure; an
- * unhandled rejection escaping here would abandon the rest of the batch
- * mid-flight, leaving those rows claimed and stranded until the stale sweep.
+ * ⚠ AND IT NEVER REJECTS. An unhandled rejection escaping here would abandon
+ * the rest of the batch mid-flight, leaving those rows claimed and stranded
+ * until the stale sweep.
+ *
+ * ⚠ BUT IT NO LONGER DISCARDS WHAT IT CAUGHT. `.catch(() => {})` was doing two
+ * jobs — keeping the batch running, and throwing away the only evidence that a
+ * message's outcome was never written down — and only the first was intended.
+ * `onError` is what separates them: the batch still finishes, and the failure
+ * is still reported.
  */
 async function inBatches<T>(
   items: readonly T[],
   limit: number,
   fn: (item: T) => Promise<void>,
+  onError: (error: unknown, item: T) => void,
 ): Promise<void> {
   const width = Math.max(1, Math.min(limit, items.length))
   let cursor = 0
@@ -196,7 +246,19 @@ async function inBatches<T>(
   const runners = Array.from({ length: width }, async () => {
     while (cursor < items.length) {
       const item = items[cursor++]!
-      await fn(item).catch(() => {})
+      try {
+        await fn(item)
+      } catch (error) {
+        // ⚠ THE REPORT ITSELF MUST NOT BE ABLE TO STOP THE BATCH. It logs and
+        // calls out to Sentry, and a logger that throws here would take the
+        // remaining messages with it — the exact failure the catch exists to
+        // prevent, arriving through the handler for it.
+        try {
+          onError(error, item)
+        } catch {
+          /* nothing left to report it to */
+        }
+      }
     }
   })
 

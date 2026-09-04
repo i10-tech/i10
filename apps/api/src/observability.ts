@@ -36,7 +36,7 @@ export interface Logger {
 }
 
 /** One process, one of these. It becomes the `service` tag on every event. */
-export type Service = "api" | "worker" | "reconcile"
+export type Service = "api" | "worker" | "reconcile" | "sweep"
 
 export interface ObservabilityOptions {
   /**
@@ -292,4 +292,27 @@ export async function withMonitor<T>(
 export function captureError(error: unknown, context?: Record<string, unknown>): void {
   if (!enabled) return
   Sentry.captureException(error, context ? { extra: context } : undefined)
+}
+
+/**
+ * Reports a condition that is worth waking somebody for and is not an
+ * exception.
+ *
+ * ⚠ IT EXISTS BECAUSE `new Error(...)` FOR THIS IS A LIE THAT COSTS LATER. A
+ * sweep that hit its row cap has not failed — every line of it worked — but the
+ * system around it is losing ground, and that is exactly the kind of thing the
+ * codebase keeps discovering by reading pod logs by hand. Sent as a message, it
+ * groups by its own text and carries no fabricated stack pointing at whichever
+ * line happened to construct it.
+ */
+export function captureMessage(
+  message: string,
+  level: "info" | "warning" | "error" = "warning",
+  context?: Record<string, unknown>,
+): void {
+  if (!enabled) return
+  Sentry.captureMessage(message, {
+    level,
+    ...(context ? { extra: context } : {}),
+  })
 }

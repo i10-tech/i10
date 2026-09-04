@@ -58,7 +58,7 @@ argocd/
 i10/
   doppler/           DopplerSecrets → Kubernetes Secrets
   platform-db/       CNPG Cluster, ObjectStore, Pooler, ScheduledBackup
-  redis/             BullMQ's Redis, i10's own
+  redis/             The queues' Redis, i10's own
   stalwart/          the mail engine (kustomize, for config hashing)
   bulwark/           JMAP webmail — AGPL-3.0, read the header before editing
   workloads/         api, console, web, docs, and the TLS certificate
