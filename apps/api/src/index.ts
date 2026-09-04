@@ -108,12 +108,13 @@ log.info(
  * visible, rather than a silent downgrade to unsigned or plaintext.
  */
 const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
-// ⚠ `maxAttempts` HERE, NOT ONLY ON THE WORKER'S QUEUE. groupmq resolves the
-// budget at `add()` time and stores it on the job, so the ENQUEUING side is
-// what decides how many retries a delivery gets. Left to the default, raising
-// WEBHOOK_MAX_ATTEMPTS would make groupmq give up before `deliverWebhook`
-// considers the attempt final — and the row would sit `pending` forever with
-// the endpoint never disabled.
+// ⚠ `maxAttempts` HERE, NOT ONLY ON THE WORKER'S QUEUE, BECAUSE THE BUDGET HAS
+// TWO HALVES. The value stamped on the job at `add()` is enforced as a ceiling
+// in `retry.lua`; the Worker's own value is what actually dead-letters. The
+// effective budget is the smaller of the two, so both come from
+// WEBHOOK_MAX_ATTEMPTS — left to the default here, raising that variable would
+// make groupmq give up before `deliverWebhook` considers the attempt final, and
+// the row would sit `pending` forever with the endpoint never disabled.
 const webhookQueue = secrets
   ? createWebhookQueue({ redis: queueRedis, maxAttempts: env.WEBHOOK_MAX_ATTEMPTS })
   : null
@@ -210,16 +211,26 @@ log.info(
  * queue configured differently from the one being written to is a scaler that
  * measures the wrong thing.
  */
+/**
+ * ⚠ `maxAttempts` HERE AS WELL AS ON THE WORKER, AND FROM THE SAME VARIABLE.
+ * groupmq stamps this side's value on the job and `retry.lua` enforces it as a
+ * ceiling, while the Worker's own setting is what actually dead-letters — so
+ * two different numbers give an effective budget equal to the smaller of them.
+ * This side used to take the queue's fallback of 5 while the worker asked for
+ * 3, which meant the real budget was 3 and nothing anywhere said so.
+ */
 const sendQueues = {
   transactional: createSendQueue({
     redis: queueRedis,
     class: "transactional",
     jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+    maxAttempts: env.WORKER_MAX_ATTEMPTS,
   }),
   bulk: createSendQueue({
     redis: queueRedis,
     class: "bulk",
     jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+    maxAttempts: env.WORKER_MAX_ATTEMPTS,
   }),
 }
 
@@ -353,7 +364,13 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
         sql.end({ timeout: 5 }),
         cache.quit(),
         queueRedis.quit(),
-      ]).finally(() => process.exit(0))
+      ])
+        // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
+        // queues and the transport sends on a timer, so a 500 raised in the
+        // last seconds before a rolling deploy took the report with it — and
+        // the seconds around a deploy are when the interesting ones happen.
+        .then(() => flushObservability())
+        .finally(() => process.exit(0))
     })
   })
 }

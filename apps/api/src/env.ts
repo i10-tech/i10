@@ -21,7 +21,7 @@ const schema = z.object({
   // session variant, for the same reason.
   DATABASE_URL: z.string().min(1),
 
-  // BullMQ's Redis. i10's OWN instance, never one shared with PSL under a
+  // The queues' Redis. i10's OWN instance, never one shared with PSL under a
   // prefix — queues are product data, and a shared Redis is exactly the kind
   // of coupling that turns extraction into a rewrite.
   REDIS_URL: z.string().min(1),
@@ -86,6 +86,30 @@ const schema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(8),
 
   /**
+   * How many BATCHES one worker replica holds at once. Not the same number as
+   * `WORKER_CONCURRENCY`, which is the fan-out inside a single batch.
+   *
+   * ⚠ ONE IS groupmq's DEFAULT AND IT IS THE WRONG DEFAULT FOR US. Per-group
+   * serialisation is deliberate — a tenant never has two batches in flight —
+   * but one batch at a time across ALL groups means one tenant's batch blocks
+   * every other tenant's, which is precisely the head-of-line blocking the
+   * transactional/bulk split was built to prevent, arriving one level down.
+   *
+   * ⚠ AND IT MULTIPLIES WITH EVERYTHING ELSE AGAINST THE SES RATE. What SES
+   * sees is `replicas × WORKER_BATCH_CONCURRENCY × WORKER_CONCURRENCY` calls in
+   * flight — at the defaults that is 1 × 8, and doubling this doubles it.
+   *
+   * ⚠ SO THE DEFAULT IS STILL 1 WHILE THE SES ACCOUNT IS IN THE SANDBOX, for
+   * exactly the reason `maxReplicaCount` is 1 in worker-autoscale.yaml: at a
+   * 1/s account rate the extra calls come back 429, the transport defers them,
+   * and the queue drains SLOWER with nothing logging an error. What changed is
+   * that the number now exists, is named, and is raised deliberately — before
+   * this it was groupmq's undocumented default and the blocking it caused was
+   * invisible. Raise it in the same change that raises the SES quota.
+   */
+  WORKER_BATCH_CONCURRENCY: z.coerce.number().int().positive().max(50).default(1),
+
+  /**
    * How long a row may sit in `sending` before another worker may take it.
    *
    * ⚠ IT MUST EXCEED groupmq's job timeout, or the two release the same job at
@@ -96,6 +120,64 @@ const schema = z.object({
 
   /** groupmq's lease. Shorter than WORKER_CLAIM_STALE_AFTER, deliberately. */
   WORKER_JOB_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
+  /**
+   * How many times groupmq may re-run a send JOB before dead-lettering it.
+   *
+   * ⚠ THIS IS NOT THE MESSAGE'S RETRY BUDGET, AND CONFLATING THE TWO IS HOW
+   * MAIL GETS SENT TWICE. A message that failed is already back in `queued`
+   * with its attempt counted, and the row is the record. This governs only the
+   * case where the HANDLER ITSELF threw, which is our bug rather than a
+   * provider being slow.
+   *
+   * ⚠ AND IT MUST BE SET ON BOTH SIDES, WHICH IS WHY IT IS ONE VARIABLE.
+   * groupmq stamps the enqueuing side's value on the job and `retry.lua`
+   * enforces it as a ceiling; the Worker's own value is what actually
+   * dead-letters, in `handleJobFailure`. Configured apart, the API and the
+   * worker each looked right and the effective budget was whichever was
+   * smaller — a number nothing in the code stated.
+   */
+  WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(3),
+
+  // ── the stale-message sweep ───────────────────────────────────────────────
+
+  /**
+   * How long a row may sit `queued` before the sweep decides no job points at
+   * it. Postgres interval syntax.
+   *
+   * ⚠ IT IS AN UPPER BOUND ON HOW LATE A DEFERRED MESSAGE IS, NOT A TUNING
+   * KNOB. A message SES throttled goes back to `queued` with nothing pointing
+   * at it, and this plus the CronJob's interval is the whole of the delay
+   * before it is tried again. Too short and the sweep re-enqueues rows a worker
+   * is about to take anyway — harmless, because the claim refuses them, but it
+   * spends the pass's budget on work that was never lost.
+   */
+  SWEEP_QUEUED_GRACE: z.string().min(1).default("5 minutes"),
+
+  /**
+   * The most rows one pass will take.
+   *
+   * ⚠ HITTING IT IS A SIGNAL, NOT A LIMIT TO RAISE. The sweep reports reaching
+   * this to Sentry, because a backlog bigger than one pass means messages are
+   * being stranded faster than they are being rescued — which is a problem
+   * upstream of the sweep and is not fixed by sweeping harder.
+   */
+  SWEEP_MAX_ROWS: z.coerce.number().int().positive().max(10_000).default(1_000),
+
+  /**
+   * How far back the send-side reconcilers look, in days.
+   *
+   * ⚠ A WINDOW RATHER THAN A HIGH-WATER MARK, DELIBERATELY. Both legs are
+   * idempotent — the SES repair refuses a row already `sent`, and Autumn's
+   * `track` is keyed on the message id — so overlapping windows cost a repeated
+   * read and nothing else. A stored cursor would have to survive a restore, and
+   * would silently skip whatever it was wrong about.
+   *
+   * ⚠ AND IT MUST COMFORTABLY EXCEED THE RUN INTERVAL, or a discrepancy that
+   * appears just before a run is examined once and then falls out of the window
+   * forever.
+   */
+  RECONCILE_LOOKBACK_DAYS: z.coerce.number().int().positive().max(30).default(2),
 
   // ── metering ──────────────────────────────────────────────────────────────
 
@@ -300,10 +382,86 @@ const schema = z.object({
   SENTRY_ENVIRONMENT: z.string().min(1).default("development"),
 })
 
+/**
+ * Postgres interval syntax, in milliseconds, or null if we cannot tell.
+ *
+ * ⚠ IT REFUSES TO GUESS RATHER THAN GUESSING WRONG. Postgres accepts far more
+ * than this recognises — `P1DT2H`, `1 mon`, fractional units — and a parser that
+ * returned a plausible number for a form it did not really understand would
+ * turn the check below into a check that fails on correct configuration. Null
+ * means "not comparable", and the invariant is then left unenforced rather than
+ * enforced against a made-up value.
+ */
+const UNITS: [RegExp, number][] = [
+  [/^(?:ms|msec|millisecond)s?$/, 1],
+  [/^(?:s|sec|second)s?$/, 1_000],
+  [/^(?:m|min|minute)s?$/, 60_000],
+  [/^(?:h|hr|hour)s?$/, 3_600_000],
+  [/^(?:d|day)s?$/, 86_400_000],
+]
+
+export function intervalToMs(value: string): number | null {
+  const text = value.trim().toLowerCase()
+
+  const clock = /^(\d+):([0-5]\d):([0-5]\d(?:\.\d+)?)$/.exec(text)
+  if (clock) {
+    return (
+      Number(clock[1]) * 3_600_000 +
+      Number(clock[2]) * 60_000 +
+      Number(clock[3]) * 1_000
+    )
+  }
+
+  const parts = text.match(/(\d+(?:\.\d+)?)\s*([a-z]+)/g)
+  if (!parts) return null
+  // Anything the pairs did not consume means we are reading a form we do not
+  // fully understand, so we decline the whole string.
+  if (parts.join("").replace(/\s+/g, "") !== text.replace(/\s+/g, "")) return null
+
+  let total = 0
+  for (const part of parts) {
+    const [, amount, unit] = /^(\d+(?:\.\d+)?)\s*([a-z]+)$/.exec(part.trim()) ?? []
+    if (!amount || !unit) return null
+    const factor = UNITS.find(([pattern]) => pattern.test(unit))?.[1]
+    if (factor === undefined) return null
+    total += Number(amount) * factor
+  }
+
+  return total
+}
+
+/**
+ * ⚠ THE ONE INVARIANT THAT WAS STATED IN THREE COMMENTS AND ENFORCED NOWHERE.
+ * Redis governs liveness and Postgres governs correctness: groupmq hands a job
+ * to a second worker after `WORKER_JOB_TIMEOUT_MS`, and the claim refuses that
+ * worker the rows until `WORKER_CLAIM_STALE_AFTER` has passed. Set the interval
+ * shorter than the lease and the database releases a row while Redis still
+ * believes the first worker holds it — both win the compare-and-swap in turn,
+ * and a duplicate send becomes routine rather than exceptional.
+ *
+ * It is checked here because the two are configured independently, in Doppler,
+ * by different people at different times, and nothing else in the system would
+ * report the mistake.
+ */
+const validated = schema.superRefine((env, ctx) => {
+  const staleAfterMs = intervalToMs(env.WORKER_CLAIM_STALE_AFTER)
+  if (staleAfterMs === null || staleAfterMs > env.WORKER_JOB_TIMEOUT_MS) return
+
+  ctx.addIssue({
+    code: "custom",
+    path: ["WORKER_CLAIM_STALE_AFTER"],
+    message:
+      `"${env.WORKER_CLAIM_STALE_AFTER}" (${staleAfterMs}ms) must be longer than ` +
+      `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms). Postgres must ` +
+      `release a claim after Redis releases the job, never before, or two ` +
+      `workers can both win the claim and send the same message twice.`,
+  })
+})
+
 export type Env = z.infer<typeof schema>
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const parsed = schema.safeParse(source)
+  const parsed = validated.safeParse(source)
   if (!parsed.success) {
     const detail = parsed.error.issues
       .map((i) => `  ${i.path.join(".")}: ${i.message}`)

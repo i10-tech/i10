@@ -23,6 +23,20 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    # ⚠ WITHOUT THIS A SYNC THAT LOSES A RACE STAYS FAILED UNTIL SOMEBODY LOOKS.
+    # Argo does not retry a failed sync on its own; it records the failure and
+    # waits. Most of what fails here is transient and self-clearing — the image
+    # pull while ghcr is slow, the webhook that is not up yet, the ServerSide
+    # apply that collides with a concurrent one — and every one of them leaves
+    # the app OutOfSync indefinitely, which reads identically to a genuine
+    # config error. Five attempts over roughly five minutes covers the transient
+    # class without papering over the real one.
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
     syncOptions:
       - ServerSideApply=true
       # See i10-redis.yaml for why this is required rather than optional — the

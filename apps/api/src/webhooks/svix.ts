@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto"
+import { createHmac } from "node:crypto"
+import { decodeSecret, matchesAnySignature } from "./signing.js"
 
 /**
  * Verification for Clerk's webhooks, which are delivered through Svix.
@@ -83,34 +84,12 @@ export function verifySvixSignature(
 
   // The header carries a space-separated list so a secret can be rotated with
   // both keys live. Any one match is a pass.
-  for (const part of signature.split(" ")) {
-    const [version, encoded] = part.split(",", 2)
-    if (version !== "v1" || !encoded) continue
-
-    let candidate: Buffer
-    try {
-      candidate = Buffer.from(encoded, "base64")
-    } catch {
-      continue
-    }
-    // timingSafeEqual throws on a length mismatch, so guard first. Length is
-    // not a secret — the digest is a fixed 32 bytes.
-    if (candidate.length === expected.length && timingSafeEqual(candidate, expected)) {
-      return { ok: true }
-    }
-  }
+  //
+  // ⚠ THE SAME PARSER THE OUTBOUND SIGNER USES. Since 2026-09-04 both
+  // directions speak Standard Webhooks, so two hand-written readers of this
+  // header would be two chances for one to drift into accepting something the
+  // other refuses.
+  if (matchesAnySignature(expected, signature)) return { ok: true }
 
   return { ok: false, reason: "no matching signature" }
-}
-
-/**
- * Svix secrets are `whsec_` followed by base64. The bytes are what key the
- * HMAC — using the printable form as the key silently produces a different
- * digest and every delivery fails verification.
- */
-function decodeSecret(secret: string): Buffer {
-  const raw = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret
-  const decoded = Buffer.from(raw, "base64")
-  if (decoded.length === 0) throw new Error("empty secret")
-  return decoded
 }

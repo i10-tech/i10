@@ -80,6 +80,29 @@ export interface AutumnClient {
   aggregateByCustomer(start: Date, end: Date): Promise<UsageBucket[]>
 
   /**
+   * Every customer Autumn holds, by id.
+   *
+   * ⚠ IT EXISTS FOR ONE CALLER: `missingCustomers()` in send/reconcile.ts, which
+   * finds tenants Autumn has never heard of. That is not a number that drifted
+   * — it is a tenant whose every `track` has been failing silently since it was
+   * created, with no usage, no invoice and nothing in the usage reconciler to
+   * notice, because both sides read zero and agree.
+   */
+  listCustomerIds(): Promise<string[]>
+
+  /**
+   * Whether one customer exists, asked directly.
+   *
+   * ⚠ THREE ANSWERS, NOT TWO, AND THE THIRD IS THE POINT. `listCustomerIds`
+   * pages a list that can change underneath it, so a customer created during
+   * the walk can be missed — and reporting that as "this tenant has no billing
+   * customer" would page somebody over a paging race. This confirms a candidate
+   * against a point lookup, and `unknown` means Autumn could not answer, which
+   * must never be reported as an absence.
+   */
+  customerExists(customerId: string): Promise<boolean | "unknown">
+
+  /**
    * Makes sure the tenant exists as a customer, on the free plan.
    *
    * ⚠ WITHOUT THIS, EVERY `check` FOR THAT TENANT IS A 404. Autumn has no
@@ -136,6 +159,19 @@ const MAX_GROUPS = 250
 
 /** Autumn accepts at most 1000 events per batch. */
 const MAX_BATCH = 1000
+
+/**
+ * ⚠ WELL UNDER AUTUMN'S CEILING, DELIBERATELY. `ListCustomersV2_3ParamsSchema`
+ * accepts up to 5000, but `handleListCustomersV2` then compares the value
+ * against a PER-ORGANISATION maximum and answers 400 if it is over — a limit
+ * that is configuration on their side, not a constant we can read. A hundred is
+ * below any plausible setting and costs one extra round trip per hundred
+ * tenants on a job nobody is waiting for.
+ */
+const CUSTOMER_PAGE_SIZE = 100
+
+/** A guard against a cursor that never advances, not a cap on tenants. */
+const MAX_CUSTOMER_PAGES = 1000
 
 export function autumnClient(opts: AutumnOptions): AutumnClient {
   const base = (opts.baseUrl ?? "https://api.useautumn.com").replace(/\/+$/, "")
@@ -314,6 +350,63 @@ export function autumnClient(opts: AutumnOptions): AutumnClient {
       }
 
       return buckets
+    },
+
+    async listCustomerIds() {
+      const ids: string[] = []
+      let cursor = ""
+
+      // ⚠ A HARD STOP ON THE WALK. `next_cursor` is opaque and server-built, so
+      // a bug at either end that returned the same cursor forever would spin
+      // this CronJob until Kubernetes killed it on `activeDeadlineSeconds` —
+      // with the reconciliation never running. The ceiling is far above any
+      // plausible tenant count and is a guard rather than a limit.
+      for (let page = 0; page < MAX_CUSTOMER_PAGES; page += 1) {
+        const result = await post("/v1/customers.list", {
+          // ⚠ THE EMPTY STRING IS "THE FIRST PAGE", NOT "NO CURSOR". Autumn's
+          // `CursorRequestFieldSchema` defaults to it and decodes it as the
+          // start; sending null instead is a 400.
+          start_cursor: cursor,
+          limit: CUSTOMER_PAGE_SIZE,
+        })
+
+        if (result.status < 200 || result.status >= 300) {
+          throw new Error(`autumn customers.list failed with ${result.status}`)
+        }
+
+        const body = result.body as {
+          list?: { id?: string }[]
+          next_cursor?: string | null
+        } | null
+
+        for (const customer of body?.list ?? []) {
+          if (customer.id) ids.push(customer.id)
+        }
+
+        // ⚠ NULL MEANS THE END, AND AN EMPTY STRING WOULD MEAN THE BEGINNING.
+        // Treating a falsy cursor as "keep going" would restart the walk from
+        // page one and never terminate.
+        const next = body?.next_cursor
+        if (!next) return ids
+        cursor = next
+      }
+
+      throw new Error(
+        `autumn customers.list did not terminate within ${MAX_CUSTOMER_PAGES} pages`,
+      )
+    },
+
+    async customerExists(customerId) {
+      const result = await post("/v1/customers.get", { customer_id: customerId })
+
+      // ⚠ 404 IS THE ONLY ANSWER THAT MEANS "NO". Autumn raises
+      // `CustomerNotFoundError` with that status and nothing else does; a 401,
+      // a 429 or a 502 says we could not find out, and reporting those as an
+      // absent customer would turn an Autumn outage into a report claiming
+      // every tenant is unbilled.
+      if (result.status === 404) return false
+      if (result.status >= 200 && result.status < 300) return true
+      return "unknown"
     },
 
     async ensureCustomer(input) {

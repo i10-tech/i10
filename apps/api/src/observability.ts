@@ -36,7 +36,7 @@ export interface Logger {
 }
 
 /** One process, one of these. It becomes the `service` tag on every event. */
-export type Service = "api" | "worker" | "reconcile"
+export type Service = "api" | "worker" | "reconcile" | "sweep"
 
 export interface ObservabilityOptions {
   /**
@@ -139,7 +139,19 @@ const PATTERNS: [RegExp, string][] = [
   [/\bpolar_[a-z]+_[A-Za-z0-9]{8,}/gi, "[redacted-key]"],
   // Anything that reads as an address. Last, so the more specific rules above
   // have already claimed what they recognise.
-  [/[\w.!#$%&'*+/=?^`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, "[redacted-email]"],
+  //
+  // ⚠ NO `/` IN THE LOCAL PART, AND THE LAST LABEL MUST BE ALPHABETIC. Both
+  // narrowings exist because the obvious pattern ate stack traces: a pnpm store
+  // path is `.../groupmq@1.2.3_ioredis@5.8.2_/node_modules/...`, which is a
+  // slash-bearing "local part" and a numeric "domain", so every dependency
+  // frame came out as `[redacted-email]`. Nothing leaked — but the frames that
+  // say WHICH library failed were destroyed, which costs exactly what the
+  // report was for. An address with a slash in it is legal and effectively
+  // nonexistent; a version number that ends in letters is not an address.
+  [
+    /[\w.!#$%&'*+=?^`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
+    "[redacted-email]",
+  ],
 ]
 
 /** One string, cleaned. Exported because this is the part worth testing. */
@@ -280,4 +292,27 @@ export async function withMonitor<T>(
 export function captureError(error: unknown, context?: Record<string, unknown>): void {
   if (!enabled) return
   Sentry.captureException(error, context ? { extra: context } : undefined)
+}
+
+/**
+ * Reports a condition that is worth waking somebody for and is not an
+ * exception.
+ *
+ * ⚠ IT EXISTS BECAUSE `new Error(...)` FOR THIS IS A LIE THAT COSTS LATER. A
+ * sweep that hit its row cap has not failed — every line of it worked — but the
+ * system around it is losing ground, and that is exactly the kind of thing the
+ * codebase keeps discovering by reading pod logs by hand. Sent as a message, it
+ * groups by its own text and carries no fabricated stack pointing at whichever
+ * line happened to construct it.
+ */
+export function captureMessage(
+  message: string,
+  level: "info" | "warning" | "error" = "warning",
+  context?: Record<string, unknown>,
+): void {
+  if (!enabled) return
+  Sentry.captureMessage(message, {
+    level,
+    ...(context ? { extra: context } : {}),
+  })
 }

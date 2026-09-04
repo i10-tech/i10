@@ -438,3 +438,85 @@ describe("autumnMetering", () => {
     expect(fakeFetch).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("listCustomerIds", () => {
+  it("posts to the RPC route with the first-page cursor", async () => {
+    const { autumn, calls } = client({
+      status: 200,
+      body: { list: [{ id: "ten-1" }, { id: "ten-2" }], next_cursor: null },
+    })
+
+    expect(await autumn.listCustomerIds()).toEqual(["ten-1", "ten-2"])
+
+    expect(calls[0]?.url).toBe("https://autumn.internal/v1/customers.list")
+    // ⚠ THE EMPTY STRING IS "THE FIRST PAGE", NOT "NO CURSOR". Autumn decodes
+    // it as the start; null is a 400.
+    expect(calls[0]?.body).toEqual({ start_cursor: "", limit: 100 })
+  })
+
+  it("follows the cursor to the end", async () => {
+    const { autumn, calls } = client([
+      { status: 200, body: { list: [{ id: "a" }], next_cursor: "c1" } },
+      { status: 200, body: { list: [{ id: "b" }], next_cursor: "c2" } },
+      { status: 200, body: { list: [{ id: "c" }], next_cursor: null } },
+    ])
+
+    expect(await autumn.listCustomerIds()).toEqual(["a", "b", "c"])
+    expect(calls.map((c) => (c.body as { start_cursor: string }).start_cursor)).toEqual(
+      ["", "c1", "c2"],
+    )
+  })
+
+  // ⚠ A FALSY CURSOR IS THE END, NEVER "START AGAIN". Treating it as the
+  // beginning would restart the walk from page one and never terminate.
+  it("stops on an empty-string cursor as well as null", async () => {
+    const { autumn, calls } = client([
+      { status: 200, body: { list: [{ id: "a" }], next_cursor: "" } },
+      { status: 200, body: { list: [{ id: "b" }], next_cursor: null } },
+    ])
+
+    expect(await autumn.listCustomerIds()).toEqual(["a"])
+    expect(calls).toHaveLength(1)
+  })
+
+  it("throws rather than returning a short list", async () => {
+    const { autumn } = client({ status: 500 })
+
+    await expect(autumn.listCustomerIds()).rejects.toThrow(/customers.list failed/)
+  })
+
+  it("tolerates a page with no list", async () => {
+    const { autumn } = client({ status: 200, body: { next_cursor: null } })
+
+    expect(await autumn.listCustomerIds()).toEqual([])
+  })
+})
+
+describe("customerExists", () => {
+  it("reads a 404 as absent", async () => {
+    const { autumn, calls } = client({
+      status: 404,
+      body: { code: "customer_not_found" },
+    })
+
+    expect(await autumn.customerExists("ten-1")).toBe(false)
+    expect(calls[0]?.url).toBe("https://autumn.internal/v1/customers.get")
+    expect(calls[0]?.body).toEqual({ customer_id: "ten-1" })
+  })
+
+  it("reads a 200 as present", async () => {
+    const { autumn } = client({ status: 200, body: { id: "ten-1" } })
+
+    expect(await autumn.customerExists("ten-1")).toBe(true)
+  })
+
+  // ⚠ THE ANSWER THAT IS NOT AN ANSWER. Anything but a 404 says we could not
+  // find out — reporting a 502 as an absent customer would turn an Autumn
+  // outage into a report claiming every tenant is unbilled.
+  it("reads anything else as unknown", async () => {
+    for (const status of [401, 429, 500, 502]) {
+      const { autumn } = client({ status })
+      expect(await autumn.customerExists("ten-1")).toBe("unknown")
+    }
+  })
+})

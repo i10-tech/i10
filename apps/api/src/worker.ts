@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { Worker } from "groupmq"
 import pino from "pino"
-import { createCacheClient } from "./cache/redis.js"
+import { createQueueClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, flushObservability, initObservability } from "./observability.js"
@@ -77,8 +77,20 @@ try {
   process.exit(1)
 }
 
-const redis = createCacheClient(env.REDIS_URL)
-redis.on("error", (err: Error) => log.error({ err }, "redis error"))
+// ⚠ THE QUEUE CLIENT, NOT THE CACHE ONE, AND THE DIFFERENCE IS THE WHOLE POINT
+// OF THERE BEING TWO. `createCacheClient` sets `enableOfflineQueue: false` so a
+// command issued while disconnected fails instead of waiting — correct for a
+// cache, where a miss costs nothing. This process exists to drain a queue, so
+// the same policy means a Redis blip drops queue commands on the floor.
+//
+// It was the cache client until Sentry caught it on its first day: groupmq
+// loads its Lua scripts the moment a Worker is constructed, that raced the
+// connection, and every worker restart threw "Stream isn't writeable and
+// enableOfflineQueue options is false" out of `startWorker`. The startup race
+// was the visible half; the silent half was every transient blip after it.
+// index.ts always had this right — see the note on `queueRedis` there.
+const queueRedis = createQueueClient(env.REDIS_URL)
+queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
 
 const transport = sesTransport({
   client: new SESv2Client({ region: env.AWS_REGION }),
@@ -119,9 +131,10 @@ const ops = databaseOps({
 
 function startWorker(cls: SendClass) {
   const queue = createSendQueue({
-    redis,
+    redis: queueRedis,
     class: cls,
     jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+    maxAttempts: env.WORKER_MAX_ATTEMPTS,
   })
 
   const worker = new Worker<SendJob>({
@@ -133,14 +146,41 @@ function startWorker(cls: SendClass) {
         transport,
         metering,
         log,
+        // A message whose outcome could not be written down is our failure, not
+        // a provider's, and it leaves a row in `sending` that the mail may
+        // already have left. It was silently discarded before this.
+        reportError: captureError,
         concurrency: env.WORKER_CONCURRENCY,
       }),
+    // ⚠ BATCHES AT ONCE, NOT MESSAGES AT ONCE — TWO DIFFERENT NUMBERS THAT BOTH
+    // WANT TO BE CALLED CONCURRENCY. `WORKER_CONCURRENCY` above is the fan-out
+    // INSIDE one batch; this is how many batches this worker will hold at the
+    // same time, and groupmq defaults it to 1.
+    //
+    // ⚠ AND LEAVING IT AT 1 REINTRODUCES THE BLOCKING THE QUEUE SPLIT EXISTS TO
+    // PREVENT. groupmq already serialises per group, so one batch at a time
+    // across ALL groups means tenant B's password reset waits behind the whole
+    // of tenant A's batch — head-of-line blocking between tenants, which no
+    // amount of per-group ordering was ever meant to allow. The webhook worker
+    // below always set this; the send workers never did.
+    //
+    // ⚠ IT IS DELIBERATELY NOT `WORKER_CONCURRENCY`. What SES sees is
+    // replicas × batches in flight × the fan-out inside each, so reusing that
+    // number here would square the account's send rate without anything saying
+    // so. Small, and raised only alongside the SES quota.
+    concurrency: env.WORKER_BATCH_CONCURRENCY,
     // ⚠ THE HANDLER OWNS RETRIES, NOT groupmq. A message that failed is already
     // back in `queued` with its attempt counted, and the row is the record. If
     // groupmq also retried the JOB, the same batch would be re-claimed and the
     // two retry schedules would compound — so the job's own attempts exist only
     // for the case where the handler itself throws.
-    maxAttempts: 3,
+    //
+    // ⚠ THE SAME VALUE AS THE QUEUE ABOVE, AND IT HAS TO COME FROM ONE PLACE.
+    // groupmq checks the Worker's budget first (`handleJobFailure`) and
+    // `retry.lua` enforces the job's stamped one as a ceiling, so two different
+    // numbers give an effective budget equal to the smaller — which was 3
+    // against the API's 5, stated nowhere.
+    maxAttempts: env.WORKER_MAX_ATTEMPTS,
     // ⚠ REPORTED, UNLIKE THE WEBHOOK WORKER'S — see the note there. The handler
     // already puts a failed message back in `queued` with its attempt counted,
     // so reaching here means the handler ITSELF threw, which is our bug rather
@@ -177,7 +217,7 @@ function startWebhookWorker() {
 
   const secrets = secretBox(env.WEBHOOK_SECRET_KEY)
   const queue = createWebhookQueue({
-    redis,
+    redis: queueRedis,
     maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
   })
   const ops = webhookDeliveryOps({ db, secrets })
@@ -231,6 +271,20 @@ const workers = [
  * a duplicate if the provider had in fact accepted it. Closing cleanly is what
  * keeps an ordinary deploy from generating both.
  */
+/**
+ * ⚠ AND groupmq's OWN DEFAULT IS 30 SECONDS, WHICH SILENTLY DEFEATED ALL OF THE
+ * ABOVE. `close()` with no argument waits `gracefulTimeoutMs = 30_000`, then
+ * logs a warning, emits `graceful-timeout` and abandons whatever is still in
+ * flight — so a batch running at the thirty-second mark produced exactly the
+ * stranded `sending` rows the ninety-second grace period in worker.yaml was
+ * chosen to prevent. The manifest was right and unused.
+ *
+ * Sixty seconds leaves the pod thirty of its ninety to close the pool, quit
+ * Redis and flush Sentry, and stays under the 120-second job timeout so a batch
+ * that outlives even this is one Redis will hand to another worker anyway.
+ */
+const CLOSE_TIMEOUT_MS = 60_000
+
 let shuttingDown = false
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
@@ -238,8 +292,14 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     shuttingDown = true
     log.info({ signal }, "shutting down")
 
-    void Promise.allSettled(workers.map((w) => w.close()))
-      .then(() => Promise.allSettled([sql.end({ timeout: 10 }), redis.quit()]))
+    void Promise.allSettled(workers.map((w) => w.close(CLOSE_TIMEOUT_MS)))
+      .then(() => Promise.allSettled([sql.end({ timeout: 10 }), queueRedis.quit()]))
+      // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
+      // queues and the transport sends on a timer, so an error raised in the
+      // last seconds before a rolling deploy — which is a common moment for one
+      // — died in the buffer with the process. The boot path always got this
+      // right; the shutdown path never did.
+      .then(() => flushObservability())
       .finally(() => process.exit(0))
   })
 }

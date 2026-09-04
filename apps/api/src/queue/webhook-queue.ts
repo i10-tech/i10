@@ -99,6 +99,16 @@ export async function enqueueDelivery(
  * to the Queue it is silently ignored — TypeScript catches it today, and the
  * failure if it ever stopped catching it is retries hammering a dead endpoint
  * every half second.
+ *
+ * ⚠ AND `maxAttempts` ON BOTH IS NOT BELT-AND-BRACES, IT IS TWO HALVES OF ONE
+ * BUDGET. The Worker's value is what actually dead-letters — `handleJobFailure`
+ * compares the next attempt against the WORKER's number — while the value the
+ * enqueuing side stamps on the job is enforced separately, as a ceiling, inside
+ * `retry.lua`. So the effective budget is the smaller of the two, and the two
+ * have to come from the same variable. An earlier note here had this backwards
+ * and said the enqueuing side decides; it does not, and following that would
+ * have produced a worker that gives up before `deliverWebhook` calls the
+ * attempt final, leaving the row `pending` and the endpoint never disabled.
  */
 export const webhookBackoff = (attempt: number): number =>
   Math.min(8 * 60_000, 2 ** attempt * 1_000)

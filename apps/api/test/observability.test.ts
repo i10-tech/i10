@@ -68,6 +68,23 @@ describe("scrubbing what leaves the process", () => {
     expect(scrub(real)).toBe(real)
   })
 
+  // ⚠ REGRESSION TEST FOR A REAL LOSS OF SIGNAL. The first pattern's local part
+  // allowed `/`, and its domain allowed a bare number — so a pnpm store path
+  // read as an address and every dependency frame in a stack trace came back as
+  // `[redacted-email]`. Nothing leaked; the report simply stopped saying which
+  // library had failed, which is the only thing it was for.
+  it("leaves a pnpm store path in a stack frame readable", () => {
+    const frame =
+      "/app/node_modules/.pnpm/groupmq@1.2.3_ioredis@5.8.2_/node_modules/groupmq/dist/index.js:1876:8"
+    expect(scrub(frame)).toBe(frame)
+  })
+
+  it("still redacts an address that sits next to a version number", () => {
+    expect(scrub("ioredis@5.8.2 failed for ada@lovelace.example")).toBe(
+      "ioredis@5.8.2 failed for [redacted-email]",
+    )
+  })
+
   it("reaches strings at every depth of an event, not a list of fields", () => {
     const event = {
       message: "send failed for ada@lovelace.example",
