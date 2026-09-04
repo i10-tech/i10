@@ -407,20 +407,29 @@ export function autumnClient(opts: AutumnOptions): AutumnClient {
         ...(input.subscriptionId ? { subscription_id: input.subscriptionId } : {}),
       })
 
-      // ⚠ 409 `duplicate_subscription_id` IS THE SUCCESS CONDITION, NOT A
-      // FAILURE — but ONLY because we send the id exclusively when attaching
-      // the plan that subscription bought (see grants.ts). Given that, "this
-      // subscription is already attached" means the entitlement we are asking
-      // for is already in force, which is what a retry after a crash between
-      // `attach` and `markGranted` looks like.
+      // ⚠ TWO 409s MEAN "ALREADY DONE", AND BOTH MUST BE TREATED AS SUCCESS OR
+      // THIS NEVER CONVERGES. `attach` is not idempotent: asking for a state
+      // that already holds is an error rather than a no-op, so without this the
+      // reconciler re-attempts the same repair every thirty minutes, fails, and
+      // reports the tenant broken forever.
       //
-      // ⚠ AND IT MUST NOT BE WIDENED TO ANY 409. Treating a conflict as success
-      // while asking for a DIFFERENT plan would leave the customer on the old
-      // one with our row claiming the new — silently, and in Autumn's favour
-      // rather than the customer's.
-      if (result.status === 409 && input.subscriptionId) {
+      // ⚠ AND IT MUST NOT BE WIDENED TO ANY 409. A conflict while asking for a
+      // DIFFERENT plan would leave the customer on the old one with our row
+      // claiming the new — silently, and in our favour rather than theirs. Only
+      // these two codes say the end state we asked for is the state that holds.
+      if (result.status === 409) {
         const code = (result.body as { code?: unknown } | null)?.code
-        if (code === "duplicate_subscription_id") return
+
+        // The customer is already on this exact plan. Autumn's own words:
+        // "the customer's current product 'Free' is the same as the product
+        // being attached". Nothing to do, and nothing wrong.
+        if (code === "plan_already_attached") return
+
+        // This Polar subscription is already attached. Safe only because
+        // grants.ts sends the id exclusively for the plan that subscription
+        // bought, so the conflict cannot be about some other plan. It is what a
+        // retry after a crash between `attach` and `markGranted` looks like.
+        if (code === "duplicate_subscription_id" && input.subscriptionId) return
       }
 
       if (result.status < 200 || result.status >= 300) {
