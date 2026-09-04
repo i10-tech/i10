@@ -3,9 +3,14 @@ import { describe, expect, it, vi } from "vitest"
 import { createApp } from "../src/app.js"
 import { decide, type PolarEvent } from "../src/billing/events.js"
 
+// Fixed so the file does not start failing on the day `current_period_end`
+// below goes past — entitlement genuinely depends on the clock now.
+const NOW = new Date("2026-09-03T12:00:00Z")
+
 const options = {
   planForProduct: (id: string) => (id === "prod_pro" ? "pro" : undefined),
   freePlanId: "free",
+  now: () => NOW,
 }
 
 const subscription = (over: Record<string, unknown> = {}) => ({
@@ -45,6 +50,62 @@ describe("deciding what a Polar event means", () => {
       kind: "apply",
       state: { entitledPlanId: "pro", cancelAtPeriodEnd: true },
     })
+  })
+
+  // ⚠ THE END DATE IS THE END DATE, WITH OR WITHOUT THE EVENT THAT ANNOUNCES
+  // IT. Polar sends `subscription.revoked` when the period runs out, and this
+  // is what happens if that event is lost: the status still reads `active`
+  // because nothing has updated it, and the entitlement ends anyway. Without
+  // this the customer keeps Pro until somebody notices by hand.
+  it("drops to the free plan once a cancelled subscription's period has passed", () => {
+    const decided = decide(
+      event({
+        cancel_at_period_end: true,
+        current_period_end: "2026-09-03T11:59:59Z",
+      }),
+      options,
+    )
+    expect(decided).toMatchObject({
+      kind: "apply",
+      state: { status: "active", planId: "pro", entitledPlanId: "free" },
+    })
+  })
+
+  // The boundary matters because there is no grace period on either side of
+  // it: a second earlier is the plan they paid for, and the instant itself is
+  // not.
+  it("keeps the plan until the last moment of a cancelled period", () => {
+    const upTo = (current_period_end: string) =>
+      decide(event({ cancel_at_period_end: true, current_period_end }), options)
+
+    expect(upTo("2026-09-03T12:00:00.001Z")).toMatchObject({
+      state: { entitledPlanId: "pro" },
+    })
+    expect(upTo("2026-09-03T12:00:00.000Z")).toMatchObject({
+      state: { entitledPlanId: "free" },
+    })
+  })
+
+  // ⚠ A RENEWING SUBSCRIPTION IS BRIEFLY PAST ITS OWN PERIOD END, EVERY CYCLE.
+  // Expiring on the date alone would cut off a paying customer once a month
+  // for as long as Polar takes to push the renewal through.
+  it("keeps a renewing subscription whose period end has gone by", () => {
+    const decided = decide(
+      event({
+        cancel_at_period_end: false,
+        current_period_end: "2026-09-03T11:59:59Z",
+      }),
+      options,
+    )
+    expect(decided).toMatchObject({ state: { entitledPlanId: "pro" } })
+  })
+
+  it("does not expire a cancelled subscription with no stated period end", () => {
+    const decided = decide(
+      event({ cancel_at_period_end: true, current_period_end: null }),
+      options,
+    )
+    expect(decided).toMatchObject({ state: { entitledPlanId: "pro" } })
   })
 
   it("drops to the free plan once the subscription is revoked", () => {

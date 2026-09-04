@@ -192,6 +192,68 @@ describe("reconciling against Polar", () => {
     expect(apply).not.toHaveBeenCalled()
   })
 
+  // ⚠ POLAR NEVER DELETES A SUBSCRIPTION, AND WE HOLD ONE ROW PER TENANT. A
+  // customer who has bought twice is two entries in the list and one row here,
+  // so without collapsing them the dead subscription gets its own turn at
+  // writing the live one's row.
+  it("decides once per tenant when Polar lists several of their subscriptions", async () => {
+    const apply = vi.fn()
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: vi.fn(),
+        listSubscriptions: async () => [
+          polarSub({
+            id: "sub_old",
+            status: "canceled",
+            modified_at: "2026-09-02T12:00:00Z",
+          }),
+          polarSub({ id: "sub_new", modified_at: "2026-09-03T12:00:00Z" }),
+        ],
+        createCheckout: vi.fn(),
+      },
+      subscriptions: ops({
+        snapshot: async () => [row({ polarSubscriptionId: "sub_new" })],
+      }),
+      grants: { apply },
+      options,
+      log,
+    })
+
+    expect(report).toMatchObject({ checked: 1, agreed: 1, repaired: 0, orphaned: [] })
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  // ⚠ AND RECENCY ALONE IS NOT THE RULE. It answers the ordinary case only
+  // because the new subscription happens to have been modified last; one touch
+  // on the ended one after that, for any reason at all, and picking the most
+  // recent downgrades somebody who is paying.
+  it("lets a live subscription outrank a dead one modified more recently", async () => {
+    const apply = vi.fn()
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: vi.fn(),
+        listSubscriptions: async () => [
+          polarSub({ id: "sub_live", modified_at: "2026-09-03T12:00:00Z" }),
+          polarSub({
+            id: "sub_dead",
+            status: "canceled",
+            modified_at: "2026-09-04T12:00:00Z",
+          }),
+        ],
+        createCheckout: vi.fn(),
+      },
+      subscriptions: ops({
+        snapshot: async () => [row({ polarSubscriptionId: "sub_live" })],
+      }),
+      grants: { apply },
+      options,
+      log,
+    })
+
+    expect(report).toMatchObject({ checked: 1, agreed: 1, repaired: 0 })
+    expect(apply).not.toHaveBeenCalled()
+  })
+
   it("grants a subscription we never received a webhook for", async () => {
     const apply = vi.fn(async () => ({ status: "applied" as const, planId: "pro" }))
     const report = await reconcileSubscriptions({

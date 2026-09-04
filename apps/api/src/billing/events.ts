@@ -15,6 +15,21 @@
  * they bought until the period ends. Only `revoked` — status `canceled` — ends
  * it. So `cancelAtPeriodEnd` is recorded and deliberately not acted on.
  *
+ * ⚠ BUT A CANCELLATION'S OWN DEADLINE IS ENFORCED WITHOUT WAITING TO BE TOLD.
+ * Once `cancel_at_period_end` is set, Polar has stated the end date, and after
+ * that date passes the subscription entitles nothing — whether or not the
+ * `revoked` event announcing it ever arrives. Reading it that way is what makes
+ * the end date the end date: the alternative is that a lost webhook silently
+ * becomes an open-ended free extension, granted by nobody and noticed by no
+ * one, because every other check we have would agree the row looks fine.
+ *
+ * ⚠ AND IT IS SCOPED TO `cancel_at_period_end`, WHICH IS NOT PEDANTRY. A
+ * renewing subscription is past its `current_period_end` for the moment
+ * between the period elapsing and Polar's renewal landing; expiring on the
+ * date alone would cut off a paying customer once a month, every month, for as
+ * long as that gap lasts. Only a subscription Polar has already said will not
+ * renew can be ended by its own clock.
+ *
  * ⚠ AND `past_due` KEEPS ITS ENTITLEMENT ON PURPOSE. A card that failed at
  * 3am is not a customer who stopped paying; Polar retries for days and revokes
  * when it gives up. Cutting transactional email off at the first failed charge
@@ -77,6 +92,14 @@ export interface DecideOptions {
   /** Polar product id → our plan id. From POLAR_PRODUCTS. */
   planForProduct: (productId: string) => string | undefined
   freePlanId: string
+  /**
+   * ⚠ THE CLOCK IS AN INPUT BECAUSE ENTITLEMENT NOW DEPENDS ON IT. A cancelled
+   * subscription's answer changes from `pro` to `free` with nothing but time
+   * passing, so a test that could not move the clock could only assert the
+   * boring half of the rule. Optional, so no production call site has to pass
+   * it and none of them can drift.
+   */
+  now?: () => Date
 }
 
 /**
@@ -130,7 +153,18 @@ export function toState(
     return { kind: "ignore", reason: `product ${sub.product_id} is not an i10 plan` }
   }
 
-  const entitled = ENTITLED_STATUSES.has(sub.status)
+  const currentPeriodEnd = parseDate(sub.current_period_end)
+  const cancelAtPeriodEnd = sub.cancel_at_period_end ?? false
+
+  // The period a cancelled subscription was paid up to, once it is behind us.
+  // `null` current_period_end means Polar has not stated one, which is not the
+  // same as one that has passed.
+  const lapsed =
+    cancelAtPeriodEnd &&
+    currentPeriodEnd !== null &&
+    currentPeriodEnd.getTime() <= (opts.now?.() ?? new Date()).getTime()
+
+  const entitled = ENTITLED_STATUSES.has(sub.status) && !lapsed
 
   return {
     kind: "apply",
@@ -141,8 +175,8 @@ export function toState(
       polarProductId: sub.product_id,
       planId,
       status: sub.status,
-      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
-      currentPeriodEnd: parseDate(sub.current_period_end),
+      cancelAtPeriodEnd,
+      currentPeriodEnd,
       // `modified_at` is null on an object that has never been modified, so
       // `created_at` is the fallback rather than `now()` — using our own clock
       // would make two events that arrive together unorderable.
