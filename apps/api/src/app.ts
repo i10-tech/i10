@@ -1,5 +1,7 @@
 import { createRequire } from "node:module"
 import { OpenAPIHono } from "@hono/zod-openapi"
+import { HTTPException } from "hono/http-exception"
+import { routePath } from "hono/route"
 import type { VerifyDeps } from "./auth/api-key.js"
 import { createBilling, type BillingDeps } from "./routes/billing.js"
 import {
@@ -85,6 +87,19 @@ export interface AppDeps {
   }
   /** Answers whether the database is reachable, for the readiness probe. */
   pingDb?: () => Promise<void>
+  /**
+   * Where an unhandled route error goes, besides into the 500.
+   *
+   * ⚠ INJECTED RATHER THAN IMPORTED, so this module still knows nothing about
+   * Sentry. Every test in the suite builds an app without it and gets the same
+   * 500 with no reporting, which is also what a local checkout gets.
+   *
+   * ⚠ AND WITHOUT IT A 500 IS REPORTED NOWHERE. A throw inside a route does not
+   * crash the process, so the SDK's uncaught-exception handler never sees it;
+   * with tracing off there is no HTTP instrumentation to catch it either. This
+   * hook is the only path from a failed request to an alert.
+   */
+  reportError?: (error: unknown, context?: Record<string, unknown>) => void
 }
 
 /**
@@ -260,6 +275,27 @@ export function createApp(deps: AppDeps = {}) {
   app.notFound((c) =>
     c.json({ statusCode: 404, name: "not_found", message: "Not found." }, 404),
   )
+
+  app.onError((error, c) => {
+    // Hono raises this for a malformed body and similar; it carries its own
+    // status and response, and rewriting it as a 500 would both lie to the
+    // caller and report their bad request as our bug.
+    if (error instanceof HTTPException) return error.getResponse()
+
+    // ⚠ THE ROUTE PATTERN, NOT THE URL. `/emails/{id}` groups every failure of
+    // one endpoint into one issue; the concrete path would open a new issue per
+    // message id and bury the signal under its own volume.
+    deps.reportError?.(error, { route: routePath(c), method: c.req.method })
+
+    // ⚠ THE SAME SHAPE AS EVERY OTHER ERROR THIS API RETURNS, and deliberately
+    // no detail. What went wrong is in the log and in Sentry; a caller learning
+    // which internal call threw learns something about our infrastructure and
+    // nothing they can act on.
+    return c.json(
+      { statusCode: 500, name: "internal_error", message: "Something went wrong." },
+      500,
+    )
+  })
 
   return app
 }

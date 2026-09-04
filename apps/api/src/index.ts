@@ -10,6 +10,7 @@ import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { captureError, flushObservability, initObservability } from "./observability.js"
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
@@ -23,6 +24,19 @@ import { webhookEndpointStore } from "./webhooks/store.js"
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
 
+// ⚠ BEFORE THE DATABASE, THE CLERK CLIENT AND EVERY OTHER DEPENDENCY, so that
+// the boot failures below are the first things it can report. A pod that dies
+// during startup is the one failure nobody is watching a dashboard for.
+initObservability({
+  dsn: env.SENTRY_DSN,
+  environment: env.SENTRY_ENVIRONMENT,
+  service: "api",
+  // Read straight from the environment, the same way /version does — it is
+  // baked into the image at build time rather than validated as configuration.
+  release: process.env.GIT_SHA,
+  log,
+})
+
 const { sql, db } = createDb(env.DATABASE_URL)
 
 // ⚠ BEFORE THE LISTENER, NOT AFTER, AND NOT IN A HEALTH CHECK. Connecting as a
@@ -34,7 +48,12 @@ try {
   await assertRlsSubject(sql)
 } catch (error) {
   log.fatal({ err: error }, "refusing to start")
+  captureError(error, { phase: "boot" })
   await sql.end({ timeout: 5 })
+  // ⚠ FLUSHED BEFORE THE EXIT, or the report dies in the buffer with the
+  // process. A crashlooping pod is the case where this matters most and the
+  // one where there is no later chance to send it.
+  await flushObservability()
   process.exit(1)
 }
 
@@ -314,6 +333,7 @@ const app = createApp({
   pingDb: async () => {
     await sql`select 1`
   },
+  reportError: captureError,
 })
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {

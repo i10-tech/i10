@@ -269,6 +269,35 @@ const schema = z.object({
 
   /** Bounds the checkout call, which sits in front of a waiting customer. */
   POLAR_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(5000),
+
+  // ── observability ─────────────────────────────────────────────────────────
+
+  /**
+   * Where errors and cron check-ins go.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS A VISIBLE STATE RATHER THAN A QUIET ONE —
+   * the same rule as AUTUMN_SECRET_KEY. Without it the services run and report
+   * nothing, and say so in a line of the boot log you can grep for. Making it
+   * required would mean nobody can run the API without a Sentry account;
+   * letting it fail silently would mean a production that lost its DSN looks
+   * exactly like one that has it, which is the failure mode this whole piece
+   * exists to remove.
+   *
+   * ⚠ A DSN IS NOT A SECRET IN THE WAY THE OTHER KEYS HERE ARE. It authorises
+   * sending events, not reading them, and the browser SDKs publish it. It still
+   * belongs in Doppler, because someone who has it can fill the quota.
+   */
+  SENTRY_DSN: z.url().optional(),
+
+  /**
+   * Which deployment an issue came from.
+   *
+   * ⚠ IT MUST DISTINGUISH STAGING FROM PRODUCTION, because the promotion model
+   * re-tags one image for both. Everything else about the two is identical by
+   * design, so this string is the only thing in an event that says which one
+   * broke.
+   */
+  SENTRY_ENVIRONMENT: z.string().min(1).default("development"),
 })
 
 export type Env = z.infer<typeof schema>
