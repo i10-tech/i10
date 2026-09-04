@@ -14,24 +14,17 @@ permissions:
   contents: read
 
 env:
-  # Pinned rather than read from packageManager, because the setup action runs
+  # Pinned rather than read from packageManager, because the toolchain is set up
   # before the checkout is parsed. Four places hold this version — here,
   # package.json, and any Dockerfile that installs it — and they move together.
+  #
+  # ⚠ THE PIN NO LONGER COSTS ANYTHING. It used to: `pnpm/action-setup` reacts
+  # to a version that differs from the runner's preinstalled pnpm by running an
+  # `npm install`, which was measured at 7m08s in six parallel jobs on a run
+  # whose real work took under 40 seconds. .github/actions/node-toolchain
+  # fetches the tarball directly instead, so pinning is now free and should
+  # stay.
   PNPM_VERSION: "11.24.0"
-  #
-  # ⚠ AND EVERY `pnpm/action-setup` BELOW PASSES `standalone: true` BECAUSE OF
-  # THIS PIN. GitHub's runner image ships its own pnpm — 11.19.0 at the time of
-  # writing — so pinning a different version makes the action run its
-  # self-installer, and the default self-installer goes through `npm install`.
-  # That npm call is on the critical path of all six Node jobs, in parallel,
-  # and it is not reliably fast: measured at 5s in one run and 7m04s in another
-  # 45 minutes later, same commit range, same pinned version. An 8-minute CI
-  # run whose actual work was 16 seconds.
-  #
-  # `standalone: true` fetches pnpm's self-contained binary instead, which
-  # keeps the npm registry off the critical path. It does not change which
-  # pnpm we run — the pin above is still the version, and it should stay
-  # pinned for the reason given.
   NODE_VERSION: "22.20.0"
   # services/authd is a Go module and is deliberately outside the pnpm
   # workspace, so Turborepo never sees it and it needs its own lane below.
@@ -49,13 +42,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with: { version: "${{ env.PNPM_VERSION }}", standalone: true }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/node-toolchain
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          # commitlint is not a turbo task, so the cache server would start and
+          # serve nothing.
+          turbo-cache: "false"
       # ⚠ THIS GUARD IS LOAD-BEARING, not style enforcement. Release versions
       # are derived from `feat:` / `fix:` / `!` in the commit log, and
       # next-version.mjs SKIPS a non-conventional subject rather than failing
@@ -75,54 +68,35 @@ jobs:
     # waiting on input that never arrives — holds a runner for six hours and
     # reports nothing until it does. This is the bound at which that becomes a
     # red run instead.
-    timeout-minutes: 25
+    #
+    # ⚠ AND IT IS DELIBERATELY TIGHTER THAN IT WAS. At 25 minutes the npm stall
+    # that made these jobs take eight minutes each still passed, so nothing
+    # failed and nothing said anything was wrong. The whole matrix now finishes
+    # inside a minute; five is enough headroom for a cold cache and still low
+    # enough that a stall shows up as a red run rather than as a slow day.
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
         task: [lint, check-types, test, build]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with: { version: "${{ env.PNPM_VERSION }}", standalone: true }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/node-toolchain
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      # ⚠ MUST COME BEFORE ANY `pnpm run <task>`. It starts a local cache server
-      # on 41230 and exports TURBO_API/TURBO_TOKEN/TURBO_TEAM; a turbo
-      # invocation earlier in the job just misses the cache, with no error to
-      # say so.
-      #
-      # Turborepo's cache was the one layer this workflow lacked — Docker
-      # layers, the pnpm store and the Go build cache were already covered. The
-      # four matrix tasks each rebuild the same shared packages from cold:
-      # check-types depends on ^build, so @repo/contracts and the SDKs are built
-      # in every job, and again in the OpenAPI job. This lets the second job to
-      # need a package restore it instead of rebuilding it.
-      #
-      # It backs onto the same GitHub Actions cache the Docker layers use, so
-      # there is no external service and no Vercel account. ⚠ That cache is
-      # 10 GB per repository and evicts LRU, so `mode=max` Docker caching in
-      # build.yml competes with these entries for the same budget.
-      - uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
-      - run: pnpm install --frozen-lockfile
+          pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm run ${{ matrix.task }}
 
   openapi:
     name: OpenAPI document
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with: { version: "${{ env.PNPM_VERSION }}", standalone: true }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/node-toolchain
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      # Turbo remote cache — see the note in the `verify` job.
-      - uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
-      - run: pnpm install --frozen-lockfile
+          pnpm-version: ${{ env.PNPM_VERSION }}
       # ⚠ THIS GUARD IS WHY INLINING THE SPEC IS SAFE. apps/api/openapi.json is a
       # committed artifact: docs.i10.tech/api inlines it at build time so the
       # reference needs no CORS header and renders even when the API is down, and
@@ -171,16 +145,13 @@ jobs:
   format:
     name: Format
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with: { version: "${{ env.PNPM_VERSION }}", standalone: true }
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/node-toolchain
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      # Turbo remote cache — see the note in the `verify` job.
-      - uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
-      - run: pnpm install --frozen-lockfile
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          # prettier --check is not a turbo task either.
+          turbo-cache: "false"
       - run: pnpm run format:check

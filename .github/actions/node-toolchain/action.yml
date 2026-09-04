@@ -1,0 +1,87 @@
+name: Node toolchain
+description: Node, pnpm and the workspace's dependencies, with npm off the critical path.
+
+# ⚠ THIS EXISTS BECAUSE `pnpm/action-setup` INSTALLS PNPM WITH `npm install`,
+# AND THAT CALL IS NOT RELIABLY FAST. GitHub's runner image ships its own pnpm
+# (11.19.0 at the time of writing), so pinning any other version makes the
+# action run its self-installer, and the self-installer shells out to npm. On
+# 2026-09-04 that step took 7m08s to add five packages — in six parallel jobs
+# at once, on a run whose actual lint/test/build work totalled under 40
+# seconds. It was 5s on an earlier run of the same commit range, so it is a
+# gamble rather than a constant cost.
+#
+# ⚠ AND `standalone: true` DOES NOT FIX IT — that was tried first and measured.
+# The flag only changes WHICH package the self-installer fetches (`@pnpm/exe`
+# rather than `pnpm`); it still goes through npm, still resolves a dependency
+# tree, and still stalled for 7m. What follows removes npm from the path
+# entirely: one HTTPS GET of the published tarball, which is 5 MB with no
+# dependencies of its own, then a symlink onto PATH.
+
+inputs:
+  node-version:
+    description: Node version, as `actions/setup-node` takes it.
+    required: true
+  pnpm-version:
+    description: >-
+      pnpm version. Must match `packageManager` in package.json and any
+      Dockerfile that installs pnpm — they move together.
+    required: true
+  turbo-cache:
+    description: >-
+      Start the Turborepo cache server. Leave on for anything that runs a turbo
+      task; the server must be up before the first `pnpm run <task>` or the
+      invocation just misses the cache with no error to say so.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm ${{ inputs.pnpm-version }}
+      shell: bash
+      env:
+        PNPM_VERSION: ${{ inputs.pnpm-version }}
+      run: |
+        set -euo pipefail
+        dest="$RUNNER_TEMP/pnpm"
+        mkdir -p "$dest"
+        # The published `pnpm` package is a single self-contained JS bundle with
+        # an empty `dependencies` — nothing to resolve, so a plain fetch is the
+        # whole install. `--retry-all-errors` covers the registry CDN returning
+        # a 5xx, which a bare `--retry` would not retry.
+        curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --max-time 120 \
+          "https://registry.npmjs.org/pnpm/-/pnpm-${PNPM_VERSION}.tgz" \
+          | tar -xz -C "$dest" --strip-components=1
+        # package.json maps the `pnpm` bin to bin/pnpm.mjs, which npm would
+        # normally symlink for us. Both entrypoints carry `#!/usr/bin/env node`
+        # and the runner has a Node preinstalled, so this is runnable before
+        # setup-node has chosen ours — which it has to be, because setup-node's
+        # `cache: pnpm` probes `pnpm store path` while resolving the cache key.
+        chmod +x "$dest/bin/pnpm.mjs"
+        ln -sf "$dest/bin/pnpm.mjs" "$dest/bin/pnpm"
+        echo "$dest/bin" >> "$GITHUB_PATH"
+        # Fail here, with the version in the message, rather than three steps
+        # later inside setup-node's cache probe.
+        installed="$("$dest/bin/pnpm" --version)"
+        [ "$installed" = "$PNPM_VERSION" ] || {
+          echo "::error::wanted pnpm $PNPM_VERSION, got $installed"; exit 1
+        }
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    # Turborepo's cache backs onto the same GitHub Actions cache the Docker
+    # layers use, so there is no external service and no Vercel account. The
+    # four matrix tasks each rebuild the same shared packages from cold —
+    # check-types depends on ^build, so @repo/contracts and the SDKs are built
+    # in every job, and again in the OpenAPI job. This lets the second job to
+    # need a package restore it instead of rebuilding it.
+    #
+    # ⚠ That cache is 10 GB per repository and evicts LRU, so `mode=max` Docker
+    # caching in build.yml competes with these entries for the same budget.
+    - if: inputs.turbo-cache == 'true'
+      uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
+
+    - shell: bash
+      run: pnpm install --frozen-lockfile
