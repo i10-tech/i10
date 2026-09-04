@@ -1,4 +1,9 @@
-import { toState, type DecideOptions, type PolarSubscription } from "./events.js"
+import {
+  toState,
+  type DecideOptions,
+  type PolarSubscription,
+  type SubscriptionState,
+} from "./events.js"
 import type { SubscriptionOps } from "./db.js"
 import type { Logger, SubscriptionGrants } from "./grants.js"
 import type { PolarClient } from "./polar.js"
@@ -34,7 +39,14 @@ export interface ReconcileDeps {
 }
 
 export interface ReconcileReport {
-  /** Subscriptions Polar returned that map to an i10 plan. */
+  /**
+   * Tenants Polar returned at least one i10 subscription for.
+   *
+   * ⚠ TENANTS, NOT SUBSCRIPTIONS, BECAUSE POLAR NEVER DELETES ONE. A customer
+   * who has bought twice has two subscriptions in the list forever, and we
+   * hold one row per tenant — so `agreed + repaired + failed` counts decisions
+   * made, and this is the number of them.
+   */
   checked: number
   /** Entitlements this run repaired. Should be zero on a healthy deployment. */
   repaired: number
@@ -74,13 +86,38 @@ export async function reconcileSubscriptions(
   const byTenant = new Map(ours.map((row) => [row.tenantId, row]))
   const seen = new Set<string>()
 
+  // ⚠ ONE SUBSCRIPTION PER TENANT DECIDES, AND CHOOSING WHICH IS NOT
+  // BOOKKEEPING. Polar never deletes a subscription — a cancelled one stays in
+  // the list with status `canceled` forever — so a customer who has bought
+  // twice appears twice, while `core.subscriptions` holds exactly one row for
+  // them. Feeding both to `grants.apply` in list order means the dead one gets
+  // its turn at writing the live one's row, and the only thing standing
+  // between a paying customer and a downgrade is `record`'s `event_at` guard
+  // rejecting it. That guard holds today, and it holds for a reason it does
+  // not control: that Polar happens not to touch `modified_at` on a
+  // subscription it has already ended. One such touch, for any reason, and the
+  // dead subscription wins.
+  //
+  // Observed as noise before it was ever a bug — every run logged an "ignored
+  // an out-of-order subscription event" for the old subscription and counted
+  // it as agreement.
+  const decidedByTenant = new Map<string, SubscriptionState>()
+
   for (const sub of polarSubs) {
     const decided = toState(sub as PolarSubscription, deps.options)
     if (decided.kind === "ignore") continue
 
     const state = decided.state
-    report.checked += 1
     seen.add(state.polarSubscriptionId)
+
+    const held = decidedByTenant.get(state.tenantId)
+    if (!held || supersedes(state, held, deps.options.freePlanId)) {
+      decidedByTenant.set(state.tenantId, state)
+    }
+  }
+
+  for (const state of decidedByTenant.values()) {
+    report.checked += 1
 
     const row = byTenant.get(state.tenantId)
 
@@ -141,4 +178,27 @@ export async function reconcileSubscriptions(
   }
 
   return report
+}
+
+/**
+ * Which of two subscriptions for the same tenant states their entitlement.
+ *
+ * ⚠ ENTITLEMENT WINS BEFORE RECENCY, AND THAT ORDER IS THE POINT. Recency
+ * alone answers the ordinary case — resubscribing after churn — but it answers
+ * it by accident, because the new subscription happens to have been modified
+ * last. It gives the wrong answer the moment anything at all touches an ended
+ * subscription after a live one was created, and that is a downgrade for
+ * somebody who is paying. Asking "does Polar say this customer holds a plan"
+ * first cannot fail that way: if any subscription entitles them, they are
+ * entitled, and recency only picks between subscriptions that agree.
+ */
+function supersedes(
+  candidate: SubscriptionState,
+  held: SubscriptionState,
+  freePlanId: string,
+): boolean {
+  const candidateEntitles = candidate.entitledPlanId !== freePlanId
+  const heldEntitles = held.entitledPlanId !== freePlanId
+  if (candidateEntitles !== heldEntitles) return candidateEntitles
+  return candidate.eventAt.getTime() > held.eventAt.getTime()
 }
