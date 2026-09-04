@@ -8,8 +8,15 @@ updates:
       # One PR per ecosystem rather than per package. Twenty separate patch
       # PRs is a review queue nobody reads, which is worse for security than
       # one grouped PR that actually gets looked at.
+      # ⚠ CAPPED THE SAME WAY `production` IS, AND FOR A REASON THAT ACTUALLY
+      # HAPPENED. Uncapped, this group swept TypeScript 6→7, ESLint 9→10 and
+      # @types/node 22→26 into ONE pull request. Every code job failed, and no
+      # amount of reading told you which of the three did it — the only move
+      # left was to close it. Majors still get proposed, as their own ungrouped
+      # PR each, which is the form you can actually review and revert.
       dev-dependencies:
         dependency-type: development
+        update-types: [minor, patch]
       production:
         dependency-type: production
         update-types: [minor, patch]
@@ -31,3 +38,13 @@ updates:
     schedule: { interval: weekly }
     commit-message:
       prefix: "chore(deps)"
+    # ⚠ THE NODE MAJOR IS A FIVE-FILE CHANGE, SO IT IS NEVER ONE PR HERE. A bump
+    # in one app's Dockerfile leaves that container on a runtime the other three
+    # are not on, built by a CI pinned to NODE_VERSION in ci.yml and typechecked
+    # against whatever @types/node says — three-way drift discovered at runtime.
+    # Dependabot proposed exactly that for apps/console and it had to be closed.
+    # Moving Node means all four Dockerfiles, ci.yml and @types/node together,
+    # deliberately, which is not a thing a bot can offer.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
