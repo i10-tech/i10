@@ -52,9 +52,8 @@ await withMonitor(
     schedule: "*/30 * * * *",
     // A run that has not checked in five minutes after its slot is missing, not
     // slow: `activeDeadlineSeconds` on the Job is 300, so by then Kubernetes has
-    // already given up on it.
+    // already given up on it and there is nothing left to wait for.
     checkinMarginMinutes: 5,
-    maxRuntimeMinutes: 5,
     log,
   },
   async () => {
