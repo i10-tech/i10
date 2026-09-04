@@ -43,12 +43,12 @@ jobs:
       packages: write
     steps:
       - name: Check out i10 (for the dashboard Dockerfile)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           path: i10
 
       - name: Check out Autumn at the pinned revision
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: useautumn/autumn
           ref: ${{ inputs.ref || env.AUTUMN_REF }}
