@@ -365,6 +365,25 @@ describe("entitlements", () => {
     ).resolves.toBeUndefined()
   })
 
+  // ⚠ WITHOUT THIS THE RECONCILER NEVER CONVERGES. `attach` treats "already on
+  // that plan" as a conflict rather than a no-op, so a repair whose end state
+  // already holds fails, and fails again every thirty minutes, reporting a
+  // healthy tenant as broken forever. Seen live on the first repair after a
+  // revocation.
+  it("treats a plan that is already attached as done", async () => {
+    const { autumn } = client({
+      status: 409,
+      body: {
+        code: "plan_already_attached",
+        message: "the customer's current product 'Free' is the same",
+      },
+    })
+
+    await expect(
+      autumn.grantPlan({ tenantId: "ten-1", planId: "free" }),
+    ).resolves.toBeUndefined()
+  })
+
   // ⚠ AND NOT ONE STEP FURTHER. Swallowing a 409 we did not cause by sending an
   // id would let the row claim a plan Autumn never attached — the customer
   // stays on the old one and nothing anywhere disagrees.
