@@ -208,8 +208,6 @@ export interface MonitorOptions {
   schedule: string
   /** Minutes late before a missing run is called missed. */
   checkinMarginMinutes?: number
-  /** Minutes running before a run is called timed out. */
-  maxRuntimeMinutes?: number
   log: Logger
 }
 
@@ -230,27 +228,35 @@ export async function withMonitor<T>(
 ): Promise<T> {
   if (!enabled) return run()
 
-  const startedAt = Date.now()
-  const checkInId = Sentry.captureCheckIn(
-    { monitorSlug: opts.slug, status: "in_progress" },
-    {
-      schedule: { type: "crontab", value: opts.schedule },
-      checkinMargin: opts.checkinMarginMinutes,
-      maxRuntime: opts.maxRuntimeMinutes,
-      // ⚠ UTC, BECAUSE THE CLUSTER IS. A CronJob schedule with no timezone runs
-      // on the kubelet's clock, and saying anything else here would have Sentry
-      // expecting runs at hours they never happen.
-      timezone: "Etc/UTC",
-    },
-  )
-
+  // ⚠ ONE CHECK-IN, NOT AN `in_progress` FOLLOWED BY A VERDICT, AND THIS WAS
+  // LEARNED THE EXPENSIVE WAY. The two-envelope form is what Sentry documents,
+  // and on the first real run it left the monitor stuck: the `in_progress`
+  // arrived, the `ok` never did, and the pod had already exited — a job that
+  // lives two seconds gives the transport almost no room, and the terminal
+  // check-in has to reference an id the ingest pipeline may not have processed
+  // yet. `max_runtime` then turns a run that SUCCEEDED into a timeout alert.
+  // False alarms are how alerting gets ignored, which is the failure this whole
+  // module exists to prevent, so the pattern had to go rather than be tuned.
+  //
+  // A single terminal check-in is self-contained: no id to correlate, no window
+  // between two envelopes, and it carries the schedule so a missed run is still
+  // caught. What it gives up is `max_runtime` — Sentry cannot time out a run it
+  // was never told had started. Nothing is lost by that here: the CronJob sets
+  // `activeDeadlineSeconds: 300`, so Kubernetes kills a hung run, and a killed
+  // run sends no check-in at all and is reported as MISSED. Same alert, one
+  // fewer state, and it does not depend on two packets arriving in order.
   const finish = (status: "ok" | "error") => {
-    Sentry.captureCheckIn({
-      monitorSlug: opts.slug,
-      status,
-      checkInId,
-      duration: (Date.now() - startedAt) / 1000,
-    })
+    Sentry.captureCheckIn(
+      { monitorSlug: opts.slug, status },
+      {
+        schedule: { type: "crontab", value: opts.schedule },
+        checkinMargin: opts.checkinMarginMinutes,
+        // ⚠ UTC, BECAUSE THE CLUSTER IS. A CronJob schedule with no timezone
+        // runs on the kubelet's clock, and saying anything else here would have
+        // Sentry expecting runs at hours they never happen.
+        timezone: "Etc/UTC",
+      },
+    )
   }
 
   try {

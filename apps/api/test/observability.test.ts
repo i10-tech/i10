@@ -131,6 +131,25 @@ describe("check-ins for a scheduled job", () => {
     })
   })
 
+  // ⚠ REGRESSION TEST FOR A REAL OUTAGE OF THIS FEATURE. The first version sent
+  // `in_progress` and then a verdict. On the first production run the verdict
+  // never arrived — the pod lived two seconds — and the monitor sat
+  // `in_progress` until `max_runtime` turned a successful run into a timeout
+  // alert. One self-contained envelope has no second packet to lose.
+  it("sends exactly one check-in, with no in_progress to be left hanging", async () => {
+    initObservability({
+      dsn: "https://k@o0.ingest.de.sentry.io/1",
+      environment: "test",
+      service: "reconcile",
+      log,
+    })
+
+    await withMonitor({ slug: "s", schedule: "* * * * *", log }, async () => {})
+
+    expect(captureCheckIn).toHaveBeenCalledTimes(1)
+    expect(captureCheckIn.mock.calls[0]?.[0].status).toBe("ok")
+  })
+
   // ⚠ THE WHOLE POINT OF READING THE EXIT CODE. The reconciler reports a run
   // where every tenant failed by setting an exit code and returning normally —
   // no exception is thrown. A check-in that only watched for throws would call
