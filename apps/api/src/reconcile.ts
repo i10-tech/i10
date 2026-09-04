@@ -21,17 +21,23 @@
  * and no exit code — Sentry knows the schedule, so an absence is the one
  * failure it can see that nothing in this file can.
  *
- * ⚠ THREE LEGS, IN THIS ORDER, AND THE ORDER IS LOAD-BEARING:
+ * ⚠ FOUR LEGS, IN THIS ORDER, AND THE ORDER IS LOAD-BEARING:
  *
  *   1. SES ↔ i10       did everything we marked sent actually go?  (correctness)
  *   2. i10 ↔ Autumn    did we bill for everything we sent?         (books)
- *   3. Polar ↔ Autumn  is every customer on the plan they paid for? (entitlements)
+ *   3. tenants ↔ Autumn does every tenant exist as a customer?     (existence)
+ *   4. Polar ↔ Autumn  is every customer on the plan they paid for? (entitlements)
  *
  * The first repairs INTO `core.messages` and the second reads it, so a message
  * SES sent that we recorded late is an ordinary `sent` row by the time the
- * second leg counts — rather than waiting a whole cycle to be billed. The third
- * is independent of both and runs last because it is the one that talks to
- * Polar.
+ * second leg counts — rather than waiting a whole cycle to be billed.
+ *
+ * The third is deliberately AFTER the second and not folded into it: the usage
+ * reconciler cannot see a tenant Autumn has never heard of, because both sides
+ * read zero for it and agree. That is the whole reason it is a separate
+ * question, and it compares the entire tenant list rather than only tenants
+ * that sent something — a tenant that has not sent yet is exactly the one worth
+ * finding before it does.
  *
  * ⚠ THE FIRST TWO WERE WRITTEN, TESTED AND NEVER CALLED. `send/reconcile.ts`
  * and `send/reconcile-ses.ts` were imported by their own tests and by nothing
@@ -52,7 +58,12 @@ import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 import { autumnClient } from "./send/autumn.js"
-import { needsAttention, reconcileSes, reconcileUsage } from "./send/reconcile-run.js"
+import {
+  needsAttention,
+  reconcileSes,
+  reconcileTenantCustomers,
+  reconcileUsage,
+} from "./send/reconcile-run.js"
 
 const log = pino({ name: "i10-reconcile" })
 const env = loadEnv()
@@ -121,7 +132,13 @@ await withMonitor(
       secretKey: env.AUTUMN_SECRET_KEY,
       featureId: env.AUTUMN_FEATURE_ID,
       freePlanId: env.AUTUMN_FREE_PLAN_ID,
-      timeoutMs: env.AUTUMN_TIMEOUT_MS,
+      // ⚠ LONGER THAN THE SEND PATH'S, FOR THE SAME REASON AS POLAR'S BELOW.
+      // AUTUMN_TIMEOUT_MS is two seconds because a customer is waiting behind
+      // it and a slow meter must never become a slow send. Nobody is waiting on
+      // this job, and the aggregate and the customer list are both far heavier
+      // than a `check` — two seconds would fail them on size alone and report
+      // it as an outage.
+      timeoutMs: 30_000,
       log,
     })
 
@@ -200,7 +217,49 @@ await withMonitor(
       process.exitCode = 1
     }
 
-    // ── 3. Polar ↔ Autumn ───────────────────────────────────────────────────
+    // ── 3. tenants ↔ Autumn ─────────────────────────────────────────────────
+    try {
+      const tenants = await reconcileTenantCustomers(db, entitlements, log)
+      log.info(
+        {
+          checked: tenants.checked,
+          missing: tenants.missing.length,
+          unverified: tenants.unverified.length,
+        },
+        "tenant/customer reconciliation complete",
+      )
+
+      // ⚠ A MISSING CUSTOMER IS ALWAYS WORTH WAKING SOMEBODY FOR, however few.
+      // It is not a number drifting — it is a tenant whose every usage event
+      // has been failing since it was created, invisibly, and it stays that way
+      // until a person fixes it.
+      if (tenants.missing.length > 0) {
+        process.exitCode = 1
+        captureError(
+          new Error(
+            `${tenants.missing.length} active tenant(s) have no customer in Autumn; ` +
+              "their usage has never been recorded",
+          ),
+          { missing: tenants.missing.slice(0, 20) },
+        )
+      }
+
+      // Not a finding and not a failure: Autumn could not answer, and the next
+      // run asks again. Logged so a run of them is visible without being an
+      // alert.
+      if (tenants.unverified.length > 0) {
+        log.warn(
+          { unverified: tenants.unverified.map((t) => t.tenantId) },
+          "could not confirm some tenants against Autumn",
+        )
+      }
+    } catch (error) {
+      log.error({ err: error }, "tenant/customer reconciliation failed")
+      captureError(error)
+      process.exitCode = 1
+    }
+
+    // ── 4. Polar ↔ Autumn ───────────────────────────────────────────────────
     const subscriptions = subscriptionOps(db)
 
     try {

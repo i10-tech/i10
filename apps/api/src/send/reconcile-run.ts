@@ -1,10 +1,13 @@
 import type { Database } from "../db/client.js"
 import type { AutumnClient, Logger } from "./autumn.js"
 import {
+  activeTenantsStatement,
+  missingCustomers,
   reconcile,
   sentUsageStatement,
   unbilledIdsStatement,
   type ReconcileResult,
+  type TenantRef,
   type UsageBucket,
 } from "./reconcile.js"
 import {
@@ -205,6 +208,86 @@ export async function reconcileUsage(
   }
 
   return { ...result, toppedUp, alreadyKnown, failed }
+}
+
+export interface TenantCustomerReport {
+  /** Active tenants checked. */
+  checked: number
+  /**
+   * Tenants confirmed to have no customer in Autumn.
+   *
+   * ⚠ REPORTED, NEVER CREATED. `ensureCustomer` would put them on the free
+   * plan, and a tenant that should be on a paid one would then be quietly
+   * wrong in a way nothing else looks at. The fix is a person, or the
+   * onboarding path that should have done it — see `missingCustomers`.
+   */
+  missing: TenantRef[]
+  /**
+   * Candidates Autumn could not give a straight answer about.
+   *
+   * ⚠ COUNTED SEPARATELY SO AN OUTAGE CANNOT MASQUERADE AS A FINDING. A 500
+   * from the confirmation call is not evidence a customer is absent, and
+   * folding it into `missing` would report every tenant as unbilled the first
+   * time Autumn had a bad afternoon.
+   */
+  unverified: TenantRef[]
+}
+
+/**
+ * The third check: does every tenant exist as a customer at all?
+ *
+ * ⚠ IT IS A DIFFERENT KIND OF ERROR FROM THE TWO ABOVE, WHICH IS WHY IT IS ITS
+ * OWN PASS. Those find a number that drifted. This finds a customer that does
+ * not exist — which means every `track` for that tenant has been failing since
+ * the tenant was created: no usage, no invoice, nothing in the Polar dashboard,
+ * and nothing in the usage reconciler to notice it, because both sides read
+ * zero and agree.
+ *
+ * ⚠ LIST TO FIND CANDIDATES, THEN CONFIRM EACH ONE INDIVIDUALLY. `customers.list`
+ * is cursor-paginated over a list that can change underneath the walk — a
+ * customer created between two pages is sorted ahead of where we already are
+ * and is simply missed. Reporting that would be an alarming finding caused by
+ * nothing but a paging race. The point lookup settles it, and on a healthy
+ * deployment there are no candidates, so it costs one list and nothing else.
+ */
+export async function reconcileTenantCustomers(
+  db: Database,
+  entitlements: AutumnClient,
+  log: Logger,
+): Promise<TenantCustomerReport> {
+  const tenants: TenantRef[] = (
+    (await db.execute(activeTenantsStatement())) as unknown as Row[]
+  ).map((r) => ({
+    tenantId: String(r.tenant_id),
+    slug: String(r.slug),
+    name: String(r.name),
+  }))
+
+  const customerIds = await entitlements.listCustomerIds()
+  const candidates = missingCustomers(tenants, customerIds)
+
+  const missing: TenantRef[] = []
+  const unverified: TenantRef[] = []
+
+  for (const tenant of candidates) {
+    let exists: boolean | "unknown"
+    try {
+      exists = await entitlements.customerExists(tenant.tenantId)
+    } catch (error) {
+      log.error(
+        { err: error, tenantId: tenant.tenantId },
+        "could not confirm whether a tenant has a customer",
+      )
+      exists = "unknown"
+    }
+
+    if (exists === false) missing.push(tenant)
+    else if (exists === "unknown") unverified.push(tenant)
+    // `true` is the paging race, and it is the expected reason a candidate
+    // fails to confirm. Nothing to report.
+  }
+
+  return { checked: tenants.length, missing, unverified }
 }
 
 export { needsAttention }

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Database } from "../src/db/client.js"
 import type { AutumnClient } from "../src/send/autumn.js"
-import { reconcileSes, reconcileUsage } from "../src/send/reconcile-run.js"
+import {
+  reconcileSes,
+  reconcileTenantCustomers,
+  reconcileUsage,
+} from "../src/send/reconcile-run.js"
 
 const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })
 
@@ -108,6 +112,8 @@ function fakeAutumn(over: Partial<AutumnClient> = {}): AutumnClient {
     batchTrack: vi.fn(),
     track: vi.fn(async () => "recorded" as const),
     aggregateByCustomer: vi.fn(async () => []),
+    listCustomerIds: vi.fn(async () => []),
+    customerExists: vi.fn(async () => false as const),
     ensureCustomer: vi.fn(),
     grantPlan: vi.fn(),
     ...over,
@@ -210,5 +216,100 @@ describe("the usage leg", () => {
     expect(report.deficits).toEqual([])
     expect(report.surpluses).toEqual([])
     expect(track).not.toHaveBeenCalled()
+  })
+})
+
+describe("the tenant/customer leg", () => {
+  const tenants = [
+    { tenant_id: "ten-1", slug: "one", name: "One" },
+    { tenant_id: "ten-2", slug: "two", name: "Two" },
+  ]
+
+  it("says nothing when every tenant is a customer", async () => {
+    const { db } = fakeDb([tenants])
+    const autumn = fakeAutumn({
+      listCustomerIds: vi.fn(async () => ["ten-1", "ten-2"]),
+    })
+
+    const report = await reconcileTenantCustomers(db, autumn, log())
+
+    expect(report).toMatchObject({ checked: 2, missing: [], unverified: [] })
+    expect(autumn.customerExists).not.toHaveBeenCalled()
+  })
+
+  it("confirms a candidate before reporting it", async () => {
+    const { db } = fakeDb([tenants])
+    const customerExists = vi.fn(async () => false as const)
+    const autumn = fakeAutumn({
+      listCustomerIds: vi.fn(async () => ["ten-1"]),
+      customerExists,
+    })
+
+    const report = await reconcileTenantCustomers(db, autumn, log())
+
+    expect(customerExists).toHaveBeenCalledExactlyOnceWith("ten-2")
+    expect(report.missing).toEqual([{ tenantId: "ten-2", slug: "two", name: "Two" }])
+  })
+
+  // ⚠ THE PAGING RACE. `customers.list` walks a list that can change underneath
+  // it, so a customer created between two pages is sorted ahead of where the
+  // walk already is and is missed. The point lookup is what stops that being
+  // reported as a tenant with no billing customer.
+  it("drops a candidate the point lookup finds after all", async () => {
+    const { db } = fakeDb([tenants])
+    const autumn = fakeAutumn({
+      listCustomerIds: vi.fn(async () => ["ten-1"]),
+      customerExists: vi.fn(async () => true as const),
+    })
+
+    const report = await reconcileTenantCustomers(db, autumn, log())
+
+    expect(report.missing).toEqual([])
+    expect(report.unverified).toEqual([])
+  })
+
+  // ⚠ AN OUTAGE MUST NOT MASQUERADE AS A FINDING. Anything but a 404 is "could
+  // not find out", and folding it into `missing` would report every tenant as
+  // unbilled the first time Autumn had a bad afternoon.
+  it("keeps an unanswerable candidate out of the findings", async () => {
+    const { db } = fakeDb([tenants])
+    const autumn = fakeAutumn({
+      listCustomerIds: vi.fn(async () => []),
+      customerExists: vi.fn(async () => "unknown" as const),
+    })
+
+    const report = await reconcileTenantCustomers(db, autumn, log())
+
+    expect(report.missing).toEqual([])
+    expect(report.unverified).toHaveLength(2)
+  })
+
+  it("treats a thrown confirmation as unverified rather than absent", async () => {
+    const { db } = fakeDb([tenants])
+    const autumn = fakeAutumn({
+      listCustomerIds: vi.fn(async () => ["ten-1"]),
+      customerExists: vi.fn(async () => {
+        throw new Error("autumn is down")
+      }),
+    })
+
+    const report = await reconcileTenantCustomers(db, autumn, log())
+
+    expect(report.missing).toEqual([])
+    expect(report.unverified).toHaveLength(1)
+  })
+
+  // A failed list is not "no customers exist", which would report every tenant.
+  it("propagates a failed list rather than reporting everyone", async () => {
+    const { db } = fakeDb([tenants])
+    const autumn = fakeAutumn({
+      listCustomerIds: vi.fn(async () => {
+        throw new Error("customers.list failed with 500")
+      }),
+    })
+
+    await expect(reconcileTenantCustomers(db, autumn, log())).rejects.toThrow(
+      /customers.list failed/,
+    )
   })
 })
