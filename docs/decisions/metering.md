@@ -1,9 +1,11 @@
 # Metering, and getting off Autumn
 
-**Status:** decided, not built. **Date:** 2026-09-04.
+**Decided:** 2026-09-04. **Status:** step 2 shipped; everything else is still
+only decided.
 
-Nothing here is implemented. Autumn keeps running until the current end-to-end
-pass is finished — this document is where we are going, not where we are.
+The reasoning below is preserved as it was argued, not rewritten as work lands
+— the sequence at the bottom is the only part that tracks state. Autumn keeps
+running until the current end-to-end pass is finished.
 
 ---
 
@@ -12,12 +14,12 @@ pass is finished — this document is where we are going, not where we are.
 The box is a **CX33: 4 vCPU / 8 GB**, shared with PSL. i10's own requests are
 about **3.6 GiB of the 8**, and the largest single line is Autumn:
 
-| | requests |
-| --- | --- |
+|                                                     | requests     |
+| --------------------------------------------------- | ------------ |
 | Autumn (server + 2 workers + dashboard + ElasticMQ) | **~1.3 GiB** |
-| Stalwart + Bulwark | ~830 MiB |
-| CNPG + Redis | 640 MiB |
-| api, worker, web, console, docs | ~830 MiB |
+| Stalwart + Bulwark                                  | ~830 MiB     |
+| CNPG + Redis                                        | 640 MiB      |
+| api, worker, web, console, docs                     | ~830 MiB     |
 
 ⚠ **This is not a load problem.** Every i10 workload is `replicas: 1` and KEDA
 sits at zero. The memory is consumed by control planes and self-hosted vendor
@@ -32,18 +34,18 @@ OpenTelemetry, Sentry, Better Auth, DuckDB, S3, Svix.
 
 Line that up against what i10 already owns:
 
-| Autumn carries | i10 already has |
-| --- | --- |
-| Stripe | **Polar** — and `no_billing_changes: true` |
-| Better Auth | **Clerk** |
-| Svix | our own `apps/api/src/webhooks/` with signing |
-| Sentry + OTel | `apps/api/src/observability.ts` |
-| DuckDB, S3 | not used at all |
-| Drizzle, ioredis | already ours |
+| Autumn carries   | i10 already has                               |
+| ---------------- | --------------------------------------------- |
+| Stripe           | **Polar** — and `no_billing_changes: true`    |
+| Better Auth      | **Clerk**                                     |
+| Svix             | our own `apps/api/src/webhooks/` with signing |
+| Sentry + OTel    | `apps/api/src/observability.ts`               |
+| DuckDB, S3       | not used at all                               |
+| Drizzle, ioredis | already ours                                  |
 
 We pay 470 MB per process for a second copy of our entire stack, to use the
 ~2% of it that decrements an integer. Stripe alone is **403 files and 15,081
-references** — it is not a dependency we can prune, it is what Autumn *is*.
+references** — it is not a dependency we can prune, it is what Autumn _is_.
 
 **Decision: replace it with our own, and do not move to hosted Autumn.**
 
@@ -53,7 +55,7 @@ references** — it is not a dependency we can prune, it is what Autumn *is*.
 
 **Autumn is Apache-2.0.** Verified against the repo, 2026-09-04. Permissive,
 commercial use fine, no copyleft, no non-compete, and it carries an explicit
-patent grant — which makes it *safer* to borrow from than MIT.
+patent grant — which makes it _safer_ to borrow from than MIT.
 
 ⚠ **Contrast with Bulwark in this same repo, which is AGPL-3.0.** The two are
 handled completely differently. Do not carry a habit from one to the other.
@@ -123,10 +125,10 @@ ElasticMQ means operating an SQS emulator to speak a protocol nothing else in
 our stack uses.
 
 Autumn moved to SQS because they are AWS-native and did not want to run Redis
-for their SaaS — a decision that suits *their* deployment and leaks downstream
+for their SaaS — a decision that suits _their_ deployment and leaks downstream
 to self-hosters. Our situation is the inverse.
 
-⚠ It is also a dead end in both directions: at the edge there is no SQS *and*
+⚠ It is also a dead end in both directions: at the edge there is no SQS _and_
 no Redis. The analog there is Cloudflare Queues.
 
 **TODO:** confirm Autumn's actual migration reason from their commit history
@@ -140,11 +142,11 @@ rather than taking this inference. It is a "how does Autumn do it?" question.
 DO (gate)  →  Postgres (ledger, source of truth)  →  Polar meters (billing)
 ```
 
-| | job | consistency | freshness |
-| --- | --- | --- | --- |
-| **Durable Object** | the gate: check, decrement, reset | strong, single-threaded | instant |
-| **Postgres** | the ledger: aggregates, history, reconciliation | exact | seconds |
-| **Polar** | invoicing, tax, dunning, customer portal | Polar's | per period |
+|                    | job                                             | consistency             | freshness  |
+| ------------------ | ----------------------------------------------- | ----------------------- | ---------- |
+| **Durable Object** | the gate: check, decrement, reset               | strong, single-threaded | instant    |
+| **Postgres**       | the ledger: aggregates, history, reconciliation | exact                   | seconds    |
+| **Polar**          | invoicing, tax, dunning, customer portal        | Polar's                 | per period |
 
 ### ⚠ The gate is approximate. The ledger is exact.
 
@@ -171,7 +173,7 @@ Instead:
 - A failed flush leaves the buffer intact and retries on the next alarm. DO
   storage is durable, so an evicted object does not lose it.
 
-**Reconciliation drops from *the sync mechanism* to *the backstop*.**
+**Reconciliation drops from _the sync mechanism_ to _the backstop_.**
 `apps/api/src/send/reconcile.ts` was always shaped for this; it just points
 somewhere else.
 
@@ -196,12 +198,12 @@ It is the single highest-value thing to take from Autumn.
   now", plus webhooks telling us when that changed.
 
 **Why we still build a counter when Polar has meters:** Polar's meters are for
-*billing*; ours is for *gating*. Billing tolerates seconds and runs monthly.
+_billing_; ours is for _gating_. Billing tolerates seconds and runs monthly.
 The gate sits inside `POST /emails` and needs single-digit milliseconds. A
 payment provider's API structurally cannot serve the second job — which is the
 entire reason Autumn exists as a category.
 
-⚠ **Strictly one direction.** Polar's meter is a *downstream consumer* of our
+⚠ **Strictly one direction.** Polar's meter is a _downstream consumer_ of our
 ledger, never an input to the gate. Anything that reads a balance back from
 Polar to decide whether to send reintroduces the latency coupling and the
 split-brain this design exists to avoid.
@@ -225,7 +227,7 @@ double-counts, with no error anywhere. Always set it, to the `messageId`.
 **Backfill works. Correction does not.**
 
 - `timestamp` can be backdated — their docs bless it for batched ingestion and
-  replaying from your own queue. Flush lag is fine for *history*.
+  replaying from your own queue. Flush lag is fine for _history_.
 - ⚠ **But Polar attributes an event to a billing period by when Polar received
   it, not by the supplied `timestamp`.** Events are immutable — no edit, no
   delete. Their stated policy: Polar never issues retroactive invoices or
@@ -290,7 +292,7 @@ sales deal produce a bespoke plan without a PR.
 
 ⚠ **The live "usage right now" widget reads the DO directly, not Postgres.**
 The DO is where the decrement happens, so it is fresher than Postgres can ever
-be. Postgres serves usage *over time*, which is inherently backward-looking.
+be. Postgres serves usage _over time_, which is inherently backward-looking.
 
 ---
 
@@ -305,7 +307,7 @@ schedules a future callback that survives eviction.
 ⚠ **`alarm()` is the reset job.** It deletes `autumn-cron` outright — no pod,
 no schedule, no drift.
 
-**We choose the ID, so the addressing scheme *is* the sharding design.**
+**We choose the ID, so the addressing scheme _is_ the sharding design.**
 
 ### `meterKey()` from day one
 
@@ -334,7 +336,7 @@ out **leases** to children. Not now.
 
 ### Placement — decided: do 1, build for 2, and 3
 
-An object is created near whoever addressed that ID *first*, then stays there.
+An object is created near whoever addressed that ID _first_, then stays there.
 A later request from anywhere routes back to it.
 
 ⚠ **This is never worse than today** — a Sydney caller currently reaches
@@ -351,7 +353,7 @@ cannot move, but we can create a new one and cut over. A region or generation
 component in `meterKey()` makes that a key change plus a state transfer.
 
 **3. Do not call the DO on most requests — do this.** The deep fix, and it
-composes with *the gate is approximate*. The overwhelming majority of requests
+composes with _the gate is approximate_. The overwhelming majority of requests
 are from tenants nowhere near their limit; a cached local balance at the edge
 answers those, with the decrement applied asynchronously. Only near the
 boundary do we need the authoritative object. This collapses the placement
@@ -364,6 +366,117 @@ variant of sharding, so building one gets both.
 Cloudflare's docs. That surface has moved more than the rest of DO, and
 jurisdiction pinning may be useful as an **EU data-residency feature**, not
 just a latency knob.
+
+---
+
+## Webhooks
+
+Three different things get called "Svix", and the answer differs for each.
+
+⚠ **The window was open exactly once, and it was taken on 2026-09-04.** The old
+wire format was pinned by `@i10/next`'s published `verifySignature` — customers
+had it installed, so a change meant every webhook we send is rejected by our own
+SDK, surfacing as a 401 in the customer's logs that looks like THEIR secret
+being wrong. With no users that constraint did not bind. It binds again the
+moment someone integrates.
+
+**As built:** `signing.ts` signs `v1,<base64>` over `id.timestamp.body` keyed by
+the decoded secret; `deliver.ts` sends the three spec headers; `svix.ts` gave up
+its private copies of `decodeSecret` and the signature-list parser and now
+shares one implementation with the signer; `@i10/next` mirrors it and treats a
+missing id as a 400 rather than a 401.
+
+⚠ **`generateSecret` changed shape too** — `whsec_` + base64 where it used to be
+`whsec_` + hex. Secrets minted before the change still decode and sign
+consistently, but they are not what the generator produces now. Regenerate any
+that exist in a dev database rather than leaving the two forms side by side.
+
+### Take the spec — Standard Webhooks
+
+Verified against the spec, 2026-09-04.
+
+|                | bespoke format                                     | Standard Webhooks                                      |
+| -------------- | -------------------------------------------------- | ------------------------------------------------------ |
+| headers        | `i10-signature`, `i10-timestamp`, `i10-webhook-id` | `webhook-id`, `webhook-timestamp`, `webhook-signature` |
+| signed content | `timestamp.body`                                   | `id.timestamp.body`                                    |
+| encoding       | bare hex                                           | base64, `v1,` prefixed                                 |
+| key rotation   | **none**                                           | space-delimited multiple signatures                    |
+| asymmetric     | none                                               | `v1a`, ed25519                                         |
+| secret         | ours                                               | `whsec_` + base64, 24–64 bytes                         |
+
+Three of those are real gains rather than cosmetics:
+
+- **The delivery id becomes signed material.** Today `i10-webhook-id` sits
+  outside the signature and is therefore tamperable.
+- **Key rotation exists at all.** Sign with the new secret _and_ the old one,
+  space-delimited; the receiver tries each until one matches. The bespoke
+  format has no rotation story, and "rotate my webhook secret" is a day-one
+  customer request.
+- **Customers verify with any Standard Webhooks library, in any language.**
+  One fewer SDK to write and maintain per language, and `@i10/next` becomes a
+  convenience rather than a requirement.
+
+⚠ **Inbound is already compliant.** `apps/api/src/webhooks/svix.ts` reads both
+the `svix-` names Clerk sends and the vendor-neutral `webhook-` names. Only
+outbound moves — and then there is ONE webhook format in the codebase, used in
+both directions, verifiable against shared vectors.
+
+### Do NOT add the `svix` package for inbound
+
+That swaps forty lines of HMAC for a dependency **in the authentication path**.
+`svix.ts` already argues this and the argument holds: a forged Clerk event
+writes to the mailbox projection. It is the one place where supply-chain
+surface costs the most and buys the least, because the algorithm is fixed,
+published, and already pinned by tests.
+
+### Do NOT adopt Svix the service, or self-host the server
+
+The server is MIT, so nothing legal stops us. The reasons are otherwise.
+
+- ⚠ **Self-hosting it is Autumn again** — a Rust server with its own Postgres
+  and its own Redis, on the 8 GB box this entire document exists to clear.
+  Same shape, same trade, same outcome.
+- ⚠ **The hosted service puts customer endpoint URLs and secrets in a vendor's
+  database.** That is customer-configured state, the most painful category to
+  migrate off later. We already own the data model —
+  `apps/api/src/webhooks/endpoints.ts` and the routes exist today.
+- **It is our core competency, not an adjacent concern.** i10 is an ESP.
+  At-least-once delivery to endpoints we do not control, with retries, signing
+  and a delivery log, _is_ the product pointed at a different protocol. Resend,
+  Postmark and SendGrid all built their own.
+
+**The honest counterweight:** Svix's App Portal — a hosted UI where customers
+manage endpoints and replay failed deliveries — is genuine work we would be
+skipping. But it is console UI over a data model we already own, and a surface
+we would want to own for design consistency.
+
+### Delivery stays ours, on Durable Objects
+
+`apps/api/src/webhooks/deliver.ts` already describes the problem DO solves, in
+its own words: _a socket that accepts the connection and then says nothing …
+one such endpoint occupies a worker slot until the job lease expires, and a
+handful of them stop every other customer's webhooks._
+
+One DO per endpoint makes that structurally impossible — a slow customer blocks
+only their own object. The rest maps cleanly:
+
+| today                                                            | on DO                                                                                                    |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `DISABLE_AFTER_FAILURES = 20`, a DB column touched every attempt | object state                                                                                             |
+| retry backoff via queue rescheduling                             | `alarm()`                                                                                                |
+| `DELIVERY_TIMEOUT_MS`, protecting a shared worker pool           | still needed, but protects only that endpoint                                                            |
+| delivery id stable across attempts                               | unchanged — and it is what makes DO retries safe, the same property `messageId` gives the metering flush |
+
+⚠ **The test vectors are pinned from both sides.**
+`apps/api/test/webhook-signing.test.ts` and `packages/next/test/webhook.test.ts`
+pin the same vector, which is what stops the two drifting. The signed-content
+change (`timestamp.body` → `id.timestamp.body`) and hex → base64 must land in
+both at once.
+
+⚠ **`signing.ts` uses `createCipheriv`/`createDecipheriv`** to keep endpoint
+secrets encrypted at rest. HMAC ports to WebCrypto cleanly and AES-GCM is
+available, but node's cipher API is not — check the secret handling before that
+code runs on Workers.
 
 ---
 
@@ -397,7 +510,7 @@ work that becomes revenue.
 - DDoS, Bot Fight, WAF custom rules, rate limiting.
 - **Key format gate** — `KEY_PATTERN` from `apps/api/src/auth/api-key.ts`.
   ⚠ That file already calls it "a cost gate, not a security control" — and it
-  currently runs *after* a TCP connect, TLS handshake, Traefik routing and a
+  currently runs _after_ a TCP connect, TLS handshake, Traefik routing and a
   Node event-loop turn. It is stateless and belongs at the edge.
 - **SNS signature verification** (`apps/api/src/webhooks/sns.ts`) — pure CPU,
   and forged bounces then never reach the box.
@@ -428,9 +541,15 @@ tiers move.
 ## Sequence
 
 1. Finish the current end-to-end pass. **Autumn keeps running.**
-2. `packages/metering` — domain core, ports, Postgres adapter. Read Autumn's
+2. ~~**Outbound webhooks → Standard Webhooks format.**~~ **DONE 2026-09-04.**
+   Ordered first because it was gated by having no users rather than by
+   anything technical, and that gate closes on its own.
+   ⚠ **The window is now shut.** The format is a contract from here on; the
+   next change to it is a breaking one, whether or not anyone has integrated
+   yet.
+3. `packages/metering` — domain core, ports, Postgres adapter. Read Autumn's
    files for semantics; attribute at copy time.
-3. Swap `Metering` to the new implementation behind the existing interface.
-4. Retire Autumn. **~1.3 GiB back.**
-5. Cloudflare free tier: WAF, format gate, SNS verification.
-6. When there is revenue: $5 Workers Paid → DO counter, then DO webhooks.
+4. Swap `Metering` to the new implementation behind the existing interface.
+5. Retire Autumn. **~1.3 GiB back.**
+6. Cloudflare free tier: WAF, format gate, SNS verification.
+7. When there is revenue: $5 Workers Paid → DO counter, then DO webhooks.

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { deliverWebhook, type DeliveryRecord } from "../src/webhooks/deliver.js"
 import { verifySignature } from "../src/webhooks/signing.js"
 
-const SECRET = "whsec_0123456789abcdef0123456789abcdef"
+const SECRET = "whsec_MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3"
 
 const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
   id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60aa",
@@ -63,15 +63,17 @@ describe("a successful delivery", () => {
     const [url, init] = requestOf(doFetch)
     expect(url).toBe("https://hooks.example.com/i10")
     const headers = init.headers as Record<string, string>
-    // ⚠ VERIFIED THE WAY THE SHIPPED SDK VERIFIES IT — separate signature and
-    // timestamp headers, bare hex digest. This is the assertion that would have
-    // caught the sender and `@i10/next` disagreeing on the wire format.
+    // ⚠ VERIFIED THE WAY A RECEIVER VERIFIES IT — the three Standard Webhooks
+    // headers, with the id and timestamp read back off the request rather than
+    // assumed. This is the assertion that would catch the sender and any
+    // conforming verifier disagreeing on the wire format.
     expect(
       verifySignature(
         SECRET,
+        headers["webhook-id"]!,
         String(init.body),
-        headers["i10-signature"]!,
-        headers["i10-timestamp"]!,
+        headers["webhook-signature"]!,
+        headers["webhook-timestamp"]!,
       ),
     ).toBe(true)
   })
@@ -83,7 +85,7 @@ describe("a successful delivery", () => {
     const { deps: d, doFetch } = deps()
     await deliverWebhook(job, d)
     const headers = requestOf(doFetch)[1].headers as Record<string, string>
-    expect(headers["i10-webhook-id"]).toBe(record().id)
+    expect(headers["webhook-id"]).toBe(record().id)
   })
 
   it("sends the event envelope, not the bare payload", async () => {

@@ -100,13 +100,13 @@ export async function deliverWebhook(
       headers: {
         "content-type": "application/json",
         "user-agent": "i10-webhooks/1",
-        // ⚠ THESE THREE NAMES ARE THE SHIPPED SDK's, NOT OURS TO PICK.
-        // `@i10/next`'s createWebhookHandler reads `i10-signature` and
-        // `i10-timestamp`; anything else and every customer on the SDK gets a
-        // 401 that looks like their own secret being wrong.
-        "i10-webhook-id": delivery.id,
-        "i10-timestamp": timestampFor(now),
-        "i10-signature": signPayload(delivery.secret, body, now),
+        // ⚠ THESE THREE NAMES ARE THE STANDARD WEBHOOKS SPEC's, NOT OURS TO
+        // PICK. They are what lets a customer verify with any conforming
+        // library in any language rather than only with `@i10/next` — which is
+        // the entire reason the format moved. All three are signed material.
+        "webhook-id": delivery.id,
+        "webhook-timestamp": timestampFor(now),
+        "webhook-signature": signPayload(delivery.secret, delivery.id, body, now),
       },
       body,
       // ⚠ NOT OPTIONAL. See the note at the top of this file: a silent socket
