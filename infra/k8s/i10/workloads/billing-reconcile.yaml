@@ -5,6 +5,13 @@
 # artifact, so it cannot drift from the schema or the environment validation the
 # API is built against.
 #
+# ⚠ AND A MISSED RUN IS THE FAILURE NOTHING HERE CAN REPORT. A run that fails
+# leaves a pod behind to read. A CronJob that is suspended, rescheduled, or
+# cannot be placed produces no pod, no logs and no exit code — the job is simply
+# absent, and absence is invisible to everything in this file. The Sentry
+# check-in in apps/api/src/reconcile.ts is what closes that, which is why the
+# schedule below is declared in two places on purpose.
+#
 # ⚠ WHY THIS EXISTS AT ALL. Autumn attaches plans with `no_billing_changes`,
 # which makes Polar the state of record and Autumn a downstream copy — and the
 # only thing carrying state between them is a webhook. One lost during a deploy
@@ -25,6 +32,12 @@ spec:
   # Every half hour. The upper bound on how long a customer who paid can be
   # sitting on free-tier limits after a lost webhook — which is the number this
   # schedule actually sets, and the reason it is not nightly.
+  #
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/reconcile.ts, AND THEY MUST AGREE.
+  # Sentry decides a run is MISSING by comparing the clock against the schedule
+  # the job declares in its check-in. Changing it here alone does not break the
+  # job — it makes the alerting wrong, either crying missed on a healthy
+  # deployment or staying quiet through a real outage.
   schedule: "*/30 * * * *"
   # ⚠ NEVER TWO AT ONCE. A run that overruns its slot would otherwise be joined
   # by the next one, and both would read the same discrepancies and both would
@@ -33,9 +46,10 @@ spec:
   # and leave the row recording whichever finished last.
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
-  # ⚠ FAILED RUNS ARE KEPT LONGER THAN SUCCESSFUL ONES. Until there is alerting,
-  # `kubectl get jobs` is the entire monitoring story for this, and a failed pod
-  # that has been garbage-collected leaves no evidence that entitlements drifted.
+  # ⚠ FAILED RUNS ARE KEPT LONGER THAN SUCCESSFUL ONES, and that is still worth
+  # having now that Sentry watches this. The check-in says a run failed; the pod
+  # is where the reason is. Garbage-collecting it leaves an alert nobody can act
+  # on.
   failedJobsHistoryLimit: 5
   startingDeadlineSeconds: 300
   jobTemplate:

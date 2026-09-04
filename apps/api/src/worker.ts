@@ -5,6 +5,7 @@ import pino from "pino"
 import { createCacheClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { captureError, flushObservability, initObservability } from "./observability.js"
 import { createSendQueue, type SendClass, type SendJob } from "./queue/send-queue.js"
 import {
   createWebhookQueue,
@@ -39,6 +40,14 @@ import { handleBatch } from "./worker/handle-batch.js"
 const log = pino({ name: "i10-worker" })
 const env = loadEnv()
 
+initObservability({
+  dsn: env.SENTRY_DSN,
+  environment: env.SENTRY_ENVIRONMENT,
+  service: "worker",
+  release: process.env.GIT_SHA,
+  log,
+})
+
 /**
  * ⚠ IDENTIFIES THE CLAIM, AND IT MUST BE UNIQUE PER PROCESS. It is written to
  * `claimed_by`, and `markSent` refuses to record a result for a row it does not
@@ -61,7 +70,10 @@ try {
   await assertRlsSubject(sql)
 } catch (error) {
   log.fatal({ err: error }, "refusing to start")
+  captureError(error, { phase: "boot" })
   await sql.end({ timeout: 5 })
+  // Flushed before the exit, or the report dies in the buffer with the process.
+  await flushObservability()
   process.exit(1)
 }
 
@@ -129,7 +141,14 @@ function startWorker(cls: SendClass) {
     // two retry schedules would compound — so the job's own attempts exist only
     // for the case where the handler itself throws.
     maxAttempts: 3,
-    onError: (err, job) => log.error({ err, jobId: job?.id, cls }, "send job failed"),
+    // ⚠ REPORTED, UNLIKE THE WEBHOOK WORKER'S — see the note there. The handler
+    // already puts a failed message back in `queued` with its attempt counted,
+    // so reaching here means the handler ITSELF threw, which is our bug rather
+    // than a provider being slow.
+    onError: (err, job) => {
+      log.error({ err, jobId: job?.id, cls }, "send job failed")
+      captureError(err, { jobId: job?.id, cls })
+    },
   })
 
   worker.run()
@@ -185,6 +204,11 @@ function startWebhookWorker() {
     // Deliberately quiet: a customer's endpoint being down is their operational
     // problem, recorded on the delivery row, and logging it as an error here
     // would drown the log in other people's outages.
+    //
+    // ⚠ AND NOT REPORTED TO SENTRY EITHER, FOR THE SAME REASON RATHER THAN BY
+    // OVERSIGHT. Every customer whose endpoint has a bad afternoon would raise
+    // an issue against us, spend the quota, and bury the failures that are
+    // actually ours. The delivery row is where this belongs.
     onError: (err, job) =>
       log.warn({ err, jobId: job?.id }, "webhook delivery job failed"),
   })
