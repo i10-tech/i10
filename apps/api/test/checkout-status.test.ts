@@ -21,6 +21,7 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
 const polar = (checkout: CheckoutState | null): PolarClient => ({
   createCheckout: async () => ({ id: "c1", url: "https://x", expiresAt: "" }),
   getCheckout: async () => checkout,
+  ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
   listSubscriptions: async () => [],
 })
 

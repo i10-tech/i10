@@ -204,6 +204,17 @@ const schema = z.object({
    */
   METERING_FREE_PLAN_ID: z.string().min(1).default("free"),
 
+  /**
+   * The event name usage is ingested under, and what Polar's meter filters on.
+   *
+   * ⚠ IF THIS AND THE METER DISAGREE, THE METER AGGREGATES NOTHING — and every
+   * ingest still answers 200, because the events are stored either way. The
+   * symptom is an invoice with no usage on it, a month later, which is the
+   * worst possible time to find out. It defaults to the feature id so the two
+   * only differ if somebody makes them.
+   */
+  METERING_EVENT_NAME: z.string().min(1).default("emails"),
+
   // ── autumn (being retired — see docs/decisions/metering.md) ───────────────
 
   /**

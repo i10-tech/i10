@@ -58,6 +58,7 @@ import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 import { postgresEntitlements, postgresLedger } from "./metering/service.js"
+import { flushUsage } from "./metering/ingest.js"
 import {
   needsAttention,
   reconcileSes,
@@ -205,6 +206,45 @@ await withMonitor(
       }
     } catch (error) {
       log.error({ err: error }, "usage reconciliation failed")
+      captureError(error)
+      process.exitCode = 1
+    }
+
+    // ── 3. usage → polar ────────────────────────────────────────────────────
+    //
+    // ⚠ AFTER THE LEDGER IS RECONCILED, NOT BEFORE. Leg 2 tops up units the
+    // send path dropped; shipping first would leave those units un-ingested
+    // until the next pass, which for a run that straddles a period boundary
+    // means they are invoiced a month late.
+    try {
+      let pass = 0
+      let shipped = 0
+      let duplicates = 0
+      // ⚠ BOUNDED, BECAUSE THIS SHARES A CRONJOB WITH A DEADLINE. A backlog
+      // larger than this drains over subsequent runs rather than making one run
+      // exceed `activeDeadlineSeconds` and be killed mid-flush.
+      for (; pass < 20; pass += 1) {
+        const report = await flushUsage({
+          db,
+          polar: polarClient({
+            accessToken: env.POLAR_ACCESS_TOKEN,
+            server: env.POLAR_SERVER,
+            timeoutMs: 30_000,
+          }),
+          featureId: env.METERING_FEATURE_ID,
+          eventName: env.METERING_EVENT_NAME,
+          log,
+        })
+        shipped += report.shipped
+        duplicates += report.duplicates
+        if (!report.batchWasFull) break
+      }
+
+      log.info({ shipped, duplicates, passes: pass + 1 }, "usage ingest complete")
+    } catch (error) {
+      // ⚠ NOT FATAL, AND NOT LOST. Every un-shipped row still has
+      // `ingested_at IS NULL`, so the next run finds exactly the same work.
+      log.error({ err: error }, "usage ingest failed")
       captureError(error)
       process.exitCode = 1
     }

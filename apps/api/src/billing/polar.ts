@@ -83,6 +83,40 @@ export interface PolarClient {
   getCheckout(checkoutId: string): Promise<CheckoutState | null>
   /** Every subscription Polar holds for this organisation. The reconciler's view. */
   listSubscriptions(): Promise<PolarSubscription[]>
+  /**
+   * Usage, into Polar's meter.
+   *
+   * ⚠ SAFE TO RETRY, BECAUSE `external_id` IS THE MESSAGE ID. Polar's ingest
+   * answers with `inserted` and `duplicates` and skips anything it has already
+   * seen, so a flush that timed out after Polar committed costs a re-send and
+   * nothing else. That property is the reason the whole pipeline can be
+   * at-least-once.
+   */
+  ingestEvents(events: readonly UsageIngestEvent[]): Promise<IngestResult>
+}
+
+export interface UsageIngestEvent {
+  /** The meter's event name. Must match what the meter filters on. */
+  name: string
+  /** ⚠ Our message id. The dedup key, the same one the ledger is keyed on. */
+  externalId: string
+  /** ⚠ Our tenant id, which Polar already holds as `customer.external_id`. */
+  tenantId: string
+  /**
+   * ⚠ WHEN IT HAPPENED, NOT WHEN WE SENT IT — and Polar rejects a timestamp in
+   * the future outright. Their billing period attributes by RECEIPT time, so a
+   * flush that straddles a period boundary moves revenue between months
+   * whatever this says; the timestamp is what makes the meter's own reporting
+   * line up with ours.
+   */
+  at: Date
+  /** Units. One email is 1. */
+  units: number
+}
+
+export interface IngestResult {
+  inserted: number
+  duplicates: number
 }
 
 export function polarClient(opts: PolarOptions): PolarClient {
@@ -157,6 +191,39 @@ export function polarClient(opts: PolarOptions): PolarClient {
         status: body.status,
         tenantId: typeof tenantId === "string" && tenantId ? tenantId : null,
       }
+    },
+
+    async ingestEvents(events) {
+      if (events.length === 0) return { inserted: 0, duplicates: 0 }
+
+      const response = await call("/v1/events/ingest", {
+        method: "POST",
+        body: JSON.stringify({
+          events: events.map((event) => ({
+            name: event.name,
+            external_id: event.externalId,
+            // ⚠ `external_customer_id`, NOT `customer_id`. Polar echoes our
+            // tenant id back on every subscription webhook as
+            // `customer.external_id` precisely so neither side needs a lookup
+            // table; using their uuid here would reintroduce one.
+            external_customer_id: event.tenantId,
+            timestamp: event.at.toISOString(),
+            metadata: { units: event.units },
+          })),
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(
+          `polar ingest failed: ${response.status} ${await response.text()}`,
+        )
+      }
+
+      const body = (await response.json()) as {
+        inserted?: number
+        duplicates?: number
+      }
+      return { inserted: body.inserted ?? 0, duplicates: body.duplicates ?? 0 }
     },
 
     async listSubscriptions() {

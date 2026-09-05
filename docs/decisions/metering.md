@@ -324,6 +324,26 @@ tiering, currency, tax and the invoice line all belong to the party that sends
 the invoice. What we own is the count that goes in — and the gate, which is a
 product decision about whether to accept a send, not a pricing one.
 
+⚠ **WHICH MEANS THE INGEST SHIPS EVERY UNIT, NOT ONLY THE BILLABLE ONES.**
+**Built 2026-09-05** (`src/metering/ingest.ts`). The tempting design is to
+compute the included/billable split ourselves and send only the remainder; it
+is wrong twice. The credits benefit already draws the allowance down before the
+metered price charges anything, so splitting here reimplements arithmetic Polar
+owns — and a customer who enables overage next month would have a meter that
+never saw the usage before it. `overage` is therefore a GATE outcome only: it
+decides whether to accept the send, and it computes no money.
+
+The flush is `POST /v1/events/ingest`, keyed on `external_id` = our message id,
+addressed by `external_customer_id` = our tenant id (which Polar already echoes
+on every subscription webhook). It runs as a leg of the reconcile CronJob and is
+bounded per pass; `core.meter_events.ingested_at` is the per-row watermark, so
+an interrupted flush resumes rather than skipping.
+
+⚠ **POLAR FIRST, THE WATERMARK SECOND.** Marking before posting loses units on
+any failure. Posting before marking can only re-send, and their ingest answers
+`inserted` / `duplicates` — so a retry costs a request and bills nobody twice.
+Only one of the two orders can lose revenue.
+
 ### ⚠ The gate must mirror the credits, not the plan's headline number
 
 This is the sharp edge of the whole section, and it is a customer-trust

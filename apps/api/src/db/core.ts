@@ -969,6 +969,21 @@ export const meterEvents = core.table(
 
     /** When we wrote it. The gap from `occurred_at` is the flush lag. */
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+
+    /**
+     * When this unit reached Polar's meter. NULL until it has.
+     *
+     * ⚠ IT IS A WATERMARK PER ROW, NOT A GLOBAL ONE, AND THAT IS WHAT MAKES THE
+     * FLUSH RESUMABLE. A "last shipped at" timestamp would be wrong the moment a
+     * late-arriving event lands behind it — the row would be skipped forever,
+     * silently, and the customer would be under-billed with nothing to notice
+     * it. Per row, an interrupted flush simply finds the same rows next time.
+     *
+     * ⚠ AND IT IS SET ONLY AFTER POLAR ANSWERS. Marking first and posting after
+     * loses usage on any failure; posting first and marking after can only
+     * re-send, which `external_id` makes free.
+     */
+    ingestedAt: timestamp("ingested_at", { withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.featureId, t.eventId] }),

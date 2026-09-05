@@ -179,6 +179,7 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [polarSub()],
         createCheckout: vi.fn(),
       },
@@ -201,6 +202,7 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [
           polarSub({
             id: "sub_old",
@@ -232,6 +234,7 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [
           polarSub({ id: "sub_live", modified_at: "2026-09-03T12:00:00Z" }),
           polarSub({
@@ -259,6 +262,7 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [polarSub()],
         createCheckout: vi.fn(),
       },
@@ -279,6 +283,7 @@ describe("reconciling against Polar", () => {
     await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [polarSub()],
         createCheckout: vi.fn(),
       },
@@ -296,6 +301,7 @@ describe("reconciling against Polar", () => {
     await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [
           polarSub({ status: "canceled", modified_at: "2026-09-04T12:00:00Z" }),
         ],
@@ -320,6 +326,7 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [polarSub({ id: "sub_other" })],
         createCheckout: vi.fn(),
       },
@@ -339,6 +346,7 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         listSubscriptions: async () => [
           polarSub({ id: "sub_1", customer: { external_id: "ten-1" } }),
           polarSub({ id: "sub_2", customer: { external_id: "ten-2" } }),
@@ -387,7 +395,12 @@ describe("POST /billing/checkout", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { getCheckout: vi.fn(), createCheckout, listSubscriptions: vi.fn() },
+        polar: {
+          getCheckout: vi.fn(),
+          createCheckout,
+          listSubscriptions: vi.fn(),
+          ingestEvents: vi.fn(),
+        },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
         successUrl: "https://console.i10.tech/billing",
@@ -416,7 +429,12 @@ describe("POST /billing/checkout", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { getCheckout: vi.fn(), createCheckout, listSubscriptions: vi.fn() },
+        polar: {
+          getCheckout: vi.fn(),
+          createCheckout,
+          listSubscriptions: vi.fn(),
+          ingestEvents: vi.fn(),
+        },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
         log,
@@ -440,6 +458,7 @@ describe("POST /billing/checkout", () => {
         polar: {
           getCheckout: vi.fn(),
           createCheckout: vi.fn(),
+          ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
           listSubscriptions: vi.fn(),
         },
         subscriptions: ops(),
@@ -469,6 +488,7 @@ describe("GET /billing/plan", () => {
         polar: {
           getCheckout: vi.fn(),
           createCheckout: vi.fn(),
+          ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
           listSubscriptions: vi.fn(),
         },
         subscriptions: ops({
