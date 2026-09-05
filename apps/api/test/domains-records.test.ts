@@ -15,6 +15,8 @@ const records = (
   dnsRecordsFor({
     domain: "example.com",
     mailFromSubdomain: "send",
+    bounceSubdomain: "bounce",
+    bounceHost: "mx.i10.tech",
     region: "eu-central-1",
     dkimSelector,
     dkimPublicKey,
@@ -42,7 +44,7 @@ describe("the MAIL FROM records", () => {
    */
   it("uses a soft fail", () => {
     const spf = find("TXT", "send.example.com")
-    expect(spf?.value).toBe("v=spf1 include:amazonses.com include:_spf.i10.tech ~all")
+    expect(spf?.value).toBe("v=spf1 include:amazonses.com ~all")
     expect(spf?.value).not.toContain("-all")
   })
 
@@ -53,8 +55,8 @@ describe("the MAIL FROM records", () => {
    * with nothing to tell them why.
    */
   it("names our senders behind an include, not by address", () => {
-    const spf = find("TXT", "send.example.com")
-    expect(spf?.value).toContain("include:_spf.i10.tech")
+    const spf = find("TXT", "bounce.example.com")
+    expect(spf?.value).toBe("v=spf1 include:_spf.i10.tech ~all")
     expect(spf?.value).not.toMatch(/ip4:|ip6:/)
   })
 
@@ -65,10 +67,33 @@ describe("the MAIL FROM records", () => {
     }
   })
 
+  /**
+   * ⚠ TWO RETURN PATHS, AND THIS IS WHAT MAKES DMARC PASS ON SPF WHATEVER SENT
+   * THE MAIL. A name has one MX target and the two routes need different ones —
+   * Amazon's feedback host for SES, ours for direct. Sharing one label would
+   * mean one of the two routes bounces into the other's mailbox.
+   */
+  it("gives the direct route its own return path, pointed at us", () => {
+    expect(find("MX", "bounce.example.com")).toMatchObject({
+      value: "mx.i10.tech",
+      priority: 10,
+    })
+    expect(find("MX", "send.example.com")?.value).toContain("amazonses.com")
+  })
+
+  // ⚠ Each path authorises only the sender that uses it. Listing both on both
+  // lets each forge the other's bounces and spends SPF lookups for nothing.
+  it("does not cross-authorise the two senders", () => {
+    expect(find("TXT", "send.example.com")?.value).not.toContain("_spf.i10.tech")
+    expect(find("TXT", "bounce.example.com")?.value).not.toContain("amazonses.com")
+  })
+
   it("follows a custom return path", () => {
     const custom = dnsRecordsFor({
       domain: "example.com",
       mailFromSubdomain: "bounces",
+      bounceSubdomain: "bounce",
+      bounceHost: "mx.i10.tech",
       region: "eu-central-1",
       dkimSelector: null,
       dkimPublicKey: null,
@@ -155,8 +180,10 @@ describe("status", () => {
  * domain either way.
  */
 describe("what the customer publishes, in total", () => {
-  it("is four records and no more", () => {
+  it("is six records and no more", () => {
     expect(records().map((r) => `${r.record}:${r.type}`)).toEqual([
+      "SPF:MX",
+      "SPF:TXT",
       "SPF:MX",
       "SPF:TXT",
       "DKIM:TXT",
@@ -169,6 +196,6 @@ describe("what the customer publishes, in total", () => {
   // leaves through SES or through our own MTA.
   it("names amazon only where SES must be named", () => {
     const amazon = records().filter((r) => r.value.includes("amazonses.com"))
-    expect(amazon.map((r) => r.type)).toEqual(["MX", "TXT"])
+    expect(amazon.map((r) => r.name)).toEqual(["send.example.com", "send.example.com"])
   })
 })

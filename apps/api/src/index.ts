@@ -337,7 +337,10 @@ const app = createApp({
           identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
           capacity: postgresMeter(db),
           region: env.AWS_REGION,
-          spfInclude: env.MAIL_SPF_INCLUDE,
+          dns: {
+            spfInclude: env.MAIL_SPF_INCLUDE,
+            bounceHost: env.MAIL_BOUNCE_HOST,
+          },
           // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is
           // nowhere safe to keep a DKIM private key, so the routes answer 501
           // rather than storing one in the clear — the same rule webhooks

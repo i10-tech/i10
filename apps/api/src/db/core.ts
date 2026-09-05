@@ -121,6 +121,22 @@ export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
  * `failed`: SES uses it for a DNS lookup that failed in a way worth retrying,
  * and collapsing the two would tell a customer their correct records are wrong.
  */
+/**
+ * Which MTA a domain's mail leaves through.
+ *
+ * ⚠ `auto` IS NOT A THIRD MTA, IT IS "ASK THE PLAN". Free tenants send through
+ * our own MTA and paid ones through SES, and that mapping is policy that will
+ * change. Storing the RESOLVED answer on every domain would freeze today's
+ * policy into rows and make a pricing change a backfill; storing `auto` keeps
+ * the decision in one place and leaves the column for the exceptions.
+ *
+ * ⚠ AND THE OVERRIDES EXIST FOR SUPPORT, NOT FOR CUSTOMERS. A domain pinned to
+ * `direct` or `ses` ignores the plan entirely — for a customer whose
+ * deliverability needs one specific path, or to move somebody off a route that
+ * is having a bad day. It is a dashboard control, not an API field.
+ */
+export const deliveryRoute = core.enum("delivery_route", ["auto", "ses", "direct"])
+
 export const domainStatus = core.enum("domain_status", [
   /** No identity has been created yet. */
   "not_started",
@@ -217,8 +233,39 @@ export const domains = core.table(
      * The custom MAIL FROM subdomain, stored as the label only ("send"), not
      * the FQDN — the FQDN is `${mailFromSubdomain}.${name}` and storing it
      * twice invites the two to disagree.
+     *
+     * ⚠ THIS ONE IS THE SES ROUTE'S RETURN PATH, AND ITS MX MUST BE AMAZON'S.
+     * That is why there is a second one below rather than one shared label: a
+     * name has one MX target, and the two routes need different ones.
      */
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
+
+    /**
+     * The return path for mail we deliver ourselves.
+     *
+     * ⚠ A SECOND SUBDOMAIN EXISTS SO THAT SPF ALIGNS ON BOTH ROUTES. Sending
+     * direct with a bounce address on i10's own domain works and DMARC still
+     * passes — on DKIM alone. Passing on SPF *as well* requires the envelope
+     * sender to be on the CUSTOMER'S domain, which means their DNS needs a
+     * return path pointing at us. Two labels, two MX records, published once.
+     *
+     * ⚠ RELAXED ALIGNMENT IS WHAT MAKES A SUBDOMAIN ENOUGH. DMARC's default
+     * `aspf=r` aligns anything under the organizational domain, so
+     * `bounce.example.com` aligns with `From: someone@example.com`. Under
+     * `aspf=s` it would not — which is a reason never to publish a DMARC record
+     * for a customer with strict alignment on.
+     */
+    bounceSubdomain: text("bounce_subdomain").notNull().default("bounce"),
+
+    /**
+     * Which MTA this domain's mail leaves through. `auto` asks the plan.
+     *
+     * ⚠ ON THE DOMAIN, NOT THE TENANT, BECAUSE DELIVERABILITY IS PER DOMAIN. A
+     * customer with a warmed sending domain and a brand-new one has different
+     * needs for each, and a tenant-level switch would force the same answer on
+     * both.
+     */
+    deliveryRoute: deliveryRoute("delivery_route").notNull().default("auto"),
 
     /**
      * BYODKIM. The selector and public key are published in the customer's DNS

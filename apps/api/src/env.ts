@@ -231,6 +231,16 @@ const schema = z.object({
    */
   MAIL_SPF_INCLUDE: z.string().min(1).default("_spf.i10.tech"),
 
+  /**
+   * The host that receives bounces for mail we deliver ourselves.
+   *
+   * ⚠ IT IS THE MX FOR EVERY CUSTOMER'S `bounce.<domain>`, WHICH IS WHY DMARC
+   * PASSES ON SPF FOR THE DIRECT ROUTE. Bouncing to a name on i10.tech instead
+   * would need no customer record and would leave SPF unaligned with their
+   * `From:` — DMARC would then be passing on DKIM alone.
+   */
+  MAIL_BOUNCE_HOST: z.string().min(1).default("mx.i10.tech"),
+
   // ── autumn (being retired — see docs/decisions/metering.md) ───────────────
 
   /**

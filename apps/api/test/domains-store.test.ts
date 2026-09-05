@@ -10,6 +10,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb",
   name: "example.com",
   mailFromSubdomain: "send",
+  bounceSubdomain: "bounce",
   dkimSelector: "i10abc123",
   dkimPublicKey: "MIIBIjANBgkq",
   status: "pending",
@@ -63,7 +64,11 @@ const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
 const roomFor = (status: string) => ({ check: async () => ({ status }) })
 
 const secrets = { seal: (v: string) => `sealed:${v}`, open: (v: string) => v }
-const deps = { region: "eu-central-1", spfInclude: "_spf.i10.tech", secrets }
+const deps = {
+  region: "eu-central-1",
+  dns: { spfInclude: "_spf.i10.tech", bounceHost: "mx.i10.tech" },
+  secrets,
+}
 
 describe("what counts as a domain name", () => {
   /**

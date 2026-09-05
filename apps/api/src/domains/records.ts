@@ -29,13 +29,22 @@ const feedbackHost = (region: string) => `feedback-smtp.${region}.amazonses.com`
  * every customer to re-publish, and the ones who did not would silently start
  * failing SPF. Behind an include, the same change is one record we own.
  */
-const spfValue = (include: string) =>
-  `v=spf1 include:amazonses.com include:${include} ~all`
+/**
+ * ⚠ EACH RETURN PATH NAMES ONLY THE SENDER THAT USES IT. The SES path is only
+ * ever used by SES and the direct path only by us, so listing both on both
+ * would authorise each sender to forge the other's bounces and would spend two
+ * of SPF's ten DNS lookups for nothing.
+ */
+const spfValue = (mechanism: string) => `v=spf1 ${mechanism} ~all`
 
 export interface RecordInput {
   domain: string
-  /** The MAIL FROM label, e.g. `send`. Not the FQDN. */
+  /** The SES route's MAIL FROM label, e.g. `send`. Not the FQDN. */
   mailFromSubdomain: string
+  /** The direct route's return path label, e.g. `bounce`. Not the FQDN. */
+  bounceSubdomain: string
+  /** Our inbound host, which receives bounces for the direct route. */
+  bounceHost: string
   region: string
   /** The DNS label the DKIM key is published under. */
   dkimSelector: string | null
@@ -64,6 +73,8 @@ export interface RecordInput {
 export function dnsRecordsFor({
   domain,
   mailFromSubdomain,
+  bounceSubdomain,
+  bounceHost,
   region,
   dkimSelector,
   dkimPublicKey,
@@ -71,6 +82,7 @@ export function dnsRecordsFor({
   status,
 }: RecordInput): DnsRecord[] {
   const mailFrom = `${mailFromSubdomain}.${domain}`
+  const bounce = `${bounceSubdomain}.${domain}`
 
   return [
     // ⚠ BOTH HALVES OF MAIL FROM, AND NEITHER IS OPTIONAL. Without the MX,
@@ -91,7 +103,31 @@ export function dnsRecordsFor({
       type: "TXT",
       ttl: "Auto",
       status,
-      value: spfValue(spfInclude),
+      value: spfValue("include:amazonses.com"),
+    },
+    /**
+     * ⚠ THE SECOND RETURN PATH, AND IT IS WHAT MAKES DMARC PASS ON SPF WHEN WE
+     * DELIVER THE MAIL OURSELVES. Bouncing to i10's own domain instead would
+     * work and would need no record here — but the envelope domain would then
+     * be ours, SPF would not align with the customer's `From:`, and DMARC would
+     * be passing on DKIM alone. Two labels is the price of both.
+     */
+    {
+      record: "SPF",
+      name: bounce,
+      type: "MX",
+      ttl: "Auto",
+      status,
+      value: bounceHost,
+      priority: 10,
+    },
+    {
+      record: "SPF",
+      name: bounce,
+      type: "TXT",
+      ttl: "Auto",
+      status,
+      value: spfValue(`include:${spfInclude}`),
     },
     /**
      * ⚠ ONE TXT HOLDING OUR OWN PUBLIC KEY — BYODKIM. Easy DKIM would be three

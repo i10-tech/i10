@@ -120,7 +120,15 @@ rebuilding queueing, retries and DSN generation that it already does properly.
 - [ ] The tier → route function itself, and the Stalwart config that calls it.
 - [ ] i10's own bounce domain for the direct route, and ingesting those bounces
       into `core.message_events` the way SES's already are.
-- [ ] Which tier gets which route. ⚠ Free traffic on our own IP is the abuse
-      surface on an address shared with PSL; the inverse split costs money and
-      protects the asset. A deliberate decision either way, not a default.
+- [x] ~~Which tier gets which route.~~ **Decided 2026-09-05: free sends direct,
+      paid sends through SES**, with a per-domain override for support.
+      `resolveRoute` in `src/domains/route.ts`; `core.domains.delivery_route`
+      holds `auto | ses | direct`.
+      ⚠ **`auto` is stored, not the resolved answer.** Freezing today's policy
+      into rows would make a pricing change a backfill.
+      ⚠ **Free is the default branch, not a special case** — anything not
+      recognised as a paid plan sends direct, so a plan id renamed in the
+      catalogue cannot start spending SES money on tenants who pay nothing.
+      ⚠ Free traffic on our own IP is still the abuse surface, on an address
+      shared with PSL. Revisit when there is volume.
 - [ ] DKIM key rotation. The random selector makes it possible; nothing does it.

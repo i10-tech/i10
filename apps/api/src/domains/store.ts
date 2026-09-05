@@ -55,8 +55,7 @@ export interface DomainStoreDeps {
   capacity: Capacity
   /** Reported on every domain. One region, so it is configuration, not a column. */
   region: string
-  /** The domain listing our own MTAs in SPF, e.g. `_spf.i10.tech`. */
-  spfInclude: string
+  dns: DnsSettings
   /**
    * ⚠ SEALS THE DKIM PRIVATE KEY BEFORE IT REACHES A ROW. Anyone holding it can
    * sign mail as the customer's domain, so it never lands in the database in a
@@ -85,6 +84,7 @@ interface Row {
   id: string
   name: string
   mailFromSubdomain: string
+  bounceSubdomain: string
   dkimSelector: string | null
   dkimPublicKey: string | null
   status: DomainStatus
@@ -95,6 +95,7 @@ const COLUMNS = {
   id: domains.id,
   name: domains.name,
   mailFromSubdomain: domains.mailFromSubdomain,
+  bounceSubdomain: domains.bounceSubdomain,
   dkimSelector: domains.dkimSelector,
   dkimPublicKey: domains.dkimPublicKey,
   status: domains.status,
@@ -110,18 +111,28 @@ const summarise = (row: Row, region: string): DomainSummary => ({
   region,
 })
 
-const present = (row: Row, region: string, spfInclude: string): Domain => ({
+const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
   ...summarise(row, region),
   records: dnsRecordsFor({
     domain: row.name,
     mailFromSubdomain: row.mailFromSubdomain,
+    bounceSubdomain: row.bounceSubdomain,
+    bounceHost: dns.bounceHost,
     region,
     dkimSelector: row.dkimSelector,
     dkimPublicKey: row.dkimPublicKey,
-    spfInclude,
+    spfInclude: dns.spfInclude,
     status: row.status,
   }),
 })
+
+/** The two names customers point at us. Configuration, not columns. */
+export interface DnsSettings {
+  /** The domain whose SPF record lists our own MTAs, e.g. `_spf.i10.tech`. */
+  spfInclude: string
+  /** Our inbound host, which receives bounces for the direct route. */
+  bounceHost: string
+}
 
 /** Postgres's unique violation. The name is unique across every tenant. */
 const isUniqueViolation = (error: unknown) =>
@@ -132,7 +143,7 @@ export function domainStore({
   identity,
   capacity,
   region,
-  spfInclude,
+  dns,
   secrets,
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
@@ -210,7 +221,7 @@ export function domainStore({
 
         return {
           status: "created",
-          domain: present(row as Row, region, spfInclude),
+          domain: present(row as Row, region, dns),
         }
       } catch (error) {
         if (isUniqueViolation(error)) {
@@ -234,7 +245,7 @@ export function domainStore({
           .from(domains)
           .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
           .limit(1)
-        return row ? present(row as Row, region, spfInclude) : null
+        return row ? present(row as Row, region, dns) : null
       })
     },
 
@@ -302,7 +313,7 @@ export function domainStore({
           .returning(COLUMNS),
       )
 
-      return row ? present(row as Row, region, spfInclude) : null
+      return row ? present(row as Row, region, dns) : null
     },
   }
 }
