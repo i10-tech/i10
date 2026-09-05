@@ -2,9 +2,11 @@ import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
 import { describe, expect, it, vi } from "vitest"
 import {
+  MAILBOXES,
   MAILBOX_DOMAINS,
   SENDING_DOMAINS,
   mailboxDomainsStatement,
+  mailboxesStatement,
   postgresLevels,
   sendingDomainsStatement,
 } from "../src/metering/levels.js"
@@ -97,7 +99,7 @@ describe("reading a level", () => {
    */
   it("throws for a feature it cannot count, rather than answering zero", async () => {
     const { db } = fakeDb(() => [])
-    for (const featureId of ["mailboxes", "storage.gb", "emails"]) {
+    for (const featureId of ["storage.gb", "emails", "seats"]) {
       await expect(postgresLevels(db).levelOf(key(featureId))).rejects.toThrow(
         /no level source/,
       )
@@ -114,5 +116,35 @@ describe("reading a level", () => {
     await expect(postgresLevels(db).levelOf(key(SENDING_DOMAINS, 1))).rejects.toThrow(
       RangeError,
     )
+  })
+})
+
+describe("the seat count", () => {
+  /**
+   * ⚠ `active` IS THE SUBSCRIPTION GATE, NOT AN EXISTENCE TEST. A suspended
+   * mailbox still exists, still holds its storage and still reserves its
+   * address; counting only active ones would let a tenant hold any number of
+   * seats by switching them off.
+   */
+  it("counts every mailbox, including inactive ones", () => {
+    const { sql: statement } = render(mailboxesStatement(TENANT))
+    expect(statement).toContain("from authd.accounts")
+    expect(statement).not.toContain("active")
+  })
+
+  /**
+   * ⚠ THE `authd` SCHEMA HAS NO ROW LEVEL SECURITY, so this predicate is the
+   * whole of the isolation rather than defence in depth. Dropping it would
+   * count every mailbox on the platform against one tenant's limit.
+   */
+  it("scopes to the tenant in the statement itself", () => {
+    const { sql: statement, params } = render(mailboxesStatement(TENANT))
+    expect(statement).toContain("tenant_id = $1::uuid")
+    expect(params).toEqual([TENANT])
+  })
+
+  it("reads through the store", async () => {
+    const { db } = fakeDb(() => [{ level: "12" }])
+    expect(await postgresLevels(db).levelOf(key(MAILBOXES))).toBe(12)
   })
 })

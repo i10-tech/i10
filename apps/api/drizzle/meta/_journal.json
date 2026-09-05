@@ -113,6 +113,20 @@
       "when": 1788617156749,
       "tag": "0015_domain_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788617787372,
+      "tag": "0016_mailbox_domain_owners",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788617849073,
+      "tag": "0017_free_domain_limit",
+      "breakpoints": true
     }
   ]
 }

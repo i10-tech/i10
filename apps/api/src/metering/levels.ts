@@ -25,6 +25,9 @@ export const SENDING_DOMAINS = "domains.sending"
 /** A domain Stalwart accepts mail for. */
 export const MAILBOX_DOMAINS = "domains.mailbox"
 
+/** A person with a mailbox. The seat. */
+export const MAILBOXES = "mailboxes"
+
 /**
  * ⚠ TWO STATEMENTS RATHER THAN ONE WITH THE COLUMN SUBSTITUTED IN. The column
  * comes from a closed set and never from a request, so interpolating it would
@@ -52,9 +55,37 @@ export const mailboxDomainsStatement = (tenantId: string): SQL => sql`
      and hosts_mailboxes
 `
 
+/**
+ * Seats: one row per person who has a mailbox on one of this tenant's domains.
+ *
+ * ⚠ `authd.accounts.tenant_id` IS SET FROM THE DOMAIN, AND NOTHING WROTE IT
+ * UNTIL 0016. A mailbox on acme.com belongs to whoever proved they control
+ * acme.com — not to the holder's Clerk organisation, which they may have
+ * several of or none. Before that migration this count returned zero for every
+ * tenant, which is why the feature was left out of this store rather than
+ * shipped as a limit that never fires.
+ *
+ * ⚠ AND IT COUNTS EVERY ROW, INCLUDING INACTIVE ONES. `active` is the
+ * subscription gate — a suspended mailbox still exists, still holds its
+ * storage, and its address is still reserved. Counting only active ones would
+ * let a tenant hold any number of seats by having them switched off, and would
+ * make a suspended account free.
+ *
+ * ⚠ THE `authd` SCHEMA HAS NO ROW LEVEL SECURITY — no migration ever enabled
+ * it, unlike every table in `core`. The WHERE clause below is therefore the
+ * whole of the isolation rather than defence in depth, and it must never be
+ * dropped in favour of trusting the transaction's tenant context.
+ */
+export const mailboxesStatement = (tenantId: string): SQL => sql`
+  select count(*)::bigint as level
+    from authd.accounts
+   where tenant_id = ${tenantId}::uuid
+`
+
 const SOURCES: Readonly<Record<string, (tenantId: string) => SQL>> = {
   [SENDING_DOMAINS]: sendingDomainsStatement,
   [MAILBOX_DOMAINS]: mailboxDomainsStatement,
+  [MAILBOXES]: mailboxesStatement,
 }
 
 export function postgresLevels(db: Database): LevelStore {
@@ -82,7 +113,10 @@ export function postgresLevels(db: Database): LevelStore {
       }
 
       // `core.domains` is under row level security, so the tenant context is
-      // required — the WHERE clause below is defence in depth, not the boundary.
+      // required there. `authd.accounts` is NOT — see `mailboxesStatement` —
+      // so for that one the WHERE clause is the whole boundary. The wrapper is
+      // uniform because a reader should not have to know which is which to see
+      // that both are scoped.
       return withTenant(db, key.tenantId, async (tx) => {
         const rows = (await tx.execute(statement(key.tenantId))) as unknown as {
           level: string | number

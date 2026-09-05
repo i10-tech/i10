@@ -455,6 +455,20 @@ unverified domain holds a slot and a deactivated mailbox still holds its
 storage; counting only the working ones lets a tenant park fifty pending
 domains against a limit of three. The row is the thing being limited.
 
+⚠ **WHICH IS A DIFFERENT QUESTION FROM WHAT A DOMAIN MAY DO, AND THE TWO MUST
+NOT COLLAPSE.**
+
+|              | predicate                 | why                                    |
+| ------------ | ------------------------- | -------------------------------------- |
+| **counting** | every row for the tenant  | a pending domain still occupies a slot |
+| **acting**   | `verified_at IS NOT NULL` | a claim is not control                 |
+
+`core.mailbox_domains()` (0016) is the acting side: a domain appears there only
+once verified, and appearing there is what makes Stalwart treat it as a local
+recipient. Get that predicate the wrong way round in either direction and it is
+a security bug — unlimited free domains one way, receiving mail for a name you
+merely typed the other.
+
 ⚠ **AND NOTHING WRITES `core.domains` YET** — the table exists, and no route
 creates a row. So the check goes in with the creation path rather than being
 retrofitted onto one, which is the only version of this that costs nothing.
@@ -927,12 +941,17 @@ tiers move.
       it was read rather than run.
 - [ ] The bound on "approximate" for the gate, now that a permissive gate
       costs the customer rather than us. Needed before sharding.
-- [ ] ⚠ **Who writes `authd.accounts.tenant_id`**, without which no mailbox can
-      be attributed to a tenant and no seat can be counted or billed.
+- [x] ~~Who writes `authd.accounts.tenant_id`.~~ **Answered 2026-09-05** — the
+      Clerk projection, from the domain of the address. See 0016.
 - [ ] Where a per-tenant storage figure comes from, given Stalwart's database
       is separate and its schema is pre-1.0.
-- [ ] The domain limits themselves. 0015 seeds 1/10 sending and 0/1 mailbox as
-      placeholders; nobody has made that pricing decision.
+- [ ] The domain limits themselves. Free's sending limit is 3 (0017); pro's
+      10 and the 0/1 mailbox split are still the placeholders from 0015.
+- [ ] ⚠ **There is no way to create a domain**, so no limit is enforced
+      anywhere yet. No route in `apps/api/src/routes/`, no page in
+      `apps/console/app/`, and nothing inserts into `core.domains`. The
+      capacity check belongs in that route when it is written — the level
+      adapter and the entitlement are both ready for it.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
       ⚠ Neither is available yet; see the tenant_id question above.
@@ -993,12 +1012,14 @@ tiers move.
    silently and in the customer's favour. The other two are blocked, and not on
    effort:
 
-   - ⚠ **`mailboxes` CANNOT BE COUNTED TODAY.** `authd.accounts.tenant_id` is
-     nullable and **nothing writes it** — the projection in
-     `src/projection/clerk-user.ts` never sets it. A count grouped by tenant
-     would return 0 for everybody, forever, which is a limit that looks
-     implemented and never fires. Populating that column is its own piece of
-     work, and it is a prerequisite for selling seats at all.
+   - ~~`mailboxes` cannot be counted.~~ **FIXED 2026-09-05 (0016).** The
+     projection now writes `authd.accounts.tenant_id`, derived from the DOMAIN
+     of the address rather than from the holder's Clerk organisation — a
+     mailbox on acme.com belongs to whoever proved they control acme.com, which
+     is also the only derivation that cannot disagree with how Stalwart routes.
+     ⚠ **And customer domains now project at all**, which they did not:
+     `MAIL_DOMAINS` is i10's own list and a customer domain was in neither it
+     nor the projection. `core.mailbox_domains()` supplies the rest.
    - ⚠ **`storage.gb` IS IN A DIFFERENT DATABASE.** Stalwart owns the
      `stalwart` database, not a schema in `i10` — deliberately, because its
      schema is pre-1.0 and moves. Postgres cannot join across databases, so
