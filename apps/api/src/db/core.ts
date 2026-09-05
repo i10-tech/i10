@@ -111,6 +111,28 @@ export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
   "failed",
 ])
 
+/**
+ * How far along a domain's verification is.
+ *
+ * ⚠ RESEND'S VOCABULARY, VERBATIM, AND THAT IS THE POINT OF THE CHOICE. These
+ * strings reach customer code as literals in `if (domain.status === ...)`, and
+ * a migration from Resend that has to rewrite those comparisons is a migration
+ * that does not happen. `temporary_failure` in particular is not a synonym for
+ * `failed`: SES uses it for a DNS lookup that failed in a way worth retrying,
+ * and collapsing the two would tell a customer their correct records are wrong.
+ */
+export const domainStatus = core.enum("domain_status", [
+  /** No identity has been created yet. */
+  "not_started",
+  /** Records issued, waiting for DNS to propagate. */
+  "pending",
+  "verified",
+  /** SES gave up. The records are absent or wrong. */
+  "failed",
+  /** A retryable lookup failure. NOT the same as `failed`. */
+  "temporary_failure",
+])
+
 export const suppressionReason = core.enum("suppression_reason", [
   "hard_bounce",
   "complaint",
@@ -213,6 +235,29 @@ export const domains = core.table(
 
     /** The SES tenant this domain's sending is attributed to. */
     sesTenantName: text("ses_tenant_name"),
+
+    /**
+     * Easy DKIM's three tokens, from `CreateEmailIdentity`.
+     *
+     * ⚠ THESE ARE NOT SECRET AND THEY ARE NOT KEYS. Each one becomes a public
+     * CNAME in the customer's DNS pointing at Amazon, who hold the private half
+     * and do the signing. That is the whole reason Easy DKIM is used here
+     * rather than the BYODKIM columns above: there is no private key for i10 to
+     * generate, store, rotate or leak.
+     *
+     * ⚠ AND THEY MUST SURVIVE, BECAUSE THEY ARE THE RECORDS THE CUSTOMER WAS
+     * TOLD TO PUBLISH. Re-creating the identity mints different tokens, so a
+     * customer who published the first set would silently stop verifying.
+     */
+    dkimTokens: text("dkim_tokens").array(),
+
+    /**
+     * ⚠ SES'S ANSWER, COPIED — NOT DERIVED FROM `verified_at`. A domain can be
+     * `failed` or `temporary_failure` while `verified_at` is null, and those
+     * three states are what a customer needs told apart: one means wait, one
+     * means check your DNS, one means it never started.
+     */
+    status: domainStatus("status").notNull().default("not_started"),
 
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     dnsCheckedAt: timestamp("dns_checked_at", { withTimezone: true }),

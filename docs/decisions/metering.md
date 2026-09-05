@@ -947,11 +947,16 @@ tiers move.
       is separate and its schema is pre-1.0.
 - [ ] The domain limits themselves. Free's sending limit is 3 (0017); pro's
       10 and the 0/1 mailbox split are still the placeholders from 0015.
-- [ ] ⚠ **There is no way to create a domain**, so no limit is enforced
-      anywhere yet. No route in `apps/api/src/routes/`, no page in
-      `apps/console/app/`, and nothing inserts into `core.domains`. The
-      capacity check belongs in that route when it is written — the level
-      adapter and the entitlement are both ready for it.
+- [x] ~~There is no way to create a domain, so no limit is enforced anywhere.~~
+      **DONE 2026-09-05.** `POST /domains` (Resend-shaped) checks
+      `domains.sending` before it creates the SES identity, and answers **403
+      `plan_limit_exceeded`** — not 429, because the SDKs back off on a 429 and
+      waiting never produces another domain.
+      ⚠ Still no console page: the limit is enforced at the API, and the
+      dashboard has nothing to call yet.
+      ⚠ And `domains.mailbox` still has no writer — this API is Resend's, and
+      Resend has no concept of hosting mail, so every domain it creates is
+      `sends: true, hosts_mailboxes: false`.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
       ⚠ Neither is available yet; see the tenant_id question above.

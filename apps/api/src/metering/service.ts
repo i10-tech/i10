@@ -1,4 +1,5 @@
 import { createMeter } from "@repo/metering"
+import type { Meter } from "@repo/metering"
 import { withTenant, type Database } from "../db/client.js"
 import {
   assignedTenantIdsStatement,
@@ -41,20 +42,33 @@ export interface MeteringOptions {
   now?: () => Date
 }
 
+/**
+ * The meter itself, for callers that ask about a feature other than sending.
+ *
+ * ⚠ ONE INSTANCE PER PROCESS, NOT ONE PER QUESTION. `Metering` below is the
+ * send path's narrow view of it — quota and usage for one feature id — and the
+ * domains API needs the general form to ask about `domains.sending`. Building a
+ * second meter would give the two halves separate adapters and, eventually,
+ * separate opinions about the same tenant's plan.
+ */
+export function postgresMeter(db: Database): Meter {
+  return createMeter({
+    assignments: planAssignmentStore(db),
+    usage: meterEventStore(db),
+    // ⚠ IT ONLY KNOWS THE FEATURES IT CAN ACTUALLY COUNT, and throws by name
+    // for the rest. `storage.gb` is deliberately absent — see levels.ts and
+    // docs/decisions/metering.md for why it is not readable yet.
+    levels: postgresLevels(db),
+  })
+}
+
 export function postgresMetering({
   db,
   featureId,
   log,
   now = () => new Date(),
 }: MeteringOptions): Metering {
-  const meter = createMeter({
-    assignments: planAssignmentStore(db),
-    usage: meterEventStore(db),
-    // ⚠ IT ONLY KNOWS THE FEATURES IT CAN ACTUALLY COUNT, and throws by name
-    // for the rest. `mailboxes` and `storage.gb` are deliberately absent — see
-    // levels.ts and docs/decisions/metering.md for why neither is readable yet.
-    levels: postgresLevels(db),
-  })
+  const meter = postgresMeter(db)
 
   return {
     async checkQuota(tenantId, count): Promise<QuotaOutcome> {

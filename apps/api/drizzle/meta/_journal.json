@@ -127,6 +127,13 @@
       "when": 1788617849073,
       "tag": "0017_free_domain_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788618395801,
+      "tag": "0018_domain_status",
+      "breakpoints": true
     }
   ]
 }

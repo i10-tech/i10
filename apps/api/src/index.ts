@@ -14,6 +14,10 @@ import { captureError, flushObservability, initObservability } from "./observabi
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
+import { SESv2Client } from "@aws-sdk/client-sesv2"
+import { domainStore } from "./domains/store.js"
+import { sesIdentity } from "./domains/identity.js"
+import { postgresMeter } from "./metering/service.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
@@ -320,6 +324,18 @@ const app = createApp({
         checkoutStatus: { polar, subscriptions, log },
       }
     : {}),
+  /**
+   * ⚠ THE ONLY WRITER OF `core.domains` IN THE APPLICATION, which is what makes
+   * the plan's domain limit enforceable at all — before this there was nowhere
+   * to check it. It is handed the meter rather than the `Metering` seam,
+   * because the seam answers about one feature and this asks about another.
+   */
+  domains: domainStore({
+    db,
+    identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
+    capacity: postgresMeter(db),
+    region: env.AWS_REGION,
+  }),
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets),
