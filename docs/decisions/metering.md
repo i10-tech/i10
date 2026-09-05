@@ -3,6 +3,13 @@
 **Decided:** 2026-09-04. **Status:** steps 2–4 shipped. Autumn still runs and
 is no longer wired to anything.
 
+⚠ **The pricing model was added on 2026-09-05 and the sequence below predates
+it.** Steps 1–7 describe a transactional product on a fixed allowance. Included
+usage with billed overage, and human mail's seats and storage, are in "What we
+sell, and who computes the money" — and they need a second feature kind that
+`packages/metering` does not have. Nothing shipped is wrong; it is half a
+product.
+
 The reasoning below is preserved as it was argued, not rewritten as work lands
 — the sequence at the bottom is the only part that tracks state. Autumn keeps
 running until the current end-to-end pass is finished.
@@ -254,6 +261,326 @@ package work at all.
 ⚠ Autumn's failure here is instructive and is not "they had no interface" — it
 is that Stripe leaked into 403 files anyway. What enforces this is the package
 boundary, not discipline.
+
+---
+
+## What we sell, and who computes the money
+
+**Added 2026-09-05.** Everything above this line was argued for a product that
+sends transactional email on a fixed allowance. That is half of i10, and the
+half with the simpler billing. This section is the other half and the pricing
+model both halves actually use.
+
+### The model
+
+**A plan paid upfront that includes an allowance, plus billed overage the
+customer opts into.** Resend's shape, and deliberately so — it is what the
+market already understands.
+
+|                      | transactional                | human mail               |
+| -------------------- | ---------------------------- | ------------------------ |
+| paid upfront         | $20/mo                       | $/mo                     |
+| includes             | 50,000 emails, N domains     | N seats, N GB, N domains |
+| beyond the allowance | $0.90 / 1,000                | per seat, per GB         |
+| at renewal           | $20 again, allowance refills | same                     |
+
+⚠ **DOMAINS ARE IN THE TABLE BUT NOT IN THE OVERAGE ROW, AND THAT IS THE
+POINT.** A plan grants 3 domains and the fourth is refused — nobody sells a
+fourth domain for $0.30. It is a metered feature with a hard cap sitting beside
+one that bills past its cap, which is why the overage policy cannot live where
+the first draft of this section put it. See below.
+
+⚠ **OVERAGE IS OFF BY DEFAULT AND THE CUSTOMER TURNS IT ON.** Until they do,
+the allowance is a hard stop and the answer at the limit is a 429. That switch
+is the entire difference between "your sends stopped" and "you owe us $27 you
+did not expect", and it belongs to the customer rather than to us.
+
+⚠ **AND IT IS A LIMIT, NOT A PREPAID BUCKET.** A customer who sends 50 emails
+on the $20 plan pays $20, not forty cents. The upfront price buys a ceiling and
+they are never billed below it — which is why the meter's job is not to price
+usage but to decide, per unit, whether it falls inside the ceiling.
+
+**PAYG is the same mechanism with the allowance set to zero.** No upfront
+charge, every unit billable — for enterprises later. That it needs no new
+machinery is the strongest evidence the shape above is the right one, and it is
+worth protecting: any design where PAYG is a second code path is wrong.
+
+### Polar computes the money, and it already can
+
+Verified against `polarsource/polar`, 2026-09-05:
+
+- **Meter** — filters and aggregates the events we ingest.
+- **Metered price** — a subscription price computed from a meter.
+- **Meter Credits benefit** — _"the customer will be credited the amount of
+  units specified in the benefit at the beginning of every subscription cycle
+  period."_
+
+A $20 product carrying a flat price, a metered price at $0.90/1,000 and a
+credits benefit of 50,000 units **is** the row in the table above. Usage draws
+the credits down first; only the remainder is billed.
+
+⚠ **SO WE DO NOT WRITE THE OVERAGE ARITHMETIC, AND WE MUST NOT.** Rounding,
+tiering, currency, tax and the invoice line all belong to the party that sends
+the invoice. What we own is the count that goes in — and the gate, which is a
+product decision about whether to accept a send, not a pricing one.
+
+### ⚠ The gate must mirror the credits, not the plan's headline number
+
+This is the sharp edge of the whole section, and it is a customer-trust
+failure rather than an accounting one.
+
+Our gate decides what a customer is told is included. Polar's credits decide
+what they are actually billed for. If those two numbers disagree, the customer
+is charged for units our own dashboard called free — and they find out on an
+invoice, which is the worst possible place.
+
+Whether they disagree at a mid-cycle plan change turns out to be **our choice,
+not Polar's policy** — and the wrong choice is the default one.
+
+#### Traced through `polarsource/polar`, 2026-09-05
+
+`subscription/service.py::update_product` calls `enqueue_benefits_grants`
+unconditionally after a product change. That function diffs:
+
+```python
+granted_benefit_ids = {g.benefit_id for g in existing_grants if g.is_granted}
+grant_benefit_ids   = [b.id for b in product.benefits
+                       if b.id not in granted_benefit_ids and ...]
+outdated_grants     = await repository.list_outdated_grants(product, **scope)
+revoke_benefit_ids.extend(g.benefit_id for g in outdated_grants)
+```
+
+and `grant_benefit` returns early on `elif grant.is_granted:` — the strategy is
+never invoked for a benefit already held.
+
+For a Meter Credits benefit the two strategy methods are
+(`benefit/strategies/meter_credit/service.py`):
+
+- `grant` → posts a **`+units`** event on the meter, immediately.
+- `revoke` → posts **`-last_credited_units`** — the whole original grant, not
+  the unused remainder.
+
+So there are two behaviours, and they are selected by how the products are
+built:
+
+**Each plan carries its OWN credits benefit.** The old benefit is outdated →
+revoked → `−50,000`. The new one is not yet granted → granted → `+100,000`.
+A customer who had used 45,000 goes `5,000 → −45,000 → 55,000`.
+
+⚠ **THAT IS EXACTLY `draw({allowance: 100_000, used: 45_000})`.** Ceiling
+raised, usage kept, boundary unmoved — the model we want, and the same number
+our gate computes, by construction rather than by correction.
+
+**Both plans SHARE one credits benefit.** It is already granted, so it is
+neither revoked nor re-granted, and nothing happens until the next cycle. The
+customer keeps 5,000 credits while our gate offers 55,000 — and is billed
+overage on 50,000 units the dashboard called included.
+
+⚠ **SO: EVERY PLAN GETS ITS OWN METER CREDITS BENEFIT. NEVER SHARE ONE.** It
+looks like harmless deduplication in the Polar dashboard — one "50,000 emails"
+benefit reused across products — and it is the difference between the two
+paragraphs above. Nothing in Polar's UI will warn about it.
+
+⚠ **AND `rollover` MUST BE OFF.** `revoke` claws back `last_credited_units`,
+which with rollover on is not the plan's headline number, and the cancellation
+above stops being exact.
+
+⚠ **THE ANSWER IS NOT TO READ POLAR ON THE SEND PATH.** That is precisely the
+mistake removed by replacing Autumn, and re-introducing it for a different
+vendor would not be an improvement. Mirror the rule, reconcile the number, and
+make the reconciler carry the included figure as a third quantity beside what
+we sent and what we counted.
+
+### What this changes in `packages/metering`
+
+**1. `draw()` needs a third outcome.** Today: `allowed` | `exceeded`. Needed:
+`allowed` | `overage` | `exceeded`.
+
+⚠ **AND THE OVERAGE POLICY IS PER-ENTITLEMENT, NOT PER-TENANT.** The obvious
+design — one "allow overage" column on the tenant — is wrong the moment
+`domains` exists beside `emails`: the same tenant must be able to bill past
+50,000 emails and be refused a fourth domain. So the plan's grant for a feature
+says whether that feature may be exceeded at all, and the tenant's switch only
+turns it on where the plan already permits it. A tenant switch alone would
+either sell domains nobody priced or hard-stop sends the customer asked to be
+billed for.
+
+**2. A batch splits across the line — and this is NOT the partial-acceptance
+decision `balance.ts` already refuses.** Five hundred requested with three
+hundred included remaining is still accepted **whole**; answering a single
+`POST /emails` with "some of these were accepted" remains data loss dressed as
+a quota error. What changes is that its units attribute as 300 included and 200
+billable. **Acceptance is all-or-nothing; attribution is not.**
+
+**3. ⚠ "The gate is approximate" now costs a different person, and the earlier
+argument for tolerating it no longer holds unamended.** When the gate could
+only refuse, a permissive gate cost _us_ unbilled revenue and the reconciler
+swept it up. With overage enabled the gate never refuses — so a permissive gate
+means the **customer pays** for our imprecision.
+
+The tiering is still right, and this is an argument for it rather than against:
+the gate decides whether to send, the ledger decides what is owed, and no
+invoice is ever computed from the approximate number. But "approximate" now
+needs a stated bound rather than a shrug, and it has to be stated **before**
+sharding, because sharding is what makes the gate loose.
+
+### Human mail: the second feature kind
+
+⚠ **`packages/metering` currently models one kind of feature.** Autumn draws
+the line we need and names our exact examples:
+
+> **Consumable**: features that can be used up and replenished... For example,
+> credits, API requests.
+> **Non-consumable**: features that are used persistently. For example, seats,
+> storage, workspaces.
+>
+> ...reset cycles for `consumable` features, and proration behavior for
+> `non-consumable` features.
+
+`emails` is consumable — that is what `windowFor()` and `core.meter_events`
+were built for. **Domains, seats and storage are not**, which means three of the
+four things we meter are the kind the package does not model, and the one it
+does model is the exception. Three things break:
+
+- **There is no reset cycle.** Asking when a seat refills is a category error.
+- **"Used" is a level, not a sum** — `count(*)` over `core.domains`, a count of
+  `authd.accounts`, bytes from Stalwart — read from elsewhere rather than
+  accumulated here.
+- **A domain can be removed, and an append-only table cannot go down.** This is
+  the one that actually breaks: domains are deleted, mailboxes are deleted,
+  folders are emptied.
+
+⚠ **THE LEVEL COUNTS WHAT EXISTS, NOT WHAT IS VERIFIED OR ACTIVE.** An
+unverified domain holds a slot and a deactivated mailbox still holds its
+storage; counting only the working ones lets a tenant park fifty pending
+domains against a limit of three. The row is the thing being limited.
+
+⚠ **AND NOTHING WRITES `core.domains` YET** — the table exists, and no route
+creates a row. So the check goes in with the creation path rather than being
+retrofitted onto one, which is the only version of this that costs nothing.
+
+#### Sending domains and mailbox domains are two features, not one
+
+`core.domains` already carries `sends` and `hosts_mailboxes` as independent
+booleans, and they buy different things: one is an SES identity with DKIM and a
+MAIL FROM subdomain, the other is a domain Stalwart accepts mail for. A plan
+sells them separately — "3 sending domains, 1 mailbox domain" — so they are two
+metered features with two limits.
+
+⚠ **AND A DOMAIN THAT DOES BOTH COUNTS AGAINST BOTH.** The level for each is a
+count over its own flag, not a partition of one total. Otherwise the cheapest
+way to hold a domain is to claim both roles for it, and the two limits stop
+meaning anything.
+
+`draw()` itself generalises unchanged — `{allowance: 5, used: 3, requested: 1}`
+answers "can they add a mailbox" as well as it answers "can they send". The
+arithmetic was never the consumable part; the storage model was.
+
+What is needed: a `kind` on the feature, a `LevelStore` port beside
+`UsageStore`, and **a level-change log** — because proration bills on the
+_change_, and a table holding only today's count cannot reconstruct "three
+seats added on day 15".
+
+### Domains and seats: unit-based, not Polar's seat model
+
+Polar offers both, and their doc points at seat-based for anything that maps to
+a person. **Take unit-based anyway** — and note that domains are not people at
+all, so their own guidance puts domains in unit-based regardless.
+
+Seat-based brings Customer → Member → CustomerSeat, invitation emails, claim
+tokens and per-member benefit grants. We already run that flow: Clerk owns
+identity and `authd.accounts` is the projection Stalwart authenticates against.
+Adopting Polar's would make a **third** system that believes it knows who has a
+mailbox, and the symptom when they disagree is somebody's mail bouncing.
+
+⚠ **Storage is not seats and must not be modelled as one.** Nobody declares
+their gigabytes at checkout; it is observed. Start as an enforced cap that is
+never billed, and add metered overage when a customer asks. Prepaid capacity
+blocks are the option that makes people buy what they do not use.
+
+### What we use in Polar today
+
+Verified against `apps/api/src/billing/`, 2026-09-05. **Three endpoints and a
+webhook receiver:**
+
+|                          |                                |
+| ------------------------ | ------------------------------ |
+| `POST /v1/checkouts/`    | start a purchase               |
+| `GET /v1/checkouts/{id}` | poll one, for the landing page |
+| `GET /v1/subscriptions/` | list, for the reconciler       |
+| webhook `subscription.*` | grant the plan                 |
+
+⚠ **NO METERS. NO EVENT INGESTION. NO USAGE BILLING OF ANY KIND.** Nothing in
+`billing/` mentions a meter or `/v1/events`. Everything above about metered
+prices and credits benefits is a thing Polar _can_ do that we have not built —
+the ingest research recorded elsewhere was never wired up. Today a plan is a
+flat monthly price and the allowance is enforced entirely by us.
+
+⚠ **AND THERE IS NO `PATCH /v1/subscriptions/{id}` ANYWHERE.** We have no
+plan-change path at all: a customer who wants to move from $20 to $40 can only
+do it on Polar's hosted portal.
+
+### The customer deals with us, and we deal with Polar
+
+**Decided 2026-09-05.** No `billing.i10.tech` handed to Polar; plan changes
+happen in our console against our API.
+
+That is not a preference about branding — it is what makes proration exist. As
+established above, Polar's `update.py` has no upgrade/downgrade branch, so the
+correct behaviour is only reachable by passing `proration_behavior` per call.
+An org-wide default cannot be right for both directions, and the portal only
+ever uses the default. **So owning the plan-change UI and having correct
+proration are the same piece of work.**
+
+What that endpoint gives us, with no card entry anywhere:
+
+- **Upgrade** — `proration_behavior: "invoice"`. Applies now, difference
+  charged now, and the credits benefit swap makes the new ceiling exact.
+- **Downgrade** — `proration_behavior: "next_period"`. Scheduled to the period
+  end, no credit issued, and the customer keeps what they paid for.
+- **Cancel** — `cancel_at_period_end`, which the subscription row already
+  records and the console already renders.
+
+⚠ **WHAT CANNOT BE OURS IS CARD ENTRY, AND THAT IS PCI, NOT PREFERENCE.**
+Accepting a card number on our own page moves us from SAQ A to SAQ A-EP and
+makes card data our compliance problem. So the FIRST purchase keeps Polar's
+hosted checkout — which it already uses — and updating a stored card stays
+Polar's too. Everything after the first purchase, including every plan change,
+is ours.
+
+The practical shape: a customer sees Polar exactly twice — once when they first
+pay, and again only if they change their card.
+
+### Proration
+
+**Money: Polar's arithmetic, but it does need code — we have none of it today.**
+An upgrade mid-cycle credits the unused portion of the old plan and charges the
+prorated new one, and Polar computes every figure. What is missing is the call
+that asks for it.
+
+⚠ **BUT POLAR DOES NOT DISTINGUISH AN UPGRADE FROM A DOWNGRADE.**
+`server/polar/subscription/update.py` matches on `proration_behavior` alone —
+there is no direction check anywhere in it. So the standard behaviour everyone
+expects, immediate upgrades and downgrades deferred to period end, does not
+happen by choosing a good default; it exists only if **we** call
+`PATCH /v1/subscriptions/{id}` with the behaviour picked per direction. Leaving
+customers on Polar's portal means one setting governs both, and one setting
+cannot be right for both.
+
+⚠ **AVOID `reset`.** It restarts Polar's billing anchor, and ours is fixed at
+tenant creation and deliberately never moves. Using it splits the invoice date
+from the allowance refill date permanently.
+
+**Allowance: not prorated, matching Autumn.** A plan change swaps the ceiling
+and keeps the usage; the boundary does not move. Autumn does not prorate a
+consumable feature either, and their reason is ours: a consumable is billed on
+what was used, and the ceiling is a limit rather than something bought by the
+day.
+
+⚠ **This is only safe while downgrades are deferred.** With immediate
+downgrades a customer can upgrade on day 28, take the higher ceiling, downgrade
+on day 30 and be credited — which is why the per-direction call above is not a
+nicety.
 
 ---
 
@@ -543,6 +870,15 @@ tiers move.
       on it.
 - [ ] Whether `console` can ever move to Workers, given the authd / LDAP
       bind-delegation boundary.
+- [x] ~~What Polar does to a Meter Credits benefit on a mid-cycle product
+      change.~~ **Answered 2026-09-05 from their source** — it depends on
+      whether the plans share a benefit object. See "The gate must mirror the
+      credits". ⚠ Still worth one sandbox confirmation before launch, because
+      it was read rather than run.
+- [ ] The bound on "approximate" for the gate, now that a permissive gate
+      costs the customer rather than us. Needed before sharding.
+- [ ] Whether seats are counted from `authd.accounts` or from Clerk
+      memberships — they can differ, and only one can be the billable number.
 
 ## Sequence
 
