@@ -502,6 +502,15 @@ returns 0, because a wrong guess about the wire shape would otherwise read as
 "this mailbox uses no space" and grant the whole allowance to everybody. It
 needs one run against a real server.
 
+⚠ **AND THAT SERVER IS NOT REACHABLE FROM OUTSIDE THE CLUSTER, BY DESIGN.**
+Probed 2026-09-05: `/jmap`, `/.well-known/jmap` and `/api/schema` all answer
+**404** on `mail.i10.tech`, because `ingressroute.yaml` routes only autoconfig,
+autodiscover and MTA-STS to the pod — and the network policy's own comment says
+8080 is omitted "because the management API belongs behind Traefik". `i10-prod`
+is an allowed source namespace, so the reconcile job reaches it in-cluster at
+`http://i10-stalwart:8080`; confirming the call shape needs cluster access, not
+a public request.
+
 ### Human mail: the second feature kind
 
 ⚠ **`packages/metering` currently models one kind of feature.** Autumn draws

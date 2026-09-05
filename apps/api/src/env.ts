@@ -255,6 +255,14 @@ const schema = z.object({
   /**
    * Stalwart's API, for sampling how much disk each tenant's mailboxes use.
    *
+   * ⚠ THE IN-CLUSTER SERVICE, NOT `https://mail.i10.tech`. The management API
+   * is deliberately not routed publicly — `infra/k8s/i10/stalwart/ingressroute.yaml`
+   * sends only autoconfig, autodiscover and MTA-STS to the pod, and the network
+   * policy's own comment says 8080 is left out "because the management API
+   * belongs behind Traefik". Every management path answers 404 from outside.
+   * `i10-prod` is an allowed source namespace, so the reconcile job reaches it
+   * at `http://i10-stalwart:8080`.
+   *
    * ⚠ OPTIONAL, AND ITS ABSENCE SKIPS THE SAMPLE RATHER THAN ZEROING IT. A
    * deployment that cannot ask the mail server must leave the last figure
    * standing: replacing it with 0 would hand every tenant their whole storage
