@@ -520,6 +520,35 @@ flat monthly price and the allowance is enforced entirely by us.
 plan-change path at all: a customer who wants to move from $20 to $40 can only
 do it on Polar's hosted portal.
 
+### What we will use in Polar
+
+The target surface, against the four-endpoint inventory above. Everything in
+**bold** does not exist yet.
+
+|                                        | for                                       |
+| -------------------------------------- | ----------------------------------------- |
+| `POST /v1/checkouts/` + `embed_origin` | first purchase, in an iframe on our page  |
+| `GET /v1/checkouts/{id}`               | the landing page poll                     |
+| **`PATCH /v1/subscriptions/{id}`**     | plan change, with per-direction proration |
+| **`POST /v1/customer-sessions/`**      | a token for the payment-method embed      |
+| **`POST /v1/events/`**                 | usage ingest, one event per billable unit |
+| `GET /v1/subscriptions/`               | the reconciler                            |
+| webhook `subscription.*`               | granting the plan                         |
+
+Plus three things configured in Polar rather than called: **a meter** per
+metered feature, **a metered price** on each paid product, and **a Meter
+Credits benefit per plan** — never shared between plans, `rollover` off, for
+the reasons traced above.
+
+**Yes, we use their meters.** That is the whole answer to "who computes the
+overage": we ingest one event per billable unit, the meter aggregates, the
+credits benefit covers the included allowance, and the metered price turns the
+remainder into an invoice line. We supply the count and nothing else.
+
+**Yes, we will have prorations** — for money, from `PATCH`, chosen per
+direction. The allowance is deliberately never prorated; the credits swap
+already produces the right ceiling.
+
 ### The customer deals with us, and we deal with Polar
 
 **Decided 2026-09-05.** No `billing.i10.tech` handed to Polar; plan changes
@@ -541,15 +570,36 @@ What that endpoint gives us, with no card entry anywhere:
 - **Cancel** — `cancel_at_period_end`, which the subscription row already
   records and the console already renders.
 
-⚠ **WHAT CANNOT BE OURS IS CARD ENTRY, AND THAT IS PCI, NOT PREFERENCE.**
-Accepting a card number on our own page moves us from SAQ A to SAQ A-EP and
-makes card data our compliance problem. So the FIRST purchase keeps Polar's
-hosted checkout — which it already uses — and updating a stored card stays
-Polar's too. Everything after the first purchase, including every plan change,
-is ours.
+⚠ **AND THE CUSTOMER NEVER LEAVES, INCLUDING FOR CARD ENTRY.** An earlier draft
+of this section said the first purchase and any card change had to stay on
+Polar's hosted pages, on the grounds that taking a card number on our own page
+moves us from SAQ A to SAQ A-EP. That reasoning is right and does not apply,
+because both embeds are **iframes** — `PolarEmbedCheckout.create()` is
+documented as "creates the checkout iframe". The fields render on Polar's
+origin; card data never touches our DOM or our server, and we stay SAQ A.
 
-The practical shape: a customer sees Polar exactly twice — once when they first
-pay, and again only if they change their card.
+- **Embedded Checkout** (`@polar-sh/checkout/embed`) for the first purchase.
+  Take the programmatic route — `PolarEmbedCheckout.create()` with `onLoaded`
+  and close/success events — rather than the `data-polar-checkout` attribute,
+  because the console is a Next.js app and we already create the session
+  server-side. ⚠ **Set `embed_origin` on the Checkout Session** or it will not
+  open.
+- **Embedded Payment Method** (`@polar-sh/checkout/payment-method`) for
+  changing a stored card. It needs a **customer session token minted
+  server-side** — one hour, scoped to one customer — which is one new endpoint
+  on our side and one more reason the Polar access token never reaches a
+  browser.
+
+⚠ **THE EMBED HOST ALLOWLIST IS AN OUTAGE WAITING TO HAPPEN.** Embedding only
+works from hosts listed under Settings → Preferences → Embedding, matching is
+exact, and "a host you leave out stops working straight away". `example.com`
+does not match a subdomain and does not match a non-default port; `*.example.com`
+does not match the apex. So every preview and staging domain has to be listed
+too, and the failure is a checkout that silently refuses to open on a deploy
+that changed nothing about billing.
+
+Public hosts must be HTTPS, and the reason is worth keeping: the message the
+checkout posts back after payment carries a customer session token.
 
 ### Proration
 
