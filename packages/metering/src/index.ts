@@ -16,3 +16,20 @@ export type { Allowance, DrawInput, DrawOutcome } from "./balance.js"
 
 export { resetsAt, windowFor } from "./interval.js"
 export type { ResetInterval, ResetWindow, WindowInput } from "./interval.js"
+
+export { formatMeterKey, meterKey, meterKeyOf, parseMeterKey } from "./key.js"
+export type { MeterKey } from "./key.js"
+
+export { entitlementFor } from "./plan.js"
+export type { Assignment, Entitlement, Plan, PlanSource } from "./plan.js"
+
+export type { AssignmentStore, RecordResult, UsageEvent, UsageStore } from "./ports.js"
+
+export { createMeter } from "./meter.js"
+export type {
+  CheckInput,
+  CheckOutcome,
+  Meter,
+  MeterDeps,
+  RecordInput,
+} from "./meter.js"
