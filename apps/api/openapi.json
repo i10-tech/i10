@@ -716,7 +716,8 @@
                   "enum": [
                     "MX",
                     "TXT",
-                    "CNAME"
+                    "CNAME",
+                    "NS"
                   ]
                 },
                 "ttl": {
@@ -748,6 +749,9 @@
                 "value"
               ]
             }
+          },
+          "delegated": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -757,7 +761,8 @@
           "status",
           "created_at",
           "region",
-          "records"
+          "records",
+          "delegated"
         ]
       },
       "CreateDomain": {
@@ -776,6 +781,9 @@
           },
           "region": {
             "type": "string"
+          },
+          "delegated": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -818,6 +826,9 @@
                 },
                 "region": {
                   "type": "string"
+                },
+                "delegated": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -826,7 +837,8 @@
                 "name",
                 "status",
                 "created_at",
-                "region"
+                "region",
+                "delegated"
               ]
             }
           }

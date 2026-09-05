@@ -4,6 +4,8 @@ import { withTenant, type Database } from "../db/client.js"
 import { domains } from "../db/core.js"
 import { dnsRecordsFor } from "./records.js"
 import { generateDkimKeypair } from "./dkim.js"
+import { delegatedZoneNames, delegatedZones, delegationRecordsFor } from "./zone.js"
+import type { DnsZones } from "./zone.js"
 import type { DomainIdentity } from "./identity.js"
 import type { SecretBox } from "../webhooks/signing.js"
 
@@ -57,6 +59,13 @@ export interface DomainStoreDeps {
   region: string
   dns: DnsSettings
   /**
+   * ⚠ OPTIONAL, AND ITS ABSENCE MAKES DELEGATION IMPOSSIBLE RATHER THAN
+   * SILENT. A deployment with no nameserver cannot serve a delegated zone, so
+   * asking for one is refused with a reason instead of creating a domain whose
+   * NS records point at nothing.
+   */
+  zones?: DnsZones
+  /**
    * ⚠ SEALS THE DKIM PRIVATE KEY BEFORE IT REACHES A ROW. Anyone holding it can
    * sign mail as the customer's domain, so it never lands in the database in a
    * form a backup or a replica could use.
@@ -85,6 +94,7 @@ interface Row {
   name: string
   mailFromSubdomain: string
   bounceSubdomain: string
+  delegated: boolean
   dkimSelector: string | null
   dkimPublicKey: string | null
   status: DomainStatus
@@ -96,6 +106,7 @@ const COLUMNS = {
   name: domains.name,
   mailFromSubdomain: domains.mailFromSubdomain,
   bounceSubdomain: domains.bounceSubdomain,
+  delegated: domains.delegated,
   dkimSelector: domains.dkimSelector,
   dkimPublicKey: domains.dkimPublicKey,
   status: domains.status,
@@ -109,21 +120,27 @@ const summarise = (row: Row, region: string): DomainSummary => ({
   status: row.status,
   created_at: row.createdAt.toISOString(),
   region,
+  delegated: row.delegated,
 })
 
 const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
   ...summarise(row, region),
-  records: dnsRecordsFor({
-    domain: row.name,
-    mailFromSubdomain: row.mailFromSubdomain,
-    bounceSubdomain: row.bounceSubdomain,
-    bounceHost: dns.bounceHost,
-    region,
-    dkimSelector: row.dkimSelector,
-    dkimPublicKey: row.dkimPublicKey,
-    spfInclude: dns.spfInclude,
-    status: row.status,
-  }),
+  // ⚠ THE SAME FIELD EITHER WAY. A delegating customer publishes NS records and
+  // a manual one publishes six; a client renders `records` and does not need to
+  // know which it is looking at.
+  records: row.delegated
+    ? delegationRecordsFor(row.name, dns.nameservers, row.status)
+    : dnsRecordsFor({
+        domain: row.name,
+        mailFromSubdomain: row.mailFromSubdomain,
+        bounceSubdomain: row.bounceSubdomain,
+        bounceHost: dns.bounceHost,
+        region,
+        dkimSelector: row.dkimSelector,
+        dkimPublicKey: row.dkimPublicKey,
+        spfInclude: dns.spfInclude,
+        status: row.status,
+      }),
 })
 
 /** The two names customers point at us. Configuration, not columns. */
@@ -132,6 +149,8 @@ export interface DnsSettings {
   spfInclude: string
   /** Our inbound host, which receives bounces for the direct route. */
   bounceHost: string
+  /** Our authoritative nameservers, for delegated domains. */
+  nameservers: readonly string[]
 }
 
 /** Postgres's unique violation. The name is unique across every tenant. */
@@ -145,6 +164,7 @@ export function domainStore({
   region,
   dns,
   secrets,
+  zones,
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
   return {
@@ -183,6 +203,14 @@ export function domainStore({
       // no domains — our misconfiguration, not their fault — and the policy
       // this codebase has already chosen for that is to allow and log.
 
+      const delegated = input.delegated ?? false
+      if (delegated && !zones) {
+        return {
+          status: "rejected",
+          reason: "Delegated domains are not available on this deployment.",
+        }
+      }
+
       const mailFromSubdomain = input.custom_return_path ?? "send"
 
       // ⚠ GENERATED HERE, NOT BY THE PROVIDER, AND THAT IS WHAT MAKES THE
@@ -190,9 +218,19 @@ export function domainStore({
       // customer publishes one DKIM record whether a message leaves through SES
       // or through our own MTA.
       const keypair = generateDkimKeypair()
+
+      // ⚠ THE RETURN PATH MOVES UNDER `mail.` WHEN DELEGATED, and SES has to be
+      // told the name it will actually see. Registering `send.example.com`
+      // while the zone serves `send.mail.example.com` is a MAIL FROM that never
+      // verifies — with records that look correct because they are, under a
+      // different name.
+      const mailFrom = delegated
+        ? `${mailFromSubdomain}.${delegatedZoneNames(name).mail}`
+        : `${mailFromSubdomain}.${name}`
+
       const created = await identity.create({
         domain: name,
-        mailFrom: `${mailFromSubdomain}.${name}`,
+        mailFrom,
         selector: keypair.selector,
         privateKey: keypair.privateKey,
       })
@@ -205,6 +243,7 @@ export function domainStore({
               tenantId,
               name,
               mailFromSubdomain,
+              delegated,
               dkimSelector: keypair.selector,
               dkimPublicKey: keypair.publicKey,
               dkimPrivateKeySealed: secrets.seal(keypair.privateKey),
@@ -218,6 +257,27 @@ export function domainStore({
             })
             .returning(COLUMNS),
         )
+
+        // ⚠ AFTER THE ROW, AND OUTSIDE ITS TRANSACTION ON PURPOSE. A zone
+        // published for a domain that failed to insert is a delegation
+        // answering for a customer we have no record of; the other order leaves
+        // a domain whose zone is missing, which `verify` repairs by publishing
+        // it again. Only one of the two is invisible.
+        if (delegated && zones) {
+          for (const zone of delegatedZones({
+            domain: name,
+            mailFromSubdomain,
+            bounceSubdomain: "bounce",
+            bounceHost: dns.bounceHost,
+            region,
+            dkimSelector: keypair.selector,
+            dkimPublicKey: keypair.publicKey,
+            spfInclude: dns.spfInclude,
+            nameservers: dns.nameservers,
+          })) {
+            await zones.put(zone)
+          }
+        }
 
         return {
           status: "created",
@@ -276,6 +336,16 @@ export function domainStore({
       )
 
       await identity.remove(existing.name)
+
+      // ⚠ THE ZONES GO TOO, OR THE DELEGATION OUTLIVES THE DOMAIN. The customer's
+      // NS records still point here after a delete, so a zone left behind keeps
+      // answering — with a DKIM key and a return path for a domain nobody owns.
+      if (existing.delegated && zones) {
+        for (const zone of Object.values(delegatedZoneNames(existing.name))) {
+          await zones.remove(zone)
+        }
+      }
+
       return true
     },
 

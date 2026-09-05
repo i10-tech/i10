@@ -11,6 +11,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   name: "example.com",
   mailFromSubdomain: "send",
   bounceSubdomain: "bounce",
+  delegated: false,
   dkimSelector: "i10abc123",
   dkimPublicKey: "MIIBIjANBgkq",
   status: "pending",
@@ -66,7 +67,11 @@ const roomFor = (status: string) => ({ check: async () => ({ status }) })
 const secrets = { seal: (v: string) => `sealed:${v}`, open: (v: string) => v }
 const deps = {
   region: "eu-central-1",
-  dns: { spfInclude: "_spf.i10.tech", bounceHost: "mx.i10.tech" },
+  dns: {
+    spfInclude: "_spf.i10.tech",
+    bounceHost: "mx.i10.tech",
+    nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
+  },
   secrets,
 }
 

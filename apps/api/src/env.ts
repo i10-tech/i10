@@ -241,6 +241,28 @@ const schema = z.object({
    */
   MAIL_BOUNCE_HOST: z.string().min(1).default("mx.i10.tech"),
 
+  /**
+   * i10's authoritative nameservers, for customers who delegate subdomains.
+   *
+   * ⚠ A DELEGATED DOMAIN'S MAIL DNS DEPENDS ENTIRELY ON THESE ANSWERING. A
+   * customer publishing records in their own provider keeps resolving whatever
+   * happens to us; a delegating one stops resolving at all. Two names are
+   * listed because resolvers expect more than one and will retry the second —
+   * but pointing both at one machine buys the appearance of redundancy and not
+   * the fact of it, which is the reason to move this to Cloudflare or Route 53
+   * rather than a reason it is fine.
+   */
+  MAIL_NAMESERVERS: z
+    .string()
+    .default("ns1.i10.tech,ns2.i10.tech")
+    .transform((raw) =>
+      raw
+        .split(",")
+        .map((ns) => ns.trim().toLowerCase().replace(/\.$/, ""))
+        .filter((ns) => ns.length > 0),
+    )
+    .refine((list) => list.length > 0, "at least one nameserver is required"),
+
   // ── autumn (being retired — see docs/decisions/metering.md) ───────────────
 
   /**

@@ -115,9 +115,81 @@ rebuilding queueing, retries and DSN generation that it already does properly.
 
 ---
 
+## Delegated subdomains
+
+**Decided and built 2026-09-05.** Opt-in per domain; manual records stay the
+default.
+
+A delegating customer adds **three NS record sets and nothing else**:
+
+```
+_domainkey.example.com.  NS  ns1.i10.tech.  ns2.i10.tech.
+mail.example.com.        NS  ns1.i10.tech.  ns2.i10.tech.
+_dmarc.example.com.      NS  ns1.i10.tech.  ns2.i10.tech.
+```
+
+We then serve every record that matters and can change any of them — rotate a
+DKIM key, move a return path, flip a domain between SES and direct — with no
+customer action at all.
+
+⚠ **THREE SUBDOMAINS, NEVER THE APEX.** Taking the whole zone would make i10
+responsible for their website, their inbound MX and every other vendor's
+verification record: a bad day for our nameserver takes their marketing site
+down, not just their mail. It also asks a company to hand its most load-bearing
+infrastructure to a mail vendor, which established ones decline.
+
+⚠ **THE RETURN PATHS MOVE UNDER `mail.`** — `send.mail.example.com` and
+`bounce.mail.example.com`. Delegating `send.` and `bounce.` separately would be
+two more record sets to add and two more chances to add one wrong. SES accepts
+any subdomain as its MAIL FROM, so this costs nothing.
+
+⚠ **AND SES MUST BE TOLD THE NAME IT WILL ACTUALLY SEE.** Registering
+`send.example.com` while the zone serves `send.mail.example.com` is a MAIL FROM
+that never verifies, with records that look correct because they are — under a
+different name.
+
+### PowerDNS on the box, over our own Postgres
+
+The zone is **rows we write**, not an API we call: `pdns.domains` and
+`pdns.records` live in the `i10` database (0023), and PowerDNS reads them.
+
+⚠ **A SCHEMA, NOT A SEPARATE DATABASE LIKE STALWART'S.** Creating a domain and
+publishing its zone have to succeed or fail together, and Postgres cannot span
+two databases in one transaction. The trade is that a PowerDNS upgrade may want
+columns we did not write — their schema is stable and they publish the ALTERs,
+so that is a migration to write rather than a surprise.
+
+⚠ **THE `pdns` ROLE REACHES NOTHING BUT ITS OWN SCHEMA.** It is the one process
+here answering unauthenticated queries from the whole internet, and it has no
+grant on `core` or `authd`.
+
+### ⚠ One machine is the real cost, and it is not hypothetical
+
+A customer publishing records in their own provider keeps resolving whatever
+happens to us. **A delegating customer stops resolving at all** — no DKIM, no
+SPF, no return path — and their mail fails while their domain looks fine.
+Listing two nameserver names that point at one box buys the appearance of
+redundancy, not the fact of it.
+
+That is the reason to move this to **Cloudflare** (preferred — their anycast and
+edge are the point) or Route 53, not a reason the current shape is fine. The
+port is `DnsZones`; the zone contents do not change with the provider.
+
+⚠ **AND THE SOA SERIAL IS A CONSTANT TODAY.** That is safe only because nothing
+transfers these zones. The moment a secondary exists — which is how this stops
+being a single point of failure — it has to increase on every write.
+
+---
+
 ## Open
 
 - [ ] The tier → route function itself, and the Stalwart config that calls it.
+- [ ] The PowerDNS deployment: a manifest, the `pdns` role's password, and the
+      glue records for `ns1`/`ns2` at the registrar. ⚠ **None of this exists
+      yet** — the zones are written and nothing serves them.
+- [ ] Moving zones to Cloudflare. ⚠ Subdomain zones are an Enterprise feature
+      there and need verifying before the plan depends on it; Route 53 hosts
+      them natively at $0.50 per zone per month.
 - [ ] i10's own bounce domain for the direct route, and ingesting those bounces
       into `core.message_events` the way SES's already are.
 - [x] ~~Which tier gets which route.~~ **Decided 2026-09-05: free sends direct,

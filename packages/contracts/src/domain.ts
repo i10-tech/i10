@@ -29,10 +29,15 @@ export const domainStatus = z.enum([
  * were given rather than one we normalised.
  */
 export const dnsRecordSchema = z.object({
-  /** `SPF` or `DKIM`. What the record is for, not its DNS type. */
+  /** `SPF`, `DKIM`, `DMARC` or `NS`. What the record is for, not its DNS type. */
   record: z.string(),
   name: z.string(),
-  type: z.enum(["MX", "TXT", "CNAME"]),
+  /**
+   * ⚠ `NS` IS HERE FOR DELEGATED DOMAINS. A delegating customer publishes three
+   * NS record sets instead of six ordinary records, and the API deliberately
+   * does not fork for it: a client renders `records` either way.
+   */
+  type: z.enum(["MX", "TXT", "CNAME", "NS"]),
   ttl: z.string(),
   status: domainStatus,
   value: z.string(),
@@ -63,6 +68,18 @@ export const createDomainSchema = z.object({
    * The response always reports the region the mail actually leaves from.
    */
   region: z.string().optional(),
+  /**
+   * Point three subdomains at i10's nameservers instead of publishing records.
+   *
+   * ⚠ AN i10 EXTENSION, NOT PART OF RESEND'S API. Absent, it is `false` and the
+   * response is the ordinary record list, so a Resend client that never sends
+   * it behaves exactly as it did.
+   *
+   * ⚠ AND IT CANNOT BE CHANGED AFTERWARDS THROUGH THIS FIELD. Switching a live
+   * domain between the two means the records it must publish change, so it is a
+   * deliberate operation rather than a PATCH that silently stops mail.
+   */
+  delegated: z.boolean().optional(),
 })
 
 export const domainSchema = z.object({
@@ -72,7 +89,13 @@ export const domainSchema = z.object({
   status: domainStatus,
   created_at: z.string(),
   region: z.string(),
+  /**
+   * What the customer has to publish. Six ordinary records, or — for a
+   * delegated domain — the NS records for the three subdomains i10 serves.
+   */
   records: z.array(dnsRecordSchema),
+  /** Whether i10 serves this domain's mail records. See `records`. */
+  delegated: z.boolean(),
 })
 
 /** ⚠ NO `records`. Resend's list is the summary; the records are on the get. */
@@ -83,6 +106,7 @@ export const domainSummarySchema = z.object({
   status: domainStatus,
   created_at: z.string(),
   region: z.string(),
+  delegated: z.boolean(),
 })
 
 export const domainListSchema = z.object({

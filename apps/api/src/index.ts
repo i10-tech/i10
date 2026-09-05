@@ -17,6 +17,7 @@ import { acceptDatabaseOps } from "./send/accept-db.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { domainStore } from "./domains/store.js"
 import { sesIdentity } from "./domains/identity.js"
+import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
@@ -340,7 +341,13 @@ const app = createApp({
           dns: {
             spfInclude: env.MAIL_SPF_INCLUDE,
             bounceHost: env.MAIL_BOUNCE_HOST,
+            nameservers: env.MAIL_NAMESERVERS,
           },
+          // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write
+          // in the same transaction as everything else rather than a call to a
+          // provider that can be down. Swapping this for Cloudflare or Route 53
+          // later is an adapter, not a migration.
+          zones: powerDnsZones(db),
           // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is
           // nowhere safe to keep a DKIM private key, so the routes answer 501
           // rather than storing one in the clear — the same rule webhooks

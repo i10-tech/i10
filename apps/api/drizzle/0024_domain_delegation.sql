@@ -1,0 +1,1 @@
+ALTER TABLE "core"."domains" ADD COLUMN "delegated" boolean DEFAULT false NOT NULL;

@@ -268,6 +268,22 @@ export const domains = core.table(
     deliveryRoute: deliveryRoute("delivery_route").notNull().default("auto"),
 
     /**
+     * Whether i10 serves this domain's mail records from its own nameservers.
+     *
+     * ⚠ IT CHANGES WHAT THE CUSTOMER MUST PUBLISH, WHICH IS WHY IT IS NOT A
+     * SETTING TO TOGGLE. Delegated, they add three NS record sets and we serve
+     * the rest; manual, they add six records themselves. Flipping it on a live
+     * domain invalidates whichever set is already published, so it is chosen at
+     * creation and changed only deliberately.
+     *
+     * ⚠ AND MANUAL IS THE DEFAULT, BECAUSE IT HAS NO DEPENDENCY ON US. Records
+     * in the customer's own DNS keep resolving whatever happens to our
+     * nameserver; a delegated domain stops resolving entirely. Until that is
+     * served by something with real redundancy, the safer shape is the default.
+     */
+    delegated: boolean("delegated").notNull().default(false),
+
+    /**
      * BYODKIM. The selector and public key are published in the customer's DNS
      * and are not secret.
      *
