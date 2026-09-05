@@ -31,7 +31,13 @@ export type {
   PlanSource,
 } from "./plan.js"
 
-export type { AssignmentStore, RecordResult, UsageEvent, UsageStore } from "./ports.js"
+export type {
+  AssignmentStore,
+  LevelStore,
+  RecordResult,
+  UsageEvent,
+  UsageStore,
+} from "./ports.js"
 
 export { createMeter } from "./meter.js"
 export type {

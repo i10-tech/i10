@@ -7,6 +7,7 @@ import {
   planAssignmentStore,
   usageSnapshotStatement,
 } from "./postgres.js"
+import { postgresLevels } from "./levels.js"
 import type { Metering, QuotaOutcome, SentMessage } from "../send/metering.js"
 import type { UsageBucket } from "../send/reconcile.js"
 
@@ -49,6 +50,10 @@ export function postgresMetering({
   const meter = createMeter({
     assignments: planAssignmentStore(db),
     usage: meterEventStore(db),
+    // ⚠ IT ONLY KNOWS THE FEATURES IT CAN ACTUALLY COUNT, and throws by name
+    // for the rest. `mailboxes` and `storage.gb` are deliberately absent — see
+    // levels.ts and docs/decisions/metering.md for why neither is readable yet.
+    levels: postgresLevels(db),
   })
 
   return {

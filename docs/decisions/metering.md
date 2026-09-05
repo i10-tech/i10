@@ -927,8 +927,15 @@ tiers move.
       it was read rather than run.
 - [ ] The bound on "approximate" for the gate, now that a permissive gate
       costs the customer rather than us. Needed before sharding.
+- [ ] ⚠ **Who writes `authd.accounts.tenant_id`**, without which no mailbox can
+      be attributed to a tenant and no seat can be counted or billed.
+- [ ] Where a per-tenant storage figure comes from, given Stalwart's database
+      is separate and its schema is pre-1.0.
+- [ ] The domain limits themselves. 0015 seeds 1/10 sending and 0/1 mailbox as
+      placeholders; nobody has made that pricing decision.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
+      ⚠ Neither is available yet; see the tenant_id question above.
 
 ## Sequence
 
@@ -978,14 +985,30 @@ tiers move.
    it. `draw()` gained `overage`, resolved from the plan's policy AND the
    tenant's switch, both of which must agree. `LevelStore` is a second port
    beside `UsageStore`.
-   ⚠ **No level adapters yet.** `createMeter` throws by name if a continuous
-   entitlement resolves with no level store, which is the state today — the
-   counts over `core.domains`, the mailbox count and the storage read are the
-   next piece.
-   ⚠ **And `emails` is seeded `overage: "never"`.** Billed overage needs the
-   meter, the metered price, the credits benefit and the ingest, none of which
-   exist; a catalogue promising it first would let a customer send past their
-   plan with no way to invoice for it.
+   ⚠ **Level adapters: domains only.** `apps/api/src/metering/levels.ts` counts
+   `domains.sending` and `domains.mailbox` over `core.domains`, and **throws by
+   name** for any other feature. Answering `0` would be the worst possible
+   default — zero held means the whole allowance is free, so a plan granting a
+   feature the store cannot count would hand every tenant an unlimited number,
+   silently and in the customer's favour. The other two are blocked, and not on
+   effort:
+
+   - ⚠ **`mailboxes` CANNOT BE COUNTED TODAY.** `authd.accounts.tenant_id` is
+     nullable and **nothing writes it** — the projection in
+     `src/projection/clerk-user.ts` never sets it. A count grouped by tenant
+     would return 0 for everybody, forever, which is a limit that looks
+     implemented and never fires. Populating that column is its own piece of
+     work, and it is a prerequisite for selling seats at all.
+   - ⚠ **`storage.gb` IS IN A DIFFERENT DATABASE.** Stalwart owns the
+     `stalwart` database, not a schema in `i10` — deliberately, because its
+     schema is pre-1.0 and moves. Postgres cannot join across databases, so
+     this needs either Stalwart's admin API on a sampling job or a decision to
+     read tables whose shape their own release notes change.
+     ⚠ **And `emails` is seeded `overage: "never"`.** Billed overage needs the
+     meter, the metered price, the credits benefit and the ingest, none of which
+     exist; a catalogue promising it first would let a customer send past their
+     plan with no way to invoice for it.
+
 5. Retire Autumn. **~1.3 GiB back.**
 6. Cloudflare free tier: WAF, format gate, SNS verification.
 7. When there is revenue: $5 Workers Paid → DO counter, then DO webhooks.
