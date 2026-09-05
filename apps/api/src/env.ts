@@ -215,6 +215,22 @@ const schema = z.object({
    */
   METERING_EVENT_NAME: z.string().min(1).default("emails"),
 
+  /**
+   * The domain whose SPF record lists i10's own outbound MTAs.
+   *
+   * ⚠ CUSTOMERS PUBLISH `include:` THIS, NEVER OUR IP ADDRESSES. A literal
+   * address in a customer's DNS pins our infrastructure into records we cannot
+   * edit: changing a relay, adding a second, or moving provider would mean
+   * asking every customer to re-publish, and the ones who did not would start
+   * failing SPF with nothing to tell them why.
+   *
+   * ⚠ AND IT IS A DEDICATED SUBDOMAIN RATHER THAN THE APEX. SPF allows ten DNS
+   * lookups per evaluation, and the apex record has its own job — who may send
+   * as i10.tech. Conflating them means every customer's SPF inherits every
+   * include we add for our own mail.
+   */
+  MAIL_SPF_INCLUDE: z.string().min(1).default("_spf.i10.tech"),
+
   // ── autumn (being retired — see docs/decisions/metering.md) ───────────────
 
   /**

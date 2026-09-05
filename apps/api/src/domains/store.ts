@@ -3,7 +3,9 @@ import type { CreateDomain, Domain, DomainStatus, DomainSummary } from "@repo/co
 import { withTenant, type Database } from "../db/client.js"
 import { domains } from "../db/core.js"
 import { dnsRecordsFor } from "./records.js"
+import { generateDkimKeypair } from "./dkim.js"
 import type { DomainIdentity } from "./identity.js"
+import type { SecretBox } from "../webhooks/signing.js"
 
 /**
  * Domains a tenant has claimed, and what they may do.
@@ -53,6 +55,14 @@ export interface DomainStoreDeps {
   capacity: Capacity
   /** Reported on every domain. One region, so it is configuration, not a column. */
   region: string
+  /** The domain listing our own MTAs in SPF, e.g. `_spf.i10.tech`. */
+  spfInclude: string
+  /**
+   * ⚠ SEALS THE DKIM PRIVATE KEY BEFORE IT REACHES A ROW. Anyone holding it can
+   * sign mail as the customer's domain, so it never lands in the database in a
+   * form a backup or a replica could use.
+   */
+  secrets: SecretBox
   now?: () => Date
 }
 
@@ -75,7 +85,8 @@ interface Row {
   id: string
   name: string
   mailFromSubdomain: string
-  dkimTokens: string[] | null
+  dkimSelector: string | null
+  dkimPublicKey: string | null
   status: DomainStatus
   createdAt: Date
 }
@@ -84,7 +95,8 @@ const COLUMNS = {
   id: domains.id,
   name: domains.name,
   mailFromSubdomain: domains.mailFromSubdomain,
-  dkimTokens: domains.dkimTokens,
+  dkimSelector: domains.dkimSelector,
+  dkimPublicKey: domains.dkimPublicKey,
   status: domains.status,
   createdAt: domains.createdAt,
 }
@@ -98,13 +110,15 @@ const summarise = (row: Row, region: string): DomainSummary => ({
   region,
 })
 
-const present = (row: Row, region: string): Domain => ({
+const present = (row: Row, region: string, spfInclude: string): Domain => ({
   ...summarise(row, region),
   records: dnsRecordsFor({
     domain: row.name,
     mailFromSubdomain: row.mailFromSubdomain,
     region,
-    dkimTokens: row.dkimTokens ?? [],
+    dkimSelector: row.dkimSelector,
+    dkimPublicKey: row.dkimPublicKey,
+    spfInclude,
     status: row.status,
   }),
 })
@@ -118,6 +132,8 @@ export function domainStore({
   identity,
   capacity,
   region,
+  spfInclude,
+  secrets,
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
   return {
@@ -157,9 +173,17 @@ export function domainStore({
       // this codebase has already chosen for that is to allow and log.
 
       const mailFromSubdomain = input.custom_return_path ?? "send"
+
+      // ⚠ GENERATED HERE, NOT BY THE PROVIDER, AND THAT IS WHAT MAKES THE
+      // ROUTING DECISION POSSIBLE. One key we own signs on both routes, so the
+      // customer publishes one DKIM record whether a message leaves through SES
+      // or through our own MTA.
+      const keypair = generateDkimKeypair()
       const created = await identity.create({
         domain: name,
         mailFrom: `${mailFromSubdomain}.${name}`,
+        selector: keypair.selector,
+        privateKey: keypair.privateKey,
       })
 
       try {
@@ -170,7 +194,9 @@ export function domainStore({
               tenantId,
               name,
               mailFromSubdomain,
-              dkimTokens: created.dkimTokens,
+              dkimSelector: keypair.selector,
+              dkimPublicKey: keypair.publicKey,
+              dkimPrivateKeySealed: secrets.seal(keypair.privateKey),
               status: created.status,
               sends: true,
               // ⚠ NOT A MAILBOX DOMAIN. This API is Resend's, and Resend has no
@@ -182,7 +208,10 @@ export function domainStore({
             .returning(COLUMNS),
         )
 
-        return { status: "created", domain: present(row as Row, region) }
+        return {
+          status: "created",
+          domain: present(row as Row, region, spfInclude),
+        }
       } catch (error) {
         if (isUniqueViolation(error)) {
           // ⚠ THE NAME IS UNIQUE ACROSS TENANTS, so this is either their own
@@ -205,7 +234,7 @@ export function domainStore({
           .from(domains)
           .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
           .limit(1)
-        return row ? present(row as Row, region) : null
+        return row ? present(row as Row, region, spfInclude) : null
       })
     },
 
@@ -265,7 +294,6 @@ export function domainStore({
           .update(domains)
           .set({
             status: seen.status,
-            dkimTokens: seen.dkimTokens,
             dnsCheckedAt: now(),
             updatedAt: now(),
             ...(verifiedAt ? { verifiedAt } : {}),
@@ -274,7 +302,7 @@ export function domainStore({
           .returning(COLUMNS),
       )
 
-      return row ? present(row as Row, region) : null
+      return row ? present(row as Row, region, spfInclude) : null
     },
   }
 }

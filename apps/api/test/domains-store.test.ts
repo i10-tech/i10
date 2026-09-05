@@ -10,7 +10,8 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb",
   name: "example.com",
   mailFromSubdomain: "send",
-  dkimTokens: ["aaa"],
+  dkimSelector: "i10abc123",
+  dkimPublicKey: "MIIBIjANBgkq",
   status: "pending",
   createdAt: NOW,
   ...over,
@@ -61,6 +62,9 @@ const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
 
 const roomFor = (status: string) => ({ check: async () => ({ status }) })
 
+const secrets = { seal: (v: string) => `sealed:${v}`, open: (v: string) => v }
+const deps = { region: "eu-central-1", spfInclude: "_spf.i10.tech", secrets }
+
 describe("what counts as a domain name", () => {
   /**
    * ⚠ BOTH OF THESE ARE THINGS PEOPLE PASTE, and both would create a domain
@@ -101,7 +105,7 @@ describe("the plan limit", () => {
       db: fakeDb({}),
       identity: identity({ create }),
       capacity: roomFor("exceeded"),
-      region: "eu-central-1",
+      ...deps,
       now: () => NOW,
     })
 
@@ -122,7 +126,7 @@ describe("the plan limit", () => {
       db: fakeDb({ insert: () => [row()] }),
       identity: identity(),
       capacity: roomFor("unentitled"),
-      region: "eu-central-1",
+      ...deps,
       now: () => NOW,
     })
     expect((await store.create(TENANT, { name: "example.com" })).status).toBe("created")
@@ -135,7 +139,7 @@ describe("creating", () => {
       db: fakeDb({ insert: () => [row()] }),
       identity: identity(),
       capacity: roomFor("allowed"),
-      region: "eu-central-1",
+      ...deps,
       now: () => NOW,
     })
 
@@ -161,7 +165,7 @@ describe("creating", () => {
       }),
       identity: identity(),
       capacity: roomFor("allowed"),
-      region: "eu-central-1",
+      ...deps,
       now: () => NOW,
     })
 
@@ -192,7 +196,7 @@ describe("creating", () => {
       db,
       identity: identity(),
       capacity: roomFor("allowed"),
-      region: "eu-central-1",
+      ...deps,
       now: () => NOW,
     }).create(TENANT, { name: "example.com" })
 
@@ -233,7 +237,7 @@ describe("verifying", () => {
         status: async () => ({ dkimTokens: ["aaa"], status: "temporary_failure" }),
       }),
       capacity: roomFor("allowed"),
-      region: "eu-central-1",
+      ...deps,
       now: () => NOW,
     }).verify(TENANT, row().id)
 
@@ -267,7 +271,7 @@ describe("verifying", () => {
         status: async () => ({ dkimTokens: ["aaa"], status: "verified" }),
       }),
       capacity: roomFor("allowed"),
-      region: "eu-central-1",
+      ...deps,
       now: () => NOW,
     }).verify(TENANT, row().id)
 

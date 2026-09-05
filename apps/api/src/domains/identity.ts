@@ -2,6 +2,7 @@ import {
   CreateEmailIdentityCommand,
   DeleteEmailIdentityCommand,
   GetEmailIdentityCommand,
+  PutEmailIdentityDkimSigningAttributesCommand,
   PutEmailIdentityMailFromAttributesCommand,
   type SESv2Client,
 } from "@aws-sdk/client-sesv2"
@@ -17,14 +18,23 @@ import type { DomainStatus } from "@repo/contracts"
  * be exercised without credentials.
  */
 export interface DomainIdentity {
-  /** Idempotent: creating one that exists returns its existing tokens. */
+  /**
+   * Registers the domain and the key WE generated. Idempotent.
+   *
+   * ⚠ IT TAKES A KEYPAIR RATHER THAN RETURNING ONE, WHICH IS THE WHOLE POINT OF
+   * BYODKIM. The provider is told which key to sign with; it does not choose.
+   * That is what lets a second sender — our own MTA — sign identically.
+   */
   create(input: {
     domain: string
     mailFrom: string
-  }): Promise<{ dkimTokens: string[]; status: DomainStatus }>
+    selector: string
+    /** base64 PKCS#8 DER. */
+    privateKey: string
+  }): Promise<{ status: DomainStatus }>
 
   /** What the provider currently believes. */
-  status(domain: string): Promise<{ dkimTokens: string[]; status: DomainStatus }>
+  status(domain: string): Promise<{ status: DomainStatus }>
 
   remove(domain: string): Promise<void>
 }
@@ -55,31 +65,43 @@ export function sesIdentity(client: SESv2Client): DomainIdentity {
     const identity = await client.send(
       new GetEmailIdentityCommand({ EmailIdentity: domain }),
     )
-    return {
-      dkimTokens: identity.DkimAttributes?.Tokens ?? [],
-      status: toStatus(identity.DkimAttributes?.Status),
-    }
+    return { status: toStatus(identity.DkimAttributes?.Status) }
   }
 
   return {
-    async create({ domain, mailFrom }) {
+    async create({ domain, mailFrom, selector, privateKey }) {
+      const signing = {
+        DomainSigningSelector: selector,
+        DomainSigningPrivateKey: privateKey,
+      }
+
       try {
         await client.send(
           new CreateEmailIdentityCommand({
             EmailIdentity: domain,
-            // Easy DKIM. Omitting `DkimSigningAttributes` is what selects it —
-            // supplying a key would opt into BYODKIM and make us the holder of
-            // a private key for every customer domain.
-            DkimSigningAttributes: undefined,
+            // ⚠ SUPPLYING THESE IS WHAT SELECTS BYODKIM. Omitting them opts
+            // into Easy DKIM, where Amazon generates the pair and keeps the
+            // private half — after which only Amazon can sign for this domain
+            // and routing a message through our own MTA becomes impossible.
+            DkimSigningAttributes: signing,
           }),
         )
       } catch (error) {
-        // ⚠ ALREADY EXISTS IS A SUCCESS, NOT AN ERROR, AND RE-CREATING WOULD BE
-        // THE REAL FAILURE. A second `CreateEmailIdentity` mints DIFFERENT DKIM
-        // tokens, so a customer who already published the first set would
-        // silently stop verifying — with correct-looking records in their DNS.
-        // Retries and double-clicks both land here.
         if ((error as { name?: string }).name !== "AlreadyExistsException") throw error
+
+        // ⚠ ALREADY EXISTS MEANS RE-ASSERT THE KEY, NOT SHRUG. With Easy DKIM
+        // there was nothing to do here; with BYODKIM the existing identity may
+        // be signing with an older key — a re-created domain, a rotation that
+        // half-applied — and leaving it would mean SES signs with a key the
+        // customer's DNS no longer publishes. Every signature then fails and
+        // the records look correct.
+        await client.send(
+          new PutEmailIdentityDkimSigningAttributesCommand({
+            EmailIdentity: domain,
+            SigningAttributesOrigin: "EXTERNAL",
+            SigningAttributes: signing,
+          }),
+        )
       }
 
       // ⚠ SET AFTER THE IDENTITY EXISTS, AND SEPARATELY, because SES has no way

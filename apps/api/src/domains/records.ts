@@ -1,4 +1,5 @@
 import type { DnsRecord, DomainStatus } from "@repo/contracts"
+import { dkimRecordValue } from "./dkim.js"
 
 /**
  * The DNS a customer has to publish before their domain can send.
@@ -21,16 +22,35 @@ const feedbackHost = (region: string) => `feedback-smtp.${region}.amazonses.com`
  * sends from elsewhere — their own mail server, a CRM, a helpdesk — rejects
  * that mail outright the moment this record is published. The customer's SPF
  * record is theirs to tighten once they know what else sends as them.
+ *
+ * ⚠ AND OUR HALF IS AN `include:`, NEVER AN `ip4:`. A literal address in a
+ * customer's DNS is our infrastructure pinned into records we cannot edit:
+ * changing a relay, adding a second one or moving provider would mean asking
+ * every customer to re-publish, and the ones who did not would silently start
+ * failing SPF. Behind an include, the same change is one record we own.
  */
-const SPF_VALUE = "v=spf1 include:amazonses.com ~all"
+const spfValue = (include: string) =>
+  `v=spf1 include:amazonses.com include:${include} ~all`
 
 export interface RecordInput {
   domain: string
   /** The MAIL FROM label, e.g. `send`. Not the FQDN. */
   mailFromSubdomain: string
   region: string
-  /** Easy DKIM's tokens. Empty until the identity exists. */
-  dkimTokens: readonly string[]
+  /** The DNS label the DKIM key is published under. */
+  dkimSelector: string | null
+  /** base64 SPKI DER. Not secret. `null` before the key exists. */
+  dkimPublicKey: string | null
+  /**
+   * The domain whose SPF record lists our own MTAs, e.g. `_spf.i10.tech`.
+   *
+   * ⚠ A DEDICATED SUBDOMAIN RATHER THAN THE APEX. SPF allows ten DNS lookups
+   * per evaluation and the apex's record has its own job — it says who may send
+   * as i10.tech. Conflating the two means every customer's SPF inherits every
+   * include we ever add for our own mail, and the limit is reached by a change
+   * nobody connected to customer deliverability.
+   */
+  spfInclude: string
   /** What we currently believe about the domain, stamped on every record. */
   status: DomainStatus
 }
@@ -45,7 +65,9 @@ export function dnsRecordsFor({
   domain,
   mailFromSubdomain,
   region,
-  dkimTokens,
+  dkimSelector,
+  dkimPublicKey,
+  spfInclude,
   status,
 }: RecordInput): DnsRecord[] {
   const mailFrom = `${mailFromSubdomain}.${domain}`
@@ -69,18 +91,28 @@ export function dnsRecordsFor({
       type: "TXT",
       ttl: "Auto",
       status,
-      value: SPF_VALUE,
+      value: spfValue(spfInclude),
     },
-    // Easy DKIM: three CNAMEs pointing at Amazon, who hold the private keys.
-    // Three of them so a key can be rotated without a gap in signing.
-    ...dkimTokens.map((token): DnsRecord => ({
-      record: "DKIM",
-      name: `${token}._domainkey.${domain}`,
-      type: "CNAME",
-      ttl: "Auto",
-      status,
-      value: `${token}.dkim.amazonses.com`,
-    })),
+    /**
+     * ⚠ ONE TXT HOLDING OUR OWN PUBLIC KEY — BYODKIM. Easy DKIM would be three
+     * CNAMEs pointing at Amazon, who would then hold the private half and be
+     * the only party able to sign. That forecloses the routing decision
+     * entirely: a message sent through our own MTA would have no key. One key
+     * we own signs on both routes, so the customer publishes this once and
+     * never touches it again whichever way their mail leaves.
+     */
+    ...(dkimSelector && dkimPublicKey
+      ? [
+          {
+            record: "DKIM",
+            name: `${dkimSelector}._domainkey.${domain}`,
+            type: "TXT" as const,
+            ttl: "Auto",
+            status,
+            value: dkimRecordValue(dkimPublicKey),
+          },
+        ]
+      : []),
     /**
      * ⚠ DMARC IS INCLUDED THOUGH RESEND LISTS IT SEPARATELY, and `p=none` is
      * deliberate. Since 2024 the large mailbox providers require a DMARC record

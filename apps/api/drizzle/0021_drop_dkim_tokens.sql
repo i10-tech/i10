@@ -1,0 +1,12 @@
+-- Easy DKIM's tokens, removed.
+--
+-- ⚠ THEY WERE THE WRONG MECHANISM AND THE SCHEMA ALREADY SAID SO. `core.domains`
+-- has carried `dkim_selector`, `dkim_public_key` and `dkim_private_key_ref`
+-- since it was written — BYODKIM, with the key ours. Easy DKIM was introduced
+-- in 0018 and contradicts it: Amazon generates the pair and holds the private
+-- half, so only Amazon can sign, and a message routed through our own MTA
+-- instead has no key. Choosing the route per message is impossible with it.
+--
+-- Nothing is lost by dropping the column: no domain has ever been created
+-- against it.
+ALTER TABLE "core"."domains" DROP COLUMN "dkim_tokens";

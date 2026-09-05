@@ -141,6 +141,20 @@
       "when": 1788619958701,
       "tag": "0019_meter_ingest",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788620773080,
+      "tag": "0020_byodkim_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788620780343,
+      "tag": "0021_drop_dkim_tokens",
+      "breakpoints": true
     }
   ]
 }

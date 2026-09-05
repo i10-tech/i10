@@ -330,12 +330,22 @@ const app = createApp({
    * to check it. It is handed the meter rather than the `Metering` seam,
    * because the seam answers about one feature and this asks about another.
    */
-  domains: domainStore({
-    db,
-    identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
-    capacity: postgresMeter(db),
-    region: env.AWS_REGION,
-  }),
+  ...(secrets
+    ? {
+        domains: domainStore({
+          db,
+          identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
+          capacity: postgresMeter(db),
+          region: env.AWS_REGION,
+          spfInclude: env.MAIL_SPF_INCLUDE,
+          // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is
+          // nowhere safe to keep a DKIM private key, so the routes answer 501
+          // rather than storing one in the clear — the same rule webhooks
+          // already follow.
+          secrets,
+        }),
+      }
+    : {}),
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets),

@@ -237,19 +237,19 @@ export const domains = core.table(
     sesTenantName: text("ses_tenant_name"),
 
     /**
-     * Easy DKIM's three tokens, from `CreateEmailIdentity`.
+     * The DKIM private key, sealed with `WEBHOOK_SECRET_KEY`.
      *
-     * ⚠ THESE ARE NOT SECRET AND THEY ARE NOT KEYS. Each one becomes a public
-     * CNAME in the customer's DNS pointing at Amazon, who hold the private half
-     * and do the signing. That is the whole reason Easy DKIM is used here
-     * rather than the BYODKIM columns above: there is no private key for i10 to
-     * generate, store, rotate or leak.
+     * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. The column
+     * above says a database backup, a replica or a read-only analytics grant
+     * must never be enough to sign mail as a customer's domain — and with the
+     * key held outside the database, none of them are. The ciphertext is inert
+     * without it.
      *
-     * ⚠ AND THEY MUST SURVIVE, BECAUSE THEY ARE THE RECORDS THE CUSTOMER WAS
-     * TOLD TO PUBLISH. Re-creating the identity mints different tokens, so a
-     * customer who published the first set would silently stop verifying.
+     * ⚠ AND IT IS NEVER RETURNED BY THE API. There is no "show me my DKIM key"
+     * endpoint, for the same reason there is none for a webhook signing secret:
+     * such a call is a better target than the database it would read from.
      */
-    dkimTokens: text("dkim_tokens").array(),
+    dkimPrivateKeySealed: text("dkim_private_key_sealed"),
 
     /**
      * ⚠ SES'S ANSWER, COPIED — NOT DERIVED FROM `verified_at`. A domain can be
