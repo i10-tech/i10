@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   MAILBOXES,
   MAILBOX_DOMAINS,
+  STORAGE,
   SENDING_DOMAINS,
   mailboxDomainsStatement,
   mailboxesStatement,
@@ -99,7 +100,7 @@ describe("reading a level", () => {
    */
   it("throws for a feature it cannot count, rather than answering zero", async () => {
     const { db } = fakeDb(() => [])
-    for (const featureId of ["storage.gb", "emails", "seats"]) {
+    for (const featureId of ["emails", "seats", "storage.gb"]) {
       await expect(postgresLevels(db).levelOf(key(featureId))).rejects.toThrow(
         /no level source/,
       )
@@ -146,5 +147,28 @@ describe("the seat count", () => {
   it("reads through the store", async () => {
     const { db } = fakeDb(() => [{ level: "12" }])
     expect(await postgresLevels(db).levelOf(key(MAILBOXES))).toBe(12)
+  })
+})
+
+describe("the storage level", () => {
+  /**
+   * ⚠ THE LAST SAMPLE, NOT A LIVE READ. Storage lives in Stalwart; asking it on
+   * the request path would put its availability inside ours for an accuracy a
+   * plan limit does not need.
+   */
+  it("reads the sampled figure, not the mail server", async () => {
+    const { db, seen } = fakeDb(() => [{ level: "10737418240" }])
+    expect(await postgresLevels(db).levelOf(key(STORAGE))).toBe(10_737_418_240)
+    expect(seen.some((s) => s.includes("core.tenant_storage"))).toBe(true)
+  })
+
+  /**
+   * ⚠ THE ONE PLACE AN ABSENT ROW IS HONESTLY ZERO. No sample means no mailbox
+   * has ever been measured for this tenant — they hold no storage. An unknown
+   * FEATURE still throws; this is a known feature with no data yet.
+   */
+  it("reads a tenant with no sample as holding nothing", async () => {
+    const { db } = fakeDb(() => [])
+    expect(await postgresLevels(db).levelOf(key(STORAGE))).toBe(0)
   })
 })

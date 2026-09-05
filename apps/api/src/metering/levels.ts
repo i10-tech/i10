@@ -29,6 +29,16 @@ export const MAILBOX_DOMAINS = "domains.mailbox"
 export const MAILBOXES = "mailboxes"
 
 /**
+ * Disk occupied by a tenant's mailboxes, in BYTES.
+ *
+ * ⚠ BYTES, AND THE ALLOWANCE IS IN BYTES TOO. Rounding to gigabytes forces a
+ * choice between a ceiling — where one byte past ten gigabytes reads as eleven
+ * and refuses — and a floor, which hands out up to a gigabyte free. Neither is
+ * defensible on a cap, and with both sides exact there is nothing to round.
+ */
+export const STORAGE = "storage.bytes"
+
+/**
  * ⚠ TWO STATEMENTS RATHER THAN ONE WITH THE COLUMN SUBSTITUTED IN. The column
  * comes from a closed set and never from a request, so interpolating it would
  * be safe today — and it would put an identifier into SQL text built at
@@ -82,10 +92,29 @@ export const mailboxesStatement = (tenantId: string): SQL => sql`
    where tenant_id = ${tenantId}::uuid
 `
 
+/**
+ * ⚠ THE LAST SAMPLE, NOT A LIVE READ. Storage lives in Stalwart and is sampled
+ * on a schedule — see src/mail/storage.ts. Asking the mail server on the
+ * request path would put its availability inside ours for an accuracy nobody
+ * can use: the figure moves continuously and a plan limit does not need it to
+ * the byte-second.
+ *
+ * ⚠ AND A TENANT WITH NO SAMPLE READS AS ZERO, WHICH IS CORRECT HERE AND ONLY
+ * HERE. No row means no mailbox has ever been sampled for them — they hold no
+ * storage. That is the one case where the absent-row answer is the true one,
+ * unlike an unknown FEATURE, which throws.
+ */
+export const storageStatement = (tenantId: string): SQL => sql`
+  select coalesce(bytes, 0)::bigint as level
+    from core.tenant_storage
+   where tenant_id = ${tenantId}::uuid
+`
+
 const SOURCES: Readonly<Record<string, (tenantId: string) => SQL>> = {
   [SENDING_DOMAINS]: sendingDomainsStatement,
   [MAILBOX_DOMAINS]: mailboxDomainsStatement,
   [MAILBOXES]: mailboxesStatement,
+  [STORAGE]: storageStatement,
 }
 
 export function postgresLevels(db: Database): LevelStore {

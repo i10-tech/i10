@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -988,6 +989,50 @@ export const planAssignments = core.table("plan_assignments", {
 
   assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * How much disk each tenant's mailboxes occupy, as last sampled.
+ *
+ * ⚠ A SAMPLE, NOT A LEDGER, AND THE DIFFERENCE IS THE WHOLE DESIGN. Storage is
+ * a LEVEL that goes up and down — a deleted folder frees space — so it cannot
+ * be accumulated from events the way sends are. There is exactly one row per
+ * tenant and it is overwritten; the history, if it is ever wanted, is a
+ * different table with a different retention.
+ *
+ * ⚠ AND IT IS OUR COPY OF SOMEBODY ELSE'S NUMBER. Stalwart computes it and owns
+ * it. This exists so the quota check is an indexed local read rather than a
+ * synchronous call to another service on a request path — see the note on
+ * freshness in `sampledAt`.
+ */
+export const tenantStorage = core.table("tenant_storage", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+
+  /**
+   * ⚠ BYTES, NOT GIGABYTES, AND THE ALLOWANCE IS IN BYTES TOO. Rounding to GB
+   * forces a choice between a ceiling — where one byte past ten gigabytes reads
+   * as eleven and refuses — and a floor, which hands out up to a gigabyte free.
+   * Neither is defensible on a cap, and `draw()` needs no rounding at all if
+   * both sides are exact. The catalogue writes the byte figure and says the GB
+   * equivalent in a comment.
+   *
+   * ⚠ `bigint`, BECAUSE A TERABYTE DOES NOT FIT IN AN `integer`. 2^31 bytes is
+   * 2.1 GB — a limit some tenants would pass in their first month.
+   */
+  bytes: bigint("bytes", { mode: "number" }).notNull(),
+
+  /**
+   * When the figure was taken.
+   *
+   * ⚠ THE GATE READS A NUMBER THAT IS MINUTES OLD, ON PURPOSE. A mailbox quota
+   * check at delivery time is Stalwart's own business and it does that itself,
+   * exactly; ours is for plan limits and billing, where a synchronous call to
+   * another service on the request path would put its availability inside ours
+   * for no accuracy anyone can use.
+   */
+  sampledAt: timestamp("sampled_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
 /**

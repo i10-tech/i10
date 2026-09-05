@@ -59,6 +59,8 @@ import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 import { postgresEntitlements, postgresLedger } from "./metering/service.js"
 import { flushUsage } from "./metering/ingest.js"
+import { sampleStorage } from "./mail/storage.js"
+import { stalwartStorage } from "./mail/stalwart.js"
 import {
   needsAttention,
   reconcileSes,
@@ -208,6 +210,39 @@ await withMonitor(
       log.error({ err: error }, "usage reconciliation failed")
       captureError(error)
       process.exitCode = 1
+    }
+
+    // ── storage sample ──────────────────────────────────────────────────────
+    //
+    // ⚠ IT RUNS HERE RATHER THAN ON ITS OWN SCHEDULE BECAUSE IT IS THE SAME KIND
+    // OF WORK: a number that lives somewhere else, pulled on a cadence, with
+    // nobody waiting on it. Thirty minutes is far finer than a storage limit
+    // needs — the figure moves in megabytes over hours.
+    if (env.STALWART_URL && env.STALWART_API_TOKEN) {
+      try {
+        const report = await sampleStorage({
+          db,
+          mail: stalwartStorage({
+            baseUrl: env.STALWART_URL,
+            token: env.STALWART_API_TOKEN,
+          }),
+          log,
+        })
+
+        // ⚠ FAILURES ARE LOGGED AND NOT FATAL. A mailbox we could not read
+        // leaves that tenant's previous total standing, which is stale and
+        // honest; the run itself has nothing to repair.
+        log.info(report, "storage sample complete")
+      } catch (error) {
+        log.error({ err: error }, "storage sample failed")
+        captureError(error)
+        process.exitCode = 1
+      }
+    } else {
+      log.warn(
+        { stalwart: Boolean(env.STALWART_URL) },
+        "storage not sampled — STALWART_URL or STALWART_API_TOKEN is unset",
+      )
     }
 
     // ── 3. usage → polar ────────────────────────────────────────────────────

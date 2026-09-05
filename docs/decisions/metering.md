@@ -471,16 +471,36 @@ two would have required us to start.
 answer only if the admin API turns out to miss something or to cost too much to
 poll. It is a decision to revisit with a reason, not a preference to act on.
 
-⚠ **ONE THING TO CONFIRM BEFORE BUILDING:** whether Stalwart's own _tenant_
-object is available in the edition we run, or whether we sum
-`get_used_quota_account` over the mailboxes `authd.accounts.tenant_id` already
-attributes to each tenant. Both work; only one is a single call.
+⚠ **THE TENANT CALL IS ENTERPRISE, SO WE SUM ACCOUNTS.** Confirmed 2026-09-05:
+`validate_tenant_quota` in `crates/jmap/src/registry/mapping/principal.rs` is
+`#[cfg(feature = "enterprise")]` under their SEL licence, and we run the
+community image (`stalwartlabs/stalwart:v0.16.19-alpine`).
+`get_used_quota_account` is not gated, so the sampler asks per mailbox and
+groups by `authd.accounts.tenant_id` — which is what writing that column
+bought.
 
-**Shape when built:** a sampling job reads the figure and writes it to a level
-we own, and `storage.gb` in `src/metering/levels.ts` reads that. ⚠ **Not read
-on the request path** — a mailbox quota check is Stalwart's own business, and
-ours is for limits and billing, where a figure minutes old is fine and a
-synchronous call to another service is not.
+**Built 2026-09-05.** `src/mail/storage.ts` samples on the reconcile job's
+cadence and writes `core.tenant_storage`; `storage.bytes` in
+`src/metering/levels.ts` reads that. ⚠ **Not read on the request path** — a
+mailbox quota check is Stalwart's own business, and ours is for limits and
+billing, where a figure minutes old is fine and a synchronous call to another
+service is not.
+
+⚠ **BYTES, NOT GIGABYTES, ON BOTH SIDES.** Rounding to GB forces a choice
+between a ceiling — one byte past ten gigabytes reads as eleven and refuses —
+and a floor, which hands out up to a gigabyte free. Neither is defensible on a
+cap, and with both sides exact there is nothing to round.
+
+⚠ **A TENANT WITH ONE UNREADABLE MAILBOX GETS NO WRITE AT ALL.** A partial sum
+is a number that looks right and is silently low, which on a cap lets them past
+their limit and on billing under-charges — both invisibly. The previous sample
+stands instead: stale and honest.
+
+⚠ **AND THE JMAP CALL ITSELF IS THE ONE THING NO REPOSITORY CAN CONFIRM.**
+`src/mail/stalwart.ts` throws on any response it does not recognise and never
+returns 0, because a wrong guess about the wire shape would otherwise read as
+"this mailbox uses no space" and grant the whole allowance to everybody. It
+needs one run against a real server.
 
 ### Human mail: the second feature kind
 
@@ -1045,7 +1065,12 @@ tiers move.
       `sends: true, hosts_mailboxes: false`.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
-      ⚠ Neither is available yet; see the tenant_id question above.
+      `mailboxes` currently counts `authd.accounts`.
+- [ ] ⚠ **The Stalwart JMAP call in `src/mail/stalwart.ts` has never run against
+      a server.** The property is read from their source; the method name and
+      envelope are not confirmable from a repository.
+- [ ] The storage and mailbox limits themselves. 0027 seeds 0/0 for free and
+      1 mailbox / 10 GiB for pro as placeholders.
 
 ## Sequence
 

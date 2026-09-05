@@ -252,6 +252,17 @@ const schema = z.object({
    * the fact of it, which is the reason to move this to Cloudflare or Route 53
    * rather than a reason it is fine.
    */
+  /**
+   * Stalwart's API, for sampling how much disk each tenant's mailboxes use.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE SKIPS THE SAMPLE RATHER THAN ZEROING IT. A
+   * deployment that cannot ask the mail server must leave the last figure
+   * standing: replacing it with 0 would hand every tenant their whole storage
+   * allowance back, silently, and in the direction nobody reports.
+   */
+  STALWART_URL: z.url().optional(),
+  STALWART_API_TOKEN: z.string().min(1).optional(),
+
   MAIL_NAMESERVERS: z
     .string()
     .default("ns1.i10.tech,ns2.i10.tech")
