@@ -15,8 +15,8 @@ import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
 import { emailLookup } from "./send/lookup.js"
-import { autumnClient, autumnMetering } from "./send/autumn.js"
-import { resilient, unmetered } from "./send/metering.js"
+import { resilient } from "./send/metering.js"
+import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
@@ -73,33 +73,23 @@ const queueRedis = createQueueClient(env.REDIS_URL)
 queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
 
 /**
- * ⚠ THE ONE PLACE THAT DECIDES WHETHER SENDING IS METERED AT ALL, AND IT SAYS
- * SO IN THE BOOT LOG. No key means `unmetered`: everything allowed, nothing
- * counted. That is right for a local checkout and catastrophic to discover in
- * production a month later, so it is a line you can grep for rather than a
- * silent default.
+ * ⚠ THERE IS NO LONGER AN UNMETERED MODE TO FALL INTO, AND THAT IS THE POINT OF
+ * THE SWAP. This used to hinge on `AUTUMN_SECRET_KEY`: no key meant every send
+ * allowed and nothing counted — right for a local checkout, catastrophic to
+ * discover in production a month later, and so a line you could grep for rather
+ * than a silent default. Usage now lives in the database the API cannot start
+ * without, so the state that needed announcing no longer exists.
  *
- * `resilient` wraps whichever it is, so a metering outage degrades to
- * "unavailable" — which `shouldSend` turns into a send — instead of refusing a
- * paying customer's password resets.
+ * `resilient` still wraps it. The database can be unreachable too, and the
+ * policy has not changed: a metering outage degrades to `unavailable`, which
+ * `shouldSend` turns into a send, rather than refusing a paying customer's
+ * password resets.
  */
 const metering = resilient(
-  env.AUTUMN_SECRET_KEY
-    ? autumnMetering({
-        baseUrl: env.AUTUMN_URL,
-        secretKey: env.AUTUMN_SECRET_KEY,
-        featureId: env.AUTUMN_FEATURE_ID,
-        freePlanId: env.AUTUMN_FREE_PLAN_ID,
-        timeoutMs: env.AUTUMN_TIMEOUT_MS,
-        log,
-      })
-    : unmetered,
+  postgresMetering({ db, featureId: env.METERING_FEATURE_ID, log }),
   log,
 )
-log.info(
-  { metered: Boolean(env.AUTUMN_SECRET_KEY), feature: env.AUTUMN_FEATURE_ID },
-  env.AUTUMN_SECRET_KEY ? "metering via autumn" : "UNMETERED — no AUTUMN_SECRET_KEY",
-)
+log.info({ feature: env.METERING_FEATURE_ID }, "metering via postgres")
 
 /**
  * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
@@ -143,22 +133,20 @@ const subscriptions = subscriptionOps(db)
  * ⚠ THE ONLY OBJECT IN THIS PROCESS THAT CAN MOVE A CUSTOMER BETWEEN PLANS, and
  * it reaches exactly two places: `subscriptionGrants`, which acts on verified
  * Polar events, and tenant provisioning, which puts a brand-new tenant on the
- * free plan. Nothing else is handed it.
+ * free plan. Nothing else is handed it — everything else gets `metering`, which
+ * exposes quota and usage and nothing that could grant anything.
+ *
+ * ⚠ AND IT IS NO LONGER OPTIONAL, WHICH REMOVES A WHOLE FAILURE MODE. Without
+ * Autumn there was no granting at all, so the Polar receiver answered 503 and
+ * every paying customer sat on free-tier limits until somebody noticed. An
+ * assignment is a row in our own database; there is nothing left to be absent.
  */
-const entitlements = env.AUTUMN_SECRET_KEY
-  ? autumnClient({
-      baseUrl: env.AUTUMN_URL,
-      secretKey: env.AUTUMN_SECRET_KEY,
-      featureId: env.AUTUMN_FEATURE_ID,
-      freePlanId: env.AUTUMN_FREE_PLAN_ID,
-      timeoutMs: env.AUTUMN_TIMEOUT_MS,
-      log,
-    })
-  : null
+const entitlements = postgresEntitlements({
+  db,
+  freePlanId: env.METERING_FREE_PLAN_ID,
+})
 
-const grants = entitlements
-  ? subscriptionGrants({ subscriptions, entitlements, log })
-  : null
+const grants = subscriptionGrants({ subscriptions, entitlements, log })
 
 /**
  * Sign-up: a Clerk organization becomes a tenant, and a user with no
@@ -174,7 +162,7 @@ const provisioning = tenantProvisioning({
     },
   },
   tenants: tenantStore(db),
-  ...(entitlements ? { entitlements } : {}),
+  entitlements,
   log,
 })
 
@@ -189,7 +177,7 @@ const polar = env.POLAR_ACCESS_TOKEN
 const planOptions = {
   planForProduct: (productId: string) =>
     Object.entries(env.POLAR_PRODUCTS).find(([, id]) => id === productId)?.[0],
-  freePlanId: env.AUTUMN_FREE_PLAN_ID,
+  freePlanId: env.METERING_FREE_PLAN_ID,
 }
 
 log.info(

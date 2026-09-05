@@ -1,7 +1,7 @@
 # Metering, and getting off Autumn
 
-**Decided:** 2026-09-04. **Status:** steps 2 and 3 shipped; nothing is wired to
-them yet.
+**Decided:** 2026-09-04. **Status:** steps 2–4 shipped. Autumn still runs and
+is no longer wired to anything.
 
 The reasoning below is preserved as it was argued, not rewritten as work lands
 — the sequence at the bottom is the only part that tracks state. Autumn keeps
@@ -568,7 +568,24 @@ tiers move.
    own table rather than a read of `core.messages`, because the reconciler
    compares two independently-derived numbers and reading the meter off
    `messages` would have it compare a number against itself.
-4. Swap `Metering` to the new implementation behind the existing interface.
+4. ~~Swap `Metering` to the new implementation behind the existing interface.~~
+   **DONE 2026-09-05.** Three seams moved, not one: `Metering` (quota and
+   usage), `Entitlements` (plan granting and signup), and the reconciler's
+   ledger. Autumn's client is still in the tree and is now imported by nothing.
+   ⚠ **`unentitled` maps to `unavailable`, never to `exceeded`.** A tenant with
+   no plan is our misconfiguration, and reporting it as "you have used your
+   allowance" tells a customer who has sent nothing to go and upgrade — after
+   which the mistake is invisible.
+   ⚠ **The reconciler's cross-tenant reads were raising, not running.** Every
+   policy in `core` reads `app.tenant_id` strictly and only `withTenant()` sets
+   it, so `sentUsageStatement` and `activeTenantsStatement` failed on their
+   first statement from the job. Migration 0013 gives both a `SECURITY DEFINER`
+   snapshot, and the top-up read now runs inside `withTenant`. **`reconcile-ses.ts`
+   has the same defect and is untouched** — it queries `core.messages` and
+   `core.message_events` directly from the same job.
+   ⚠ **There is no longer an unmetered mode.** It used to hinge on
+   `AUTUMN_SECRET_KEY` being absent; usage now lives in the database the API
+   cannot start without.
 5. Retire Autumn. **~1.3 GiB back.**
 6. Cloudflare free tier: WAF, format gate, SNS verification.
 7. When there is revenue: $5 Workers Paid → DO counter, then DO webhooks.

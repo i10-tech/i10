@@ -182,6 +182,31 @@ const schema = z.object({
   // ── metering ──────────────────────────────────────────────────────────────
 
   /**
+  /**
+   * The metered feature every email is one unit of.
+   *
+   * ⚠ IT IS A ROW IN `core.plans`' entitlements, AND RENAMING IT DOES NOT FAIL.
+   * A feature id no plan grants resolves to `unentitled`, which fails open — so
+   * every send goes, unmetered and unbilled, with only a log line to say so.
+   * The same warning was true of Autumn's catalogue and is the reason
+   * `unentitled` is a separate outcome rather than folded into `exceeded`.
+   */
+  METERING_FEATURE_ID: z.string().min(1).default("emails"),
+
+  /**
+   * The plan a brand-new tenant lands on.
+   *
+   * ⚠ IT MUST EXIST IN `core.plans`, WHICH IS WHY MIGRATION 0012 SEEDS IT
+   * RATHER THAN LEAVING IT TO A JOB. A tenant assigned a plan id that is not
+   * there has no entitlement at all — and unlike a missing catalogue in a
+   * remote service, this one is a foreign key, so the assignment fails loudly
+   * instead of leaving a customer silently unmetered.
+   */
+  METERING_FREE_PLAN_ID: z.string().min(1).default("free"),
+
+  // ── autumn (being retired — see docs/decisions/metering.md) ───────────────
+
+  /**
    * Autumn, which owns balances, entitlements and usage.
    *
    * ⚠ SELF-HOSTED, SO THE BASE URL IS CONFIGURATION RATHER THAN A CONSTANT. The

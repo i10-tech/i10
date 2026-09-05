@@ -1,14 +1,16 @@
-import type { Database } from "../db/client.js"
-import type { AutumnClient, Logger } from "./autumn.js"
+import { withTenant, type Database } from "../db/client.js"
+import type { Logger } from "./autumn.js"
 import {
   activeTenantsStatement,
   missingCustomers,
   reconcile,
   sentUsageStatement,
   unbilledIdsStatement,
+  type CustomerDirectory,
   type ReconcileResult,
   type TenantRef,
   type UsageBucket,
+  type UsageLedger,
 } from "./reconcile.js"
 import {
   billedButUnconfirmedStatement,
@@ -46,11 +48,12 @@ import {
 const FINDING_LIMIT = 500
 
 /**
- * ⚠ HOW MANY MESSAGES ONE PASS WILL TOP UP, AND IT IS A RATE LIMIT AS MUCH AS A
- * BUDGET. The top-up uses Autumn's single `track` — one request per message,
- * because only that endpoint takes an idempotency key — and Autumn rate-limits
- * to ten requests per second per organisation. A deficit larger than this is
- * carried to the next run rather than spent hammering them.
+ * ⚠ HOW MANY MESSAGES ONE PASS WILL TOP UP. It was a vendor rate limit — Autumn
+ * allowed ten requests per second per organisation, and only its single `track`
+ * took an idempotency key — and against our own ledger it is a bound on how
+ * much work one pass does instead: each id is its own idempotent write, so a
+ * large deficit is carried to the next run rather than held open in one long
+ * loop while the send path is using the same pool.
  */
 const TOPUP_LIMIT = 200
 
@@ -142,7 +145,7 @@ export interface UsageReport extends ReconcileResult {
  */
 export async function reconcileUsage(
   db: Database,
-  entitlements: AutumnClient,
+  entitlements: UsageLedger,
   from: Date,
   to: Date,
   log: Logger,
@@ -169,15 +172,24 @@ export async function reconcileUsage(
     const periodEnd = new Date(bucket.periodStart.getTime() + 86_400_000)
 
     try {
+      // ⚠ INSIDE `withTenant`, UNLIKE THE TWO SNAPSHOTS ABOVE. This one names a
+      // single tenant, so it needs no privileged function — but `core.messages`
+      // is still under row level security, and a read issued without a tenant
+      // context raises rather than returning rows.
       const ids = (
-        (await db.execute(
-          unbilledIdsStatement(
-            bucket.tenantId,
-            bucket.periodStart,
-            periodEnd,
-            Math.min(bucket.deficit, TOPUP_LIMIT),
-          ),
-        )) as unknown as Row[]
+        await withTenant(
+          db,
+          bucket.tenantId,
+          async (tx) =>
+            (await tx.execute(
+              unbilledIdsStatement(
+                bucket.tenantId,
+                bucket.periodStart,
+                periodEnd,
+                Math.min(bucket.deficit, TOPUP_LIMIT),
+              ),
+            )) as unknown as Row[],
+        )
       ).map((r) => String(r.id))
 
       for (const id of ids) {
@@ -252,7 +264,7 @@ export interface TenantCustomerReport {
  */
 export async function reconcileTenantCustomers(
   db: Database,
-  entitlements: AutumnClient,
+  entitlements: CustomerDirectory,
   log: Logger,
 ): Promise<TenantCustomerReport> {
   const tenants: TenantRef[] = (

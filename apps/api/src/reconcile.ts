@@ -57,7 +57,7 @@ import { reconcileSubscriptions } from "./billing/reconcile.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
-import { autumnClient } from "./send/autumn.js"
+import { postgresEntitlements, postgresLedger } from "./metering/service.js"
 import {
   needsAttention,
   reconcileSes,
@@ -91,7 +91,11 @@ await withMonitor(
     log,
   },
   async () => {
-    if (!env.POLAR_ACCESS_TOKEN || !env.AUTUMN_SECRET_KEY) {
+    // ⚠ THE METER IS NO LONGER PART OF THIS CONDITION, BECAUSE IT IS NO LONGER
+    // A SERVICE THAT CAN BE ABSENT. Usage lives in our own database, so the
+    // usage and tenant legs run on any deployment that has one; only the Polar
+    // leg needs a credential.
+    if (!env.POLAR_ACCESS_TOKEN) {
       // ⚠ NOT AN ERROR, AND IT STILL CHECKS IN. A deployment with no billing
       // configured has nothing to reconcile, and failing here would put a red
       // CronJob on a cluster that is behaving exactly as configured. Returning
@@ -99,10 +103,7 @@ await withMonitor(
       // `process.exit` would look to Sentry exactly like a run that never
       // happened, and alert every half hour on a correct deployment.
       log.warn(
-        {
-          polar: Boolean(env.POLAR_ACCESS_TOKEN),
-          autumn: Boolean(env.AUTUMN_SECRET_KEY),
-        },
+        { polar: Boolean(env.POLAR_ACCESS_TOKEN) },
         "billing is not fully configured — nothing to reconcile",
       )
       return
@@ -127,20 +128,11 @@ await withMonitor(
       return
     }
 
-    const entitlements = autumnClient({
-      baseUrl: env.AUTUMN_URL,
-      secretKey: env.AUTUMN_SECRET_KEY,
-      featureId: env.AUTUMN_FEATURE_ID,
-      freePlanId: env.AUTUMN_FREE_PLAN_ID,
-      // ⚠ LONGER THAN THE SEND PATH'S, FOR THE SAME REASON AS POLAR'S BELOW.
-      // AUTUMN_TIMEOUT_MS is two seconds because a customer is waiting behind
-      // it and a slow meter must never become a slow send. Nobody is waiting on
-      // this job, and the aggregate and the customer list are both far heavier
-      // than a `check` — two seconds would fail them on size alone and report
-      // it as an outage.
-      timeoutMs: 30_000,
-      log,
-    })
+    // ⚠ THE LEDGER, NOT A BILLING CLIENT. It exposes the aggregate, the
+    // idempotent top-up and the customer list, and nothing that could grant a
+    // plan — see `UsageLedger` and `CustomerDirectory` in send/reconcile.ts.
+    // The timeout that used to live here is gone with the HTTP call it bounded.
+    const entitlements = postgresLedger({ db, featureId: env.METERING_FEATURE_ID })
 
     // ⚠ A WINDOW, NOT "EVERYTHING SINCE THE LAST RUN". Both legs are idempotent
     // and both skip anything inside `EVENT_GRACE`, so overlapping windows cost
@@ -274,11 +266,23 @@ await withMonitor(
         subscriptions,
         // The same client the usage leg reads through. Two would be two sets of
         // timeouts and two connection pools against one service, for nothing.
-        grants: subscriptionGrants({ subscriptions, entitlements, log }),
+        // ⚠ A DIFFERENT OBJECT FROM THE LEDGER THE USAGE LEG READS, AND
+        // DELIBERATELY SO. This one can move a customer between plans; that one
+        // can only count. They were one client while both were Autumn over
+        // HTTP, and splitting them is what makes "only the grant path grants a
+        // plan" a fact about the wiring rather than a rule to remember.
+        grants: subscriptionGrants({
+          subscriptions,
+          entitlements: postgresEntitlements({
+            db,
+            freePlanId: env.METERING_FREE_PLAN_ID,
+          }),
+          log,
+        }),
         options: {
           planForProduct: (productId: string) =>
             Object.entries(env.POLAR_PRODUCTS).find(([, id]) => id === productId)?.[0],
-          freePlanId: env.AUTUMN_FREE_PLAN_ID,
+          freePlanId: env.METERING_FREE_PLAN_ID,
         },
         log,
       })

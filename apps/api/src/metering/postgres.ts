@@ -90,6 +90,66 @@ export const assignStatement = (input: {
 `
 
 /**
+ * Put a tenant on a plan only if they hold none.
+ *
+ * ⚠ `DO NOTHING`, WHERE `assignStatement` DOES `DO UPDATE`, AND THE TWO ARE NOT
+ * INTERCHANGEABLE. This is the signup path: it guarantees a brand-new tenant
+ * has an allowance, and it must never be able to move a paying customer back
+ * onto free. A provisioning webhook Clerk redelivers, or a retry after a
+ * timeout, would do exactly that with an upsert — silently, on a customer who
+ * had already bought Pro.
+ */
+export const ensureStatement = (input: {
+  tenantId: string
+  planId: string
+  anchor: Date
+}): SQL => sql`
+  insert into core.plan_assignments (tenant_id, plan_id, anchor)
+  values (${input.tenantId}::uuid, ${input.planId}, ${input.anchor})
+  on conflict (tenant_id) do nothing
+`
+
+/**
+ * What the ledger holds, per tenant per day, across every tenant.
+ *
+ * ⚠ THROUGH A SECURITY DEFINER FUNCTION, BECAUSE NO TENANT-SCOPED CONNECTION
+ * CAN ANSWER THIS. Row level security shows `i10_api` exactly one tenant, and
+ * the reconciler's question spans all of them — under the policy it would
+ * conclude every other customer's usage had vanished, and its job is to act on
+ * discrepancies. See 0013 for the function and what it deliberately does not
+ * return.
+ */
+export const usageSnapshotStatement = (
+  featureId: string,
+  from: Date,
+  to: Date,
+): SQL => sql`
+  select tenant_id::text as tenant_id, period_start, count
+    from core.meter_usage_snapshot(${featureId}, ${from}, ${to})
+`
+
+/** Every tenant holding a plan. Cross-tenant, so also a definer function. */
+export const assignedTenantIdsStatement = (): SQL => sql`
+  select tenant_id::text as tenant_id from core.assigned_tenant_ids()
+`
+
+/**
+ * Whether one tenant holds a plan, asked directly.
+ *
+ * ⚠ TENANT-SCOPED, SO IT NEEDS NO DEFINER FUNCTION — and it is deliberately a
+ * second question rather than a filter on the list above. A snapshot and a
+ * point lookup can disagree when a tenant is provisioned between them, and
+ * reporting that race as "this tenant has no plan" would page somebody over
+ * nothing.
+ */
+export const hasAssignmentStatement = (tenantId: string): SQL => sql`
+  select 1 as present
+    from core.plan_assignments
+   where tenant_id = ${tenantId}::uuid
+   limit 1
+`
+
+/**
  * What this meter has consumed inside a window.
  *
  * ⚠ HALF-OPEN, MATCHING `windowFor`. `>= start` and `< end`, so an event landing
@@ -152,6 +212,8 @@ export interface PlanAssignments extends AssignmentStore {
    * Polar event, exactly as it was for Autumn's `grantPlan`. This writes a row.
    */
   assign(input: { tenantId: string; planId: string; anchor: Date }): Promise<void>
+  /** Give a tenant a plan if — and only if — they hold none yet. */
+  ensure(input: { tenantId: string; planId: string; anchor: Date }): Promise<void>
 }
 
 export function planAssignmentStore(db: Database): PlanAssignments {
@@ -187,6 +249,12 @@ export function planAssignmentStore(db: Database): PlanAssignments {
     async assign({ tenantId, planId, anchor }) {
       await withTenant(db, tenantId, async (tx) => {
         await tx.execute(assignStatement({ tenantId, planId, anchor }))
+      })
+    },
+
+    async ensure({ tenantId, planId, anchor }) {
+      await withTenant(db, tenantId, async (tx) => {
+        await tx.execute(ensureStatement({ tenantId, planId, anchor }))
       })
     },
   }

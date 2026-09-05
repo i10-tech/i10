@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
+import type { SQL } from "drizzle-orm"
+import { PgDialect } from "drizzle-orm/pg-core"
 import type { Database } from "../src/db/client.js"
 import type { AutumnClient } from "../src/send/autumn.js"
 import {
@@ -15,8 +17,19 @@ const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })
  * reconcile.test.ts and reconcile-ses.test.ts.
  */
 function fakeDb(results: unknown[][]) {
-  const execute = vi.fn(async () => results.shift() ?? [])
-  return { db: { execute } as unknown as Database, execute }
+  const dialect = new PgDialect()
+  // ⚠ `withTenant` issues its `set_config` on the same handle, so it would
+  // otherwise eat the queued result the statement after it is waiting for.
+  const execute = vi.fn(async (query?: SQL) => {
+    if (query && dialect.sqlToQuery(query).sql.includes("set_config")) return []
+    return results.shift() ?? []
+  })
+  const db = {
+    execute,
+    transaction: async (fn: (tx: { execute: typeof execute }) => Promise<unknown>) =>
+      fn({ execute }),
+  } as unknown as Database
+  return { db, execute }
 }
 
 const AT = new Date("2026-09-03T10:00:00Z")

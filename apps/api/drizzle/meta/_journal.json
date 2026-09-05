@@ -92,6 +92,13 @@
       "when": 1788602926110,
       "tag": "0012_metering",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788604387543,
+      "tag": "0013_metering_snapshots",
+      "breakpoints": true
     }
   ]
 }
