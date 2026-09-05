@@ -93,6 +93,37 @@ export interface PolarClient {
    * at-least-once.
    */
   ingestEvents(events: readonly UsageIngestEvent[]): Promise<IngestResult>
+
+  /**
+   * Moves a live subscription to another product.
+   *
+   * ⚠ THIS IS THE ONLY WAY PRORATION HAPPENS THE WAY ANYONE EXPECTS. Polar's
+   * `update.py` has no upgrade/downgrade branch — it acts on
+   * `proration_behavior` alone — so "charge an upgrade now, defer a downgrade"
+   * exists only because WE choose the behaviour per direction. An organisation
+   * default cannot be right for both, and the customer portal only ever uses
+   * the default.
+   */
+  updateSubscription(input: UpdateSubscription): Promise<void>
+
+  /**
+   * A short-lived token for the embedded payment-method form.
+   *
+   * ⚠ MINTED SERVER-SIDE, WHICH IS WHY THIS EXISTS AT ALL. The embed needs a
+   * credential and the only alternative is putting our Polar access token in a
+   * browser. The session lasts an hour and is scoped to one customer.
+   */
+  createCustomerSession(tenantId: string): Promise<{ token: string }>
+}
+
+/** Polar's four behaviours. We use two; see `prorationFor`. */
+export type ProrationBehavior = "invoice" | "prorate" | "next_period" | "reset"
+
+export interface UpdateSubscription {
+  subscriptionId: string
+  /** The Polar product to move to. From POLAR_PRODUCTS, never from a request. */
+  productId: string
+  prorationBehavior: ProrationBehavior
 }
 
 export interface UsageIngestEvent {
@@ -224,6 +255,48 @@ export function polarClient(opts: PolarOptions): PolarClient {
         duplicates?: number
       }
       return { inserted: body.inserted ?? 0, duplicates: body.duplicates ?? 0 }
+    },
+
+    async updateSubscription({ subscriptionId, productId, prorationBehavior }) {
+      const response = await call(
+        `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            product_id: productId,
+            proration_behavior: prorationBehavior,
+          }),
+        },
+      )
+
+      // ⚠ POLAR APPLIES THE CHANGE ONLY IF THE PAYMENT SUCCEEDS, for `invoice`
+      // and `prorate`. A failed card is an error here and the subscription is
+      // untouched — which is why this throws rather than reporting a partial
+      // success the caller would have to reconcile.
+      if (!response.ok) {
+        throw new Error(
+          `polar subscription update failed: ${response.status} ${await response.text()}`,
+        )
+      }
+    },
+
+    async createCustomerSession(tenantId) {
+      const response = await call("/v1/customer-sessions", {
+        method: "POST",
+        // ⚠ `external_customer_id`, so neither side needs a lookup table — the
+        // same id Polar already echoes on every subscription webhook.
+        body: JSON.stringify({ external_customer_id: tenantId }),
+      })
+
+      if (!response.ok) {
+        throw new Error(
+          `polar customer session failed: ${response.status} ${await response.text()}`,
+        )
+      }
+
+      const body = (await response.json()) as { token?: string }
+      if (!body.token) throw new Error("polar customer session returned no token")
+      return { token: body.token }
     },
 
     async listSubscriptions() {

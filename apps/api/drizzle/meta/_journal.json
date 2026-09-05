@@ -176,6 +176,13 @@
       "when": 1788622454502,
       "tag": "0024_domain_delegation",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788635175923,
+      "tag": "0025_plan_rank",
+      "breakpoints": true
     }
   ]
 }

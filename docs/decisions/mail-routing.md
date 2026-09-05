@@ -163,6 +163,53 @@ so that is a migration to write rather than a surprise.
 here answering unauthenticated queries from the whole internet, and it has no
 grant on `core` or `authd`.
 
+### What delegation actually grants us
+
+⚠ **THE SUBTREE, AND NOTHING ELSE.** `mail.example.com. NS ns1.i10.tech.` in the
+parent zone means resolvers are referred to us for `mail.example.com` and
+everything below it. Queries for the apex, `www.`, `app.`, or their inbound MX
+go to **their** nameservers; we are never consulted and cannot answer. Creating
+`app.example.com` on a customer's behalf is not something delegation makes
+possible.
+
+What it does grant is everything under the delegated names — we could serve
+`anything.mail.example.com`. That is inherent to NS delegation: the subtree is
+the smallest unit DNS has. Anything narrower means them keeping control and
+handing us an API credential to their whole zone instead, which is a strictly
+worse trust trade.
+
+⚠ **TWO OF THE THREE NAMES CANNOT HOST ANYTHING.** `_domainkey` and `_dmarc` are
+underscore-prefixed, which RFC 1123 excludes from hostnames — no browser
+resolves them, no public CA issues for them. Only `mail.` is an ordinary label,
+and it has to be: SMTP envelope domains must be valid hostnames, so the return
+paths cannot hide behind an underscore.
+
+**A narrower mode is available if that residual still matters:** delegate
+`_domainkey` and `_dmarc` only, and leave the return paths as manual records.
+DKIM rotation — the thing that actually needs to change without asking — stays
+ours, and the delegated surface becomes names that cannot serve a website at
+all. The cost is four manual records instead of zero.
+
+### ⚠ Cloudflare cannot host these zones below Enterprise
+
+Verified against their docs, 2026-09-05.
+
+| feature                                                          | plan required                                         |
+| ---------------------------------------------------------------- | ----------------------------------------------------- |
+| **Subdomain setup** (hosting `mail.example.com` as its own zone) | **Enterprise only** — Free, Pro and Business all "No" |
+| Zone custom nameservers                                          | Business or Enterprise                                |
+| Account custom nameservers                                       | Business (via support) or Enterprise                  |
+
+⚠ **AND THE BLOCKER IS NOT THE BRANDING.** Accepting Cloudflare-branded
+nameservers removes the custom-nameserver requirement entirely — but subdomain
+zones are a separate Enterprise feature, and that is what this design needs.
+Zone custom nameservers would not help either: their names must be subdomains
+of the zone itself, so they would be `ns1.<customer>.com`, never `ns1.i10.tech`.
+
+**Route 53 hosts a subdomain zone natively on no particular tier**, at $0.50 per
+hosted zone per month plus queries — trivial at ten customers, $500/month at a
+thousand. That is the realistic first move off the box.
+
 ### ⚠ One machine is the real cost, and it is not hypothetical
 
 A customer publishing records in their own provider keeps resolving whatever
@@ -187,9 +234,8 @@ being a single point of failure — it has to increase on every write.
 - [ ] The PowerDNS deployment: a manifest, the `pdns` role's password, and the
       glue records for `ns1`/`ns2` at the registrar. ⚠ **None of this exists
       yet** — the zones are written and nothing serves them.
-- [ ] Moving zones to Cloudflare. ⚠ Subdomain zones are an Enterprise feature
-      there and need verifying before the plan depends on it; Route 53 hosts
-      them natively at $0.50 per zone per month.
+- [ ] Moving zones off the box. ⚠ **Cloudflare is not the answer for this, and
+      it is verified rather than suspected** — see below.
 - [ ] i10's own bounce domain for the direct route, and ingesting those bounces
       into `core.message_events` the way SES's already are.
 - [x] ~~Which tier gets which route.~~ **Decided 2026-09-05: free sends direct,

@@ -4,6 +4,7 @@ import pino from "pino"
 import { createApp } from "./app.js"
 import { subscriptionOps } from "./billing/db.js"
 import { subscriptionGrants } from "./billing/grants.js"
+import { planChange } from "./billing/plan-change.js"
 import { polarClient } from "./billing/polar.js"
 import { tenantStore } from "./tenants/db.js"
 import { tenantProvisioning } from "./tenants/provision.js"
@@ -318,6 +319,17 @@ const app = createApp({
           subscriptions,
           products: env.POLAR_PRODUCTS,
           successUrl: env.POLAR_SUCCESS_URL,
+          // ⚠ THE ONLY OBJECT THAT CAN MOVE A PAYING CUSTOMER BETWEEN PRODUCTS,
+          // and it is named rather than reached through `polar` so the wiring
+          // says so. It grants nothing: the entitlement still moves only when
+          // Polar's webhook says the money did.
+          planChange: planChange({
+            db,
+            polar,
+            subscriptions,
+            products: env.POLAR_PRODUCTS,
+            log,
+          }),
           log,
         },
         // Same two dependencies, no `products` and no `grants`: it can read a

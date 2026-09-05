@@ -916,6 +916,21 @@ export const plans = core.table(
     name: text("name").notNull(),
     entitlements: jsonb("entitlements").$type<StoredEntitlement[]>().notNull(),
 
+    /**
+     * Where this plan sits relative to the others. Higher is more.
+     *
+     * ⚠ AN EXPLICIT NUMBER, NOT AN INFERENCE FROM PRICE OR ALLOWANCE. Whether a
+     * plan change is an upgrade decides how Polar prorates it — charged now, or
+     * deferred to the period end — so the answer has to be one somebody chose.
+     * Inferring it from the `emails` allowance breaks the moment a plan is
+     * cheaper on volume and dearer on seats, and inferring it from price means
+     * storing a price we deliberately do not own.
+     *
+     * ⚠ TIES ARE NOT UPGRADES. Two plans at the same rank are a sideways move,
+     * which is neither charged nor deferred — see `directionOf`.
+     */
+    rank: integer("rank").notNull().default(0),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

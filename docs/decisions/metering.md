@@ -444,6 +444,44 @@ invoice is ever computed from the approximate number. But "approximate" now
 needs a stated bound rather than a shrug, and it has to be stated **before**
 sharding, because sharding is what makes the gate loose.
 
+### Storage: the admin API, not their tables
+
+**Decided 2026-09-05.** Verified against `stalwartlabs/stalwart` v0.16.
+
+`crates/jmap/src/registry/get.rs` exposes **`UsedDiskQuota`** as a property of
+the registry's objects, and it is served by two different calls:
+
+- `get_used_quota_account(...)` — one mailbox's usage.
+- `get_used_quota_tenant(...)` — **an entire tenant's, aggregated by Stalwart.**
+
+⚠ **SO THE ADMIN API ANSWERS THE QUESTION WE ACTUALLY HAVE**, which is a
+per-tenant total, rather than the one we would have had to assemble from parts.
+That settles it in favour of the API: reading their tables would mean
+re-deriving a number they already compute, against a pre-1.0 schema their
+release notes change, from a database our connection cannot even reach.
+
+⚠ **AND IT IS NOT THE PER-ACCOUNT PATH, WHICH WE STRUCTURALLY CANNOT USE.**
+Stalwart also reports usage through JMAP `Quota/get` and IMAP `GETQUOTA`
+(`crates/jmap/src/quota/get.rs`, `crates/imap/src/op/quota.rs`) — both
+authenticated **as the account**. We never hold a user's password; the whole
+authd bind-delegation design exists so that we do not. Anything built on those
+two would have required us to start.
+
+**Reading their schema stays the documented fallback**, and it becomes the right
+answer only if the admin API turns out to miss something or to cost too much to
+poll. It is a decision to revisit with a reason, not a preference to act on.
+
+⚠ **ONE THING TO CONFIRM BEFORE BUILDING:** whether Stalwart's own _tenant_
+object is available in the edition we run, or whether we sum
+`get_used_quota_account` over the mailboxes `authd.accounts.tenant_id` already
+attributes to each tenant. Both work; only one is a single call.
+
+**Shape when built:** a sampling job reads the figure and writes it to a level
+we own, and `storage.gb` in `src/metering/levels.ts` reads that. ⚠ **Not read
+on the request path** — a mailbox quota check is Stalwart's own business, and
+ours is for limits and billing, where a figure minutes old is fine and a
+synchronous call to another service is not.
+
 ### Human mail: the second feature kind
 
 ⚠ **`packages/metering` currently models one kind of feature.** Autumn draws
@@ -584,6 +622,33 @@ direction. The allowance is deliberately never prorated; the credits swap
 already produces the right ceiling.
 
 ### The customer deals with us, and we deal with Polar
+
+**Built 2026-09-05.** `POST /billing/plan` in the console's API; the service is
+`src/billing/plan-change.ts`.
+
+⚠ **THE DIRECTION COMES FROM `core.plans.rank`, NOT FROM A PRICE OR AN
+ALLOWANCE.** Whether a change is an upgrade decides how Polar prorates it, so
+the answer has to be one somebody chose. Inferring it from the `emails`
+allowance breaks the first time a plan is cheaper on volume and dearer on
+seats; inferring it from price means storing a price we deliberately do not own.
+Free is 0 and Pro is 10 — the gap is so a plan can be inserted between them
+without renumbering rows that live subscriptions are compared against.
+
+⚠ **A TIE IS A SIDEWAYS MOVE.** Same rank, different id: nothing is charged and
+nothing is deferred, because there is no difference to prorate.
+
+⚠ **THE ROUTE ANSWERS 202, NOT 200.** Polar has accepted the change; the
+entitlement moves when their webhook says it did, through the one path in this
+repository that can grant a plan. The console polls `GET /billing/plan`, exactly
+as it already does after a checkout.
+
+⚠ **AND A DECLINED CARD IS A 402, NOT A 502.** For `invoice`, Polar applies the
+change only if the payment succeeds — the subscription is untouched, and the
+customer's next step is their bank rather than our support queue.
+
+`POST /billing/payment-method-session` mints the customer session token for the
+embedded card form. ⚠ **Server-side, because the alternative is our Polar access
+token in a browser.**
 
 **Decided 2026-09-05.** No `billing.i10.tech` handed to Polar; plan changes
 happen in our console against our API.
@@ -963,8 +1028,9 @@ tiers move.
       costs the customer rather than us. Needed before sharding.
 - [x] ~~Who writes `authd.accounts.tenant_id`.~~ **Answered 2026-09-05** — the
       Clerk projection, from the domain of the address. See 0016.
-- [ ] Where a per-tenant storage figure comes from, given Stalwart's database
-      is separate and its schema is pre-1.0.
+- [x] ~~Where a per-tenant storage figure comes from.~~ **Answered 2026-09-05
+      from their source: the admin API, and it is the better fit.** See
+      "Storage" below.
 - [ ] The domain limits themselves. Free's sending limit is 3 (0017); pro's
       10 and the 0/1 mailbox split are still the placeholders from 0015.
 - [x] ~~There is no way to create a domain, so no limit is enforced anywhere.~~
