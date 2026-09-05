@@ -41,12 +41,37 @@ import type {
  * interval would otherwise flow into the window arithmetic and produce a
  * confidently wrong boundary.
  */
-const entitlement = z.object({
-  featureId: z.string().min(1),
-  allowance: z.union([z.number().nonnegative(), z.literal("unlimited")]),
-  interval: z.enum(["day", "week", "month", "year", "lifetime"]),
-  intervalCount: z.number().int().positive().optional(),
-})
+const allowance = z.union([z.number().nonnegative(), z.literal("unlimited")])
+const overage = z.enum(["billable", "never"])
+
+/**
+ * ⚠ A DISCRIMINATED UNION, MATCHING THE ONE IN `@repo/metering`, SO THAT A
+ * CONTINUOUS ENTITLEMENT CANNOT PARSE WITH A RESET INTERVAL ON IT. `strict()`
+ * is what does that work: without it, `{kind: "continuous", interval: "month"}`
+ * parses cleanly, the extra key is dropped, and the only sign anything was
+ * wrong is a domain limit that behaves correctly. A plan edited through the
+ * dashboard is exactly where that shape arises.
+ */
+const entitlement = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("consumable"),
+      featureId: z.string().min(1),
+      allowance,
+      overage,
+      interval: z.enum(["day", "week", "month", "year", "lifetime"]),
+      intervalCount: z.number().int().positive().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("continuous"),
+      featureId: z.string().min(1),
+      allowance,
+      overage,
+    })
+    .strict(),
+])
 
 const entitlements = z.array(entitlement)
 
@@ -55,11 +80,12 @@ const planRow = z.object({
   source: z.enum(["catalog", "custom"]),
   entitlements: z.unknown(),
   anchor: z.date(),
+  overage_enabled: z.boolean(),
 })
 
 /** One tenant's plan and anchor, or nothing. */
 export const assignmentStatement = (tenantId: string): SQL => sql`
-  select p.id as plan_id, p.source, p.entitlements, a.anchor
+  select p.id as plan_id, p.source, p.entitlements, a.anchor, a.overage_enabled
     from core.plan_assignments a
     join core.plans p on p.id = a.plan_id
    where a.tenant_id = ${tenantId}::uuid
@@ -237,6 +263,7 @@ export function planAssignmentStore(db: Database): PlanAssignments {
         return {
           tenantId,
           anchor: row.anchor,
+          overageEnabled: row.overage_enabled,
           plan: {
             id: row.plan_id,
             source: row.source,

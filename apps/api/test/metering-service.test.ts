@@ -34,19 +34,36 @@ function fakeDb(rowsFor: (statement: string) => unknown[]) {
   return { db, seen }
 }
 
-const onPro = (used: number) => (statement: string) => {
-  if (statement.includes("plan_assignments") && statement.includes("select"))
-    return [
-      {
-        plan_id: "pro",
-        source: "catalog",
-        entitlements: [{ featureId: "emails", allowance: 50_000, interval: "month" }],
-        anchor: ANCHOR,
-      },
-    ]
-  if (statement.includes("sum(value)")) return [{ used: String(used) }]
-  return []
-}
+const onPro =
+  (
+    used: number,
+    { overage = "never", overageEnabled = false } = {} as {
+      overage?: "billable" | "never"
+      overageEnabled?: boolean
+    },
+  ) =>
+  (statement: string) => {
+    if (statement.includes("plan_assignments") && statement.includes("select"))
+      return [
+        {
+          plan_id: "pro",
+          source: "catalog",
+          entitlements: [
+            {
+              kind: "consumable",
+              featureId: "emails",
+              allowance: 50_000,
+              interval: "month",
+              overage,
+            },
+          ],
+          anchor: ANCHOR,
+          overage_enabled: overageEnabled,
+        },
+      ]
+    if (statement.includes("sum(value)")) return [{ used: String(used) }]
+    return []
+  }
 
 describe("checking quota", () => {
   it("allows a request inside the allowance", async () => {
@@ -215,5 +232,37 @@ describe("the ledger the reconciler reads", () => {
 
     expect(await ledger(present.db).customerExists(TENANT)).toBe(true)
     expect(await ledger(absent.db).customerExists(TENANT)).toBe(false)
+  })
+})
+
+/**
+ * ⚠ AN OPTED-IN OVERAGE IS A SEND, AND THE SEAM HAS NO WORD FOR IT ON PURPOSE.
+ * `QuotaOutcome` answers whether the request may proceed; which units were
+ * included and which are billable is decided when the send is RECORDED, because
+ * only then do the message ids exist — and it is those ids that reach Polar's
+ * meter. Attributing at the gate would bill for mail that may never go.
+ */
+describe("sending past the plan", () => {
+  it("allows the send when the plan permits overage and the tenant opted in", async () => {
+    const { db } = fakeDb(onPro(50_000, { overage: "billable", overageEnabled: true }))
+    const metering = postgresMetering({ db, featureId: "emails", now })
+
+    expect(await metering.checkQuota(TENANT, 300)).toEqual({ status: "allowed" })
+  })
+
+  it("refuses when the plan permits it but the tenant has not opted in", async () => {
+    const { db } = fakeDb(onPro(50_000, { overage: "billable" }))
+    const metering = postgresMetering({ db, featureId: "emails", now })
+
+    expect((await metering.checkQuota(TENANT, 300)).status).toBe("exceeded")
+  })
+
+  // ⚠ The customer's switch cannot override a plan that says never — which is
+  // what keeps a hard-capped feature like `domains` hard-capped.
+  it("refuses when the plan says never, however the switch is set", async () => {
+    const { db } = fakeDb(onPro(50_000, { overageEnabled: true }))
+    const metering = postgresMetering({ db, featureId: "emails", now })
+
+    expect((await metering.checkQuota(TENANT, 300)).status).toBe("exceeded")
   })
 })

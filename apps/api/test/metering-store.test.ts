@@ -42,8 +42,17 @@ function fakeDb(rowsFor: (statement: string) => unknown[]) {
 const PLAN_ROW = {
   plan_id: "pro",
   source: "catalog",
-  entitlements: [{ featureId: "emails", allowance: 50_000, interval: "month" }],
+  entitlements: [
+    {
+      kind: "consumable",
+      featureId: "emails",
+      allowance: 50_000,
+      interval: "month",
+      overage: "never",
+    },
+  ],
   anchor: new Date("2026-01-15T00:00:00.000Z"),
+  overage_enabled: false,
 }
 
 describe("finding an assignment", () => {
@@ -53,10 +62,19 @@ describe("finding an assignment", () => {
     expect(await planAssignmentStore(db).find(TENANT)).toEqual({
       tenantId: TENANT,
       anchor: PLAN_ROW.anchor,
+      overageEnabled: false,
       plan: {
         id: "pro",
         source: "catalog",
-        entitlements: [{ featureId: "emails", allowance: 50_000, interval: "month" }],
+        entitlements: [
+          {
+            kind: "consumable",
+            featureId: "emails",
+            allowance: 50_000,
+            interval: "month",
+            overage: "never",
+          },
+        ],
       },
     })
   })
@@ -79,7 +97,13 @@ describe("finding an assignment", () => {
             {
               ...PLAN_ROW,
               entitlements: [
-                { featureId: "emails", allowance: 100, interval: "fortnight" },
+                {
+                  kind: "consumable",
+                  featureId: "emails",
+                  allowance: 100,
+                  interval: "fortnight",
+                  overage: "never",
+                },
               ],
             },
           ]

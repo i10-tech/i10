@@ -1,16 +1,24 @@
 import { describe, expect, it } from "vitest"
 import { entitlementFor } from "../src/plan.js"
-import type { Plan } from "../src/plan.js"
+import type { ConsumableEntitlement, Plan } from "../src/plan.js"
+
+/** Every consumable in this file is a plain, non-overage one unless it says so. */
+const consumable = (
+  e: Omit<ConsumableEntitlement, "kind" | "overage"> &
+    Partial<Pick<ConsumableEntitlement, "overage">>,
+): ConsumableEntitlement => ({ kind: "consumable", overage: "never", ...e })
 
 const free: Plan = {
   id: "free",
   source: "catalog",
-  entitlements: [{ featureId: "emails", allowance: 100, interval: "day" }],
+  entitlements: [consumable({ featureId: "emails", allowance: 100, interval: "day" })],
 }
 
 describe("resolving an entitlement", () => {
   it("finds what the plan grants for a feature", () => {
     expect(entitlementFor(free, "emails")).toEqual({
+      kind: "consumable",
+      overage: "never",
       featureId: "emails",
       allowance: 100,
       interval: "day",
@@ -32,7 +40,7 @@ describe("resolving an entitlement", () => {
       id: "acme-2026",
       source: "custom",
       entitlements: [
-        { featureId: "emails", allowance: "unlimited", interval: "month" },
+        consumable({ featureId: "emails", allowance: "unlimited", interval: "month" }),
       ],
     }
     expect(entitlementFor(enterprise, "emails")?.allowance).toBe("unlimited")
@@ -51,8 +59,8 @@ describe("refusals", () => {
       id: "broken",
       source: "custom",
       entitlements: [
-        { featureId: "emails", allowance: 100, interval: "day" },
-        { featureId: "emails", allowance: 50_000, interval: "month" },
+        consumable({ featureId: "emails", allowance: 100, interval: "day" }),
+        consumable({ featureId: "emails", allowance: 50_000, interval: "month" }),
       ],
     }
     expect(() => entitlementFor(broken, "emails")).toThrow(RangeError)

@@ -972,6 +972,20 @@ tiers move.
    ⚠ **There is no longer an unmetered mode.** It used to hinge on
    `AUTUMN_SECRET_KEY` being absent; usage now lives in the database the API
    cannot start without.
+   4b. ~~The feature-kind split.~~ **DONE 2026-09-05.** `Entitlement` is a
+   discriminated union on `kind`, so a continuous feature cannot carry a reset
+   interval — the compiler refuses the shape rather than a validator catching
+   it. `draw()` gained `overage`, resolved from the plan's policy AND the
+   tenant's switch, both of which must agree. `LevelStore` is a second port
+   beside `UsageStore`.
+   ⚠ **No level adapters yet.** `createMeter` throws by name if a continuous
+   entitlement resolves with no level store, which is the state today — the
+   counts over `core.domains`, the mailbox count and the storage read are the
+   next piece.
+   ⚠ **And `emails` is seeded `overage: "never"`.** Billed overage needs the
+   meter, the metered price, the credits benefit and the ingest, none of which
+   exist; a catalogue promising it first would let a customer send past their
+   plan with no way to invoice for it.
 5. Retire Autumn. **~1.3 GiB back.**
 6. Cloudflare free tier: WAF, format gate, SNS verification.
 7. When there is revenue: $5 Workers Paid → DO counter, then DO webhooks.

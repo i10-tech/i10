@@ -74,6 +74,36 @@ export interface UsageStore {
   record(key: MeterKey, events: readonly UsageEvent[]): Promise<RecordResult>
 }
 
+/**
+ * Where a continuous feature's level is read from.
+ *
+ * ⚠ IT IS A SEPARATE PORT FROM `UsageStore`, NOT A METHOD ON IT, BECAUSE THE
+ * TWO READ DIFFERENT KINDS OF THING FROM DIFFERENT PLACES. Usage is a sum of
+ * events this package's own ledger recorded. A level is the count of things
+ * that presently exist, and it is owned by whoever owns those things — rows in
+ * `core.domains`, mailboxes in the identity projection, bytes reported by the
+ * mail server. Metering does not write any of them and must never try to keep
+ * its own copy: the copy is what goes stale, and a stale seat count either
+ * refuses a mailbox the customer is entitled to or bills one they deleted.
+ *
+ * ⚠ AND THE LEVEL COUNTS WHAT EXISTS, NOT WHAT IS VERIFIED OR ACTIVE. An
+ * unverified domain holds a slot; a deactivated mailbox still holds its
+ * storage. Counting only the working ones lets a tenant park fifty pending
+ * domains against a limit of three.
+ */
+export interface LevelStore {
+  /**
+   * How much of this feature the tenant currently holds.
+   *
+   * ⚠ ONE READ PER FEATURE, AND THE ADAPTER DECIDES WHAT IT MEANS. `meterKey`
+   * carries the feature id, so `domains.sending` and `domains.mailbox` are two
+   * different questions against the same table — and a domain that does both
+   * counts in both, because each is a count over its own flag rather than a
+   * partition of one total.
+   */
+  levelOf(key: MeterKey): Promise<number>
+}
+
 export interface AssignmentStore {
   /**
    * The plan this tenant holds, or `null` if they hold none.

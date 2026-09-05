@@ -98,3 +98,72 @@ describe("refusals", () => {
     expect(() => draw({ allowance: -5, used: 0, requested: 1 })).toThrow(RangeError)
   })
 })
+
+/**
+ * ⚠ ACCEPTED WHOLE, ATTRIBUTED IN TWO PARTS. This is NOT the partial acceptance
+ * refused above — the batch still goes in full. What splits is which units are
+ * covered by the plan and which land on an invoice.
+ */
+describe("overage", () => {
+  it("splits a batch that crosses the line, without trimming it", () => {
+    expect(draw({ allowance: 1000, used: 700, requested: 500, overage: true })).toEqual(
+      { status: "overage", remaining: 0, included: 300, billable: 200 },
+    )
+  })
+
+  it("bills the whole request once the allowance is already spent", () => {
+    expect(draw({ allowance: 100, used: 100, requested: 5, overage: true })).toEqual({
+      status: "overage",
+      remaining: 0,
+      included: 0,
+      billable: 5,
+    })
+  })
+
+  it("stays `allowed` while the request still fits", () => {
+    expect(draw({ allowance: 100, used: 10, requested: 5, overage: true })).toEqual({
+      status: "allowed",
+      remaining: 85,
+    })
+  })
+
+  // ⚠ THE DEFAULT IS A HARD CAP. A caller that forgets the flag gets a refusal,
+  // never a surprise invoice — the safe direction for the customer.
+  it("refuses rather than bills when the flag is absent", () => {
+    expect(draw({ allowance: 100, used: 100, requested: 5 })).toEqual({
+      status: "exceeded",
+      remaining: 0,
+      shortfall: 5,
+    })
+  })
+
+  /**
+   * ⚠ AN OVERDRAFT IS STILL BILLED FROM ZERO, NOT FROM THE NEGATIVE. `used` past
+   * the allowance is a tolerated state of an approximate gate; billing the gap
+   * as well would charge the customer for our imprecision twice.
+   */
+  it("bills only this request when used is already past the allowance", () => {
+    expect(draw({ allowance: 100, used: 140, requested: 10, overage: true })).toEqual({
+      status: "overage",
+      remaining: 0,
+      included: 0,
+      billable: 10,
+    })
+  })
+
+  // ⚠ There is no allowance to be past, so there is nothing to bill — an
+  // unlimited feature producing billable units is a contradiction on an invoice.
+  it("never bills an unlimited allowance", () => {
+    expect(
+      draw({ allowance: "unlimited", used: 10_000, requested: 5, overage: true })
+        .status,
+    ).toBe("allowed")
+  })
+
+  it("still allows a request for nothing", () => {
+    expect(draw({ allowance: 100, used: 250, requested: 0, overage: true })).toEqual({
+      status: "allowed",
+      remaining: 0,
+    })
+  })
+})

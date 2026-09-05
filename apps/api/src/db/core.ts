@@ -746,12 +746,31 @@ export const planSource = core.enum("plan_source", ["catalog", "custom"])
  * is declared here rather than imported so the schema stays free of a
  * dependency that drizzle-kit would have to resolve.
  */
-export interface StoredEntitlement {
-  featureId: string
-  allowance: number | "unlimited"
-  interval: "day" | "week" | "month" | "year" | "lifetime"
-  intervalCount?: number
-}
+export type StoredEntitlement =
+  | {
+      /** Used up and replenished: emails. Has a reset cycle. */
+      kind: "consumable"
+      featureId: string
+      allowance: number | "unlimited"
+      overage: "billable" | "never"
+      interval: "day" | "week" | "month" | "year" | "lifetime"
+      intervalCount?: number
+    }
+  | {
+      /**
+       * Held persistently: domains, mailboxes, storage.
+       *
+       * ⚠ NO `interval`, AND THE UNION IS WHY RATHER THAN A COMMENT. A domain
+       * does not refill. A shape that can carry a reset interval is one
+       * somebody eventually sets, after which the limit silently scopes itself
+       * to a window and every domain created before the boundary stops
+       * counting.
+       */
+      kind: "continuous"
+      featureId: string
+      allowance: number | "unlimited"
+      overage: "billable" | "never"
+    }
 
 /**
  * The plan catalogue, and the bespoke plans beside it.
@@ -828,6 +847,21 @@ export const planAssignments = core.table("plan_assignments", {
    * DO UPDATE, which is where the rule is actually enforced.
    */
   anchor: timestamp("anchor", { withTimezone: true }).notNull(),
+
+  /**
+   * The customer's own switch: "keep going past my plan and bill me".
+   *
+   * ⚠ OFF BY DEFAULT, AND IT IS THE CUSTOMER'S TO SET. It is the whole
+   * difference between "your sends stopped" and "you owe us twenty-seven
+   * dollars you did not expect", and only one of those is a decision we are
+   * entitled to make on somebody's behalf.
+   *
+   * ⚠ AND IT GRANTS NOTHING ON ITS OWN. Each entitlement says whether that
+   * feature may be exceeded at all; this only turns it on where the plan
+   * already permits it. A tenant with this set still cannot buy a fourth
+   * domain, because nobody sells a fourth domain.
+   */
+  overageEnabled: boolean("overage_enabled").notNull().default(false),
 
   assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

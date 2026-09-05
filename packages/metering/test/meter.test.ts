@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createMeter } from "../src/meter.js"
 import { formatMeterKey } from "../src/key.js"
 import type { ResetWindow } from "../src/interval.js"
-import type { Assignment, Plan } from "../src/plan.js"
+import type { Assignment, Entitlement, OveragePolicy, Plan } from "../src/plan.js"
 import type {
   AssignmentStore,
   RecordResult,
@@ -18,18 +18,31 @@ const ANCHOR = at("2026-01-15T00:00:00.000Z")
 const free: Plan = {
   id: "free",
   source: "catalog",
-  entitlements: [{ featureId: "emails", allowance: 100, interval: "day" }],
+  entitlements: [emails(100, "day")],
 }
 
 const pro: Plan = {
   id: "pro",
   source: "catalog",
-  entitlements: [{ featureId: "emails", allowance: 50_000, interval: "month" }],
+  entitlements: [emails(50_000, "month")],
 }
 
-const assigned = (plan: Plan, anchor = ANCHOR): AssignmentStore => ({
+function emails(
+  allowance: number,
+  interval: "day" | "month" | "lifetime",
+  overage: OveragePolicy = "never",
+): Entitlement {
+  return { kind: "consumable", featureId: "emails", allowance, interval, overage }
+}
+
+const assigned = (
+  plan: Plan,
+  { anchor = ANCHOR, overageEnabled = false } = {},
+): AssignmentStore => ({
   find: async (tenantId) =>
-    tenantId === TENANT ? ({ tenantId, plan, anchor } satisfies Assignment) : null,
+    tenantId === TENANT
+      ? ({ tenantId, plan, anchor, overageEnabled } satisfies Assignment)
+      : null,
 })
 
 /** ⚠ Idempotent on `id`, because a real adapter has to be. */
@@ -142,7 +155,7 @@ describe("checking", () => {
     const credits: Plan = {
       id: "credit-pack",
       source: "custom",
-      entitlements: [{ featureId: "emails", allowance: 500, interval: "lifetime" }],
+      entitlements: [emails(500, "lifetime")],
     }
     const { store } = memoryUsage()
     const meter = createMeter({ assignments: assigned(credits), usage: store })
@@ -363,5 +376,83 @@ describe("windowOf", () => {
     expect(
       await meter.windowOf({ tenantId: TENANT, featureId: "emails", at: ANCHOR }),
     ).toBeNull()
+  })
+})
+
+/**
+ * The consumable half of the overage rule — the continuous half is in
+ * continuous.test.ts. Both must agree, because the resolution happens once in
+ * `createMeter` for either kind.
+ */
+describe("emails past the plan", () => {
+  const proBillable: Plan = {
+    id: "pro",
+    source: "catalog",
+    entitlements: [emails(50_000, "month", "billable")],
+  }
+  const key = `${TENANT}:emails:0`
+  const seeded = () =>
+    memoryUsage([{ ...usageAt("m1", "2026-02-01T06:00:00.000Z", 49_900), key }])
+  const now = at("2026-02-01T09:00:00.000Z")
+
+  it("splits the batch and keeps the reset date", async () => {
+    const meter = createMeter({
+      assignments: assigned(proBillable, { overageEnabled: true }),
+      usage: seeded().store,
+    })
+
+    expect(
+      await meter.check({
+        tenantId: TENANT,
+        featureId: "emails",
+        requested: 300,
+        at: now,
+      }),
+    ).toEqual({
+      status: "overage",
+      included: 100,
+      billable: 200,
+      resetsAt: at("2026-02-15T00:00:00.000Z"),
+    })
+  })
+
+  // ⚠ The plan permitting overage is not the customer consenting to it.
+  it("refuses when the tenant has not switched it on", async () => {
+    const meter = createMeter({
+      assignments: assigned(proBillable, { overageEnabled: false }),
+      usage: seeded().store,
+    })
+
+    expect(
+      (
+        await meter.check({
+          tenantId: TENANT,
+          featureId: "emails",
+          requested: 300,
+          at: now,
+        })
+      ).status,
+    ).toBe("exceeded")
+  })
+
+  // ⚠ And the customer switching it on cannot override a plan that says never.
+  it("refuses when the plan says never, however the switch is set", async () => {
+    const meter = createMeter({
+      assignments: assigned(pro, { overageEnabled: true }),
+      usage: memoryUsage([
+        { ...usageAt("m1", "2026-02-01T06:00:00.000Z", 50_000), key },
+      ]).store,
+    })
+
+    expect(
+      (
+        await meter.check({
+          tenantId: TENANT,
+          featureId: "emails",
+          requested: 1,
+          at: now,
+        })
+      ).status,
+    ).toBe("exceeded")
   })
 })

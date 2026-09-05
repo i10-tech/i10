@@ -99,6 +99,13 @@
       "when": 1788604387543,
       "tag": "0013_metering_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788616574181,
+      "tag": "0014_feature_kinds",
+      "breakpoints": true
     }
   ]
 }

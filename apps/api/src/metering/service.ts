@@ -62,6 +62,14 @@ export function postgresMetering({
 
       if (outcome.status === "allowed") return { status: "allowed" }
 
+      // ⚠ `overage` IS A SEND, NOT A REFUSAL, AND THE SPLIT IS NOT COMPUTED HERE.
+      // The customer opted in to being billed past their plan, so the answer at
+      // the gate is simply yes. Which units were included and which are billable
+      // is decided when the send is RECORDED — at that point the message ids
+      // exist, and it is those ids that reach Polar's meter. Deciding it here
+      // would attribute units for mail that may never go.
+      if (outcome.status === "overage") return { status: "allowed" }
+
       if (outcome.status === "exceeded") {
         return {
           status: "exceeded",

@@ -21,7 +21,15 @@ export { formatMeterKey, meterKey, meterKeyOf, parseMeterKey } from "./key.js"
 export type { MeterKey } from "./key.js"
 
 export { entitlementFor } from "./plan.js"
-export type { Assignment, Entitlement, Plan, PlanSource } from "./plan.js"
+export type {
+  Assignment,
+  ConsumableEntitlement,
+  ContinuousEntitlement,
+  Entitlement,
+  OveragePolicy,
+  Plan,
+  PlanSource,
+} from "./plan.js"
 
 export type { AssignmentStore, RecordResult, UsageEvent, UsageStore } from "./ports.js"
 
