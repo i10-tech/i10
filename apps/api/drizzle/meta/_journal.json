@@ -85,6 +85,13 @@
       "when": 1788430765293,
       "tag": "0011_provision_tenant",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788602926110,
+      "tag": "0012_metering",
+      "breakpoints": true
     }
   ]
 }

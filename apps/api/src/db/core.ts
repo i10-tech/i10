@@ -723,3 +723,177 @@ export const subscriptions = core.table(
   },
   (t) => [index("subscriptions_granted_idx").on(t.grantedPlanId, t.planId)],
 )
+
+/**
+ * Where a plan came from, and who is allowed to overwrite it.
+ *
+ * ⚠ THE DISCRIMINATOR IS A MECHANISM, NOT A LABEL. `catalog` plans are seeded
+ * from configuration and reconciled destructively by a push — the file wins,
+ * and anything edited by clicking is reverted. `custom` plans belong to one
+ * tenant, are created through the dashboard for a specific deal, and a push
+ * never touches them. The second is the only reason the first can safely be
+ * destructive.
+ */
+export const planSource = core.enum("plan_source", ["catalog", "custom"])
+
+/**
+ * One line of what a plan grants, as stored.
+ *
+ * ⚠ THIS TYPE IS AN ASSERTION ABOUT JSON, NOT A GUARANTEE. `$type` is erased at
+ * runtime and the column can hold anything a migration or a psql session put
+ * there, so every read parses it — see `parseEntitlements` in
+ * src/metering/postgres.ts. It mirrors `Entitlement` in `@repo/metering`, and it
+ * is declared here rather than imported so the schema stays free of a
+ * dependency that drizzle-kit would have to resolve.
+ */
+export interface StoredEntitlement {
+  featureId: string
+  allowance: number | "unlimited"
+  interval: "day" | "week" | "month" | "year" | "lifetime"
+  intervalCount?: number
+}
+
+/**
+ * The plan catalogue, and the bespoke plans beside it.
+ *
+ * ⚠ THE ENTITLEMENTS ARE `jsonb` RATHER THAN A CHILD TABLE, AND THE REASON IS
+ * THAT THEY ARE NEVER READ APART FROM THEIR PLAN. Autumn models these as
+ * `product_items` rows because it carries a full pricing model — tiers, prices,
+ * proration. Ours are four fields, always loaded as a set, and a child table
+ * would buy a second RLS policy, a second index and a join on the hot path of
+ * every quota check in exchange for nothing.
+ *
+ * ⚠ AND A PLAN IS NOT TENANT-SCOPED THE WAY EVERY OTHER TABLE HERE IS. A
+ * catalogue row has `tenant_id IS NULL` and is readable by everyone; a custom
+ * row is readable only by its owner. The policy in the migration says so, and
+ * its WITH CHECK excludes NULL — so `i10_api` can create a bespoke plan for the
+ * tenant it is scoped to, and can never create or alter a catalogue one. That
+ * is the "the file is the source of truth" rule, enforced by the database
+ * rather than by reviewers.
+ */
+export const plans = core.table(
+  "plans",
+  {
+    /** `free`, `pro`, or something a sales deal produced. */
+    id: text("id").primaryKey(),
+    source: planSource("source").notNull(),
+
+    /**
+     * ⚠ NULL FOR A CATALOGUE PLAN, AND A CHECK CONSTRAINT TIES IT TO `source`.
+     * The two ways to get this wrong are both silent: a custom plan with no
+     * owner is invisible to the tenant it was built for, and a catalogue plan
+     * with one is a price list only one customer can see.
+     */
+    tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
+
+    name: text("name").notNull(),
+    entitlements: jsonb("entitlements").$type<StoredEntitlement[]>().notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("plans_tenant_idx").on(t.tenantId)],
+)
+
+/**
+ * Which plan a tenant is on, and the clock their windows are measured from.
+ *
+ * ⚠ SEPARATE FROM `subscriptions`, BECAUSE AN ASSIGNMENT DOES NOT REQUIRE A
+ * PAYMENT. `core.subscriptions` is our copy of what Polar says was bought;
+ * this is what we actually entitle the tenant to. They agree for every ordinary
+ * customer and must be able to differ for the ones that matter — an enterprise
+ * on a bespoke plan, an account comped by support, our own internal tenant.
+ * Folding this into `subscriptions` would mean inventing a fake Polar
+ * subscription id to put anybody on a plan they did not buy.
+ *
+ * ⚠ ONE ROW PER TENANT. What they are entitled to today is a single question
+ * with a single answer; the history of how they got there lives in Polar and in
+ * the audit trail, which keep it properly.
+ */
+export const planAssignments = core.table("plan_assignments", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+
+  planId: text("plan_id")
+    .notNull()
+    .references(() => plans.id),
+
+  /**
+   * ⚠ SET ONCE, AND NEVER MOVED BY A PLAN CHANGE. Every reset boundary for this
+   * tenant is derived from it, so rewriting it re-buckets all of their history
+   * — and re-anchoring on assignment would hand every customer a free reset:
+   * exhaust the allowance, change plan, start a fresh window, repeat. The
+   * upsert in src/metering/postgres.ts deliberately omits this column from its
+   * DO UPDATE, which is where the rule is actually enforced.
+   */
+  anchor: timestamp("anchor", { withTimezone: true }).notNull(),
+
+  assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * The ledger: one row per unit of metered usage.
+ *
+ * ⚠ IT DUPLICATES A COUNT THAT `core.messages` ALREADY IMPLIES, AND THAT IS THE
+ * POINT RATHER THAN AN OVERSIGHT. `send/reconcile.ts` exists to compare two
+ * INDEPENDENTLY DERIVED numbers; deriving the meter from `core.messages` would
+ * have it compare a number against itself, and a bad flush — from the send path
+ * today, from a Durable Object at the edge later — would become undetectable.
+ * The cost is a narrow row per message; the thing bought is the only mechanism
+ * that can notice metering has gone wrong.
+ *
+ * ⚠ THE PRIMARY KEY DOES NOT INCLUDE `shard`, AND THAT IS DELIBERATE. Dedup is
+ * on `(tenant_id, feature_id, event_id)` so that the same message cannot be
+ * counted twice if it is ever replayed against a different shard than the one
+ * that first recorded it. The shard is stored for attribution, not identity.
+ *
+ * ⚠ NOT PARTITIONED, UNLIKE `messages`. Its volume is the same but its
+ * retention is not: message content ages out, and billing evidence is what a
+ * disputed invoice is settled against. When this needs partitioning it wants
+ * yearly bounds and a different retention job than the monthly one in 0002 —
+ * a decision to make with a real row count rather than now.
+ */
+export const meterEvents = core.table(
+  "meter_events",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /** `emails`. The metered feature this unit was drawn from. */
+    featureId: text("feature_id").notNull(),
+
+    /**
+     * ⚠ `messageId`, AND IT IS THE PROPERTY THE WHOLE DESIGN RESTS ON. The same
+     * value keys the buffer entry at the edge, this row, and Polar's
+     * `external_id`, which is what makes every leg independently retryable —
+     * and being independently retryable is what makes buffering usage away from
+     * this table safe at all.
+     */
+    eventId: text("event_id").notNull(),
+
+    shard: integer("shard").notNull().default(0),
+
+    /** Units consumed. One email is 1. */
+    value: integer("value").notNull().default(1),
+
+    /**
+     * ⚠ THE `sent_at` THE DATABASE STORED, NOT THE RECORDING PROCESS'S CLOCK.
+     * The reconciler buckets our side by `core.messages.sent_at` and the meter's
+     * by this column; a millisecond of disagreement across a boundary shows a
+     * deficit in one window and a surplus in the next, and tops the deficit up
+     * on every run forever.
+     */
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+
+    /** When we wrote it. The gap from `occurred_at` is the flush lag. */
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.featureId, t.eventId] }),
+    // The gate's only read: one tenant, one feature, one shard, one window.
+    index("meter_events_window_idx").on(t.tenantId, t.featureId, t.shard, t.occurredAt),
+  ],
+)

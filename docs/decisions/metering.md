@@ -1,7 +1,7 @@
 # Metering, and getting off Autumn
 
-**Decided:** 2026-09-04. **Status:** step 2 shipped; everything else is still
-only decided.
+**Decided:** 2026-09-04. **Status:** steps 2 and 3 shipped; nothing is wired to
+them yet.
 
 The reasoning below is preserved as it was argued, not rewritten as work lands
 — the sequence at the bottom is the only part that tracks state. Autumn keeps
@@ -307,6 +307,12 @@ schedules a future callback that survives eviction.
 ⚠ **`alarm()` is the reset job.** It deletes `autumn-cron` outright — no pod,
 no schedule, no drift.
 
+> **Superseded 2026-09-05, in the better direction.** Step 3 computes the window
+> from a fixed anchor, so there is no reset **event** at all: the balance is a
+> pure function of the anchor and the clock, and the window simply moves. The
+> cron is still deleted; `alarm()` now only schedules the flush, which is a
+> convenience. Nothing can be missed, because nothing has to happen.
+
 **We choose the ID, so the addressing scheme _is_ the sharding design.**
 
 ### `meterKey()` from day one
@@ -547,8 +553,21 @@ tiers move.
    ⚠ **The window is now shut.** The format is a contract from here on; the
    next change to it is a breaking one, whether or not anyone has integrated
    yet.
-3. `packages/metering` — domain core, ports, Postgres adapter. Read Autumn's
-   files for semantics; attribute at copy time.
+3. ~~`packages/metering` — domain core, ports, Postgres adapter.~~
+   **DONE 2026-09-05.** Read Autumn's files for semantics; attributed at copy
+   time in `packages/metering/NOTICE`.
+   ⚠ **The adapter is `apps/api/src/metering/postgres.ts`, not in the package.**
+   The package compiles without Node types so the arithmetic can run unchanged
+   in a Durable Object, which is precisely what a Drizzle adapter cannot do; it
+   also belongs beside the schema and migration it depends on. The port is in
+   the package, the driver is not — which is what "storage behind a port"
+   actually buys.
+   ⚠ **Two decisions were made building it that are not argued above.** The
+   reset anchor belongs to the tenant rather than to the plan, so a plan change
+   never moves a boundary or hands out a fresh allowance. And the ledger is its
+   own table rather than a read of `core.messages`, because the reconciler
+   compares two independently-derived numbers and reading the meter off
+   `messages` would have it compare a number against itself.
 4. Swap `Metering` to the new implementation behind the existing interface.
 5. Retire Autumn. **~1.3 GiB back.**
 6. Cloudflare free tier: WAF, format gate, SNS verification.
