@@ -752,8 +752,8 @@ export const suppressions = core.table(
  * without a round trip to Polar, and so the reconciler has something to compare
  * against; every value in it arrives from a signature-verified webhook.
  *
- * ⚠ AND IT IS WRITTEN BEFORE AUTUMN IS TOLD ANYTHING. The order is deliberate:
- * row first, entitlement second. If the Autumn call then fails, the truth is
+ * ⚠ AND IT IS WRITTEN BEFORE THE ENTITLEMENT MOVES. The order is deliberate:
+ * row first, entitlement second. If the grant then fails, the truth is
  * already durable and the reconciler repairs the entitlement on its next pass.
  * Reversed, a crash between the two leaves a customer holding a paid plan that
  * nothing in our database records — invisible, and never revoked.
@@ -815,8 +815,8 @@ export const subscriptions = core.table(
     eventAt: timestamp("event_at", { withTimezone: true }).notNull(),
 
     /**
-     * The plan Autumn was last successfully told about, and NULL until one
-     * lands.
+     * The plan the entitlement was last successfully moved to, and NULL until
+     * one lands.
      *
      * ⚠ THIS COLUMN IS THE ENTIRE POINT OF THE RECONCILER. It is what makes
      * "the row was written but the entitlement never applied" a query rather
@@ -885,7 +885,7 @@ export type StoredEntitlement =
  * The plan catalogue, and the bespoke plans beside it.
  *
  * ⚠ THE ENTITLEMENTS ARE `jsonb` RATHER THAN A CHILD TABLE, AND THE REASON IS
- * THAT THEY ARE NEVER READ APART FROM THEIR PLAN. Autumn models these as
+ * THAT THEY ARE NEVER READ APART FROM THEIR PLAN. Autumn modelled these as
  * `product_items` rows because it carries a full pricing model — tiers, prices,
  * proration. Ours are four fields, always loaded as a set, and a child table
  * would buy a second RLS policy, a second index and a join on the hot path of

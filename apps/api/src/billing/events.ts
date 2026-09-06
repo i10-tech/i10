@@ -79,7 +79,7 @@ export interface SubscriptionState {
   /**
    * The plan the customer should hold RIGHT NOW — `planId` while the
    * subscription entitles them, the free plan once it does not. This is what
-   * gets attached in Autumn, and keeping it separate from `planId` is what lets
+   * gets attached, and keeping it separate from `planId` is what lets
    * the row still say what they bought after access ends.
    */
   entitledPlanId: string

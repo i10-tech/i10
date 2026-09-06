@@ -3,7 +3,8 @@ import type { PolarSubscription } from "./events.js"
 /**
  * Polar over HTTP.
  *
- * ⚠ RAW `fetch` RATHER THAN `@polar-sh/sdk`, FOR THE SAME REASON AUTUMN IS. The
+ * ⚠ RAW `fetch` RATHER THAN `@polar-sh/sdk`, AND THE RETIRED AUTUMN CLIENT WAS
+ * WRITTEN THE SAME WAY. The
  * SDK is a generated client for the whole API — checkouts, benefits, orders,
  * seats, discounts — and this uses two endpoints of it. What it would buy is
  * types we can write in twenty lines; what it costs is a large dependency on

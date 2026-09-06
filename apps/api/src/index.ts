@@ -80,7 +80,7 @@ queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailabl
 
 /**
  * ⚠ THERE IS NO LONGER AN UNMETERED MODE TO FALL INTO, AND THAT IS THE POINT OF
- * THE SWAP. This used to hinge on `AUTUMN_SECRET_KEY`: no key meant every send
+ * THE SWAP. This used to hinge on a vendor secret key: no key meant every send
  * allowed and nothing counted — right for a local checkout, catastrophic to
  * discover in production a month later, and so a line you could grep for rather
  * than a silent default. Usage now lives in the database the API cannot start
@@ -121,17 +121,13 @@ log.info(
 )
 
 /**
- * Billing: Polar takes the money, Autumn holds the entitlement.
+ * Billing: Polar takes the money, `core.plan_assignments` holds the entitlement.
  *
- * ⚠ THE AUTUMN CLIENT IS CONSTRUCTED HERE AND HANDED ONLY TO `subscriptionGrants`.
- * Everything else in this process gets `metering`, which exposes quota and
- * usage and nothing else. That is what keeps "only one code path grants a plan"
- * a fact about the wiring rather than a rule somebody has to remember.
- *
- * ⚠ AND WITHOUT AUTUMN THERE IS NO GRANTING AT ALL, so the receiver answers 503
- * and Polar keeps the event on its retry schedule. Recording subscription rows
- * we cannot turn into entitlements would look like it was working and leave
- * every paying customer on free-tier limits.
+ * ⚠ THE GRANTING OBJECT IS CONSTRUCTED HERE AND HANDED ONLY TO
+ * `subscriptionGrants`. Everything else in this process gets `metering`, which
+ * exposes quota and usage and nothing else. That is what keeps "only one code
+ * path grants a plan" a fact about the wiring rather than a rule somebody has
+ * to remember.
  */
 const subscriptions = subscriptionOps(db)
 
@@ -142,10 +138,11 @@ const subscriptions = subscriptionOps(db)
  * free plan. Nothing else is handed it — everything else gets `metering`, which
  * exposes quota and usage and nothing that could grant anything.
  *
- * ⚠ AND IT IS NO LONGER OPTIONAL, WHICH REMOVES A WHOLE FAILURE MODE. Without
- * Autumn there was no granting at all, so the Polar receiver answered 503 and
- * every paying customer sat on free-tier limits until somebody noticed. An
- * assignment is a row in our own database; there is nothing left to be absent.
+ * ⚠ AND IT IS NO LONGER OPTIONAL, WHICH REMOVES A WHOLE FAILURE MODE. When the
+ * entitlement lived in a remote service, its absence meant no granting at all:
+ * the Polar receiver answered 503 and every paying customer sat on free-tier
+ * limits until somebody noticed. An assignment is a row in our own database;
+ * there is nothing left to be absent.
  */
 const entitlements = postgresEntitlements({
   db,

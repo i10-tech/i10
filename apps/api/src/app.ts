@@ -70,8 +70,8 @@ export interface AppDeps {
    * Polar subscription events. Unauthenticated; signature-verified.
    *
    * ⚠ THE ONLY WIRING IN THE APPLICATION THAT CAN GRANT A PAID PLAN. Everything
-   * it needs to do that is behind billing/grants.ts, which takes the two Autumn
-   * operations rather than the client — so no other route can reach `grantPlan`
+   * it needs to do that is behind billing/grants.ts, which takes the two
+   * operations rather than a whole client — so no other route can reach `grantPlan`
    * by way of something it happens to have been passed.
    */
   polarWebhooks?: PolarWebhookDeps

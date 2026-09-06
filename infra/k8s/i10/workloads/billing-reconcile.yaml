@@ -12,16 +12,20 @@
 # check-in in apps/api/src/reconcile.ts is what closes that, which is why the
 # schedule below is declared in two places on purpose.
 #
-# ⚠ WHY THIS EXISTS AT ALL. Autumn attaches plans with `no_billing_changes`,
-# which makes Polar the state of record and Autumn a downstream copy — and the
-# only thing carrying state between them is a webhook. One lost during a deploy
-# is a customer silently on the wrong plan, in either direction, with nothing in
+# ⚠ WHY THIS EXISTS AT ALL. Polar is the state of record for what a customer
+# pays, and `core.plan_assignments` is a downstream copy — the only thing
+# carrying state between them is a webhook. One lost during a deploy is a
+# customer silently on the wrong plan, in either direction, with nothing in
 # either system that would ever notice. This is what notices.
+#
+# ⚠ IT PREDATES THE SWAP AND OUTLIVED IT. The copy used to live in Autumn; it
+# now lives in our own tables, which changes who is wrong when the two disagree
+# and changes nothing about the fact that they can.
 #
 # ⚠ A CronJob RATHER THAN AN INTERVAL IN THE WORKER, BECAUSE THE WORKER SCALES.
 # KEDA runs one to several replicas of it on queue depth; an interval inside
 # would issue one set of repairs per replica against the same rows, each one
-# calling Autumn. Kubernetes already owns "exactly once, on a schedule".
+# calling Polar. Kubernetes already owns "exactly once, on a schedule".
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -41,7 +45,7 @@ spec:
   schedule: "*/30 * * * *"
   # ⚠ NEVER TWO AT ONCE. A run that overruns its slot would otherwise be joined
   # by the next one, and both would read the same discrepancies and both would
-  # attach. Autumn's `subscription_id` makes that idempotent rather than
+  # attach. Polar's `subscription_id` makes that idempotent rather than
   # double-billing, but two concurrent passes still race on `granted_plan_id`
   # and leave the row recording whichever finished last.
   concurrencyPolicy: Forbid
@@ -54,7 +58,7 @@ spec:
   startingDeadlineSeconds: 300
   jobTemplate:
     spec:
-      # One attempt per slot. A transient Polar or Autumn failure is picked up by
+      # One attempt per slot. A transient Polar or Stalwart failure is picked up by
       # the next run half an hour later, and retrying immediately inside the slot
       # only compresses the same failure into a tighter loop.
       backoffLimit: 0

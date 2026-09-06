@@ -40,8 +40,8 @@ export type Service = "api" | "worker" | "reconcile" | "sweep"
 
 export interface ObservabilityOptions {
   /**
-   * ⚠ OPTIONAL, AND ITS ABSENCE IS A DELIBERATE, VISIBLE STATE — the same rule
-   * as AUTUMN_SECRET_KEY. Without it nothing is reported and the boot log says
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS A DELIBERATE, VISIBLE STATE. Without it
+   * nothing is reported and the boot log says
    * so in a line you can grep for. A local checkout should not need a Sentry
    * account, and a production that quietly lost its DSN should not look
    * identical to one that has it.

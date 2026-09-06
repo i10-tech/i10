@@ -17,9 +17,9 @@ import type { ResetInterval } from "./interval.js"
  * Where a plan came from, and who is allowed to overwrite it.
  *
  * ⚠ THE DISCRIMINATOR IS THE WHOLE MECHANISM, NOT A LABEL. It is what lets the
- * catalogue keep the position already taken in infra/autumn/autumn.config.ts —
- * "the dashboard is not the source of truth, this file is" — while still
- * letting a sales deal produce a bespoke plan without a pull request.
+ * catalogue keep the position a config file used to hold — "the dashboard is
+ * not the source of truth, the checked-in definition is" — while still letting
+ * a sales deal produce a bespoke plan without a pull request.
  *
  * - `catalog` — seeded from the config file. A config push reconciles these
  *   DESTRUCTIVELY: the file wins, and anything edited by clicking is reverted

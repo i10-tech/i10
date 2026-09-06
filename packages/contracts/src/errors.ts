@@ -61,7 +61,7 @@ export type ApiError = z.infer<typeof errorSchema>
  *
  * `rate_limit_exceeded` answers "too fast" and is retryable with backoff.
  * `daily_quota_exceeded` answers "this customer has no sending budget left"
- * and is not retryable — it is a billing state, owned by Autumn, not by the
+ * and is not retryable — it is a billing state, owned by the meter, not by the
  * request path. Collapsing the two into one 429 makes it impossible to sell a
  * plan that differs only by volume.
  */

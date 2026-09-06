@@ -168,8 +168,8 @@ const schema = z.object({
    * How far back the send-side reconcilers look, in days.
    *
    * ⚠ A WINDOW RATHER THAN A HIGH-WATER MARK, DELIBERATELY. Both legs are
-   * idempotent — the SES repair refuses a row already `sent`, and Autumn's
-   * `track` is keyed on the message id — so overlapping windows cost a repeated
+   * idempotent — the SES repair refuses a row already `sent`, and `track` is
+   * keyed on the message id — so overlapping windows cost a repeated
    * read and nothing else. A stored cursor would have to survive a restore, and
    * would silently skip whatever it was wrong about.
    *
@@ -282,49 +282,6 @@ const schema = z.object({
     )
     .refine((list) => list.length > 0, "at least one nameserver is required"),
 
-  // ── autumn (being retired — see docs/decisions/metering.md) ───────────────
-
-  /**
-   * Autumn, which owns balances, entitlements and usage.
-   *
-   * ⚠ SELF-HOSTED, SO THE BASE URL IS CONFIGURATION RATHER THAN A CONSTANT. The
-   * default is the SaaS, which is what a local checkout and the test
-   * environment talk to; production points at our own instance.
-   */
-  AUTUMN_URL: z.url().default("https://api.useautumn.com"),
-
-  /**
-   * ⚠ OPTIONAL, AND ITS ABSENCE IS A DELIBERATE, VISIBLE STATE. Without it the
-   * services run `unmetered` — every send allowed, nothing counted — which is
-   * the correct behaviour for a local checkout and a loud one in the boot log.
-   * Making it required would mean no one can run the API without a billing
-   * account; making it silently default to metering would mean a misconfigured
-   * production looks identical to a working one.
-   */
-  AUTUMN_SECRET_KEY: z.string().min(1).optional(),
-
-  /** The metered feature. One email is one unit of it. */
-  AUTUMN_FEATURE_ID: z.string().min(1).default("emails"),
-
-  /**
-   * The plan a new tenant is auto-enabled onto.
-   *
-   * ⚠ IT MUST MATCH A PLAN IN infra/autumn/autumn.config.ts. A tenant enabled
-   * onto a plan id Autumn does not have is a customer with no entitlement —
-   * `check` refuses, our client reads that as unavailable, and the tenant sends
-   * unmetered forever with nothing in the logs to say why.
-   */
-  AUTUMN_FREE_PLAN_ID: z.string().min(1).default("free"),
-
-  /**
-   * ⚠ THIS IS ADDED TO THE LATENCY OF EVERY `POST /emails` WHEN AUTUMN IS SLOW,
-   * because the quota check is synchronous. Short on purpose: a timeout is
-   * `unavailable`, and `unavailable` sends — so the cost of being impatient is
-   * a little unbilled usage, and the cost of being patient is every customer's
-   * password reset waiting on a billing service.
-   */
-  AUTUMN_TIMEOUT_MS: z.coerce.number().int().positive().max(10_000).default(2000),
-
   // ── webhooks ──────────────────────────────────────────────────────────────
 
   /**
@@ -370,9 +327,14 @@ const schema = z.object({
 
   // ── billing ───────────────────────────────────────────────────────────────
   //
-  // Polar takes the money; Autumn holds the entitlement. The two never speak —
-  // see send/autumn.ts on `no_billing_changes` for why that separation is the
-  // design rather than a limitation.
+  // Polar takes the money; `core.plan_assignments` holds the entitlement. The
+  // two never speak: the webhook is the only thing carrying state between them,
+  // which is why billing/reconcile.ts exists to notice a lost one.
+  //
+  // ⚠ THE ENTITLEMENT USED TO LIVE IN AUTUMN, AND THE SEPARATION IS OLDER THAN
+  // THE SWAP. Autumn attached plans with `no_billing_changes` for exactly this
+  // reason — one system decides who paid, another decides what they may do —
+  // and moving the second half in-house changed the owner, not the shape.
 
   /**
    * ⚠ WHICH POLAR, AND IT IS A DIFFERENT DATABASE RATHER THAN A DIFFERENT MODE.
@@ -460,8 +422,8 @@ const schema = z.object({
   /**
    * Where errors and cron check-ins go.
    *
-   * ⚠ OPTIONAL, AND ITS ABSENCE IS A VISIBLE STATE RATHER THAN A QUIET ONE —
-   * the same rule as AUTUMN_SECRET_KEY. Without it the services run and report
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS A VISIBLE STATE RATHER THAN A QUIET ONE.
+   * Without it the services run and report
    * nothing, and say so in a line of the boot log you can grep for. Making it
    * required would mean nobody can run the API without a Sentry account;
    * letting it fail silently would mean a production that lost its DSN looks

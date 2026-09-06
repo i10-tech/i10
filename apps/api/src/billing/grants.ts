@@ -4,7 +4,7 @@ import type { SubscriptionOps } from "./db.js"
 /**
  * THE ONLY PLACE IN THIS REPOSITORY THAT PUTS A TENANT ON A PAID PLAN.
  *
- * ⚠ AND THAT IS A STRUCTURAL PROPERTY, NOT A CONVENTION. Autumn attaches plans
+ * ⚠ AND THAT IS A STRUCTURAL PROPERTY, NOT A CONVENTION. Plans are attached
  * with `no_billing_changes: true`, which means it takes no money and cannot
  * know whether any was taken — it does what it is told. So the question "has
  * this customer actually paid" is answered here and nowhere else, and the
@@ -18,12 +18,16 @@ import type { SubscriptionOps } from "./db.js"
  * own row and show a spinner until this has run.
  *
  * The narrow `Entitlements` interface below is the mechanism: this module takes
- * the two Autumn operations it needs rather than the whole client, so a future
- * caller cannot reach `grantPlan` by way of something that happened to be
- * passed a metering object.
+ * the two operations it needs rather than a whole client, so a future caller
+ * cannot reach `grantPlan` by way of something that happened to be passed a
+ * metering object.
  */
 
-/** The slice of Autumn this needs. `AutumnClient` satisfies it structurally. */
+/**
+ * The two operations granting needs. `postgresEntitlements` satisfies it
+ * structurally, as `AutumnClient` did before it — which is the point of stating
+ * the slice rather than naming an implementation.
+ */
 export interface Entitlements {
   ensureCustomer(input: { tenantId: string }): Promise<void>
   grantPlan(input: {
@@ -46,7 +50,7 @@ export interface GrantsDeps {
 }
 
 export type ApplyOutcome =
-  /** The row moved and Autumn agrees with it. */
+  /** The row moved and the entitlement agrees with it. */
   | { status: "applied"; planId: string }
   /** A newer event has already been applied. Normal; not a failure. */
   | { status: "stale" }
@@ -59,7 +63,7 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
   return {
     async apply(state) {
       // ⚠ THE ROW FIRST, ALWAYS. Polar is the state of record and this is our
-      // durable copy of it; if the Autumn call below throws, the truth is
+      // durable copy of it; if the grant below throws, the truth is
       // already written and both the delivery retry and the reconciler can
       // repair the entitlement. The other order loses the fact that a payment
       // happened at all.
@@ -72,9 +76,9 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
         return { status: "stale" }
       }
 
-      // ⚠ BEFORE THE ATTACH, BECAUSE ATTACHING TO A CUSTOMER AUTUMN HAS NEVER
+      // ⚠ BEFORE THE ATTACH, BECAUSE ATTACHING TO A CUSTOMER THE METER HAS NEVER
       // HEARD OF IS A 404. A tenant that signed up before metering was
-      // configured has no Autumn customer at all, and its first paid plan would
+      // configured has no customer record at all, and its first paid plan would
       // fail on that rather than on anything about the plan.
       await deps.entitlements.ensureCustomer({ tenantId: state.tenantId })
 
@@ -82,10 +86,10 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
         tenantId: state.tenantId,
         planId: state.entitledPlanId,
         // ⚠ ONLY WHEN THE PLAN IS THE ONE THAT SUBSCRIPTION BOUGHT, AND THE
-        // DOWNGRADE IS WHY. `subscription_id` tells Autumn "this attachment IS
+        // DOWNGRADE IS WHY. `subscription_id` says "this attachment IS
         // that Polar subscription", so sending it alongside `free` claims the
         // free plan is a subscription that has just ended — which is both untrue
-        // and rejected: Autumn answers 409 `duplicate_subscription_id`, because
+        // and rejected: a replay answers 409 `duplicate_subscription_id`, because
         // the id is already bound to the paid attachment.
         //
         // Observed on the first real cancellation: every downgrade failed and

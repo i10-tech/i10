@@ -53,10 +53,10 @@ export interface SubscriptionOps {
    */
   record(state: SubscriptionState): Promise<"applied" | "stale">
   /**
-   * Records that Autumn now holds this entitlement.
+   * Records that the entitlement now holds this plan.
    *
    * ⚠ SCOPED TO THE EXACT EVENT THAT WAS GRANTED FOR. If a newer event landed
-   * between the write and the Autumn call, this marks nothing — the row still
+   * between the write and the grant, this marks nothing — the row still
    * reads as needing a grant, and the reconciler picks it up. Marking it
    * regardless would record a plan we never actually attached.
    */
@@ -67,7 +67,7 @@ export interface SubscriptionOps {
    * One tenant's plan, for the console.
    *
    * ⚠ IT REPORTS `granted_plan_id`, NOT `plan_id`. What the customer can
-   * actually do is what Autumn was told, and showing the plan they bought
+   * actually do is what the entitlement records, and showing the plan they bought
    * before the entitlement landed is how a dashboard says "Pro" to somebody who
    * is still being refused at the send path.
    */
@@ -91,7 +91,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         // ⚠ THE SECOND DISJUNCT IS WHAT MAKES A DELIVERY RETRY ABLE TO REPAIR A
         // FAILED GRANT, AND IT IS NOT DEFENSIVE. A redelivery carries the SAME
         // `event_at`, so under `<` alone it answered "stale" and returned
-        // before `ensureCustomer` — meaning that when the Autumn call threw,
+        // before `ensureCustomer` — meaning that when the grant threw,
         // every one of Polar's retries was discarded and the only repair left
         // was the reconciler, up to half an hour later. Observed twice on real
         // events: once on the first payment, once on the first cancellation.
@@ -140,7 +140,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         `)) as unknown as { tenant_id: string }[]
 
         // ⚠ `granted_plan_id` IS DELIBERATELY NOT TOUCHED BY THE UPDATE. It
-        // records what Autumn was last told, so leaving it behind is what makes
+        // records what the entitlement was last moved to, so leaving it behind is what makes
         // a plan change visible as a discrepancy the reconciler can find.
         return rows.length > 0 ? "applied" : "stale"
       })

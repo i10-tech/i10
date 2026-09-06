@@ -1,7 +1,7 @@
 import { withTenant, type Database } from "../db/client.js"
-import type { Logger } from "./autumn.js"
 import {
   activeTenantsStatement,
+  type Logger,
   missingCustomers,
   reconcile,
   sentUsageStatement,
@@ -33,14 +33,14 @@ import {
  * `recordSent`) described a job that did not run.
  *
  * ⚠ AND THE ORDER IS PART OF THE CORRECTNESS, NOT A PREFERENCE. The SES leg
- * repairs INTO `core.messages`; the Autumn leg reads `core.messages`. Run the
+ * repairs INTO `core.messages`; the usage leg reads `core.messages`. Run the
  * wrong way round, a message SES sent that we recorded late is repaired after
  * the count that would have billed it, and it waits a whole cycle. Run this way
  * round, it is simply an ordinary `sent` row by the time the second leg looks.
  *
  * ⚠ BOTH ARE READ-MOSTLY AND NEITHER SENDS MAIL. The SES leg's only write is
  * `repairFromSesStatement`, which refuses a row that is already `sent`; the
- * Autumn leg's only write is `track`, which is idempotent on the message id.
+ * usage leg's only write is `track`, which is idempotent on the message id.
  * Running twice, or racing a second copy, cannot double-bill or re-send.
  */
 
@@ -122,9 +122,9 @@ export async function reconcileSes(
 }
 
 export interface UsageReport extends ReconcileResult {
-  /** Messages this pass submitted to Autumn. */
+  /** Messages this pass submitted to the meter. */
   toppedUp: number
-  /** Messages Autumn already had, which is the ordinary answer on a replay. */
+  /** Messages the meter already had, the ordinary answer on a replay. */
   alreadyKnown: number
   /** Buckets we could not finish. Carried to the next run. */
   failed: number
@@ -133,13 +133,13 @@ export interface UsageReport extends ReconcileResult {
 /**
  * Did we bill for everything we sent?
  *
- * ⚠ THE DEFICIT IS TOPPED UP BY MESSAGE ID, NEVER BY COUNT. Autumn's `track`
+ * ⚠ THE DEFICIT IS TOPPED UP BY MESSAGE ID, NEVER BY COUNT. `track`
  * answers 409 to a replayed idempotency key, so submitting the same message
  * again — two passes racing, one retried after a timeout — cannot double-bill.
  * Submitting "seventeen more" is not safe in the same way, and that difference
  * is why `unbilledIdsStatement` returns ids at all.
  *
- * ⚠ A SURPLUS IS REPORTED AND NEVER CORRECTED. Autumn counting more than we
+ * ⚠ A SURPLUS IS REPORTED AND NEVER CORRECTED. The meter counting more than we
  * sent means a duplicate was recorded somewhere, and issuing negative usage to
  * flatten it would erase the only evidence of that.
  */
@@ -196,7 +196,7 @@ export async function reconcileUsage(
         const outcome = await entitlements.track({
           customerId: bucket.tenantId,
           messageId: id,
-          // ⚠ THE BUCKET'S OWN START, NOT `now()`. Autumn buckets on the event's
+          // ⚠ THE BUCKET'S OWN START, NOT `now()`. The meter buckets on the event's
           // timestamp, so stamping the repair time would file the message in the
           // day it was noticed — and the next pass would then find the same
           // deficit in the original day and the same surplus in this one,
@@ -226,7 +226,7 @@ export interface TenantCustomerReport {
   /** Active tenants checked. */
   checked: number
   /**
-   * Tenants confirmed to have no customer in Autumn.
+   * Tenants confirmed to have no customer in Polar.
    *
    * ⚠ REPORTED, NEVER CREATED. `ensureCustomer` would put them on the free
    * plan, and a tenant that should be on a paid one would then be quietly
@@ -235,12 +235,12 @@ export interface TenantCustomerReport {
    */
   missing: TenantRef[]
   /**
-   * Candidates Autumn could not give a straight answer about.
+   * Candidates Polar could not give a straight answer about.
    *
    * ⚠ COUNTED SEPARATELY SO AN OUTAGE CANNOT MASQUERADE AS A FINDING. A 500
    * from the confirmation call is not evidence a customer is absent, and
    * folding it into `missing` would report every tenant as unbilled the first
-   * time Autumn had a bad afternoon.
+   * time Polar had a bad afternoon.
    */
   unverified: TenantRef[]
 }

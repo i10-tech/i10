@@ -26,7 +26,7 @@ import { verifyPolarWebhook } from "../billing/signature.js"
  *        product for some other purpose. "Not ours" is not a failure, and a
  *        non-2xx would have Polar retrying it all afternoon.
  *   500  a real event we could not apply. Retry is exactly right: the
- *        subscription row is already durable, so the retry re-runs the Autumn
+ *        subscription row is already durable, so the retry re-runs the
  *        call rather than starting over, and the reconciler is the backstop if
  *        the retries run out.
  */
