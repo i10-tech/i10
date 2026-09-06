@@ -62,6 +62,19 @@ import { sql, type SQL } from "drizzle-orm"
  * picked up by the following run. What the grace must never be is shorter than
  * SES's latency, which is the setting that manufactures findings.
  */
+/**
+ * ⚠ EVERY STATEMENT BELOW GOES THROUGH A `SECURITY DEFINER` FUNCTION, AND NONE
+ * OF THEM WORKED BEFORE 0028. This job holds no tenant context; every policy in
+ * `core` reads `current_setting('app.tenant_id')` strictly and only a
+ * `withTenant()` transaction sets it, so each of these raised on its first
+ * statement. 0013 fixed exactly this for the usage leg of the same job and left
+ * this file untouched.
+ *
+ * ⚠ IT RAISED RATHER THAN RETURNING NOTHING, WHICH IS THE ONLY REASON IT WAS
+ * SURVIVABLE. Had RLS filtered the rows instead, this reconciler would have
+ * reported a clean account on every run forever — and a reconciler that cannot
+ * fail is worse than no reconciler, because it is evidence.
+ */
 export const EVENT_GRACE = "30 minutes"
 
 /**
@@ -80,20 +93,13 @@ export const EVENT_GRACE = "30 minutes"
  */
 export function sesSentButUnbilledStatement(limit: number): SQL {
   return sql`
-    select m.id::text        as message_id,
-           m.created_at      as created_at,
-           m.tenant_id::text as tenant_id,
-           m.status::text    as status,
-           e.occurred_at     as ses_sent_at,
-           e.payload ->> 'sesMessageId' as ses_message_id
-      from core.message_events e
-      join core.messages m
-        on m.id = e.message_id
-     where e.type = 'sent'
-       and e.occurred_at < now() - ${EVENT_GRACE}::interval
-       and m.status <> 'sent'
-     order by e.occurred_at
-     limit ${limit}
+    select message_id::text     as message_id,
+           created_at           as created_at,
+           tenant_id::text      as tenant_id,
+           status               as status,
+           ses_sent_at          as ses_sent_at,
+           ses_message_id       as ses_message_id
+      from core.ses_unbilled_snapshot(${EVENT_GRACE}::interval, ${limit})
   `
 }
 
@@ -109,6 +115,13 @@ export function sesSentButUnbilledStatement(limit: number): SQL {
  * reconciler buckets on `sent_at`; stamping the repair time would file a
  * message in the day it was noticed rather than the day it was sent, and every
  * boundary would then disagree with SES's own record of the same message.
+ *
+ * ⚠ BOTH GUARDS NOW LIVE IN THE FUNCTION, NOT HERE, AND THAT IS LOAD-BEARING.
+ * `core.repair_from_ses` is SECURITY DEFINER, so it runs with RLS bypassed —
+ * anything a caller could omit would be a row they could rewrite. Keeping the
+ * `status <> 'sent'` and `created_at` checks inside is what stops it being "set
+ * any message to sent at any timestamp", which in a billing table is the whole
+ * of the damage.
  */
 export function repairFromSesStatement(
   messageId: string,
@@ -117,17 +130,13 @@ export function repairFromSesStatement(
   sesMessageId: string | null,
 ): SQL {
   return sql`
-    update core.messages
-       set status         = 'sent',
-           sent_at        = ${sesSentAt.toISOString()}::timestamptz,
-           ses_message_id = coalesce(ses_message_id, ${sesMessageId}),
-           last_error     = null,
-           claimed_by     = null,
-           claimed_at     = null
-     where id = ${messageId}::uuid
-       and created_at = ${createdAt.toISOString()}::timestamptz
-       and status <> 'sent'
-    returning id
+    select message_id::text as id
+      from core.repair_from_ses(
+             ${messageId}::uuid,
+             ${createdAt.toISOString()}::timestamptz,
+             ${sesSentAt.toISOString()}::timestamptz,
+             ${sesMessageId}
+           )
   `
 }
 
@@ -146,22 +155,15 @@ export function repairFromSesStatement(
  */
 export function billedButUnconfirmedStatement(from: Date, limit: number): SQL {
   return sql`
-    select m.id::text        as message_id,
-           m.created_at      as created_at,
-           m.tenant_id::text as tenant_id,
-           m.sent_at         as sent_at
-      from core.messages m
-     where m.status = 'sent'
-       and m.sent_at >= ${from.toISOString()}::timestamptz
-       and m.sent_at <  now() - ${EVENT_GRACE}::interval
-       and not exists (
-             select 1
-               from core.message_events e
-              where e.message_id = m.id
-                and e.type = 'sent'
+    select message_id::text as message_id,
+           created_at       as created_at,
+           tenant_id::text  as tenant_id,
+           sent_at          as sent_at
+      from core.ses_unconfirmed_snapshot(
+             ${from.toISOString()}::timestamptz,
+             ${EVENT_GRACE}::interval,
+             ${limit}
            )
-     order by m.sent_at
-     limit ${limit}
   `
 }
 
@@ -181,18 +183,14 @@ export function billedButUnconfirmedStatement(from: Date, limit: number): SQL {
  */
 export function orphanEventsStatement(from: Date, limit: number): SQL {
   return sql`
-    select e.message_id::text as message_id,
-           e.tenant_id::text  as tenant_id,
-           e.occurred_at      as occurred_at
-      from core.message_events e
-     where e.type = 'sent'
-       and e.occurred_at >= ${from.toISOString()}::timestamptz
-       and e.occurred_at <  now() - ${EVENT_GRACE}::interval
-       and not exists (
-             select 1 from core.messages m where m.id = e.message_id
+    select message_id::text as message_id,
+           tenant_id::text  as tenant_id,
+           occurred_at      as occurred_at
+      from core.ses_orphan_snapshot(
+             ${from.toISOString()}::timestamptz,
+             ${EVENT_GRACE}::interval,
+             ${limit}
            )
-     order by e.occurred_at
-     limit ${limit}
   `
 }
 

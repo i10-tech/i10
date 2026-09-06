@@ -1190,9 +1190,19 @@ tiers move.
    policy in `core` reads `app.tenant_id` strictly and only `withTenant()` sets
    it, so `sentUsageStatement` and `activeTenantsStatement` failed on their
    first statement from the job. Migration 0013 gives both a `SECURITY DEFINER`
-   snapshot, and the top-up read now runs inside `withTenant`. **`reconcile-ses.ts`
-   has the same defect and is untouched** — it queries `core.messages` and
-   `core.message_events` directly from the same job.
+   snapshot, and the top-up read now runs inside `withTenant`. ~~**`reconcile-ses.ts` has the same
+   defect and is untouched**~~ — **FIXED 2026-09-06 (0028).** Its three reads
+   and its repair now go through `SECURITY DEFINER` functions, the same shape
+   0013 gave the usage leg.
+   ⚠ **THE REPAIR IS THE ONLY DEFINER IN EITHER MIGRATION THAT WRITES**, so its
+   guards moved into the function body rather than staying in the caller: with
+   RLS bypassed, `status <> 'sent'` and the `created_at` match are what stop it
+   being "set any message to sent at any timestamp".
+   ⚠ **And the assertions moved with the SQL.** Twelve guarantees — the grace,
+   the join, oldest-first, the read-only-ness of the two reporting queries —
+   were pinned against statements that no longer contain them, so
+   `reconcile-ses.test.ts` now reads the migration, as `reconcile.test.ts`
+   already did for 0013.
    ⚠ **There is no longer an unmetered mode.** It used to hinge on
    `AUTUMN_SECRET_KEY` being absent; usage now lives in the database the API
    cannot start without.
