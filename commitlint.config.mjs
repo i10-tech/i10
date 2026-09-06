@@ -33,6 +33,14 @@ export default {
         // better when a change to the bridge is not filed under the mail server
         // it happens to run beside.
         "authd",
+        // apps/api/src/billing — Polar: checkouts, subscriptions, plan changes
+        // and the proration decision. Inside the API rather than beside it, so
+        // NOT a scope by the release-surface rule the two above follow — it is
+        // here because a changelog reads better when "how a customer changes
+        // plan" is not filed under the same heading as a route handler, and
+        // because `infra`, `ci`, `repo` and `deps` already show this list is
+        // about grouping rather than about packages.
+        "billing",
         "stalwart",
         "bulwark",
         "infra",
