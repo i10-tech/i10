@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import type { SQL } from "drizzle-orm"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
+import { usageSnapshotStatement } from "../src/metering/postgres.js"
 import {
   activeTenantsStatement,
   missingCustomers,
@@ -102,6 +103,27 @@ describe("what i10 believes it sent", () => {
     expect(statement).toContain("core.sent_usage_snapshot(")
     expect(statement).not.toContain("from core.messages")
     expect(params).toHaveLength(2)
+  })
+
+  /**
+   * ⚠ THE ASSERTION THAT WOULD HAVE CAUGHT A LIVE OUTAGE, AND DID NOT EXIST.
+   * postgres.js binds a parameter by writing its bytes, so a `Date` throws
+   * `ERR_INVALID_ARG_TYPE` before the query is sent — this call had never once
+   * completed in production. Every test above renders SQL and never binds, so
+   * the whole suite passed against a statement that could not run.
+   *
+   * ⚠ AND THE CAST TRAVELS WITH THE STRING. Once the parameter is text,
+   * Postgres has to be told it is a timestamp or it resolves the overload
+   * against `text` and fails on a different line for a different reason.
+   */
+  it("binds strings, never Date objects", () => {
+    for (const { params, sql: statement } of [
+      render(sentUsageStatement(day("01"), day("03"))),
+      render(usageSnapshotStatement("emails", day("01"), day("03"))),
+    ]) {
+      for (const param of params) expect(typeof param).toBe("string")
+      expect(statement).toContain("::timestamptz")
+    }
   })
 })
 

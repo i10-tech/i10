@@ -151,7 +151,11 @@ export const usageSnapshotStatement = (
   to: Date,
 ): SQL => sql`
   select tenant_id::text as tenant_id, period_start, count
-    from core.meter_usage_snapshot(${featureId}, ${from}, ${to})
+    from core.meter_usage_snapshot(
+           ${featureId},
+           ${from.toISOString()}::timestamptz,
+           ${to.toISOString()}::timestamptz
+         )
 `
 
 /** Every tenant holding a plan. Cross-tenant, so also a definer function. */
