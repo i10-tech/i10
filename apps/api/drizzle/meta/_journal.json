@@ -204,6 +204,13 @@
       "when": 1788636243939,
       "tag": "0028_ses_reconcile_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788636303939,
+      "tag": "0029_i10_owns_its_domain",
+      "breakpoints": true
     }
   ]
 }

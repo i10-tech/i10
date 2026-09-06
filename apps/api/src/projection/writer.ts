@@ -107,11 +107,17 @@ async function applyUser(
   hostedDomains: readonly string[],
 ): Promise<ApplyResult> {
   // ⚠ TWO SOURCES OF HOSTED DOMAINS, AND THEY MEAN DIFFERENT THINGS.
-  // `MAIL_DOMAINS` is i10's own — i10.tech predates tenancy, owns no row, and
-  // its mailboxes belong to no customer. The table is every customer domain
-  // that has been VERIFIED. A domain in neither does not project at all, which
-  // is what stops an address the user merely claimed becoming a local
-  // recipient.
+  // `MAIL_DOMAINS` is the env list — domains i10 hosts mail for regardless of
+  // ownership. The table is every domain a TENANT owns, verified. A domain in
+  // neither does not project at all, which is what stops an address the user
+  // merely claimed becoming a local recipient.
+  //
+  // ⚠ i10.tech IS NOW IN BOTH, AND THAT IS THE POINT RATHER THAN A DUPLICATE.
+  // It used to be env-only, so its mailboxes were attributed to nobody — which
+  // meant every meter read zero for the one deployment we can actually watch,
+  // and a storage sampler that worked was indistinguishable from one that did
+  // not. 0029 gives it a `core.domains` row owned by the `i10` tenant. The
+  // union tolerates the overlap; the attribution is what changed.
   const owners = await mailboxDomains(tx)
   const mailbox = projectUser(user, [...hostedDomains, ...owners.keys()])
 
