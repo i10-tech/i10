@@ -548,17 +548,45 @@ export function intervalToMs(value: string): number | null {
  */
 const validated = schema.superRefine((env, ctx) => {
   const staleAfterMs = intervalToMs(env.WORKER_CLAIM_STALE_AFTER)
-  if (staleAfterMs === null || staleAfterMs > env.WORKER_JOB_TIMEOUT_MS) return
+  if (staleAfterMs !== null && staleAfterMs <= env.WORKER_JOB_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["WORKER_CLAIM_STALE_AFTER"],
+      message:
+        `"${env.WORKER_CLAIM_STALE_AFTER}" (${staleAfterMs}ms) must be longer than ` +
+        `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms). Postgres must ` +
+        `release a claim after Redis releases the job, never before, or two ` +
+        `workers can both win the claim and send the same message twice.`,
+    })
+  }
 
-  ctx.addIssue({
-    code: "custom",
-    path: ["WORKER_CLAIM_STALE_AFTER"],
-    message:
-      `"${env.WORKER_CLAIM_STALE_AFTER}" (${staleAfterMs}ms) must be longer than ` +
-      `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms). Postgres must ` +
-      `release a claim after Redis releases the job, never before, or two ` +
-      `workers can both win the claim and send the same message twice.`,
-  })
+  /**
+   * ⚠ THE DEFAULT IS THE BUG, WHICH IS WHY THIS IS A CHECK AND NOT A DEFAULT.
+   * `SENTRY_ENVIRONMENT` falls back to "development", so a production
+   * deployment that never sets it reports its errors tagged as a developer's
+   * laptop — and every dashboard, alert rule and filter that selects on
+   * environment quietly excludes the only deployment anybody cares about.
+   * Nothing errors, nothing is missing, and the events are simply filed under
+   * the wrong name.
+   *
+   * ⚠ AND `NODE_ENV` CANNOT SUPPLY THE ANSWER, WHICH IS THE WHOLE DIFFICULTY.
+   * The promotion model re-tags one image for staging and production, so both
+   * run `NODE_ENV=production` — deriving the value would label staging's errors
+   * as production's, trading a visible mistake for an invisible one. The only
+   * correct source is an explicit statement per deployment, so production is
+   * required to make it and this is what makes the omission loud.
+   */
+  if (env.NODE_ENV === "production" && env.SENTRY_ENVIRONMENT === "development") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["SENTRY_ENVIRONMENT"],
+      message:
+        `must be set explicitly when NODE_ENV is production — "development" is ` +
+        `the fallback, and leaving it means production errors arrive tagged as ` +
+        `development and are filtered out of every view that matters. Staging ` +
+        `and production run the same image, so only this value tells them apart.`,
+    })
+  }
 })
 
 export type Env = z.infer<typeof schema>

@@ -136,8 +136,13 @@ envFrom:
 ```
 
 Later entries win on conflict. A Deployment mounting only its own config starts
-without `SENTRY_ENVIRONMENT` and the `OTEL_*` vars, and **nothing errors** —
-tracing simply reports nothing, forever.
+without `SENTRY_DSN`, and **nothing errors** — errors go to stdout and are
+reported nowhere, forever.
+
+`SENTRY_ENVIRONMENT` used to fail the same way and no longer can: `loadEnv`
+refuses to start when `NODE_ENV` is production and it was left at its
+`development` fallback. Staging and production run the same image, so that
+value is the only thing distinguishing their events.
 
 ## Deploying
 
