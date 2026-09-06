@@ -70,7 +70,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: reconcile
-              image: ghcr.io/i10-tech/i10-api:prod-e32b46863000dccb02a026453558fabf723b1e94@sha256:c2eee3f95ea3219a2abc68c2cb900261537bf6acbf317ecbf5bac01084bfdf65
+              image: ghcr.io/i10-tech/i10-api:prod-0d00cf228b90fc8909314e768b0616d7653e5fe1@sha256:94eef3abe7a2f608cff959b4e50d8491186f1590a3d8c7a7474940057d7eb832
               imagePullPolicy: Always
               command: ["node", "dist/reconcile.js"]
               envFrom:
