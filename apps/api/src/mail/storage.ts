@@ -10,24 +10,29 @@ import { withTenant, type Database } from "../db/client.js"
  * The difference here is that the number lives in another server, so we ask for
  * it on a schedule and keep the answer.
  *
- * ⚠ AND WE ASK PER MAILBOX, NOT PER TENANT, BECAUSE THE TENANT CALL IS
- * ENTERPRISE. Stalwart's registry exposes `UsedDiskQuota` on both an account and
- * a tenant, but `validate_tenant_quota` in
+ * ⚠ AND WE SUM ACCOUNTS RATHER THAN ASKING FOR A TENANT, BECAUSE THE TENANT
+ * CALL IS ENTERPRISE. Stalwart's registry exposes `usedDiskQuota` on both an
+ * account and a tenant, but `validate_tenant_quota` in
  * `crates/jmap/src/registry/mapping/principal.rs` is `#[cfg(feature =
  * "enterprise")]` under their SEL licence — so on the community build we run,
- * the tenant object is not ours to read. Summing accounts gives the same figure
- * for one more round trip each, and `authd.accounts.tenant_id` is what makes
- * the grouping possible at all.
+ * the tenant object is not ours to read. `authd.accounts.tenant_id` is what
+ * makes the grouping possible at all.
  */
 
 /**
- * ⚠ A PORT, AND ITS ADAPTER IS THE ONE THING HERE THAT NEEDS A RUNNING SERVER
- * TO VERIFY. Everything else — the grouping, the write, the level source — is
- * exercised without one.
+ * ⚠ ONE SNAPSHOT OF EVERY ACCOUNT, NOT A LOOKUP PER MAILBOX, AND THE SERVER
+ * CHOSE THAT FOR US. Stalwart's account ids are opaque (`"b"`), not email
+ * addresses, so there is no call that takes an address and returns usage: the
+ * verified path is `x:Account/query` for ids and `x:Account/get` for their
+ * objects, both of which are naturally whole-directory calls. Two round trips
+ * for the entire run rather than two per mailbox.
+ *
+ * The map is keyed by lowercased email. A mailbox absent from it is a mailbox
+ * the server did not answer for, which is the failure case below.
  */
 export interface MailboxStorage {
-  /** Bytes this mailbox occupies. Throws if the server cannot be asked. */
-  usedBytes(email: string): Promise<number>
+  /** Every account the server knows: lowercased email → bytes. Throws if unreachable. */
+  snapshot(): Promise<ReadonlyMap<string, number>>
 }
 
 export interface Logger {
@@ -85,6 +90,12 @@ export async function sampleStorage({
     else byTenant.set(row.tenant_id, [row.email])
   }
 
+  // ⚠ AND IF THIS THROWS, THE WHOLE RUN STOPS AND NOTHING IS WRITTEN. The
+  // snapshot is all-or-nothing by construction: there is no partial answer to
+  // salvage, and every tenant's previous figure standing is the honest outcome
+  // of a mail server we could not reach.
+  const usage = await mail.snapshot()
+
   let mailboxes = 0
   let failed = 0
 
@@ -93,19 +104,25 @@ export async function sampleStorage({
     let complete = true
 
     for (const email of emails) {
-      try {
-        bytes += await mail.usedBytes(email)
-        mailboxes += 1
-      } catch (error) {
+      const used = usage.get(email.toLowerCase())
+
+      if (used === undefined) {
         // ⚠ ONE UNREADABLE MAILBOX POISONS THE TENANT'S TOTAL, so the total is
         // not written. A partial sum is a number that looks right and is
         // silently low — which on a cap means letting a tenant past their limit
         // and on billing means under-charging, both invisibly. Keeping the
         // previous sample is stale and honest; writing a partial one is neither.
+        //
+        // A mailbox we know about that the mail server does not is exactly this
+        // case: the two directories disagree, and the disagreement is the bug.
         complete = false
         failed += 1
-        log?.warn({ err: error, tenantId, email }, "could not read mailbox storage")
+        log?.warn({ tenantId, email }, "mail server did not report this mailbox")
+        continue
       }
+
+      bytes += used
+      mailboxes += 1
     }
 
     if (!complete) continue

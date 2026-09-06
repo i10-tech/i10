@@ -496,20 +496,64 @@ is a number that looks right and is silently low, which on a cap lets them past
 their limit and on billing under-charges — both invisibly. The previous sample
 stands instead: stale and honest.
 
-⚠ **AND THE JMAP CALL ITSELF IS THE ONE THING NO REPOSITORY CAN CONFIRM.**
-`src/mail/stalwart.ts` throws on any response it does not recognise and never
-returns 0, because a wrong guess about the wire shape would otherwise read as
-"this mailbox uses no space" and grant the whole allowance to everybody. It
-needs one run against a real server.
-
 ⚠ **AND THAT SERVER IS NOT REACHABLE FROM OUTSIDE THE CLUSTER, BY DESIGN.**
 Probed 2026-09-05: `/jmap`, `/.well-known/jmap` and `/api/schema` all answer
 **404** on `mail.i10.tech`, because `ingressroute.yaml` routes only autoconfig,
 autodiscover and MTA-STS to the pod — and the network policy's own comment says
 8080 is omitted "because the management API belongs behind Traefik". `i10-prod`
 is an allowed source namespace, so the reconcile job reaches it in-cluster at
-`http://i10-stalwart:8080`; confirming the call shape needs cluster access, not
-a public request.
+`http://i10-stalwart:8080`.
+
+#### The wire shape, verified 2026-09-06
+
+**Probed against the running server on psl-vps**, which is the only place it
+can be probed. The guessed version of `src/mail/stalwart.ts` was wrong in four
+independent ways, every one of which would have failed every call:
+
+| Guessed                                          | Actual                                                         |
+| ------------------------------------------------ | -------------------------------------------------------------- |
+| `Account/get`                                    | **`x:Account/get`** — the registry's whole namespace is `x:`   |
+| `using: [… "urn:stalwart:params:jmap:registry"]` | **`["urn:ietf:params:jmap:core"]`** and nothing else           |
+| `ids: ["user@domain"]`                           | ids are **opaque** (`"b"`); the address is a property          |
+| one call per mailbox                             | `x:Account/query` then `x:Account/get` — **two calls per run** |
+
+⚠ **THE SESSION ADVERTISES NO VENDOR CAPABILITY AT ALL** — seventeen
+`urn:ietf:…` URIs, authenticated or anonymous, and no Stalwart URI. Since a
+conforming server MUST reject a request naming a capability it did not
+advertise, `using` carries core alone even though the method is an extension.
+`Account/get` under core answers `unknownMethod`; `x:Account/get` returns the
+object.
+
+⚠ **AND A JMAP ERROR ARRIVES AS AN HTTP 200.** `unknownMethod` comes back with
+`error` in the slot where the method name goes. Checking `response.ok` alone —
+which the first version did — reads that as an empty success, and every mailbox
+silently becomes zero. The adapter now inspects the method response tag.
+
+⚠ **`x:Account` IS A UNION AND THE `Group` VARIANT HAS NO `usedDiskQuota`
+FIELD.** Not null, absent: a group is a delivery target with no store. The
+first version's "a missing property is a failure" rule — right for a `User` —
+would have aborted a whole tenant's sample over a mailing list. Groups
+contribute 0.
+
+⚠ **AND THE SESSION'S OWN `apiUrl` MUST BE IGNORED.** It advertises
+`https://mail.i10.tech/jmap/`, the public hostname, which 404s at Traefik. A
+conforming JMAP client follows `apiUrl`; ours cannot. `STALWART_URL` stays the
+in-cluster service.
+
+`/api/principal`, `/api/settings`, `/metrics` and every other REST path answer
+404 — there is no REST management API in v1.0.0, only this registry.
+`/api/schema` does exist in-cluster and is 940 KB of UI descriptors, which is
+where the `x:` prefix was found.
+
+The fallback, if the `x:` namespace is renamed by a release: `Principal/get`
+(advertised, RFC) resolves an address to an id, and `urn:ietf:params:jmap:quota`
+is advertised too — but `Quota/get` is scoped to the authenticated account, so
+it only helps if an admin session may name another `accountId`. Untested.
+
+⚠ **A BUMP OF THE STALWART IMAGE IS A REASON TO RE-RUN THE PROBE.** A vendor
+extension carries no compatibility promise. The adapter throws on anything it
+does not recognise and never returns 0, so a rename fails loudly and leaves the
+previous figures standing rather than zeroing everybody's usage.
 
 ### Human mail: the second feature kind
 
@@ -1075,9 +1119,9 @@ tiers move.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
       `mailboxes` currently counts `authd.accounts`.
-- [ ] ⚠ **The Stalwart JMAP call in `src/mail/stalwart.ts` has never run against
-      a server.** The property is read from their source; the method name and
-      envelope are not confirmable from a repository.
+- [ ] An `x:ApiKey` for the reconcile job. `STALWART_API_TOKEN` is sent as a
+      bearer token; basic auth with the recovery admin also works but is the
+      wrong credential to hand a cron job.
 - [ ] The storage and mailbox limits themselves. 0027 seeds 0/0 for free and
       1 mailbox / 10 GiB for pro as placeholders.
 
