@@ -231,6 +231,13 @@ being a single point of failure — it has to increase on every write.
 ## Open
 
 - [ ] The tier → route function itself, and the Stalwart config that calls it.
+- [ ] The `pdns` ROLE ITSELF, WHICH 0023 NO LONGER CREATES. `CREATE ROLE` needs
+      CREATEROLE and the migration connects as `i10`, which does not have it —
+      so 0023 failed on its first real run and blocked 0024-0028 behind the
+      PreSync hook. Roles are CNPG's job here (`platform-db/cluster.yaml`,
+      `managed.roles`), so the role, its Doppler config and its password secret
+      arrive with the deployment below, along with the five grants 0023 now
+      lists in a comment instead of applying.
 - [ ] The PowerDNS deployment: a manifest, the `pdns` role's password, and the
       glue records for `ns1`/`ns2` at the registrar. ⚠ **None of this exists
       yet** — the zones are written and nothing serves them.
