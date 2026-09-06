@@ -1,0 +1,42 @@
+@repo/metering
+
+Portions of the behaviour in this package are derived from Autumn
+(https://github.com/useautumn/autumn), which is licensed under the Apache
+License, Version 2.0.
+
+No source files were copied. What was taken is the semantics — read from their
+implementation and reimplemented here — specifically:
+
+  - the shape of a metered entitlement: an allowance that refills on an
+    interval, drawn down per request;
+  - reset intervals expressed as an interval plus a count, so that "quarterly"
+    is `month` x 3 rather than a separate kind of thing;
+  - all-or-nothing draw-down for a batched request.
+
+Where this package deliberately DIFFERS from Autumn, and why:
+
+  1. Reset windows are computed from a fixed anchor rather than stored in a
+     `next_reset_at` column and advanced by a cron.
+
+     Autumn's server/src/cron/resetCron/resetCustomerEntitlement.ts advances by
+     exactly one interval per run regardless of how overdue the row is, so a
+     cron outage spanning several periods restores one period of allowance and
+     leaves the stored boundary in the past.
+
+  2. Month-based intervals preserve the anchor day across short months.
+
+     Autumn's shared/utils/billingUtils/intervalUtils/intervalArithmetic.ts
+     documents `addInterval` as "preserves the anchor day (Stripe-compatible
+     end-of-month behavior)", computes `anchorDay` and `isMonthBased`, and then
+     uses neither -- it applies date-fns `addMonths` to the previous boundary.
+     Because `addMonths` clamps, repeated stepping walks the date backwards
+     permanently: 31 Jan -> 28 Feb -> 28 Mar. Deriving each boundary from the
+     original anchor keeps the clamp local to the short month.
+
+  3. Concurrency safety is not implemented here.
+
+     Autumn achieves atomic draw-down with Redis Lua scripts
+     (server/src/_luaScriptsV2/fullSubjectDeduction/). i10 runs this inside a
+     single-threaded Durable Object per (tenant, feature), so the atomicity is
+     a property of where the code runs rather than of the code. This package is
+     pure arithmetic and makes no concurrency claim of its own.

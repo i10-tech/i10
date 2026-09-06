@@ -58,6 +58,8 @@
               "invalid_to_address",
               "domain_not_verified",
               "idempotency_conflict",
+              "domain_already_exists",
+              "plan_limit_exceeded",
               "internal_server_error"
             ]
           },
@@ -665,6 +667,211 @@
         "required": [
           "data"
         ]
+      },
+      "Domain": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "domain"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "pending",
+              "verified",
+              "failed",
+              "temporary_failure"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "record": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "MX",
+                    "TXT",
+                    "CNAME",
+                    "NS"
+                  ]
+                },
+                "ttl": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "not_started",
+                    "pending",
+                    "verified",
+                    "failed",
+                    "temporary_failure"
+                  ]
+                },
+                "value": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "record",
+                "name",
+                "type",
+                "ttl",
+                "status",
+                "value"
+              ]
+            }
+          },
+          "delegated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "name",
+          "status",
+          "created_at",
+          "region",
+          "records",
+          "delegated"
+        ]
+      },
+      "CreateDomain": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253
+          },
+          "custom_return_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i"
+          },
+          "region": {
+            "type": "string"
+          },
+          "delegated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "DomainList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "enum": [
+                    "domain"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "not_started",
+                    "pending",
+                    "verified",
+                    "failed",
+                    "temporary_failure"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "region": {
+                  "type": "string"
+                },
+                "delegated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "object",
+                "id",
+                "name",
+                "status",
+                "created_at",
+                "region",
+                "delegated"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "DeletedDomain": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "domain"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deleted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "deleted"
+        ]
       }
     },
     "parameters": {}
@@ -1174,6 +1381,334 @@
           },
           "501": {
             "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/domains": {
+      "post": {
+        "summary": "Create a domain",
+        "description": "Claims a domain for sending and returns the DNS records to publish. The domain is unusable until those records exist and `POST /domains/{id}/verify` has confirmed them.",
+        "tags": [
+          "Domains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDomain"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created, with the records to publish.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The plan does not include another domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That domain is already registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The name is not a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Domains are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List domains",
+        "description": "Summaries only. Fetch one domain to see its DNS records.",
+        "tags": [
+          "Domains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every domain this key's tenant owns, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Domains are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/domains/{id}": {
+      "get": {
+        "summary": "Retrieve a domain",
+        "tags": [
+          "Domains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The domain, with the records to publish.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No domain with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Domains are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a domain",
+        "description": "Removes the domain and its sending identity. Mail already accepted is unaffected; nothing new can be sent from it afterwards.",
+        "tags": [
+          "Domains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedDomain"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No domain with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Domains are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/domains/{id}/verify": {
+      "post": {
+        "summary": "Verify a domain",
+        "description": "Asks the provider to re-check the DNS records. Verification is not instant: a `pending` answer means the records have not propagated yet, and `temporary_failure` means the lookup itself failed and is worth retrying — neither means the records are wrong.",
+        "tags": [
+          "Domains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The domain as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No domain with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Domains are not configured.",
             "content": {
               "application/json": {
                 "schema": {

@@ -67,3 +67,41 @@ describe("the claim must outlive the lease", () => {
     expect(env.WORKER_CLAIM_STALE_AFTER).toBe("1 mon")
   })
 })
+
+/**
+ * ⚠ THE FAILURE THIS PREVENTS LEAVES NOTHING BEHIND. An unset
+ * SENTRY_ENVIRONMENT does not error, does not warn and does not lose an event —
+ * it files production's errors under "development", where every dashboard and
+ * alert that filters by environment quietly skips them. The only symptom is a
+ * Sentry project that looks calm.
+ */
+describe("production must name its environment", () => {
+  it("refuses the development fallback when NODE_ENV is production", () => {
+    expect(() => loadEnv({ ...base, NODE_ENV: "production" })).toThrow(
+      /SENTRY_ENVIRONMENT/,
+    )
+  })
+
+  // ⚠ Staging and production run THE SAME IMAGE, so NODE_ENV cannot tell them
+  // apart and deriving the value would tag staging's errors as production's.
+  // An explicit statement is the only thing that distinguishes them.
+  it("accepts any explicit environment, staging included", () => {
+    for (const environment of ["production", "staging"]) {
+      const env = loadEnv({
+        ...base,
+        NODE_ENV: "production",
+        SENTRY_ENVIRONMENT: environment,
+      })
+      expect(env.SENTRY_ENVIRONMENT).toBe(environment)
+    }
+  })
+
+  // ⚠ And it stays silent everywhere else — a developer's machine and CI both
+  // want the fallback, and a check that fired there would be turned off.
+  it("leaves development and test alone", () => {
+    expect(loadEnv(base).SENTRY_ENVIRONMENT).toBe("development")
+    expect(loadEnv({ ...base, NODE_ENV: "test" }).SENTRY_ENVIRONMENT).toBe(
+      "development",
+    )
+  })
+})

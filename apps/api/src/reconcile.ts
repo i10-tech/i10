@@ -57,7 +57,10 @@ import { reconcileSubscriptions } from "./billing/reconcile.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
-import { autumnClient } from "./send/autumn.js"
+import { postgresEntitlements, postgresLedger } from "./metering/service.js"
+import { flushUsage } from "./metering/ingest.js"
+import { sampleStorage } from "./mail/storage.js"
+import { stalwartStorage } from "./mail/stalwart.js"
 import {
   needsAttention,
   reconcileSes,
@@ -91,7 +94,11 @@ await withMonitor(
     log,
   },
   async () => {
-    if (!env.POLAR_ACCESS_TOKEN || !env.AUTUMN_SECRET_KEY) {
+    // ⚠ THE METER IS NO LONGER PART OF THIS CONDITION, BECAUSE IT IS NO LONGER
+    // A SERVICE THAT CAN BE ABSENT. Usage lives in our own database, so the
+    // usage and tenant legs run on any deployment that has one; only the Polar
+    // leg needs a credential.
+    if (!env.POLAR_ACCESS_TOKEN) {
       // ⚠ NOT AN ERROR, AND IT STILL CHECKS IN. A deployment with no billing
       // configured has nothing to reconcile, and failing here would put a red
       // CronJob on a cluster that is behaving exactly as configured. Returning
@@ -99,10 +106,7 @@ await withMonitor(
       // `process.exit` would look to Sentry exactly like a run that never
       // happened, and alert every half hour on a correct deployment.
       log.warn(
-        {
-          polar: Boolean(env.POLAR_ACCESS_TOKEN),
-          autumn: Boolean(env.AUTUMN_SECRET_KEY),
-        },
+        { polar: Boolean(env.POLAR_ACCESS_TOKEN) },
         "billing is not fully configured — nothing to reconcile",
       )
       return
@@ -127,20 +131,11 @@ await withMonitor(
       return
     }
 
-    const entitlements = autumnClient({
-      baseUrl: env.AUTUMN_URL,
-      secretKey: env.AUTUMN_SECRET_KEY,
-      featureId: env.AUTUMN_FEATURE_ID,
-      freePlanId: env.AUTUMN_FREE_PLAN_ID,
-      // ⚠ LONGER THAN THE SEND PATH'S, FOR THE SAME REASON AS POLAR'S BELOW.
-      // AUTUMN_TIMEOUT_MS is two seconds because a customer is waiting behind
-      // it and a slow meter must never become a slow send. Nobody is waiting on
-      // this job, and the aggregate and the customer list are both far heavier
-      // than a `check` — two seconds would fail them on size alone and report
-      // it as an outage.
-      timeoutMs: 30_000,
-      log,
-    })
+    // ⚠ THE LEDGER, NOT A BILLING CLIENT. It exposes the aggregate, the
+    // idempotent top-up and the customer list, and nothing that could grant a
+    // plan — see `UsageLedger` and `CustomerDirectory` in send/reconcile.ts.
+    // The timeout that used to live here is gone with the HTTP call it bounded.
+    const entitlements = postgresLedger({ db, featureId: env.METERING_FEATURE_ID })
 
     // ⚠ A WINDOW, NOT "EVERYTHING SINCE THE LAST RUN". Both legs are idempotent
     // and both skip anything inside `EVENT_GRACE`, so overlapping windows cost
@@ -217,6 +212,78 @@ await withMonitor(
       process.exitCode = 1
     }
 
+    // ── storage sample ──────────────────────────────────────────────────────
+    //
+    // ⚠ IT RUNS HERE RATHER THAN ON ITS OWN SCHEDULE BECAUSE IT IS THE SAME KIND
+    // OF WORK: a number that lives somewhere else, pulled on a cadence, with
+    // nobody waiting on it. Thirty minutes is far finer than a storage limit
+    // needs — the figure moves in megabytes over hours.
+    if (env.STALWART_URL && env.STALWART_API_TOKEN) {
+      try {
+        const report = await sampleStorage({
+          db,
+          mail: stalwartStorage({
+            baseUrl: env.STALWART_URL,
+            token: env.STALWART_API_TOKEN,
+          }),
+          log,
+        })
+
+        // ⚠ FAILURES ARE LOGGED AND NOT FATAL. A mailbox we could not read
+        // leaves that tenant's previous total standing, which is stale and
+        // honest; the run itself has nothing to repair.
+        log.info(report, "storage sample complete")
+      } catch (error) {
+        log.error({ err: error }, "storage sample failed")
+        captureError(error)
+        process.exitCode = 1
+      }
+    } else {
+      log.warn(
+        { stalwart: Boolean(env.STALWART_URL) },
+        "storage not sampled — STALWART_URL or STALWART_API_TOKEN is unset",
+      )
+    }
+
+    // ── 3. usage → polar ────────────────────────────────────────────────────
+    //
+    // ⚠ AFTER THE LEDGER IS RECONCILED, NOT BEFORE. Leg 2 tops up units the
+    // send path dropped; shipping first would leave those units un-ingested
+    // until the next pass, which for a run that straddles a period boundary
+    // means they are invoiced a month late.
+    try {
+      let pass = 0
+      let shipped = 0
+      let duplicates = 0
+      // ⚠ BOUNDED, BECAUSE THIS SHARES A CRONJOB WITH A DEADLINE. A backlog
+      // larger than this drains over subsequent runs rather than making one run
+      // exceed `activeDeadlineSeconds` and be killed mid-flush.
+      for (; pass < 20; pass += 1) {
+        const report = await flushUsage({
+          db,
+          polar: polarClient({
+            accessToken: env.POLAR_ACCESS_TOKEN,
+            server: env.POLAR_SERVER,
+            timeoutMs: 30_000,
+          }),
+          featureId: env.METERING_FEATURE_ID,
+          eventName: env.METERING_EVENT_NAME,
+          log,
+        })
+        shipped += report.shipped
+        duplicates += report.duplicates
+        if (!report.batchWasFull) break
+      }
+
+      log.info({ shipped, duplicates, passes: pass + 1 }, "usage ingest complete")
+    } catch (error) {
+      // ⚠ NOT FATAL, AND NOT LOST. Every un-shipped row still has
+      // `ingested_at IS NULL`, so the next run finds exactly the same work.
+      log.error({ err: error }, "usage ingest failed")
+      captureError(error)
+      process.exitCode = 1
+    }
+
     // ── 3. tenants ↔ Autumn ─────────────────────────────────────────────────
     try {
       const tenants = await reconcileTenantCustomers(db, entitlements, log)
@@ -274,11 +341,23 @@ await withMonitor(
         subscriptions,
         // The same client the usage leg reads through. Two would be two sets of
         // timeouts and two connection pools against one service, for nothing.
-        grants: subscriptionGrants({ subscriptions, entitlements, log }),
+        // ⚠ A DIFFERENT OBJECT FROM THE LEDGER THE USAGE LEG READS, AND
+        // DELIBERATELY SO. This one can move a customer between plans; that one
+        // can only count. They were one client while both were Autumn over
+        // HTTP, and splitting them is what makes "only the grant path grants a
+        // plan" a fact about the wiring rather than a rule to remember.
+        grants: subscriptionGrants({
+          subscriptions,
+          entitlements: postgresEntitlements({
+            db,
+            freePlanId: env.METERING_FREE_PLAN_ID,
+          }),
+          log,
+        }),
         options: {
           planForProduct: (productId: string) =>
             Object.entries(env.POLAR_PRODUCTS).find(([, id]) => id === productId)?.[0],
-          freePlanId: env.AUTUMN_FREE_PLAN_ID,
+          freePlanId: env.METERING_FREE_PLAN_ID,
         },
         log,
       })

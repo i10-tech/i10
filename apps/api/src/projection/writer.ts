@@ -3,6 +3,30 @@ import type { Database } from "../db/client.js"
 import { accounts, aliases, webhookEvents } from "../db/schema.js"
 import { projectUser, type ClerkUser } from "./clerk-user.js"
 
+/**
+ * Every domain that may host mailboxes right now, and who owns it.
+ *
+ * ⚠ VERIFIED ONLY, AND THE FUNCTION IN 0016 IS WHERE THAT IS ENFORCED. A row
+ * here makes Stalwart treat the domain as a local recipient, so an unverified
+ * one would let somebody receive mail for a name they merely typed.
+ *
+ * ⚠ AND IT IS READ PER EVENT RATHER THAN CACHED. A domain verified a second ago
+ * must project the mailboxes on it, and a domain removed a second ago must
+ * stop; a cache turns both into "sometime in the next few minutes", which for
+ * the second one means accepting mail for a domain the tenant no longer owns.
+ */
+async function mailboxDomains(tx: Tx): Promise<Map<string, string | null>> {
+  const rows = (await tx.execute(
+    sql`select name, tenant_id::text as tenant_id from core.mailbox_domains()`,
+  )) as unknown as { name: string; tenant_id: string | null }[]
+
+  return new Map(rows.map((r) => [String(r.name).toLowerCase(), r.tenant_id]))
+}
+
+/** The domain half of an address, lowercased. */
+const domainOf = (email: string) =>
+  email.slice(email.lastIndexOf("@") + 1).toLowerCase()
+
 export type ApplyOutcome =
   /** The mailbox now matches Clerk. */
   | "upserted"
@@ -82,7 +106,14 @@ async function applyUser(
   user: ClerkUser,
   hostedDomains: readonly string[],
 ): Promise<ApplyResult> {
-  const mailbox = projectUser(user, hostedDomains)
+  // ⚠ TWO SOURCES OF HOSTED DOMAINS, AND THEY MEAN DIFFERENT THINGS.
+  // `MAIL_DOMAINS` is i10's own — i10.tech predates tenancy, owns no row, and
+  // its mailboxes belong to no customer. The table is every customer domain
+  // that has been VERIFIED. A domain in neither does not project at all, which
+  // is what stops an address the user merely claimed becoming a local
+  // recipient.
+  const owners = await mailboxDomains(tx)
+  const mailbox = projectUser(user, [...hostedDomains, ...owners.keys()])
 
   if (!mailbox) {
     // No hosted address: either they never had one, or they gave it up. Either
@@ -99,6 +130,15 @@ async function applyUser(
       email: mailbox.email,
       displayName: mailbox.displayName || null,
       clerkUpdatedAt: mailbox.clerkUpdatedAt,
+      // ⚠ THE TENANT IS THE ONE THAT OWNS THE DOMAIN, NOT THE USER'S CLERK ORG.
+      // A mailbox on acme.com belongs to whoever proved they control acme.com;
+      // the person holding it may be in several organisations or none. It is
+      // also the only derivation that cannot disagree with what Stalwart does,
+      // because Stalwart routes on the domain too.
+      //
+      // NULL for an address on one of i10's own domains, which is what the
+      // column allows for and why it is nullable.
+      tenantId: owners.get(domainOf(mailbox.email)) ?? null,
     })
     .onConflictDoUpdate({
       target: accounts.clerkUserId,
@@ -106,6 +146,10 @@ async function applyUser(
         email: sql`excluded.email`,
         displayName: sql`excluded.display_name`,
         clerkUpdatedAt: sql`excluded.clerk_updated_at`,
+        // Re-derived on every write, so a domain that changed hands — or was
+        // verified after the mailbox existed — is corrected by the next event
+        // rather than needing a backfill.
+        tenantId: sql`excluded.tenant_id`,
         updatedAt: sql`now()`,
       },
       // Out-of-order delivery guard. A delayed older event must not overwrite

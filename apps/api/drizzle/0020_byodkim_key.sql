@@ -1,0 +1,1 @@
+ALTER TABLE "core"."domains" ADD COLUMN "dkim_private_key_sealed" text;

@@ -14,6 +14,7 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
     status: null,
     cancelAtPeriodEnd: false,
     currentPeriodEnd: null,
+    polarSubscriptionId: "sub_1",
   }),
   ...over,
 })
@@ -21,6 +22,9 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
 const polar = (checkout: CheckoutState | null): PolarClient => ({
   createCheckout: async () => ({ id: "c1", url: "https://x", expiresAt: "" }),
   getCheckout: async () => checkout,
+  ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+  updateSubscription: async () => {},
+  createCustomerSession: async () => ({ token: "polar_cst_test" }),
   listSubscriptions: async () => [],
 })
 
@@ -58,6 +62,7 @@ describe("the post-checkout status page", () => {
             status: "active",
             cancelAtPeriodEnd: false,
             currentPeriodEnd: null,
+            polarSubscriptionId: "sub_1",
           }),
         }),
         log,
@@ -78,6 +83,7 @@ describe("the post-checkout status page", () => {
       status: "active",
       cancelAtPeriodEnd: false,
       currentPeriodEnd: null,
+      polarSubscriptionId: "sub_1",
     }))
 
     const app = createApp({

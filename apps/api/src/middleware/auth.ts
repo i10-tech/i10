@@ -36,6 +36,8 @@ declare module "hono" {
     emailLookup?: import("../send/lookup.js").EmailLookup
     /** Customer-managed webhook destinations. */
     webhookEndpoints?: import("../webhooks/store.js").WebhookEndpointStore
+    /** Sending domains and their DNS records. */
+    domains?: import("../domains/store.js").DomainStore
   }
 }
 

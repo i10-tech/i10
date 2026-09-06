@@ -30,6 +30,7 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
     status: null,
     cancelAtPeriodEnd: false,
     currentPeriodEnd: null,
+    polarSubscriptionId: null,
   }),
   ...over,
 })
@@ -179,6 +180,9 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub()],
         createCheckout: vi.fn(),
       },
@@ -201,6 +205,9 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [
           polarSub({
             id: "sub_old",
@@ -232,6 +239,9 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [
           polarSub({ id: "sub_live", modified_at: "2026-09-03T12:00:00Z" }),
           polarSub({
@@ -259,6 +269,9 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub()],
         createCheckout: vi.fn(),
       },
@@ -279,6 +292,9 @@ describe("reconciling against Polar", () => {
     await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub()],
         createCheckout: vi.fn(),
       },
@@ -296,6 +312,9 @@ describe("reconciling against Polar", () => {
     await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [
           polarSub({ status: "canceled", modified_at: "2026-09-04T12:00:00Z" }),
         ],
@@ -320,6 +339,9 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub({ id: "sub_other" })],
         createCheckout: vi.fn(),
       },
@@ -339,6 +361,9 @@ describe("reconciling against Polar", () => {
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: vi.fn(),
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [
           polarSub({ id: "sub_1", customer: { external_id: "ten-1" } }),
           polarSub({ id: "sub_2", customer: { external_id: "ten-2" } }),
@@ -387,7 +412,14 @@ describe("POST /billing/checkout", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { getCheckout: vi.fn(), createCheckout, listSubscriptions: vi.fn() },
+        polar: {
+          getCheckout: vi.fn(),
+          createCheckout,
+          listSubscriptions: vi.fn(),
+          ingestEvents: vi.fn(),
+          updateSubscription: vi.fn(),
+          createCustomerSession: vi.fn(),
+        },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
         successUrl: "https://console.i10.tech/billing",
@@ -416,7 +448,14 @@ describe("POST /billing/checkout", () => {
     const app = createApp({
       apiKeyAuth,
       billing: {
-        polar: { getCheckout: vi.fn(), createCheckout, listSubscriptions: vi.fn() },
+        polar: {
+          getCheckout: vi.fn(),
+          createCheckout,
+          listSubscriptions: vi.fn(),
+          ingestEvents: vi.fn(),
+          updateSubscription: vi.fn(),
+          createCustomerSession: vi.fn(),
+        },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
         log,
@@ -440,6 +479,9 @@ describe("POST /billing/checkout", () => {
         polar: {
           getCheckout: vi.fn(),
           createCheckout: vi.fn(),
+          ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+          updateSubscription: async () => {},
+          createCustomerSession: async () => ({ token: "polar_cst_test" }),
           listSubscriptions: vi.fn(),
         },
         subscriptions: ops(),
@@ -469,6 +511,9 @@ describe("GET /billing/plan", () => {
         polar: {
           getCheckout: vi.fn(),
           createCheckout: vi.fn(),
+          ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+          updateSubscription: async () => {},
+          createCustomerSession: async () => ({ token: "polar_cst_test" }),
           listSubscriptions: vi.fn(),
         },
         subscriptions: ops({
@@ -477,6 +522,7 @@ describe("GET /billing/plan", () => {
             status: "active",
             cancelAtPeriodEnd: true,
             currentPeriodEnd: new Date("2026-10-03T00:00:00Z"),
+            polarSubscriptionId: "sub_1",
           }),
         }),
         products: { pro: "prod_pro" },
@@ -495,5 +541,43 @@ describe("GET /billing/plan", () => {
       cancelAtPeriodEnd: true,
       currentPeriodEnd: "2026-10-03T00:00:00.000Z",
     })
+  })
+
+  /**
+   * ⚠ POLAR'S SUBSCRIPTION ID IS NOT FOR RENDERING. `current()` carries it so a
+   * plan change has something to PATCH; putting it in this response would make
+   * an internal identifier part of what the console is entitled to know, and
+   * then part of what it eventually sends back.
+   */
+  it("does not expose polar's subscription id", async () => {
+    const app = createApp({
+      apiKeyAuth,
+      billing: {
+        polar: {
+          getCheckout: vi.fn(),
+          createCheckout: vi.fn(),
+          ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+          updateSubscription: async () => {},
+          createCustomerSession: async () => ({ token: "polar_cst_test" }),
+          listSubscriptions: vi.fn(),
+        },
+        subscriptions: ops({
+          current: async () => ({
+            plan: "pro",
+            status: "active",
+            cancelAtPeriodEnd: false,
+            currentPeriodEnd: null,
+            polarSubscriptionId: "sub_secret",
+          }),
+        }),
+        products: { pro: "prod_pro" },
+        log,
+      },
+    })
+
+    const res = await app.request("/billing/plan", {
+      headers: { Authorization: `Bearer ${KEY}` },
+    })
+    expect(JSON.stringify(await res.json())).not.toContain("sub_secret")
   })
 })

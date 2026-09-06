@@ -26,6 +26,24 @@ export const errorNames = [
   // Adding a name is safe in a way that changing one is not: an SDK switching
   // on these already needs a default branch.
   "idempotency_conflict",
+  /**
+   * ⚠ 409, AND IT DELIBERATELY DOES NOT SAY WHOSE. `core.domains.name` is
+   * unique across every tenant — two customers cannot both own example.com,
+   * because a second claim on a verified domain could send as it and receive
+   * its mail. So this answer is returned whether the domain is the caller's own
+   * duplicate or somebody else's, and the message must never distinguish them:
+   * "another customer has example.com" is a way to enumerate who our customers
+   * are.
+   */
+  "domain_already_exists",
+  /**
+   * ⚠ NOT `daily_quota_exceeded`, AND NOT A 429. That one is volume — a
+   * customer who waits gets more. This is a plan limit on a resource that is
+   * held rather than consumed: a fourth domain does not become available by
+   * waiting, and an SDK that backs off on it retries forever. The fix is an
+   * upgrade or a deletion, which is a 403.
+   */
+  "plan_limit_exceeded",
   "internal_server_error",
 ] as const
 

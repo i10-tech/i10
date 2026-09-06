@@ -12,8 +12,8 @@ import {
   webhookBackoff,
   type WebhookJob,
 } from "./queue/webhook-queue.js"
-import { autumnMetering } from "./send/autumn.js"
-import { resilient, unmetered } from "./send/metering.js"
+import { postgresMetering } from "./metering/service.js"
+import { resilient } from "./send/metering.js"
 import { sesTransport } from "./send/ses.js"
 import { webhookDeliveryOps } from "./webhooks/db.js"
 import { deliverWebhook } from "./webhooks/deliver.js"
@@ -98,30 +98,19 @@ const transport = sesTransport({
 })
 
 // ⚠ THE WORKER METERS TOO, AND ITS HALF IS THE ONE THAT BILLS. The API checks
-// quota; this records what actually went. No key means `unmetered` — allowed,
-// uncounted — which is right locally and must be visible in the boot log rather
-// than inferred from an invoice.
+// quota; this records what actually went — and it writes to the same
+// `core.meter_events` the API reads, on the same connection pool, so there is
+// no longer a second system that can be configured differently in the two
+// processes.
 //
 // `resilient` is what makes a billing failure unable to fail a send: the mail
 // has already gone, and throwing here would return the row to the queue and
 // send it twice to fix a billing record.
 const metering = resilient(
-  env.AUTUMN_SECRET_KEY
-    ? autumnMetering({
-        baseUrl: env.AUTUMN_URL,
-        secretKey: env.AUTUMN_SECRET_KEY,
-        featureId: env.AUTUMN_FEATURE_ID,
-        freePlanId: env.AUTUMN_FREE_PLAN_ID,
-        timeoutMs: env.AUTUMN_TIMEOUT_MS,
-        log,
-      })
-    : unmetered,
+  postgresMetering({ db, featureId: env.METERING_FEATURE_ID, log }),
   log,
 )
-log.info(
-  { metered: Boolean(env.AUTUMN_SECRET_KEY) },
-  env.AUTUMN_SECRET_KEY ? "metering via autumn" : "UNMETERED — no AUTUMN_SECRET_KEY",
-)
+log.info({ feature: env.METERING_FEATURE_ID }, "metering via postgres")
 
 const ops = databaseOps({
   db,

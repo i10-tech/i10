@@ -22,12 +22,25 @@ export default {
         "sdk",
         "ui",
         "contracts",
+        // packages/metering — the allowance/reset core that replaces Autumn.
+        // Its own scope rather than `api`: it is a workspace package with its
+        // own tests and its own release surface, and it is destined to run in a
+        // Durable Object rather than in the API server at all.
+        "metering",
         // services/authd — the LDAP bridge that delegates password checks to
         // Clerk. Its own scope rather than `stalwart`: it is a separate Go
         // service with a separate release surface, and the release notes read
         // better when a change to the bridge is not filed under the mail server
         // it happens to run beside.
         "authd",
+        // apps/api/src/billing — Polar: checkouts, subscriptions, plan changes
+        // and the proration decision. Inside the API rather than beside it, so
+        // NOT a scope by the release-surface rule the two above follow — it is
+        // here because a changelog reads better when "how a customer changes
+        // plan" is not filed under the same heading as a route handler, and
+        // because `infra`, `ci`, `repo` and `deps` already show this list is
+        // about grouping rather than about packages.
+        "billing",
         "stalwart",
         "bulwark",
         "infra",

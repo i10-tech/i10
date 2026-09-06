@@ -31,6 +31,16 @@ export interface CurrentPlan {
   status: string | null
   cancelAtPeriodEnd: boolean
   currentPeriodEnd: Date | null
+  /**
+   * Polar's id for the subscription, or `null` if there is none.
+   *
+   * ⚠ IT IS HERE SO A PLAN CHANGE HAS SOMETHING TO PATCH, and it is the one
+   * field on this object that is not for rendering. A tenant with `null` here
+   * has never bought anything — they go through checkout, not through an
+   * update, and `PATCH` on a subscription that does not exist is a 404 nobody
+   * can act on.
+   */
+  polarSubscriptionId: string | null
 }
 
 export interface SubscriptionOps {
@@ -152,7 +162,8 @@ export function subscriptionOps(db: Database): SubscriptionOps {
     async current(tenantId) {
       return withTenant(db, tenantId, async (tx) => {
         const rows = (await tx.execute(sql`
-          select granted_plan_id, status, cancel_at_period_end, current_period_end
+          select granted_plan_id, status, cancel_at_period_end, current_period_end,
+                 polar_subscription_id
             from core.subscriptions
            where tenant_id = ${tenantId}::uuid
            limit 1
@@ -161,6 +172,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
           status: string
           cancel_at_period_end: boolean
           current_period_end: string | Date | null
+          polar_subscription_id: string | null
         }[]
 
         const row = rows[0]
@@ -173,6 +185,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
             status: null,
             cancelAtPeriodEnd: false,
             currentPeriodEnd: null,
+            polarSubscriptionId: null,
           }
         }
 
@@ -181,6 +194,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
           status: row.status,
           cancelAtPeriodEnd: row.cancel_at_period_end,
           currentPeriodEnd: toDate(row.current_period_end),
+          polarSubscriptionId: row.polar_subscription_id,
         }
       })
     },

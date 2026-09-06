@@ -15,10 +15,12 @@ import { createAutoconfig, type AutoconfigDeps } from "./routes/autoconfig.js"
 import { emails } from "./routes/emails.js"
 import { createSesWebhooks, type SesWebhookDeps } from "./routes/ses-events.js"
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
+import { domains } from "./routes/domains.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
+import type { DomainStore } from "./domains/store.js"
 
 /**
  * Read from package.json rather than `npm_package_version`, which pnpm only
@@ -54,6 +56,14 @@ export interface AppDeps {
   emailLookup?: EmailLookup
   /** Customer-managed webhook destinations, for `/webhook-endpoints`. */
   webhookEndpoints?: WebhookEndpointStore
+  /**
+   * Sending domains, for `/domains`.
+   *
+   * ⚠ THE ONLY PLACE A PLAN'S DOMAIN LIMIT IS ENFORCED, because it is the only
+   * thing in the application that writes `core.domains`. Omitted in tests and
+   * in the OpenAPI generator, where the routes answer 501.
+   */
+  domains?: DomainStore
   /** SES delivery events over SNS. Unauthenticated; signature-verified. */
   sesWebhooks?: SesWebhookDeps
   /**
@@ -125,16 +135,24 @@ export function createApp(deps: AppDeps = {}) {
   // at import time, so the middleware cannot capture anything createApp knows.
   // Setting it per request is what lets one process serve a configured app and
   // the tests serve an unconfigured one.
-  if (deps.apiKeyAuth || deps.sendPath || deps.emailLookup || deps.webhookEndpoints) {
+  if (
+    deps.apiKeyAuth ||
+    deps.sendPath ||
+    deps.emailLookup ||
+    deps.webhookEndpoints ||
+    deps.domains
+  ) {
     const auth = deps.apiKeyAuth
     const sendPath = deps.sendPath
     const lookup = deps.emailLookup
     const endpoints = deps.webhookEndpoints
+    const domainStore = deps.domains
     app.use("*", async (c, next) => {
       if (auth) c.set("apiKeyAuth", auth)
       if (sendPath) c.set("sendPath", sendPath)
       if (lookup) c.set("emailLookup", lookup)
       if (endpoints) c.set("webhookEndpoints", endpoints)
+      if (domainStore) c.set("domains", domainStore)
       await next()
     })
   }
@@ -204,6 +222,9 @@ export function createApp(deps: AppDeps = {}) {
   // `/webhooks`, which is the inbound router below: one prefix for two opposite
   // authentication models is how a middleware mistake exposes the wrong half.
   app.route("/webhook-endpoints", webhookEndpoints)
+
+  // Resend's paths, verbs and body keys. See routes/domains.ts.
+  app.route("/domains", domains)
 
   // Mounted unconditionally. Only mounting it when configured would turn a
   // missing secret into a 404 that looks like Clerk having the wrong URL,

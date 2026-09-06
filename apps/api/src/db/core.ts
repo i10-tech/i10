@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -111,6 +112,44 @@ export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
   "failed",
 ])
 
+/**
+ * How far along a domain's verification is.
+ *
+ * ⚠ RESEND'S VOCABULARY, VERBATIM, AND THAT IS THE POINT OF THE CHOICE. These
+ * strings reach customer code as literals in `if (domain.status === ...)`, and
+ * a migration from Resend that has to rewrite those comparisons is a migration
+ * that does not happen. `temporary_failure` in particular is not a synonym for
+ * `failed`: SES uses it for a DNS lookup that failed in a way worth retrying,
+ * and collapsing the two would tell a customer their correct records are wrong.
+ */
+/**
+ * Which MTA a domain's mail leaves through.
+ *
+ * ⚠ `auto` IS NOT A THIRD MTA, IT IS "ASK THE PLAN". Free tenants send through
+ * our own MTA and paid ones through SES, and that mapping is policy that will
+ * change. Storing the RESOLVED answer on every domain would freeze today's
+ * policy into rows and make a pricing change a backfill; storing `auto` keeps
+ * the decision in one place and leaves the column for the exceptions.
+ *
+ * ⚠ AND THE OVERRIDES EXIST FOR SUPPORT, NOT FOR CUSTOMERS. A domain pinned to
+ * `direct` or `ses` ignores the plan entirely — for a customer whose
+ * deliverability needs one specific path, or to move somebody off a route that
+ * is having a bad day. It is a dashboard control, not an API field.
+ */
+export const deliveryRoute = core.enum("delivery_route", ["auto", "ses", "direct"])
+
+export const domainStatus = core.enum("domain_status", [
+  /** No identity has been created yet. */
+  "not_started",
+  /** Records issued, waiting for DNS to propagate. */
+  "pending",
+  "verified",
+  /** SES gave up. The records are absent or wrong. */
+  "failed",
+  /** A retryable lookup failure. NOT the same as `failed`. */
+  "temporary_failure",
+])
+
 export const suppressionReason = core.enum("suppression_reason", [
   "hard_bounce",
   "complaint",
@@ -195,8 +234,55 @@ export const domains = core.table(
      * The custom MAIL FROM subdomain, stored as the label only ("send"), not
      * the FQDN — the FQDN is `${mailFromSubdomain}.${name}` and storing it
      * twice invites the two to disagree.
+     *
+     * ⚠ THIS ONE IS THE SES ROUTE'S RETURN PATH, AND ITS MX MUST BE AMAZON'S.
+     * That is why there is a second one below rather than one shared label: a
+     * name has one MX target, and the two routes need different ones.
      */
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
+
+    /**
+     * The return path for mail we deliver ourselves.
+     *
+     * ⚠ A SECOND SUBDOMAIN EXISTS SO THAT SPF ALIGNS ON BOTH ROUTES. Sending
+     * direct with a bounce address on i10's own domain works and DMARC still
+     * passes — on DKIM alone. Passing on SPF *as well* requires the envelope
+     * sender to be on the CUSTOMER'S domain, which means their DNS needs a
+     * return path pointing at us. Two labels, two MX records, published once.
+     *
+     * ⚠ RELAXED ALIGNMENT IS WHAT MAKES A SUBDOMAIN ENOUGH. DMARC's default
+     * `aspf=r` aligns anything under the organizational domain, so
+     * `bounce.example.com` aligns with `From: someone@example.com`. Under
+     * `aspf=s` it would not — which is a reason never to publish a DMARC record
+     * for a customer with strict alignment on.
+     */
+    bounceSubdomain: text("bounce_subdomain").notNull().default("bounce"),
+
+    /**
+     * Which MTA this domain's mail leaves through. `auto` asks the plan.
+     *
+     * ⚠ ON THE DOMAIN, NOT THE TENANT, BECAUSE DELIVERABILITY IS PER DOMAIN. A
+     * customer with a warmed sending domain and a brand-new one has different
+     * needs for each, and a tenant-level switch would force the same answer on
+     * both.
+     */
+    deliveryRoute: deliveryRoute("delivery_route").notNull().default("auto"),
+
+    /**
+     * Whether i10 serves this domain's mail records from its own nameservers.
+     *
+     * ⚠ IT CHANGES WHAT THE CUSTOMER MUST PUBLISH, WHICH IS WHY IT IS NOT A
+     * SETTING TO TOGGLE. Delegated, they add three NS record sets and we serve
+     * the rest; manual, they add six records themselves. Flipping it on a live
+     * domain invalidates whichever set is already published, so it is chosen at
+     * creation and changed only deliberately.
+     *
+     * ⚠ AND MANUAL IS THE DEFAULT, BECAUSE IT HAS NO DEPENDENCY ON US. Records
+     * in the customer's own DNS keep resolving whatever happens to our
+     * nameserver; a delegated domain stops resolving entirely. Until that is
+     * served by something with real redundancy, the safer shape is the default.
+     */
+    delegated: boolean("delegated").notNull().default(false),
 
     /**
      * BYODKIM. The selector and public key are published in the customer's DNS
@@ -213,6 +299,29 @@ export const domains = core.table(
 
     /** The SES tenant this domain's sending is attributed to. */
     sesTenantName: text("ses_tenant_name"),
+
+    /**
+     * The DKIM private key, sealed with `WEBHOOK_SECRET_KEY`.
+     *
+     * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. The column
+     * above says a database backup, a replica or a read-only analytics grant
+     * must never be enough to sign mail as a customer's domain — and with the
+     * key held outside the database, none of them are. The ciphertext is inert
+     * without it.
+     *
+     * ⚠ AND IT IS NEVER RETURNED BY THE API. There is no "show me my DKIM key"
+     * endpoint, for the same reason there is none for a webhook signing secret:
+     * such a call is a better target than the database it would read from.
+     */
+    dkimPrivateKeySealed: text("dkim_private_key_sealed"),
+
+    /**
+     * ⚠ SES'S ANSWER, COPIED — NOT DERIVED FROM `verified_at`. A domain can be
+     * `failed` or `temporary_failure` while `verified_at` is null, and those
+     * three states are what a customer needs told apart: one means wait, one
+     * means check your DNS, one means it never started.
+     */
+    status: domainStatus("status").notNull().default("not_started"),
 
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     dnsCheckedAt: timestamp("dns_checked_at", { withTimezone: true }),
@@ -722,4 +831,286 @@ export const subscriptions = core.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("subscriptions_granted_idx").on(t.grantedPlanId, t.planId)],
+)
+
+/**
+ * Where a plan came from, and who is allowed to overwrite it.
+ *
+ * ⚠ THE DISCRIMINATOR IS A MECHANISM, NOT A LABEL. `catalog` plans are seeded
+ * from configuration and reconciled destructively by a push — the file wins,
+ * and anything edited by clicking is reverted. `custom` plans belong to one
+ * tenant, are created through the dashboard for a specific deal, and a push
+ * never touches them. The second is the only reason the first can safely be
+ * destructive.
+ */
+export const planSource = core.enum("plan_source", ["catalog", "custom"])
+
+/**
+ * One line of what a plan grants, as stored.
+ *
+ * ⚠ THIS TYPE IS AN ASSERTION ABOUT JSON, NOT A GUARANTEE. `$type` is erased at
+ * runtime and the column can hold anything a migration or a psql session put
+ * there, so every read parses it — see `parseEntitlements` in
+ * src/metering/postgres.ts. It mirrors `Entitlement` in `@repo/metering`, and it
+ * is declared here rather than imported so the schema stays free of a
+ * dependency that drizzle-kit would have to resolve.
+ */
+export type StoredEntitlement =
+  | {
+      /** Used up and replenished: emails. Has a reset cycle. */
+      kind: "consumable"
+      featureId: string
+      allowance: number | "unlimited"
+      overage: "billable" | "never"
+      interval: "day" | "week" | "month" | "year" | "lifetime"
+      intervalCount?: number
+    }
+  | {
+      /**
+       * Held persistently: domains, mailboxes, storage.
+       *
+       * ⚠ NO `interval`, AND THE UNION IS WHY RATHER THAN A COMMENT. A domain
+       * does not refill. A shape that can carry a reset interval is one
+       * somebody eventually sets, after which the limit silently scopes itself
+       * to a window and every domain created before the boundary stops
+       * counting.
+       */
+      kind: "continuous"
+      featureId: string
+      allowance: number | "unlimited"
+      overage: "billable" | "never"
+    }
+
+/**
+ * The plan catalogue, and the bespoke plans beside it.
+ *
+ * ⚠ THE ENTITLEMENTS ARE `jsonb` RATHER THAN A CHILD TABLE, AND THE REASON IS
+ * THAT THEY ARE NEVER READ APART FROM THEIR PLAN. Autumn models these as
+ * `product_items` rows because it carries a full pricing model — tiers, prices,
+ * proration. Ours are four fields, always loaded as a set, and a child table
+ * would buy a second RLS policy, a second index and a join on the hot path of
+ * every quota check in exchange for nothing.
+ *
+ * ⚠ AND A PLAN IS NOT TENANT-SCOPED THE WAY EVERY OTHER TABLE HERE IS. A
+ * catalogue row has `tenant_id IS NULL` and is readable by everyone; a custom
+ * row is readable only by its owner. The policy in the migration says so, and
+ * its WITH CHECK excludes NULL — so `i10_api` can create a bespoke plan for the
+ * tenant it is scoped to, and can never create or alter a catalogue one. That
+ * is the "the file is the source of truth" rule, enforced by the database
+ * rather than by reviewers.
+ */
+export const plans = core.table(
+  "plans",
+  {
+    /** `free`, `pro`, or something a sales deal produced. */
+    id: text("id").primaryKey(),
+    source: planSource("source").notNull(),
+
+    /**
+     * ⚠ NULL FOR A CATALOGUE PLAN, AND A CHECK CONSTRAINT TIES IT TO `source`.
+     * The two ways to get this wrong are both silent: a custom plan with no
+     * owner is invisible to the tenant it was built for, and a catalogue plan
+     * with one is a price list only one customer can see.
+     */
+    tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
+
+    name: text("name").notNull(),
+    entitlements: jsonb("entitlements").$type<StoredEntitlement[]>().notNull(),
+
+    /**
+     * Where this plan sits relative to the others. Higher is more.
+     *
+     * ⚠ AN EXPLICIT NUMBER, NOT AN INFERENCE FROM PRICE OR ALLOWANCE. Whether a
+     * plan change is an upgrade decides how Polar prorates it — charged now, or
+     * deferred to the period end — so the answer has to be one somebody chose.
+     * Inferring it from the `emails` allowance breaks the moment a plan is
+     * cheaper on volume and dearer on seats, and inferring it from price means
+     * storing a price we deliberately do not own.
+     *
+     * ⚠ TIES ARE NOT UPGRADES. Two plans at the same rank are a sideways move,
+     * which is neither charged nor deferred — see `directionOf`.
+     */
+    rank: integer("rank").notNull().default(0),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("plans_tenant_idx").on(t.tenantId)],
+)
+
+/**
+ * Which plan a tenant is on, and the clock their windows are measured from.
+ *
+ * ⚠ SEPARATE FROM `subscriptions`, BECAUSE AN ASSIGNMENT DOES NOT REQUIRE A
+ * PAYMENT. `core.subscriptions` is our copy of what Polar says was bought;
+ * this is what we actually entitle the tenant to. They agree for every ordinary
+ * customer and must be able to differ for the ones that matter — an enterprise
+ * on a bespoke plan, an account comped by support, our own internal tenant.
+ * Folding this into `subscriptions` would mean inventing a fake Polar
+ * subscription id to put anybody on a plan they did not buy.
+ *
+ * ⚠ ONE ROW PER TENANT. What they are entitled to today is a single question
+ * with a single answer; the history of how they got there lives in Polar and in
+ * the audit trail, which keep it properly.
+ */
+export const planAssignments = core.table("plan_assignments", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+
+  planId: text("plan_id")
+    .notNull()
+    .references(() => plans.id),
+
+  /**
+   * ⚠ SET ONCE, AND NEVER MOVED BY A PLAN CHANGE. Every reset boundary for this
+   * tenant is derived from it, so rewriting it re-buckets all of their history
+   * — and re-anchoring on assignment would hand every customer a free reset:
+   * exhaust the allowance, change plan, start a fresh window, repeat. The
+   * upsert in src/metering/postgres.ts deliberately omits this column from its
+   * DO UPDATE, which is where the rule is actually enforced.
+   */
+  anchor: timestamp("anchor", { withTimezone: true }).notNull(),
+
+  /**
+   * The customer's own switch: "keep going past my plan and bill me".
+   *
+   * ⚠ OFF BY DEFAULT, AND IT IS THE CUSTOMER'S TO SET. It is the whole
+   * difference between "your sends stopped" and "you owe us twenty-seven
+   * dollars you did not expect", and only one of those is a decision we are
+   * entitled to make on somebody's behalf.
+   *
+   * ⚠ AND IT GRANTS NOTHING ON ITS OWN. Each entitlement says whether that
+   * feature may be exceeded at all; this only turns it on where the plan
+   * already permits it. A tenant with this set still cannot buy a fourth
+   * domain, because nobody sells a fourth domain.
+   */
+  overageEnabled: boolean("overage_enabled").notNull().default(false),
+
+  assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * How much disk each tenant's mailboxes occupy, as last sampled.
+ *
+ * ⚠ A SAMPLE, NOT A LEDGER, AND THE DIFFERENCE IS THE WHOLE DESIGN. Storage is
+ * a LEVEL that goes up and down — a deleted folder frees space — so it cannot
+ * be accumulated from events the way sends are. There is exactly one row per
+ * tenant and it is overwritten; the history, if it is ever wanted, is a
+ * different table with a different retention.
+ *
+ * ⚠ AND IT IS OUR COPY OF SOMEBODY ELSE'S NUMBER. Stalwart computes it and owns
+ * it. This exists so the quota check is an indexed local read rather than a
+ * synchronous call to another service on a request path — see the note on
+ * freshness in `sampledAt`.
+ */
+export const tenantStorage = core.table("tenant_storage", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+
+  /**
+   * ⚠ BYTES, NOT GIGABYTES, AND THE ALLOWANCE IS IN BYTES TOO. Rounding to GB
+   * forces a choice between a ceiling — where one byte past ten gigabytes reads
+   * as eleven and refuses — and a floor, which hands out up to a gigabyte free.
+   * Neither is defensible on a cap, and `draw()` needs no rounding at all if
+   * both sides are exact. The catalogue writes the byte figure and says the GB
+   * equivalent in a comment.
+   *
+   * ⚠ `bigint`, BECAUSE A TERABYTE DOES NOT FIT IN AN `integer`. 2^31 bytes is
+   * 2.1 GB — a limit some tenants would pass in their first month.
+   */
+  bytes: bigint("bytes", { mode: "number" }).notNull(),
+
+  /**
+   * When the figure was taken.
+   *
+   * ⚠ THE GATE READS A NUMBER THAT IS MINUTES OLD, ON PURPOSE. A mailbox quota
+   * check at delivery time is Stalwart's own business and it does that itself,
+   * exactly; ours is for plan limits and billing, where a synchronous call to
+   * another service on the request path would put its availability inside ours
+   * for no accuracy anyone can use.
+   */
+  sampledAt: timestamp("sampled_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * The ledger: one row per unit of metered usage.
+ *
+ * ⚠ IT DUPLICATES A COUNT THAT `core.messages` ALREADY IMPLIES, AND THAT IS THE
+ * POINT RATHER THAN AN OVERSIGHT. `send/reconcile.ts` exists to compare two
+ * INDEPENDENTLY DERIVED numbers; deriving the meter from `core.messages` would
+ * have it compare a number against itself, and a bad flush — from the send path
+ * today, from a Durable Object at the edge later — would become undetectable.
+ * The cost is a narrow row per message; the thing bought is the only mechanism
+ * that can notice metering has gone wrong.
+ *
+ * ⚠ THE PRIMARY KEY DOES NOT INCLUDE `shard`, AND THAT IS DELIBERATE. Dedup is
+ * on `(tenant_id, feature_id, event_id)` so that the same message cannot be
+ * counted twice if it is ever replayed against a different shard than the one
+ * that first recorded it. The shard is stored for attribution, not identity.
+ *
+ * ⚠ NOT PARTITIONED, UNLIKE `messages`. Its volume is the same but its
+ * retention is not: message content ages out, and billing evidence is what a
+ * disputed invoice is settled against. When this needs partitioning it wants
+ * yearly bounds and a different retention job than the monthly one in 0002 —
+ * a decision to make with a real row count rather than now.
+ */
+export const meterEvents = core.table(
+  "meter_events",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /** `emails`. The metered feature this unit was drawn from. */
+    featureId: text("feature_id").notNull(),
+
+    /**
+     * ⚠ `messageId`, AND IT IS THE PROPERTY THE WHOLE DESIGN RESTS ON. The same
+     * value keys the buffer entry at the edge, this row, and Polar's
+     * `external_id`, which is what makes every leg independently retryable —
+     * and being independently retryable is what makes buffering usage away from
+     * this table safe at all.
+     */
+    eventId: text("event_id").notNull(),
+
+    shard: integer("shard").notNull().default(0),
+
+    /** Units consumed. One email is 1. */
+    value: integer("value").notNull().default(1),
+
+    /**
+     * ⚠ THE `sent_at` THE DATABASE STORED, NOT THE RECORDING PROCESS'S CLOCK.
+     * The reconciler buckets our side by `core.messages.sent_at` and the meter's
+     * by this column; a millisecond of disagreement across a boundary shows a
+     * deficit in one window and a surplus in the next, and tops the deficit up
+     * on every run forever.
+     */
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+
+    /** When we wrote it. The gap from `occurred_at` is the flush lag. */
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+
+    /**
+     * When this unit reached Polar's meter. NULL until it has.
+     *
+     * ⚠ IT IS A WATERMARK PER ROW, NOT A GLOBAL ONE, AND THAT IS WHAT MAKES THE
+     * FLUSH RESUMABLE. A "last shipped at" timestamp would be wrong the moment a
+     * late-arriving event lands behind it — the row would be skipped forever,
+     * silently, and the customer would be under-billed with nothing to notice
+     * it. Per row, an interrupted flush simply finds the same rows next time.
+     *
+     * ⚠ AND IT IS SET ONLY AFTER POLAR ANSWERS. Marking first and posting after
+     * loses usage on any failure; posting first and marking after can only
+     * re-send, which `external_id` makes free.
+     */
+    ingestedAt: timestamp("ingested_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.featureId, t.eventId] }),
+    // The gate's only read: one tenant, one feature, one shard, one window.
+    index("meter_events_window_idx").on(t.tenantId, t.featureId, t.shard, t.occurredAt),
+  ],
 )

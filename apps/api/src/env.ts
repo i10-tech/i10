@@ -182,6 +182,109 @@ const schema = z.object({
   // ── metering ──────────────────────────────────────────────────────────────
 
   /**
+  /**
+   * The metered feature every email is one unit of.
+   *
+   * ⚠ IT IS A ROW IN `core.plans`' entitlements, AND RENAMING IT DOES NOT FAIL.
+   * A feature id no plan grants resolves to `unentitled`, which fails open — so
+   * every send goes, unmetered and unbilled, with only a log line to say so.
+   * The same warning was true of Autumn's catalogue and is the reason
+   * `unentitled` is a separate outcome rather than folded into `exceeded`.
+   */
+  METERING_FEATURE_ID: z.string().min(1).default("emails"),
+
+  /**
+   * The plan a brand-new tenant lands on.
+   *
+   * ⚠ IT MUST EXIST IN `core.plans`, WHICH IS WHY MIGRATION 0012 SEEDS IT
+   * RATHER THAN LEAVING IT TO A JOB. A tenant assigned a plan id that is not
+   * there has no entitlement at all — and unlike a missing catalogue in a
+   * remote service, this one is a foreign key, so the assignment fails loudly
+   * instead of leaving a customer silently unmetered.
+   */
+  METERING_FREE_PLAN_ID: z.string().min(1).default("free"),
+
+  /**
+   * The event name usage is ingested under, and what Polar's meter filters on.
+   *
+   * ⚠ IF THIS AND THE METER DISAGREE, THE METER AGGREGATES NOTHING — and every
+   * ingest still answers 200, because the events are stored either way. The
+   * symptom is an invoice with no usage on it, a month later, which is the
+   * worst possible time to find out. It defaults to the feature id so the two
+   * only differ if somebody makes them.
+   */
+  METERING_EVENT_NAME: z.string().min(1).default("emails"),
+
+  /**
+   * The domain whose SPF record lists i10's own outbound MTAs.
+   *
+   * ⚠ CUSTOMERS PUBLISH `include:` THIS, NEVER OUR IP ADDRESSES. A literal
+   * address in a customer's DNS pins our infrastructure into records we cannot
+   * edit: changing a relay, adding a second, or moving provider would mean
+   * asking every customer to re-publish, and the ones who did not would start
+   * failing SPF with nothing to tell them why.
+   *
+   * ⚠ AND IT IS A DEDICATED SUBDOMAIN RATHER THAN THE APEX. SPF allows ten DNS
+   * lookups per evaluation, and the apex record has its own job — who may send
+   * as i10.tech. Conflating them means every customer's SPF inherits every
+   * include we add for our own mail.
+   */
+  MAIL_SPF_INCLUDE: z.string().min(1).default("_spf.i10.tech"),
+
+  /**
+   * The host that receives bounces for mail we deliver ourselves.
+   *
+   * ⚠ IT IS THE MX FOR EVERY CUSTOMER'S `bounce.<domain>`, WHICH IS WHY DMARC
+   * PASSES ON SPF FOR THE DIRECT ROUTE. Bouncing to a name on i10.tech instead
+   * would need no customer record and would leave SPF unaligned with their
+   * `From:` — DMARC would then be passing on DKIM alone.
+   */
+  MAIL_BOUNCE_HOST: z.string().min(1).default("mx.i10.tech"),
+
+  /**
+   * i10's authoritative nameservers, for customers who delegate subdomains.
+   *
+   * ⚠ A DELEGATED DOMAIN'S MAIL DNS DEPENDS ENTIRELY ON THESE ANSWERING. A
+   * customer publishing records in their own provider keeps resolving whatever
+   * happens to us; a delegating one stops resolving at all. Two names are
+   * listed because resolvers expect more than one and will retry the second —
+   * but pointing both at one machine buys the appearance of redundancy and not
+   * the fact of it, which is the reason to move this to Cloudflare or Route 53
+   * rather than a reason it is fine.
+   */
+  /**
+   * Stalwart's API, for sampling how much disk each tenant's mailboxes use.
+   *
+   * ⚠ THE IN-CLUSTER SERVICE, NOT `https://mail.i10.tech`. The management API
+   * is deliberately not routed publicly — `infra/k8s/i10/stalwart/ingressroute.yaml`
+   * sends only autoconfig, autodiscover and MTA-STS to the pod, and the network
+   * policy's own comment says 8080 is left out "because the management API
+   * belongs behind Traefik". Every management path answers 404 from outside.
+   * `i10-prod` is an allowed source namespace, so the reconcile job reaches it
+   * at `http://i10-stalwart:8080`.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE SKIPS THE SAMPLE RATHER THAN ZEROING IT. A
+   * deployment that cannot ask the mail server must leave the last figure
+   * standing: replacing it with 0 would hand every tenant their whole storage
+   * allowance back, silently, and in the direction nobody reports.
+   */
+  STALWART_URL: z.url().optional(),
+  STALWART_API_TOKEN: z.string().min(1).optional(),
+
+  MAIL_NAMESERVERS: z
+    .string()
+    .default("ns1.i10.tech,ns2.i10.tech")
+    .transform((raw) =>
+      raw
+        .split(",")
+        .map((ns) => ns.trim().toLowerCase().replace(/\.$/, ""))
+        .filter((ns) => ns.length > 0),
+    )
+    .refine((list) => list.length > 0, "at least one nameserver is required"),
+
+  // ── autumn (being retired — see docs/decisions/metering.md) ───────────────
+
+  /**
    * Autumn, which owns balances, entitlements and usage.
    *
    * ⚠ SELF-HOSTED, SO THE BASE URL IS CONFIGURATION RATHER THAN A CONSTANT. The
@@ -445,17 +548,45 @@ export function intervalToMs(value: string): number | null {
  */
 const validated = schema.superRefine((env, ctx) => {
   const staleAfterMs = intervalToMs(env.WORKER_CLAIM_STALE_AFTER)
-  if (staleAfterMs === null || staleAfterMs > env.WORKER_JOB_TIMEOUT_MS) return
+  if (staleAfterMs !== null && staleAfterMs <= env.WORKER_JOB_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["WORKER_CLAIM_STALE_AFTER"],
+      message:
+        `"${env.WORKER_CLAIM_STALE_AFTER}" (${staleAfterMs}ms) must be longer than ` +
+        `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms). Postgres must ` +
+        `release a claim after Redis releases the job, never before, or two ` +
+        `workers can both win the claim and send the same message twice.`,
+    })
+  }
 
-  ctx.addIssue({
-    code: "custom",
-    path: ["WORKER_CLAIM_STALE_AFTER"],
-    message:
-      `"${env.WORKER_CLAIM_STALE_AFTER}" (${staleAfterMs}ms) must be longer than ` +
-      `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms). Postgres must ` +
-      `release a claim after Redis releases the job, never before, or two ` +
-      `workers can both win the claim and send the same message twice.`,
-  })
+  /**
+   * ⚠ THE DEFAULT IS THE BUG, WHICH IS WHY THIS IS A CHECK AND NOT A DEFAULT.
+   * `SENTRY_ENVIRONMENT` falls back to "development", so a production
+   * deployment that never sets it reports its errors tagged as a developer's
+   * laptop — and every dashboard, alert rule and filter that selects on
+   * environment quietly excludes the only deployment anybody cares about.
+   * Nothing errors, nothing is missing, and the events are simply filed under
+   * the wrong name.
+   *
+   * ⚠ AND `NODE_ENV` CANNOT SUPPLY THE ANSWER, WHICH IS THE WHOLE DIFFICULTY.
+   * The promotion model re-tags one image for staging and production, so both
+   * run `NODE_ENV=production` — deriving the value would label staging's errors
+   * as production's, trading a visible mistake for an invisible one. The only
+   * correct source is an explicit statement per deployment, so production is
+   * required to make it and this is what makes the omission loud.
+   */
+  if (env.NODE_ENV === "production" && env.SENTRY_ENVIRONMENT === "development") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["SENTRY_ENVIRONMENT"],
+      message:
+        `must be set explicitly when NODE_ENV is production — "development" is ` +
+        `the fallback, and leaving it means production errors arrive tagged as ` +
+        `development and are filtered out of every view that matters. Staging ` +
+        `and production run the same image, so only this value tells them apart.`,
+    })
+  }
 })
 
 export type Env = z.infer<typeof schema>

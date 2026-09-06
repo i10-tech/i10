@@ -1,7 +1,14 @@
 # Metering, and getting off Autumn
 
-**Decided:** 2026-09-04. **Status:** step 2 shipped; everything else is still
-only decided.
+**Decided:** 2026-09-04. **Status:** steps 2–4 shipped. Autumn still runs and
+is no longer wired to anything.
+
+⚠ **The pricing model was added on 2026-09-05 and the sequence below predates
+it.** Steps 1–7 describe a transactional product on a fixed allowance. Included
+usage with billed overage, and human mail's seats and storage, are in "What we
+sell, and who computes the money" — and they need a second feature kind that
+`packages/metering` does not have. Nothing shipped is wrong; it is half a
+product.
 
 The reasoning below is preserved as it was argued, not rewritten as work lands
 — the sequence at the bottom is the only part that tracks state. Autumn keeps
@@ -257,6 +264,577 @@ boundary, not discipline.
 
 ---
 
+## What we sell, and who computes the money
+
+**Added 2026-09-05.** Everything above this line was argued for a product that
+sends transactional email on a fixed allowance. That is half of i10, and the
+half with the simpler billing. This section is the other half and the pricing
+model both halves actually use.
+
+### The model
+
+**A plan paid upfront that includes an allowance, plus billed overage the
+customer opts into.** Resend's shape, and deliberately so — it is what the
+market already understands.
+
+|                      | transactional                | human mail               |
+| -------------------- | ---------------------------- | ------------------------ |
+| paid upfront         | $20/mo                       | $/mo                     |
+| includes             | 50,000 emails, N domains     | N seats, N GB, N domains |
+| beyond the allowance | $0.90 / 1,000                | per seat, per GB         |
+| at renewal           | $20 again, allowance refills | same                     |
+
+⚠ **DOMAINS ARE IN THE TABLE BUT NOT IN THE OVERAGE ROW, AND THAT IS THE
+POINT.** A plan grants 3 domains and the fourth is refused — nobody sells a
+fourth domain for $0.30. It is a metered feature with a hard cap sitting beside
+one that bills past its cap, which is why the overage policy cannot live where
+the first draft of this section put it. See below.
+
+⚠ **OVERAGE IS OFF BY DEFAULT AND THE CUSTOMER TURNS IT ON.** Until they do,
+the allowance is a hard stop and the answer at the limit is a 429. That switch
+is the entire difference between "your sends stopped" and "you owe us $27 you
+did not expect", and it belongs to the customer rather than to us.
+
+⚠ **AND IT IS A LIMIT, NOT A PREPAID BUCKET.** A customer who sends 50 emails
+on the $20 plan pays $20, not forty cents. The upfront price buys a ceiling and
+they are never billed below it — which is why the meter's job is not to price
+usage but to decide, per unit, whether it falls inside the ceiling.
+
+**PAYG is the same mechanism with the allowance set to zero.** No upfront
+charge, every unit billable — for enterprises later. That it needs no new
+machinery is the strongest evidence the shape above is the right one, and it is
+worth protecting: any design where PAYG is a second code path is wrong.
+
+### Polar computes the money, and it already can
+
+Verified against `polarsource/polar`, 2026-09-05:
+
+- **Meter** — filters and aggregates the events we ingest.
+- **Metered price** — a subscription price computed from a meter.
+- **Meter Credits benefit** — _"the customer will be credited the amount of
+  units specified in the benefit at the beginning of every subscription cycle
+  period."_
+
+A $20 product carrying a flat price, a metered price at $0.90/1,000 and a
+credits benefit of 50,000 units **is** the row in the table above. Usage draws
+the credits down first; only the remainder is billed.
+
+⚠ **SO WE DO NOT WRITE THE OVERAGE ARITHMETIC, AND WE MUST NOT.** Rounding,
+tiering, currency, tax and the invoice line all belong to the party that sends
+the invoice. What we own is the count that goes in — and the gate, which is a
+product decision about whether to accept a send, not a pricing one.
+
+⚠ **WHICH MEANS THE INGEST SHIPS EVERY UNIT, NOT ONLY THE BILLABLE ONES.**
+**Built 2026-09-05** (`src/metering/ingest.ts`). The tempting design is to
+compute the included/billable split ourselves and send only the remainder; it
+is wrong twice. The credits benefit already draws the allowance down before the
+metered price charges anything, so splitting here reimplements arithmetic Polar
+owns — and a customer who enables overage next month would have a meter that
+never saw the usage before it. `overage` is therefore a GATE outcome only: it
+decides whether to accept the send, and it computes no money.
+
+The flush is `POST /v1/events/ingest`, keyed on `external_id` = our message id,
+addressed by `external_customer_id` = our tenant id (which Polar already echoes
+on every subscription webhook). It runs as a leg of the reconcile CronJob and is
+bounded per pass; `core.meter_events.ingested_at` is the per-row watermark, so
+an interrupted flush resumes rather than skipping.
+
+⚠ **POLAR FIRST, THE WATERMARK SECOND.** Marking before posting loses units on
+any failure. Posting before marking can only re-send, and their ingest answers
+`inserted` / `duplicates` — so a retry costs a request and bills nobody twice.
+Only one of the two orders can lose revenue.
+
+### ⚠ The gate must mirror the credits, not the plan's headline number
+
+This is the sharp edge of the whole section, and it is a customer-trust
+failure rather than an accounting one.
+
+Our gate decides what a customer is told is included. Polar's credits decide
+what they are actually billed for. If those two numbers disagree, the customer
+is charged for units our own dashboard called free — and they find out on an
+invoice, which is the worst possible place.
+
+Whether they disagree at a mid-cycle plan change turns out to be **our choice,
+not Polar's policy** — and the wrong choice is the default one.
+
+#### Traced through `polarsource/polar`, 2026-09-05
+
+`subscription/service.py::update_product` calls `enqueue_benefits_grants`
+unconditionally after a product change. That function diffs:
+
+```python
+granted_benefit_ids = {g.benefit_id for g in existing_grants if g.is_granted}
+grant_benefit_ids   = [b.id for b in product.benefits
+                       if b.id not in granted_benefit_ids and ...]
+outdated_grants     = await repository.list_outdated_grants(product, **scope)
+revoke_benefit_ids.extend(g.benefit_id for g in outdated_grants)
+```
+
+and `grant_benefit` returns early on `elif grant.is_granted:` — the strategy is
+never invoked for a benefit already held.
+
+For a Meter Credits benefit the two strategy methods are
+(`benefit/strategies/meter_credit/service.py`):
+
+- `grant` → posts a **`+units`** event on the meter, immediately.
+- `revoke` → posts **`-last_credited_units`** — the whole original grant, not
+  the unused remainder.
+
+So there are two behaviours, and they are selected by how the products are
+built:
+
+**Each plan carries its OWN credits benefit.** The old benefit is outdated →
+revoked → `−50,000`. The new one is not yet granted → granted → `+100,000`.
+A customer who had used 45,000 goes `5,000 → −45,000 → 55,000`.
+
+⚠ **THAT IS EXACTLY `draw({allowance: 100_000, used: 45_000})`.** Ceiling
+raised, usage kept, boundary unmoved — the model we want, and the same number
+our gate computes, by construction rather than by correction.
+
+**Both plans SHARE one credits benefit.** It is already granted, so it is
+neither revoked nor re-granted, and nothing happens until the next cycle. The
+customer keeps 5,000 credits while our gate offers 55,000 — and is billed
+overage on 50,000 units the dashboard called included.
+
+⚠ **SO: EVERY PLAN GETS ITS OWN METER CREDITS BENEFIT. NEVER SHARE ONE.** It
+looks like harmless deduplication in the Polar dashboard — one "50,000 emails"
+benefit reused across products — and it is the difference between the two
+paragraphs above. Nothing in Polar's UI will warn about it.
+
+⚠ **AND `rollover` MUST BE OFF.** `revoke` claws back `last_credited_units`,
+which with rollover on is not the plan's headline number, and the cancellation
+above stops being exact.
+
+⚠ **THE ANSWER IS NOT TO READ POLAR ON THE SEND PATH.** That is precisely the
+mistake removed by replacing Autumn, and re-introducing it for a different
+vendor would not be an improvement. Mirror the rule, reconcile the number, and
+make the reconciler carry the included figure as a third quantity beside what
+we sent and what we counted.
+
+### What this changes in `packages/metering`
+
+**1. `draw()` needs a third outcome.** Today: `allowed` | `exceeded`. Needed:
+`allowed` | `overage` | `exceeded`.
+
+⚠ **AND THE OVERAGE POLICY IS PER-ENTITLEMENT, NOT PER-TENANT.** The obvious
+design — one "allow overage" column on the tenant — is wrong the moment
+`domains` exists beside `emails`: the same tenant must be able to bill past
+50,000 emails and be refused a fourth domain. So the plan's grant for a feature
+says whether that feature may be exceeded at all, and the tenant's switch only
+turns it on where the plan already permits it. A tenant switch alone would
+either sell domains nobody priced or hard-stop sends the customer asked to be
+billed for.
+
+**2. A batch splits across the line — and this is NOT the partial-acceptance
+decision `balance.ts` already refuses.** Five hundred requested with three
+hundred included remaining is still accepted **whole**; answering a single
+`POST /emails` with "some of these were accepted" remains data loss dressed as
+a quota error. What changes is that its units attribute as 300 included and 200
+billable. **Acceptance is all-or-nothing; attribution is not.**
+
+**3. ⚠ "The gate is approximate" now costs a different person, and the earlier
+argument for tolerating it no longer holds unamended.** When the gate could
+only refuse, a permissive gate cost _us_ unbilled revenue and the reconciler
+swept it up. With overage enabled the gate never refuses — so a permissive gate
+means the **customer pays** for our imprecision.
+
+The tiering is still right, and this is an argument for it rather than against:
+the gate decides whether to send, the ledger decides what is owed, and no
+invoice is ever computed from the approximate number. But "approximate" now
+needs a stated bound rather than a shrug, and it has to be stated **before**
+sharding, because sharding is what makes the gate loose.
+
+### Storage: the admin API, not their tables
+
+**Decided 2026-09-05.** Verified against `stalwartlabs/stalwart` v0.16.
+
+`crates/jmap/src/registry/get.rs` exposes **`UsedDiskQuota`** as a property of
+the registry's objects, and it is served by two different calls:
+
+- `get_used_quota_account(...)` — one mailbox's usage.
+- `get_used_quota_tenant(...)` — **an entire tenant's, aggregated by Stalwart.**
+
+⚠ **SO THE ADMIN API ANSWERS THE QUESTION WE ACTUALLY HAVE**, which is a
+per-tenant total, rather than the one we would have had to assemble from parts.
+That settles it in favour of the API: reading their tables would mean
+re-deriving a number they already compute, against a pre-1.0 schema their
+release notes change, from a database our connection cannot even reach.
+
+⚠ **AND IT IS NOT THE PER-ACCOUNT PATH, WHICH WE STRUCTURALLY CANNOT USE.**
+Stalwart also reports usage through JMAP `Quota/get` and IMAP `GETQUOTA`
+(`crates/jmap/src/quota/get.rs`, `crates/imap/src/op/quota.rs`) — both
+authenticated **as the account**. We never hold a user's password; the whole
+authd bind-delegation design exists so that we do not. Anything built on those
+two would have required us to start.
+
+**Reading their schema stays the documented fallback**, and it becomes the right
+answer only if the admin API turns out to miss something or to cost too much to
+poll. It is a decision to revisit with a reason, not a preference to act on.
+
+⚠ **THE TENANT CALL IS ENTERPRISE, SO WE SUM ACCOUNTS.** Confirmed 2026-09-05:
+`validate_tenant_quota` in `crates/jmap/src/registry/mapping/principal.rs` is
+`#[cfg(feature = "enterprise")]` under their SEL licence, and we run the
+community image (`stalwartlabs/stalwart:v0.16.19-alpine`).
+`get_used_quota_account` is not gated, so the sampler asks per mailbox and
+groups by `authd.accounts.tenant_id` — which is what writing that column
+bought.
+
+**Built 2026-09-05.** `src/mail/storage.ts` samples on the reconcile job's
+cadence and writes `core.tenant_storage`; `storage.bytes` in
+`src/metering/levels.ts` reads that. ⚠ **Not read on the request path** — a
+mailbox quota check is Stalwart's own business, and ours is for limits and
+billing, where a figure minutes old is fine and a synchronous call to another
+service is not.
+
+⚠ **BYTES, NOT GIGABYTES, ON BOTH SIDES.** Rounding to GB forces a choice
+between a ceiling — one byte past ten gigabytes reads as eleven and refuses —
+and a floor, which hands out up to a gigabyte free. Neither is defensible on a
+cap, and with both sides exact there is nothing to round.
+
+⚠ **A TENANT WITH ONE UNREADABLE MAILBOX GETS NO WRITE AT ALL.** A partial sum
+is a number that looks right and is silently low, which on a cap lets them past
+their limit and on billing under-charges — both invisibly. The previous sample
+stands instead: stale and honest.
+
+⚠ **AND THAT SERVER IS NOT REACHABLE FROM OUTSIDE THE CLUSTER, BY DESIGN.**
+Probed 2026-09-05: `/jmap`, `/.well-known/jmap` and `/api/schema` all answer
+**404** on `mail.i10.tech`, because `ingressroute.yaml` routes only autoconfig,
+autodiscover and MTA-STS to the pod — and the network policy's own comment says
+8080 is omitted "because the management API belongs behind Traefik". `i10-prod`
+is an allowed source namespace, so the reconcile job reaches it in-cluster at
+`http://i10-stalwart:8080`.
+
+#### The wire shape, verified 2026-09-06
+
+**Probed against the running server on psl-vps**, which is the only place it
+can be probed. The guessed version of `src/mail/stalwart.ts` was wrong in four
+independent ways, every one of which would have failed every call:
+
+| Guessed                                          | Actual                                                         |
+| ------------------------------------------------ | -------------------------------------------------------------- |
+| `Account/get`                                    | **`x:Account/get`** — the registry's whole namespace is `x:`   |
+| `using: [… "urn:stalwart:params:jmap:registry"]` | **`["urn:ietf:params:jmap:core"]`** and nothing else           |
+| `ids: ["user@domain"]`                           | ids are **opaque** (`"b"`); the address is a property          |
+| one call per mailbox                             | `x:Account/query` then `x:Account/get` — **two calls per run** |
+
+⚠ **THE SESSION ADVERTISES NO VENDOR CAPABILITY AT ALL** — seventeen
+`urn:ietf:…` URIs, authenticated or anonymous, and no Stalwart URI. Since a
+conforming server MUST reject a request naming a capability it did not
+advertise, `using` carries core alone even though the method is an extension.
+`Account/get` under core answers `unknownMethod`; `x:Account/get` returns the
+object.
+
+⚠ **AND A JMAP ERROR ARRIVES AS AN HTTP 200.** `unknownMethod` comes back with
+`error` in the slot where the method name goes. Checking `response.ok` alone —
+which the first version did — reads that as an empty success, and every mailbox
+silently becomes zero. The adapter now inspects the method response tag.
+
+⚠ **`x:Account` IS A UNION AND THE `Group` VARIANT HAS NO `usedDiskQuota`
+FIELD.** Not null, absent: a group is a delivery target with no store. The
+first version's "a missing property is a failure" rule — right for a `User` —
+would have aborted a whole tenant's sample over a mailing list. Groups
+contribute 0.
+
+⚠ **AND THE SESSION'S OWN `apiUrl` MUST BE IGNORED.** It advertises
+`https://mail.i10.tech/jmap/`, the public hostname, which 404s at Traefik. A
+conforming JMAP client follows `apiUrl`; ours cannot. `STALWART_URL` stays the
+in-cluster service.
+
+`/api/principal`, `/api/settings`, `/metrics` and every other REST path answer
+404 — there is no REST management API in v1.0.0, only this registry.
+`/api/schema` does exist in-cluster and is 940 KB of UI descriptors, which is
+where the `x:` prefix was found.
+
+The fallback, if the `x:` namespace is renamed by a release: `Principal/get`
+(advertised, RFC) resolves an address to an id, and `urn:ietf:params:jmap:quota`
+is advertised too — but `Quota/get` is scoped to the authenticated account, so
+it only helps if an admin session may name another `accountId`. Untested.
+
+#### The credential, created 2026-09-06
+
+`metering@i10.tech` (registry id `c`), a principal that exists only to be
+authenticated as. Its `x:ApiKey` credential is `STALWART_API_TOKEN`, sent as a
+bearer token; `STALWART_URL` is `http://i10-stalwart:8080`. Both live in
+Doppler's `prod_api` config, which is what `i10-api` syncs and what
+`billing-reconcile.yaml` already mounts — so no manifest change was needed.
+
+⚠ **AN `x:ApiKey` IS A CREDENTIAL ON A PRINCIPAL, NOT A FREE-STANDING TOKEN,
+WHICH IS WHY THERE IS A SERVICE ACCOUNT AT ALL.** It sits in an account's
+`credentials` beside `Password`. The only other registry account is a person's,
+and hanging a cron job's credential off it would entangle revoking the job with
+their mailbox.
+
+⚠ **THREE PERMISSIONS OUT OF 660.** `authenticate`, `sysAccountGet`,
+`sysAccountQuery` — exactly what the two method calls need, and nothing else:
+no mail access, no writes, no configuration. The account carries them as
+`permissions: {"@type": "Replace", …}` and the key inherits, so the grant has
+one home rather than two that can drift.
+
+⚠ **AND NO `expiresAt`.** A cron job that stops silently on a date nobody
+remembers is worse than a long-lived key whose blast radius is three read
+permissions. The narrow grant is the control here, not the lifetime.
+
+⚠ **SETS SERIALISE AS MAPS, AND THE TWO PERMISSION OBJECTS DIFFER.** An account
+takes `x:PermissionsList` with `enabledPermissions`; a credential takes
+`x:CredentialPermissionsList` with `permissions`. Both are `{"name": true}`
+maps, not arrays. Three of the four failed attempts were this.
+
+⚠ **A BUMP OF THE STALWART IMAGE IS A REASON TO RE-RUN THE PROBE.** A vendor
+extension carries no compatibility promise. The adapter throws on anything it
+does not recognise and never returns 0, so a rename fails loudly and leaves the
+previous figures standing rather than zeroing everybody's usage.
+
+### Human mail: the second feature kind
+
+⚠ **`packages/metering` currently models one kind of feature.** Autumn draws
+the line we need and names our exact examples:
+
+> **Consumable**: features that can be used up and replenished... For example,
+> credits, API requests.
+> **Non-consumable**: features that are used persistently. For example, seats,
+> storage, workspaces.
+>
+> ...reset cycles for `consumable` features, and proration behavior for
+> `non-consumable` features.
+
+`emails` is consumable — that is what `windowFor()` and `core.meter_events`
+were built for. **Domains, seats and storage are not**, which means three of the
+four things we meter are the kind the package does not model, and the one it
+does model is the exception. Three things break:
+
+- **There is no reset cycle.** Asking when a seat refills is a category error.
+- **"Used" is a level, not a sum** — `count(*)` over `core.domains`, a count of
+  `authd.accounts`, bytes from Stalwart — read from elsewhere rather than
+  accumulated here.
+- **A domain can be removed, and an append-only table cannot go down.** This is
+  the one that actually breaks: domains are deleted, mailboxes are deleted,
+  folders are emptied.
+
+⚠ **THE LEVEL COUNTS WHAT EXISTS, NOT WHAT IS VERIFIED OR ACTIVE.** An
+unverified domain holds a slot and a deactivated mailbox still holds its
+storage; counting only the working ones lets a tenant park fifty pending
+domains against a limit of three. The row is the thing being limited.
+
+⚠ **WHICH IS A DIFFERENT QUESTION FROM WHAT A DOMAIN MAY DO, AND THE TWO MUST
+NOT COLLAPSE.**
+
+|              | predicate                 | why                                    |
+| ------------ | ------------------------- | -------------------------------------- |
+| **counting** | every row for the tenant  | a pending domain still occupies a slot |
+| **acting**   | `verified_at IS NOT NULL` | a claim is not control                 |
+
+`core.mailbox_domains()` (0016) is the acting side: a domain appears there only
+once verified, and appearing there is what makes Stalwart treat it as a local
+recipient. Get that predicate the wrong way round in either direction and it is
+a security bug — unlimited free domains one way, receiving mail for a name you
+merely typed the other.
+
+⚠ **AND NOTHING WRITES `core.domains` YET** — the table exists, and no route
+creates a row. So the check goes in with the creation path rather than being
+retrofitted onto one, which is the only version of this that costs nothing.
+
+#### Sending domains and mailbox domains are two features, not one
+
+`core.domains` already carries `sends` and `hosts_mailboxes` as independent
+booleans, and they buy different things: one is an SES identity with DKIM and a
+MAIL FROM subdomain, the other is a domain Stalwart accepts mail for. A plan
+sells them separately — "3 sending domains, 1 mailbox domain" — so they are two
+metered features with two limits.
+
+⚠ **AND A DOMAIN THAT DOES BOTH COUNTS AGAINST BOTH.** The level for each is a
+count over its own flag, not a partition of one total. Otherwise the cheapest
+way to hold a domain is to claim both roles for it, and the two limits stop
+meaning anything.
+
+`draw()` itself generalises unchanged — `{allowance: 5, used: 3, requested: 1}`
+answers "can they add a mailbox" as well as it answers "can they send". The
+arithmetic was never the consumable part; the storage model was.
+
+What is needed: a `kind` on the feature, a `LevelStore` port beside
+`UsageStore`, and **a level-change log** — because proration bills on the
+_change_, and a table holding only today's count cannot reconstruct "three
+seats added on day 15".
+
+### Domains and seats: unit-based, not Polar's seat model
+
+Polar offers both, and their doc points at seat-based for anything that maps to
+a person. **Take unit-based anyway** — and note that domains are not people at
+all, so their own guidance puts domains in unit-based regardless.
+
+Seat-based brings Customer → Member → CustomerSeat, invitation emails, claim
+tokens and per-member benefit grants. We already run that flow: Clerk owns
+identity and `authd.accounts` is the projection Stalwart authenticates against.
+Adopting Polar's would make a **third** system that believes it knows who has a
+mailbox, and the symptom when they disagree is somebody's mail bouncing.
+
+⚠ **Storage is not seats and must not be modelled as one.** Nobody declares
+their gigabytes at checkout; it is observed. Start as an enforced cap that is
+never billed, and add metered overage when a customer asks. Prepaid capacity
+blocks are the option that makes people buy what they do not use.
+
+### What we use in Polar today
+
+Verified against `apps/api/src/billing/`, 2026-09-05. **Three endpoints and a
+webhook receiver:**
+
+|                          |                                |
+| ------------------------ | ------------------------------ |
+| `POST /v1/checkouts/`    | start a purchase               |
+| `GET /v1/checkouts/{id}` | poll one, for the landing page |
+| `GET /v1/subscriptions/` | list, for the reconciler       |
+| webhook `subscription.*` | grant the plan                 |
+
+⚠ **NO METERS. NO EVENT INGESTION. NO USAGE BILLING OF ANY KIND.** Nothing in
+`billing/` mentions a meter or `/v1/events`. Everything above about metered
+prices and credits benefits is a thing Polar _can_ do that we have not built —
+the ingest research recorded elsewhere was never wired up. Today a plan is a
+flat monthly price and the allowance is enforced entirely by us.
+
+⚠ **AND THERE IS NO `PATCH /v1/subscriptions/{id}` ANYWHERE.** We have no
+plan-change path at all: a customer who wants to move from $20 to $40 can only
+do it on Polar's hosted portal.
+
+### What we will use in Polar
+
+The target surface, against the four-endpoint inventory above. Everything in
+**bold** does not exist yet.
+
+|                                        | for                                       |
+| -------------------------------------- | ----------------------------------------- |
+| `POST /v1/checkouts/` + `embed_origin` | first purchase, in an iframe on our page  |
+| `GET /v1/checkouts/{id}`               | the landing page poll                     |
+| **`PATCH /v1/subscriptions/{id}`**     | plan change, with per-direction proration |
+| **`POST /v1/customer-sessions/`**      | a token for the payment-method embed      |
+| **`POST /v1/events/`**                 | usage ingest, one event per billable unit |
+| `GET /v1/subscriptions/`               | the reconciler                            |
+| webhook `subscription.*`               | granting the plan                         |
+
+Plus three things configured in Polar rather than called: **a meter** per
+metered feature, **a metered price** on each paid product, and **a Meter
+Credits benefit per plan** — never shared between plans, `rollover` off, for
+the reasons traced above.
+
+**Yes, we use their meters.** That is the whole answer to "who computes the
+overage": we ingest one event per billable unit, the meter aggregates, the
+credits benefit covers the included allowance, and the metered price turns the
+remainder into an invoice line. We supply the count and nothing else.
+
+**Yes, we will have prorations** — for money, from `PATCH`, chosen per
+direction. The allowance is deliberately never prorated; the credits swap
+already produces the right ceiling.
+
+### The customer deals with us, and we deal with Polar
+
+**Built 2026-09-05.** `POST /billing/plan` in the console's API; the service is
+`src/billing/plan-change.ts`.
+
+⚠ **THE DIRECTION COMES FROM `core.plans.rank`, NOT FROM A PRICE OR AN
+ALLOWANCE.** Whether a change is an upgrade decides how Polar prorates it, so
+the answer has to be one somebody chose. Inferring it from the `emails`
+allowance breaks the first time a plan is cheaper on volume and dearer on
+seats; inferring it from price means storing a price we deliberately do not own.
+Free is 0 and Pro is 10 — the gap is so a plan can be inserted between them
+without renumbering rows that live subscriptions are compared against.
+
+⚠ **A TIE IS A SIDEWAYS MOVE.** Same rank, different id: nothing is charged and
+nothing is deferred, because there is no difference to prorate.
+
+⚠ **THE ROUTE ANSWERS 202, NOT 200.** Polar has accepted the change; the
+entitlement moves when their webhook says it did, through the one path in this
+repository that can grant a plan. The console polls `GET /billing/plan`, exactly
+as it already does after a checkout.
+
+⚠ **AND A DECLINED CARD IS A 402, NOT A 502.** For `invoice`, Polar applies the
+change only if the payment succeeds — the subscription is untouched, and the
+customer's next step is their bank rather than our support queue.
+
+`POST /billing/payment-method-session` mints the customer session token for the
+embedded card form. ⚠ **Server-side, because the alternative is our Polar access
+token in a browser.**
+
+**Decided 2026-09-05.** No `billing.i10.tech` handed to Polar; plan changes
+happen in our console against our API.
+
+That is not a preference about branding — it is what makes proration exist. As
+established above, Polar's `update.py` has no upgrade/downgrade branch, so the
+correct behaviour is only reachable by passing `proration_behavior` per call.
+An org-wide default cannot be right for both directions, and the portal only
+ever uses the default. **So owning the plan-change UI and having correct
+proration are the same piece of work.**
+
+What that endpoint gives us, with no card entry anywhere:
+
+- **Upgrade** — `proration_behavior: "invoice"`. Applies now, difference
+  charged now, and the credits benefit swap makes the new ceiling exact.
+- **Downgrade** — `proration_behavior: "next_period"`. Scheduled to the period
+  end, no credit issued, and the customer keeps what they paid for.
+- **Cancel** — `cancel_at_period_end`, which the subscription row already
+  records and the console already renders.
+
+⚠ **AND THE CUSTOMER NEVER LEAVES, INCLUDING FOR CARD ENTRY.** An earlier draft
+of this section said the first purchase and any card change had to stay on
+Polar's hosted pages, on the grounds that taking a card number on our own page
+moves us from SAQ A to SAQ A-EP. That reasoning is right and does not apply,
+because both embeds are **iframes** — `PolarEmbedCheckout.create()` is
+documented as "creates the checkout iframe". The fields render on Polar's
+origin; card data never touches our DOM or our server, and we stay SAQ A.
+
+- **Embedded Checkout** (`@polar-sh/checkout/embed`) for the first purchase.
+  Take the programmatic route — `PolarEmbedCheckout.create()` with `onLoaded`
+  and close/success events — rather than the `data-polar-checkout` attribute,
+  because the console is a Next.js app and we already create the session
+  server-side. ⚠ **Set `embed_origin` on the Checkout Session** or it will not
+  open.
+- **Embedded Payment Method** (`@polar-sh/checkout/payment-method`) for
+  changing a stored card. It needs a **customer session token minted
+  server-side** — one hour, scoped to one customer — which is one new endpoint
+  on our side and one more reason the Polar access token never reaches a
+  browser.
+
+⚠ **THE EMBED HOST ALLOWLIST IS AN OUTAGE WAITING TO HAPPEN.** Embedding only
+works from hosts listed under Settings → Preferences → Embedding, matching is
+exact, and "a host you leave out stops working straight away". `example.com`
+does not match a subdomain and does not match a non-default port; `*.example.com`
+does not match the apex. So every preview and staging domain has to be listed
+too, and the failure is a checkout that silently refuses to open on a deploy
+that changed nothing about billing.
+
+Public hosts must be HTTPS, and the reason is worth keeping: the message the
+checkout posts back after payment carries a customer session token.
+
+### Proration
+
+**Money: Polar's arithmetic, but it does need code — we have none of it today.**
+An upgrade mid-cycle credits the unused portion of the old plan and charges the
+prorated new one, and Polar computes every figure. What is missing is the call
+that asks for it.
+
+⚠ **BUT POLAR DOES NOT DISTINGUISH AN UPGRADE FROM A DOWNGRADE.**
+`server/polar/subscription/update.py` matches on `proration_behavior` alone —
+there is no direction check anywhere in it. So the standard behaviour everyone
+expects, immediate upgrades and downgrades deferred to period end, does not
+happen by choosing a good default; it exists only if **we** call
+`PATCH /v1/subscriptions/{id}` with the behaviour picked per direction. Leaving
+customers on Polar's portal means one setting governs both, and one setting
+cannot be right for both.
+
+⚠ **AVOID `reset`.** It restarts Polar's billing anchor, and ours is fixed at
+tenant creation and deliberately never moves. Using it splits the invoice date
+from the allowance refill date permanently.
+
+**Allowance: not prorated, matching Autumn.** A plan change swaps the ceiling
+and keeps the usage; the boundary does not move. Autumn does not prorate a
+consumable feature either, and their reason is ours: a consumable is billed on
+what was used, and the ceiling is a limit rather than something bought by the
+day.
+
+⚠ **This is only safe while downgrades are deferred.** With immediate
+downgrades a customer can upgrade on day 28, take the higher ceiling, downgrade
+on day 30 and be credited — which is why the per-direction call above is not a
+nicety.
+
+---
+
 ## Multi-tenancy
 
 - ⚠ **Every primitive is keyed by `(tenantId, featureId)`. No global counters,
@@ -306,6 +884,12 @@ schedules a future callback that survives eviction.
 
 ⚠ **`alarm()` is the reset job.** It deletes `autumn-cron` outright — no pod,
 no schedule, no drift.
+
+> **Superseded 2026-09-05, in the better direction.** Step 3 computes the window
+> from a fixed anchor, so there is no reset **event** at all: the balance is a
+> pure function of the anchor and the clock, and the window simply moves. The
+> cron is still deleted; `alarm()` now only schedules the flush, which is a
+> convenience. Nothing can be missed, because nothing has to happen.
 
 **We choose the ID, so the addressing scheme _is_ the sharding design.**
 
@@ -537,6 +1121,38 @@ tiers move.
       on it.
 - [ ] Whether `console` can ever move to Workers, given the authd / LDAP
       bind-delegation boundary.
+- [x] ~~What Polar does to a Meter Credits benefit on a mid-cycle product
+      change.~~ **Answered 2026-09-05 from their source** — it depends on
+      whether the plans share a benefit object. See "The gate must mirror the
+      credits". ⚠ Still worth one sandbox confirmation before launch, because
+      it was read rather than run.
+- [ ] The bound on "approximate" for the gate, now that a permissive gate
+      costs the customer rather than us. Needed before sharding.
+- [x] ~~Who writes `authd.accounts.tenant_id`.~~ **Answered 2026-09-05** — the
+      Clerk projection, from the domain of the address. See 0016.
+- [x] ~~Where a per-tenant storage figure comes from.~~ **Answered 2026-09-05
+      from their source: the admin API, and it is the better fit.** See
+      "Storage" below.
+- [ ] The domain limits themselves. Free's sending limit is 3 (0017); pro's
+      10 and the 0/1 mailbox split are still the placeholders from 0015.
+- [x] ~~There is no way to create a domain, so no limit is enforced anywhere.~~
+      **DONE 2026-09-05.** `POST /domains` (Resend-shaped) checks
+      `domains.sending` before it creates the SES identity, and answers **403
+      `plan_limit_exceeded`** — not 429, because the SDKs back off on a 429 and
+      waiting never produces another domain.
+      ⚠ Still no console page: the limit is enforced at the API, and the
+      dashboard has nothing to call yet.
+      ⚠ And `domains.mailbox` still has no writer — this API is Resend's, and
+      Resend has no concept of hosting mail, so every domain it creates is
+      `sends: true, hosts_mailboxes: false`.
+- [ ] Whether seats are counted from `authd.accounts` or from Clerk
+      memberships — they can differ, and only one can be the billable number.
+      `mailboxes` currently counts `authd.accounts`.
+- [ ] Whether the deployed reconcile job actually samples. The key and the
+      adapter are both verified in isolation; the job runs the deployed image,
+      so the first real run is after this ships.
+- [ ] The storage and mailbox limits themselves. 0027 seeds 0/0 for free and
+      1 mailbox / 10 GiB for pro as placeholders.
 
 ## Sequence
 
@@ -547,9 +1163,81 @@ tiers move.
    ⚠ **The window is now shut.** The format is a contract from here on; the
    next change to it is a breaking one, whether or not anyone has integrated
    yet.
-3. `packages/metering` — domain core, ports, Postgres adapter. Read Autumn's
-   files for semantics; attribute at copy time.
-4. Swap `Metering` to the new implementation behind the existing interface.
+3. ~~`packages/metering` — domain core, ports, Postgres adapter.~~
+   **DONE 2026-09-05.** Read Autumn's files for semantics; attributed at copy
+   time in `packages/metering/NOTICE`.
+   ⚠ **The adapter is `apps/api/src/metering/postgres.ts`, not in the package.**
+   The package compiles without Node types so the arithmetic can run unchanged
+   in a Durable Object, which is precisely what a Drizzle adapter cannot do; it
+   also belongs beside the schema and migration it depends on. The port is in
+   the package, the driver is not — which is what "storage behind a port"
+   actually buys.
+   ⚠ **Two decisions were made building it that are not argued above.** The
+   reset anchor belongs to the tenant rather than to the plan, so a plan change
+   never moves a boundary or hands out a fresh allowance. And the ledger is its
+   own table rather than a read of `core.messages`, because the reconciler
+   compares two independently-derived numbers and reading the meter off
+   `messages` would have it compare a number against itself.
+4. ~~Swap `Metering` to the new implementation behind the existing interface.~~
+   **DONE 2026-09-05.** Three seams moved, not one: `Metering` (quota and
+   usage), `Entitlements` (plan granting and signup), and the reconciler's
+   ledger. Autumn's client is still in the tree and is now imported by nothing.
+   ⚠ **`unentitled` maps to `unavailable`, never to `exceeded`.** A tenant with
+   no plan is our misconfiguration, and reporting it as "you have used your
+   allowance" tells a customer who has sent nothing to go and upgrade — after
+   which the mistake is invisible.
+   ⚠ **The reconciler's cross-tenant reads were raising, not running.** Every
+   policy in `core` reads `app.tenant_id` strictly and only `withTenant()` sets
+   it, so `sentUsageStatement` and `activeTenantsStatement` failed on their
+   first statement from the job. Migration 0013 gives both a `SECURITY DEFINER`
+   snapshot, and the top-up read now runs inside `withTenant`. ~~**`reconcile-ses.ts` has the same
+   defect and is untouched**~~ — **FIXED 2026-09-06 (0028).** Its three reads
+   and its repair now go through `SECURITY DEFINER` functions, the same shape
+   0013 gave the usage leg.
+   ⚠ **THE REPAIR IS THE ONLY DEFINER IN EITHER MIGRATION THAT WRITES**, so its
+   guards moved into the function body rather than staying in the caller: with
+   RLS bypassed, `status <> 'sent'` and the `created_at` match are what stop it
+   being "set any message to sent at any timestamp".
+   ⚠ **And the assertions moved with the SQL.** Twelve guarantees — the grace,
+   the join, oldest-first, the read-only-ness of the two reporting queries —
+   were pinned against statements that no longer contain them, so
+   `reconcile-ses.test.ts` now reads the migration, as `reconcile.test.ts`
+   already did for 0013.
+   ⚠ **There is no longer an unmetered mode.** It used to hinge on
+   `AUTUMN_SECRET_KEY` being absent; usage now lives in the database the API
+   cannot start without.
+   4b. ~~The feature-kind split.~~ **DONE 2026-09-05.** `Entitlement` is a
+   discriminated union on `kind`, so a continuous feature cannot carry a reset
+   interval — the compiler refuses the shape rather than a validator catching
+   it. `draw()` gained `overage`, resolved from the plan's policy AND the
+   tenant's switch, both of which must agree. `LevelStore` is a second port
+   beside `UsageStore`.
+   ⚠ **Level adapters: domains only.** `apps/api/src/metering/levels.ts` counts
+   `domains.sending` and `domains.mailbox` over `core.domains`, and **throws by
+   name** for any other feature. Answering `0` would be the worst possible
+   default — zero held means the whole allowance is free, so a plan granting a
+   feature the store cannot count would hand every tenant an unlimited number,
+   silently and in the customer's favour. The other two are blocked, and not on
+   effort:
+
+   - ~~`mailboxes` cannot be counted.~~ **FIXED 2026-09-05 (0016).** The
+     projection now writes `authd.accounts.tenant_id`, derived from the DOMAIN
+     of the address rather than from the holder's Clerk organisation — a
+     mailbox on acme.com belongs to whoever proved they control acme.com, which
+     is also the only derivation that cannot disagree with how Stalwart routes.
+     ⚠ **And customer domains now project at all**, which they did not:
+     `MAIL_DOMAINS` is i10's own list and a customer domain was in neither it
+     nor the projection. `core.mailbox_domains()` supplies the rest.
+   - ⚠ **`storage.gb` IS IN A DIFFERENT DATABASE.** Stalwart owns the
+     `stalwart` database, not a schema in `i10` — deliberately, because its
+     schema is pre-1.0 and moves. Postgres cannot join across databases, so
+     this needs either Stalwart's admin API on a sampling job or a decision to
+     read tables whose shape their own release notes change.
+     ⚠ **And `emails` is seeded `overage: "never"`.** Billed overage needs the
+     meter, the metered price, the credits benefit and the ingest, none of which
+     exist; a catalogue promising it first would let a customer send past their
+     plan with no way to invoice for it.
+
 5. Retire Autumn. **~1.3 GiB back.**
 6. Cloudflare free tier: WAF, format gate, SNS verification.
 7. When there is revenue: $5 Workers Paid → DO counter, then DO webhooks.

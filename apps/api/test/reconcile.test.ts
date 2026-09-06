@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import type { SQL } from "drizzle-orm"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
@@ -20,44 +21,87 @@ const bucket = (tenantId: string, d: string, count: number): UsageBucket => ({
   count,
 })
 
+/**
+ * ⚠ THE GUARANTEES MOVED INTO A MIGRATION, SO THE ASSERTIONS FOLLOWED THEM.
+ * These properties used to be pinned against the statement this file builds;
+ * they now live in `core.sent_usage_snapshot`, because the question spans every
+ * tenant and row level security means no tenant-scoped connection can ask it —
+ * outside a `withTenant()` transaction the old statement raised rather than
+ * returning rows. Asserting the function body is the only place left where
+ * "billed on `sent_at`, in UTC, half-open, `sent` only" is still checked, and
+ * dropping the assertions along with the SQL would have quietly retired four
+ * guarantees at once.
+ */
+const migration = readFileSync(
+  new URL("../drizzle/0013_metering_snapshots.sql", import.meta.url),
+  "utf8",
+)
+
+const functionBody = (name: string) => {
+  const start = migration.indexOf(`CREATE FUNCTION "core"."${name}"`)
+  expect(start, `${name} is not in 0013`).toBeGreaterThan(-1)
+  return migration.slice(start, migration.indexOf("$$;", start))
+}
+
 describe("what i10 believes it sent", () => {
-  const { sql: statement } = render(sentUsageStatement(day("01"), day("03")))
+  const body = functionBody("sent_usage_snapshot")
 
   // ⚠ Acceptance is not delivery. Billing on created_at charges for messages
   // that never went, and puts a message accepted at 23:59 in the wrong day.
   it("clocks on sent_at, never created_at", () => {
-    expect(statement).toContain("m.sent_at >=")
-    expect(statement).toContain("m.sent_at <")
-    expect(statement).not.toContain("created_at >=")
+    expect(body).toContain("m.sent_at >= p_from")
+    expect(body).toContain("m.sent_at <  p_to")
+    expect(body).not.toContain("created_at >=")
   })
 
   // A row in `sending` is undecided; billing it charges for a message that may
   // still fail permanently.
   it("counts only `sent`", () => {
-    expect(statement).toContain("m.status = 'sent'")
-    expect(statement).not.toContain("'sending'")
-    expect(statement).not.toContain("'queued'")
+    expect(body).toContain("m.status = 'sent'")
+    expect(body).not.toContain("'sending'")
+    expect(body).not.toContain("'queued'")
   })
 
   it("groups per tenant per day", () => {
-    expect(statement).toContain("m.tenant_id")
-    expect(statement).toContain("date_trunc('day'")
-    expect(statement).toContain("group by")
+    expect(body).toContain("m.tenant_id")
+    expect(body).toContain("date_trunc('day'")
+    expect(body).toContain("GROUP BY")
   })
 
-  // The bucket boundary has to be the same clock Autumn's events carry, or
+  // The bucket boundary has to be the same clock the meter's events carry, or
   // every bucket disagrees by an offset and the reconciler tops up forever.
   it("truncates in UTC explicitly", () => {
-    expect(statement).toContain("at time zone 'UTC'")
+    expect(body).toContain("AT TIME ZONE 'UTC'")
   })
 
   it("is half-open, so adjacent windows neither skip nor double-count", () => {
-    expect(statement).toMatch(/sent_at >=.*\n.*sent_at </s)
+    expect(body).toMatch(/sent_at >=.*\n.*sent_at </s)
   })
 
-  it("binds the window rather than inlining it", () => {
-    const { params } = render(sentUsageStatement(day("01"), day("03")))
-    expect(params).toContain(day("01").toISOString())
+  /**
+   * ⚠ THE TWO SIDES OF THE COMPARISON MUST BUCKET IDENTICALLY. One clocking in
+   * UTC and the other in the session's timezone disagree by an offset every
+   * single day, and the reconciler then tops up the same messages forever.
+   */
+  it("buckets the meter side exactly as it buckets ours", () => {
+    const ours = functionBody("sent_usage_snapshot")
+    const theirs = functionBody("meter_usage_snapshot")
+    expect(theirs).toContain("date_trunc('day'")
+    expect(theirs).toContain("AT TIME ZONE 'UTC'")
+    expect(ours).toContain("date_trunc('day'")
+  })
+
+  // ⚠ `sum(value)`, not `count(*)`: a row is not necessarily one unit, and
+  // counting rows would bill any future multi-unit feature at one.
+  it("sums the meter's values rather than counting its rows", () => {
+    expect(functionBody("meter_usage_snapshot")).toContain("sum(e.value)")
+  })
+
+  it("is read through the function, never off the table", () => {
+    const { sql: statement, params } = render(sentUsageStatement(day("01"), day("03")))
+    expect(statement).toContain("core.sent_usage_snapshot(")
+    expect(statement).not.toContain("from core.messages")
+    expect(params).toHaveLength(2)
   })
 })
 
@@ -189,8 +233,12 @@ describe("every tenant should exist as a customer", () => {
 
 describe("the active-tenant list", () => {
   it("excludes suspended tenants, which are not expected to be billable", () => {
+    expect(functionBody("active_tenants_snapshot")).toContain("t.status = 'active'")
+  })
+
+  it("is read through the function, never off the table", () => {
     const { sql: statement } = render(activeTenantsStatement())
-    expect(statement).toContain("t.status = 'active'")
-    expect(statement).toContain("core.tenants")
+    expect(statement).toContain("core.active_tenants_snapshot()")
+    expect(statement).not.toContain("from core.tenants")
   })
 })
