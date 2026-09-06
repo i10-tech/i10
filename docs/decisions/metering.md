@@ -550,6 +550,35 @@ The fallback, if the `x:` namespace is renamed by a release: `Principal/get`
 is advertised too — but `Quota/get` is scoped to the authenticated account, so
 it only helps if an admin session may name another `accountId`. Untested.
 
+#### The credential, created 2026-09-06
+
+`metering@i10.tech` (registry id `c`), a principal that exists only to be
+authenticated as. Its `x:ApiKey` credential is `STALWART_API_TOKEN`, sent as a
+bearer token; `STALWART_URL` is `http://i10-stalwart:8080`. Both live in
+Doppler's `prod_api` config, which is what `i10-api` syncs and what
+`billing-reconcile.yaml` already mounts — so no manifest change was needed.
+
+⚠ **AN `x:ApiKey` IS A CREDENTIAL ON A PRINCIPAL, NOT A FREE-STANDING TOKEN,
+WHICH IS WHY THERE IS A SERVICE ACCOUNT AT ALL.** It sits in an account's
+`credentials` beside `Password`. The only other registry account is a person's,
+and hanging a cron job's credential off it would entangle revoking the job with
+their mailbox.
+
+⚠ **THREE PERMISSIONS OUT OF 660.** `authenticate`, `sysAccountGet`,
+`sysAccountQuery` — exactly what the two method calls need, and nothing else:
+no mail access, no writes, no configuration. The account carries them as
+`permissions: {"@type": "Replace", …}` and the key inherits, so the grant has
+one home rather than two that can drift.
+
+⚠ **AND NO `expiresAt`.** A cron job that stops silently on a date nobody
+remembers is worse than a long-lived key whose blast radius is three read
+permissions. The narrow grant is the control here, not the lifetime.
+
+⚠ **SETS SERIALISE AS MAPS, AND THE TWO PERMISSION OBJECTS DIFFER.** An account
+takes `x:PermissionsList` with `enabledPermissions`; a credential takes
+`x:CredentialPermissionsList` with `permissions`. Both are `{"name": true}`
+maps, not arrays. Three of the four failed attempts were this.
+
 ⚠ **A BUMP OF THE STALWART IMAGE IS A REASON TO RE-RUN THE PROBE.** A vendor
 extension carries no compatibility promise. The adapter throws on anything it
 does not recognise and never returns 0, so a rename fails loudly and leaves the
@@ -1119,9 +1148,9 @@ tiers move.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
       `mailboxes` currently counts `authd.accounts`.
-- [ ] An `x:ApiKey` for the reconcile job. `STALWART_API_TOKEN` is sent as a
-      bearer token; basic auth with the recovery admin also works but is the
-      wrong credential to hand a cron job.
+- [ ] Whether the deployed reconcile job actually samples. The key and the
+      adapter are both verified in isolation; the job runs the deployed image,
+      so the first real run is after this ships.
 - [ ] The storage and mailbox limits themselves. 0027 seeds 0/0 for free and
       1 mailbox / 10 GiB for pro as placeholders.
 
