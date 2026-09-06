@@ -1148,9 +1148,24 @@ tiers move.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
       `mailboxes` currently counts `authd.accounts`.
-- [ ] Whether the deployed reconcile job actually samples. The key and the
-      adapter are both verified in isolation; the job runs the deployed image,
-      so the first real run is after this ships.
+- [x] ~~Whether the deployed reconcile job actually samples.~~ **PROVEN
+      2026-09-06.** `tenants:1, mailboxes:1, failed:0`, and
+      `core.tenant_storage` holds **30116 bytes** — the same figure read
+      directly off the registry during the probe, so the adapter, the sampler,
+      the RLS boundary and the level all agree on a number that could not be
+      right by accident.
+      ⚠ **AND TWO OTHER LEGS HAD NEVER ONCE SUCCEEDED.** The SES reconciler
+      raised on RLS until 0028; usage reconciliation bound `Date` objects that
+      postgres.js cannot write, so it failed before the query was sent — 0013
+      fixed that call's row-level-security half and left its binding half
+      broken. Both were invisible because the job's exit code was the only
+      thing anyone read, and it reports one failure the same as six.
+      ⚠ **A FAILED PreSync HOOK IS NEVER CLEANED UP.**
+      `hook-delete-policy: HookSucceeded` keeps the failed Job, so the next
+      sync cannot create its own and fails on that instead of on the
+      migration — then Argo exhausts its retries and will not re-attempt the
+      same revision. Recovering needs the Job deleted by hand AND a manual
+      sync, however the migration itself was fixed.
 - [ ] The storage and mailbox limits themselves. 0027 seeds 0/0 for free and
       1 mailbox / 10 GiB for pro as placeholders.
 
