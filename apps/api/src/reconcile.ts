@@ -5,7 +5,7 @@
  * it must run EXACTLY once per pass. The worker Deployment scales on queue
  * depth, so an interval inside it would run once per replica — three replicas
  * would issue three sets of repairs against the same rows, and every one of
- * them would call Autumn. Kubernetes already owns "run this once, on a
+ * them would write the same ledger. Kubernetes already owns "run this once, on a
  * schedule", with `concurrencyPolicy: Forbid` to say what happens when a run
  * overruns. Same image, a different command, exactly as migrate.js is.
  *
@@ -24,17 +24,17 @@
  * ⚠ FOUR LEGS, IN THIS ORDER, AND THE ORDER IS LOAD-BEARING:
  *
  *   1. SES ↔ i10       did everything we marked sent actually go?  (correctness)
- *   2. i10 ↔ Autumn    did we bill for everything we sent?         (books)
- *   3. tenants ↔ Autumn does every tenant exist as a customer?     (existence)
- *   4. Polar ↔ Autumn  is every customer on the plan they paid for? (entitlements)
+ *   2. i10 ↔ meter     did we bill for everything we sent?         (books)
+ *   3. tenants ↔ Polar does every tenant exist as a customer?      (existence)
+ *   4. Polar ↔ i10     is every customer on the plan they paid for? (entitlements)
  *
  * The first repairs INTO `core.messages` and the second reads it, so a message
  * SES sent that we recorded late is an ordinary `sent` row by the time the
  * second leg counts — rather than waiting a whole cycle to be billed.
  *
  * The third is deliberately AFTER the second and not folded into it: the usage
- * reconciler cannot see a tenant Autumn has never heard of, because both sides
- * read zero for it and agree. That is the whole reason it is a separate
+ * reconciler cannot see a tenant the meter has never heard of, because both
+ * sides read zero for it and agree. That is the whole reason it is a separate
  * question, and it compares the entire tenant list rather than only tenants
  * that sent something — a tenant that has not sent yet is exactly the one worth
  * finding before it does.
@@ -46,8 +46,8 @@
  * job that did not run. `send/reconcile-run.ts` binds them; this calls it.
  *
  * ⚠ AND A LEG THAT FAILS DOES NOT STOP THE ONES AFTER IT. They repair three
- * different things and share no state beyond the order above, so an Autumn
- * outage must not also stop the SES leg from writing down mail that went.
+ * different things and share no state beyond the order above, so a Polar outage
+ * must not also stop the SES leg from writing down mail that went.
  */
 import pino from "pino"
 import { subscriptionOps } from "./billing/db.js"
@@ -177,7 +177,7 @@ await withMonitor(
       process.exitCode = 1
     }
 
-    // ── 2. i10 ↔ Autumn ─────────────────────────────────────────────────────
+    // ── 2. i10 ↔ meter ─────────────────────────────────────────────────────
     try {
       const usage = await reconcileUsage(db, entitlements, from, to, log)
       log.info(
@@ -193,7 +193,7 @@ await withMonitor(
 
       // ⚠ A SURPLUS IS THE ALARMING DIRECTION. A deficit is the hot path
       // dropping usage exactly as it is designed to, and this leg closing it.
-      // A surplus means Autumn counted something we did not send, which is a
+      // A surplus means the meter counted something we did not send, which is a
       // customer being over-charged and has no automatic fix that would not
       // also destroy the evidence.
       if (usage.surpluses.length > 0 || usage.failed > 0) {
@@ -284,7 +284,7 @@ await withMonitor(
       process.exitCode = 1
     }
 
-    // ── 3. tenants ↔ Autumn ─────────────────────────────────────────────────
+    // ── 3. tenants ↔ Polar ─────────────────────────────────────────────────
     try {
       const tenants = await reconcileTenantCustomers(db, entitlements, log)
       log.info(
@@ -304,20 +304,20 @@ await withMonitor(
         process.exitCode = 1
         captureError(
           new Error(
-            `${tenants.missing.length} active tenant(s) have no customer in Autumn; ` +
+            `${tenants.missing.length} active tenant(s) have no customer in Polar; ` +
               "their usage has never been recorded",
           ),
           { missing: tenants.missing.slice(0, 20) },
         )
       }
 
-      // Not a finding and not a failure: Autumn could not answer, and the next
+      // Not a finding and not a failure: Polar could not answer, and the next
       // run asks again. Logged so a run of them is visible without being an
       // alert.
       if (tenants.unverified.length > 0) {
         log.warn(
           { unverified: tenants.unverified.map((t) => t.tenantId) },
-          "could not confirm some tenants against Autumn",
+          "could not confirm some tenants against Polar",
         )
       }
     } catch (error) {
@@ -326,7 +326,7 @@ await withMonitor(
       process.exitCode = 1
     }
 
-    // ── 4. Polar ↔ Autumn ───────────────────────────────────────────────────
+    // ── 4. Polar ↔ i10 ───────────────────────────────────────────────────
     const subscriptions = subscriptionOps(db)
 
     try {
@@ -339,8 +339,6 @@ await withMonitor(
           timeoutMs: 30_000,
         }),
         subscriptions,
-        // The same client the usage leg reads through. Two would be two sets of
-        // timeouts and two connection pools against one service, for nothing.
         // ⚠ A DIFFERENT OBJECT FROM THE LEDGER THE USAGE LEG READS, AND
         // DELIBERATELY SO. This one can move a customer between plans; that one
         // can only count. They were one client while both were Autumn over

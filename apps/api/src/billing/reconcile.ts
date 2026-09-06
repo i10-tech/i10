@@ -13,15 +13,16 @@ import type { PolarClient } from "./polar.js"
  *
  * ⚠ THIS IS NOT OPTIONAL, AND IT IS NOT A SAFETY NET FOR SLOPPINESS. Attaching
  * plans with `no_billing_changes: true` makes Polar the state of record and
- * Autumn a downstream copy — and the only thing that carries state from the one
+ * our own tables a downstream copy — and the only thing that carries state from the one
  * to the other is a webhook. A webhook lost during a deploy, dropped by a
  * rollout, or 500'd past its retry budget is a customer silently on the wrong
  * plan, in either direction: paying for Pro with free-tier limits, or holding
- * Pro they stopped paying for. Nothing in Autumn will ever notice, because
- * Autumn was told the truth as far as it knows.
+ * Pro they stopped paying for. Nothing downstream will ever notice, because it
+ * was told the truth as far as it knew.
  *
- * ⚠ IT READS POLAR, NOT AUTUMN. The question is "does our record match the
- * payment provider", and Autumn cannot answer it — it holds whatever we last
+ * ⚠ IT READS POLAR, NOT OUR OWN TABLES. The question is "does our record match
+ * the payment provider", and our record cannot answer it — it holds whatever we
+ * last
  * told it, so comparing the two would only ever confirm our own mistake.
  *
  * ⚠ AND IT NEVER REVOKES ON ABSENCE. See `orphaned` below: a subscription
@@ -125,7 +126,7 @@ export async function reconcileSubscriptions(
     // No row at all is a webhook we never received. An older `event_at` is one
     // we received out of order or lost. A `granted_plan_id` that disagrees with
     // what the subscription entitles is the row having been written while the
-    // Autumn call failed — the state this whole design is built to survive, and
+    // grant failed — the state this whole design is built to survive, and
     // the one no other check would ever surface.
     const outOfStep =
       !row ||

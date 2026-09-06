@@ -51,7 +51,7 @@ declare module "hono" {
  *
  * ⚠ AUTHENTICATION IS NOT QUOTA. This answers "is this key valid and what may
  * it do". Whether the customer has sending budget left is a different question
- * with a different failure mode and a different owner (Autumn). Collapsing the
+ * with a different failure mode and a different owner (the meter). Collapsing the
  * two makes it impossible to sell a plan that differs only by volume, and it
  * makes `rate_limit_exceeded` (retryable) indistinguishable from
  * `daily_quota_exceeded` (not).

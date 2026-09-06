@@ -44,7 +44,7 @@ export interface TenantStore {
   }): Promise<{ id: string; created: boolean }>
 }
 
-/** Autumn, narrowed to the one call. See billing/grants.ts on why it is narrow. */
+/** Entitlements, narrowed to the one call. See billing/grants.ts on why. */
 export interface Entitlements {
   ensureCustomer(input: { tenantId: string; name?: string }): Promise<void>
 }
@@ -53,7 +53,7 @@ export interface ProvisioningDeps {
   organizations: ClerkOrganizations
   tenants: TenantStore
   /**
-   * ⚠ OPTIONAL, AND ITS ABSENCE IS VISIBLE RATHER THAN FATAL. Without Autumn a
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS VISIBLE RATHER THAN FATAL. Without it a
    * tenant is created with no entitlement, which means its first send is
    * refused. `missingCustomers()` in send/reconcile.ts is the sweep that finds
    * them; provisioning still succeeds, because a tenant that exists and cannot
@@ -135,7 +135,8 @@ export function tenantProvisioning(deps: ProvisioningDeps): TenantProvisioning {
 
       // ⚠ AFTER THE ROW, AND OUTSIDE ITS TRANSACTION. This is a call to somebody
       // else's service; holding a database transaction open across it would tie
-      // a connection to Autumn's latency on the sign-up path. If it fails the
+      // a connection to another service's latency on the sign-up path. If it
+      // fails the
       // tenant still exists, which is the recoverable half.
       if (deps.entitlements) {
         try {
@@ -143,7 +144,7 @@ export function tenantProvisioning(deps: ProvisioningDeps): TenantProvisioning {
         } catch (error) {
           deps.log.error(
             { err: error, tenantId: tenant.id },
-            "tenant created but Autumn does not know it — first send will be refused",
+            "tenant created without an entitlement — first send will be refused",
           )
         }
       }

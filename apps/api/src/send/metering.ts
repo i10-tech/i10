@@ -1,5 +1,5 @@
 /**
- * Metering and quota — the seam Autumn plugs into.
+ * Metering and quota — the seam the meter plugs into.
  *
  * ⚠ QUOTA IS NOT AUTHENTICATION, AND THE TWO MUST NOT COLLAPSE. `requireApiKey`
  * answers "is this key valid and what may it do". This answers "does this
@@ -15,7 +15,8 @@
  * milliseconds without touching the send path. It reads a cached balance, so it
  * is approximate: a burst can slip past a stale answer. That is the right
  * trade — the alternative is a synchronous call to a third party on the hot
- * path of every send, which makes Autumn's availability i10's availability.
+ * path of every send, which would make a billing service's availability
+ * i10's availability. It was Autumn's; the port outlived it.
  *
  * Recording at send is what makes the number true. Billing on acceptance would
  * charge for messages that were never delivered because the address was
@@ -36,7 +37,7 @@ export type QuotaOutcome =
    */
   | { status: "exceeded"; message: string; resetsAt?: Date }
   /**
-   * ⚠ THE ONE THAT MATTERS. Autumn did not answer, so we do not know. Same rule
+   * ⚠ THE ONE THAT MATTERS. The meter did not answer, so we do not know. Same rule
    * as `verifyApiKey` and as authd answering LDAP `unavailable`: a metering
    * outage must never be reported as "you are over quota", because the customer
    * responds by upgrading a plan that was fine.
@@ -73,10 +74,11 @@ export interface Metering {
    * Called after the provider accepted the messages.
    *
    * ⚠ IT TAKES MESSAGE IDS, NOT A COUNT, AND THAT IS WHAT MAKES THE BOOKS
-   * FIXABLE. A count can only ever be added; an id can be checked. Autumn's
-   * single `track` accepts an `Idempotency-Key` header and answers 409 to a
-   * replay, so a message id is a key that cannot double-bill however many times
-   * it is presented. The reconciler below depends on that entirely.
+   * FIXABLE. A count can only ever be added; an id can be checked. `track` is
+   * idempotent on the message id, so a message id is a key that cannot
+   * double-bill however many times it is presented. The reconciler below depends
+   * on that entirely, and depended on the same property when the id was an
+   * `Idempotency-Key` header to somebody else's service.
    *
    * ⚠ AND IT MUST NOT BE ABLE TO FAIL A SEND THAT ALREADY HAPPENED. The mail
    * has gone; throwing here would return the row to the queue and send it twice
@@ -111,7 +113,7 @@ export function shouldSend(outcome: QuotaOutcome, failOpen = true): boolean {
 /**
  * Metering that allows everything and counts nothing.
  *
- * Used in tests, and as the wiring before Autumn is connected. ⚠ It is
+ * Used in tests. ⚠ It is
  * DELIBERATELY not the production default: `createApp` takes metering as a
  * dependency, so shipping without it is a visible omission in one place rather
  * than a silent one at every call site.
@@ -128,7 +130,7 @@ export const unmetered: Metering = {
  * ⚠ A SWALLOWED `recordSent` IS REVENUE NEVER COUNTED, AND THAT IS ACCEPTABLE
  * ONLY BECAUSE SOMETHING ELSE FINDS IT. `core.messages` is the billing source
  * of truth — every `sent` row is one billable unit with `sent_at` as its clock —
- * and send/reconcile.ts compares it against what Autumn actually recorded. The
+ * and send/reconcile.ts compares it against what the meter actually recorded. The
  * log line is a signal, not the record.
  */
 export function resilient(inner: Metering, log?: Logger): Metering {
@@ -145,11 +147,13 @@ export function resilient(inner: Metering, log?: Logger): Metering {
       try {
         await inner.recordSent(tenantId, sent)
       } catch (err) {
-        // ⚠ NOT RETRIED HERE, ON PURPOSE, AND AUTUMN SAYS SO ITSELF. `batchTrack`
-        // has no per-item idempotency, and its documentation is explicit:
-        // "retrying re-enqueues the already-succeeded items, which causes
-        // double-deduction", and "gaps are preferable to duplicates". So the hot
-        // path takes the gap and the reconciler closes it — see send/reconcile.ts.
+        // ⚠ NOT RETRIED HERE, ON PURPOSE. A bulk write has no per-item
+        // idempotency, so retrying re-submits the items that already succeeded
+        // and double-counts them; a gap is preferable to a duplicate, because
+        // the reconciler can find a gap and cannot find a duplicate. The hot
+        // path takes the gap and the reconciler closes it — see
+        // send/reconcile.ts. Autumn's own documentation said the same thing,
+        // and the reasoning is a property of bulk writes rather than of Autumn.
         log?.error(
           { err, tenantId, count: sent.length },
           "usage not recorded — the reconciler will close the gap",

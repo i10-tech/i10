@@ -115,22 +115,22 @@ spec:
         passwordSecret:
           name: i10-api-db-role
 
-      # Owns the `autumn` database declared in i10/autumn/database.yaml.
+      # ⚠ THE `autumn` ROLE AND ITS DATABASE ARE GONE FROM HERE BUT STILL EXIST,
+      # AND THAT IS DELIBERATE. Autumn was retired; its 13 MB database is the
+      # only surviving record of what it counted before the swap, and dropping
+      # it is irreversible while keeping it costs a rounding error of disk. The
+      # ~1.3 GiB retirement reclaimed was five pods, not this.
       #
-      # ⚠ IT OWNS ITS TABLES, WHICH IS WHY IT NEEDS ITS OWN DATABASE. Autumn
-      # generates and applies its own Drizzle migrations on every upgrade, so
-      # the role it connects as must be able to CREATE, ALTER and DROP. That is
-      # the exact opposite of `i10_api`, which owns nothing so that row level
-      # security binds to it — the two cannot share a database without one of
-      # them being wrong.
-      - name: autumn
-        ensure: present
-        login: true
-        superuser: false
-        createdb: false
-        createrole: false
-        passwordSecret:
-          name: i10-autumn-db-role
+      # ⚠ REMOVED FROM `managed.roles` RATHER THAN SET `ensure: absent`, WHICH
+      # WOULD HAVE FAILED. The role OWNS the database, so Postgres refuses to
+      # drop it while that database exists. Un-managing it also detaches it from
+      # `i10-autumn-db-role`, a Secret that no longer syncs — CNPG reconciling a
+      # managed role against a missing passwordSecret is an error loop.
+      #
+      # To finish the job once the data is certainly not wanted:
+      #
+      #   DROP DATABASE autumn;
+      #   DROP ROLE autumn;
 
   bootstrap:
     initdb:

@@ -5,22 +5,22 @@ import { sql, type SQL } from "drizzle-orm"
  *
  * ⚠ THE THREE PARTIES MEET AT `core.messages`, AND THEY MEET NOWHERE ELSE.
  *
- *   SES ──▶ core.messages ──▶ Autumn ──▶ Polar
+ *   SES ──▶ core.messages ──▶ core.meter_events ──▶ Polar
  *            (the hub)
  *
  * That shape is the whole point. SES discrepancies are repaired INTO the
- * messages table, and the Autumn reconciler then bills them on its next run
+ * messages table, and the usage reconciler then bills them on its next run
  * because they are simply `sent` rows it has not seen yet. Nothing here talks
- * to Autumn, and a message SES sent that we never recorded needs no special
+ * to the meter, and a message SES sent that we never recorded needs no special
  * billing path — it becomes an ordinary row and the existing machinery bills it.
  *
- * Repairing SES → Autumn directly would give the same number two writers, and
+ * Repairing SES → the meter directly would give the same number two writers, and
  * the two would disagree the first time one of them was retried.
  *
  * ⚠ POLAR IS A PLACE OF RECORD, NOT A PARTY TO THIS. Customers exist there so
- * the dashboard and its features work, and Autumn puts them there. It is
- * downstream of a number that is already agreed, so reconciling against it
- * would be checking Autumn's arithmetic rather than our own.
+ * the dashboard and its features work, and the grant path puts them there. It
+ * is downstream of a number that is already agreed, so reconciling against it
+ * would be checking Polar's arithmetic rather than our own.
  *
  * ⚠ THE LEFT-HAND SIDE IS OUR EVENT LOG, WHICH IS A PUSH FEED AND THEREFORE
  * NOT INDEPENDENT EVIDENCE. `core.message_events` exists only because SES
@@ -108,10 +108,10 @@ export function sesSentButUnbilledStatement(limit: number): SQL {
  *
  * ⚠ IT MUST NOT OVERWRITE A ROW THAT IS ALREADY `sent`. Two reconcilers, or one
  * retried, would otherwise rewrite `sent_at` and move the message into a
- * different billing bucket — turning a repair into a double-count in the Autumn
+ * different billing bucket — turning a repair into a double-count in the usage
  * reconciler that reads this table next.
  *
- * ⚠ AND `sent_at` COMES FROM SES'S EVENT, NOT FROM `now()`. The Autumn
+ * ⚠ AND `sent_at` COMES FROM SES'S EVENT, NOT FROM `now()`. The usage
  * reconciler buckets on `sent_at`; stamping the repair time would file a
  * message in the day it was noticed rather than the day it was sent, and every
  * boundary would then disagree with SES's own record of the same message.
@@ -200,7 +200,7 @@ export interface SesFinding {
 }
 
 export interface SesReconcileReport {
-  /** SES sent them, we did not bill them. Repaired, then billed by Autumn. */
+  /** SES sent them, we did not bill them. Repaired, then billed by the meter. */
   unbilled: SesFinding[]
   /** We billed them, SES never confirmed. Reported only. */
   unconfirmed: SesFinding[]

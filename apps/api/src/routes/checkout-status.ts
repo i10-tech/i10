@@ -102,7 +102,7 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
 
     const current = await deps.subscriptions.current(checkout.tenantId)
 
-    // ⚠ `plan` IS `granted_plan_id` — what Autumn was actually told, not what
+    // ⚠ `plan` IS `granted_plan_id` — what was actually granted, not what
     // Polar said. Reading `plan_id` instead would show "Pro" the instant the
     // row was written and before the entitlement existed, which is exactly the
     // lie this page is built to avoid.

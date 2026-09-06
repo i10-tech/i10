@@ -1148,9 +1148,24 @@ tiers move.
 - [ ] Whether seats are counted from `authd.accounts` or from Clerk
       memberships — they can differ, and only one can be the billable number.
       `mailboxes` currently counts `authd.accounts`.
-- [ ] Whether the deployed reconcile job actually samples. The key and the
-      adapter are both verified in isolation; the job runs the deployed image,
-      so the first real run is after this ships.
+- [x] ~~Whether the deployed reconcile job actually samples.~~ **PROVEN
+      2026-09-06.** `tenants:1, mailboxes:1, failed:0`, and
+      `core.tenant_storage` holds **30116 bytes** — the same figure read
+      directly off the registry during the probe, so the adapter, the sampler,
+      the RLS boundary and the level all agree on a number that could not be
+      right by accident.
+      ⚠ **AND TWO OTHER LEGS HAD NEVER ONCE SUCCEEDED.** The SES reconciler
+      raised on RLS until 0028; usage reconciliation bound `Date` objects that
+      postgres.js cannot write, so it failed before the query was sent — 0013
+      fixed that call's row-level-security half and left its binding half
+      broken. Both were invisible because the job's exit code was the only
+      thing anyone read, and it reports one failure the same as six.
+      ⚠ **A FAILED PreSync HOOK IS NEVER CLEANED UP.**
+      `hook-delete-policy: HookSucceeded` keeps the failed Job, so the next
+      sync cannot create its own and fails on that instead of on the
+      migration — then Argo exhausts its retries and will not re-attempt the
+      same revision. Recovering needs the Job deleted by hand AND a manual
+      sync, however the migration itself was fixed.
 - [ ] The storage and mailbox limits themselves. 0027 seeds 0/0 for free and
       1 mailbox / 10 GiB for pro as placeholders.
 
@@ -1238,6 +1253,26 @@ tiers move.
      exist; a catalogue promising it first would let a customer send past their
      plan with no way to invoice for it.
 
-5. Retire Autumn. **~1.3 GiB back.**
+5. ~~Retire Autumn.~~ **DONE 2026-09-06.** Five pods gone — server, workers,
+   cron, dashboard and the ElasticMQ that existed only to be its SQS — plus the
+   Argo app, the image workflow, both Dockerfiles, the config file, the client,
+   its tests, its five env vars and its two DopplerSecrets.
+   ⚠ **THE DATABASE AND ITS ROLE ARE KEPT, DELIBERATELY.** `autumn` is 13 MB —
+   the reclaimed ~1.3 GiB was pods, not disk — and it is the only surviving
+   record of what Autumn counted before the swap. Dropping it is irreversible
+   and buys a rounding error, so it stays until somebody decides otherwise;
+   `platform-db/cluster.yaml` carries the two statements that finish the job.
+   ⚠ **AND THE ROLE WAS UN-MANAGED RATHER THAN SET `ensure: absent`**, which
+   would have failed: it OWNS that database, so Postgres refuses to drop it
+   while the database exists. Un-managing also detaches it from a Secret that no
+   longer syncs, which would otherwise be a CNPG reconcile loop.
+   ⚠ **THE PROSE WAS THE LARGEST PART OF THE CHANGE, AND THE EASIEST TO SKIP.**
+   Around ninety comments named Autumn. The ones describing what the code does
+   now were false — a reconciler leg labelled `i10 ↔ Autumn`, a `Logger` type
+   imported from a vendor client by code that never called it, a "slice of
+   Autumn" satisfied by a type that no longer exists. Those were rewritten. The
+   ones recording where a decision came from were kept, including every
+   divergence in `packages/metering` and the Apache-2.0 attribution in NOTICE,
+   which is a licence obligation rather than a courtesy.
 6. Cloudflare free tier: WAF, format gate, SNS verification.
 7. When there is revenue: $5 Workers Paid → DO counter, then DO webhooks.
