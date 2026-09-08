@@ -9,6 +9,7 @@ import { polarClient } from "./billing/polar.js"
 import { tenantStore } from "./tenants/db.js"
 import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
+import { keyLookup, keyStore } from "./auth/store.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, flushObservability, initObservability } from "./observability.js"
@@ -232,10 +233,15 @@ const depthSources = {
 
 const app = createApp({
   apiKeyAuth: {
-    verify: (secret) => clerk.apiKeys.verify(secret),
+    // ⚠ OUR OWN TABLE, NOT CLERK. See auth/api-key.ts for why, and note the
+    // client above is still built — Clerk remains the identity provider for
+    // sessions, organizations and the authd bind delegation. It is only the
+    // per-request credential check that stopped crossing the network.
+    lookup: keyLookup(db),
     cache: redisKeyCache(cache),
     ttlSeconds: env.API_KEY_CACHE_TTL_SECONDS,
   },
+  apiKeys: { store: keyStore(db), cache: redisKeyCache(cache), log },
   clerkWebhooks: {
     db,
     signingSecret: env.CLERK_WEBHOOK_SECRET,

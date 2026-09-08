@@ -1,31 +1,45 @@
-import { createHash } from "node:crypto"
-import type { APIKey } from "@clerk/backend"
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
 
 /**
- * Customer-facing API keys.
+ * Customer-facing API keys. i10 mints them, stores their hashes, and verifies
+ * them against its own database.
  *
- * Clerk issues and verifies them; the format is ours. `apiKeys.create()` returns
- * a secret shaped `ak_…`, and Clerk publishes no way to change that prefix — so
- * the key a customer holds is that secret rewritten under our own prefix, and
- * the rewrite is reversed before it is handed back to Clerk.
+ * ⚠ CLERK ISSUED THESE UNTIL 2026-09-08, AND REMOVING IT WAS A LATENCY
+ * DECISION. `apiKeys.verify()` is a network call, the cache TTL is 60 seconds,
+ * and a customer who sends less often than that paid it on essentially every
+ * request. Measured on the live API: 1119ms cold against 353ms warm, where an
+ * unauthenticated 401 costs 180ms of pure round trip. Roughly 900ms of every
+ * cold send was spent asking a third party a question about a row we already
+ * owned — more than the SES call it was authenticating.
  *
- * ⚠ THE PREFIX IS COSMETIC AND MUST BE TREATED AS SUCH. `i10_live_` and
- * `i10_test_` are the same length, so `i10_live_X` and `i10_test_X` unwrap to
- * one identical Clerk secret. Reading the mode off the string a caller sent
- * would let anyone promote a test key to a live key by editing one character.
- * The mode comes from Clerk's `claims` on the verified key, always.
+ * ⚠ AND CLERK WAS NEVER WHAT TIED A KEY TO A TENANT. Its `subject` is a
+ * `user_…` or `org_…`; our tenant is neither. This file read `claims.tenantId`
+ * — a claim we stamped ourselves at creation — and ignored `subject` entirely.
+ * The link was always `core.api_keys.tenant_id`.
+ *
+ * ⚠ WHAT WENT AWAY WITH IT IS WORTH KNOWING. Clerk publishes no way to change
+ * its `ak_` prefix, so keys were rewritten to `i10_live_…` outbound and back
+ * inbound — and since both our prefixes are nine characters, `i10_live_X` and
+ * `i10_test_X` stripped to ONE Clerk secret. The mode therefore could not be
+ * read from the string without letting anyone promote a test key to a live one
+ * by editing a character. Hashing the whole key, prefix included, makes those
+ * two different credentials and deletes the hazard rather than documenting it.
+ *
+ * ⚠ CLERK REMAINS THE IDENTITY PROVIDER. Sessions, MFA, organizations, tenant
+ * provisioning and the LDAP bind delegation services/authd depends on are all
+ * still Clerk's, and none of them are on this path. This is a narrowing of what
+ * Clerk is asked to do, not a move away from it.
  */
 
-const CLERK_PREFIX = "ak_"
 const OUR_PREFIXES = ["i10_live_", "i10_test_"] as const
 
 /**
- * The shape of a key we will even ask Clerk about.
+ * The shape of a key we will even hash.
  *
- * ⚠ THIS IS A COST GATE, NOT A SECURITY CONTROL. Verification is a network call
- * to Clerk, so anything obviously malformed has to be refused here — otherwise
- * a stream of garbage in the Authorization header becomes a stream of billed
- * requests against Clerk, and a way to exhaust our quota from outside.
+ * ⚠ THIS IS NO LONGER A COST GATE, AND IT IS STILL WORTH KEEPING. It existed to
+ * stop malformed input becoming billed Clerk requests; there is no third party
+ * to bill now. What it still does is keep obviously-wrong input from reaching
+ * the database at all, and it documents the format in one place.
  */
 const KEY_PATTERN = /^i10_(live|test)_[A-Za-z0-9_-]{16,512}$/
 
@@ -33,6 +47,11 @@ export type Mode = "live" | "test"
 
 /** What the rest of the request needs to know about the caller. */
 export interface ResolvedKey {
+  /**
+   * ⚠ i10'S OWN `core.api_keys.id`, WHERE THIS USED TO BE CLERK'S `ak_…`. It is
+   * the value written to `core.messages.api_key_id`, so the send path no longer
+   * has to look the row up to attribute a message — see send/accept-db.ts.
+   */
   apiKeyId: string
   tenantId: string
   scopes: readonly string[]
@@ -40,88 +59,163 @@ export interface ResolvedKey {
 }
 
 export type VerifyOutcome =
-  /** Clerk answered, and the key is good. */
+  /** The key matched a live row. */
   | { status: "verified"; key: ResolvedKey }
-  /** Clerk answered, and the key is not. Malformed, unknown, revoked, expired. */
+  /** Malformed, unknown, revoked or expired. */
   | { status: "rejected"; reason: string }
   /**
-   * Clerk did not answer, or answered with a tenant we cannot resolve.
+   * We could not find out.
    *
-   * ⚠ NEVER COLLAPSE THIS INTO `rejected`. A 401 tells a customer their key is
-   * wrong, and the customer's next move is to rotate a key that was fine — the
-   * same reasoning that makes services/authd answer LDAP `unavailable` rather
-   * than `invalidCredentials` when Clerk is unreachable. An outage must look
-   * like an outage.
+   * ⚠ STILL HERE, AND STILL NOT COLLAPSIBLE INTO `rejected`, THOUGH THE THING
+   * THAT CAN FAIL HAS CHANGED. It used to mean "Clerk did not answer"; it now
+   * means "the database did not answer". A 401 tells a customer their key is
+   * wrong, and their next move is to rotate a key that was fine — during an
+   * outage that was never theirs. Same rule as services/authd answering LDAP
+   * `unavailable` rather than `invalidCredentials`.
    */
   | { status: "unavailable"; reason: string }
 
-/** `ak_abc` → `i10_live_abc`. */
-export function wrapSecret(clerkSecret: string, mode: Mode): string {
-  // ⚠ Assert rather than tolerate. If Clerk ever changes its prefix, minting a
-  // key we cannot unwrap produces a credential that authenticates nothing and
-  // fails only in the customer's hands. Failing at creation is recoverable.
-  if (!clerkSecret.startsWith(CLERK_PREFIX)) {
-    throw new Error(
-      `Clerk returned a secret that does not start with "${CLERK_PREFIX}"; ` +
-        `the wrapping in api-key.ts assumes it does and must be updated.`,
-    )
-  }
-  return `i10_${mode}_${clerkSecret.slice(CLERK_PREFIX.length)}`
+/**
+ * A new key: what the customer sees, and what we keep.
+ *
+ * ⚠ `secret` IS RETURNED EXACTLY ONCE AND IS NOT RECOVERABLE. Nothing stores it,
+ * nothing logs it, and there is no endpoint that reads it back. A customer who
+ * loses it rotates.
+ */
+export interface MintedKey {
+  secret: string
+  secretHash: string
+  prefix: string
+  mode: Mode
 }
 
 /**
- * `i10_live_abc` → `ak_abc`, or null if it is not one of ours.
+ * ⚠ 32 BYTES FROM A CSPRNG, AND EVERY WORD OF THAT MATTERS. `randomBytes` is
+ * the cryptographic generator; `Math.random` is a predictable PRNG and using it
+ * here would make keys guessable from one another. 256 bits is far past any
+ * brute-force concern and is what makes the fast hash below correct.
  *
- * Note what this deliberately does NOT return: the mode. Both prefixes are nine
- * characters and strip to the same secret, so the string cannot be evidence of
- * anything but shape.
+ * ⚠ `base64url`, NOT `base64` OR `hex`. Base64url's alphabet is exactly the one
+ * KEY_PATTERN accepts and is safe in a header, a URL and a shell; plain base64
+ * emits `+` and `/`, which are neither. Hex would need 64 characters to carry
+ * the same entropy.
  */
-export function unwrapKey(key: string): string | null {
-  if (!KEY_PATTERN.test(key)) return null
+export function mintKey(mode: Mode): MintedKey {
+  const secret = `i10_${mode}_${randomBytes(32).toString("base64url")}`
 
-  const prefix = OUR_PREFIXES.find((p) => key.startsWith(p))
-  if (!prefix) return null
-
-  return CLERK_PREFIX + key.slice(prefix.length)
+  return {
+    secret,
+    secretHash: hashKey(secret),
+    prefix: prefixOf(secret),
+    mode,
+  }
 }
 
-/** The cache key. A hash, so the secret itself never reaches Redis. */
-export function cacheKeyFor(key: string): string {
-  return `apikey:${createHash("sha256").update(key).digest("hex")}`
+/**
+ * SHA-256 of the whole key.
+ *
+ * ⚠ SHA-256 RATHER THAN bcrypt OR argon2, AND A REVIEWER SHOULD EXPECT TO
+ * FLINCH AT THAT. Slow hashes exist because passwords are low-entropy and worth
+ * guessing. This input is 256 random bits: there is nothing to guess, and a
+ * deliberately slow hash would move the very latency this file exists to remove
+ * from the network onto the CPU of every request. Fast hashing of high-entropy
+ * secrets is the correct and conventional choice.
+ *
+ * ⚠ AND IT COVERS THE PREFIX. That is what makes `i10_live_X` and `i10_test_X`
+ * two different credentials instead of one wearing two labels.
+ */
+export function hashKey(key: string): string {
+  return createHash("sha256").update(key).digest("hex")
+}
+
+/**
+ * The part shown in the dashboard: `i10_live_a1b2c3d4`.
+ *
+ * ⚠ EIGHT CHARACTERS OF A 256-BIT SECRET, WHICH LEAVES ABOUT 208 BITS. Stored
+ * in the clear, so a database read hands them over — irrelevant at this
+ * entropy, and it stops being irrelevant the moment anybody shortens the
+ * secret. Shorten one and not the other and this becomes a real disclosure.
+ *
+ * ⚠ THE LITERAL PREFIX IS THE HALF THAT EARNS ITS KEEP. `i10_live_` is what
+ * makes a leaked key findable by grepping repositories, logs and paste sites —
+ * showing only secret characters would identify a key to its owner and to
+ * nobody scanning for one.
+ */
+export function prefixOf(key: string): string {
+  const prefix = OUR_PREFIXES.find((p) => key.startsWith(p))
+  if (!prefix) throw new Error("not an i10 key")
+  return key.slice(0, prefix.length + 8)
+}
+
+/** The row as the database hands it back. */
+export interface KeyRow {
+  id: string
+  tenantId: string
+  scopes: readonly string[]
+  mode: string
+  revokedAt: Date | null
+  expiresAt: Date | null
+}
+
+export interface KeyLookup {
+  /**
+   * Resolves a hash to its row, or null.
+   *
+   * ⚠ IT MUST NOT FILTER OUT REVOKED OR EXPIRED KEYS. Returning null for those
+   * makes "withdrawn" and "never existed" indistinguishable here, and they are
+   * different things to log after a leak.
+   */
+  byHash(hash: string): Promise<KeyRow | null>
 }
 
 export interface KeyCache {
   get(key: string): Promise<string | null>
   set(key: string, value: string, ttlSeconds: number): Promise<void>
+  del(key: string): Promise<void>
 }
 
 export interface VerifyDeps {
-  /** `clerkClient.apiKeys.verify`, or a fake. */
-  verify: (secret: string) => Promise<APIKey>
+  lookup: KeyLookup
   cache: KeyCache
-  /** Seconds a verified key stays cached. Bounds how long a revocation lags. */
+  /** Seconds a verified key stays cached. */
   ttlSeconds: number
+  now?: () => Date
 }
 
 /**
- * Resolves a customer's key to the tenant behind it.
+ * The cache key.
  *
- * ⚠ ONLY SUCCESSES ARE CACHED. Caching a rejection would mean a key created a
- * moment ago stays refused for the whole TTL because something probed it first
- * — and it would let one bad request poison a good one. The cost of not caching
- * failures is that malformed keys reach Clerk, which is what KEY_PATTERN is for.
+ * ⚠ DERIVED FROM THE HASH, NOT FROM THE PLAINTEXT, AND THIS IS WHAT MAKES
+ * REVOCATION IMMEDIATE. Revocation happens in a route that has the key's ROW —
+ * its id and its `secret_hash` — and never the secret itself, which nothing
+ * stores. Keying the cache on the plaintext would leave no way to evict the
+ * entry at that moment, and "instant revocation" would quietly mean "within the
+ * TTL", which is the exact behaviour this change set out to remove.
+ */
+export function cacheKeyFor(secretHash: string): string {
+  return `apikey:${secretHash}`
+}
+
+/**
+ * Resolves a presented key to the tenant behind it.
+ *
+ * ⚠ ONLY SUCCESSES ARE CACHED. Caching a rejection would keep a key created a
+ * moment ago refused for the whole TTL because something probed it first, and
+ * would let one bad request poison a good one.
  */
 export async function verifyApiKey(
-  key: string,
+  presented: string,
   deps: VerifyDeps,
 ): Promise<VerifyOutcome> {
-  const secret = unwrapKey(key)
-  if (!secret) return { status: "rejected", reason: "malformed key" }
+  if (!KEY_PATTERN.test(presented)) {
+    return { status: "rejected", reason: "malformed key" }
+  }
 
-  const cacheKey = cacheKeyFor(key)
+  const hash = hashKey(presented)
+  const cacheKey = cacheKeyFor(hash)
 
-  // A cache read must never be able to fail the request: Redis being down is a
-  // reason to ask Clerk, not a reason to refuse a customer.
+  // A cache read must never fail the request: Redis being down is a reason to
+  // ask Postgres, not a reason to refuse a customer.
   let cached: string | null = null
   try {
     cached = await deps.cache.get(cacheKey)
@@ -133,56 +227,56 @@ export async function verifyApiKey(
     if (parsed) return { status: "verified", key: parsed }
   }
 
-  let verified: APIKey
+  let row: KeyRow | null
   try {
-    verified = await deps.verify(secret)
+    row = await deps.lookup.byHash(hash)
   } catch (error) {
-    return classify(error)
-  }
-
-  // ⚠ Checked even though verify() is documented to throw for these. The flags
-  // are on the returned object, so trusting the throw alone makes us depend on
-  // undocumented behaviour to refuse a revoked key — which is precisely the
-  // check that must not be the one that quietly stops happening.
-  if (verified.revoked) return { status: "rejected", reason: "key revoked" }
-  if (verified.expired) return { status: "rejected", reason: "key expired" }
-
-  const resolved = resolve(verified)
-  if (!resolved) {
-    // Clerk knows the key; we cannot map it to a tenant. That is our data being
-    // wrong, not the customer's key, so it is not a 401.
     return {
       status: "unavailable",
-      reason: `key ${verified.id} carries no usable tenant claim`,
+      reason: error instanceof Error ? error.message : "lookup failed",
     }
+  }
+
+  if (!row) return { status: "rejected", reason: "unknown key" }
+  if (row.revokedAt) return { status: "rejected", reason: "key revoked" }
+
+  const now = (deps.now ?? (() => new Date()))()
+  if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
+    return { status: "rejected", reason: "key expired" }
+  }
+
+  if (row.mode !== "live" && row.mode !== "test") {
+    // Our own data is wrong, not the customer's key. Not a 401.
+    return { status: "unavailable", reason: `key ${row.id} has mode ${row.mode}` }
+  }
+
+  const resolved: ResolvedKey = {
+    apiKeyId: row.id,
+    tenantId: row.tenantId,
+    scopes: row.scopes,
+    mode: row.mode,
   }
 
   try {
     await deps.cache.set(cacheKey, JSON.stringify(resolved), deps.ttlSeconds)
   } catch {
-    // A cache write that fails costs a Clerk call next time. Nothing more.
+    // A cache write that fails costs one database lookup next time. Nothing more.
   }
 
   return { status: "verified", key: resolved }
 }
 
 /**
- * Reads the tenant and mode off Clerk's `claims`.
- *
- * `subject` is a Clerk user or organization id, and our tenant is neither — it
- * is our own row that may reference either. Stamping `tenantId` into the claims
- * at creation keeps the resolution off the request path entirely, so a send does
- * not pay for a database lookup to learn who is sending.
+ * ⚠ CONSTANT-TIME, THOUGH THE LOOKUP ABOVE DOES NOT NEED IT. Exported for
+ * comparing two hashes where one came from a request — rotation confirming a
+ * caller holds the key it is replacing, say. Timing-safe comparison of the HASH
+ * is free; comparing secrets themselves is what this exists to avoid.
  */
-function resolve(key: APIKey): ResolvedKey | null {
-  const claims = key.claims ?? {}
-  const tenantId = claims.tenantId
-  const mode = claims.mode
-
-  if (typeof tenantId !== "string" || tenantId.length === 0) return null
-  if (mode !== "live" && mode !== "test") return null
-
-  return { apiKeyId: key.id, tenantId, scopes: key.scopes ?? [], mode }
+export function hashesEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a)
+  const right = Buffer.from(b)
+  if (left.length !== right.length) return false
+  return timingSafeEqual(left, right)
 }
 
 function parseCached(raw: string): ResolvedKey | null {
@@ -201,29 +295,4 @@ function parseCached(raw: string): ResolvedKey | null {
     // A malformed cache entry is a cache miss, never an error.
     return null
   }
-}
-
-/**
- * Separates "Clerk says no" from "Clerk did not say".
- *
- * The same table as services/authd's Clerk client, for the same reason: a 4xx is
- * an answer about the credential, and everything else is an answer about Clerk.
- */
-function classify(error: unknown): VerifyOutcome {
-  const status = statusOf(error)
-
-  if (status !== null && status >= 400 && status < 500 && status !== 429) {
-    return { status: "rejected", reason: `clerk rejected the key (${status})` }
-  }
-
-  return {
-    status: "unavailable",
-    reason: status === null ? "clerk unreachable" : `clerk returned ${status}`,
-  }
-}
-
-function statusOf(error: unknown): number | null {
-  if (typeof error !== "object" || error === null) return null
-  const status = (error as { status?: unknown }).status
-  return typeof status === "number" ? status : null
 }

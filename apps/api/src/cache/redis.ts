@@ -56,5 +56,19 @@ export function redisKeyCache(client: Redis): KeyCache {
     set: async (key, value, ttlSeconds) => {
       await client.set(key, value, "EX", ttlSeconds)
     },
+    /**
+     * ⚠ THIS IS WHAT MAKES REVOCATION IMMEDIATE RATHER THAN EVENTUAL. Without an
+     * eviction the floor on withdrawing a leaked key is the TTL, which is the
+     * behaviour self-issuing the keys was meant to remove. Redis is shared
+     * across every API pod, so one delete reaches all of them.
+     *
+     * ⚠ AND A FAILURE HERE IS NOT SWALLOWED BY THE CALLER. Unlike a get or a
+     * set — where an error is a miss and costs one lookup — a delete that
+     * silently failed would leave a revoked key working for the rest of its TTL
+     * while the route reported success.
+     */
+    del: async (key) => {
+      await client.del(key)
+    },
   }
 }

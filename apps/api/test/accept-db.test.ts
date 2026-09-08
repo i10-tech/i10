@@ -151,7 +151,7 @@ type PersistInput = Parameters<AcceptOps["persist"]>[0]
 
 const input = (over: Partial<PersistInput> = {}): PersistInput => ({
   tenantId: "ten-1",
-  apiKeyId: "ak_clerk",
+  apiKeyId: "key-uuid",
   queue: "transactional",
   messages: [prepared()],
   requestHash: "hash-1",
@@ -219,10 +219,24 @@ describe("persist", () => {
     expect(wrote(o.recorded, messageBodies)[0]?.createdAt).toEqual(AT)
   })
 
-  it("records the tenant's own key id rather than Clerk's", async () => {
+  /**
+   * ⚠ WRITTEN STRAIGHT THROUGH, WHERE THIS USED TO BE A LOOKUP. Clerk's `ak_…`
+   * had to be translated into our own row id by querying `core.api_keys`, and
+   * best-effort at that — a key minted seconds earlier might not have reached
+   * the table yet, and attribution was not worth refusing a send over. Keys are
+   * ours now, so `apiKeyId` IS the foreign key, it cannot be missing (the
+   * request could not have authenticated without the row it names), and the
+   * send path lost a statement.
+   */
+  it("writes the key id it was given, with no lookup", async () => {
     const o = ops()
     await o.persist(input())
+
     expect(wrote(o.recorded, messages)[0]?.apiKeyId).toBe("key-uuid")
+    expect(
+      o.recorded.some((op) => op.table === apiKeys),
+      "the send path should no longer touch core.api_keys",
+    ).toBe(false)
   })
 
   // ⚠ THE KEY BEFORE THE MESSAGES, BECAUSE THE PRIMARY KEY IS THE LOCK. Two
