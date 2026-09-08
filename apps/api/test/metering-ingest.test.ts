@@ -75,6 +75,28 @@ describe("what gets marked", () => {
     expect(statement).not.toMatch(/occurred_at\s*<|recorded_at\s*</)
   })
 
+  /**
+   * ⚠ AN ARRAY LITERAL, NOT A ROW CONSTRUCTOR, AND THE TEST ABOVE COULD NOT
+   * TELL THEM APART. Interpolating the id array directly renders `any(($3, $4))`
+   * — which satisfies `toContain("any(")` and which Postgres rejects at run time
+   * with `cannot cast type record to text[]`.
+   *
+   * ⚠ AND THE CONSEQUENCE WAS RE-BILLING, NOT AN OUTAGE. The flush had already
+   * handed the units to Polar by the time this ran, so the failure left them
+   * un-marked and every subsequent run shipped them again. Nothing but Polar's
+   * `external_id` dedupe stood between that and usage counted twice per run,
+   * forever.
+   */
+  it("builds an array literal Postgres can actually cast", () => {
+    const { sql: statement, params } = render(
+      markShippedStatement(A, "emails", ["m1", "m2"]),
+    )
+    expect(statement).toContain("any(array[")
+    expect(statement).not.toContain("any((")
+    // One scalar per id, so nothing depends on the driver serialising an array.
+    expect(params).toEqual([A, "emails", "m1", "m2"])
+  })
+
   // Re-marking a shipped row would move its watermark for no reason; the guard
   // also makes a concurrent second pass harmless.
   it("only touches rows that are still unshipped", () => {
