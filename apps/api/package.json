@@ -12,7 +12,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "openapi": "tsx scripts/generate-openapi.ts"
+    "openapi": "tsx scripts/generate-openapi.ts",
+    "adopt-dkim": "tsx scripts/adopt-dkim.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1123.0",
