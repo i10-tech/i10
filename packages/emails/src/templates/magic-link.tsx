@@ -18,7 +18,7 @@ const COPY: Record<MagicLinkPurpose, { heading: string; action: string }> = {
   verify: { heading: "Verify your email address", action: "Verify email address" },
 }
 
-export function MagicLink({
+export default function MagicLink({
   purpose,
   url,
   ttlMinutes,
@@ -46,3 +46,22 @@ export function MagicLink({
     </Layout>
   )
 }
+
+/*
+ * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
+ * `email dev` renders a directory of DEFAULT exports and has no way to invent
+ * props, so this used to need a second `emails/` tree holding sample values —
+ * two files per template, and a preview that could silently drift from what is
+ * actually sent. react-email reads this static instead, so the thing you look
+ * at IS the thing that goes out.
+ *
+ * It costs a few sample strings in the built bundle. Nothing reads them at
+ * runtime; the alternative was a whole parallel directory.
+ */
+MagicLink.PreviewProps = {
+  purpose: "sign-in",
+  url: "https://auth.i10.tech/verify?token=sample",
+  ttlMinutes: "10",
+  requestedFrom: "Chrome on macOS",
+  requestedAt: "9 September 2026 at 14:02",
+} satisfies React.ComponentProps<typeof MagicLink>

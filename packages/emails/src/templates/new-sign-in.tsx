@@ -9,7 +9,7 @@ import { ActionButton, Detail, FallbackLink, Layout, styles } from "../layout.js
  * URL can do is sign somebody OUT. That asymmetry is the whole reason it is
  * allowed here — it fails closed.
  */
-export function NewSignIn({
+export default function NewSignIn({
   signInMethod,
   device,
   location,
@@ -55,3 +55,24 @@ export function NewSignIn({
     </Layout>
   )
 }
+
+/*
+ * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
+ * `email dev` renders a directory of DEFAULT exports and has no way to invent
+ * props, so this used to need a second `emails/` tree holding sample values —
+ * two files per template, and a preview that could silently drift from what is
+ * actually sent. react-email reads this static instead, so the thing you look
+ * at IS the thing that goes out.
+ *
+ * It costs a few sample strings in the built bundle. Nothing reads them at
+ * runtime; the alternative was a whole parallel directory.
+ */
+NewSignIn.PreviewProps = {
+  signInMethod: "Password",
+  device: "Desktop · Chrome · macOS",
+  location: "Cairo, Egypt",
+  ipAddress: "102.44.18.7",
+  signedInAt: "9 September 2026 at 14:02",
+  revokeUrl: "https://auth.i10.tech/revoke?session=sample",
+  supportEmail: "support@i10.tech",
+} satisfies React.ComponentProps<typeof NewSignIn>

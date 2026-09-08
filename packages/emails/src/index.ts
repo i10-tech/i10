@@ -1,25 +1,33 @@
 import { render } from "@react-email/components"
 import { SLUG } from "./slugs.js"
-import { VerificationCode } from "./templates/verification-code.js"
-import { ResetPasswordCode } from "./templates/reset-password-code.js"
-import { MagicLink, type MagicLinkPurpose } from "./templates/magic-link.js"
-import { AccountLocked } from "./templates/account-locked.js"
-import { PasswordChanged } from "./templates/password-changed.js"
-import { PasswordRemoved } from "./templates/password-removed.js"
-import { PrimaryEmailChanged } from "./templates/primary-email-changed.js"
-import { NewSignIn } from "./templates/new-sign-in.js"
-import { MfaEnabled } from "./templates/mfa-enabled.js"
-import { PasskeyChanged } from "./templates/passkey-changed.js"
-import { Invitation } from "./templates/invitation.js"
-import { OrganizationInvitation } from "./templates/organization-invitation.js"
-import { OrganizationMemberJoined } from "./templates/organization-member-joined.js"
-import { WaitlistConfirmation } from "./templates/waitlist-confirmation.js"
+import VerificationCode from "./templates/verification-code.js"
+import ResetPasswordCode from "./templates/reset-password-code.js"
+import MagicLink, { type MagicLinkPurpose } from "./templates/magic-link.js"
+import AccountLocked from "./templates/account-locked.js"
+import PasswordChanged from "./templates/password-changed.js"
+import PasswordRemoved from "./templates/password-removed.js"
+import PrimaryEmailChanged from "./templates/primary-email-changed.js"
+import NewSignIn from "./templates/new-sign-in.js"
+import MfaEnabled from "./templates/mfa-enabled.js"
+import PasskeyChanged from "./templates/passkey-changed.js"
+import Invitation from "./templates/invitation.js"
+import OrganizationInvitation from "./templates/organization-invitation.js"
+import OrganizationMemberJoined from "./templates/organization-member-joined.js"
+import WaitlistConfirmation from "./templates/waitlist-confirmation.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
-export * from "./templates/billing/payment-succeeded.js"
-export * from "./templates/billing/payment-failed.js"
-export * from "./templates/billing/subscription-price-changed.js"
+/**
+ * Billing templates, re-exported by name for whatever ends up driving them.
+ *
+ * ⚠ NOT WIRED TO ANY WEBHOOK. Clerk's billing product emits its own events and
+ * i10 does not use it — Polar takes the money, `packages/metering` counts the
+ * usage — so these are exported for our own future sender rather than reached
+ * through `renderClerkEmail`.
+ */
+export { default as PaymentSucceeded } from "./templates/billing/payment-succeeded.js"
+export { default as PaymentFailed } from "./templates/billing/payment-failed.js"
+export { default as SubscriptionPriceChanged } from "./templates/billing/subscription-price-changed.js"
 
 /**
  * One `email.created` payload, narrowed to what rendering needs.

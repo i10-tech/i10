@@ -1,7 +1,7 @@
 import { Text } from "@react-email/components"
 import { Code, Layout, Provenance, styles } from "../layout.js"
 
-export function ResetPasswordCode({
+export default function ResetPasswordCode({
   code,
   requestedFrom,
   requestedAt,
@@ -22,3 +22,20 @@ export function ResetPasswordCode({
     </Layout>
   )
 }
+
+/*
+ * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
+ * `email dev` renders a directory of DEFAULT exports and has no way to invent
+ * props, so this used to need a second `emails/` tree holding sample values —
+ * two files per template, and a preview that could silently drift from what is
+ * actually sent. react-email reads this static instead, so the thing you look
+ * at IS the thing that goes out.
+ *
+ * It costs a few sample strings in the built bundle. Nothing reads them at
+ * runtime; the alternative was a whole parallel directory.
+ */
+ResetPasswordCode.PreviewProps = {
+  code: "384021",
+  requestedFrom: "Safari on iPhone",
+  requestedAt: "9 September 2026 at 14:02",
+} satisfies React.ComponentProps<typeof ResetPasswordCode>

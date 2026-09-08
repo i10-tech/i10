@@ -7,7 +7,7 @@ import { Layout, styles } from "../layout.js"
  * and teaching customers to click it is teaching them to fall for the forgery.
  * It says where to go; it does not take them there.
  */
-export function PasswordChanged({
+export default function PasswordChanged({
   greetingName,
   emailAddress,
 }: {
@@ -28,3 +28,19 @@ export function PasswordChanged({
     </Layout>
   )
 }
+
+/*
+ * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
+ * `email dev` renders a directory of DEFAULT exports and has no way to invent
+ * props, so this used to need a second `emails/` tree holding sample values —
+ * two files per template, and a preview that could silently drift from what is
+ * actually sent. react-email reads this static instead, so the thing you look
+ * at IS the thing that goes out.
+ *
+ * It costs a few sample strings in the built bundle. Nothing reads them at
+ * runtime; the alternative was a whole parallel directory.
+ */
+PasswordChanged.PreviewProps = {
+  greetingName: "Mohamed",
+  emailAddress: "mo@i10.tech",
+} satisfies React.ComponentProps<typeof PasswordChanged>

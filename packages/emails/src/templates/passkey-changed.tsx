@@ -6,7 +6,7 @@ import { Layout, styles } from "../layout.js"
  * by a single word and the security advice is identical. The registry maps both
  * slugs; splitting them later is a file move, not a rewrite.
  */
-export function PasskeyChanged({
+export default function PasskeyChanged({
   action,
   greetingName,
   emailAddress,
@@ -31,3 +31,21 @@ export function PasskeyChanged({
     </Layout>
   )
 }
+
+/*
+ * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
+ * `email dev` renders a directory of DEFAULT exports and has no way to invent
+ * props, so this used to need a second `emails/` tree holding sample values —
+ * two files per template, and a preview that could silently drift from what is
+ * actually sent. react-email reads this static instead, so the thing you look
+ * at IS the thing that goes out.
+ *
+ * It costs a few sample strings in the built bundle. Nothing reads them at
+ * runtime; the alternative was a whole parallel directory.
+ */
+PasskeyChanged.PreviewProps = {
+  action: "added",
+  greetingName: "Mohamed",
+  emailAddress: "mo@i10.tech",
+  passkeyName: "iCloud Keychain",
+} satisfies React.ComponentProps<typeof PasskeyChanged>

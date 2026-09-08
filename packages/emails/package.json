@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "email dev --dir emails --port 3005",
+    "dev": "email dev --dir src/templates --port 3005",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit"
   },
@@ -19,6 +19,7 @@
     "@react-email/components": "1.0.12"
   },
   "devDependencies": {
+    "@react-email/ui": "6.9.3",
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/react": "^19.2.0",
