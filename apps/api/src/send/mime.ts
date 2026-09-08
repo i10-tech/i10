@@ -14,9 +14,8 @@ import { messageIdHeader, type OutboundMessage } from "./transport.js"
  * The SendRawEmail reference says SES applies its own `Message-ID` and `Date`
  * and discards a caller's; confirmed on the wire, and again with a raw message
  * sent straight from the AWS CLI. Raw is still the single path — attachments
- * need it, one path beats two, and our own MTA does honour these headers — but
- * the duplicate mitigation it was reached for is absent on SES-routed mail.
- * See send/transport.ts.
+ * need it, and one path beats two — but the duplicate mitigation it was reached
+ * for is absent on every send we currently make. See send/transport.ts.
  *
  * ⚠ EVERY LINE ENDS CRLF, INCLUDING THE BLANK ONES. A bare LF makes the message
  * technically malformed; some receivers accept it, some reject it, and the ones
@@ -88,10 +87,10 @@ export function buildRawMessage(
   headers.push(
     `Subject: ${encodeWord(message.subject)}`,
     `Date: ${now.toUTCString().replace("GMT", "+0000")}`,
-    // ⚠ WRITTEN, AND OVERWRITTEN BY SES ON ITS ROUTE — both this and `Date`.
-    // It is emitted anyway because our own MTA honours it, and there a retry of
-    // an at-least-once send really is collapsed by receivers rather than shown
-    // twice.
+    // ⚠ WRITTEN, AND THEN OVERWRITTEN BY SES — both this and `Date` above.
+    // Emitted anyway: it costs nothing, and it is what a relay we run ourselves
+    // would carry, where a retry of an at-least-once send really is collapsed by
+    // receivers rather than shown twice.
     `Message-ID: ${messageIdHeader(message.id, message.from)}`,
     "MIME-Version: 1.0",
   )

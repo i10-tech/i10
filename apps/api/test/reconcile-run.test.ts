@@ -259,10 +259,32 @@ describe("the tenant/customer leg", () => {
       listCustomerIds: vi.fn(async () => ["ten-1", "ten-2"]),
     })
 
-    const report = await reconcileTenantCustomers(db, directory, log())
+    const report = await reconcileTenantCustomers(db, directory, log(), "free")
 
     expect(report).toMatchObject({ checked: 2, missing: [], unverified: [] })
     expect(directory.customerExists).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⚠ THE NARROWING ONLY WORKS IF THE PLAN ID REACHES THE QUERY. The exclusion
+   * itself lives in `core.paying_tenants_snapshot`, so a fake database cannot
+   * demonstrate it — what this pins is the wiring: the caller's free plan id is
+   * bound as a parameter rather than dropped, which is the half that can
+   * regress here. Pass the wrong one and every free tenant is checked again,
+   * which is the failure this whole change removes.
+   */
+  it("asks only for tenants off the free plan", async () => {
+    const { db, execute } = fakeDb([tenants])
+    await reconcileTenantCustomers(
+      db,
+      fakeDirectory({ listCustomerIds: vi.fn(async () => ["ten-1", "ten-2"]) }),
+      log(),
+      "starter",
+    )
+
+    const rendered = new PgDialect().sqlToQuery(execute.mock.calls[0]![0]!)
+    expect(rendered.sql).toContain("core.paying_tenants_snapshot(")
+    expect(rendered.params).toEqual(["starter"])
   })
 
   it("confirms a candidate before reporting it", async () => {
@@ -273,7 +295,7 @@ describe("the tenant/customer leg", () => {
       customerExists,
     })
 
-    const report = await reconcileTenantCustomers(db, directory, log())
+    const report = await reconcileTenantCustomers(db, directory, log(), "free")
 
     expect(customerExists).toHaveBeenCalledExactlyOnceWith("ten-2")
     expect(report.missing).toEqual([{ tenantId: "ten-2", slug: "two", name: "Two" }])
@@ -290,7 +312,7 @@ describe("the tenant/customer leg", () => {
       customerExists: vi.fn(async () => true as const),
     })
 
-    const report = await reconcileTenantCustomers(db, directory, log())
+    const report = await reconcileTenantCustomers(db, directory, log(), "free")
 
     expect(report.missing).toEqual([])
     expect(report.unverified).toEqual([])
@@ -306,7 +328,7 @@ describe("the tenant/customer leg", () => {
       customerExists: vi.fn(async () => "unknown" as const),
     })
 
-    const report = await reconcileTenantCustomers(db, directory, log())
+    const report = await reconcileTenantCustomers(db, directory, log(), "free")
 
     expect(report.missing).toEqual([])
     expect(report.unverified).toHaveLength(2)
@@ -321,7 +343,7 @@ describe("the tenant/customer leg", () => {
       }),
     })
 
-    const report = await reconcileTenantCustomers(db, directory, log())
+    const report = await reconcileTenantCustomers(db, directory, log(), "free")
 
     expect(report.missing).toEqual([])
     expect(report.unverified).toHaveLength(1)
@@ -336,8 +358,8 @@ describe("the tenant/customer leg", () => {
       }),
     })
 
-    await expect(reconcileTenantCustomers(db, directory, log())).rejects.toThrow(
-      /customers.list failed/,
-    )
+    await expect(
+      reconcileTenantCustomers(db, directory, log(), "free"),
+    ).rejects.toThrow(/customers.list failed/)
   })
 })

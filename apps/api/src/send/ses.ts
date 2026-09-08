@@ -108,11 +108,10 @@ function toSesInput(
  * with a hand-built message sent through the AWS CLI. So the change did not buy
  * what it was made to buy, and no SES path can — see send/transport.ts.
  *
- * ⚠ IT STAYS RAW REGARDLESS, AND THE REASONS ARE NOW THE PLAIN ONES. Attachments
- * require it, so Simple was never the only path; one path is cheaper to reason
- * about than two; the encoder is written and tested; and our own MTA does honour
- * the Message-ID, so the header is worth continuing to emit for the route that
- * respects it. Reverting would be churn that buys back only SES's validation.
+ * ⚠ IT STAYS RAW REGARDLESS, AND THE REASONS ARE NOW THE PLAIN ONES.
+ * Attachments require it, so Simple was never the only path; one path is
+ * cheaper to reason about than two; and the encoder is written and tested.
+ * Reverting would be churn that buys back only SES's validation of Simple.
  *
  * ⚠ `Destination` STILL GOVERNS WHO RECEIVES IT. Raw supplies the bytes; the
  * recipient list is passed alongside, which is what keeps `Bcc` blind — see

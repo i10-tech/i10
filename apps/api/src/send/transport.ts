@@ -82,10 +82,13 @@ export interface Transport {
  * so a retry that reproduced this value exactly would arrive as one message.
  *
  * ⚠ THAT REASONING IS STILL SOUND AND IS STILL WHY THIS IS DERIVED RATHER THAN
- * RANDOM — it just does not survive SES. It DOES survive our own MTA, where we
- * write the envelope ourselves, so the guarantee holds on the `Mx` delivery
- * route and is absent on the SES one. Anything time-based or random here would
- * break it on the route where it still works.
+ * RANDOM — it just does not survive SES. It would survive a relay we run
+ * ourselves, which writes the envelope rather than handing it to somebody who
+ * rewrites it. `core.domains.delivery_route` anticipates exactly that, but NO
+ * SUCH TRANSPORT EXISTS: the worker builds `sesTransport` and nothing reads
+ * that column. So this header is currently emitted and discarded on every send,
+ * and is kept derived rather than random so it is already correct on the day a
+ * direct transport lands.
  *
  * ⚠ AND db/claim.ts's TRADE IS WEAKER THAN IT READS FOR SES-ROUTED MAIL. Its
  * "a duplicate is a shrug" rests on receivers collapsing them; for SES that

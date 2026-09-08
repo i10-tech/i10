@@ -33,8 +33,9 @@ import { sql, type SQL } from "drizzle-orm"
  * receiving systems do collapse duplicates on it — but SES overwrites that
  * header with its own before delivery, so each retry carries a different one and
  * arrives as a visibly separate email. Measured, and documented in AWS's
- * SendRawEmail reference. It still holds on the `Mx` route, where we write the
- * envelope ourselves. See send/transport.ts.
+ * SendRawEmail reference. It would hold on a relay we run ourselves, which
+ * `core.domains.delivery_route` anticipates and which does not exist yet — SES
+ * is the only transport the worker has. See send/transport.ts.
  */
 
 /**
