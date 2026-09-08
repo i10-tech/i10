@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import {
   assignStatement,
   assignmentStatement,
+  ensureStatement,
   recordStatement,
   usedInStatement,
 } from "../src/metering/postgres.js"
@@ -133,5 +134,42 @@ describe("recording usage", () => {
     // Six bound values per row, and nothing interpolated into the text.
     expect(params).toHaveLength(12)
     expect(statement).not.toContain("msg_1")
+  })
+})
+
+/**
+ * ⚠ THE ASSERTION THAT WOULD HAVE CAUGHT THREE LIVE FAILURES, AND DID NOT
+ * EXIST. postgres.js binds a parameter by writing its bytes, so a `Date` throws
+ * `ERR_INVALID_ARG_TYPE` before the query reaches the server. Every other test
+ * in this file renders SQL and never binds, so the whole suite passed against
+ * statements that could not run at all.
+ *
+ * `ensureStatement` is the signup path: it failed on the first tenant ever
+ * provisioned through it, which is logged as "tenant created without an
+ * entitlement" and means that customer's first send is refused. `recordStatement`
+ * is every metered send. Neither had sent a byte in production, so nothing
+ * disagreed with anything and no reconciler had a discrepancy to report.
+ *
+ * ⚠ AND THE CAST TRAVELS WITH THE STRING. Once the parameter is text, Postgres
+ * has to be told it is a timestamp, or it resolves the column against `text`
+ * and fails further along for an unrelated-looking reason.
+ *
+ * The same defect and the same fix as send/reconcile.ts — see the matching
+ * guard in reconcile.test.ts. Any new statement binding a timestamp belongs
+ * here too.
+ */
+describe("what actually reaches postgres", () => {
+  it("binds strings, never Date objects", () => {
+    const statements = [
+      assignStatement({ tenantId: TENANT, planId: "pro", anchor: WINDOW.start }),
+      ensureStatement({ tenantId: TENANT, planId: "free", anchor: WINDOW.start }),
+      recordStatement(KEY, [{ id: "msg_1", at: WINDOW.start, value: 1 }]),
+    ]
+
+    for (const statement of statements) {
+      const { params, sql: text } = render(statement)
+      for (const param of params) expect(param).not.toBeInstanceOf(Date)
+      expect(text).toContain("::timestamptz")
+    }
   })
 })
