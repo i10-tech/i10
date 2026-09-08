@@ -6,7 +6,12 @@ import { createQueueClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, flushObservability, initObservability } from "./observability.js"
-import { createSendQueue, type SendClass, type SendJob } from "./queue/send-queue.js"
+import {
+  createSendQueue,
+  reviveSendJob,
+  type SendClass,
+  type SendJob,
+} from "./queue/send-queue.js"
 import {
   createWebhookQueue,
   webhookBackoff,
@@ -130,7 +135,7 @@ function startWorker(cls: SendClass) {
     queue,
     name: `${workerId}:${cls}`,
     handler: (job) =>
-      handleBatch<ClaimedMessage>(job.data, {
+      handleBatch<ClaimedMessage>(reviveSendJob(job.data), {
         ...ops,
         transport,
         metering,
