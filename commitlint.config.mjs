@@ -16,6 +16,17 @@ export default {
       "always",
       [
         "api",
+        // apps/auth — sign-in, sign-up, password reset and second factors,
+        // served at auth.i10.tech on Clerk's custom flows.
+        //
+        // ⚠ NOT THE SAME SCOPE AS `authd`, AND THE ONE-LETTER GAP IS THE WHOLE
+        // TRAP. This is the browser-facing Next app where a person types a
+        // password; `authd` is the Go LDAP bridge that answers Stalwart's binds
+        // by delegating to Clerk. They share a name and nothing else — not a
+        // language, not a release surface, not an audience — and a changelog
+        // that files a sign-in button under the mail directory is wrong in a
+        // way nobody notices until they go looking for the change.
+        "auth",
         "console",
         "web",
         "docs",
