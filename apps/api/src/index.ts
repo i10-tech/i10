@@ -251,22 +251,40 @@ const depthSources = {
 const authEmailTenantId = await (async () => {
   if (!env.AUTH_EMAIL_FROM) return null
 
-  // The postgres client directly rather than drizzle: `core.tenants` has no
-  // table definition in this app, and one query at boot does not earn one.
-  const rows = await sql<{ id: string }[]>`
-    select id::text as id
-      from core.tenants
-     where slug = ${env.AUTH_EMAIL_TENANT_SLUG}
-     limit 1`
+  try {
+    // ⚠ THROUGH THE DEFINER, NOT `select … from core.tenants`. That table is
+    // under RLS and its policy reads `current_setting('app.tenant_id')`
+    // strictly, which nothing has set this early — so the direct read did not
+    // return zero rows, it RAISED. It cannot be repaired with `withTenant()`
+    // either: that needs the tenant id, and the id is what this is looking
+    // for. See migration 0032.
+    //
+    // The postgres client directly rather than drizzle: this is a function
+    // call, not a table, and one query at boot does not earn a definition.
+    const rows = await sql<{ id: string | null }[]>`
+      select core.tenant_id_by_slug(${env.AUTH_EMAIL_TENANT_SLUG})::text as id`
 
-  const id = rows[0]?.id ?? null
-  if (!id) {
-    log.warn(
-      { slug: env.AUTH_EMAIL_TENANT_SLUG },
-      "no tenant for auth email — clerk keeps delivering its own",
+    const id = rows[0]?.id ?? null
+    if (!id) {
+      log.warn(
+        { slug: env.AUTH_EMAIL_TENANT_SLUG },
+        "no tenant for auth email — clerk keeps delivering its own",
+      )
+    }
+    return id
+  } catch (err) {
+    // ⚠ CAUGHT, BECAUSE THE RLS FAULT ABOVE TOOK THE WHOLE API DOWN WITH IT.
+    // One question about who signs the verification mail crashlooped the send
+    // path, the webhooks and the mailbox projection along with it. However
+    // this fails, the right outcome is the one this value already has a name
+    // for — no tenant, and Clerk keeps delivering. Loud in the log, not in the
+    // exit code.
+    log.error(
+      { slug: env.AUTH_EMAIL_TENANT_SLUG, err: String(err) },
+      "could not resolve the auth email tenant — clerk keeps delivering its own",
     )
+    return null
   }
-  return id
 })()
 
 const app = createApp({
