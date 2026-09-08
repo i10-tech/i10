@@ -24,7 +24,7 @@ error semantics. Only the key _format_ is ours: `i10_live_…`.
 | `api.i10.tech`    | the send API                                     |
 | `docs.i10.tech`   | the docs                                         |
 | `mail.i10.tech`   | Stalwart — grey-cloud, the one unproxied name    |
-| `spf.i10.tech`    | the SPF include customers point at               |
+| `_spf.i10.tech`   | the SPF include customers point at               |
 
 ## Layout
 
@@ -77,7 +77,7 @@ Customers publish three records:
 
 ```
 send.customer.com             MX    10 feedback-smtp.eu-central-1.amazonses.com
-send.customer.com             TXT   "v=spf1 include:spf.i10.tech ~all"
+send.customer.com             TXT   "v=spf1 include:_spf.i10.tech ~all"
 i10._domainkey.customer.com   TXT   p=<our public key>
 ```
 
@@ -92,7 +92,7 @@ RFC 2181 forbids an MX target that is a CNAME, so it cannot hide behind an i10
 hostname. Leaving SES — or merely changing AWS region — means every customer
 edits DNS. It is **eu-central-1**, chosen once.
 
-`include:spf.i10.tech` buys the other half: adding a second relay, or swapping
+`include:_spf.i10.tech` buys the other half: adding a second relay, or swapping
 the sending path, without touching anyone's DNS.
 
 ### i10 must be able to walk away from PSL

@@ -237,6 +237,35 @@ resource "cloudflare_dns_record" "send_spf" {
   comment = module.labels.comment
 }
 
+# The name every CUSTOMER's SPF record includes, and the reason their DNS never
+# has to change when ours does.
+#
+# ⚠ IT DID NOT EXIST, AND THAT IS NOT A COSMETIC GAP. `apps/docs` and the README
+# both tell customers to publish `include:_spf.i10.tech`, and an SPF `include:`
+# pointing at a name with no TXT record is a PERMERROR under RFC 7208 — not a
+# soft miss. Every domain onboarded through the domains API would have failed
+# SPF outright. It went unnoticed only because there are no customers yet.
+#
+# ⚠ IT AUTHORISES BOTH ROUTES, BECAUSE THE PLAN DECIDES WHICH ONE A MESSAGE
+# TAKES. `docs/decisions/mail-routing.md`: free sends through our own MTA, paid
+# through SES. A record listing only Amazon would fail every free tenant's mail
+# the moment the direct route is switched on.
+#
+# ⚠ THE MTA IS LISTED AS LITERAL ADDRESSES RATHER THAN `a:mail.i10.tech`, to
+# spend one DNS lookup instead of two. SPF allows ten per evaluation and the
+# customer's own record has already spent one reaching this include, so the
+# budget here is not ours alone. The addresses are `mail.i10.tech`, which is
+# deliberately unproxied — see the note on that record.
+resource "cloudflare_dns_record" "spf_include" {
+  zone_id = var.zone_id
+  name    = "_spf.${local.domain}"
+  type    = "TXT"
+  content = "\"v=spf1 include:amazonses.com ip4:178.105.164.132 ip6:2a01:4f8:1c18:45fb::1 -all\""
+  ttl     = 1
+  proxied = false
+  comment = module.labels.comment
+}
+
 # ── DKIM ───────────────────────────────────────────────────────────────────
 #
 # ⚠ TWO KEYS, TWO ALGORITHMS, AND BOTH ARE NEEDED. Stalwart signs every outbound
@@ -249,6 +278,7 @@ resource "cloudflare_dns_record" "send_spf" {
 # These are the public halves, and they are NOT derivable from anything in this
 # repository — if the Stalwart database is ever lost, new keys are generated
 # with new selectors and these records must be replaced. See the bootstrap
+# runbook.
 
 # The DKIM key SES signs with, which is OURS rather than Amazon's.
 #
