@@ -79,7 +79,25 @@ const planRow = z.object({
   plan_id: z.string(),
   source: z.enum(["catalog", "custom"]),
   entitlements: z.unknown(),
-  anchor: z.date(),
+  /**
+   * ⚠ COERCED, BECAUSE THE DRIVER RETURNS EITHER A `Date` OR A STRING AND WE DO
+   * NOT GET TO PICK. postgres.js maps timestamptz (OID 1184) to `new Date(x)`
+   * by default, so `z.date()` looked right — and then the first real call to
+   * `find()` in production threw `expected date, received string` on this exact
+   * column while `overage_enabled` beside it parsed as a boolean.
+   *
+   * ⚠ AND IT THREW AS A 500 ON `POST /domains`, WHICH IS THE SHAPE THAT MAKES
+   * THIS WORTH A COMMENT. Every gate — sending, adding a domain, any limit at
+   * all — resolves the plan through here first, so a plan that cannot be parsed
+   * is not a degraded limit check, it is the whole API answering "something went
+   * wrong" for a customer whose account is perfectly fine.
+   *
+   * `new Date(...)` on a value that is already a `Date` is a copy, so accepting
+   * both costs nothing and cannot be wrong in the direction that matters. The
+   * same defensiveness, for the same reason, as the `minted_at` read in
+   * send/accept-db.ts.
+   */
+  anchor: z.coerce.date(),
   overage_enabled: z.boolean(),
 })
 
