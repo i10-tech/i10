@@ -271,7 +271,9 @@ describe("a job that has been through redis", () => {
    */
   it("can be claimed, which the raw payload could not", () => {
     const opts = { workerId: "w1", staleAfter: "5 minutes" }
-    expect(() => claimStatement(reviveSendJob(overTheWire()).messages, opts)).not.toThrow()
+    expect(() =>
+      claimStatement(reviveSendJob(overTheWire()).messages, opts),
+    ).not.toThrow()
     expect(() => claimStatement(overTheWire().messages, opts)).toThrow()
   })
 
