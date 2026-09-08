@@ -10,12 +10,13 @@ import { messageIdHeader, type OutboundMessage } from "./transport.js"
  * SIMPLE CONTENT — `BadRequestException: Header <Message-ID> is not supported`,
  * which is what the first mail this system ever sent came back with.
  *
- * ⚠ AND THAT HEADER IS NOT DECORATION. The send path is at-least-once by
- * agreement (see db/claim.ts): SES can accept a message and the worker die
- * before recording it, and the retry is collapsed by receivers because both
- * copies carry the same Message-ID. Letting SES mint its own makes every such
- * retry a visibly separate email in the customer's inbox. Raw is the only
- * content type that can carry it, so Raw is the only path.
+ * ⚠ AND SES THEN OVERWRITES THAT HEADER, SO THE MOVE DID NOT ACHIEVE ITS AIM.
+ * The SendRawEmail reference says SES applies its own `Message-ID` and `Date`
+ * and discards a caller's; confirmed on the wire, and again with a raw message
+ * sent straight from the AWS CLI. Raw is still the single path — attachments
+ * need it, one path beats two, and our own MTA does honour these headers — but
+ * the duplicate mitigation it was reached for is absent on SES-routed mail.
+ * See send/transport.ts.
  *
  * ⚠ EVERY LINE ENDS CRLF, INCLUDING THE BLANK ONES. A bare LF makes the message
  * technically malformed; some receivers accept it, some reject it, and the ones
@@ -41,8 +42,8 @@ const CRLF = "\r\n"
 
 /**
  * ⚠ HEADERS WE OWN. A caller-supplied copy of any of these is dropped: `From`
- * and `To` decide who the mail is from and to, `Message-ID` is the duplicate
- * mitigation the whole send path depends on, and `Content-Type` would
+ * and `To` decide who the mail is from and to, `Message-ID` is ours to derive
+ * from the row id rather than the caller's to choose, and `Content-Type` would
  * contradict the structure built below. `Bcc` is absent for a different reason —
  * see `buildRawMessage`.
  */
@@ -87,9 +88,10 @@ export function buildRawMessage(
   headers.push(
     `Subject: ${encodeWord(message.subject)}`,
     `Date: ${now.toUTCString().replace("GMT", "+0000")}`,
-    // The same value `Content.Simple` would carry, and for the same reason: a
-    // retry of an at-least-once send has to be the same message, so receivers
-    // collapse the duplicate instead of showing it twice.
+    // ⚠ WRITTEN, AND OVERWRITTEN BY SES ON ITS ROUTE — both this and `Date`.
+    // It is emitted anyway because our own MTA honours it, and there a retry of
+    // an at-least-once send really is collapsed by receivers rather than shown
+    // twice.
     `Message-ID: ${messageIdHeader(message.id, message.from)}`,
     "MIME-Version: 1.0",
   )

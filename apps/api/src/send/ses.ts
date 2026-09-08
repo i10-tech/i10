@@ -96,19 +96,23 @@ function toSesInput(
 }
 
 /**
- * ⚠ ALWAYS RAW, AND SES IS THE REASON RATHER THAN A PREFERENCE. This chose
- * `Content.Simple` unless a message carried a file, on the grounds that Simple
- * is less code to be wrong in and that building every message by hand bought
- * nothing. SES answered that with `BadRequestException: Header <Message-ID> is
- * not supported` on the first mail this system ever tried to send: `Message-ID`
- * is reserved, and Simple cannot carry one at any price.
+ * ⚠ ALWAYS RAW, THOUGH NOT FOR THE REASON IT WAS CHANGED. This chose
+ * `Content.Simple` unless a message carried a file, and SES refused the first
+ * mail this system ever sent with `BadRequestException: Header <Message-ID> is
+ * not supported` — Simple cannot carry that header at any price. Raw can, so
+ * raw it became, to keep the retry mitigation db/claim.ts leans on.
  *
- * ⚠ SO THE CHOICE WAS NEVER "SIMPLE OR RAW", IT WAS "MESSAGE-ID OR NOT". The
- * send path is at-least-once and db/claim.ts accepts that trade explicitly,
- * because a retry carrying the same Message-ID is collapsed by receivers rather
- * than shown twice. Keeping Simple would have meant deleting that guarantee and
- * the comments claiming it — a worse trade than putting an encoder we already
- * had, and already tested, on the common path.
+ * ⚠ AND THEN SES OVERWROTE THE HEADER ANYWAY. Measured on the wire, and stated
+ * plainly in the SendRawEmail API reference: SES applies its own `Message-ID`
+ * and `Date` and discards the caller's. Verified independently of this code
+ * with a hand-built message sent through the AWS CLI. So the change did not buy
+ * what it was made to buy, and no SES path can — see send/transport.ts.
+ *
+ * ⚠ IT STAYS RAW REGARDLESS, AND THE REASONS ARE NOW THE PLAIN ONES. Attachments
+ * require it, so Simple was never the only path; one path is cheaper to reason
+ * about than two; the encoder is written and tested; and our own MTA does honour
+ * the Message-ID, so the header is worth continuing to emit for the route that
+ * respects it. Reverting would be churn that buys back only SES's validation.
  *
  * ⚠ `Destination` STILL GOVERNS WHO RECEIVES IT. Raw supplies the bytes; the
  * recipient list is passed alongside, which is what keeps `Bcc` blind — see

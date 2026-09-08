@@ -68,17 +68,29 @@ export interface Transport {
 /**
  * The RFC 5322 Message-ID, derived from i10's own message id.
  *
- * ⚠ THIS IS THE ONLY THING THAT MAKES A DUPLICATE HARMLESS, AND IT IS WHY IT IS
- * DERIVED RATHER THAN RANDOM. The send path is at-least-once by design: the
- * worker can call the provider, have it accepted, and die before recording the
- * result, and no provider offers a request-level idempotency key that would let
- * the retry be recognised. What it can do is send a message that is byte-wise
- * the SAME message — and receiving systems, including Gmail, collapse two
- * deliveries sharing a Message-ID into one.
+ * ⚠ SES DISCARDS THIS HEADER, AND THE DUPLICATE MITIGATION IT WAS WRITTEN FOR
+ * DOES NOT EXIST ON THAT ROUTE. Measured 2026-09-08 and documented by AWS: the
+ * SendRawEmail reference states SES applies its own `Message-ID` and `Date`
+ * headers and that a caller's are overwritten. Confirmed twice — through this
+ * code, and through a hand-written raw message sent with the AWS CLI, which
+ * bypasses everything here. Both arrived as `…@eu-central-1.amazonses.com`.
  *
- * So a retry must produce this exact value again. Anything time-based or random
- * here silently turns the accepted duplicate rate into a delivered duplicate
- * rate.
+ * The intent it was built on: the send path is at-least-once by design — the
+ * worker can call the provider, have it accepted, and die before recording the
+ * result, and no provider offers a request-level idempotency key. Two
+ * deliveries sharing a Message-ID are collapsed by receivers, including Gmail,
+ * so a retry that reproduced this value exactly would arrive as one message.
+ *
+ * ⚠ THAT REASONING IS STILL SOUND AND IS STILL WHY THIS IS DERIVED RATHER THAN
+ * RANDOM — it just does not survive SES. It DOES survive our own MTA, where we
+ * write the envelope ourselves, so the guarantee holds on the `Mx` delivery
+ * route and is absent on the SES one. Anything time-based or random here would
+ * break it on the route where it still works.
+ *
+ * ⚠ AND db/claim.ts's TRADE IS WEAKER THAN IT READS FOR SES-ROUTED MAIL. Its
+ * "a duplicate is a shrug" rests on receivers collapsing them; for SES that
+ * collapse does not happen, because each retry is a separate SendEmail call and
+ * gets a separate SES-assigned Message-ID.
  *
  * The domain is taken from the From address so the Message-ID aligns with the
  * sending domain, which is what receivers expect and what some filters check.
@@ -89,12 +101,10 @@ export interface Transport {
  * `i10 test <noreply@pslhq.app>` — producing `<id@pslhq.app>>`, with a doubled
  * bracket, which is not a valid msg-id.
  *
- * ⚠ AND THE COST WAS SILENT, WHICH IS WHY IT SURVIVED. SES does not refuse a
- * malformed Message-ID; it discards it and substitutes its own
- * `…@eu-central-1.amazonses.com`. So the header this function exists to
- * guarantee was simply absent from delivered mail, the duplicate mitigation
- * above was not in force, and nothing anywhere reported a problem — the mail
- * arrived, DKIM passed, and only reading a delivered message's source showed it.
+ * That bug was real and is fixed, but it was NOT what put `amazonses.com` in
+ * delivered mail — SES overwrites a well-formed header just the same. Two
+ * separate faults with one symptom, and the malformed one masked the other
+ * until a valid header was sent and nothing changed.
  */
 export function messageIdHeader(id: string, fromAddress: string): string {
   // `Name <addr>` → `addr`; a bare address is left as it is.

@@ -25,10 +25,16 @@ import { sql, type SQL } from "drizzle-orm"
  * offers no request-level idempotency key. So it sends again.
  *
  * That is the agreed trade: a message that never arrives is a support ticket, a
- * duplicate is a shrug. Two things narrow it. The window is one statement wide,
- * because the result is written immediately after the call returns. And the
- * retry reuses the SAME RFC 5322 Message-ID, derived from the row's id, so
- * receiving systems collapse the duplicate on their side.
+ * duplicate is a shrug. One thing narrows it — the window is one statement wide,
+ * because the result is written immediately after the call returns.
+ *
+ * ⚠ THE SECOND MITIGATION THIS USED TO CLAIM DOES NOT HOLD ON SES. The retry
+ * does reuse the same RFC 5322 Message-ID, derived from the row's id, and
+ * receiving systems do collapse duplicates on it — but SES overwrites that
+ * header with its own before delivery, so each retry carries a different one and
+ * arrives as a visibly separate email. Measured, and documented in AWS's
+ * SendRawEmail reference. It still holds on the `Mx` route, where we write the
+ * envelope ourselves. See send/transport.ts.
  */
 
 /**
