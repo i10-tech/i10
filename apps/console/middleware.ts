@@ -54,8 +54,23 @@ export default clerkMiddleware(
     await auth.protect()
   },
   {
+    /**
+     * ⚠ `secretKey` IS DELIBERATELY NOT PASSED, AND PASSING IT CRASHES THE APP.
+     * Handing `clerkMiddleware` an explicit secret puts it in "dynamic keys"
+     * mode, where the key is encrypted and propagated from the middleware to
+     * the server runtime — which requires `CLERK_ENCRYPTION_KEY`. Without one
+     * it throws `encryption_key_missing` on EVERY request, so the pod starts,
+     * answers 500 to everything including its own probe, and never goes ready.
+     * The guard is literally `if (requestData.secretKey && !ENCRYPTION_KEY)`.
+     *
+     * ⚠ AND IT IS NOT NEEDED, BECAUSE THE BUILD-TIME PROBLEM BELOW IS NOT ITS
+     * PROBLEM. `CLERK_SECRET_KEY` carries no `NEXT_PUBLIC_` prefix, so Next
+     * never inlines it and Clerk reads it straight from runtime env by default.
+     * Only the PUBLISHABLE key needs threading by hand, because Clerk's default
+     * name for it is `NEXT_PUBLIC_…`, which a CI build with no Clerk
+     * environment would compile in as `undefined` for good.
+     */
     publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-    secretKey: process.env.CLERK_SECRET_KEY,
     /**
      * ⚠ THESE MUST BE SET IN PRODUCTION, and pointed at auth.i10.tech. Left
      * unset, Clerk falls back to inferring its own hosted Account Portal — so
