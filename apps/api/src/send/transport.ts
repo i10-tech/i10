@@ -82,13 +82,30 @@ export interface Transport {
  *
  * The domain is taken from the From address so the Message-ID aligns with the
  * sending domain, which is what receivers expect and what some filters check.
+ *
+ * ⚠ THE From MAY CARRY A DISPLAY NAME, AND THAT HAS TO BE UNWRAPPED FIRST. This
+ * used to take everything after the last `@`, which is the domain for a bare
+ * `noreply@pslhq.app` and is `pslhq.app>` for the far more common
+ * `i10 test <noreply@pslhq.app>` — producing `<id@pslhq.app>>`, with a doubled
+ * bracket, which is not a valid msg-id.
+ *
+ * ⚠ AND THE COST WAS SILENT, WHICH IS WHY IT SURVIVED. SES does not refuse a
+ * malformed Message-ID; it discards it and substitutes its own
+ * `…@eu-central-1.amazonses.com`. So the header this function exists to
+ * guarantee was simply absent from delivered mail, the duplicate mitigation
+ * above was not in force, and nothing anywhere reported a problem — the mail
+ * arrived, DKIM passed, and only reading a delivered message's source showed it.
  */
 export function messageIdHeader(id: string, fromAddress: string): string {
-  const at = fromAddress.lastIndexOf("@")
+  // `Name <addr>` → `addr`; a bare address is left as it is.
+  const angled = /<([^>]*)>\s*$/.exec(fromAddress)
+  const address = (angled?.[1] ?? fromAddress).trim()
+
+  const at = address.lastIndexOf("@")
   const domain =
     at === -1
       ? "i10.tech"
-      : fromAddress
+      : address
           .slice(at + 1)
           .trim()
           .toLowerCase()

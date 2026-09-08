@@ -303,6 +303,28 @@ describe("the Message-ID header", () => {
   it("falls back rather than emitting a malformed header", () => {
     expect(messageIdHeader("m", "not-an-address")).toBe("<m@i10.tech>")
   })
+
+  /**
+   * ⚠ THE FORM REAL CALLERS ACTUALLY SEND, AND THE ONE THIS FILE NEVER TRIED.
+   * Every case above passes a bare address, so taking everything after the last
+   * `@` looked correct — and on `i10 test <noreply@pslhq.app>` it yields
+   * `pslhq.app>`, producing `<m@pslhq.app>>` with a doubled bracket.
+   *
+   * ⚠ AND SES SWALLOWS THAT WITHOUT COMPLAINING. A malformed Message-ID is not
+   * refused, it is replaced with `…@eu-central-1.amazonses.com` — so the header
+   * was simply missing from delivered mail, the retry mitigation was not in
+   * force, and the only evidence was in a received message's source.
+   */
+  it("unwraps a display name instead of trusting the last @", () => {
+    expect(messageIdHeader("m", "i10 test <noreply@pslhq.app>")).toBe("<m@pslhq.app>")
+    expect(messageIdHeader("m", '"Doe, John" <j@Example.COM>')).toBe("<m@example.com>")
+  })
+
+  // The two forms must agree, or the same message routed through a display name
+  // and a bare address would be two different messages to a receiver.
+  it("gives a display name and a bare address the same value", () => {
+    expect(messageIdHeader("m", "Name <a@b.com>")).toBe(messageIdHeader("m", "a@b.com"))
+  })
 })
 
 describe("a failure to record the outcome", () => {
