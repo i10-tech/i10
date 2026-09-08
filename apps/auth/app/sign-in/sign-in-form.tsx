@@ -14,6 +14,7 @@ import {
   FieldSeparator,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
+import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 
@@ -33,12 +34,14 @@ export function SignInForm({
   resetHref,
   mfaHref,
   passkeyHref,
+  redirectRaw,
 }: {
   afterAuthUrl: string
   signUpHref: string
   resetHref: string
   mfaHref: string
   passkeyHref: string
+  redirectRaw?: string
 }) {
   const router = useRouter()
   const { signIn } = useSignIn()
@@ -79,7 +82,16 @@ export function SignInForm({
         return
       }
 
-      if (signIn.status === "needs_second_factor") {
+      // ⚠ `needs_client_trust` IS NOT AN ERROR AND IS NOT RARE. It is Clerk's
+      // device-trust step: the password was right, and the instance wants this
+      // BROWSER proved with an emailed code before it hands over a session.
+      // Treating it as unsupported — which this did — makes correct
+      // credentials answer "contact support" on a fresh device, which is every
+      // first sign-in.
+      if (
+        signIn.status === "needs_second_factor" ||
+        signIn.status === "needs_client_trust"
+      ) {
         // ⚠ `router.push`, NEVER `window.location`. The second-factor page
         // resumes THIS `signIn` out of Clerk's client state; a full page load
         // would start a fresh client with no attempt in progress and bounce the
@@ -131,10 +143,10 @@ export function SignInForm({
               Forgot your password?
             </Link>
           </div>
-          <Input
+          <PasswordInput
             id="password"
             name="password"
-            type="password"
+
             // ⚠ `current-password`, NOT `password`. It is what tells a password
             // manager to offer the saved credential rather than to propose a
             // new one, and getting it wrong is how people end up with a second
@@ -149,7 +161,7 @@ export function SignInForm({
           </Button>
         </Field>
         <FieldSeparator>Or continue with</FieldSeparator>
-        <OAuthButtons afterAuthUrl={afterAuthUrl} />
+        <OAuthButtons afterAuthUrl={afterAuthUrl} redirectRaw={redirectRaw} />
         <FieldDescription className="text-center">
           <Link href={passkeyHref} className="underline underline-offset-4">
             Use a passkey instead

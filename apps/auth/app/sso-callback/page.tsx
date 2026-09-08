@@ -1,21 +1,22 @@
-"use client"
+import { afterAuthUrl } from "../_lib/redirect"
+import { SsoCallback } from "./sso-callback"
 
-import { AuthenticateWithRedirectCallback } from "@clerk/nextjs"
+export const dynamic = "force-dynamic"
 
 /**
- * Where an OAuth provider drops the browser on its way back.
- *
- * ⚠ IT RENDERS ALMOST NOTHING ON PURPOSE. The component's whole job is to read
- * the parameters the provider appended, finish the handshake with Clerk, and
- * navigate on — anything else drawn here is a frame the person sees for a few
- * hundred milliseconds and then loses. The one line of text exists so a slow
- * handshake is not a blank white page.
+ * ⚠ THE DESTINATION IS CARRIED HERE IN THE QUERY, because an OAuth provider
+ * returns the browser to a bare URL and remembers nothing of ours. The buttons
+ * append the ORIGINAL `redirect_url` to this page's address, and it is
+ * re-validated here against the allowlist like everywhere else — a destination
+ * that has been through a third party's redirect is exactly the one not to
+ * trust on sight.
  */
-export default function Page() {
-  return (
-    <main className="flex min-h-dvh items-center justify-center px-6">
-      <p className="text-muted-foreground text-sm">Signing you in…</p>
-      <AuthenticateWithRedirectCallback />
-    </main>
-  )
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<{ redirect_url?: string | string[] }>
+}) {
+  const { redirect_url: raw } = await searchParams
+
+  return <SsoCallback afterAuthUrl={afterAuthUrl(raw)} />
 }
