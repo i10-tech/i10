@@ -55,12 +55,19 @@ spec:
             runAsUser: 1001
             runAsGroup: 1001
             capabilities: { drop: ["ALL"] }
+          # ⚠ `/healthz`, NOT `/`. Every console page now requires a Clerk
+          # session, so `/` answers a 307 to accounts.i10.tech for a signed-out
+          # caller — which kubelet scores as healthy, making the probe pass for
+          # a reason unrelated to the pod. Worse, if Clerk is unreachable and
+          # the middleware raises rather than redirecting, `/` turns 5xx and
+          # liveness restarts every replica during somebody else's outage. See
+          # apps/console/app/healthz/route.ts.
           readinessProbe:
-            httpGet: { path: /, port: http }
+            httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /, port: http }
+            httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 20
             periodSeconds: 30
 ---

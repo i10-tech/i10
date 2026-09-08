@@ -23,6 +23,12 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Your i10 API key. Keys are prefixed `i10_live_` or `i10_test_` so they are recognisable in your own logs and greppable in a leak scan."
+      },
+      "sessionAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__session",
+        "description": "The Clerk session cookie set when you sign in at auth.i10.tech. Used by the console for mailbox management; it is not an alternative to an API key, and the sending endpoints do not accept it."
       }
     },
     "schemas": {
@@ -60,6 +66,8 @@
               "idempotency_conflict",
               "domain_already_exists",
               "plan_limit_exceeded",
+              "password_required",
+              "mailbox_already_exists",
               "internal_server_error"
             ]
           },
@@ -871,6 +879,100 @@
           "object",
           "id",
           "deleted"
+        ]
+      },
+      "Mailbox": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "mailbox"
+            ]
+          },
+          "address": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "address",
+          "display_name",
+          "active",
+          "created_at"
+        ]
+      },
+      "CreateMailbox": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 254
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "MailboxList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "enum": [
+                    "mailbox"
+                  ]
+                },
+                "address": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "created_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "object",
+                "address",
+                "display_name",
+                "active",
+                "created_at"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
         ]
       }
     },
@@ -1709,6 +1811,155 @@
           },
           "501": {
             "description": "Domains are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailboxes": {
+      "post": {
+        "summary": "Create your mailbox",
+        "description": "Creates a mailbox for the signed-in user on a domain i10 hosts mail for. The account must have a password: mail clients sign in with it, so an account created through Google or an email link cannot hold a mailbox until one is set.",
+        "tags": [
+          "Mailboxes"
+        ],
+        "security": [
+          {
+            "sessionAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMailbox"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created. The mailbox can receive mail and be signed in to.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mailbox"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The plan does not include another mailbox.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The account has no password, the address is taken, or the user already has a mailbox.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The address is not one we can host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Mailboxes are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The session could not be verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List your mailboxes",
+        "tags": [
+          "Mailboxes"
+        ],
+        "security": [
+          {
+            "sessionAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The signed-in user's mailboxes. Empty if they have none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Mailboxes are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The session could not be verified.",
             "content": {
               "application/json": {
                 "schema": {

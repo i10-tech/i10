@@ -5,7 +5,7 @@
   "type": "module",
   "exports": {
     "./styles/tokens.css": "./src/styles/tokens.css",
-    "./lib/cn": "./src/lib/cn.ts",
+    "./hooks/*": "./src/hooks/*.ts",
     "./components/*": "./src/components/*.tsx"
   },
   "scripts": {
@@ -14,8 +14,12 @@
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^3.6.0"
+    "cn": "^0.2.6",
+    "input-otp": "^1.5.0",
+    "lucide-react": "^1.42.0",
+    "next-themes": "^0.4.6",
+    "radix-ui": "^1.6.7",
+    "sonner": "^2.0.8"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",

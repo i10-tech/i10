@@ -44,6 +44,24 @@ export const errorNames = [
    * upgrade or a deletion, which is a 403.
    */
   "plan_limit_exceeded",
+  /**
+   * ⚠ A PRECONDITION THE CALLER CAN FIX, WHICH IS WHY IT IS NOT
+   * `invalid_access`. The account is authenticated and permitted; it simply has
+   * no password, and a mailbox is unusable without one — an IMAP login is an
+   * LDAP bind that authd delegates to Clerk, so a user who signed up with
+   * Google or an email link has no credential for the mail server to check.
+   * The client's correct response is to send the person to set one and retry
+   * the identical request, which is a conflict with current state rather than a
+   * permission they lack.
+   */
+  "password_required",
+  /**
+   * ⚠ SAYS "TAKEN", NEVER BY WHOM — the same rule as `domain_already_exists`.
+   * It covers both the caller already having a mailbox and the address
+   * belonging to somebody else, because distinguishing them would turn this
+   * endpoint into a way to test which addresses exist on a domain.
+   */
+  "mailbox_already_exists",
   "internal_server_error",
 ] as const
 

@@ -15,3 +15,9 @@ apps/docs/.nimbus/
 # produce different bytes and the drift job can never pass.
 apps/api/openapi.json
 apps/docs/public/scalar/
+
+# Vendored agent skills, installed by `pnpm dlx skills add`. Third-party files
+# whose formatting belongs to their publisher — reformatting them would produce
+# a diff against every upstream update for no benefit, and `.claude/skills`
+# only symlinks into here.
+.agents/

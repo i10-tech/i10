@@ -11,6 +11,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.9.1",
     "@i10/next": "workspace:*",
     "@i10/node": "workspace:*",
     "@repo/ui": "workspace:*",

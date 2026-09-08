@@ -44,6 +44,25 @@ const schema = z.object({
   // src/auth/api-key.ts.
   CLERK_SECRET_KEY: z.string().min(1),
 
+  /**
+   * Origins allowed to present a Clerk session to `/mailboxes`.
+   *
+   * ⚠ THIS IS THE `azp` CHECK, AND LEAVING IT EMPTY DISABLES IT. One Clerk
+   * instance can back several applications; without this, a token minted for
+   * any of them is accepted here. It lists the origins that HOLD the session —
+   * the dashboard — not the one that issues it, because `azp` records who asked
+   * for the token rather than where the person typed their password.
+   */
+  CONSOLE_ORIGINS: z
+    .string()
+    .optional()
+    .transform((v) =>
+      (v ?? "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean),
+    ),
+
   // ⚠ THIS NUMBER IS HOW LONG A REVOKED KEY KEEPS WORKING. Verification is a
   // network call to Clerk on every send, so it is cached — and the TTL is the
   // whole trade. Longer means less Clerk on the critical path and a longer

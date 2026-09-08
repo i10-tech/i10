@@ -1,0 +1,280 @@
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { toast } from "sonner"
+import { useSignIn } from "@clerk/nextjs"
+import { Button } from "@repo/ui/components/button"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@repo/ui/components/field"
+import { Input } from "@repo/ui/components/input"
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@repo/ui/components/input-otp"
+import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+
+/*
+ * The second factor.
+ *
+ * ⚠ THIS PAGE HOLDS NO STATE OF ITS OWN ABOUT WHO IS SIGNING IN. It resumes the
+ * `signIn` that the sign-in form left in Clerk's client state, which is why
+ * getting here has to be a CLIENT-SIDE navigation — a full page load starts a
+ * fresh Clerk client with no attempt in progress, and the person would be sent
+ * back to the beginning. `router.push` from the sign-in form, never
+ * `window.location`.
+ *
+ * ⚠ AND A RELOAD IS TREATED AS A LOST ATTEMPT, DELIBERATELY. If the status is
+ * not `needs_second_factor` there is nothing to verify against; showing the
+ * code boxes anyway would collect six digits and then fail with something
+ * unrelated to what the person did.
+ */
+
+/** The strategies this page can actually finish. `email_link` is not one. */
+type Method = "totp" | "phone_code" | "email_code" | "backup_code"
+
+const LABELS: Record<Method, string> = {
+  totp: "Authenticator app",
+  phone_code: "Text message",
+  email_code: "Email",
+  backup_code: "Backup code",
+}
+
+const BLURB: Record<Method, string> = {
+  totp: "Enter the code from your authenticator app.",
+  phone_code: "We sent a code to your phone.",
+  email_code: "We sent a code to your email.",
+  backup_code: "Enter one of the backup codes you saved when you set this up.",
+}
+
+/** Six boxes for every code strategy. Backup codes are not six digits. */
+const OTP_LENGTH = 6
+
+export function MfaForm({
+  afterAuthUrl,
+  signInHref,
+}: {
+  afterAuthUrl: string
+  signInHref: string
+}) {
+  const { signIn } = useSignIn()
+  const formRef = useRef<HTMLFormElement>(null)
+  const [method, setMethod] = useState<Method | null>(null)
+  const [code, setCode] = useState("")
+  const [pending, setPending] = useState(false)
+  /**
+   * Which strategies have already had a code dispatched.
+   *
+   * ⚠ A REF, NOT STATE, AND THE DIFFERENCE IS CORRECTNESS RATHER THAN STYLE.
+   * Nothing renders from it, so making it state would schedule a re-render that
+   * re-runs this effect — and setting state inside an effect that depends on it
+   * is the loop React lints against. A ref also updates SYNCHRONOUSLY, which is
+   * the property that actually matters here: two renders in the same tick both
+   * see the write, so a second code is never sent to invalidate the first.
+   */
+  const sent = useRef<Partial<Record<Method, boolean>>>({})
+
+  const ready = signIn?.status === "needs_second_factor"
+
+  // What this account actually has enrolled, narrowed to what we can finish.
+  const available: Method[] = (signIn?.supportedSecondFactors ?? [])
+    .map((factor) => factor.strategy)
+    .filter((s): s is Method => s in LABELS)
+
+  // ⚠ TOTP FIRST WHERE IT EXISTS, because it is the only one that needs no
+  // round trip — the code is already on the person's phone. Defaulting to a
+  // code we have to send would put an avoidable email or SMS in front of
+  // somebody who did not need one.
+  const preferred =
+    available.find((m) => m === "totp") ??
+    available.find((m) => m !== "backup_code") ??
+    available[0] ??
+    null
+
+  const active = method ?? preferred
+
+  useEffect(() => {
+    if (!signIn || !ready || !active) return
+    if (active !== "phone_code" && active !== "email_code") return
+    if (sent.current[active]) return
+
+    // Marked before the await, not after: otherwise both renders see `false`.
+    sent.current[active] = true
+
+    const send =
+      active === "phone_code" ? signIn.mfa.sendPhoneCode() : signIn.mfa.sendEmailCode()
+
+    void send
+      .then(({ error }) => {
+        if (error) {
+          toast.error(messageFor(error))
+          return
+        }
+        toast.success(
+          active === "phone_code"
+            ? "We sent a code to your phone."
+            : "We sent a code to your email.",
+        )
+      })
+      .catch(() => toast.error(TRANSPORT_FAILURE))
+  }, [signIn, ready, active])
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!signIn || !active || pending) return
+
+    setPending(true)
+
+    try {
+      const { error } =
+        active === "totp"
+          ? await signIn.mfa.verifyTOTP({ code })
+          : active === "backup_code"
+            ? await signIn.mfa.verifyBackupCode({ code })
+            : active === "phone_code"
+              ? await signIn.mfa.verifyPhoneCode({ code })
+              : await signIn.mfa.verifyEmailCode({ code })
+
+      if (error) {
+        toast.error(messageFor(error))
+        // ⚠ CLEARED ON FAILURE, for the code strategies only. A wrong six-digit
+        // code is never salvaged by editing one box, and leaving it filled
+        // means the next attempt starts by deleting six characters. A backup
+        // code is long enough to be worth correcting rather than retyping.
+        if (active !== "backup_code") setCode("")
+        return
+      }
+
+      if (signIn.status === "complete") {
+        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
+        // see the sign-in form.
+        await signIn.finalize({
+          navigate: ({ decorateUrl }) => {
+            window.location.href = decorateUrl(afterAuthUrl)
+          },
+        })
+        return
+      }
+
+      toast.error("That worked, but the sign-in needs another step we cannot do yet.")
+    } catch {
+      toast.error(TRANSPORT_FAILURE)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  if (!signIn) {
+    return <p className="text-muted-foreground text-sm">Loading…</p>
+  }
+
+  if (!ready || !active) {
+    return (
+      <FieldGroup>
+        <div className="flex flex-col items-center gap-1 text-center">
+          <h1 className="text-2xl font-bold">Start again</h1>
+          <p className="text-sm text-balance text-muted-foreground">
+            This sign-in is no longer in progress. Reloading this page ends it.
+          </p>
+        </div>
+        <Link
+          href={signInHref}
+          className="text-center text-sm underline underline-offset-4"
+        >
+          Back to sign in
+        </Link>
+      </FieldGroup>
+    )
+  }
+
+  const others = available.filter((m) => m !== active)
+
+  return (
+    <form ref={formRef} className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
+      <FieldGroup>
+        <div className="flex flex-col items-center gap-1 text-center">
+          <h1 className="text-2xl font-bold">Two-step verification</h1>
+          <p className="text-sm text-balance text-muted-foreground">{BLURB[active]}</p>
+        </div>
+
+        {active === "backup_code" ? (
+          <Field>
+            <FieldLabel htmlFor="code">Backup code</FieldLabel>
+            <Input
+              id="code"
+              name="code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoComplete="one-time-code"
+              autoFocus
+              required
+            />
+          </Field>
+        ) : (
+          <Field>
+            {/*
+             * ⚠ THE LABEL IS `htmlFor` THE OTP INPUT'S OWN HIDDEN FIELD, which
+             * `InputOTP` renders and points at with this id. The boxes are
+             * presentational: a screen reader lands on the single input behind
+             * them, and labelling the wrapper instead leaves it unnamed.
+             */}
+            <FieldLabel htmlFor="code">Verification code</FieldLabel>
+            <InputOTP
+              id="code"
+              maxLength={OTP_LENGTH}
+              value={code}
+              onChange={setCode}
+              // Submits itself the moment the last digit lands. A six-digit
+              // code has exactly one complete state, so asking for a click
+              // afterwards is a step that carries no decision.
+              // ⚠ THROUGH A REF, NOT THE EVENT. `onComplete` is handed the
+              // completed value, not a DOM event, so there is no `target` to
+              // walk up to a form — reading one gives `undefined` and the
+              // auto-submit silently never fires, leaving a filled-in code and
+              // a button the person has to find.
+              onComplete={() => {
+                if (!pending) formRef.current?.requestSubmit()
+              }}
+              autoFocus
+              containerClassName="justify-center"
+            >
+              <InputOTPGroup>
+                {Array.from({ length: OTP_LENGTH }, (_, i) => (
+                  <InputOTPSlot key={i} index={i} />
+                ))}
+              </InputOTPGroup>
+            </InputOTP>
+          </Field>
+        )}
+
+        <Field>
+          <Button type="submit" disabled={pending || code.length === 0}>
+            {pending ? "Verifying…" : "Verify"}
+          </Button>
+        </Field>
+
+        {others.length > 0 ? (
+          <FieldDescription className="text-center">
+            Or verify another way:{" "}
+            {others.map((m, i) => (
+              <span key={m}>
+                {i > 0 ? ", " : ""}
+                <button
+                  type="button"
+                  className="underline underline-offset-4"
+                  onClick={() => {
+                    setMethod(m)
+                    setCode("")
+                  }}
+                >
+                  {LABELS[m]}
+                </button>
+              </span>
+            ))}
+          </FieldDescription>
+        ) : null}
+      </FieldGroup>
+    </form>
+  )
+}

@@ -16,12 +16,15 @@ import { emails } from "./routes/emails.js"
 import { createSesWebhooks, type SesWebhookDeps } from "./routes/ses-events.js"
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
 import { domains } from "./routes/domains.js"
+import { mailboxes } from "./routes/mailboxes.js"
 import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
+import type { SessionVerifier } from "./middleware/session.js"
+import type { MailboxProvisioning } from "./mailboxes/provision.js"
 
 /**
  * Read from package.json rather than `npm_package_version`, which pnpm only
@@ -73,6 +76,23 @@ export interface AppDeps {
    * in the OpenAPI generator, where the routes answer 501.
    */
   domains?: DomainStore
+  /**
+   * Verifies the Clerk session behind `/mailboxes`.
+   *
+   * ⚠ A DIFFERENT CREDENTIAL FROM `apiKeyAuth`, NOT A FALLBACK FOR IT. Nothing
+   * accepts both: sending routes take a key and mailbox routes take a session.
+   * Omitted in tests and in the OpenAPI generator, where `requireUser` answers
+   * 501 rather than letting an unauthenticated caller through.
+   */
+  sessionAuth?: SessionVerifier
+  /**
+   * Creating a human mailbox, for `/mailboxes`.
+   *
+   * ⚠ THE ONLY PLACE `authd.accounts.active` IS EVER SET TRUE, which is what
+   * makes a mailbox visible to authd at all. Omitted in tests and in the
+   * OpenAPI generator, where the routes answer 501.
+   */
+  mailboxes?: MailboxProvisioning
   /** SES delivery events over SNS. Unauthenticated; signature-verified. */
   sesWebhooks?: SesWebhookDeps
   /**
@@ -149,19 +169,25 @@ export function createApp(deps: AppDeps = {}) {
     deps.sendPath ||
     deps.emailLookup ||
     deps.webhookEndpoints ||
-    deps.domains
+    deps.domains ||
+    deps.sessionAuth ||
+    deps.mailboxes
   ) {
     const auth = deps.apiKeyAuth
     const sendPath = deps.sendPath
     const lookup = deps.emailLookup
     const endpoints = deps.webhookEndpoints
     const domainStore = deps.domains
+    const sessions = deps.sessionAuth
+    const mailboxStore = deps.mailboxes
     app.use("*", async (c, next) => {
       if (auth) c.set("apiKeyAuth", auth)
       if (sendPath) c.set("sendPath", sendPath)
       if (lookup) c.set("emailLookup", lookup)
       if (endpoints) c.set("webhookEndpoints", endpoints)
       if (domainStore) c.set("domains", domainStore)
+      if (sessions) c.set("sessionAuth", sessions)
+      if (mailboxStore) c.set("mailboxes", mailboxStore)
       await next()
     })
   }
@@ -235,6 +261,11 @@ export function createApp(deps: AppDeps = {}) {
   // Resend's paths, verbs and body keys. See routes/domains.ts.
   app.route("/domains", domains)
 
+  // ⚠ SESSION AUTHENTICATED, AND THE ONLY ROUTES THAT ARE. Mailboxes are the
+  // human half of i10; an API key must not be able to create one. See
+  // middleware/session.ts.
+  app.route("/mailboxes", mailboxes)
+
   // ⚠ API-key authenticated, like everything above it — which is exactly why it
   // cannot issue a tenant's first key. See routes/api-keys.ts.
   app.route("/api-keys", createApiKeyRoutes(deps.apiKeys))
@@ -285,6 +316,29 @@ export function createApp(deps: AppDeps = {}) {
     description:
       "Your i10 API key. Keys are prefixed `i10_live_` or `i10_test_` so they " +
       "are recognisable in your own logs and greppable in a leak scan.",
+  })
+
+  // ⚠ REGISTERED EVEN THOUGH NO CUSTOMER CODES AGAINST IT. `/mailboxes` names
+  // this scheme, and a document that REFERENCES a security scheme it never
+  // DEFINES is invalid OpenAPI — the drift check would still pass, because the
+  // generated file matches the code that generated it, while Scalar renders a
+  // dangling reference and a generator can emit a client with no way to
+  // authenticate. Every name used in a `security:` block has to exist here.
+  //
+  // ⚠ AND IT IS A COOKIE, NOT A BEARER TOKEN, WHICH IS THE POINT OF IT BEING A
+  // SECOND SCHEME RATHER THAN A SECOND USE OF THE FIRST. Mailbox routes take
+  // the session a browser already holds from auth.i10.tech; they deliberately
+  // do NOT accept an API key, so that a leaked sending key — whose whole
+  // advertised blast radius is "can send mail" — cannot also create mailboxes
+  // on the customer's domain.
+  app.openAPIRegistry.registerComponent("securitySchemes", "sessionAuth", {
+    type: "apiKey",
+    in: "cookie",
+    name: "__session",
+    description:
+      "The Clerk session cookie set when you sign in at auth.i10.tech. Used " +
+      "by the console for mailbox management; it is not an alternative to an " +
+      "API key, and the sending endpoints do not accept it.",
   })
 
   app.doc31("/openapi.json", {

@@ -18,6 +18,12 @@ import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { domainStore } from "./domains/store.js"
+import { mailboxProvisioning } from "./mailboxes/provision.js"
+import { mailboxDirectory } from "./mailboxes/store.js"
+import { clerkIdentity } from "./mailboxes/clerk.js"
+import { clerkSessions } from "./middleware/session.js"
+import { projectClerkUser } from "./projection/writer.js"
+import { MAILBOXES } from "./metering/levels.js"
 import { sesIdentity } from "./domains/identity.js"
 import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
@@ -371,6 +377,26 @@ const app = createApp({
         }),
       }
     : {}),
+  /**
+   * The human half of i10, and the only routes that take a session.
+   *
+   * ⚠ WIRED UNCONDITIONALLY, unlike `domains` above, because none of its parts
+   * are optional — there is no secret it can be missing. A deployment that
+   * cannot reach Clerk fails at the session, which answers 503, rather than at
+   * a 501 that would claim mailboxes are not a feature.
+   */
+  sessionAuth: clerkSessions(clerk, { authorizedParties: env.CONSOLE_ORIGINS }),
+  mailboxes: mailboxProvisioning({
+    identity: clerkIdentity(clerk),
+    directory: mailboxDirectory(db),
+    capacity: postgresMeter(db),
+    // ⚠ THE PROJECTION, NOT A SECOND WRITER. Provisioning changes Clerk and
+    // then asks the projection to derive the row, exactly as the webhook does;
+    // `MAIL_DOMAINS` is passed for the same reason it is there — i10's own
+    // domains are hosted regardless of who owns a `core.domains` row.
+    project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
+    featureId: MAILBOXES,
+  }),
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets),
