@@ -41,6 +41,40 @@ export interface SendJob {
   messages: MessageRef[]
 }
 
+/**
+ * The job as it comes BACK off Redis, with its dates restored.
+ *
+ * ⚠ `SendJob` DESCRIBES WHAT WE PUT IN, NOT WHAT WE GET OUT, AND THE TYPE
+ * CANNOT TELL YOU THAT. groupmq stores the payload as JSON, and `JSON.stringify`
+ * turns a `Date` into a string with no inverse — so `messages[].createdAt` is
+ * typed `Date`, is a `Date` at enqueue, and is a `string` by the time the worker
+ * reads it. TypeScript sees `job.data` as `SendJob` on both sides of a boundary
+ * that quietly changes it, so nothing anywhere complains.
+ *
+ * ⚠ AND IT FAILED AT THE FIRST STATEMENT OF THE CLAIM, WHICH IS THE WORST PLACE
+ * FOR IT. `claimStatement` calls `r.createdAt.toISOString()`, so every send
+ * threw `toISOString is not a function` before touching Postgres — the message
+ * stayed `queued`, the job retried forever, and nothing was ever marked failed
+ * because the failure happened before the row was claimed. Observed on the very
+ * first mail this system ever tried to send.
+ *
+ * Restored here rather than defended against in `claim.ts`, because the pair
+ * `(id, created_at)` is the primary key of a partitioned table and three
+ * separate statements depend on it — a coercion at each call site is three
+ * chances to forget, and this is one boundary with one owner.
+ */
+export function reviveSendJob(data: SendJob): SendJob {
+  return {
+    ...data,
+    messages: data.messages.map((m) => ({
+      ...m,
+      // `new Date` on something already a `Date` is a copy, so this is correct
+      // whether or not the payload made a round trip.
+      createdAt: new Date(m.createdAt),
+    })),
+  }
+}
+
 /** The two priority classes. One queue each — see core.ts. */
 export type SendClass = "transactional" | "bulk"
 

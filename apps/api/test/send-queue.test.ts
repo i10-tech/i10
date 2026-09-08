@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
-import type { MessageRef } from "../src/db/claim.js"
+import { claimStatement, type MessageRef } from "../src/db/claim.js"
 import {
   batchJobId,
   enqueueBatch,
   namespaceFor,
+  reviveSendJob,
   type SendJob,
 } from "../src/queue/send-queue.js"
 import {
@@ -235,5 +236,48 @@ describe("naming a job", () => {
     expect(q.add).toHaveBeenCalledWith(
       expect.objectContaining({ jobId: "sweep:1757000000000:x" }),
     )
+  })
+})
+
+/**
+ * ⚠ THE ROUND TRIP IS THE TEST. Every other test in this file builds a
+ * `SendJob` in memory, where `createdAt` is a real `Date` and everything works
+ * — which is exactly why the whole suite passed while no mail could be sent at
+ * all. groupmq stores the payload as JSON, so the worker never sees the object
+ * that was enqueued; it sees what survived `JSON.stringify`.
+ */
+describe("a job that has been through redis", () => {
+  const job: SendJob = { tenantId: "ten-1", messages: [A, B] }
+  const overTheWire = () => JSON.parse(JSON.stringify(job)) as SendJob
+
+  // The defect itself: the type says Date on both sides, and JSON has no such
+  // thing. This is the assertion that would have caught it.
+  it("loses its Date objects in transit", () => {
+    expect(typeof (overTheWire().messages[0]!.createdAt as unknown)).toBe("string")
+  })
+
+  it("gets them back", () => {
+    const revived = reviveSendJob(overTheWire())
+    for (const m of revived.messages) expect(m.createdAt).toBeInstanceOf(Date)
+    expect(revived.messages[0]!.createdAt).toEqual(A.createdAt)
+    expect(revived.messages[1]!.createdAt).toEqual(B.createdAt)
+  })
+
+  /**
+   * ⚠ AND THE CLAIM IS WHAT ACTUALLY BROKE. `claimStatement` calls
+   * `.toISOString()` on every ref, so a string payload threw before Postgres
+   * was touched — the row stayed `queued`, was never marked failed, and the job
+   * retried forever.
+   */
+  it("can be claimed, which the raw payload could not", () => {
+    const opts = { workerId: "w1", staleAfter: "5 minutes" }
+    expect(() =>
+      claimStatement(reviveSendJob(overTheWire()).messages, opts),
+    ).not.toThrow()
+    expect(() => claimStatement(overTheWire().messages, opts)).toThrow()
+  })
+
+  it("leaves everything else alone", () => {
+    expect(reviveSendJob(overTheWire()).tenantId).toBe("ten-1")
   })
 })
