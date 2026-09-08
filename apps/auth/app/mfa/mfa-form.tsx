@@ -12,7 +12,8 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@repo/ui/components/input-otp"
+import { OtpField } from "../_components/otp-field"
+import { ResendButton } from "../_components/resend-button"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 
 /*
@@ -47,9 +48,6 @@ const BLURB: Record<Method, string> = {
   email_code: "We sent a code to your email.",
   backup_code: "Enter one of the backup codes you saved when you set this up.",
 }
-
-/** Six boxes for every code strategy. Backup codes are not six digits. */
-const OTP_LENGTH = 6
 
 export function MfaForm({
   afterAuthUrl,
@@ -219,40 +217,14 @@ export function MfaForm({
             />
           </Field>
         ) : (
-          <Field>
-            {/*
-             * ⚠ THE LABEL IS `htmlFor` THE OTP INPUT'S OWN HIDDEN FIELD, which
-             * `InputOTP` renders and points at with this id. The boxes are
-             * presentational: a screen reader lands on the single input behind
-             * them, and labelling the wrapper instead leaves it unnamed.
-             */}
-            <FieldLabel htmlFor="code">Verification code</FieldLabel>
-            <InputOTP
-              id="code"
-              maxLength={OTP_LENGTH}
-              value={code}
-              onChange={setCode}
-              // Submits itself the moment the last digit lands. A six-digit
-              // code has exactly one complete state, so asking for a click
-              // afterwards is a step that carries no decision.
-              // ⚠ THROUGH A REF, NOT THE EVENT. `onComplete` is handed the
-              // completed value, not a DOM event, so there is no `target` to
-              // walk up to a form — reading one gives `undefined` and the
-              // auto-submit silently never fires, leaving a filled-in code and
-              // a button the person has to find.
-              onComplete={() => {
-                if (!pending) formRef.current?.requestSubmit()
-              }}
-              autoFocus
-              containerClassName="justify-center"
-            >
-              <InputOTPGroup>
-                {Array.from({ length: OTP_LENGTH }, (_, i) => (
-                  <InputOTPSlot key={i} index={i} />
-                ))}
-              </InputOTPGroup>
-            </InputOTP>
-          </Field>
+          <OtpField
+            value={code}
+            onChange={setCode}
+            onComplete={() => {
+              if (!pending) formRef.current?.requestSubmit()
+            }}
+            autoFocus
+          />
         )}
 
         <Field>
@@ -260,6 +232,28 @@ export function MfaForm({
             {pending ? "Verifying…" : "Verify"}
           </Button>
         </Field>
+
+        {/*
+         * ⚠ NO RESEND FOR TOTP OR A BACKUP CODE, because there is nothing to
+         * send. An authenticator generates its own code on the device and a
+         * backup code was printed once, months ago — offering "resend" for
+         * either would promise a mail that never arrives.
+         */}
+        {active === "phone_code" || active === "email_code" ? (
+          <ResendButton
+            onResend={async () => {
+              const { error } =
+                active === "phone_code"
+                  ? await signIn.mfa.sendPhoneCode()
+                  : await signIn.mfa.sendEmailCode()
+              if (error) {
+                toast.error(messageFor(error))
+                return
+              }
+              toast.success("We sent another code.")
+            }}
+          />
+        ) : null}
 
         {others.length > 0 ? (
           <FieldDescription className="text-center">

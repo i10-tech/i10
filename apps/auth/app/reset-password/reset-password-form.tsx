@@ -12,6 +12,8 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
+import { OtpField, OTP_LENGTH } from "../_components/otp-field"
+import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 
@@ -44,6 +46,7 @@ export function ResetPasswordForm({
 }) {
   const { signIn } = useSignIn()
   const [stage, setStage] = useState<"email" | "reset">("email")
+  const [code, setCode] = useState("")
   const [pending, setPending] = useState(false)
 
   async function onEmail(event: React.FormEvent<HTMLFormElement>) {
@@ -97,12 +100,11 @@ export function ResetPasswordForm({
     setPending(true)
 
     try {
-      const verified = await signIn.resetPasswordEmailCode.verifyCode({
-        code: String(form.get("code") ?? ""),
-      })
+      const verified = await signIn.resetPasswordEmailCode.verifyCode({ code })
 
       if (verified.error) {
         toast.error(messageFor(verified.error))
+        setCode("")
         return
       }
 
@@ -143,7 +145,7 @@ export function ResetPasswordForm({
 
   if (stage === "reset") {
     return (
-      <form className="flex flex-col gap-6" onSubmit={onReset} noValidate>
+      <form key="reset" className="flex flex-col gap-6" onSubmit={onReset} noValidate>
         <FieldGroup>
           <div className="flex flex-col items-center gap-1 text-center">
             <h1 className="text-2xl font-bold">Choose a new password</h1>
@@ -151,17 +153,12 @@ export function ResetPasswordForm({
               Enter the code we emailed you, and the password you want instead.
             </p>
           </div>
-          <Field>
-            <FieldLabel htmlFor="code">Verification code</FieldLabel>
-            <Input
-              id="code"
-              name="code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              required
-            />
-          </Field>
+          {/*
+           * ⚠ NO `onComplete` HERE, UNLIKE THE OTHER TWO SCREENS. The boxes sit
+           * above two password fields, so auto-submitting the instant the sixth
+           * digit lands would send an empty password and burn the code.
+           */}
+          <OtpField value={code} onChange={setCode} autoFocus />
           <Field>
             <FieldLabel htmlFor="password">New password</FieldLabel>
             <PasswordInput
@@ -184,17 +181,27 @@ export function ResetPasswordForm({
             />
           </Field>
           <Field>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" disabled={pending || code.length < OTP_LENGTH}>
               {pending ? "Saving…" : "Set new password"}
             </Button>
           </Field>
+          <ResendButton
+            onResend={async () => {
+              const { error } = await signIn.resetPasswordEmailCode.sendCode()
+              if (error) {
+                toast.error(messageFor(error))
+                return
+              }
+              toast.success("We sent another code.")
+            }}
+          />
         </FieldGroup>
       </form>
     )
   }
 
   return (
-    <form className="flex flex-col gap-6" onSubmit={onEmail} noValidate>
+    <form key="email" className="flex flex-col gap-6" onSubmit={onEmail} noValidate>
       <FieldGroup>
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-2xl font-bold">Reset your password</h1>

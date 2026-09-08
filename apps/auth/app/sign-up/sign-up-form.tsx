@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { useSignUp } from "@clerk/nextjs"
@@ -13,6 +13,8 @@ import {
   FieldSeparator,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
+import { OtpField, OTP_LENGTH } from "../_components/otp-field"
+import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
@@ -40,6 +42,8 @@ export function SignUpForm({
 }) {
   const { signUp } = useSignUp()
   const [stage, setStage] = useState<"details" | "verify">("details")
+  const [code, setCode] = useState("")
+  const formRef = useRef<HTMLFormElement>(null)
   const [pending, setPending] = useState(false)
 
   async function onDetails(event: React.FormEvent<HTMLFormElement>) {
@@ -116,16 +120,15 @@ export function SignUpForm({
     event.preventDefault()
     if (!signUp || pending) return
 
-    const form = new FormData(event.currentTarget)
     setPending(true)
 
     try {
-      const { error } = await signUp.verifications.verifyEmailCode({
-        code: String(form.get("code") ?? ""),
-      })
+      const { error } = await signUp.verifications.verifyEmailCode({ code })
 
       if (error) {
         toast.error(messageFor(error))
+        // A rejected six-digit code is never salvaged by editing one box.
+        setCode("")
         return
       }
 
@@ -152,7 +155,19 @@ export function SignUpForm({
 
   if (stage === "verify") {
     return (
-      <form className="flex flex-col gap-6" onSubmit={onVerify} noValidate>
+      // ⚠ `key` SO REACT CANNOT REUSE THE PREVIOUS STAGE'S DOM. Both stages are
+      // one component returning a <form>, and React reconciles by position —
+      // which is exactly how the name typed a moment earlier ended up sitting
+      // inside the code box, waiting to be deleted. `OtpField` already breaks
+      // the reuse by being a different component; this makes the guarantee
+      // explicit rather than incidental to the markup.
+      <form
+        key="verify"
+        ref={formRef}
+        className="flex flex-col gap-6"
+        onSubmit={onVerify}
+        noValidate
+      >
         <FieldGroup>
           <div className="flex flex-col items-center gap-1 text-center">
             <h1 className="text-2xl font-bold">Check your email</h1>
@@ -160,33 +175,37 @@ export function SignUpForm({
               We sent a code to your address. Enter it below to finish.
             </p>
           </div>
+          <OtpField
+            value={code}
+            onChange={setCode}
+            // The code is the whole form here, so filling it is the decision.
+            onComplete={() => {
+              if (!pending) formRef.current?.requestSubmit()
+            }}
+            autoFocus
+          />
           <Field>
-            <FieldLabel htmlFor="code">Verification code</FieldLabel>
-            <Input
-              id="code"
-              name="code"
-              // ⚠ `inputMode`, NOT `type="number"`. A numeric type strips
-              // leading zeros and puts spinner arrows on a code, and iOS shows
-              // the wrong keyboard for it. `one-time-code` is what lets iOS
-              // offer the code straight from the notification.
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              required
-            />
-          </Field>
-          <Field>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" disabled={pending || code.length < OTP_LENGTH}>
               {pending ? "Verifying…" : "Verify email"}
             </Button>
           </Field>
+          <ResendButton
+            onResend={async () => {
+              const { error } = await signUp.verifications.sendEmailCode()
+              if (error) {
+                toast.error(messageFor(error))
+                return
+              }
+              toast.success("We sent another code.")
+            }}
+          />
         </FieldGroup>
       </form>
     )
   }
 
   return (
-    <form className="flex flex-col gap-6" onSubmit={onDetails} noValidate>
+    <form key="details" className="flex flex-col gap-6" onSubmit={onDetails} noValidate>
       <FieldGroup>
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-2xl font-bold">Create your account</h1>

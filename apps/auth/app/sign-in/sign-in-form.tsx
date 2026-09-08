@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -46,6 +46,42 @@ export function SignInForm({
   const router = useRouter()
   const { signIn } = useSignIn()
   const [pending, setPending] = useState(false)
+
+  /**
+   * Offer a saved passkey without anybody asking.
+   *
+   * ⚠ `autofill`, NOT `discoverable` — the opposite of what /passkey does. This
+   * is WebAuthn conditional mediation: the browser quietly checks whether it
+   * holds a passkey for this site and, if it does, offers it inside the email
+   * field's own autofill menu. It must be armed BEFORE the person touches
+   * anything, which is why it runs in an effect rather than behind a button,
+   * and it pairs with `autoComplete="username webauthn"` on that input — drop
+   * either half and the prompt never appears.
+   *
+   * ⚠ AND EVERY FAILURE HERE IS SILENT ON PURPOSE. Nobody asked for this: a
+   * browser with no passkey, no platform authenticator, or no support for
+   * conditional mediation rejects immediately, and a toast would be an error
+   * message for something the person never requested. The password form
+   * underneath is unaffected either way.
+   */
+  const armed = useRef(false)
+
+  useEffect(() => {
+    if (!signIn || armed.current) return
+    armed.current = true
+
+    void signIn
+      .passkey({ flow: "autofill" })
+      .then(({ error }) => {
+        if (error || signIn.status !== "complete") return
+        return signIn.finalize({
+          navigate: ({ decorateUrl }) => {
+            window.location.href = decorateUrl(afterAuthUrl)
+          },
+        })
+      })
+      .catch(() => {})
+  }, [signIn, afterAuthUrl])
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -129,7 +165,11 @@ export function SignInForm({
             name="email"
             type="email"
             placeholder="m@example.com"
-            autoComplete="email"
+            // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
+            // This is the hook the conditional-mediation call above attaches
+            // to: without it the browser has nowhere to surface a saved
+            // passkey, and the effect silently does nothing.
+            autoComplete="email webauthn"
             required
           />
         </Field>
