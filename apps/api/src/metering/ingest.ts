@@ -44,6 +44,20 @@ export const unshippedStatement = (featureId: string, limit: number): SQL => sql
  * everything older than X" would sweep up rows that arrived during the request
  * and were never in it — under-billing, invisibly, with no row left un-shipped
  * to notice.
+ *
+ * ⚠ `array[…]`, NOT `any(${ids})`. Interpolating the array directly expands to
+ * `($1, $2, $3)` — a ROW CONSTRUCTOR — and Postgres answers `cannot cast type
+ * record to text[]`. The whole statement raised, so usage that had already
+ * reached Polar was never marked shipped and was re-sent on every run
+ * thereafter; only Polar's `external_id` dedupe stood between that and
+ * double-counted usage.
+ *
+ * ⚠ AND EVERY BOUND VALUE HERE IS A PLAIN STRING, DELIBERATELY. Binding the
+ * whole array as one parameter would also work and would read better, but it
+ * depends on the driver serialising a JS array the way this cast expects —
+ * exactly the class of assumption that has already produced several silent
+ * failures on this path. One scalar per id needs nothing from the driver but a
+ * string.
  */
 export const markShippedStatement = (
   tenantId: string,
@@ -54,7 +68,10 @@ export const markShippedStatement = (
      set ingested_at = now()
    where tenant_id  = ${tenantId}::uuid
      and feature_id = ${featureId}
-     and event_id   = any(${eventIds}::text[])
+     and event_id   = any(array[${sql.join(
+       eventIds.map((id) => sql`${id}`),
+       sql`, `,
+     )}]::text[])
      and ingested_at is null
 `
 
