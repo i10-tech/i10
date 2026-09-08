@@ -388,15 +388,17 @@ describe("reconciling against Polar", () => {
 
 const KEY = "i10_live_abcdefghijklmnopqrstuvwxyz012345"
 const apiKeyAuth = {
-  verify: async () =>
-    ({
-      id: "ak_1",
+  lookup: {
+    byHash: async () => ({
+      id: "key-1",
+      tenantId: "ten-1",
       scopes: ["emails:send"],
-      claims: { tenantId: "ten-1", mode: "live" },
-      revoked: false,
-      expired: false,
-    }) as never,
-  cache: { get: async () => null, set: async () => {} },
+      mode: "live",
+      revokedAt: null,
+      expiresAt: null,
+    }),
+  },
+  cache: { get: async () => null, set: async () => {}, del: async () => {} },
   ttlSeconds: 60,
 }
 

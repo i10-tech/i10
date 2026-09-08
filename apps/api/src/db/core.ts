@@ -333,18 +333,23 @@ export const domains = core.table(
 )
 
 /**
- * A thin index of the keys Clerk holds for a tenant.
+ * Every API key i10 has issued. This table IS the credential store.
  *
- * ⚠ NO SECRET, NO HASH, NO SCOPES, NO `revoked`, NO `last_used_at`. Clerk owns
- * every one of those and answers for them — `apiKeys.verify()` returns scopes,
- * revocation and expiry, and Clerk maintains `lastUsedAt` itself. Copying any of
- * it here would create a second source of truth for authentication, which is the
- * one kind of duplication that fails silently and in the customer's favour.
+ * ⚠ IT USED TO BE A THIN INDEX OF KEYS CLERK HELD, AND THE COMMENT HERE ARGUED
+ * AGAINST EXACTLY WHAT IT NOW DOES — no hash, no scopes, no revocation, on the
+ * grounds that a second source of truth for authentication "fails silently and
+ * in the customer's favour". That reasoning was sound while Clerk was the first
+ * source. It stopped applying when Clerk was removed: there is one source now,
+ * and it is this table.
  *
- * What is left is the part Clerk cannot answer: which i10 tenant a key belongs
- * to, in one place, when a tenant's keys may be split between a Clerk
- * organization and its owning user. The tenant also travels in the key's own
- * claims, so the request path never reads this table — only the dashboard does.
+ * ⚠ WHAT FORCED THE CHANGE WAS LATENCY, MEASURED RATHER THAN ASSUMED. Verifying
+ * against Clerk cost ~900ms on a cache miss with a 60s TTL, which is most
+ * requests for a customer who sends sporadically — larger than the SES call it
+ * was authenticating. See drizzle/0031.
+ *
+ * ⚠ AND THE TENANT LINK DID NOT MOVE. It was already `tenant_id` here, mirrored
+ * into a Clerk claim that auth/api-key.ts read on every request. Clerk's own
+ * `subject` was never consulted.
  */
 export const apiKeys = core.table(
   "api_keys",
@@ -356,10 +361,21 @@ export const apiKeys = core.table(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
 
-    /** Clerk's own id for the key, `ak_…`. The join key to everything real. */
-    clerkKeyId: text("clerk_key_id").notNull().unique(),
-
     name: text("name").notNull(),
+
+    /**
+     * SHA-256 of the WHOLE key as presented, prefix included.
+     *
+     * ⚠ THE PLAINTEXT IS NEVER STORED AND CANNOT BE RECOVERED. It is returned
+     * once, at creation, and a customer who loses it rotates rather than reads
+     * it back.
+     *
+     * ⚠ AND HASHING THE PREFIX TOO IS WHAT RETIRES AN OLD HAZARD. While Clerk
+     * issued these, `i10_live_` and `i10_test_` were nine characters each and
+     * stripped to one identical secret, so the mode could never be read off the
+     * string. Covered by the hash, they are simply two different keys.
+     */
+    secretHash: text("secret_hash").notNull().unique(),
 
     /**
      * The leading, non-secret part of the key — `i10_live_a1b2c3d4`. Shown in
@@ -369,12 +385,47 @@ export const apiKeys = core.table(
     prefix: text("prefix").notNull(),
 
     /**
-     * ⚠ FOR DISPLAY ONLY. The authoritative mode is the `mode` claim Clerk
-     * returns from verify(), because `i10_live_` and `i10_test_` are the same
-     * length and unwrap to the same secret — see src/auth/api-key.ts. Trusting
-     * this column to decide behaviour would reintroduce exactly that hole.
+     * `live` or `test`.
+     *
+     * ⚠ AUTHORITATIVE, WHERE IT WAS ONCE DISPLAY-ONLY. It is a property of the
+     * row the hash matched, not of the string a caller sent.
      */
     mode: text("mode").notNull(),
+
+    /**
+     * ⚠ CARRIED, NOT ENFORCED. `ResolvedKey` exposes these and no route checks
+     * them yet. Empty is "unrestricted", which is what every key has.
+     */
+    scopes: text("scopes")
+      .array()
+      .notNull()
+      .default(sql`'{}'`),
+
+    /**
+     * ⚠ REVOCATION IS IMMEDIATE, AND THAT IS THE WHOLE REASON IT LIVES HERE.
+     * Under Clerk the floor was the cache TTL — a leaked production key stayed
+     * live for up to a minute. Setting this and deleting the cache entry ends it
+     * at once.
+     */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+
+    /**
+     * ⚠ COARSE BY CONSTRUCTION — written on a cache miss, so once a minute per
+     * key rather than once per request. See `core.resolve_api_key`. It answers
+     * "is this key still in use", which does not need to be exact.
+     */
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+
+    /**
+     * The Clerk user who minted it.
+     *
+     * ⚠ AUDIT ONLY, NEVER AUTHORIZATION. A sending key belongs to the
+     * organisation; authorizing against its creator would mean offboarding one
+     * employee takes production sending down with them. Authorization reads
+     * `tenantId`, always.
+     */
+    createdBy: text("created_by"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

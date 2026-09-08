@@ -1,13 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm"
 import type { Queue } from "groupmq"
 import { withTenant, type Database } from "../db/client.js"
-import {
-  apiKeys,
-  idempotencyKeys,
-  messageBodies,
-  messages,
-  suppressions,
-} from "../db/core.js"
+import { idempotencyKeys, messageBodies, messages, suppressions } from "../db/core.js"
 import { enqueueBatch, type SendClass, type SendJob } from "../queue/send-queue.js"
 import { addrSpec, asList, type AcceptOps } from "./accept.js"
 
@@ -118,21 +112,18 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
         // and means a driver that hands back a string is not a silent NaN.
         const createdAt = new Date(minted[0]!.minted_at as string | Date)
 
-        // Which of the tenant's keys sent this, by our id rather than Clerk's.
-        // Best effort: a key created seconds ago may not have reached the
-        // projection yet, and attribution is not worth refusing a send over.
-        const [key] = await tx
-          .select({ id: apiKeys.id })
-          .from(apiKeys)
-          .where(eq(apiKeys.clerkKeyId, input.apiKeyId))
-          .limit(1)
-
+        // ⚠ NO LOOKUP ANY MORE, AND ONE FEWER STATEMENT ON THE SEND PATH. This
+        // used to translate Clerk's `ak_…` into our own row id, best-effort,
+        // because a key minted seconds earlier might not have reached this
+        // table yet. Self-issued keys ARE this table, so `apiKeyId` is already
+        // the foreign key — and it cannot be missing, because the request could
+        // not have authenticated without the row it names.
         await tx.insert(messages).values(
           input.messages.map((m, i) => ({
             id: ids[i]!,
             createdAt,
             tenantId: input.tenantId,
-            apiKeyId: key?.id ?? null,
+            apiKeyId: input.apiKeyId,
             queue: input.queue,
             fromAddress: m.payload.from,
             toAddresses: m.to,

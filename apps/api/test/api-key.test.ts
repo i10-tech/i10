@@ -1,234 +1,310 @@
-import type { APIKey } from "@clerk/backend"
 import { describe, expect, it, vi } from "vitest"
 import {
   cacheKeyFor,
-  unwrapKey,
+  hashKey,
+  hashesEqual,
+  mintKey,
+  prefixOf,
   verifyApiKey,
-  wrapSecret,
   type KeyCache,
+  type KeyRow,
+  type VerifyDeps,
 } from "../src/auth/api-key.js"
 
-const SECRET = "ak_abcdefghijklmnopqrstuvwxyz012345"
-const LIVE = "i10_live_abcdefghijklmnopqrstuvwxyz012345"
+/**
+ * ⚠ THESE USED TO ASSERT A WRAPPING THAT NO LONGER EXISTS. Clerk owned the
+ * secret and published no way to change its `ak_` prefix, so every key was
+ * rewritten to `i10_live_…` on the way out and stripped on the way back — and
+ * because both our prefixes are nine characters, the two variants unwrapped to
+ * ONE Clerk secret. That is why the mode had to come from Clerk's claims and
+ * never from the string a caller sent.
+ *
+ * Self-issued, the whole key including its prefix is hashed, so `i10_live_X`
+ * and `i10_test_X` are different credentials that match different rows. The
+ * hazard is gone rather than guarded, which is why the tests guarding it are.
+ */
 
-function clerkKey(over: Partial<APIKey> = {}): APIKey {
-  return {
-    id: "ak_id_1",
-    type: "api_key",
-    name: "prod",
-    subject: "org_123",
-    scopes: ["emails:send"],
-    claims: { tenantId: "ten-1", mode: "live" },
-    revoked: false,
-    revocationReason: null,
-    expired: false,
-    expiration: null,
-    createdBy: null,
-    description: null,
-    lastUsedAt: null,
-    createdAt: 0,
-    updatedAt: 0,
-    ...over,
-  } as APIKey
-}
+const TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
+const KEY_ID = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6072"
 
-function memoryCache(): KeyCache & { store: Map<string, string> } {
+const row = (over: Partial<KeyRow> = {}): KeyRow => ({
+  id: KEY_ID,
+  tenantId: TENANT,
+  scopes: [],
+  mode: "live",
+  revokedAt: null,
+  expiresAt: null,
+  ...over,
+})
+
+function fakeCache() {
   const store = new Map<string, string>()
   return {
     store,
-    get: async (k) => store.get(k) ?? null,
-    set: async (k, v) => void store.set(k, v),
-  }
+    get: async (k: string) => store.get(k) ?? null,
+    set: async (k: string, v: string) => {
+      store.set(k, v)
+    },
+    del: async (k: string) => {
+      store.delete(k)
+    },
+  } satisfies KeyCache & { store: Map<string, string> }
 }
 
-const httpError = (status: number) => Object.assign(new Error("clerk"), { status })
+const deps = (
+  byHash: (hash: string) => Promise<KeyRow | null>,
+  over: Partial<VerifyDeps> = {},
+): VerifyDeps & { cache: ReturnType<typeof fakeCache> } => {
+  const cache = fakeCache()
+  return { ...{ lookup: { byHash }, ttlSeconds: 60 }, ...over, cache }
+}
 
-describe("the wrapping", () => {
-  it("rewrites Clerk's prefix as ours, reversibly", () => {
-    expect(wrapSecret(SECRET, "live")).toBe(LIVE)
-    expect(unwrapKey(LIVE)).toBe(SECRET)
+describe("minting", () => {
+  it("produces a key of our own format", () => {
+    expect(mintKey("live").secret).toMatch(/^i10_live_[A-Za-z0-9_-]{16,512}$/)
+    expect(mintKey("test").secret).toMatch(/^i10_test_[A-Za-z0-9_-]{16,512}$/)
   })
 
-  it("refuses to mint a key it could not unwrap", () => {
-    expect(() => wrapSecret("sk_something", "live")).toThrow(/does not start with/)
+  /**
+   * ⚠ THE ASSERTION THAT REPLACES "strips both prefixes to one identical
+   * secret". That test existed because the old scheme made `i10_live_X` and
+   * `i10_test_X` the same credential wearing two labels, so the string could
+   * never be trusted to say which it was. Now they hash differently, so the
+   * mode is simply a property of the row that matched.
+   */
+  it("gives live and test keys different hashes for the same body", () => {
+    const body = "AAAAAAAAAAAAAAAAAAAAAAAA"
+    expect(hashKey(`i10_live_${body}`)).not.toBe(hashKey(`i10_test_${body}`))
   })
 
-  // ⚠ THE TRAP. Both prefixes are nine characters, so these strip to the same
-  // secret. Nothing may read the mode off the string — it comes from Clerk's
-  // claims, or a customer promotes a test key by editing one character.
-  it("strips both prefixes to one identical secret", () => {
-    expect(unwrapKey("i10_test_abcdefghijklmnopqrstuvwxyz012345")).toBe(unwrapKey(LIVE))
+  // ⚠ 32 bytes from a CSPRNG. Two mints colliding would mean the generator is
+  // not one, which is the failure that makes every other guarantee void.
+  it("does not repeat itself", () => {
+    const seen = new Set(Array.from({ length: 200 }, () => mintKey("live").secret))
+    expect(seen.size).toBe(200)
   })
 
-  it.each([
-    ["a bare Clerk secret", SECRET],
-    ["someone else's prefix", "sk_live_abcdefghijklmnopqrstuvwx"],
-    ["too short a body", "i10_live_abc"],
-    ["an invalid character", "i10_live_abcdefghijklmnop!!!!!!!!"],
-    ["empty", ""],
-  ])("does not unwrap %s", (_label, input) => {
-    expect(unwrapKey(input)).toBeNull()
+  it("never stores the secret in what it hands back for persistence", () => {
+    const minted = mintKey("live")
+    expect(minted.secretHash).toBe(hashKey(minted.secret))
+    expect(minted.secretHash).not.toContain(minted.secret)
+  })
+})
+
+describe("the displayed prefix", () => {
+  // Enough to tell two keys apart in a dashboard; nowhere near enough to use.
+  it("is the literal prefix plus eight characters", () => {
+    const key = "i10_live_abcdefghijklmnop"
+    expect(prefixOf(key)).toBe("i10_live_abcdefgh")
   })
 
-  it("hashes the key for the cache, so the secret never reaches Redis", () => {
-    const cacheKey = cacheKeyFor(LIVE)
-    expect(cacheKey).toMatch(/^apikey:[0-9a-f]{64}$/)
-    expect(cacheKey).not.toContain("abcdefghij")
+  /**
+   * ⚠ THE LITERAL PREFIX IS THE HALF THAT MATTERS FOR LEAK SCANNING. Showing
+   * only secret characters would identify a key to its owner and to nobody
+   * grepping repositories or logs for one.
+   */
+  it("keeps the literal prefix so a leak scan can grep for it", () => {
+    expect(prefixOf(mintKey("live").secret).startsWith("i10_live_")).toBe(true)
+    expect(prefixOf(mintKey("test").secret).startsWith("i10_test_")).toBe(true)
+  })
+
+  it("refuses anything that is not one of ours", () => {
+    expect(() => prefixOf("sk_live_whatever")).toThrow(/not an i10 key/)
+  })
+})
+
+describe("the cache key", () => {
+  /**
+   * ⚠ DERIVED FROM THE HASH, WHICH IS WHAT MAKES REVOCATION IMMEDIATE. A route
+   * revoking a key holds its ROW — never the secret, which nothing stores — so
+   * a cache keyed on the plaintext could not be evicted at that moment, and
+   * "instant revocation" would silently mean "within the TTL".
+   */
+  it("is computable from the stored hash alone", () => {
+    const minted = mintKey("live")
+    expect(cacheKeyFor(minted.secretHash)).toBe(cacheKeyFor(hashKey(minted.secret)))
+  })
+
+  it("never contains the secret", () => {
+    const minted = mintKey("live")
+    expect(cacheKeyFor(minted.secretHash)).not.toContain(minted.secret)
   })
 })
 
 describe("verification", () => {
-  it("resolves the tenant from Clerk's claims, not from the prefix", async () => {
-    const verify = vi.fn().mockResolvedValue(clerkKey())
-    const result = await verifyApiKey(LIVE, {
-      verify,
-      cache: memoryCache(),
-      ttlSeconds: 60,
-    })
+  it("resolves the tenant and our own key id", async () => {
+    const key = mintKey("live")
+    const d = deps(async () => row())
 
-    expect(verify).toHaveBeenCalledWith(SECRET)
-    expect(result).toEqual({
+    const outcome = await verifyApiKey(key.secret, d)
+
+    expect(outcome).toEqual({
       status: "verified",
-      key: {
-        apiKeyId: "ak_id_1",
-        tenantId: "ten-1",
-        scopes: ["emails:send"],
-        mode: "live",
-      },
+      key: { apiKeyId: KEY_ID, tenantId: TENANT, scopes: [], mode: "live" },
     })
   })
 
-  // The whole point of the wrap trap: a key whose string says live but whose
-  // claims say test is a TEST key.
-  it("takes the mode from the claims even when the prefix disagrees", async () => {
-    const verify = vi
-      .fn()
-      .mockResolvedValue(clerkKey({ claims: { tenantId: "t", mode: "test" } }))
-    const result = await verifyApiKey(LIVE, {
-      verify,
-      cache: memoryCache(),
-      ttlSeconds: 60,
-    })
-    expect(result).toMatchObject({ status: "verified", key: { mode: "test" } })
+  // ⚠ The row decides, not the string. A caller cannot edit `test` into `live`
+  // because the hash would no longer match any row at all.
+  it("takes the mode from the row", async () => {
+    const outcome = await verifyApiKey(
+      mintKey("test").secret,
+      deps(async () => row({ mode: "test" })),
+    )
+    expect(outcome.status === "verified" && outcome.key.mode).toBe("test")
   })
 
-  it("never asks Clerk about a malformed key", async () => {
-    const verify = vi.fn()
-    const result = await verifyApiKey("nonsense", {
-      verify,
-      cache: memoryCache(),
-      ttlSeconds: 60,
-    })
-    expect(verify).not.toHaveBeenCalled()
-    expect(result.status).toBe("rejected")
+  it("never touches the database for a malformed key", async () => {
+    const byHash = vi.fn(async () => row())
+    const outcome = await verifyApiKey("nope", deps(byHash))
+
+    expect(outcome).toEqual({ status: "rejected", reason: "malformed key" })
+    expect(byHash).not.toHaveBeenCalled()
   })
 
   it("serves the second call from cache", async () => {
-    const verify = vi.fn().mockResolvedValue(clerkKey())
-    const cache = memoryCache()
-    const deps = { verify, cache, ttlSeconds: 60 }
+    const key = mintKey("live")
+    const byHash = vi.fn(async () => row())
+    const d = deps(byHash)
 
-    await verifyApiKey(LIVE, deps)
-    const second = await verifyApiKey(LIVE, deps)
+    await verifyApiKey(key.secret, d)
+    await verifyApiKey(key.secret, d)
 
-    expect(verify).toHaveBeenCalledTimes(1)
-    expect(second).toMatchObject({ status: "verified", key: { tenantId: "ten-1" } })
+    expect(byHash).toHaveBeenCalledTimes(1)
   })
 
   it("does not cache a rejection", async () => {
-    const verify = vi.fn().mockRejectedValue(httpError(404))
-    const cache = memoryCache()
-    const deps = { verify, cache, ttlSeconds: 60 }
+    const key = mintKey("live")
+    const byHash = vi.fn(async () => null)
+    const d = deps(byHash)
 
-    await verifyApiKey(LIVE, deps)
-    await verifyApiKey(LIVE, deps)
+    await verifyApiKey(key.secret, d)
+    await verifyApiKey(key.secret, d)
 
-    expect(verify).toHaveBeenCalledTimes(2)
-    expect(cache.store.size).toBe(0)
+    expect(byHash).toHaveBeenCalledTimes(2)
+    expect(d.cache.store.size).toBe(0)
   })
 
-  it.each([
-    ["revoked", clerkKey({ revoked: true })],
-    ["expired", clerkKey({ expired: true })],
-  ])("rejects a %s key even though verify() resolved", async (_label, key) => {
-    const result = await verifyApiKey(LIVE, {
-      verify: vi.fn().mockResolvedValue(key),
-      cache: memoryCache(),
-      ttlSeconds: 60,
-    })
-    expect(result.status).toBe("rejected")
-  })
+  it("stores the resolved key under the hash, so the secret never reaches Redis", async () => {
+    const key = mintKey("live")
+    const d = deps(async () => row())
+    await verifyApiKey(key.secret, d)
 
-  // ⚠ The one that matters. Reporting `rejected` during a Clerk outage tells
-  // every customer their key is wrong, and they respond by rotating keys that
-  // were fine.
-  it.each([
-    ["a transport failure", new Error("ECONNREFUSED")],
-    ["a 500", httpError(500)],
-    ["a 503", httpError(503)],
-    ["a 429", httpError(429)],
-  ])("reports unavailable, not rejected, for %s", async (_label, error) => {
-    const result = await verifyApiKey(LIVE, {
-      verify: vi.fn().mockRejectedValue(error),
-      cache: memoryCache(),
-      ttlSeconds: 60,
-    })
-    expect(result.status).toBe("unavailable")
-  })
-
-  it.each([[401], [403], [404], [422]])("rejects on a %i", async (status) => {
-    const result = await verifyApiKey(LIVE, {
-      verify: vi.fn().mockRejectedValue(httpError(status)),
-      cache: memoryCache(),
-      ttlSeconds: 60,
-    })
-    expect(result.status).toBe("rejected")
-  })
-
-  // Our data is wrong, not the customer's key, so it must not read as a 401.
-  it.each([
-    ["no claims at all", clerkKey({ claims: null })],
-    ["no tenant", clerkKey({ claims: { mode: "live" } })],
-    ["an unknown mode", clerkKey({ claims: { tenantId: "t", mode: "staging" } })],
-  ])("reports unavailable when the key carries %s", async (_label, key) => {
-    const result = await verifyApiKey(LIVE, {
-      verify: vi.fn().mockResolvedValue(key),
-      cache: memoryCache(),
-      ttlSeconds: 60,
-    })
-    expect(result.status).toBe("unavailable")
+    expect([...d.cache.store.keys()]).toEqual([cacheKeyFor(hashKey(key.secret))])
+    expect(JSON.stringify([...d.cache.store.values()])).not.toContain(key.secret)
   })
 })
 
-describe("when Redis is the thing that is broken", () => {
-  const broken: KeyCache = {
-    get: async () => {
-      throw new Error("redis down")
-    },
-    set: async () => {
-      throw new Error("redis down")
-    },
-  }
+describe("keys that exist but must not work", () => {
+  /**
+   * ⚠ REVOKED IS `rejected`, NOT `unavailable`, AND THE LOOKUP MUST STILL
+   * RETURN THE ROW. A store that filtered revoked keys out would make
+   * "withdrawn" and "never existed" indistinguishable here — different things
+   * to log after a leak.
+   */
+  it("rejects a revoked key and says so", async () => {
+    const outcome = await verifyApiKey(
+      mintKey("live").secret,
+      deps(async () => row({ revokedAt: new Date("2026-09-08T10:00:00Z") })),
+    )
+    expect(outcome).toEqual({ status: "rejected", reason: "key revoked" })
+  })
 
-  // Redis being down is a reason to ask Clerk, never a reason to refuse a
-  // customer — the cache is an optimisation, not a dependency.
-  it("falls through to Clerk and still succeeds", async () => {
-    const result = await verifyApiKey(LIVE, {
-      verify: vi.fn().mockResolvedValue(clerkKey()),
-      cache: broken,
+  it("rejects an expired key", async () => {
+    const outcome = await verifyApiKey(
+      mintKey("live").secret,
+      deps(async () => row({ expiresAt: new Date("2026-09-07T00:00:00Z") }), {
+        now: () => new Date("2026-09-08T00:00:00Z"),
+      }),
+    )
+    expect(outcome).toEqual({ status: "rejected", reason: "key expired" })
+  })
+
+  it("accepts a key whose expiry has not arrived", async () => {
+    const outcome = await verifyApiKey(
+      mintKey("live").secret,
+      deps(async () => row({ expiresAt: new Date("2026-09-09T00:00:00Z") }), {
+        now: () => new Date("2026-09-08T00:00:00Z"),
+      }),
+    )
+    expect(outcome.status).toBe("verified")
+  })
+
+  /**
+   * ⚠ A ROW WE CANNOT READ IS OUR FAULT, SO IT IS NOT A 401. Telling a customer
+   * their key is invalid when our own column is malformed sends them to rotate
+   * a key that was fine.
+   */
+  it("reports our own bad data as unavailable, never as a bad key", async () => {
+    const outcome = await verifyApiKey(
+      mintKey("live").secret,
+      deps(async () => row({ mode: "staging" })),
+    )
+    expect(outcome.status).toBe("unavailable")
+  })
+})
+
+describe("when the dependency underneath is broken", () => {
+  /**
+   * ⚠ THE DISTINCTION SURVIVED THE MOVE OFF CLERK, ONLY THE FAILING THING
+   * CHANGED. This used to mean "Clerk did not answer"; it now means "Postgres
+   * did not answer". Collapsing it into a 401 tells a customer their key is
+   * wrong during an outage that was never theirs — the same rule authd follows
+   * answering LDAP `unavailable` rather than `invalidCredentials`.
+   */
+  it("reports a database failure as unavailable", async () => {
+    const outcome = await verifyApiKey(
+      mintKey("live").secret,
+      deps(async () => {
+        throw new Error("connection refused")
+      }),
+    )
+    expect(outcome).toEqual({ status: "unavailable", reason: "connection refused" })
+  })
+
+  // Redis being down is a reason to ask Postgres, never a reason to refuse.
+  it("falls through to the database when the cache throws", async () => {
+    const key = mintKey("live")
+    const cache: KeyCache = {
+      get: async () => {
+        throw new Error("redis down")
+      },
+      set: async () => {
+        throw new Error("redis down")
+      },
+      del: async () => {
+        throw new Error("redis down")
+      },
+    }
+
+    const outcome = await verifyApiKey(key.secret, {
+      lookup: { byHash: async () => row() },
+      cache,
       ttlSeconds: 60,
     })
-    expect(result).toMatchObject({ status: "verified" })
+
+    expect(outcome.status).toBe("verified")
   })
 
   it("treats a corrupt cache entry as a miss", async () => {
-    const cache = memoryCache()
-    cache.store.set(cacheKeyFor(LIVE), "{not json")
-    const verify = vi.fn().mockResolvedValue(clerkKey())
+    const key = mintKey("live")
+    const d = deps(async () => row())
+    d.cache.store.set(cacheKeyFor(hashKey(key.secret)), "{not json")
 
-    const result = await verifyApiKey(LIVE, { verify, cache, ttlSeconds: 60 })
+    expect((await verifyApiKey(key.secret, d)).status).toBe("verified")
+  })
+})
 
-    expect(verify).toHaveBeenCalledTimes(1)
-    expect(result).toMatchObject({ status: "verified" })
+describe("comparing hashes", () => {
+  it("matches equal hashes and rejects different ones", () => {
+    const a = hashKey("i10_live_aaaaaaaaaaaaaaaa")
+    const b = hashKey("i10_live_bbbbbbbbbbbbbbbb")
+    expect(hashesEqual(a, a)).toBe(true)
+    expect(hashesEqual(a, b)).toBe(false)
+  })
+
+  // timingSafeEqual throws on a length mismatch rather than returning false.
+  it("does not throw on different lengths", () => {
+    expect(hashesEqual("abc", "abcd")).toBe(false)
   })
 })

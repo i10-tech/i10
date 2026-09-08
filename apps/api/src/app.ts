@@ -16,6 +16,7 @@ import { emails } from "./routes/emails.js"
 import { createSesWebhooks, type SesWebhookDeps } from "./routes/ses-events.js"
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
 import { domains } from "./routes/domains.js"
+import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
@@ -56,6 +57,14 @@ export interface AppDeps {
   emailLookup?: EmailLookup
   /** Customer-managed webhook destinations, for `/webhook-endpoints`. */
   webhookEndpoints?: WebhookEndpointStore
+  /**
+   * Minting, listing, revoking and rotating a tenant's own API keys.
+   *
+   * ⚠ THESE ROUTES CANNOT MINT A TENANT'S FIRST KEY — they authenticate with
+   * one. See routes/api-keys.ts. Omitted in tests and in the OpenAPI generator,
+   * where they answer 501.
+   */
+  apiKeys?: ApiKeyRouteDeps
   /**
    * Sending domains, for `/domains`.
    *
@@ -225,6 +234,10 @@ export function createApp(deps: AppDeps = {}) {
 
   // Resend's paths, verbs and body keys. See routes/domains.ts.
   app.route("/domains", domains)
+
+  // ⚠ API-key authenticated, like everything above it — which is exactly why it
+  // cannot issue a tenant's first key. See routes/api-keys.ts.
+  app.route("/api-keys", createApiKeyRoutes(deps.apiKeys))
 
   // Mounted unconditionally. Only mounting it when configured would turn a
   // missing secret into a 404 that looks like Clerk having the wrong URL,

@@ -40,15 +40,17 @@ function app(over: Partial<AcceptOps> = {}, metering: Metering = unmetered) {
     app: createApp({
       sendPath,
       apiKeyAuth: {
-        verify: async () =>
-          ({
-            id: "ak_1",
+        lookup: {
+          byHash: async () => ({
+            id: "key-1",
+            tenantId: "ten-1",
             scopes: ["emails:send"],
-            claims: { tenantId: "ten-1", mode: "live" },
-            revoked: false,
-            expired: false,
-          }) as never,
-        cache: { get: async () => null, set: async () => {} },
+            mode: "live",
+            revokedAt: null,
+            expiresAt: null,
+          }),
+        },
+        cache: { get: async () => null, set: async () => {}, del: async () => {} },
         ttlSeconds: 60,
       },
     }),
@@ -282,15 +284,17 @@ describe("when the send path is not configured", () => {
   it("answers 501 rather than inventing an id", async () => {
     const unconfigured = createApp({
       apiKeyAuth: {
-        verify: async () =>
-          ({
-            id: "ak_1",
+        lookup: {
+          byHash: async () => ({
+            id: "key-1",
+            tenantId: "ten-1",
             scopes: [],
-            claims: { tenantId: "ten-1", mode: "live" },
-            revoked: false,
-            expired: false,
-          }) as never,
-        cache: { get: async () => null, set: async () => {} },
+            mode: "live",
+            revokedAt: null,
+            expiresAt: null,
+          }),
+        },
+        cache: { get: async () => null, set: async () => {}, del: async () => {} },
         ttlSeconds: 60,
       },
     })
