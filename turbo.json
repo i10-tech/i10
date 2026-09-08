@@ -24,6 +24,11 @@
     // survive transaction pooling.
     "DATABASE_URL",
     "MIGRATE_DATABASE_URL",
+    // Read directly by scripts/adopt-dkim.ts, which unseals the stored DKIM
+    // private key and talks to SES. Runtime only: they change nothing about
+    // what gets built.
+    "WEBHOOK_SECRET_KEY",
+    "AWS_REGION",
     "I10_API_KEY",
     "I10_BASE_URL",
     // The pod name, read by the worker to build a claim identity. Runtime only

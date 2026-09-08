@@ -44,7 +44,6 @@ import { eq } from "drizzle-orm"
 import { createDb } from "../src/db/client.js"
 import { domains } from "../src/db/core.js"
 import { dkimRecordValue, generateDkimKeypair } from "../src/domains/dkim.js"
-import { loadEnv } from "../src/env.js"
 import { secretBox } from "../src/webhooks/signing.js"
 
 const name = process.argv[2]?.trim().toLowerCase()
@@ -55,14 +54,35 @@ if (!name) {
   process.exit(1)
 }
 
-const env = loadEnv()
-const { sql, db } = createDb(env.DATABASE_URL)
+/**
+ * ⚠ THE OWNER ROLE, NOT `i10_api`, AND `core.domains` IS WHY. Migration 0002
+ * puts a `tenant_isolation` policy on it that reads
+ * `current_setting('app.tenant_id')` with no `missing_ok` — so a connection
+ * that has not set a tenant does not quietly see zero rows, it ERRORS. This
+ * script cannot set one either: it has to read the row before it knows which
+ * tenant owns it. Policies do not apply to a table's owner, which is exactly
+ * why `migrate.ts` connects this way, and this is migration-shaped work.
+ *
+ * ⚠ AND `loadEnv()` IS DELIBERATELY NOT USED. It demands the whole server's
+ * configuration — Redis, Clerk, the mail hostnames — none of which this needs.
+ * Requiring them would mean nobody could run a one-domain fix without standing
+ * up the entire environment.
+ */
+const url = process.env.MIGRATE_DATABASE_URL ?? process.env.DATABASE_URL
+const sealingKey = process.env.WEBHOOK_SECRET_KEY
+const region = process.env.AWS_REGION ?? "eu-central-1"
 
-const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
-if (!secrets) {
+if (!url) {
+  console.error("MIGRATE_DATABASE_URL (or DATABASE_URL) is required")
+  process.exit(1)
+}
+if (!sealingKey) {
   console.error("WEBHOOK_SECRET_KEY is required — the private key is sealed with it.")
   process.exit(1)
 }
+
+const { sql, db } = createDb(url)
+const secrets = secretBox(sealingKey)
 
 const [row] = await db.select().from(domains).where(eq(domains.name, name)).limit(1)
 
@@ -130,7 +150,7 @@ if (!published.includes(row.dkimPublicKey)) {
   process.exit(1)
 }
 
-const ses = new SESv2Client({ region: env.AWS_REGION })
+const ses = new SESv2Client({ region })
 await ses.send(
   new PutEmailIdentityDkimSigningAttributesCommand({
     EmailIdentity: name,
