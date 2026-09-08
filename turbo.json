@@ -30,6 +30,18 @@
     // and per-replica by definition, so it could not be a build input even if
     // it wanted to be.
     "HOSTNAME",
+    // The console's Clerk wiring. ⚠ UNPREFIXED ON PURPOSE, AND THAT IS WHY THEY
+    // BELONG HERE RATHER THAN IN A TASK'S `env`. Next inlines `NEXT_PUBLIC_*`
+    // at BUILD time — server code included — so a prefixed key absent from a CI
+    // build is compiled in as `undefined` and cannot be set later in the pod.
+    // Unprefixed, read at request time, they stay genuinely runtime, which is
+    // what lets one console image serve every environment. CLERK_SIGN_IN_URL and
+    // CLERK_SIGN_UP_URL point at the Account Portal (accounts.i10.tech); unset,
+    // Clerk infers its own, which is right for a development instance.
+    "CLERK_PUBLISHABLE_KEY",
+    "CLERK_SECRET_KEY",
+    "CLERK_SIGN_IN_URL",
+    "CLERK_SIGN_UP_URL",
     "SENTRY_ENVIRONMENT",
     "OTEL_EXPORTER_OTLP_ENDPOINT",
     "OTEL_SERVICE_NAME"
