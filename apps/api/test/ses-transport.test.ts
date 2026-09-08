@@ -29,6 +29,12 @@ function client(behaviour: () => unknown = () => ({ MessageId: "ses-1" })) {
 const inputOf = (c: { send: { mock: { calls: [{ input: unknown }][] } } }) =>
   c.send.mock.calls[0]![0].input as Record<string, never>
 
+/** The message as it actually goes on the wire, now that every send is raw. */
+const rawOf = (c: { send: { mock: { calls: [{ input: unknown }][] } } }) =>
+  Buffer.from(
+    (inputOf(c).Content as unknown as { Raw: { Data: Uint8Array } }).Raw.Data,
+  ).toString("utf8")
+
 describe("what reaches SES", () => {
   it("sends one message per call", async () => {
     const c = client()
@@ -69,16 +75,15 @@ describe("what reaches SES", () => {
 
   // ⚠ The duplicate mitigation. A retry must reuse this exact header or the
   // accepted-duplicate rate becomes a delivered-duplicate rate.
+  //
+  // ⚠ AND IT IS READ OUT OF THE RAW BYTES, WHICH IS THE WHOLE POINT. This used
+  // to assert `Content.Simple.Headers`, and passed, while SES refused every
+  // such send with `Header <Message-ID> is not supported` — the header is
+  // reserved there and can only travel in raw MIME.
   it("sets a Message-ID derived from our own id", async () => {
     const c = client()
     await sesTransport({ client: c }).send(message)
-    const headers = inputOf(c as never).Content as unknown as {
-      Simple: { Headers: { Name: string; Value: string }[] }
-    }
-    expect(headers.Simple.Headers).toContainEqual({
-      Name: "Message-ID",
-      Value: `<${message.id}@i10.tech>`,
-    })
+    expect(rawOf(c)).toContain(`Message-ID: <${message.id}@i10.tech>`)
   })
 
   it("refuses to let a caller override the Message-ID", async () => {
@@ -87,13 +92,9 @@ describe("what reaches SES", () => {
       ...message,
       headers: { "message-id": "<forged@evil.test>" },
     })
-    const headers = (
-      inputOf(c as never).Content as unknown as {
-        Simple: { Headers: { Name: string; Value: string }[] }
-      }
-    ).Simple.Headers
-    expect(headers.filter((h) => h.Name.toLowerCase() === "message-id")).toHaveLength(1)
-    expect(JSON.stringify(headers)).not.toContain("evil.test")
+    const raw = rawOf(c)
+    expect(raw.match(/^Message-ID:/gim) ?? []).toHaveLength(1)
+    expect(raw).not.toContain("evil.test")
   })
 
   it("omits empty recipient lists rather than sending empty arrays", async () => {
@@ -180,12 +181,27 @@ describe("attachments", () => {
     expect(raw).not.toContain("hidden@example.com")
   })
 
-  it("stays on the simple path without one", async () => {
+  /**
+   * ⚠ RAW EVEN WITH NOTHING ATTACHED, WHICH IS THE OPPOSITE OF WHAT THIS FILE
+   * USED TO ASSERT. `Content.Simple` cannot carry a `Message-ID`, so choosing it
+   * for the common case meant choosing to lose the duplicate mitigation on every
+   * ordinary send. There is only one path now.
+   */
+  it("uses raw content even without an attachment", async () => {
     const c = client()
     await sesTransport({ client: c }).send(message)
     const content = inputOf(c).Content as unknown as { Raw?: unknown; Simple?: unknown }
-    expect(content.Raw).toBeUndefined()
-    expect(content.Simple).toBeDefined()
+    expect(content.Simple).toBeUndefined()
+    expect(content.Raw).toBeDefined()
+  })
+
+  // ⚠ Nothing to mix, so no `multipart/mixed`. Wrapping a single body in one
+  // would work and would make a plain send structurally indistinguishable from
+  // one carrying a file.
+  it("does not wrap a message with no attachments in multipart/mixed", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send(message)
+    expect(rawOf(c)).not.toContain("multipart/mixed")
   })
 })
 
