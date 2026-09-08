@@ -109,7 +109,11 @@ export const assignStatement = (input: {
   anchor: Date
 }): SQL => sql`
   insert into core.plan_assignments (tenant_id, plan_id, anchor)
-  values (${input.tenantId}::uuid, ${input.planId}, ${input.anchor})
+  values (
+    ${input.tenantId}::uuid,
+    ${input.planId},
+    ${input.anchor.toISOString()}::timestamptz
+  )
   on conflict (tenant_id) do update
      set plan_id    = excluded.plan_id,
          updated_at = now()
@@ -131,7 +135,11 @@ export const ensureStatement = (input: {
   anchor: Date
 }): SQL => sql`
   insert into core.plan_assignments (tenant_id, plan_id, anchor)
-  values (${input.tenantId}::uuid, ${input.planId}, ${input.anchor})
+  values (
+    ${input.tenantId}::uuid,
+    ${input.planId},
+    ${input.anchor.toISOString()}::timestamptz
+  )
   on conflict (tenant_id) do nothing
 `
 
@@ -226,7 +234,7 @@ export const recordStatement = (
     events.map(
       (event) => sql`(
       ${key.tenantId}::uuid, ${key.featureId}, ${event.id},
-      ${key.shard}, ${event.value}, ${event.at}
+      ${key.shard}, ${event.value}, ${event.at.toISOString()}::timestamptz
     )`,
     ),
     sql`, `,
