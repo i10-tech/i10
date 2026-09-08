@@ -1,10 +1,14 @@
 import {
   Body,
+  Button,
+  Column,
   Container,
   Head,
   Hr,
   Html,
+  Link,
   Preview,
+  Row,
   Section,
   Text,
 } from "@react-email/components"
@@ -130,4 +134,99 @@ export function Layout({
  */
 export function Code({ code }: { code: string }) {
   return <Text style={styles.code}>{code}</Text>
+}
+
+export const detail = {
+  cell: {
+    backgroundColor: "#fafafa",
+    fontSize: "13px",
+    padding: "8px 12px",
+  },
+  label: { color: "#8a8a8a", margin: 0 },
+  value: { color: "#0a0a0a", fontWeight: 600, margin: 0 },
+} as const
+
+/**
+ * The dark action button.
+ *
+ * ⚠ A TABLE UNDERNEATH, WHICH IS WHY IT IS A COMPONENT AND NOT AN <a>. Outlook
+ * renders through Word and gives a styled anchor no padding and no background,
+ * so the "button" arrives as bare blue underlined text. react-email's Button
+ * emits the table-and-VML shape that survives it.
+ */
+export function ActionButton({ href, children }: { href: string; children: string }) {
+  return (
+    <Button
+      href={href}
+      style={{
+        backgroundColor: "#131316",
+        borderRadius: "6px",
+        color: "#ffffff",
+        display: "inline-block",
+        fontSize: "13px",
+        fontWeight: 600,
+        margin: "24px 0 16px",
+        padding: "10px 16px",
+        textDecoration: "none",
+      }}
+    >
+      {children}
+    </Button>
+  )
+}
+
+/**
+ * ⚠ EVERY BUTTON GETS THIS UNDERNEATH. Corporate mail clients and link scanners
+ * routinely mangle or strip the button's href, and a person who cannot click it
+ * has no other way through — the plain link is the fallback that keeps the mail
+ * usable rather than a courtesy.
+ */
+export function FallbackLink({ href }: { href: string }) {
+  return (
+    <Text style={styles.text}>
+      If the button does not work,{" "}
+      <Link href={href} style={{ color: "#131316", textDecoration: "underline" }}>
+        use this link instead
+      </Link>
+      .
+    </Text>
+  )
+}
+
+/** One label/value row in a details block. */
+export function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <Row>
+      <Column style={{ ...detail.cell, width: "35%" }}>
+        <Text style={detail.label}>{label}</Text>
+      </Column>
+      <Column style={{ ...detail.cell, width: "65%" }}>
+        <Text style={detail.value}>{value}</Text>
+      </Column>
+    </Row>
+  )
+}
+
+/**
+ * "Didn't request this?" — the provenance footer on anything actionable.
+ *
+ * ⚠ IT NAMES THE DEVICE AND THE TIME, WHICH IS THE ONLY PART OF A PHISHING
+ * DEFENCE A CUSTOMER CAN ACTUALLY USE. A code email that says nothing about
+ * where it came from gives the recipient no way to tell a real one from a
+ * forged one; "requested from Chrome on macOS at 14:02" does.
+ */
+export function Provenance({ from, at }: { from?: string; at?: string }) {
+  if (!from && !at) return null
+
+  return (
+    <Section style={{ marginTop: "32px" }}>
+      <Text style={{ ...styles.text, fontWeight: 600, marginBottom: "4px" }}>
+        Didn&apos;t request this?
+      </Text>
+      <Text style={{ ...styles.text, margin: 0 }}>
+        This was requested from {from ?? "an unknown device"}
+        {at ? ` at ${at}` : ""}. If it was not you, you can ignore this message.
+      </Text>
+    </Section>
+  )
 }

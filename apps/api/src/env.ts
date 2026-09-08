@@ -39,6 +39,27 @@ const schema = z.object({
   // forged event could create a mailbox on a domain we host or silence one.
   CLERK_WEBHOOK_SECRET: z.string().min(1),
 
+  /**
+   * Who i10's own authentication mail comes from, e.g. `i10 <no-reply@i10.tech>`.
+   *
+   * ⚠ UNSET MEANS CLERK KEEPS SENDING, WHICH IS THE SAFE DEFAULT RATHER THAN A
+   * DEGRADED ONE. Clerk's per-template "Delivered by Clerk" switch is still on
+   * until somebody turns it off, so an unconfigured deployment simply does not
+   * take over — it must never be the case that we stop Clerk sending and then
+   * fail to send ourselves, because that is a sign-up nobody can complete.
+   */
+  AUTH_EMAIL_FROM: z.string().min(1).optional(),
+
+  /**
+   * The tenant i10's own mail is attributed to.
+   *
+   * ⚠ A SLUG, NOT AN ID, AND RESOLVED AT BOOT. The tenant's uuid is generated
+   * per deployment; migration 0029 makes the same point when it attributes
+   * i10.tech by slug. A literal uuid copied between environments would send
+   * nothing anywhere but the one it came from.
+   */
+  AUTH_EMAIL_TENANT_SLUG: z.string().min(1).default("i10"),
+
   // Issues and verifies customer API keys. Clerk owns the secret; what a
   // customer holds is that secret rewritten under our own prefix — see
   // src/auth/api-key.ts.

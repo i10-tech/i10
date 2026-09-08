@@ -95,6 +95,7 @@ jobs:
             # Each app lists its OWN sources plus every workspace package it
             # consumes, transitively. Read off the package.json files:
             #   contracts → api, node
+            #   emails    → api      (clerk's auth mail, rendered by us)
             #   node      → next, console
             #   next      → console
             #   ui        → console, web, auth
@@ -102,6 +103,7 @@ jobs:
             api:
               - 'apps/api/**'
               - 'packages/contracts/**'
+              - 'packages/emails/**'
             console:
               - 'apps/console/**'
               - 'packages/ui/**'
@@ -123,6 +125,7 @@ jobs:
               - 'apps/docs/**'
               - 'apps/api/**'
               - 'packages/contracts/**'
+              - 'packages/emails/**'
             # A Go module with its own go.sum, deliberately outside the pnpm
             # workspace. Nothing in the Node sentinel below can affect it.
             authd:

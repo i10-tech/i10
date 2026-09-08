@@ -27,6 +27,8 @@ import { MAILBOXES } from "./metering/levels.js"
 import { sesIdentity } from "./domains/identity.js"
 import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
+import { authEmailDelivery } from "./auth-email/deliver.js"
+import { authEmailSender } from "./auth-email/sender.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
@@ -237,6 +239,36 @@ const depthSources = {
   ...(webhookQueue ? { webhooks: webhookQueue } : {}),
 }
 
+/**
+ * i10's own tenant, for the mail i10 sends about itself.
+ *
+ * ⚠ RESOLVED ONCE AT BOOT AND ALLOWED TO BE ABSENT. A fresh database has no
+ * `i10` tenant — migration 0029 inserts one only where it already exists — so
+ * this is `null` on a new deployment and authentication mail simply stays with
+ * Clerk. Failing to boot over it would make the API refuse to start on exactly
+ * the deployments that have no customers to email.
+ */
+const authEmailTenantId = await (async () => {
+  if (!env.AUTH_EMAIL_FROM) return null
+
+  // The postgres client directly rather than drizzle: `core.tenants` has no
+  // table definition in this app, and one query at boot does not earn one.
+  const rows = await sql<{ id: string }[]>`
+    select id::text as id
+      from core.tenants
+     where slug = ${env.AUTH_EMAIL_TENANT_SLUG}
+     limit 1`
+
+  const id = rows[0]?.id ?? null
+  if (!id) {
+    log.warn(
+      { slug: env.AUTH_EMAIL_TENANT_SLUG },
+      "no tenant for auth email — clerk keeps delivering its own",
+    )
+  }
+  return id
+})()
+
 const app = createApp({
   apiKeyAuth: {
     // ⚠ OUR OWN TABLE, NOT CLERK. See auth/api-key.ts for why, and note the
@@ -253,6 +285,24 @@ const app = createApp({
     signingSecret: env.CLERK_WEBHOOK_SECRET,
     hostedDomains: env.MAIL_DOMAINS,
     provisioning,
+    // ⚠ ONLY WHEN BOTH HALVES EXIST. Without a from-address or i10's tenant we
+    // would have nowhere to send from and nothing to attribute it to, and the
+    // webhook then acknowledges the event while Clerk keeps sending — which is
+    // the state the product is in today, and a safe place to fail to.
+    ...(env.AUTH_EMAIL_FROM && authEmailTenantId
+      ? {
+          authEmail: authEmailDelivery({
+            sender: authEmailSender({
+              tenantId: authEmailTenantId,
+              from: env.AUTH_EMAIL_FROM,
+              ops: acceptDatabaseOps({ db, queues: sendQueues }),
+              metering,
+              log,
+            }),
+            log,
+          }),
+        }
+      : {}),
     log,
   },
   autoconfig: {

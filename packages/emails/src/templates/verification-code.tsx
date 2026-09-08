@@ -1,19 +1,25 @@
 import { Text } from "@react-email/components"
-import { Code, Layout, styles } from "../layout.js"
+import { Code, Layout, Provenance, styles } from "../layout.js"
 
-/** Sign-up: proving the address belongs to the person creating the account. */
-export function VerificationCode({ code }: { code: string }) {
+/** Clerk's "Verification code" — sign-up, and any re-verification of an address. */
+export function VerificationCode({
+  code,
+  requestedFrom,
+  requestedAt,
+}: {
+  code: string
+  requestedFrom?: string
+  requestedAt?: string
+}) {
   return (
     <Layout preview="Your i10 verification code">
-      <Text style={styles.heading}>Verify your email</Text>
-      <Text style={styles.text}>
-        Enter this code to finish creating your i10 account.
-      </Text>
+      <Text style={styles.heading}>Verification code</Text>
+      <Text style={styles.text}>Enter this code when prompted:</Text>
       <Code code={code} />
       <Text style={styles.text}>
-        The code expires shortly. If you did not try to create an account, you can
-        ignore this message.
+        To protect your account, do not share this code with anyone.
       </Text>
+      <Provenance from={requestedFrom} at={requestedAt} />
     </Layout>
   )
 }
