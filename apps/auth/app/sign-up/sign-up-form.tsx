@@ -13,6 +13,7 @@ import {
   FieldSeparator,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
+import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 
@@ -31,9 +32,11 @@ import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 export function SignUpForm({
   afterAuthUrl,
   signInHref,
+  redirectRaw,
 }: {
   afterAuthUrl: string
   signInHref: string
+  redirectRaw?: string
 }) {
   const { signUp } = useSignUp()
   const [stage, setStage] = useState<"details" | "verify">("details")
@@ -219,10 +222,10 @@ export function SignUpForm({
         </Field>
         <Field>
           <FieldLabel htmlFor="password">Password</FieldLabel>
-          <Input
+          <PasswordInput
             id="password"
             name="password"
-            type="password"
+
             autoComplete="new-password"
             required
           />
@@ -230,10 +233,10 @@ export function SignUpForm({
         </Field>
         <Field>
           <FieldLabel htmlFor="confirm-password">Confirm Password</FieldLabel>
-          <Input
+          <PasswordInput
             id="confirm-password"
             name="confirm-password"
-            type="password"
+
             autoComplete="new-password"
             required
           />
@@ -255,7 +258,11 @@ export function SignUpForm({
           </Button>
         </Field>
         <FieldSeparator>Or continue with</FieldSeparator>
-        <OAuthButtons afterAuthUrl={afterAuthUrl} verb="Sign up" />
+        <OAuthButtons
+          afterAuthUrl={afterAuthUrl}
+          redirectRaw={redirectRaw}
+          verb="Sign up"
+        />
         <FieldDescription className="px-6 text-center">
           Already have an account?{" "}
           <Link href={signInHref} className="underline underline-offset-4">

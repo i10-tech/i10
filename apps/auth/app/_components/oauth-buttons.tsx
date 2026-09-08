@@ -37,9 +37,16 @@ const PROVIDERS = [
 
 export function OAuthButtons({
   afterAuthUrl,
+  redirectRaw,
   verb,
 }: {
   afterAuthUrl: string
+  /**
+   * The ORIGINAL `?redirect_url=`, forwarded to the callback page rather than
+   * the resolved destination — see sso-callback/page.tsx. A resolved URL
+   * travelling through a provider's redirect is an unvalidated URL again.
+   */
+  redirectRaw?: string
   /** "Continue" reads right on both pages; the prop exists so it need not. */
   verb?: string
 }) {
@@ -54,13 +61,15 @@ export function OAuthButtons({
       const { error } = await signIn.sso({
         strategy,
         // ⚠ TWO DIFFERENT URLS, AND SWAPPING THEM BREAKS THE FLOW SILENTLY.
-        // `redirectUrl` is where the person ends up once there is a session —
-        // the dashboard. `redirectCallbackUrl` is the page that finishes the
-        // handshake when the provider comes back needing more, and it must be
-        // one of ours. An absolute URL because the provider redirects to it
-        // from outside our origin.
+        // `redirectCallbackUrl` is OUR page, where the provider returns and
+        // where `finalize()` actually creates the session. `redirectUrl` is
+        // where the person ends up afterwards. Point the callback at the
+        // dashboard and the handshake is never finished — the browser lands on
+        // an app that has no session and bounces straight back to sign-in.
+        redirectCallbackUrl: `/sso-callback${
+          redirectRaw ? `?redirect_url=${encodeURIComponent(redirectRaw)}` : ""
+        }`,
         redirectUrl: afterAuthUrl,
-        redirectCallbackUrl: `${window.location.origin}/sso-callback`,
       })
 
       // Reached only when the redirect did not happen — otherwise the browser

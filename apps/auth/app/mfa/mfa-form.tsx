@@ -75,7 +75,14 @@ export function MfaForm({
    */
   const sent = useRef<Partial<Record<Method, boolean>>>({})
 
-  const ready = signIn?.status === "needs_second_factor"
+  // ⚠ TWO STATUSES LAND HERE, AND ONLY ONE OF THEM IS "TWO-FACTOR AUTH".
+  // `needs_second_factor` is a factor the ACCOUNT enrolled. `needs_client_trust`
+  // is Clerk proving this BROWSER — it fires on a first sign-in from a new
+  // device whether or not anyone turned MFA on, and it is answered through the
+  // same `mfa` namespace. Gating on the first alone left the common case
+  // stranded on a page that told people to start again.
+  const ready =
+    signIn?.status === "needs_second_factor" || signIn?.status === "needs_client_trust"
 
   // What this account actually has enrolled, narrowed to what we can finish.
   const available: Method[] = (signIn?.supportedSecondFactors ?? [])

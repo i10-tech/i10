@@ -12,6 +12,7 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
+import { PasswordInput } from "../_components/password-input"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 
 /*
@@ -163,10 +164,10 @@ export function ResetPasswordForm({
           </Field>
           <Field>
             <FieldLabel htmlFor="password">New password</FieldLabel>
-            <Input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
+
               autoComplete="new-password"
               required
             />
@@ -174,10 +175,10 @@ export function ResetPasswordForm({
           </Field>
           <Field>
             <FieldLabel htmlFor="confirm-password">Confirm new password</FieldLabel>
-            <Input
+            <PasswordInput
               id="confirm-password"
               name="confirm-password"
-              type="password"
+
               autoComplete="new-password"
               required
             />
