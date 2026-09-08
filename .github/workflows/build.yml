@@ -97,7 +97,7 @@ jobs:
             #   contracts → api, node
             #   node      → next, console
             #   next      → console
-            #   ui        → console, web
+            #   ui        → console, web, auth
             #   api       → docs   (docs generates its API reference from it)
             api:
               - 'apps/api/**'
@@ -108,6 +108,9 @@ jobs:
               - 'packages/next/**'
               - 'packages/node/**'
               - 'packages/contracts/**'
+            auth:
+              - 'apps/auth/**'
+              - 'packages/ui/**'
             web:
               - 'apps/web/**'
               - 'packages/ui/**'
@@ -166,6 +169,7 @@ jobs:
           SENTINEL_ALL: ${{ steps.filter.outputs.all }}
           CH_API: ${{ steps.filter.outputs.api }}
           CH_CONSOLE: ${{ steps.filter.outputs.console }}
+          CH_AUTH: ${{ steps.filter.outputs.auth }}
           CH_WEB: ${{ steps.filter.outputs.web }}
           CH_DOCS: ${{ steps.filter.outputs.docs }}
           CH_AUTHD: ${{ steps.filter.outputs.authd }}
@@ -181,12 +185,14 @@ jobs:
           table=$(jq -nc \
             --arg api "${CH_API:-false}" \
             --arg console "${CH_CONSOLE:-false}" \
+            --arg auth "${CH_AUTH:-false}" \
             --arg web "${CH_WEB:-false}" \
             --arg docs "${CH_DOCS:-false}" \
             --arg authd "${CH_AUTHD:-false}" \
             '[
               {name:"api",     image:"i10-api",     context:".",              file:"apps/api/Dockerfile",       node:true,  changed:$api},
               {name:"console", image:"i10-console", context:".",              file:"apps/console/Dockerfile",   node:true,  changed:$console},
+              {name:"auth",    image:"i10-auth",    context:".",              file:"apps/auth/Dockerfile",      node:true,  changed:$auth},
               {name:"web",     image:"i10-web",     context:".",              file:"apps/web/Dockerfile",       node:true,  changed:$web},
               {name:"docs",    image:"i10-docs",    context:".",              file:"apps/docs/Dockerfile",      node:true,  changed:$docs},
               {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", node:false, changed:$authd}

@@ -1,6 +1,21 @@
 @import "tailwindcss";
 
 /*
+ * ⚠ THE SCAN PATH LIVES HERE, IN THE PACKAGE, AND NOT IN THE APPS.
+ *
+ * Tailwind v4 scans the project that imports it. A workspace package reached
+ * through a pnpm symlink is NOT part of that project, so without this line
+ * every component in `packages/ui` renders with the right markup, the right
+ * class names, and no rules ever generated for them — unstyled, in every app,
+ * with nothing in any build log to say so. It did not matter while this package
+ * held only tokens and `cn()`; it started mattering the moment the first
+ * component landed in src/components.
+ *
+ * Relative to THIS file, so it is correct no matter which app does the import.
+ */
+@source "../";
+
+/*
  * i10 design tokens.
  *
  * The system is shadcn/ui following Uber Base's principles — the same standard

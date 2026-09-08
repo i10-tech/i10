@@ -35,13 +35,20 @@
     // at BUILD time — server code included — so a prefixed key absent from a CI
     // build is compiled in as `undefined` and cannot be set later in the pod.
     // Unprefixed, read at request time, they stay genuinely runtime, which is
-    // what lets one console image serve every environment. CLERK_SIGN_IN_URL and
-    // CLERK_SIGN_UP_URL point at the Account Portal (accounts.i10.tech); unset,
-    // Clerk infers its own, which is right for a development instance.
+    // what lets one image serve every environment. Read by BOTH apps/console
+    // and apps/auth. CLERK_SIGN_IN_URL and CLERK_SIGN_UP_URL point the console
+    // at apps/auth (auth.i10.tech); left unset, Clerk silently falls back to
+    // its own hosted Account Portal, which is a page we do not control.
     "CLERK_PUBLISHABLE_KEY",
     "CLERK_SECRET_KEY",
     "CLERK_SIGN_IN_URL",
     "CLERK_SIGN_UP_URL",
+    // apps/auth. Where a completed sign-in lands, and the origins it is allowed
+    // to land on. ⚠ THE ALLOWLIST IS A SECURITY CONTROL, NOT CONFIGURATION —
+    // see apps/auth/app/_lib/redirect.ts. Empty means every `?redirect_url=` is
+    // refused and everyone goes to the default, which fails closed.
+    "AUTH_DEFAULT_REDIRECT_URL",
+    "AUTH_ALLOWED_REDIRECT_ORIGINS",
     "SENTRY_ENVIRONMENT",
     "OTEL_EXPORTER_OTLP_ENDPOINT",
     "OTEL_SERVICE_NAME"

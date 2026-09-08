@@ -41,13 +41,15 @@ const mailbox = (address = "me@i10.tech"): Mailbox => ({
   created_at: new Date(0).toISOString(),
 })
 
-function harness(over: {
-  identity?: Partial<MailboxIdentity>
-  directory?: Partial<MailboxDirectory>
-  capacity?: ProvisionDeps["capacity"]
-  project?: ProvisionDeps["project"]
-  passwordEnabled?: boolean
-} = {}) {
+function harness(
+  over: {
+    identity?: Partial<MailboxIdentity>
+    directory?: Partial<MailboxDirectory>
+    capacity?: ProvisionDeps["capacity"]
+    project?: ProvisionDeps["project"]
+    passwordEnabled?: boolean
+  } = {},
+) {
   const addVerifiedAddress = vi.fn(async () => {})
   const activate = vi.fn(async () => mailbox())
 
@@ -197,7 +199,11 @@ describe("the plan's seats", () => {
     await create(h)
 
     expect(check).toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: TENANT, featureId: "mailboxes", requested: 1 }),
+      expect.objectContaining({
+        tenantId: TENANT,
+        featureId: "mailboxes",
+        requested: 1,
+      }),
     )
   })
 })

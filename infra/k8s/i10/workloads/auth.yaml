@@ -1,0 +1,99 @@
+# auth.i10.tech — sign-in, sign-up and password reset.
+#
+# ⚠ A SEPARATE ORIGIN FROM THE DASHBOARD, ON PURPOSE. The people who use this
+# app are not all dashboard users: an invited mailbox holder completes their
+# account here and may never be entitled to open dash.i10.tech at all. Serving
+# both from one deployment would put the "set your password" page inside the
+# app that shows a tenant's billing, one routing mistake away, forever.
+#
+# ⚠ THE IMAGE TAG BELOW IS A BOOTSTRAP VALUE AND SHOULD NOT SURVIVE the first
+# build — see console.yaml. `prod-latest` still here after auth has shipped
+# means its path filter in build.yml does not match where its sources live.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-auth
+  namespace: i10-prod
+spec:
+  selector:
+    app.kubernetes.io/name: i10-auth
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-auth
+  namespace: i10-prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-auth
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-auth
+    spec:
+      containers:
+        - name: auth
+          # ⚠ THE TAG IS UPDATED BY A COMMIT, NOT BY A DEPLOY COMMAND. That is
+          # what GitOps means here: the Build workflow publishes an image and
+          # writes its digest into this file, so `git log infra/` is the
+          # deployment history and a rollback is a revert.
+          #
+          # ⚠ THE `prod-latest` BELOW IS A BOOTSTRAP VALUE AND SHOULD NOT
+          # SURVIVE. The Build workflow's deploy job rewrites this line to
+          # `:prod-<sha>@sha256:<digest>` for every app it actually rebuilt. An
+          # app still reading `prod-latest` long after its first build means
+          # either it has never changed since this line was written, or its
+          # path filter in build.yml does not match where its sources live.
+          image: ghcr.io/i10-tech/i10-auth:prod-latest
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 3000 }
+          envFrom:
+            - secretRef: { name: i10-shared }
+            - secretRef: { name: i10-auth }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities: { drop: ["ALL"] }
+          # ⚠ `/healthz`, NOT `/`. Every console page now requires a Clerk
+          # session, so `/` answers a 307 to accounts.i10.tech for a signed-out
+          # caller — which kubelet scores as healthy, making the probe pass for
+          # a reason unrelated to the pod. Worse, if Clerk is unreachable and
+          # the middleware raises rather than redirecting, `/` turns 5xx and
+          # liveness restarts every replica during somebody else's outage. See
+          # apps/console/app/healthz/route.ts.
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: i10-auth
+  namespace: i10-prod
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`auth.i10.tech`)
+      kind: Rule
+      services:
+        - name: i10-auth
+          port: 80
+  tls:
+    secretName: i10-tech-tls

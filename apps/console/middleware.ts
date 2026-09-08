@@ -3,12 +3,12 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
 /*
  * Signing in to dash.i10.tech.
  *
- * ⚠ THE CONSOLE HOSTS NO SIGN-IN PAGE. Clerk's Account Portal at
- * accounts.i10.tech does, and this middleware only sends people there. That is
- * the whole integration: `accounts` CNAMEs to accounts.clerk.services and
- * `clerk` to frontend-api.clerk.services, so the pages and the Frontend API are
- * both Clerk's to serve. Rendering `<SignIn />` here as well would give the
- * same instance two sign-in surfaces that can drift.
+ * ⚠ THE CONSOLE HOSTS NO SIGN-IN PAGE. `apps/auth`, served at auth.i10.tech,
+ * does — custom flows on Clerk's SDK rather than Clerk's hosted Account Portal.
+ * This middleware only sends people there. Rendering a sign-in form here as
+ * well would give one Clerk instance two sign-in surfaces that can drift, and
+ * would put the "set your password" step inside the app that shows a tenant's
+ * billing — which the invited mailbox holder has no business seeing.
  *
  * ⚠ EVERY SECRET IS READ FROM RUNTIME ENV AND PASSED EXPLICITLY, and the names
  * deliberately have NO `NEXT_PUBLIC_` PREFIX. Next replaces `NEXT_PUBLIC_*`
@@ -57,11 +57,12 @@ export default clerkMiddleware(
     publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
     secretKey: process.env.CLERK_SECRET_KEY,
     /**
-     * ⚠ UNSET MEANS "LET CLERK DECIDE", WHICH IS RIGHT FOR EVERY INSTANCE BUT
-     * PRODUCTION. A development instance has no custom Account Portal domain
-     * and Clerk infers its own; production has accounts.i10.tech and is told so
-     * explicitly, because inference there depends on instance configuration we
-     * would rather not have silently change where our customers type passwords.
+     * ⚠ THESE MUST BE SET IN PRODUCTION, and pointed at auth.i10.tech. Left
+     * unset, Clerk falls back to inferring its own hosted Account Portal — so
+     * forgetting them does not fail loudly, it quietly sends customers to a
+     * sign-in page we did not build and cannot change. Clerk appends
+     * `?redirect_url=` when it bounces someone, which apps/auth validates
+     * against an allowlist before honouring.
      */
     signInUrl: process.env.CLERK_SIGN_IN_URL,
     signUpUrl: process.env.CLERK_SIGN_UP_URL,

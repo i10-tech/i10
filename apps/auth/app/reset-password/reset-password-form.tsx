@@ -1,0 +1,240 @@
+"use client"
+
+import { useState } from "react"
+import Link from "next/link"
+import { useSignIn } from "@clerk/nextjs"
+import { Button } from "@repo/ui/components/button"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@repo/ui/components/field"
+import { Input } from "@repo/ui/components/input"
+import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+
+/*
+ * Forgotten password, in Clerk's stable three-call shape.
+ *
+ *   1. `signIn.create({ identifier })`                     — names the account
+ *   2. `signIn.resetPasswordEmailCode.sendCode()`          — emails a code
+ *   3. `resetPasswordEmailCode.verifyCode({ code })`       — accepts it
+ *   4. `resetPasswordEmailCode.submitPassword({ password })` — sets the password
+ *
+ * ⚠ STEPS 3 AND 4 ARE ONE SCREEN BUT TWO CALLS, and they cannot be collapsed.
+ * The code has to be accepted before Clerk will take a new password — sending
+ * both at once fails — so the form gathers them together and the handler makes
+ * the calls in order. Splitting them across two screens would be honest to the
+ * API and worse for the person, who would be asked to prove themselves twice.
+ *
+ * ⚠ THIS PAGE IS NOT REACHED WITH THE PERSON'S MAILBOX. The code goes to the
+ * address they signed up with — a Gmail, a work address — which is exactly why
+ * a mailbox customer who forgets their password is not locked out of their own
+ * recovery. The i10 mailbox is never the recovery channel for the account that
+ * owns it.
+ */
+export function ResetPasswordForm({
+  afterAuthUrl,
+  signInHref,
+}: {
+  afterAuthUrl: string
+  signInHref: string
+}) {
+  const { signIn } = useSignIn()
+  const [stage, setStage] = useState<"email" | "reset">("email")
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onEmail(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!signIn || pending) return
+
+    const form = new FormData(event.currentTarget)
+    setPending(true)
+    setError(null)
+
+    try {
+      // ⚠ NO `strategy` HERE. On this API `create` only names the account; the
+      // strategy is chosen by which namespace sends the code below. Passing
+      // `reset_password_email_code` to `create` does not type-check, and the
+      // classic flow that did is a different API.
+      const created = await signIn.create({
+        identifier: String(form.get("email") ?? ""),
+      })
+
+      if (created.error) {
+        setError(messageFor(created.error))
+        return
+      }
+
+      const sent = await signIn.resetPasswordEmailCode.sendCode()
+      if (sent.error) {
+        setError(messageFor(sent.error))
+        return
+      }
+
+      setStage("reset")
+    } catch {
+      setError(TRANSPORT_FAILURE)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function onReset(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!signIn || pending) return
+
+    const form = new FormData(event.currentTarget)
+    const password = String(form.get("password") ?? "")
+
+    if (password !== String(form.get("confirm-password") ?? "")) {
+      setError("Those passwords do not match.")
+      return
+    }
+
+    setPending(true)
+    setError(null)
+
+    try {
+      const verified = await signIn.resetPasswordEmailCode.verifyCode({
+        code: String(form.get("code") ?? ""),
+      })
+
+      if (verified.error) {
+        setError(messageFor(verified.error))
+        return
+      }
+
+      const done = await signIn.resetPasswordEmailCode.submitPassword({
+        password,
+        // ⚠ TRUE, AND IT IS A SECURITY DEFAULT RATHER THAN A PREFERENCE. The
+        // common reason to reset a password is that somebody else may know the
+        // old one. Leaving their other sessions alive would change the lock and
+        // let the intruder keep walking through the open door.
+        signOutOfOtherSessions: true,
+      })
+
+      if (done.error) {
+        setError(messageFor(done.error))
+        return
+      }
+
+      if (signIn.status === "complete") {
+        await signIn.finalize({
+          navigate: ({ decorateUrl }) => {
+            window.location.href = decorateUrl(afterAuthUrl)
+          },
+        })
+        return
+      }
+
+      setError(
+        signIn.status === "needs_second_factor"
+          ? "Your password was changed. Signing in needs a second factor, which this page cannot do yet."
+          : "Your password was changed, but signing in needs another step.",
+      )
+    } catch {
+      setError(TRANSPORT_FAILURE)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  if (stage === "reset") {
+    return (
+      <form className="flex flex-col gap-6" onSubmit={onReset} noValidate>
+        <FieldGroup>
+          <div className="flex flex-col items-center gap-1 text-center">
+            <h1 className="text-2xl font-bold">Choose a new password</h1>
+            <p className="text-sm text-balance text-muted-foreground">
+              Enter the code we emailed you, and the password you want instead.
+            </p>
+          </div>
+          <Field>
+            <FieldLabel htmlFor="code">Verification code</FieldLabel>
+            <Input
+              id="code"
+              name="code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              required
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="password">New password</FieldLabel>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              required
+            />
+            <FieldDescription>Must be at least 8 characters long.</FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="confirm-password">Confirm new password</FieldLabel>
+            <Input
+              id="confirm-password"
+              name="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              required
+            />
+          </Field>
+          {error ? (
+            <p role="alert" className="text-destructive text-sm">
+              {error}
+            </p>
+          ) : null}
+          <Field>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Set new password"}
+            </Button>
+          </Field>
+        </FieldGroup>
+      </form>
+    )
+  }
+
+  return (
+    <form className="flex flex-col gap-6" onSubmit={onEmail} noValidate>
+      <FieldGroup>
+        <div className="flex flex-col items-center gap-1 text-center">
+          <h1 className="text-2xl font-bold">Reset your password</h1>
+          <p className="text-sm text-balance text-muted-foreground">
+            Enter your email and we&apos;ll send you a code.
+          </p>
+        </div>
+        <Field>
+          <FieldLabel htmlFor="email">Email</FieldLabel>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            placeholder="m@example.com"
+            autoComplete="email"
+            required
+          />
+        </Field>
+        {error ? (
+          <p role="alert" className="text-destructive text-sm">
+            {error}
+          </p>
+        ) : null}
+        <Field>
+          <Button type="submit" disabled={!signIn || pending}>
+            {pending ? "Sending…" : "Send code"}
+          </Button>
+        </Field>
+        <FieldDescription className="text-center">
+          Remembered it?{" "}
+          <Link href={signInHref} className="underline underline-offset-4">
+            Sign in
+          </Link>
+        </FieldDescription>
+      </FieldGroup>
+    </form>
+  )
+}
