@@ -53,7 +53,7 @@ variable "record_ids" {
       "apex_mx", "send_mx",
       "apex_spf", "send_spf",
       "dkim_rsa", "dkim_ed25519",
-      "ses_dkim_1", "ses_dkim_2", "ses_dkim_3",
+      "ses_byodkim",
       "clerk_dkim_1", "clerk_dkim_2", "clerk_mail",
       "dmarc",
       "srv_imaps", "srv_submissions", "srv_imap_none", "srv_submission_none",

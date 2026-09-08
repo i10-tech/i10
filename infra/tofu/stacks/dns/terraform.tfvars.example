@@ -41,9 +41,10 @@ record_ids = {
   # dkim — i10's own pair, then SES's three, then Clerk's
   dkim_rsa     = "853579773560c8391e9149a48432a988"
   dkim_ed25519 = "8e11e2e7d67d20e4e39c26dfc09cd560"
-  ses_dkim_1   = "ca30dfb0d03211195662351ecdf7a7f0"
-  ses_dkim_2   = "bb4a1c44fb0052fcc52be6ee7a75dcf1"
-  ses_dkim_3   = "5739eea3f4abf23a5360270f8f4e03ff"
+  # ⚠ FILL THIS IN BEFORE THE FIRST PLAN. The record was created by hand during
+  # the Easy DKIM → BYODKIM migration, so unlike every other entry here its id
+  # was never captured. Regenerate the map with the curl in variables.tf.
+  ses_byodkim  = ""
   clerk_dkim_1 = "f2c0b7a0f57a32cdce8f021ef90b48c5"
   clerk_dkim_2 = "0453fd39c89c5890b7c40dc12262654e"
   clerk_mail   = "a9d9ec00ac4cbcfbd3d3e66aa4c00bb9"
