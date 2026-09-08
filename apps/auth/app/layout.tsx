@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
+import { Toaster } from "@repo/ui/components/sonner"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -19,7 +20,17 @@ export default function RootLayout({
     // build-time-inlining reason.
     <ClerkProvider publishableKey={process.env.CLERK_PUBLISHABLE_KEY}>
       <html lang="en" suppressHydrationWarning>
-        <body>{children}</body>
+        <body>
+          {children}
+          {/*
+           * ⚠ ONE TOASTER FOR THE WHOLE APP, MOUNTED HERE. `toast()` is a
+           * module-level call that pushes onto whichever Toaster is mounted;
+           * two of them render every message twice, and none at all makes every
+           * `toast()` a silent no-op — no error, no warning, just messages that
+           * never appear.
+           */}
+          <Toaster />
+        </body>
       </html>
     </ClerkProvider>
   )

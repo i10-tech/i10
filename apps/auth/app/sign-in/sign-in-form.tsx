@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -29,14 +31,18 @@ export function SignInForm({
   afterAuthUrl,
   signUpHref,
   resetHref,
+  mfaHref,
+  passkeyHref,
 }: {
   afterAuthUrl: string
   signUpHref: string
   resetHref: string
+  mfaHref: string
+  passkeyHref: string
 }) {
+  const router = useRouter()
   const { signIn } = useSignIn()
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -46,7 +52,6 @@ export function SignInForm({
 
     const form = new FormData(event.currentTarget)
     setPending(true)
-    setError(null)
 
     try {
       const { error } = await signIn.password({
@@ -55,7 +60,7 @@ export function SignInForm({
       })
 
       if (error) {
-        setError(messageFor(error))
+        toast.error(messageFor(error))
         return
       }
 
@@ -74,19 +79,23 @@ export function SignInForm({
         return
       }
 
-      // ⚠ EVERY OTHER STATUS IS A DEAD END *TODAY*, AND IT SAYS SO RATHER THAN
-      // FAILING QUIETLY. `needs_second_factor` and `needs_new_password` are
-      // real states this UI cannot yet finish — MFA and admin-forced password
-      // changes are the next slice of the custom flows. Leaving the button
-      // spinning would be the worst option; naming the state at least tells
-      // support what happened.
-      setError(
-        signIn.status === "needs_second_factor"
-          ? "This account needs a second factor, which this page cannot do yet."
-          : "This sign-in needs a step we do not support yet. Contact support.",
-      )
+      if (signIn.status === "needs_second_factor") {
+        // ⚠ `router.push`, NEVER `window.location`. The second-factor page
+        // resumes THIS `signIn` out of Clerk's client state; a full page load
+        // would start a fresh client with no attempt in progress and bounce the
+        // person back to the beginning, having already given their password.
+        router.push(mfaHref)
+        return
+      }
+
+      // ⚠ ANYTHING ELSE IS A DEAD END *TODAY*, AND IT SAYS SO RATHER THAN
+      // FAILING QUIETLY. `needs_new_password` — an admin forcing a change — is
+      // the notable one still unhandled. Leaving the button spinning would be
+      // the worst option; naming the state at least tells support what
+      // happened.
+      toast.error("This sign-in needs a step we do not support yet. Contact support.")
     } catch {
-      setError(TRANSPORT_FAILURE)
+      toast.error(TRANSPORT_FAILURE)
     } finally {
       setPending(false)
     }
@@ -134,11 +143,6 @@ export function SignInForm({
             required
           />
         </Field>
-        {error ? (
-          <p role="alert" className="text-destructive text-sm">
-            {error}
-          </p>
-        ) : null}
         <Field>
           <Button type="submit" disabled={!signIn || pending}>
             {pending ? "Signing in…" : "Login"}
@@ -146,6 +150,11 @@ export function SignInForm({
         </Field>
         <FieldSeparator>Or continue with</FieldSeparator>
         <OAuthButtons afterAuthUrl={afterAuthUrl} />
+        <FieldDescription className="text-center">
+          <Link href={passkeyHref} className="underline underline-offset-4">
+            Use a passkey instead
+          </Link>
+        </FieldDescription>
         <FieldDescription className="text-center">
           Don&apos;t have an account?{" "}
           <Link href={signUpHref} className="underline underline-offset-4">

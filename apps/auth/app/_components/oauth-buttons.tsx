@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field } from "@repo/ui/components/field"
@@ -44,12 +45,10 @@ export function OAuthButtons({
 }) {
   const { signIn } = useSignIn()
   const [pending, setPending] = useState<SsoStrategy | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   async function start(strategy: SsoStrategy) {
     if (!signIn || pending) return
     setPending(strategy)
-    setError(null)
 
     try {
       const { error } = await signIn.sso({
@@ -68,11 +67,11 @@ export function OAuthButtons({
       // has already left this page.
       if (error) {
         setPending(null)
-        setError(messageFor(error))
+        toast.error(messageFor(error))
       }
     } catch {
       setPending(null)
-      setError(TRANSPORT_FAILURE)
+      toast.error(TRANSPORT_FAILURE)
     }
   }
 
@@ -92,11 +91,6 @@ export function OAuthButtons({
           {verb ?? "Continue"} with {label}
         </Button>
       ))}
-      {error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
-      ) : null}
     </Field>
   )
 }

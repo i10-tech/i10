@@ -5,15 +5,15 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "src/styles/tokens.css",
+    "css": "../../packages/ui/src/styles/tokens.css",
     "baseColor": "neutral",
     "cssVariables": true,
     "prefix": ""
   },
   "aliases": {
-    "components": "@repo/ui/components",
+    "components": "@/components",
+    "hooks": "@/hooks",
     "utils": "cn",
-    "hooks": "@repo/ui/hooks",
     "ui": "@repo/ui/components"
   },
   "iconLibrary": "lucide"

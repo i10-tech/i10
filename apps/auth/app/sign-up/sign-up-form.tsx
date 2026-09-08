@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { toast } from "sonner"
 import { useSignUp } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -37,7 +38,6 @@ export function SignUpForm({
   const { signUp } = useSignUp()
   const [stage, setStage] = useState<"details" | "verify">("details")
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   async function onDetails(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -52,12 +52,11 @@ export function SignUpForm({
     // existed. If this comparison is missing, a typo in both boxes is accepted
     // and the person is locked out of an account they just made.
     if (password !== String(form.get("confirm-password") ?? "")) {
-      setError("Those passwords do not match.")
+      toast.error("Those passwords do not match.")
       return
     }
 
     setPending(true)
-    setError(null)
 
     try {
       // ⚠ SPLIT ON THE FIRST SPACE ONLY. The block asks for one "Full Name" and
@@ -81,7 +80,7 @@ export function SignUpForm({
       })
 
       if (created.error) {
-        setError(messageFor(created.error))
+        toast.error(messageFor(created.error))
         return
       }
 
@@ -97,13 +96,14 @@ export function SignUpForm({
 
       const sent = await signUp.verifications.sendEmailCode()
       if (sent.error) {
-        setError(messageFor(sent.error))
+        toast.error(messageFor(sent.error))
         return
       }
 
+      toast.success("We sent a code to your email.")
       setStage("verify")
     } catch {
-      setError(TRANSPORT_FAILURE)
+      toast.error(TRANSPORT_FAILURE)
     } finally {
       setPending(false)
     }
@@ -115,7 +115,6 @@ export function SignUpForm({
 
     const form = new FormData(event.currentTarget)
     setPending(true)
-    setError(null)
 
     try {
       const { error } = await signUp.verifications.verifyEmailCode({
@@ -123,7 +122,7 @@ export function SignUpForm({
       })
 
       if (error) {
-        setError(messageFor(error))
+        toast.error(messageFor(error))
         return
       }
 
@@ -138,11 +137,11 @@ export function SignUpForm({
         return
       }
 
-      setError(
+      toast.error(
         "That code was accepted, but the account still needs something we cannot collect yet.",
       )
     } catch {
-      setError(TRANSPORT_FAILURE)
+      toast.error(TRANSPORT_FAILURE)
     } finally {
       setPending(false)
     }
@@ -173,11 +172,6 @@ export function SignUpForm({
               required
             />
           </Field>
-          {error ? (
-            <p role="alert" className="text-destructive text-sm">
-              {error}
-            </p>
-          ) : null}
           <Field>
             <Button type="submit" disabled={pending}>
               {pending ? "Verifying…" : "Verify email"}
@@ -245,11 +239,6 @@ export function SignUpForm({
           />
           <FieldDescription>Please confirm your password.</FieldDescription>
         </Field>
-        {error ? (
-          <p role="alert" className="text-destructive text-sm">
-            {error}
-          </p>
-        ) : null}
         {/*
          * ⚠ CLERK'S BOT PROTECTION MOUNTS ITSELF INTO THIS EXACT ID, AND ITS
          * ABSENCE IS A SILENT FAILURE. With Smart CAPTCHA enabled on the

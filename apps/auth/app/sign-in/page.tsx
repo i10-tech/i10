@@ -37,6 +37,8 @@ export default async function Page({
           afterAuthUrl={after}
           signUpHref={`/sign-up${carry}`}
           resetHref={`/reset-password${carry}`}
+          mfaHref={`/mfa${carry}`}
+          passkeyHref={`/passkey${carry}`}
         />
       </div>
     </main>

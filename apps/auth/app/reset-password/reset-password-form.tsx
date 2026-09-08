@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -43,7 +44,6 @@ export function ResetPasswordForm({
   const { signIn } = useSignIn()
   const [stage, setStage] = useState<"email" | "reset">("email")
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   async function onEmail(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -51,7 +51,6 @@ export function ResetPasswordForm({
 
     const form = new FormData(event.currentTarget)
     setPending(true)
-    setError(null)
 
     try {
       // ⚠ NO `strategy` HERE. On this API `create` only names the account; the
@@ -63,19 +62,20 @@ export function ResetPasswordForm({
       })
 
       if (created.error) {
-        setError(messageFor(created.error))
+        toast.error(messageFor(created.error))
         return
       }
 
       const sent = await signIn.resetPasswordEmailCode.sendCode()
       if (sent.error) {
-        setError(messageFor(sent.error))
+        toast.error(messageFor(sent.error))
         return
       }
 
+      toast.success("We sent you a code.")
       setStage("reset")
     } catch {
-      setError(TRANSPORT_FAILURE)
+      toast.error(TRANSPORT_FAILURE)
     } finally {
       setPending(false)
     }
@@ -89,12 +89,11 @@ export function ResetPasswordForm({
     const password = String(form.get("password") ?? "")
 
     if (password !== String(form.get("confirm-password") ?? "")) {
-      setError("Those passwords do not match.")
+      toast.error("Those passwords do not match.")
       return
     }
 
     setPending(true)
-    setError(null)
 
     try {
       const verified = await signIn.resetPasswordEmailCode.verifyCode({
@@ -102,7 +101,7 @@ export function ResetPasswordForm({
       })
 
       if (verified.error) {
-        setError(messageFor(verified.error))
+        toast.error(messageFor(verified.error))
         return
       }
 
@@ -116,7 +115,7 @@ export function ResetPasswordForm({
       })
 
       if (done.error) {
-        setError(messageFor(done.error))
+        toast.error(messageFor(done.error))
         return
       }
 
@@ -129,13 +128,13 @@ export function ResetPasswordForm({
         return
       }
 
-      setError(
+      toast.error(
         signIn.status === "needs_second_factor"
           ? "Your password was changed. Signing in needs a second factor, which this page cannot do yet."
           : "Your password was changed, but signing in needs another step.",
       )
     } catch {
-      setError(TRANSPORT_FAILURE)
+      toast.error(TRANSPORT_FAILURE)
     } finally {
       setPending(false)
     }
@@ -183,11 +182,6 @@ export function ResetPasswordForm({
               required
             />
           </Field>
-          {error ? (
-            <p role="alert" className="text-destructive text-sm">
-              {error}
-            </p>
-          ) : null}
           <Field>
             <Button type="submit" disabled={pending}>
               {pending ? "Saving…" : "Set new password"}
@@ -218,11 +212,6 @@ export function ResetPasswordForm({
             required
           />
         </Field>
-        {error ? (
-          <p role="alert" className="text-destructive text-sm">
-            {error}
-          </p>
-        ) : null}
         <Field>
           <Button type="submit" disabled={!signIn || pending}>
             {pending ? "Sending…" : "Send code"}
