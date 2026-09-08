@@ -251,16 +251,31 @@ resource "cloudflare_dns_record" "send_spf" {
 # through SES. A record listing only Amazon would fail every free tenant's mail
 # the moment the direct route is switched on.
 #
-# ⚠ THE MTA IS LISTED AS LITERAL ADDRESSES RATHER THAN `a:mail.i10.tech`, to
-# spend one DNS lookup instead of two. SPF allows ten per evaluation and the
-# customer's own record has already spent one reaching this include, so the
-# budget here is not ours alone. The addresses are `mail.i10.tech`, which is
-# deliberately unproxied — see the note on that record.
+# ⚠ `a:mail.i10.tech`, NOT LITERAL ADDRESSES. Pinning `ip4:`/`ip6:` saves one
+# DNS lookup and costs the ability to move the server: the record would keep
+# authorising an address we no longer send from, and the symptom would be every
+# customer's mail failing SPF with nothing in our own DNS looking wrong. The
+# budget can afford it — the customer spends one lookup reaching this include,
+# this record spends two more, and `amazonses.com` resolves to a flat list of
+# `ip4:` ranges with no nested includes. Three of ten.
+#
+# ⚠ AND IT IS `mail.i10.tech`, NOT `i10.tech`. The apex is PROXIED, so it
+# resolves to Cloudflare's anycast addresses rather than ours — `a:i10.tech`
+# would authorise Cloudflare's proxy range to send as every customer, and would
+# not authorise the machine that actually sends. `mail.i10.tech` is deliberately
+# unproxied for exactly this reason; if that ever changes, this record silently
+# starts naming the wrong hosts.
+#
+# ⚠ `include:i10.tech` WOULD ALSO WORK AND IS STILL WRONG. The apex record is
+# `v=spf1 mx -all`, so it resolves correctly through the MX — but it costs two
+# lookups instead of one, and it ties what CUSTOMERS may send through to a
+# record that exists to describe i10's OWN mail. The two are free to diverge,
+# and the day they do, nobody would look here.
 resource "cloudflare_dns_record" "spf_include" {
   zone_id = var.zone_id
   name    = "_spf.${local.domain}"
   type    = "TXT"
-  content = "\"v=spf1 include:amazonses.com ip4:178.105.164.132 ip6:2a01:4f8:1c18:45fb::1 -all\""
+  content = "\"v=spf1 include:amazonses.com a:mail.${local.domain} -all\""
   ttl     = 1
   proxied = false
   comment = module.labels.comment
