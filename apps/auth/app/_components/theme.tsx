@@ -25,7 +25,13 @@ export function Theme({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="system"
+      /**
+       * ⚠ DARK IS THE DEFAULT, NOT THE SYSTEM SETTING. `enableSystem` stays on
+       * so "system" remains a choice a person can make later, but with nothing
+       * stored this lands on dark regardless of what the machine prefers —
+       * which is the decision, not a fallback.
+       */
+      defaultTheme="dark"
       enableSystem
       disableTransitionOnChange
     >
