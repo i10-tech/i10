@@ -8,13 +8,14 @@ import { PasswordChanged } from "./templates/password-changed.js"
 import { PasswordRemoved } from "./templates/password-removed.js"
 import { PrimaryEmailChanged } from "./templates/primary-email-changed.js"
 import { NewSignIn } from "./templates/new-sign-in.js"
+import { MfaEnabled } from "./templates/mfa-enabled.js"
 import { PasskeyChanged } from "./templates/passkey-changed.js"
 import { Invitation } from "./templates/invitation.js"
 import { OrganizationInvitation } from "./templates/organization-invitation.js"
 import { OrganizationMemberJoined } from "./templates/organization-member-joined.js"
 import { WaitlistConfirmation } from "./templates/waitlist-confirmation.js"
 
-export { SLUG } from "./slugs.js"
+export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
 export * from "./templates/billing/payment-succeeded.js"
 export * from "./templates/billing/payment-failed.js"
@@ -42,9 +43,32 @@ export interface RenderedEmail {
   text?: string
 }
 
-/** `data` is `Record<string, unknown>`; nothing in it can be trusted to be a string. */
-function str(data: Record<string, unknown> | null | undefined, key: string) {
-  const value = data?.[key]
+/**
+ * Reads one template variable out of `data`.
+ *
+ * ⚠ IT WALKS A DOTTED PATH, BECAUSE HALF OF CLERK'S VARIABLES ARE NESTED.
+ * The templates say `{{invitation.expires_in_days}}`, `{{org.name}}` and
+ * `{{app.url}}` — those are objects in the payload, not flat keys with dots in
+ * their names. Reading `data["org_name"]` finds nothing and the value silently
+ * disappears from the email, which is exactly what an earlier version of this
+ * file did.
+ *
+ * ⚠ AND IT ACCEPTS A NUMBER. `invitation.expires_in_days` and
+ * `failed_attempts` arrive as numbers; a string-only guard would drop both and
+ * leave a sentence with a hole where the figure should be.
+ */
+function str(data: Record<string, unknown> | null | undefined, path: string) {
+  const value = path
+    .split(".")
+    .reduce<unknown>(
+      (node, key) =>
+        node && typeof node === "object"
+          ? (node as Record<string, unknown>)[key]
+          : undefined,
+      data,
+    )
+
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
@@ -152,6 +176,14 @@ function templateFor(payload: ClerkEmailPayload) {
         supportEmail: str(d, "support_email"),
       })
 
+    case SLUG.mfaEnabled:
+      return MfaEnabled({
+        greetingName: str(d, "greeting_name"),
+        emailAddress: str(d, "primary_email_address"),
+        requestedFrom: str(d, "requested_from"),
+        requestedAt: str(d, "requested_at"),
+      })
+
     case SLUG.passkeyAdded:
     case SLUG.passkeyRemoved:
       return PasskeyChanged({
@@ -167,7 +199,7 @@ function templateFor(payload: ClerkEmailPayload) {
       return url
         ? Invitation({
             url,
-            expiresInDays: str(d, "invitation_expires_in_days"),
+            expiresInDays: str(d, "invitation.expires_in_days"),
             fromWaitlist: payload.slug === SLUG.waitlistInvitation,
           })
         : null
@@ -178,18 +210,18 @@ function templateFor(payload: ClerkEmailPayload) {
       return url
         ? OrganizationInvitation({
             url,
-            organizationName: str(d, "org_name"),
+            organizationName: str(d, "org.name"),
             inviterName: str(d, "inviter_name"),
           })
         : null
     }
 
     case SLUG.organizationMemberJoined: {
-      const url = str(d, "app_url")
+      const url = str(d, "app.url")
       return url
         ? OrganizationMemberJoined({
             url,
-            organizationName: str(d, "org_name"),
+            organizationName: str(d, "org.name"),
             emailAddress: str(d, "email_address"),
           })
         : null

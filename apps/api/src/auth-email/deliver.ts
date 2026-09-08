@@ -1,4 +1,4 @@
-import { renderClerkEmail, SLUG, type ClerkEmailPayload } from "@repo/emails"
+import { NOT_OURS, renderClerkEmail, SLUG, type ClerkEmailPayload } from "@repo/emails"
 
 /**
  * Sending Clerk's authentication mail ourselves.
@@ -84,7 +84,8 @@ export function authEmailDelivery(deps: DeliverDeps) {
       // one real send of each template puts the exact string in the logs, and
       // until then those emails go out in Clerk's own styling rather than
       // failing.
-      if (!TEMPLATED.has(event.slug ?? "")) {
+      const slug = event.slug ?? ""
+      if (!TEMPLATED.has(slug) && !DELIBERATE.has(slug)) {
         deps.log?.info(
           { slug: event.slug ?? null },
           "clerk email sent with clerk's own body — add this slug to @repo/emails",
@@ -116,3 +117,9 @@ export function authEmailDelivery(deps: DeliverDeps) {
  * symptom would be a log line that stopped appearing — which nobody notices.
  */
 const TEMPLATED = new Set<string>(Object.values(SLUG))
+
+/**
+ * Templates we deliver but deliberately do not style — Clerk's own billing
+ * product and its operational mail to us. See `NOT_OURS`.
+ */
+const DELIBERATE = new Set<string>(NOT_OURS)
