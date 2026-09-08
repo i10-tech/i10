@@ -90,6 +90,30 @@ export async function applyClerkEvent(
   })
 }
 
+/**
+ * Projects one Clerk user immediately, outside the webhook path.
+ *
+ * ⚠ IT CLAIMS NO EVENT ID, AND THAT IS THE DIFFERENCE FROM `applyClerkEvent`.
+ * There is no Svix message here to be delivered twice — the caller has just
+ * made the change in Clerk and is reading its own write. Borrowing the
+ * deduplication table would mean inventing an id that no redelivery will ever
+ * match, which buys nothing and puts a junk row in it.
+ *
+ * ⚠ AND THE WEBHOOK THAT FOLLOWS IS EXPECTED, NOT A RACE TO BE PREVENTED.
+ * Clerk fires `user.updated` for the same change moments later; it re-derives
+ * the identical rows, and the `clerk_updated_at` guard means an older delivery
+ * cannot undo this one. Provisioning is synchronous so the endpoint can return
+ * a mailbox that exists — waiting on the webhook would make `POST /mailboxes`
+ * answer 201 for something the user cannot yet log in to.
+ */
+export async function projectClerkUser(
+  db: Database,
+  user: ClerkUser,
+  hostedDomains: readonly string[],
+): Promise<ApplyResult> {
+  return db.transaction(async (tx) => applyUser(tx, user, hostedDomains))
+}
+
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 /**

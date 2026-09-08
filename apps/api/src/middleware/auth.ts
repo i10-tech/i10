@@ -38,6 +38,16 @@ declare module "hono" {
     webhookEndpoints?: import("../webhooks/store.js").WebhookEndpointStore
     /** Sending domains and their DNS records. */
     domains?: import("../domains/store.js").DomainStore
+    /**
+     * The signed-in person, set by `requireUser`. Present only on the routes
+     * that take a session — see middleware/session.ts on why those are a
+     * different set from the ones that take an API key.
+     */
+    user: import("./session.js").SessionContext
+    /** Verifies Clerk sessions, injected like `apiKeyAuth` and for the same reason. */
+    sessionAuth?: import("./session.js").SessionVerifier
+    /** Human mailboxes, and the rules for who may have one. */
+    mailboxes?: import("../mailboxes/provision.js").MailboxProvisioning
   }
 }
 
