@@ -1,6 +1,6 @@
 import { withTenant, type Database } from "../db/client.js"
 import {
-  activeTenantsStatement,
+  payingTenantsStatement,
   type Logger,
   missingCustomers,
   reconcile,
@@ -266,9 +266,16 @@ export async function reconcileTenantCustomers(
   db: Database,
   entitlements: CustomerDirectory,
   log: Logger,
+  /**
+   * ⚠ REQUIRED, AND NOT DEFAULTED TO `"free"`. A wrong value here does not
+   * fail — it silently changes the population being checked. Defaulting would
+   * let a deployment that renamed its free plan check every tenant again, which
+   * is the exact behaviour this parameter exists to remove.
+   */
+  freePlanId: string,
 ): Promise<TenantCustomerReport> {
   const tenants: TenantRef[] = (
-    (await db.execute(activeTenantsStatement())) as unknown as Row[]
+    (await db.execute(payingTenantsStatement(freePlanId))) as unknown as Row[]
   ).map((r) => ({
     tenantId: String(r.tenant_id),
     slug: String(r.slug),

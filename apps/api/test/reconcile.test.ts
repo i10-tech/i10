@@ -4,7 +4,7 @@ import { PgDialect } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
 import { usageSnapshotStatement } from "../src/metering/postgres.js"
 import {
-  activeTenantsStatement,
+  payingTenantsStatement,
   missingCustomers,
   reconcile,
   sentUsageStatement,
@@ -253,14 +253,48 @@ describe("every tenant should exist as a customer", () => {
   })
 })
 
-describe("the active-tenant list", () => {
+describe("the paying-tenant list", () => {
+  const payingBody = () => {
+    const sql30 = readFileSync(
+      new URL("../drizzle/0030_paying_tenants_snapshot.sql", import.meta.url),
+      "utf8",
+    )
+    const start = sql30.indexOf(`CREATE FUNCTION "core"."paying_tenants_snapshot"`)
+    expect(start, "paying_tenants_snapshot is not in 0030").toBeGreaterThan(-1)
+    return sql30.slice(start, sql30.indexOf("$$;", start))
+  }
+
   it("excludes suspended tenants, which are not expected to be billable", () => {
-    expect(functionBody("active_tenants_snapshot")).toContain("t.status = 'active'")
+    expect(payingBody()).toContain("t.status = 'active'")
+  })
+
+  /**
+   * ⚠ THE ASSERTION THIS FUNCTION EXISTS FOR. Polar holds customers, not users.
+   * Checking every active tenant made the nightly job fail on the first free
+   * signup — correct state, reported as an outage, forever.
+   */
+  it("excludes tenants on the free plan", () => {
+    expect(payingBody()).toContain("a.plan_id <> p_free_plan_id")
+  })
+
+  // ⚠ A PARAMETER, NOT A LITERAL. `METERING_FREE_PLAN_ID` is configurable, and a
+  // hardcoded "free" here would silently check the wrong population.
+  it("takes the free plan id from the caller", () => {
+    const { sql: statement, params } = render(payingTenantsStatement("free"))
+    expect(statement).toContain("core.paying_tenants_snapshot(")
+    expect(params).toEqual(["free"])
+    expect(statement).not.toContain("'free'")
   })
 
   it("is read through the function, never off the table", () => {
-    const { sql: statement } = render(activeTenantsStatement())
-    expect(statement).toContain("core.active_tenants_snapshot()")
+    const { sql: statement } = render(payingTenantsStatement("free"))
     expect(statement).not.toContain("from core.tenants")
+  })
+
+  // ⚠ A tenant holding no assignment at all is not paying, and is 0013's
+  // finding rather than this one's. Two alerts for one problem clears neither.
+  it("requires an assignment rather than left-joining one", () => {
+    expect(payingBody()).toContain("JOIN core.plan_assignments")
+    expect(payingBody()).not.toContain("LEFT JOIN")
   })
 })

@@ -286,7 +286,12 @@ await withMonitor(
 
     // ── 3. tenants ↔ Polar ─────────────────────────────────────────────────
     try {
-      const tenants = await reconcileTenantCustomers(db, entitlements, log)
+      const tenants = await reconcileTenantCustomers(
+        db,
+        entitlements,
+        log,
+        env.METERING_FREE_PLAN_ID,
+      )
       log.info(
         {
           checked: tenants.checked,
@@ -296,16 +301,21 @@ await withMonitor(
         "tenant/customer reconciliation complete",
       )
 
-      // ⚠ A MISSING CUSTOMER IS ALWAYS WORTH WAKING SOMEBODY FOR, however few.
-      // It is not a number drifting — it is a tenant whose every usage event
-      // has been failing since it was created, invisibly, and it stays that way
-      // until a person fixes it.
+      // ⚠ A PAYING TENANT MISSING FROM POLAR IS ALWAYS WORTH WAKING SOMEBODY
+      // FOR, however few. It is not a number drifting — it is a customer we
+      // believe is paying whom the payment rail has never heard of, so every
+      // usage event for them fails silently and no invoice will ever be raised.
+      //
+      // ⚠ AND IT COUNTS ONLY PAYING TENANTS NOW. Free tenants legitimately have
+      // no Polar customer — one is created lazily by the checkout — so
+      // including them made this fire on healthy state from the first signup
+      // onwards. See `payingTenantsStatement`.
       if (tenants.missing.length > 0) {
         process.exitCode = 1
         captureError(
           new Error(
-            `${tenants.missing.length} active tenant(s) have no customer in Polar; ` +
-              "their usage has never been recorded",
+            `${tenants.missing.length} paying tenant(s) have no customer in Polar; ` +
+              "their usage has never been recorded and they will never be invoiced",
           ),
           { missing: tenants.missing.slice(0, 20) },
         )

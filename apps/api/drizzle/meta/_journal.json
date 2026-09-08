@@ -211,6 +211,13 @@
       "when": 1788636303939,
       "tag": "0029_i10_owns_its_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788860801672,
+      "tag": "0030_paying_tenants_snapshot",
+      "breakpoints": true
     }
   ]
 }
