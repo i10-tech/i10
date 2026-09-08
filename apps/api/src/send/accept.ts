@@ -172,7 +172,14 @@ export interface AcceptOps {
    */
   persist: (input: {
     tenantId: string
-    apiKeyId: string
+    /**
+     * ⚠ NULLABLE, BECAUSE i10'S OWN MAIL HAS NO KEY. Authentication email is
+     * sent by the `email.created` webhook rather than by a customer's request —
+     * there is no key to attribute it to, and `core.messages.api_key_id` was
+     * always nullable for exactly this. Inventing a sentinel uuid would put a
+     * row in the message log pointing at a key that does not exist.
+     */
+    apiKeyId: string | null
     queue: SendClass
     messages: PreparedMessage[]
     idempotencyKey?: string
@@ -205,7 +212,8 @@ export interface Logger {
 export async function acceptSend(
   input: {
     tenantId: string
-    apiKeyId: string
+    /** Null for i10's own mail — see `AcceptOps.persist`. */
+    apiKeyId: string | null
     payloads: SendEmail[]
     endpoint: "single" | "batch"
     idempotencyKey?: string

@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import type { Database } from "../db/client.js"
 import { applyClerkEvent } from "../projection/writer.js"
 import type { TenantProvisioning } from "../tenants/provision.js"
+import type { authEmailDelivery } from "../auth-email/deliver.js"
 import { readSvixHeaders, verifySvixSignature } from "../webhooks/svix.js"
 
 export interface Logger {
@@ -20,6 +21,15 @@ export interface ClerkWebhookDeps {
    * sign-ups still update the mailbox projection and simply provision nothing.
    */
   provisioning?: TenantProvisioning
+  /**
+   * Sends Clerk's authentication mail through our own send path.
+   *
+   * ⚠ ABSENT MEANS CLERK KEEPS SENDING IT, WHICH IS THE SAFE DEFAULT. An
+   * unconfigured deployment must not silently swallow verification codes — with
+   * this undefined the event is acknowledged and Clerk's own delivery, which is
+   * still switched on per template, remains the only sender.
+   */
+  authEmail?: ReturnType<typeof authEmailDelivery>
   log?: Logger
 }
 
@@ -110,16 +120,33 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // account that can never send. Both halves are idempotent on their own.
       const provisioned = await provision(deps, event.type, event.data)
 
+      // ⚠ OUTSIDE THE DEDUPE FOR THE SAME REASON PROVISIONING IS, and safe for
+      // a different one. `applyClerkEvent` claims the Svix id and answers
+      // `duplicate` on a redelivery — skipping the send on that basis would
+      // mean a send that failed once is never retried, and somebody's code
+      // never arrives. Instead the send path is keyed on Clerk's own email id,
+      // so a redelivery is refused there rather than here.
+      const emailed =
+        event.type === "email.created" && deps.authEmail
+          ? await deps.authEmail.onEmailCreated(event.data)
+          : undefined
+
       deps.log?.info(
         {
           svixId: headers.id,
           type: event.type,
           outcome: result.outcome,
           ...(provisioned ? { provisioned } : {}),
+          ...(emailed ? { emailed } : {}),
         },
         "clerk webhook applied",
       )
-      return c.json({ ok: true, ...result, ...(provisioned ? { provisioned } : {}) })
+      return c.json({
+        ok: true,
+        ...result,
+        ...(provisioned ? { provisioned } : {}),
+        ...(emailed ? { emailed } : {}),
+      })
     } catch (err) {
       deps.log?.error(
         { svixId: headers.id, type: event.type, err: String(err) },

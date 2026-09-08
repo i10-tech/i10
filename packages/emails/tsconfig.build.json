@@ -1,0 +1,19 @@
+{
+  // ⚠ `react-library`, NOT `base`. These are .tsx files, so the config has to
+  // set `jsx: react-jsx`; base.json does not, and every template would fail to
+  // compile with "Cannot use JSX unless the '--jsx' flag is provided".
+  //
+  // ⚠ AND IT OVERRIDES `noEmit`. react-library.json sets it for apps that let a
+  // bundler do the emitting; this package is consumed by the API server as
+  // plain compiled JS, so it has to actually produce dist/.
+  "extends": "@repo/typescript-config/react-library.json",
+  "compilerOptions": {
+    "noEmit": false,
+    // Local, not inherited — the same path-resolution note as contracts.
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "emails"]
+}

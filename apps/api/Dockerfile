@@ -24,6 +24,7 @@ COPY apps/console/package.json apps/console/
 COPY apps/docs/package.json apps/docs/
 COPY apps/web/package.json apps/web/
 COPY packages/contracts/package.json packages/contracts/
+COPY packages/emails/package.json packages/emails/
 COPY packages/eslint-config/package.json packages/eslint-config/
 COPY packages/next/package.json packages/next/
 COPY packages/node/package.json packages/node/

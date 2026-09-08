@@ -4,6 +4,10 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  // ⚠ `scripts` IS IN HERE DELIBERATELY. It was not, and the omission is the
+  // kind that hides: a script full of type errors passes `check-types` because
+  // nothing ever looks at it, and the first person to learn otherwise is
+  // whoever runs it against production.
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

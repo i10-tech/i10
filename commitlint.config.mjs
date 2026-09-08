@@ -33,6 +33,15 @@ export default {
         "sdk",
         "ui",
         "contracts",
+        // packages/emails — the react.email templates for the messages Clerk
+        // used to send and we now render ourselves.
+        //
+        // ⚠ NOT `api`, EVEN THOUGH THE API IS ITS ONLY CONSUMER. It is a
+        // workspace package with its own preview server and its own build, and
+        // a changelog reads better when "the reset-password wording changed" is
+        // not filed under the same heading as a route handler — the same
+        // reasoning `metering` and `authd` are listed for.
+        "emails",
         // packages/metering — the allowance/reset core that replaces Autumn.
         // Its own scope rather than `api`: it is a workspace package with its
         // own tests and its own release surface, and it is destined to run in a
