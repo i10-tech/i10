@@ -4,12 +4,7 @@ import {
   type SendEmailCommandInput,
 } from "@aws-sdk/client-sesv2"
 import { buildRawMessage } from "./mime.js"
-import {
-  messageIdHeader,
-  type OutboundMessage,
-  type SendOutcome,
-  type Transport,
-} from "./transport.js"
+import { type OutboundMessage, type SendOutcome, type Transport } from "./transport.js"
 
 /**
  * SES as the relay.
@@ -22,12 +17,13 @@ import {
  * concurrency and connection reuse, which is why the batching lives in the
  * queue and the concurrency lives in the worker.
  *
- * ⚠ AND A MESSAGE WITH AN ATTACHMENT TAKES A DIFFERENT SHAPE THROUGH THE SAME
- * CALL. `Content.Simple` has no room for a file, so those are built as raw MIME
- * in send/mime.ts and sent as `Content.Raw` — same command, same tags, same
- * configuration set, same classification of what came back. `Destination` is
- * still supplied alongside the raw bytes, which is what keeps `Bcc` blind: the
- * recipients come from there and the header is never written.
+ * ⚠ AND EVERY MESSAGE IS BUILT AS RAW MIME IN send/mime.ts, NOT ONLY THE ONES
+ * CARRYING A FILE. `Content.Simple` reads like the obvious choice for the common
+ * case and cannot be used at all: SES reserves `Message-ID` and rejects it there
+ * outright, and that header is what makes an at-least-once retry collapse into
+ * one email instead of two. See `content` below. `Destination` is still supplied
+ * alongside the raw bytes, which is what keeps `Bcc` blind: the recipients come
+ * from there and the header is never written.
  *
  * ⚠ AND THE CLIENT IS CONSTRUCTED ONCE. Its connection pool and credential
  * cache are the reason repeated sends are fast; building one per message turns
@@ -100,30 +96,27 @@ function toSesInput(
 }
 
 /**
- * ⚠ SIMPLE UNLESS THERE IS AN ATTACHMENT, AND THE CONDITION IS EXACTLY THAT.
- * `Content.Simple` cannot express a file, so a message carrying one has to be
- * assembled as raw MIME — but building every message that way would put a
- * hand-written encoder on the path of every password reset in the product, to
- * no benefit. The common case stays the one SES validates for us.
+ * ⚠ ALWAYS RAW, AND SES IS THE REASON RATHER THAN A PREFERENCE. This chose
+ * `Content.Simple` unless a message carried a file, on the grounds that Simple
+ * is less code to be wrong in and that building every message by hand bought
+ * nothing. SES answered that with `BadRequestException: Header <Message-ID> is
+ * not supported` on the first mail this system ever tried to send: `Message-ID`
+ * is reserved, and Simple cannot carry one at any price.
+ *
+ * ⚠ SO THE CHOICE WAS NEVER "SIMPLE OR RAW", IT WAS "MESSAGE-ID OR NOT". The
+ * send path is at-least-once and db/claim.ts accepts that trade explicitly,
+ * because a retry carrying the same Message-ID is collapsed by receivers rather
+ * than shown twice. Keeping Simple would have meant deleting that guarantee and
+ * the comments claiming it — a worse trade than putting an encoder we already
+ * had, and already tested, on the common path.
+ *
+ * ⚠ `Destination` STILL GOVERNS WHO RECEIVES IT. Raw supplies the bytes; the
+ * recipient list is passed alongside, which is what keeps `Bcc` blind — see
+ * buildRawMessage, which deliberately writes no `Bcc` header.
  */
 function content(m: OutboundMessage): SendEmailCommandInput["Content"] {
-  const attachments = m.attachments ?? []
-
-  if (attachments.length > 0) {
-    return {
-      Raw: { Data: Buffer.from(buildRawMessage(m, attachments), "utf8") },
-    }
-  }
-
   return {
-    Simple: {
-      Subject: { Data: m.subject, Charset: "UTF-8" },
-      Body: {
-        ...(m.text ? { Text: { Data: m.text, Charset: "UTF-8" } } : {}),
-        ...(m.html ? { Html: { Data: m.html, Charset: "UTF-8" } } : {}),
-      },
-      Headers: buildHeaders(m),
-    },
+    Raw: { Data: Buffer.from(buildRawMessage(m, m.attachments ?? []), "utf8") },
   }
 }
 
@@ -147,27 +140,6 @@ function buildTags(m: OutboundMessage): { Name: string; Value: string }[] {
     tags.push({ Name: tag.name, Value: tag.value })
   }
   return tags
-}
-
-/**
- * ⚠ THE Message-ID IS THE DUPLICATE MITIGATION AND MUST SURVIVE A RETRY.
- * The send path is at-least-once; a resend of the same row produces the same
- * header, and receiving systems collapse the two deliveries. Letting SES mint
- * its own would make every retry a visibly separate email.
- */
-function buildHeaders(m: OutboundMessage): { Name: string; Value: string }[] {
-  const headers = [
-    { Name: "Message-ID", Value: messageIdHeader(m.id, m.from) },
-    ...Object.entries(m.headers ?? {}).map(([Name, Value]) => ({ Name, Value })),
-  ]
-  // A caller-supplied Message-ID would defeat the whole mechanism, so ours wins.
-  const seen = new Set<string>()
-  return headers.filter((h) => {
-    const key = h.Name.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
 }
 
 /**

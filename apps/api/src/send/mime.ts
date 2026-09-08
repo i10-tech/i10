@@ -3,12 +3,19 @@ import { messageIdHeader, type OutboundMessage } from "./transport.js"
 /**
  * Building a raw RFC 5322 message.
  *
- * ⚠ THIS EXISTS ONLY BECAUSE OF ATTACHMENTS. SES's `Content.Simple` covers
- * subject, text, html and headers, and it is what every send without a file
- * uses — it is less code to be wrong in, and it lets SES handle encoding. The
- * moment a message carries a file, Simple cannot express it and the whole
- * message has to be assembled here instead. So this is the exception path, and
- * ses.ts chooses between the two on exactly that condition.
+ * ⚠ THIS IS EVERY SEND, NOT THE ATTACHMENT EXCEPTION IT WAS BUILT AS. It used
+ * to run only when `Content.Simple` could not express a file, on the reasoning
+ * that Simple is less code to be wrong in and lets SES handle the encoding.
+ * That reasoning had one false premise: SES REJECTS A `Message-ID` HEADER ON
+ * SIMPLE CONTENT — `BadRequestException: Header <Message-ID> is not supported`,
+ * which is what the first mail this system ever sent came back with.
+ *
+ * ⚠ AND THAT HEADER IS NOT DECORATION. The send path is at-least-once by
+ * agreement (see db/claim.ts): SES can accept a message and the worker die
+ * before recording it, and the retry is collapsed by receivers because both
+ * copies carry the same Message-ID. Letting SES mint its own makes every such
+ * retry a visibly separate email in the customer's inbox. Raw is the only
+ * content type that can carry it, so Raw is the only path.
  *
  * ⚠ EVERY LINE ENDS CRLF, INCLUDING THE BLANK ONES. A bare LF makes the message
  * technically malformed; some receivers accept it, some reject it, and the ones
@@ -67,7 +74,6 @@ export function buildRawMessage(
   attachments: readonly MimeAttachment[],
   now: Date = new Date(),
 ): string {
-  const boundary = boundaryFor(message.id, "mixed")
   const headers: string[] = [
     `From: ${formatAddressList([message.from])}`,
     `To: ${formatAddressList(message.to)}`,
@@ -96,9 +102,25 @@ export function buildRawMessage(
     headers.push(`${name}: ${String(value).replace(/[\r\n]+/g, " ")}`)
   }
 
+  const body = bodyPart(message)
+
+  /**
+   * ⚠ NO `multipart/mixed` WHERE THERE IS NOTHING TO MIX. `bodyPart` already
+   * carries its own `Content-Type` — a single part, or a `multipart/alternative`
+   * when there is both text and html — so with no attachments it follows the
+   * headers directly and the message ends one level shallower.
+   *
+   * Wrapping it anyway would be legal and would work, but it would announce a
+   * multipart message to every client for the sake of one part, and a
+   * plain-text send would arrive structurally indistinguishable from one
+   * carrying a file.
+   */
+  if (attachments.length === 0) return [...headers, body].join(CRLF)
+
+  const boundary = boundaryFor(message.id, "mixed")
   headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`)
 
-  const parts = [bodyPart(message), ...attachments.map(attachmentPart)]
+  const parts = [body, ...attachments.map(attachmentPart)]
 
   return [
     headers.join(CRLF),
