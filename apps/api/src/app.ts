@@ -318,6 +318,29 @@ export function createApp(deps: AppDeps = {}) {
       "are recognisable in your own logs and greppable in a leak scan.",
   })
 
+  // ⚠ REGISTERED EVEN THOUGH NO CUSTOMER CODES AGAINST IT. `/mailboxes` names
+  // this scheme, and a document that REFERENCES a security scheme it never
+  // DEFINES is invalid OpenAPI — the drift check would still pass, because the
+  // generated file matches the code that generated it, while Scalar renders a
+  // dangling reference and a generator can emit a client with no way to
+  // authenticate. Every name used in a `security:` block has to exist here.
+  //
+  // ⚠ AND IT IS A COOKIE, NOT A BEARER TOKEN, WHICH IS THE POINT OF IT BEING A
+  // SECOND SCHEME RATHER THAN A SECOND USE OF THE FIRST. Mailbox routes take
+  // the session a browser already holds from auth.i10.tech; they deliberately
+  // do NOT accept an API key, so that a leaked sending key — whose whole
+  // advertised blast radius is "can send mail" — cannot also create mailboxes
+  // on the customer's domain.
+  app.openAPIRegistry.registerComponent("securitySchemes", "sessionAuth", {
+    type: "apiKey",
+    in: "cookie",
+    name: "__session",
+    description:
+      "The Clerk session cookie set when you sign in at auth.i10.tech. Used " +
+      "by the console for mailbox management; it is not an alternative to an " +
+      "API key, and the sending endpoints do not accept it.",
+  })
+
   app.doc31("/openapi.json", {
     openapi: "3.1.0",
     info: {
