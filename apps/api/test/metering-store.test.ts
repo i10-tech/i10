@@ -79,6 +79,29 @@ describe("finding an assignment", () => {
     })
   })
 
+  /**
+   * ⚠ THE ROW AS THE DRIVER ACTUALLY HANDS IT BACK, WHICH IS NOT WHAT THE
+   * FIXTURE ABOVE SAYS. postgres.js maps timestamptz to `new Date(x)`, so
+   * `PLAN_ROW.anchor` being a real `Date` looked like the honest shape — and
+   * the first call to `find()` ever made in production threw
+   * `expected date, received string` on this column.
+   *
+   * ⚠ AND THE BLAST RADIUS IS EVERY GATE, NOT JUST BILLING. Sending, adding a
+   * domain, any limit at all, resolves the plan through here first, so this
+   * surfaced as `POST /domains` answering 500 for a tenant whose plan row was
+   * perfectly well-formed.
+   */
+  it("accepts an anchor the driver returned as a string", async () => {
+    const { db } = fakeDb((s) =>
+      s.includes("plan_assignments")
+        ? [{ ...PLAN_ROW, anchor: "2026-01-15T00:00:00.000Z" }]
+        : [],
+    )
+
+    const found = await planAssignmentStore(db).find(TENANT)
+    expect(found?.anchor).toEqual(PLAN_ROW.anchor)
+  })
+
   it("returns null when the tenant holds no plan", async () => {
     const { db } = fakeDb(() => [])
     expect(await planAssignmentStore(db).find(TENANT)).toBeNull()
