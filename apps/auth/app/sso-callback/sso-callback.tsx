@@ -4,7 +4,9 @@ import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { useClerk, useSignIn, useSignUp } from "@clerk/nextjs"
+import { Spinner } from "@repo/ui/components/spinner"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { leaveFor } from "../_lib/finish"
 
 /**
  * Where an OAuth provider drops the browser on its way back.
@@ -49,9 +51,13 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
       // route to, hence the branch.
       const url = decorateUrl(afterAuthUrl)
       if (url.startsWith("http")) {
-        window.location.href = url
+        // ⚠ `replace`, NOT `href` — see _lib/finish.ts. This page is a machine
+        // step nobody should be able to go back to: restoring it re-runs a
+        // hand-off whose one-time code has already been spent, which fails and
+        // dumps the person on /sign-in.
+        leaveFor(url)
       } else {
-        router.push(url)
+        router.replace(url)
       }
     }
 
@@ -77,7 +83,7 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
           signIn.existingSession?.sessionId ?? signUp.existingSession?.sessionId
         if (existing) {
           await clerk.setActive({ session: existing })
-          window.location.href = afterAuthUrl
+          leaveFor(afterAuthUrl)
           return
         }
 
@@ -87,15 +93,15 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
           signIn.status === "needs_second_factor" ||
           signIn.status === "needs_client_trust"
         ) {
-          router.push("/mfa")
+          router.replace("/mfa")
           return
         }
 
         toast.error("That sign-in did not complete. Try again.")
-        router.push("/sign-in")
+        router.replace("/sign-in")
       } catch {
         toast.error(TRANSPORT_FAILURE)
-        router.push("/sign-in")
+        router.replace("/sign-in")
       }
     }
 
@@ -104,7 +110,16 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-6">
-      <p className="text-muted-foreground text-sm">Signing you in…</p>
+      {/*
+       * ⚠ A SPINNER RATHER THAN A BARE SENTENCE, because this page is a pause
+       * of unknown length in the middle of a redirect chain. Static text on an
+       * empty page is indistinguishable from a page that has stopped, which is
+       * how a hand-off that is merely slow gets reported as broken.
+       */}
+      <p className="text-muted-foreground flex items-center gap-2 text-sm">
+        <Spinner aria-hidden="true" aria-label={undefined} />
+        Signing you in…
+      </p>
     </main>
   )
 }

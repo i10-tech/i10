@@ -15,6 +15,7 @@ import { Input } from "@repo/ui/components/input"
 import { OtpField } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { finalizeAndLeave } from "../_lib/finish"
 
 /*
  * The second factor.
@@ -153,12 +154,14 @@ export function MfaForm({
 
       if (signIn.status === "complete") {
         // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
-        // see the sign-in form.
-        await signIn.finalize({
-          navigate: ({ decorateUrl }) => {
-            window.location.href = decorateUrl(afterAuthUrl)
-          },
-        })
+        // see the sign-in form. `finalizeAndLeave` also replaces rather than
+        // assigns, and navigates itself if Clerk's callback never runs: see
+        // _lib/finish.ts for the phone-shaped bug both of those close.
+        const result = await finalizeAndLeave(
+          (params) => signIn.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) toast.error(messageFor(result.error))
         return
       }
 

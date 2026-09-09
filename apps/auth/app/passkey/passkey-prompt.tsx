@@ -7,6 +7,7 @@ import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { finalizeAndLeave } from "../_lib/finish"
 import { NEUTRAL_ENVIRONMENT, passkeyEnvironment } from "../_lib/platform"
 
 /*
@@ -54,12 +55,14 @@ export function PasskeyPrompt({
 
       if (signIn.status === "complete") {
         // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
-        // see the sign-in form.
-        await signIn.finalize({
-          navigate: ({ decorateUrl }) => {
-            window.location.href = decorateUrl(afterAuthUrl)
-          },
-        })
+        // see the sign-in form. `finalizeAndLeave` also replaces rather than
+        // assigns, and navigates itself if Clerk's callback never runs: see
+        // _lib/finish.ts for the phone-shaped bug both of those close.
+        const result = await finalizeAndLeave(
+          (params) => signIn.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) toast.error(messageFor(result.error))
         return
       }
 

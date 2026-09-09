@@ -16,6 +16,7 @@ import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { finalizeAndLeave } from "../_lib/finish"
 
 /*
  * Forgotten password, in Clerk's stable three-call shape.
@@ -123,11 +124,15 @@ export function ResetPasswordForm({
       }
 
       if (signIn.status === "complete") {
-        await signIn.finalize({
-          navigate: ({ decorateUrl }) => {
-            window.location.href = decorateUrl(afterAuthUrl)
-          },
-        })
+        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
+        // see the sign-in form. `finalizeAndLeave` also replaces rather than
+        // assigns, and navigates itself if Clerk's callback never runs: see
+        // _lib/finish.ts for the phone-shaped bug both of those close.
+        const result = await finalizeAndLeave(
+          (params) => signIn.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) toast.error(messageFor(result.error))
         return
       }
 

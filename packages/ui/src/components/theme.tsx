@@ -3,19 +3,25 @@
 import { ThemeProvider } from "next-themes"
 
 /**
- * Follows the operating system's light/dark setting.
+ * The light/dark provider, shared by every app in the workspace.
  *
- * ⚠ WITHOUT THIS THE APP IS PERMANENTLY LIGHT, WHICH IS EXACTLY WHAT SHIPPED.
+ * ⚠ WITHOUT THIS AN APP IS PERMANENTLY LIGHT, AND NOTHING ANYWHERE SAYS SO.
  * The token sheet defines its dark palette under a `.dark` CLASS, and a class
- * does not apply itself — nothing was reading `prefers-color-scheme` at all, so
- * a machine set to dark got the light palette with no error anywhere to explain
- * it. `attribute="class"` is what puts `.dark` on <html>, which is the selector
- * the tokens are already written against.
+ * does not apply itself — an app that renders no provider gets the `:root`
+ * light palette on a machine set to dark, with no error to explain it. That is
+ * exactly what apps/console shipped with. `attribute="class"` is what puts
+ * `.dark` on <html>, which is the selector the tokens are already written
+ * against.
+ *
+ * ⚠ IT LIVES IN THE PACKAGE RATHER THAN IN EACH APP BECAUSE THE DEFAULT IS A
+ * PRODUCT DECISION, NOT AN APP ONE. Two copies is two places for "we are dark
+ * by default" to be written differently, which is how the console came to be
+ * white while auth was dark — someone signing in on a dark page and landing on
+ * a white one has been shown a seam that does not exist in the product.
  *
  * ⚠ AND `next-themes` IS ALREADY HERE REGARDLESS. shadcn's Sonner calls
  * `useTheme()` to match the toast to the page; with no provider that call
- * returns nothing and the toasts sit on the wrong ground. One provider fixes
- * the page and the toasts together.
+ * returns nothing and the toasts sit on the wrong ground.
  *
  * ⚠ `disableTransitionOnChange` STOPS THE SWEEP. Every colour token is on a
  * transition somewhere; without this, switching theme animates the entire page

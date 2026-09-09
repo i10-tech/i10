@@ -14,19 +14,30 @@ import {
   FieldSeparator,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
+import { Spinner } from "@repo/ui/components/spinner"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { finalizeAndLeave } from "../_lib/finish"
 
 /*
  * shadcn's `login-02`, wired to Clerk.
  *
  * ⚠ THE MARKUP IS THE BLOCK'S, UNCHANGED. Only three things differ, and each is
  * behaviour rather than taste: the two placeholder `<a href="#">` links now go
- * somewhere, the single hard-coded GitHub button became the three providers we
+ * somewhere, the single hard-coded GitHub button became the providers we
  * actually enabled, and the form submits instead of reloading the page. Nothing
  * was restyled — a block edited for taste on arrival is a block that can no
  * longer be diffed against upstream.
+ *
+ * ⚠ THERE IS ONE `busy` FOR THE WHOLE PAGE, NOT ONE PER BUTTON, AND THAT IS THE
+ * FIX FOR A REAL RACE. The password form and the SSO buttons each used to track
+ * their own pending flag, so pressing "Continue with Google" and then "Login"
+ * started two flows against the same Clerk client: the SSO redirect was already
+ * in flight when `signIn.password` overwrote the attempt it depended on.
+ * Holding the id of the one running action in a single piece of state makes
+ * every other control disabled by construction rather than by remembering to
+ * disable it.
  */
 export function SignInForm({
   afterAuthUrl,
@@ -35,6 +46,7 @@ export function SignInForm({
   mfaHref,
   passkeyHref,
   redirectRaw,
+  showApple,
 }: {
   afterAuthUrl: string
   signUpHref: string
@@ -42,10 +54,11 @@ export function SignInForm({
   mfaHref: string
   passkeyHref: string
   redirectRaw?: string
+  showApple: boolean
 }) {
   const router = useRouter()
   const { signIn } = useSignIn()
-  const [pending, setPending] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
 
   /**
    * Offer a saved passkey without anybody asking.
@@ -63,6 +76,11 @@ export function SignInForm({
    * conditional mediation rejects immediately, and a toast would be an error
    * message for something the person never requested. The password form
    * underneath is unaffected either way.
+   *
+   * ⚠ IT TAKES THE LOCK ONLY ONCE IT HAS ACTUALLY SUCCEEDED. Claiming `busy` at
+   * arm time would grey the whole page out for the many people whose browser
+   * holds no passkey at all; claiming it before navigating stops them pressing
+   * "Login" during the redirect that is already happening.
    */
   const armed = useRef(false)
 
@@ -72,25 +90,31 @@ export function SignInForm({
 
     void signIn
       .passkey({ flow: "autofill" })
-      .then(({ error }) => {
+      .then(async ({ error }) => {
         if (error || signIn.status !== "complete") return
-        return signIn.finalize({
-          navigate: ({ decorateUrl }) => {
-            window.location.href = decorateUrl(afterAuthUrl)
-          },
-        })
+        setBusy("passkey")
+
+        // ⚠ RELEASED IF THE FINALIZE FAILS, or the page stays greyed out for
+        // something the person never asked for. Everything before this point
+        // fails silently by design; a lock is the one failure they can see, so
+        // it is the one that has to be undone.
+        const result = await finalizeAndLeave(
+          (params) => signIn.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) setBusy(null)
       })
-      .catch(() => {})
+      .catch(() => setBusy(null))
   }, [signIn, afterAuthUrl])
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     // ⚠ `signIn` IS NULL UNTIL CLERK LOADS. It is the only readiness signal the
     // hook gives; there is no `isLoaded` on this API.
-    if (!signIn || pending) return
+    if (!signIn || busy) return
 
     const form = new FormData(event.currentTarget)
-    setPending(true)
+    setBusy("password")
 
     try {
       const { error } = await signIn.password({
@@ -100,21 +124,27 @@ export function SignInForm({
 
       if (error) {
         toast.error(messageFor(error))
+        setBusy(null)
         return
       }
 
       if (signIn.status === "complete") {
-        // ⚠ `finalize` IS WHAT CREATES THE SESSION, and its `navigate` is how a
-        // CROSS-ORIGIN destination is reached. `decorateUrl` is not optional
-        // decoration: on Safari it carries the handshake that lets the cookie
-        // survive ITP, and skipping it means a customer on iOS lands on the
-        // dashboard signed out. Next's router cannot route to another origin,
-        // so the assignment is deliberate.
-        await signIn.finalize({
-          navigate: ({ decorateUrl }) => {
-            window.location.href = decorateUrl(afterAuthUrl)
-          },
-        })
+        /*
+         * ⚠ `finalize` IS WHAT CREATES THE SESSION, and the helper is what gets
+         * the browser out of here — see _lib/finish.ts for why the destination
+         * is `replace`d and why the navigation is not left entirely to Clerk's
+         * callback. The lock is deliberately NOT released on this path: the
+         * page is leaving, and re-enabling a "Login" button for the second or
+         * two that takes is an invitation to press it again.
+         */
+        const result = await finalizeAndLeave(
+          (params) => signIn.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) {
+          toast.error(messageFor(result.error))
+          setBusy(null)
+        }
         return
       }
 
@@ -132,6 +162,8 @@ export function SignInForm({
         // resumes THIS `signIn` out of Clerk's client state; a full page load
         // would start a fresh client with no attempt in progress and bounce the
         // person back to the beginning, having already given their password.
+        // The lock stays on for the same reason as above — this page is going
+        // away.
         router.push(mfaHref)
         return
       }
@@ -142,12 +174,14 @@ export function SignInForm({
       // the worst option; naming the state at least tells support what
       // happened.
       toast.error("This sign-in needs a step we do not support yet. Contact support.")
+      setBusy(null)
     } catch {
       toast.error(TRANSPORT_FAILURE)
-    } finally {
-      setPending(false)
+      setBusy(null)
     }
   }
+
+  const locked = busy !== null
 
   return (
     <form className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
@@ -170,6 +204,7 @@ export function SignInForm({
             // to: without it the browser has nowhere to surface a saved
             // passkey, and the effect silently does nothing.
             autoComplete="email webauthn"
+            disabled={locked}
             required
           />
         </Field>
@@ -178,7 +213,16 @@ export function SignInForm({
             <FieldLabel htmlFor="password">Password</FieldLabel>
             <Link
               href={resetHref}
-              className="ml-auto text-sm underline-offset-4 hover:underline"
+              // ⚠ THE LINKS GO DEAD WITH THE BUTTONS, and they are the half
+              // that is easy to forget. Navigating to "Forgot your password?"
+              // mid-redirect abandons a flow that is already creating a session
+              // — the person lands on a reset page for an account they were one
+              // second from being signed in to.
+              aria-disabled={locked}
+              tabIndex={locked ? -1 : undefined}
+              className={`ml-auto text-sm underline-offset-4 hover:underline ${
+                locked ? "pointer-events-none opacity-50" : ""
+              }`}
             >
               Forgot your password?
             </Link>
@@ -186,30 +230,63 @@ export function SignInForm({
           <PasswordInput
             id="password"
             name="password"
-
             // ⚠ `current-password`, NOT `password`. It is what tells a password
             // manager to offer the saved credential rather than to propose a
             // new one, and getting it wrong is how people end up with a second
             // entry for the same site.
             autoComplete="current-password"
+            disabled={locked}
             required
           />
         </Field>
         <Field>
-          <Button type="submit" disabled={!signIn || pending}>
-            {pending ? "Signing in…" : "Login"}
+          <Button type="submit" disabled={!signIn || locked}>
+            {busy === "password" ? (
+              <>
+                {/*
+                 * ⚠ `aria-hidden`, AND THE LABEL CARRIES THE STATE. The Spinner
+                 * ships with `role="status"`; leaving that on next to text that
+                 * already says "Signing in…" makes a screen reader announce the
+                 * same thing twice.
+                 */}
+                <Spinner aria-hidden="true" aria-label={undefined} />
+                Signing in…
+              </>
+            ) : (
+              "Login"
+            )}
           </Button>
         </Field>
         <FieldSeparator>Or continue with</FieldSeparator>
-        <OAuthButtons afterAuthUrl={afterAuthUrl} redirectRaw={redirectRaw} />
+        <OAuthButtons
+          afterAuthUrl={afterAuthUrl}
+          redirectRaw={redirectRaw}
+          showApple={showApple}
+          busy={busy}
+          onBusyChange={setBusy}
+        />
         <FieldDescription className="text-center">
-          <Link href={passkeyHref} className="underline underline-offset-4">
+          <Link
+            href={passkeyHref}
+            aria-disabled={locked}
+            tabIndex={locked ? -1 : undefined}
+            className={`underline underline-offset-4 ${
+              locked ? "pointer-events-none opacity-50" : ""
+            }`}
+          >
             Use a passkey instead
           </Link>
         </FieldDescription>
         <FieldDescription className="text-center">
           Don&apos;t have an account?{" "}
-          <Link href={signUpHref} className="underline underline-offset-4">
+          <Link
+            href={signUpHref}
+            aria-disabled={locked}
+            tabIndex={locked ? -1 : undefined}
+            className={`underline underline-offset-4 ${
+              locked ? "pointer-events-none opacity-50" : ""
+            }`}
+          >
             Sign up
           </Link>
         </FieldDescription>
