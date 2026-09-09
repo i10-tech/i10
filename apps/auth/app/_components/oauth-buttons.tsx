@@ -8,6 +8,7 @@ import { Field } from "@repo/ui/components/field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoStrategy } from "../_lib/clerk-types"
+import type { SsoProvider } from "../_lib/providers"
 import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
 
 /**
@@ -30,15 +31,22 @@ import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
  * loading" from "something else is".
  */
 
-const PROVIDERS = [
-  { strategy: "oauth_google", label: "Google", Icon: GoogleIcon },
-  { strategy: "oauth_github", label: "GitHub", Icon: GitHubIcon },
-  { strategy: "oauth_apple", label: "Apple", Icon: AppleIcon },
-] as const satisfies readonly {
-  strategy: SsoStrategy
-  label: string
-  Icon: (props: React.ComponentProps<"svg">) => React.ReactNode
-}[]
+/**
+ * The marks we draw ourselves, keyed by strategy.
+ *
+ * ⚠ A LOOKUP, NOT A CLOSED LIST, AND A MISS IS NOT AN ERROR. The buttons are
+ * driven by whatever Clerk reports as enabled, so a provider turned on in the
+ * dashboard that has no mark here still renders — as a correct, working button
+ * with no icon. That is the right failure: a provider we forgot to draw is a
+ * missing glyph, never a missing way to sign in. Add the mark here when it
+ * happens, and read provider-icons.tsx first — these are other companies'
+ * trademarks and the path data is governed.
+ */
+const LOCAL_ICONS: Record<string, (props: React.ComponentProps<"svg">) => React.ReactNode> = {
+  oauth_google: GoogleIcon,
+  oauth_github: GitHubIcon,
+  oauth_apple: AppleIcon,
+}
 
 /**
  * How long to wait for the browser to actually leave for the provider.
@@ -57,7 +65,7 @@ export function OAuthButtons({
   afterAuthUrl,
   redirectRaw,
   verb,
-  showApple,
+  providers,
   busy,
   onBusyChange,
 }: {
@@ -70,8 +78,12 @@ export function OAuthButtons({
   redirectRaw?: string
   /** "Continue" reads right on both pages; the prop exists so it need not. */
   verb?: string
-  /** Decided from the request's User-Agent — see _lib/apple.ts. */
-  showApple: boolean
+  /**
+   * What Clerk says is configured, already filtered for this device — see
+   * _lib/providers.ts. An empty list renders nothing at all, which is the
+   * correct answer when the instance has no SSO connections.
+   */
+  providers: SsoProvider[]
   /** The id of the one action allowed to be running, or null. */
   busy: string | null
   onBusyChange: (busy: string | null) => void
@@ -170,14 +182,13 @@ export function OAuthButtons({
     }
   }
 
-  const providers = showApple
-    ? PROVIDERS
-    : PROVIDERS.filter(({ strategy }) => strategy !== "oauth_apple")
+  if (providers.length === 0) return null
 
   return (
     <Field>
-      {providers.map(({ strategy, label, Icon }) => {
+      {providers.map(({ strategy, name }) => {
         const loading = busy === strategy
+        const Icon = LOCAL_ICONS[strategy]
 
         return (
           <Button
@@ -199,12 +210,10 @@ export function OAuthButtons({
              */}
             {loading ? (
               <Spinner aria-hidden="true" aria-label={undefined} />
-            ) : (
+            ) : Icon ? (
               <Icon aria-hidden="true" />
-            )}
-            {loading
-              ? `Continuing with ${label}…`
-              : `${verb ?? "Continue"} with ${label}`}
+            ) : null}
+            {loading ? `Continuing with ${name}…` : `${verb ?? "Continue"} with ${name}`}
           </Button>
         )
       })}

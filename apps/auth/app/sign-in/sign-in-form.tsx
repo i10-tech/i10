@@ -19,6 +19,7 @@ import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave } from "../_lib/finish"
+import type { SsoProvider } from "../_lib/providers"
 
 /*
  * shadcn's `login-02`, wired to Clerk.
@@ -46,7 +47,7 @@ export function SignInForm({
   mfaHref,
   passkeyHref,
   redirectRaw,
-  showApple,
+  providers,
 }: {
   afterAuthUrl: string
   signUpHref: string
@@ -54,7 +55,7 @@ export function SignInForm({
   mfaHref: string
   passkeyHref: string
   redirectRaw?: string
-  showApple: boolean
+  providers: SsoProvider[]
 }) {
   const router = useRouter()
   const { signIn } = useSignIn()
@@ -261,7 +262,7 @@ export function SignInForm({
         <OAuthButtons
           afterAuthUrl={afterAuthUrl}
           redirectRaw={redirectRaw}
-          showApple={showApple}
+          providers={providers}
           busy={busy}
           onBusyChange={setBusy}
         />

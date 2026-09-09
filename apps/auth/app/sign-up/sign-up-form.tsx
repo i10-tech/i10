@@ -20,6 +20,7 @@ import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave } from "../_lib/finish"
+import type { SsoProvider } from "../_lib/providers"
 
 /*
  * shadcn's `signup-02`, wired to Clerk, plus the verification step the block
@@ -42,12 +43,12 @@ export function SignUpForm({
   afterAuthUrl,
   signInHref,
   redirectRaw,
-  showApple,
+  providers,
 }: {
   afterAuthUrl: string
   signInHref: string
   redirectRaw?: string
-  showApple: boolean
+  providers: SsoProvider[]
 }) {
   const { signUp } = useSignUp()
   const [stage, setStage] = useState<"details" | "verify">("details")
@@ -372,7 +373,7 @@ export function SignUpForm({
           afterAuthUrl={afterAuthUrl}
           redirectRaw={redirectRaw}
           verb="Sign up"
-          showApple={showApple}
+          providers={providers}
           busy={busy}
           onBusyChange={setBusy}
         />

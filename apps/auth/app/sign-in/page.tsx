@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { headers } from "next/headers"
-import { isAppleUserAgent } from "../_lib/apple"
+import { ssoProviders } from "../_lib/providers"
 import { afterAuthUrl } from "../_lib/redirect"
 import { SignInForm } from "./sign-in-form"
 
@@ -32,11 +32,10 @@ export default async function Page({
   const carry =
     typeof raw === "string" ? `?redirect_url=${encodeURIComponent(raw)}` : ""
 
-  // ⚠ "Continue with Apple" IS DECIDED HERE RATHER THAN IN THE BROWSER, so
-  // the first paint is already right and no button appears a beat late,
-  // shifting the ones under it. See _lib/apple.ts. This page is
-  // `force-dynamic` already, so reading a header costs nothing.
-  const showApple = isAppleUserAgent((await headers()).get("user-agent"))
+  // ⚠ WHICH SSO BUTTONS EXIST IS CLERK'S ANSWER, NOT OURS, and it is
+  // resolved here so the first paint is already correct. See
+  // _lib/providers.ts — it also applies the Apple-hardware rule.
+  const providers = await ssoProviders((await headers()).get("user-agent"))
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
@@ -48,7 +47,7 @@ export default async function Page({
           mfaHref={`/mfa${carry}`}
           passkeyHref={`/passkey${carry}`}
           redirectRaw={typeof raw === "string" ? raw : undefined}
-          showApple={showApple}
+          providers={providers}
         />
       </div>
     </main>
