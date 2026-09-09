@@ -36,7 +36,7 @@ Two more records make the envelope yours.
 
 ```
 send.yourdomain.com             MX    10 feedback-smtp.eu-central-1.amazonses.com
-send.yourdomain.com             TXT   "v=spf1 include:spf.i10.tech ~all"
+send.yourdomain.com             TXT   "v=spf1 include:_spf.i10.tech ~all"
 ```
 
 Now SPF aligns as well as DKIM, and Gmail shows `mailed-by: yourdomain.com`.
@@ -56,7 +56,7 @@ where delivery failures are returned, the relay re-verifies it continuously,
 and RFC 2181 forbids pointing an MX at a CNAME — so it cannot be hidden behind
 an i10 hostname without breaking bounce handling.
 
-The SPF record is a different story. `include:spf.i10.tech` resolves on our
+The SPF record is a different story. `include:_spf.i10.tech` resolves on our
 side, which means changing how i10 delivers mail never requires you to edit
 DNS again.
 

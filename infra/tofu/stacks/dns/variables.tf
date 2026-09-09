@@ -53,12 +53,12 @@ variable "record_ids" {
       "apex_mx", "send_mx",
       "apex_spf", "send_spf",
       "dkim_rsa", "dkim_ed25519",
-      "ses_dkim_1", "ses_dkim_2", "ses_dkim_3",
+      "ses_byodkim",
       "clerk_dkim_1", "clerk_dkim_2", "clerk_mail",
       "dmarc",
       "srv_imaps", "srv_submissions", "srv_imap_none", "srv_submission_none",
       "mta_sts",
     ], keys(var.record_ids))) == 0
-    error_message = "record_ids is missing a key. Every resource in main.tf has an import block, so a missing id is a record that would be CREATED alongside the live one rather than adopted."
+    error_message = "record_ids is missing a key. Records this stack ADOPTS have an import block, so a missing id is a record that would be CREATED alongside the live one. Two resources are deliberately absent from this list: spf_include, which never existed and is genuinely created here, and ses_byodkim, which was created by hand during the Easy DKIM migration and still needs its id captured."
   }
 }
