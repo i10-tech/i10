@@ -8,7 +8,7 @@ import { Button } from "@repo/ui/components/button"
 import { FieldGroup } from "@repo/ui/components/field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { messageFor, ssoFailureMessage, TRANSPORT_FAILURE } from "../_lib/errors"
-import { leaveFor, setActiveAndLeave } from "../_lib/finish"
+import { finalizeAndLeave, leaveFor, setActiveAndLeave } from "../_lib/finish"
 
 /**
  * Where an OAuth provider drops the browser on its way back.
@@ -175,7 +175,12 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
           // the object the hook handed us is stale — the same trap that made
           // the SSO buttons silently do nothing.
           const transferred = clerk.client.signIn
-          if (await leaveWithSession(transferred.createdSessionId)) return
+          if (
+            await leaveWithSession(
+              signIn.createdSessionId ?? transferred.createdSessionId,
+            )
+          )
+            return
 
           // An OAuth sign-in can still owe a second factor, and
           // `needs_client_trust` is Clerk's device-trust step, not an error.
@@ -229,7 +234,21 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
      */
   }, [signIn, signUp, clerk, afterAuthUrl, router, failureCode, leaveWithSession])
 
-  /** They said yes. This is the call that actually creates the account. */
+  /**
+   * They said yes. This is the call that actually creates the account.
+   *
+   * ⚠ THE SESSION IS READ OFF THE OBJECT `create()` JUST WROTE TO, WHICH IS THE
+   * HOOK'S `signUp` AND NOT `clerk.client.signUp`. Reading the client resource
+   * instead is how pressing "Create my account" made the account, created the
+   * session, and then dumped the person on /sign-up anyway: the id was sitting
+   * on the future object the whole time, and the fallback path fired because we
+   * looked in the wrong place.
+   *
+   * ⚠ AND `createdSessionId` IS THE GATE RATHER THAN `status`, because it is
+   * also exactly what `finalize()` requires — it throws "Cannot finalize
+   * sign-up without a created session" without one. Gating on the same field
+   * the call needs means the check and the call cannot disagree.
+   */
   async function createAccount() {
     if (!signUp || pending) return
     setPending(true)
@@ -242,12 +261,28 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
         return
       }
 
-      // Re-read from the client for the same reason as above.
-      if (await leaveWithSession(clerk.client.signUp.createdSessionId)) return
+      if (signUp.createdSessionId) {
+        const result = await finalizeAndLeave(
+          (params) => signUp.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) {
+          toast.error(messageFor(result.error))
+          setPending(false)
+        }
+        return
+      }
+
+      // Belt and braces: the classic resource, or a session Clerk activated for
+      // us. `leaveWithSession` covers both and returns false only if there is
+      // genuinely no session anywhere.
+      if (await leaveWithSession(clerk.client?.signUp?.createdSessionId)) return
 
       // ⚠ `missing_requirements` IS REACHABLE AND IS NOT AN ERROR: the instance
       // asks for something the provider did not supply. We cannot collect it
-      // here, so hand back to the form that can.
+      // here, so hand back to the form that can. Reaching this now means no
+      // session exists anywhere, so it is honest rather than the mis-read it
+      // used to be.
       toast.error("We need a little more before your account is ready.")
       router.replace("/sign-up")
     } catch {
