@@ -42,7 +42,10 @@ import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
  * happens, and read provider-icons.tsx first — these are other companies'
  * trademarks and the path data is governed.
  */
-const LOCAL_ICONS: Record<string, (props: React.ComponentProps<"svg">) => React.ReactNode> = {
+const LOCAL_ICONS: Record<
+  string,
+  (props: React.ComponentProps<"svg">) => React.ReactNode
+> = {
   oauth_google: GoogleIcon,
   oauth_github: GitHubIcon,
   oauth_apple: AppleIcon,
@@ -213,7 +216,9 @@ export function OAuthButtons({
             ) : Icon ? (
               <Icon aria-hidden="true" />
             ) : null}
-            {loading ? `Continuing with ${name}…` : `${verb ?? "Continue"} with ${name}`}
+            {loading
+              ? `Continuing with ${name}…`
+              : `${verb ?? "Continue"} with ${name}`}
           </Button>
         )
       })}
