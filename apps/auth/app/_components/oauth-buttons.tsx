@@ -2,45 +2,50 @@
 
 import { useCallback, useEffect, useRef } from "react"
 import { toast } from "sonner"
-import { useClerk, useSignIn } from "@clerk/nextjs"
+import { useClerk } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field } from "@repo/ui/components/field"
 import { Spinner } from "@repo/ui/components/spinner"
-import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoStrategy } from "../_lib/clerk-types"
 import type { SsoProvider } from "../_lib/providers"
 import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
 
 /**
- * Google, GitHub and Apple, on both pages.
+ * The SSO buttons, on both pages.
  *
- * ⚠ IT CALLS `signIn.sso` ON THE SIGN-UP PAGE TOO, AND THAT IS CORRECT RATHER
+ * ⚠ IT STARTS A *SIGN-IN* EVEN ON THE SIGN-UP PAGE, AND THAT IS CORRECT RATHER
  * THAN A COPY-PASTE SLIP. An SSO redirect is one round trip that Clerk resolves
  * into whichever it turns out to be: a returning Google account completes a
- * sign-in, a new one is transferred into a sign-up. Wiring the sign-up page to
- * `signUp.sso` instead would make an existing customer who clicks "Sign up with
- * Google" fail with "that account already exists" rather than simply being let
- * in.
+ * sign-in, a new one is transferred into a sign-up. Starting a sign-UP flow
+ * instead would make an existing customer who clicks "Sign up with Google" fail
+ * with "that account already exists" rather than simply being let in.
  *
- * ⚠ AND THE LOCK IS THE PAGE'S, NOT THIS COMPONENT'S. `busy` comes from the
- * form above so that ONE action can be in flight anywhere on the page: starting
- * Google and then submitting the password form used to be possible, and it
- * raced two flows against the same Clerk client — whichever finished second
- * either overwrote the first or failed against state it did not create. The
- * value is the id of whatever is running, so each button can tell "I am the one
- * loading" from "something else is".
- */
-
-/**
- * The marks we draw ourselves, keyed by strategy.
+ * ⚠ IT DOES NOT CALL `signIn.sso()`, AND THAT IS THE FIX FOR BUTTONS THAT DID
+ * NOTHING NINE TIMES OUT OF TEN. `sso()` in clerk-js 6.31.0 makes its own
+ * `create` CONDITIONAL:
  *
- * ⚠ A LOOKUP, NOT A CLOSED LIST, AND A MISS IS NOT AN ERROR. The buttons are
- * driven by whatever Clerk reports as enabled, so a provider turned on in the
- * dashboard that has no mark here still renders — as a correct, working button
- * with no icon. That is the right failure: a provider we forgot to draw is a
- * missing glyph, never a missing way to sign in. Add the mark here when it
- * happens, and read provider-icons.tsx first — these are other companies'
- * trademarks and the path data is governed.
+ *     const hasUrl = !!signIn.firstFactorVerification.externalVerificationRedirectURL
+ *     if (!signIn.id || hasUrl) await this._create({ strategy, ... })
+ *     if (status === "unverified" && externalVerificationRedirectURL) navigate(…)
+ *
+ * With an attempt already in flight and no redirect URL on it, that skips the
+ * create, finds nothing to navigate to, and resolves `{ error: null }` having
+ * done nothing at all. And /sign-in creates exactly that attempt on mount — the
+ * passkey autofill effect POSTs `strategy=passkey`, whose verification carries
+ * no redirect URL. The attempt lives on the Clerk CLIENT, in the `__client`
+ * cookie, so it follows the person to /sign-up and survives reloads.
+ *
+ * ⚠ PRIMING THE ATTEMPT FIRST AND THEN CALLING `sso()` WAS TRIED, AND IT FAILED
+ * FOR A SECOND REASON WORTH RECORDING. `create()` REPLACES `clerk.client.signIn`
+ * with a fresh resource, while `sso()` operates on the one captured when the
+ * hook handed it to us — so the priming landed on one object and the call read
+ * another, still unprimed. Measured live: one `POST /v1/client/sign_ins`, then
+ * silence.
+ *
+ * So this does directly what `sso()` does internally, minus the conditional:
+ * create the attempt with the provider strategy, then go to the URL that comes
+ * back. One request, no second object to get stale, nothing to skip.
  */
 const LOCAL_ICONS: Record<
   string,
@@ -91,7 +96,6 @@ export function OAuthButtons({
   busy: string | null
   onBusyChange: (busy: string | null) => void
 }) {
-  const { signIn } = useSignIn()
   const clerk = useClerk()
   const handoff = useRef<number | null>(null)
 
@@ -135,7 +139,10 @@ export function OAuthButtons({
   }, [clearHandoff, onBusyChange])
 
   async function start(strategy: SsoStrategy) {
-    if (!signIn || busy) return
+    // ⚠ `clerk.loaded` IS THE READINESS GATE. Before it, `clerk.client` is not
+    // there to create an attempt on, and a click is a dead button rather than a
+    // slow one.
+    if (!clerk.loaded || busy) return
     onBusyChange(strategy)
 
     handoff.current = window.setTimeout(() => {
@@ -145,43 +152,63 @@ export function OAuthButtons({
     }, HANDOFF_TIMEOUT_MS)
 
     try {
-      await primeAttempt(clerk, strategy, redirectRaw, afterAuthUrl)
-
-      const { error } = await signIn.sso({
+      /*
+       * ⚠ TWO DIFFERENT URLS, AND SWAPPING THEM BREAKS THE FLOW SILENTLY.
+       * `redirectUrl` here is OUR callback page, where the provider returns and
+       * where `finalize()` actually creates the session.
+       * `actionCompleteRedirectUrl` is where the person ends up afterwards.
+       * Point the callback at the dashboard and the handshake is never finished
+       * — the browser lands on an app that has no session and bounces straight
+       * back to sign-in.
+       *
+       * ⚠ `buildUrlWithAuth` IS WHAT `sso()` APPLIES TO THE CALLBACK, so it is
+       * applied here too. In production it returns the URL unchanged; in
+       * development it carries the dev-browser token that lets the callback be
+       * recognised at all. Dropping it would work in prod and break locally,
+       * which is the worst way round.
+       */
+      await clerk.client.signIn.create({
         strategy,
-        /*
-         * ⚠ TWO DIFFERENT URLS, AND SWAPPING THEM BREAKS THE FLOW SILENTLY.
-         * `redirectCallbackUrl` is OUR page, where the provider returns and
-         * where `finalize()` actually creates the session. `redirectUrl` is
-         * where the person ends up afterwards. Point the callback at the
-         * dashboard and the handshake is never finished — the browser lands on
-         * an app that has no session and bounces straight back to sign-in.
-         *
-         * ⚠ THE CALLBACK IS ABSOLUTE, AND THIS IS TIDINESS RATHER THAN THE BUG
-         * FIX IT WAS FIRST ASSUMED TO BE. Measured against clerk-js 6.31.0, a
-         * relative `/sso-callback` behaved identically — so this was NOT the
-         * cause of the buttons failing; see `primeAttempt` below for what
-         * actually was. It stays absolute because the SDK treats the two
-         * parameters differently: `actionCompleteRedirectUrl` is explicitly
-         * origin-prefixed when it fails to parse, while this one is passed
-         * straight to `buildUrlWithAuth` with no such handling. Giving it a
-         * whole URL means not depending on that asymmetry holding.
-         */
-        redirectCallbackUrl: callbackUrl(redirectRaw),
-        redirectUrl: afterAuthUrl,
+        redirectUrl: clerk.buildUrlWithAuth(callbackUrl(redirectRaw)),
+        actionCompleteRedirectUrl: afterAuthUrl,
       })
 
-      // Reached only when the redirect did not happen — otherwise the browser
-      // has already left this page.
-      if (error) {
-        clearHandoff()
-        onBusyChange(null)
-        toast.error(messageFor(error))
+      /*
+       * ⚠ RE-READ FROM THE CLIENT, NOT FROM A VALUE CAPTURED BEFORE THE CALL.
+       * `create()` replaces `clerk.client.signIn`, which is the whole reason
+       * the previous attempt at this bug failed — see the note at the top.
+       */
+      const verification = clerk.client.signIn.firstFactorVerification
+      const target = verification?.externalVerificationRedirectURL
+
+      if (verification?.status === "unverified" && target) {
+        /*
+         * ⚠ `assign`, NOT `replace`, AND NOT AN `href` ASSIGNMENT. Assign keeps
+         * this page in history, so backing out of the provider's consent screen
+         * returns here rather than skipping past — the `pageshow` handler above
+         * is what unfreezes the buttons when that happens. It is a method call
+         * rather than `location.href = …` because the React Compiler lint rule
+         * `react-hooks/immutability` rejects writing to a value defined outside
+         * the component, and it is right to: the assignment form reads like
+         * state mutation.
+         *
+         * ⚠ AND THE LOCK IS NOT RELEASED. The browser is leaving, and
+         * re-enabling the row for the second that takes invites a second click
+         * that starts a second flow against the same client.
+         */
+        window.location.assign(String(target))
+        return
       }
-    } catch {
+
+      // Clerk accepted the attempt but produced nowhere to send anybody. There
+      // is nothing to retry silently, so say so rather than sit disabled.
       clearHandoff()
       onBusyChange(null)
-      toast.error(TRANSPORT_FAILURE)
+      toast.error("That did not start. Try again.")
+    } catch (error) {
+      clearHandoff()
+      onBusyChange(null)
+      toast.error(clerkErrorMessage(error))
     }
   }
 
@@ -202,7 +229,7 @@ export function OAuthButtons({
             // and a click before that point is a dead button rather than a slow
             // one. `busy` covers the rest of the page, including the password
             // form.
-            disabled={!signIn || busy !== null}
+            disabled={!clerk.loaded || busy !== null}
             onClick={() => start(strategy)}
           >
             {/*
@@ -234,64 +261,15 @@ function callbackUrl(redirectRaw: string | undefined): string {
 }
 
 /**
- * Make sure `sso()` will actually do something.
+ * A sentence for something the classic resource threw.
  *
- * ⚠ THIS IS A WORKAROUND FOR A BUG IN clerk-js, AND WITHOUT IT THE OAUTH
- * BUTTONS SILENTLY DO NOTHING FOR MOST PEOPLE, MOST OF THE TIME. Read the
- * shipped implementation of `SignIn.sso` (clerk-js 6.31.0) and the shape of it
- * is:
- *
- *     const hasUrl = !!signIn.firstFactorVerification.externalVerificationRedirectURL
- *     if (!signIn.id || hasUrl) await this._create({ strategy, ... })
- *     const { status, externalVerificationRedirectURL } = signIn.firstFactorVerification
- *     if (status === "unverified" && externalVerificationRedirectURL) navigate(…)
- *
- * The create is CONDITIONAL. If a sign-in attempt already exists and it carries
- * no external redirect URL, `sso()` skips the create, finds no URL to go to,
- * and resolves `{ error: null }` having done absolutely nothing. Success, no
- * navigation, no request, nothing to show the person.
- *
- * ⚠ AND OUR SIGN-IN PAGE CREATES EXACTLY THAT ATTEMPT ON MOUNT. The passkey
- * conditional-mediation effect POSTs `strategy=passkey`, which produces an
- * attempt whose verification is a passkey challenge — status `unverified`, no
- * `externalVerificationRedirectURL`. From that moment every provider button is
- * dead. It is not even scoped to the page: the attempt lives on the Clerk
- * CLIENT, in the `__client` cookie, so it follows the person to /sign-up and
- * survives reloads until it expires. That is the whole of "the OAuth buttons
- * work sometimes" — they work in a browser that has not yet loaded the sign-in
- * page, and stop for a day afterwards.
- *
- * ⚠ THE FIX IS TO GIVE THE ATTEMPT A REDIRECT URL, WHICH FLIPS `hasUrl` TRUE
- * AND MAKES `sso()` RE-CREATE. `create()` on the classic resource is the same
- * underlying SignIn object the signals API wraps, so this is not two competing
- * flows — it is one attempt, primed. `sso()` is still what navigates, which
- * keeps `buildUrlWithAuth`, popup handling and everything else the SDK's job
- * rather than ours.
- *
- * ⚠ IT ONLY FIRES WHEN THE ATTEMPT IS ACTUALLY POISONED, so the common path
- * costs nothing. And it swallows its own failure on purpose: if the priming
- * call fails, `sso()` is still worth attempting, and its error is the one worth
- * showing.
- *
- * Remove this the moment clerk-js makes that create unconditional.
+ * ⚠ THE CLASSIC API THROWS, WHERE THE SIGNALS API RETURNS `{ error }`. That
+ * difference is why this exists alongside `_lib/errors.ts`: a handler written
+ * for one shape reports nothing useful for the other. `longMessage` first, for
+ * the same reason as there — Clerk documents `message` as developer-facing.
  */
-async function primeAttempt(
-  clerk: ReturnType<typeof useClerk>,
-  strategy: SsoStrategy,
-  redirectRaw: string | undefined,
-  afterAuthUrl: string,
-): Promise<void> {
-  const attempt = clerk.client?.signIn
-  if (!attempt?.id) return
-  if (attempt.firstFactorVerification?.externalVerificationRedirectURL) return
-
-  try {
-    await attempt.create({
-      strategy,
-      redirectUrl: callbackUrl(redirectRaw),
-      actionCompleteRedirectUrl: afterAuthUrl,
-    })
-  } catch {
-    // Deliberately ignored — see above.
-  }
+function clerkErrorMessage(error: unknown): string {
+  const errors = (error as { errors?: { longMessage?: string; message?: string }[] })
+    ?.errors
+  return errors?.[0]?.longMessage ?? errors?.[0]?.message ?? TRANSPORT_FAILURE
 }
