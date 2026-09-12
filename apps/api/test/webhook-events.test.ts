@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { enqueueDelivery } from "../src/queue/webhook-queue.js"
 import { checkEndpointUrl } from "../src/webhooks/endpoints.js"
 import {
@@ -25,14 +25,20 @@ const mail = (over: Record<string, unknown> = {}) => ({
 
 describe("interpreting an SES notification", () => {
   it("maps the types we carry", () => {
-    const cases: [string, string][] = [
-      ["Send", "email.sent"],
-      ["Delivery", "email.delivered"],
-      ["Bounce", "email.bounced"],
-      ["Complaint", "email.complained"],
-      ["DeliveryDelay", "email.delivery_delayed"],
-      ["Reject", "email.failed"],
-    ]
+    // ⚠ THE SECOND COLUMN IS THE EVENT UNION, NOT `string`. bun types a matcher
+    // against the value it received, so `toBe(ours)` compares the narrow
+    // `email.*` union on the left with whatever this table says on the right —
+    // and `string` is not assignable to it. Naming the real type also makes a
+    // typo in an expectation a compile error rather than a failing assertion.
+    const cases: [string, NonNullable<ReturnType<typeof interpretSesEvent>>["type"]][] =
+      [
+        ["Send", "email.sent"],
+        ["Delivery", "email.delivered"],
+        ["Bounce", "email.bounced"],
+        ["Complaint", "email.complained"],
+        ["DeliveryDelay", "email.delivery_delayed"],
+        ["Reject", "email.failed"],
+      ]
     for (const [ses, ours] of cases) {
       expect(interpretSesEvent({ eventType: ses, mail: mail() }, "sns-1")?.type).toBe(
         ours,
@@ -163,14 +169,14 @@ describe("the payload a customer receives", () => {
 
 describe("ingestion", () => {
   function ops(over: Partial<EventOps> = {}) {
-    const record = vi.fn(async () => ({
+    const record = mock(async () => ({
       status: "recorded" as const,
       deliveries: [
         { id: "wh-1", endpointId: "ep-1", tenantId: "ten-1", occurredAt: new Date() },
       ],
     }))
-    const enqueue = vi.fn(async () => {})
-    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const enqueue = mock(async () => {})
+    const log = { info: mock(), warn: mock(), error: mock() }
     return {
       deps: {
         ownerOf: async () => ({ tenantId: "ten-1", createdAt: new Date() }),
@@ -191,7 +197,7 @@ describe("ingestion", () => {
     const { deps, enqueue } = ops()
     const outcome = await ingestSesEvent(notification, "sns-1", deps)
     expect(outcome).toEqual({ status: "recorded", queued: 1 })
-    expect(enqueue).toHaveBeenCalledOnce()
+    expect(enqueue).toHaveBeenCalledTimes(1)
   })
 
   // ⚠ COMMIT THEN ENQUEUE, NEVER THE OTHER WAY. A job whose delivery row is not
@@ -261,7 +267,7 @@ describe("delivery ordering", () => {
   // SNS fans them out as two concurrent requests; ordering on arrival lets a
   // customer see `email.delivered` before `email.sent`.
   it("enqueues on the event's clock, not on arrival", async () => {
-    const add = vi.fn(async () => ({ id: "j" }))
+    const add = mock(async () => ({ id: "j" }))
     const occurredAt = new Date("2026-09-03T09:00:00Z")
 
     await enqueueDelivery(
@@ -297,7 +303,7 @@ describe("SNS message verification", () => {
   })
 
   it("refuses before it fetches anything", async () => {
-    const fetchCertificate = vi.fn(async () => "")
+    const fetchCertificate = mock(async () => "")
     const verdict = await verifySnsMessage(
       {
         Type: "Notification",

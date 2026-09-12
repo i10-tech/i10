@@ -9,7 +9,7 @@
     "preview": "astro preview",
     "check-types": "astro check",
     "lint": "nimbus-docs lint",
-    "prebuild": "node scripts/vendor-scalar.mjs"
+    "prebuild": "bun scripts/vendor-scalar.mjs"
   },
   "dependencies": {
     "@cloudflare/nimbus-docs": "^0.11.0",
@@ -29,6 +29,7 @@
     "@astrojs/check": "^0.9.8",
     "@tailwindcss/vite": "^4.1.4",
     "pagefind": "^1.5.2",
+    "tailwindcss": "^4.3.3",
     "typescript": "6.0.3"
   }
 }

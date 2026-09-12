@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { entitlementFor } from "../src/plan.js"
 import type { ConsumableEntitlement, Plan } from "../src/plan.js"
 

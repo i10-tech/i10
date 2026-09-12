@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 import type { SubscriptionOps } from "../src/billing/db.js"
 import type { CheckoutState, PolarClient } from "../src/billing/polar.js"
@@ -78,7 +78,7 @@ describe("the post-checkout status page", () => {
   // ⚠ THE TENANT COMES FROM POLAR, NEVER FROM THE REQUEST. Were it a query
   // parameter, anyone could read anyone's plan by editing the URL.
   it("reads the tenant off Polar's copy of the checkout", async () => {
-    const current = vi.fn(async () => ({
+    const current = mock(async () => ({
       plan: "pro",
       status: "active",
       cancelAtPeriodEnd: false,

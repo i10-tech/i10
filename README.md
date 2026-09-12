@@ -54,18 +54,39 @@ infra/
 ## Getting started
 
 ```bash
-corepack enable
-pnpm install
-pnpm dev
+bun install
+bun dev
 ```
 
-|            |                                                            |
-| ---------- | ---------------------------------------------------------- |
-| Node       | 22.12+                                                     |
-| pnpm       | 11.24.0 — pinned in `packageManager`, corepack picks it up |
-| TypeScript | 6.0.3                                                      |
+|            |                                                             |
+| ---------- | ----------------------------------------------------------- |
+| Bun        | 1.3.12 — runtime, package manager and test runner. No Node. |
+| TypeScript | 6.0.3                                                       |
+| Go         | 1.26.5 — `services/authd` only, outside the workspace       |
 
-`pnpm build` · `pnpm lint` · `pnpm check-types` · `pnpm test` · `pnpm format`
+`bun run build` · `bun run lint` · `bun run check-types` · `bun run test` · `bun run format`
+
+**The Bun version is pinned in four places and they move together:**
+`.bun-version`, `packageManager` in `package.json`, `BUN_VERSION` in
+`.github/workflows/ci.yml`, and the base image tag in every `Dockerfile`. The
+CI toolchain action asserts the version it actually got, so a drift fails the
+run rather than quietly building against something else.
+
+**`tsc` is still here, and is not a leftover.** Bun strips types, it does not
+check them — so `check-types` is TypeScript's own compiler, and the packages
+that publish a `.d.ts` (`@repo/contracts`, `@repo/emails`, `@repo/metering`)
+still emit with `tsc` because `bun build` has no declaration output. What went
+away is `tsx`: bun runs a `.ts` file directly.
+
+**One Node process survives, and it is deliberate.** The three Next images —
+console, auth, web — install and build with bun and then run Next's standalone
+`server.js` with `node`. That file does not work under bun 1.3.12: it boots,
+answers the connection, and fails every render with _"Expected CommonJS module
+to have a function wrapper"_ while loading Next's precompiled server runtime.
+`next dev` and `next start` both serve fine under bun, and a `--webpack` build
+fails the same way, so this is specific to what `output: "standalone"` emits.
+Each of those Dockerfiles carries the reproduction and the one-line re-test;
+delete the stage when a bun upgrade passes it.
 
 ---
 

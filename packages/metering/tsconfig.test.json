@@ -1,0 +1,14 @@
+{
+  // The tests, and the sources as the tests see them. See tsconfig.json for why
+  // this is a second program rather than one `include` with `types: ["bun"]`.
+  //
+  // src/ IS included: type-checking a test against a source file it imports is
+  // the point. That means a Node-or-Bun-only API in src would pass HERE — and
+  // fail in tsconfig.json and in the build, which is where the guard lives.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

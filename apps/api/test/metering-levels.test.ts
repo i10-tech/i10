@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import {
   MAILBOXES,
   MAILBOX_DOMAINS,
@@ -19,7 +19,7 @@ const TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
 
 function fakeDb(rowsFor: (statement: string) => unknown[]) {
   const seen: string[] = []
-  const execute = vi.fn(async (query: SQL) => {
+  const execute = mock(async (query: SQL) => {
     const { sql: statement } = dialect.sqlToQuery(query)
     seen.push(statement)
     return rowsFor(statement)

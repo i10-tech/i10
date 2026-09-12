@@ -1,6 +1,6 @@
 import { isNull, or, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { accounts } from "../src/db/schema.js"
 
 /**

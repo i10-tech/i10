@@ -1,23 +1,43 @@
 # syntax=docker/dockerfile:1.7
-FROM node:22-alpine AS base
-ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
-RUN corepack enable
+# ⚠ THE TAG IS PINNED TO THE EXACT VERSION, not `1-alpine` — see
+# apps/api/Dockerfile.
+FROM oven/bun:1.3.12-alpine AS base
 
 FROM base AS build
 WORKDIR /repo
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY bun.lock bunfig.toml package.json ./
+# ⚠ EVERY WORKSPACE MANIFEST. bun.lock describes the whole workspace, and an
+# install against a tree that is missing members it names fails outright under
+# `--frozen-lockfile`. This list was shorter under pnpm and survived on pnpm's
+# willingness to resolve a partial workspace; that leniency is gone.
+COPY apps/api/package.json apps/api/
+COPY apps/auth/package.json apps/auth/
+COPY apps/console/package.json apps/console/
 COPY apps/docs/package.json apps/docs/
+COPY apps/web/package.json apps/web/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/emails/package.json packages/emails/
 COPY packages/eslint-config/package.json packages/eslint-config/
+COPY packages/metering/package.json packages/metering/
+COPY packages/next/package.json packages/next/
+COPY packages/node/package.json packages/node/
 COPY packages/typescript-config/package.json packages/typescript-config/
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+COPY packages/ui/package.json packages/ui/
+ENV BUN_INSTALL_CACHE_DIR=/bun-cache
+RUN --mount=type=cache,id=bun,target=/bun-cache \
+    bun install --frozen-lockfile
 COPY . .
 # Pagefind builds its search index as a POSTBUILD step over the emitted HTML,
-# so it must run here and not at serve time — the runtime stage has no Node.
-RUN pnpm --filter @i10/docs build
+# so it must run here and not at serve time — the runtime stage has no
+# JavaScript runtime at all.
+#
+# ⚠ TURBO, so `^build` builds @i10/api first. docs does not merely mention the
+# API: it renders the OpenAPI document that package produces.
+RUN bunx turbo run build --filter=@i10/docs
 
-# A static site needs a static server. No Node in the runtime stage means no
-# Node CVEs to patch on a container that only reads files off disk.
+# A static site needs a static server. No JavaScript runtime in the runtime
+# stage means no runtime CVEs to patch on a container that only reads files off
+# disk.
 #
 # ⚠ CADDY, NOT nginx, AND THE REASON IS A DEFAULT RATHER THAN A PREFERENCE.
 # nginx builds directory-index redirects as ABSOLUTE urls from its own listen

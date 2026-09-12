@@ -141,13 +141,17 @@ const PATTERNS: [RegExp, string][] = [
   // have already claimed what they recognise.
   //
   // ⚠ NO `/` IN THE LOCAL PART, AND THE LAST LABEL MUST BE ALPHABETIC. Both
-  // narrowings exist because the obvious pattern ate stack traces: a pnpm store
-  // path is `.../groupmq@1.2.3_ioredis@5.8.2_/node_modules/...`, which is a
+  // narrowings exist because the obvious pattern ate stack traces: a package
+  // store path is `.../groupmq@1.2.3/node_modules/...`, which is a
   // slash-bearing "local part" and a numeric "domain", so every dependency
   // frame came out as `[redacted-email]`. Nothing leaked — but the frames that
   // say WHICH library failed were destroyed, which costs exactly what the
   // report was for. An address with a slash in it is legal and effectively
   // nonexistent; a version number that ends in letters is not an address.
+  //
+  // The shape of that path changed with the package manager and the narrowing
+  // still holds for both — `.pnpm/groupmq@1.2.3_ioredis@5.8.2_/` and
+  // `.bun/groupmq@1.1.0/` alike. Both are pinned by tests.
   [
     /[\w.!#$%&'*+=?^`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
     "[redacted-email]",

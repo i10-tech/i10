@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import {
   assignStatement,
   assignmentStatement,

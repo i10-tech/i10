@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import type { SQL } from "drizzle-orm"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import {
   billedButUnconfirmedStatement,
   EVENT_GRACE,

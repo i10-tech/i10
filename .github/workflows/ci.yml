@@ -14,19 +14,14 @@ permissions:
   contents: read
 
 env:
-  # Pinned rather than read from packageManager, because the toolchain is set up
-  # before the checkout is parsed. Four places hold this version — here,
-  # package.json, and any Dockerfile that installs it — and they move together.
-  #
-  # ⚠ THE PIN NO LONGER COSTS ANYTHING. It used to: `pnpm/action-setup` reacts
-  # to a version that differs from the runner's preinstalled pnpm by running an
-  # `npm install`, which was measured at 7m08s in six parallel jobs on a run
-  # whose real work took under 40 seconds. .github/actions/node-toolchain
-  # fetches the tarball directly instead, so pinning is now free and should
-  # stay.
-  PNPM_VERSION: "11.24.0"
-  NODE_VERSION: "22.20.0"
-  # services/authd is a Go module and is deliberately outside the pnpm
+  # Pinned rather than read from the repository, because the toolchain is set up
+  # before the checkout is parsed. FOUR PLACES HOLD THIS VERSION — here,
+  # `.bun-version`, `packageManager` in package.json, and every Dockerfile's
+  # base image tag — and they move together. The toolchain action asserts the
+  # version it actually got, so a drift here fails fast rather than producing a
+  # run that built against something else.
+  BUN_VERSION: "1.3.12"
+  # services/authd is a Go module and is deliberately outside the bun
   # workspace, so Turborepo never sees it and it needs its own lane below.
   GO_VERSION: "1.26.5"
 
@@ -42,10 +37,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: ./.github/actions/node-toolchain
+      - uses: ./.github/actions/bun-toolchain
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
+          bun-version: ${{ env.BUN_VERSION }}
           # commitlint is not a turbo task, so the cache server would start and
           # serve nothing.
           turbo-cache: "false"
@@ -56,7 +50,7 @@ jobs:
       # have bumped minor.
       - name: Lint commit messages in this PR
         run: |
-          pnpm exec commitlint \
+          bunx commitlint \
             --from "${{ github.event.pull_request.base.sha }}" \
             --to "${{ github.event.pull_request.head.sha }}" \
             --verbose
@@ -81,11 +75,10 @@ jobs:
         task: [lint, check-types, test, build]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/node-toolchain
+      - uses: ./.github/actions/bun-toolchain
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
-      - run: pnpm run ${{ matrix.task }}
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun run ${{ matrix.task }}
 
   openapi:
     name: OpenAPI document
@@ -93,10 +86,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/node-toolchain
+      - uses: ./.github/actions/bun-toolchain
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
+          bun-version: ${{ env.BUN_VERSION }}
       # ⚠ THIS GUARD IS WHY INLINING THE SPEC IS SAFE. apps/api/openapi.json is a
       # committed artifact: docs.i10.tech/api inlines it at build time so the
       # reference needs no CORS header and renders even when the API is down, and
@@ -105,10 +97,10 @@ jobs:
       # came from. Regenerating and diffing is what keeps that true.
       #
       # A failure here means someone changed the API contract without committing
-      # the regenerated document — run `pnpm turbo run openapi --filter=@i10/api`.
+      # the regenerated document — run `bunx turbo run openapi --filter=@i10/api`.
       - name: Regenerate and check for drift
         run: |
-          pnpm turbo run openapi --filter=@i10/api
+          bunx turbo run openapi --filter=@i10/api
           git diff --exit-code -- apps/api/openapi.json
 
   authd:
@@ -148,10 +140,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/node-toolchain
+      - uses: ./.github/actions/bun-toolchain
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
+          bun-version: ${{ env.BUN_VERSION }}
           # prettier --check is not a turbo task either.
           turbo-cache: "false"
-      - run: pnpm run format:check
+      - run: bun run format:check

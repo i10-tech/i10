@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import {
   mailboxesStatement,
   recordStorageStatement,
@@ -12,11 +12,11 @@ import type { Database } from "../src/db/client.js"
 const dialect = new PgDialect()
 const A = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
 const B = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6072"
-const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+const log = { info: mock(), warn: mock(), error: mock() }
 
 function fakeDb(rows: unknown[]) {
   const seen: { sql: string; params: unknown[] }[] = []
-  const execute = vi.fn(async (query: SQL) => {
+  const execute = mock(async (query: SQL) => {
     const rendered = dialect.sqlToQuery(query)
     seen.push({ sql: rendered.sql, params: rendered.params })
     return rendered.sql.includes("tenant_mailboxes") ? rows : []

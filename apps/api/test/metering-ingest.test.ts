@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import {
   INGEST_LIMIT,
   flushUsage,
@@ -17,7 +17,7 @@ const B = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6072"
 
 function fakeDb(rows: unknown[]) {
   const seen: string[] = []
-  const execute = vi.fn(async (query: SQL) => {
+  const execute = mock(async (query: SQL) => {
     seen.push(dialect.sqlToQuery(query).sql)
     return dialect.sqlToQuery(query).sql.includes("unshipped_meter_events") ? rows : []
   })
@@ -108,7 +108,7 @@ describe("what gets marked", () => {
 
 describe("flushing", () => {
   it("does nothing when there is nothing to send", async () => {
-    const ingestEvents = vi.fn()
+    const ingestEvents = mock()
     const { run } = flush([], polar({ ingestEvents }))
 
     expect(await run()).toEqual({ shipped: 0, duplicates: 0, batchWasFull: false })
@@ -116,7 +116,7 @@ describe("flushing", () => {
   })
 
   it("sends every unit, keyed on the message id and the tenant", async () => {
-    const ingestEvents = vi.fn(async () => ({ inserted: 2, duplicates: 0 }))
+    const ingestEvents = mock(async () => ({ inserted: 2, duplicates: 0 }))
     const { run } = flush([row(A, "m1"), row(B, "m2")], polar({ ingestEvents }))
 
     await run()
@@ -192,7 +192,7 @@ describe("flushing", () => {
    * skips them.
    */
   it("survives a failure to mark", async () => {
-    const execute = vi.fn(async (query: SQL) => {
+    const execute = mock(async (query: SQL) => {
       const statement = dialect.sqlToQuery(query).sql
       if (statement.includes("update core.meter_events")) throw new Error("deadlock")
       return statement.includes("unshipped_meter_events") ? [row(A, "m1")] : []
@@ -202,7 +202,7 @@ describe("flushing", () => {
       transaction: async (fn: (tx: { execute: typeof execute }) => Promise<unknown>) =>
         fn({ execute }),
     } as unknown as Database
-    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const log = { info: mock(), warn: mock(), error: mock() }
 
     const report = await flushUsage({
       db,

@@ -1,4 +1,3 @@
-import { serve } from "@hono/node-server"
 import { createClerkClient } from "@clerk/backend"
 import pino from "pino"
 import { createApp } from "./app.js"
@@ -480,30 +479,44 @@ const app = createApp({
   reportError: captureError,
 })
 
-const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  log.info({ port: info.port, env: env.NODE_ENV }, "i10 api listening")
-})
+// ⚠ `Bun.serve`, NOT `@hono/node-server`. The adapter existed to give Node a
+// `fetch`-shaped listener; Bun has one natively, so the adapter was a
+// dependency that translated our handler into Node's req/res and back again
+// for no remaining reason. `app.fetch` is handed straight to the runtime.
+const server = Bun.serve({ fetch: app.fetch, port: env.PORT })
+log.info({ port: server.port, env: env.NODE_ENV }, "i10 api listening")
 
 // Kubernetes sends SIGTERM and then waits terminationGracePeriodSeconds before
 // SIGKILL. Closing the listener lets in-flight sends finish; without this a
 // rolling deploy drops requests that were already accepted.
+let shuttingDown = false
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
+    // ⚠ GUARDED, BECAUSE Bun.serve DOES NOT REMOVE THE HANDLER FOR US. A second
+    // SIGTERM — which kubelet does send if the first one looks ignored — would
+    // otherwise start a second teardown while the first is still draining, and
+    // the two races would close the pool out from under in-flight queries.
+    if (shuttingDown) return
+    shuttingDown = true
     log.info({ signal }, "shutting down")
-    server.close(() => {
+
+    // ⚠ `stop()` WITH NO ARGUMENT. It stops accepting new connections and
+    // resolves once the ones already in flight have finished — the same
+    // contract `server.close(cb)` had. Passing `true` would close active
+    // connections immediately, which is precisely the dropped-request
+    // behaviour this block exists to prevent.
+    void server
+      .stop()
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
-      void Promise.allSettled([
-        sql.end({ timeout: 5 }),
-        cache.quit(),
-        queueRedis.quit(),
-      ])
-        // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
-        // queues and the transport sends on a timer, so a 500 raised in the
-        // last seconds before a rolling deploy took the report with it — and
-        // the seconds around a deploy are when the interesting ones happen.
-        .then(() => flushObservability())
-        .finally(() => process.exit(0))
-    })
+      .then(() =>
+        Promise.allSettled([sql.end({ timeout: 5 }), cache.quit(), queueRedis.quit()]),
+      )
+      // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
+      // queues and the transport sends on a timer, so a 500 raised in the
+      // last seconds before a rolling deploy took the report with it — and
+      // the seconds around a deploy are when the interesting ones happen.
+      .then(() => flushObservability())
+      .finally(() => process.exit(0))
   })
 }

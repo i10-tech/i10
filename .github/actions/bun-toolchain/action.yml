@@ -1,0 +1,79 @@
+name: Bun toolchain
+description: Bun and the workspace's dependencies, with the Turborepo cache server up.
+
+# ⚠ THIS IS DELIBERATELY SMALL, AND THE HISTORY IS WHY THAT IS WORTH SAYING.
+# It replaces a hand-rolled node-toolchain action whose entire body was a
+# workaround: `pnpm/action-setup` installed pnpm by shelling out to
+# `npm install`, and on 2026-09-04 that step took 7m08s across six parallel
+# jobs on a run whose real work totalled under 40 seconds. `standalone: true`
+# was tried and measured and did not help — it only changed WHICH package npm
+# fetched. The fix was to curl the pnpm tarball and symlink it onto PATH.
+#
+# `oven-sh/setup-bun` has no such problem to work around: bun ships as a single
+# static binary and the action downloads and caches that binary directly, with
+# no package manager anywhere on the path. If this step ever starts costing
+# minutes, THAT is the regression — do not reach for a curl workaround before
+# reading the run log, because the shape of the old failure was npm-specific
+# and will not repeat here.
+
+inputs:
+  bun-version:
+    description: >-
+      Bun version. Must match `.bun-version`, `packageManager` in package.json
+      and every Dockerfile's base image tag — they move together.
+    required: true
+  turbo-cache:
+    description: >-
+      Start the Turborepo cache server. Leave on for anything that runs a turbo
+      task; the server must be up before the first `bun run <task>` or the
+      invocation just misses the cache with no error to say so.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    # Fail here, with the version in the message, rather than several steps
+    # later inside a task that behaves differently than it did locally.
+    - shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+      run: |
+        set -euo pipefail
+        installed="$(bun --version)"
+        [ "$installed" = "$BUN_VERSION" ] || {
+          echo "::error::wanted bun $BUN_VERSION, got $installed"; exit 1
+        }
+
+    # ⚠ THE GLOBAL PACKAGE CACHE, NOT node_modules. Bun links from this cache
+    # into the workspace, so restoring it turns an install into a link step;
+    # restoring node_modules instead would carry stale symlinks and fight
+    # `--frozen-lockfile`.
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-
+
+    # Turborepo's cache backs onto the same GitHub Actions cache the Docker
+    # layers use, so there is no external service and no Vercel account. The
+    # four matrix tasks each rebuild the same shared packages from cold —
+    # check-types depends on ^build, so @repo/contracts and the SDKs are built
+    # in every job, and again in the OpenAPI job. This lets the second job to
+    # need a package restore it instead of rebuilding it.
+    #
+    # ⚠ That cache is 10 GB per repository and evicts LRU, so `mode=max` Docker
+    # caching in build.yml competes with these entries for the same budget.
+    - if: inputs.turbo-cache == 'true'
+      uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
+
+    # ⚠ `--frozen-lockfile` IS NOT bun's DEFAULT IN CI THE WAY IT READS. Bun
+    # will happily update bun.lock when a manifest and the lockfile disagree,
+    # which in CI means a run that silently tests a dependency set nobody
+    # committed. Explicit, so the disagreement is a red run instead.
+    - shell: bash
+      run: bun install --frozen-lockfile

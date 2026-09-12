@@ -1,8 +1,15 @@
 import { createHmac } from "node:crypto"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, mock } from "bun:test"
 
-const applyClerkEvent = vi.hoisted(() => vi.fn())
-vi.mock("../src/projection/writer.js", () => ({ applyClerkEvent }))
+// ⚠ `mock.module` IS NOT HOISTED, WHICH IS WHY THE IMPORT BELOW IS DYNAMIC.
+// Vitest lifted `vi.mock` above every statement in the file and needed
+// `vi.hoisted` to get the double defined in time; bun runs this line where it
+// is written, so the double is an ordinary const — but a STATIC
+// `import { createApp } from "../src/app.js"` would then be evaluated before
+// this line ran, and the route would hold the real writer. The `await import`
+// is load-bearing, not a leftover.
+const applyClerkEvent = mock()
+mock.module("../src/projection/writer.js", () => ({ applyClerkEvent }))
 
 const { createApp } = await import("../src/app.js")
 
@@ -66,7 +73,7 @@ describe("POST /webhooks/clerk", () => {
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toMatchObject({ ok: true, outcome: "upserted" })
 
-    expect(applyClerkEvent).toHaveBeenCalledOnce()
+    expect(applyClerkEvent).toHaveBeenCalledTimes(1)
     const [, eventId, type, , domains] = applyClerkEvent.mock.calls[0]!
     expect(eventId).toBe("msg_1")
     expect(type).toBe("user.created")

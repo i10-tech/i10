@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 import { tenantProvisioning } from "../src/tenants/provision.js"
 
@@ -6,11 +6,11 @@ const log = { info: () => {}, warn: () => {}, error: () => {} }
 
 const deps = (over: Record<string, unknown> = {}) => ({
   organizations: {
-    membershipCount: vi.fn(async () => 0),
-    create: vi.fn(async () => {}),
+    membershipCount: mock(async () => 0),
+    create: mock(async () => {}),
   },
-  tenants: { provision: vi.fn(async () => ({ id: "ten-1", created: true })) },
-  entitlements: { ensureCustomer: vi.fn(async () => {}) },
+  tenants: { provision: mock(async () => ({ id: "ten-1", created: true })) },
+  entitlements: { ensureCustomer: mock(async () => {}) },
   log,
   ...over,
 })
@@ -44,8 +44,8 @@ describe("a new user", () => {
   it("gets nothing when they already belong to one", async () => {
     const d = deps({
       organizations: {
-        membershipCount: vi.fn(async () => 1),
-        create: vi.fn(async () => {}),
+        membershipCount: mock(async () => 1),
+        create: mock(async () => {}),
       },
     })
 
@@ -100,7 +100,7 @@ describe("a new organization", () => {
 
   it("does not re-register a tenant that already existed", async () => {
     const d = deps({
-      tenants: { provision: vi.fn(async () => ({ id: "ten-1", created: false })) },
+      tenants: { provision: mock(async () => ({ id: "ten-1", created: false })) },
     })
 
     expect(await tenantProvisioning(d).onOrganizationCreated(org)).toBe(
@@ -114,7 +114,7 @@ describe("a new organization", () => {
   it("still provisions the tenant when Autumn is unreachable", async () => {
     const d = deps({
       entitlements: {
-        ensureCustomer: vi.fn(async () => {
+        ensureCustomer: mock(async () => {
           throw new Error("autumn is down")
         }),
       },
@@ -144,13 +144,13 @@ describe("the Clerk webhook route", () => {
   // redelivery repairs a sign-up that failed the first time. That needs a
   // database, and belongs in an integration test we do not have yet.
   it("does not provision anything for an unsigned request", async () => {
-    const onUserCreated = vi.fn(async () => "organization_created" as const)
+    const onUserCreated = mock(async () => "organization_created" as const)
     const app = createApp({
       clerkWebhooks: {
         db: null as never,
         signingSecret: "whsec_test",
         hostedDomains: ["i10.tech"],
-        provisioning: { onUserCreated, onOrganizationCreated: vi.fn() },
+        provisioning: { onUserCreated, onOrganizationCreated: mock() },
         log,
       },
     })

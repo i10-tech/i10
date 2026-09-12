@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 import { decide, type PolarEvent } from "../src/billing/events.js"
 
@@ -192,7 +192,7 @@ const log = { info: () => {}, warn: () => {}, error: () => {} }
 
 describe("POST /webhooks/polar", () => {
   it("applies a verified subscription event", async () => {
-    const apply = vi.fn(async () => ({ status: "applied" as const, planId: "pro" }))
+    const apply = mock(async () => ({ status: "applied" as const, planId: "pro" }))
     const app = createApp({
       polarWebhooks: { secret: SECRET, grants: { apply }, options, log },
     })
@@ -209,7 +209,7 @@ describe("POST /webhooks/polar", () => {
   // ⚠ THE ONE TEST THIS FILE EXISTS FOR. An unverified request must not reach
   // the grant path — a forged `subscription.active` is a free Pro account.
   it("grants nothing when the signature does not verify", async () => {
-    const apply = vi.fn()
+    const apply = mock()
     const app = createApp({
       polarWebhooks: { secret: SECRET, grants: { apply }, options, log },
     })
@@ -221,7 +221,7 @@ describe("POST /webhooks/polar", () => {
   })
 
   it("answers 202 to a verified event that is not ours, so Polar stops retrying", async () => {
-    const apply = vi.fn()
+    const apply = mock()
     const app = createApp({
       polarWebhooks: { secret: SECRET, grants: { apply }, options, log },
     })
@@ -259,7 +259,7 @@ describe("POST /webhooks/polar", () => {
 
   it("does not 500 on a signed body that is not an object", async () => {
     const app = createApp({
-      polarWebhooks: { secret: SECRET, grants: { apply: vi.fn() }, options, log },
+      polarWebhooks: { secret: SECRET, grants: { apply: mock() }, options, log },
     })
     const res = await post(app, "null")
     expect(res.status).toBe(202)

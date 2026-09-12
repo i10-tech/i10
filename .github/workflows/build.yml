@@ -126,21 +126,23 @@ jobs:
               - 'apps/api/**'
               - 'packages/contracts/**'
               - 'packages/emails/**'
-            # A Go module with its own go.sum, deliberately outside the pnpm
-            # workspace. Nothing in the Node sentinel below can affect it.
+            # A Go module with its own go.sum, deliberately outside the bun
+            # workspace. Nothing in the bun sentinel below can affect it.
             authd:
               - 'services/authd/**'
-            # Anything that changes how EVERY Node app installs or builds.
-            node:
+            # Anything that changes how EVERY bun app installs or builds.
+            bun:
               # NO LEADING SLASH: paths-filter reports changed paths
               # repo-relative, and picomatch matches the pattern against that
               # string, so `/package.json` would match nothing. A bare
               # `package.json` has no separator, so it matches ONLY the root
               # file — each app's own is already covered above.
               - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - '.npmrc'
+              - 'bun.lock'
+              # bunfig.toml replaces BOTH .npmrc and pnpm-workspace.yaml: it
+              # carries the supply-chain release-age gate and the linker mode,
+              # either of which changes what an install produces.
+              - 'bunfig.toml'
               # turbo.json is in the same class as the lockfile: its `env` list
               # is part of every task's cache key and decides which variables
               # are visible to a build.
@@ -163,12 +165,12 @@ jobs:
       # three apps out of four.
       #
       # `manifest` is the file whose image reference the deploy job rewrites.
-      # `node` marks the apps the Node sentinel applies to.
+      # `bun` marks the apps the bun sentinel applies to.
       - name: Build the plan
         id: plan
         env:
           FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' }}
-          SENTINEL_NODE: ${{ steps.filter.outputs.node }}
+          SENTINEL_BUN: ${{ steps.filter.outputs.bun }}
           SENTINEL_ALL: ${{ steps.filter.outputs.all }}
           CH_API: ${{ steps.filter.outputs.api }}
           CH_CONSOLE: ${{ steps.filter.outputs.console }}
@@ -179,12 +181,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ⚠ `context` IS PER-ENTRY, NOT SHARED. The Node apps build from the
+          # ⚠ `context` IS PER-ENTRY, NOT SHARED. The bun apps build from the
           # REPO ROOT because their Dockerfiles install from the workspace
-          # lockfile and a per-app context would have no pnpm-lock.yaml to be
-          # frozen against. authd is a self-contained Go module with its own
-          # go.sum, so its context is its own directory — giving it the repo
-          # root would ship the entire monorepo into the build.
+          # lockfile and a per-app context would have no bun.lock to be frozen
+          # against. authd is a self-contained Go module with its own go.sum,
+          # so its context is its own directory — giving it the repo root would
+          # ship the entire monorepo into the build.
           table=$(jq -nc \
             --arg api "${CH_API:-false}" \
             --arg console "${CH_CONSOLE:-false}" \
@@ -193,22 +195,22 @@ jobs:
             --arg docs "${CH_DOCS:-false}" \
             --arg authd "${CH_AUTHD:-false}" \
             '[
-              {name:"api",     image:"i10-api",     context:".",              file:"apps/api/Dockerfile",       node:true,  changed:$api},
-              {name:"console", image:"i10-console", context:".",              file:"apps/console/Dockerfile",   node:true,  changed:$console},
-              {name:"auth",    image:"i10-auth",    context:".",              file:"apps/auth/Dockerfile",      node:true,  changed:$auth},
-              {name:"web",     image:"i10-web",     context:".",              file:"apps/web/Dockerfile",       node:true,  changed:$web},
-              {name:"docs",    image:"i10-docs",    context:".",              file:"apps/docs/Dockerfile",      node:true,  changed:$docs},
-              {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", node:false, changed:$authd}
+              {name:"api",     image:"i10-api",     context:".",              file:"apps/api/Dockerfile",       bun:true,   changed:$api},
+              {name:"console", image:"i10-console", context:".",              file:"apps/console/Dockerfile",   bun:true,   changed:$console},
+              {name:"auth",    image:"i10-auth",    context:".",              file:"apps/auth/Dockerfile",      bun:true,   changed:$auth},
+              {name:"web",     image:"i10-web",     context:".",              file:"apps/web/Dockerfile",       bun:true,   changed:$web},
+              {name:"docs",    image:"i10-docs",    context:".",              file:"apps/docs/Dockerfile",      bun:true,   changed:$docs},
+              {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", bun:false,  changed:$authd}
             ]')
 
           decided=$(jq -c \
             --arg force "$FORCE_ALL" \
-            --arg node "${SENTINEL_NODE:-false}" \
+            --arg bun "${SENTINEL_BUN:-false}" \
             --arg all "${SENTINEL_ALL:-false}" \
             'map(. + {build: (
                ($force == "true")
                or ($all == "true")
-               or (.node and ($node == "true"))
+               or (.bun and ($bun == "true"))
                or (.changed == "true")
              )})' <<<"$table")
 
@@ -237,8 +239,8 @@ jobs:
             if [[ "${SENTINEL_ALL:-}" == "true" ]]; then
               echo "\`build.yml\` changed → everything builds."
             fi
-            if [[ "${SENTINEL_NODE:-}" == "true" ]]; then
-              echo "Root manifest, lockfile, turbo.json or an unmapped package changed → every Node app builds."
+            if [[ "${SENTINEL_BUN:-}" == "true" ]]; then
+              echo "Root manifest, lockfile, bunfig.toml, turbo.json or an unmapped package changed → every bun app builds."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

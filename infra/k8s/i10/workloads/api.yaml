@@ -41,7 +41,7 @@ spec:
           # success and changes nothing. Harmless to keep once the Build
           # workflow starts writing digests into these files.
           imagePullPolicy: Always
-          command: ["node", "dist/migrate.js"]
+          command: ["bun", "dist/migrate.js"]
           env:
             - name: MIGRATE_DATABASE_URL
               valueFrom:

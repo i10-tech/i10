@@ -2,7 +2,7 @@
   "extends": "@repo/typescript-config/base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "types": ["bun"]
   },
   // ⚠ `scripts` IS IN HERE DELIBERATELY. It was not, and the omission is the
   // kind that hides: a script full of type errors passes `check-types` because

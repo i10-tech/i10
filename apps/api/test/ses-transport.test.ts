@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { classifySesError, sesTransport } from "../src/send/ses.js"
 import type { OutboundMessage } from "../src/send/transport.js"
 
@@ -16,9 +16,9 @@ const message: OutboundMessage = {
 
 /** Captures the SendEmailCommand input without touching AWS. */
 function client(behaviour: () => unknown = () => ({ MessageId: "ses-1" })) {
-  // The parameter is unused: vi.fn records the call either way, and the
+  // The parameter is unused: mock records the call either way, and the
   // assertions read it back off `mock.calls`.
-  const send = vi.fn(async () => {
+  const send = mock(async () => {
     const out = behaviour()
     if (out instanceof Error) throw out
     return out
@@ -26,8 +26,14 @@ function client(behaviour: () => unknown = () => ({ MessageId: "ses-1" })) {
   return { send } as never
 }
 
+// ⚠ `unknown`, NOT `never`, AS THE VALUE TYPE. `Record<string, never>` made
+// every field of the SES input `never`, which vitest's `toEqual(expected: any)`
+// never noticed. bun types the matcher against the RECEIVED value, so a
+// `never` field accepts no expectation at all and every assertion below became
+// "not assignable to parameter of type 'undefined'". The cast was always a lie;
+// this is the honest version of it.
 const inputOf = (c: { send: { mock: { calls: [{ input: unknown }][] } } }) =>
-  c.send.mock.calls[0]![0].input as Record<string, never>
+  c.send.mock.calls[0]![0].input as Record<string, unknown>
 
 /** The message as it actually goes on the wire, now that every send is raw. */
 const rawOf = (c: { send: { mock: { calls: [{ input: unknown }][] } } }) =>

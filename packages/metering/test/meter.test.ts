@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { createMeter } from "../src/meter.js"
 import { formatMeterKey } from "../src/key.js"
 import type { ResetWindow } from "../src/interval.js"

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import type { SendJob } from "../src/queue/send-queue.js"
 import type { Metering } from "../src/send/metering.js"
 import {
@@ -33,15 +33,15 @@ const job = (count: number): SendJob => ({
 const SENT_AT = new Date("2026-09-02T10:00:01Z")
 
 function deps(over: Partial<BatchDeps> = {}) {
-  const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  const log = { info: mock(), warn: mock(), error: mock() }
   const metering: Metering = {
-    checkQuota: vi.fn(),
-    recordSent: vi.fn(async () => {}),
+    checkQuota: mock(),
+    recordSent: mock(async () => {}),
   }
   const base: BatchDeps = {
     claim: async (j) => j.messages.map((_, i) => outbound(i)),
-    markSent: vi.fn(async () => SENT_AT),
-    markFailed: vi.fn(async () => {}),
+    markSent: mock(async () => SENT_AT),
+    markFailed: mock(async () => {}),
     transport: fakeTransport(),
     metering,
     log,
@@ -70,7 +70,8 @@ describe("the happy path", () => {
     })
     expect(transport.sent).toHaveLength(3)
     expect(d.markSent).toHaveBeenCalledTimes(3)
-    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+    expect(metering.recordSent).toHaveBeenCalledTimes(1)
+    expect(metering.recordSent).toHaveBeenCalledWith("ten-1", [
       { id: "msg-0", sentAt: SENT_AT },
       { id: "msg-1", sentAt: SENT_AT },
       { id: "msg-2", sentAt: SENT_AT },
@@ -83,11 +84,12 @@ describe("the happy path", () => {
   // and the day that came up short is topped up on every run afterwards.
   it("bills at the timestamp the write returned", async () => {
     const stored = new Date("2026-09-02T23:59:59.900Z")
-    const { deps: d, metering } = deps({ markSent: vi.fn(async () => stored) })
+    const { deps: d, metering } = deps({ markSent: mock(async () => stored) })
 
     await handleBatch(job(1), d)
 
-    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+    expect(metering.recordSent).toHaveBeenCalledTimes(1)
+    expect(metering.recordSent).toHaveBeenCalledWith("ten-1", [
       { id: "msg-0", sentAt: stored },
     ])
   })
@@ -97,7 +99,7 @@ describe("the happy path", () => {
   // row itself. Billing it here too would charge the customer twice for one
   // message.
   it("does not bill a message whose write did not land", async () => {
-    const { deps: d, metering } = deps({ markSent: vi.fn(async () => null) })
+    const { deps: d, metering } = deps({ markSent: mock(async () => null) })
 
     const result = await handleBatch(job(2), d)
 
@@ -213,7 +215,8 @@ describe("failures", () => {
       deferred: 1,
       stranded: 0,
     })
-    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+    expect(metering.recordSent).toHaveBeenCalledTimes(1)
+    expect(metering.recordSent).toHaveBeenCalledWith("ten-1", [
       { id: "msg-0", sentAt: SENT_AT },
     ])
   })
@@ -222,7 +225,7 @@ describe("failures", () => {
   // queue and send them twice.
   it("does not fail the batch when metering throws", async () => {
     const metering: Metering = {
-      checkQuota: vi.fn(),
+      checkQuota: mock(),
       recordSent: async () => {
         throw new Error("autumn down")
       },
@@ -235,7 +238,7 @@ describe("failures", () => {
   // ⚠ An unhandled rejection escaping the pool would abandon the rest of the
   // batch mid-flight, leaving those rows claimed and stranded until the sweep.
   it("finishes the batch even when recording one message throws", async () => {
-    const markSent = vi.fn(async (m: OutboundMessage) => {
+    const markSent = mock(async (m: OutboundMessage) => {
       if (m.id === "msg-0") throw new Error("deadlock")
       return SENT_AT
     })
@@ -334,10 +337,10 @@ describe("a failure to record the outcome", () => {
   // saying it had happened.
   it("counts it, logs it and reports it", async () => {
     const boom = new Error("connection terminated unexpectedly")
-    const reportError = vi.fn()
+    const reportError = mock()
     const { deps: d, log } = deps({
       transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
-      markSent: vi.fn(async () => {
+      markSent: mock(async () => {
         throw boom
       }),
       reportError,
@@ -357,7 +360,7 @@ describe("a failure to record the outcome", () => {
   // not abandon the messages beside it, which is what an unhandled rejection
   // escaping the runner would do.
   it("does not abandon the rest of the batch", async () => {
-    const markSent = vi.fn(async (m: OutboundMessage) => {
+    const markSent = mock(async (m: OutboundMessage) => {
       if (m.id === "msg-1") throw new Error("deadlock detected")
       return SENT_AT
     })
@@ -373,7 +376,8 @@ describe("a failure to record the outcome", () => {
 
     expect(result).toMatchObject({ claimed: 3, sent: 2, stranded: 1 })
     expect(markSent).toHaveBeenCalledTimes(3)
-    expect(metering.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+    expect(metering.recordSent).toHaveBeenCalledTimes(1)
+    expect(metering.recordSent).toHaveBeenCalledWith("ten-1", [
       { id: "msg-0", sentAt: SENT_AT },
       { id: "msg-2", sentAt: SENT_AT },
     ])
@@ -385,7 +389,7 @@ describe("a failure to record the outcome", () => {
   it("survives a reporter that throws", async () => {
     const { deps: d } = deps({
       transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
-      markSent: vi.fn(async () => {
+      markSent: mock(async () => {
         throw new Error("write failed")
       }),
       reportError: () => {

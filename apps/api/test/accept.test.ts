@@ -1,5 +1,5 @@
 import type { SendEmail } from "@repo/contracts"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import {
   acceptSend,
   addrSpec,
@@ -21,8 +21,8 @@ const email = (over: Partial<SendEmail> = {}): SendEmail =>
   }) as SendEmail
 
 function ops(over: Partial<AcceptOps> = {}) {
-  const enqueue = vi.fn(async () => {})
-  const persist = vi.fn(async (input: { messages: unknown[] }) => ({
+  const enqueue = mock(async () => {})
+  const persist = mock(async (input: { messages: unknown[] }) => ({
     status: "written" as const,
     ids: input.messages.map((_, i) => `msg-${i}`),
     refs: input.messages.map((_, i) => ({
@@ -30,8 +30,8 @@ function ops(over: Partial<AcceptOps> = {}) {
       createdAt: new Date("2026-09-02T10:00:00Z"),
     })),
   }))
-  const suppressedFor = vi.fn(async () => new Set<string>())
-  const log = { warn: vi.fn(), error: vi.fn() }
+  const suppressedFor = mock(async () => new Set<string>())
+  const log = { warn: mock(), error: mock() }
   return {
     deps: {
       persist,
@@ -180,14 +180,15 @@ describe("quota", () => {
   })
 
   it("counts a batch once rather than per message", async () => {
-    const checkQuota = vi.fn(async () => ({ status: "allowed" as const }))
+    const checkQuota = mock(async () => ({ status: "allowed" as const }))
     const { deps } = ops({
       metering: { checkQuota, recordSent: async () => {} },
     } as never)
 
     await accept(deps, { payloads: [email(), email(), email()] })
 
-    expect(checkQuota).toHaveBeenCalledExactlyOnceWith("ten-1", 3)
+    expect(checkQuota).toHaveBeenCalledTimes(1)
+    expect(checkQuota).toHaveBeenCalledWith("ten-1", 3)
   })
 })
 
@@ -330,7 +331,7 @@ describe("scheduling", () => {
   // The rows are committed either way; one failed enqueue must not cost the
   // other groups their jobs.
   it("still queues the other groups when one enqueue fails", async () => {
-    const enqueue = vi.fn(async (_q: unknown, _j: unknown, o?: { runAt?: Date }) => {
+    const enqueue = mock(async (_q: unknown, _j: unknown, o?: { runAt?: Date }) => {
       if (o?.runAt) throw new Error("redis down")
     })
     const { deps, log } = ops({ enqueue } as never)

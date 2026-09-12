@@ -1,6 +1,6 @@
 import type { SendEmail } from "@repo/contracts"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import type { Database } from "../src/db/client.js"
 import {
   apiKeys,
@@ -124,7 +124,7 @@ function fakeDb(canned: Canned = {}) {
 
 function ops(canned: Canned = {}) {
   const { db, recorded } = fakeDb(canned)
-  const add = vi.fn(async () => ({ id: "job-1" }))
+  const add = mock(async () => ({ id: "job-1" }))
   const queue = { add } as never
   const adapter: AcceptOps = acceptDatabaseOps({
     db,

@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import { drizzle } from "drizzle-orm/postgres-js"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { hashKey } from "../src/auth/api-key.js"
 import { keyLookup, resolveStatement } from "../src/auth/store.js"
 import { apiKeys } from "../src/db/core.js"
@@ -44,7 +44,7 @@ describe("what the lookup asks for", () => {
 describe("reading a row back", () => {
   const fakeDb = (rows: unknown[]) =>
     ({
-      execute: vi.fn(async () => rows),
+      execute: mock(async () => rows),
     }) as unknown as Database
 
   /**

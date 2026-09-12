@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { formatMeterKey, meterKey, meterKeyOf, parseMeterKey } from "../src/key.js"
 
 const TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"

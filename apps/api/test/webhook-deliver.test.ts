@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { deliverWebhook, type DeliveryRecord } from "../src/webhooks/deliver.js"
 import { verifySignature } from "../src/webhooks/signing.js"
 
@@ -20,17 +20,17 @@ const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
 const job = { deliveryId: record().id, endpointId: "ep-1", tenantId: "ten-1" }
 
 function deps(over: Record<string, unknown> = {}) {
-  const markDelivered = vi.fn(async () => {})
+  const markDelivered = mock(async () => {})
   // Typed so the assertions below can index the recorded arguments.
-  const markFailed = vi.fn<
+  const markFailed = mock<
     (
       delivery: DeliveryRecord,
       outcome: { reason: string; responseStatus?: number },
       final: boolean,
     ) => Promise<void>
   >(async () => {})
-  const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  const doFetch = vi.fn(async () => new Response("", { status: 200 }))
+  const log = { info: mock(), warn: mock(), error: mock() }
+  const doFetch = mock(async () => new Response("", { status: 200 }))
   return {
     deps: {
       load: async () => record(),
@@ -48,7 +48,7 @@ function deps(over: Record<string, unknown> = {}) {
   }
 }
 
-const requestOf = (doFetch: ReturnType<typeof vi.fn>) =>
+const requestOf = (doFetch: ReturnType<typeof mock>) =>
   doFetch.mock.calls[0] as unknown as [string, RequestInit]
 
 describe("a successful delivery", () => {
@@ -58,7 +58,7 @@ describe("a successful delivery", () => {
     const outcome = await deliverWebhook(job, d)
 
     expect(outcome).toEqual({ status: "delivered", responseStatus: 200 })
-    expect(markDelivered).toHaveBeenCalledOnce()
+    expect(markDelivered).toHaveBeenCalledTimes(1)
 
     const [url, init] = requestOf(doFetch)
     expect(url).toBe("https://hooks.example.com/i10")
@@ -102,10 +102,10 @@ describe("a successful delivery", () => {
   it.each([200, 201, 202, 204])("treats %d as success", async (status) => {
     const { deps: d, markDelivered } = deps({
       // 204 must carry a null body — the Response constructor refuses "".
-      fetch: vi.fn(async () => new Response(status === 204 ? null : "", { status })),
+      fetch: mock(async () => new Response(status === 204 ? null : "", { status })),
     })
     await deliverWebhook(job, d)
-    expect(markDelivered).toHaveBeenCalledOnce()
+    expect(markDelivered).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -114,10 +114,10 @@ describe("a failing delivery", () => {
   // all" as success would silently drop every event for a mis-configured route.
   it.each([301, 400, 401, 404, 500])("treats %d as failure", async (status) => {
     const { deps: d, markFailed } = deps({
-      fetch: vi.fn(async () => new Response("", { status })),
+      fetch: mock(async () => new Response("", { status })),
     })
     await expect(deliverWebhook(job, d)).rejects.toThrow()
-    expect(markFailed).toHaveBeenCalledOnce()
+    expect(markFailed).toHaveBeenCalledTimes(1)
   })
 
   // ⚠ THE FAILURE THAT TAKES DOWN A QUEUE IS NOT AN ERROR — it is a socket that
@@ -131,7 +131,7 @@ describe("a failing delivery", () => {
   it("names a timeout in words a human can act on", async () => {
     const timeout = Object.assign(new Error("aborted"), { name: "TimeoutError" })
     const { deps: d, markFailed } = deps({
-      fetch: vi.fn(async () => {
+      fetch: mock(async () => {
         throw timeout
       }),
     })
@@ -147,7 +147,7 @@ describe("a failing delivery", () => {
   it("stops throwing once the budget is gone", async () => {
     const { deps: d, markFailed } = deps({
       load: async () => record({ attempts: 4 }),
-      fetch: vi.fn(async () => new Response("", { status: 500 })),
+      fetch: mock(async () => new Response("", { status: 500 })),
     })
 
     const outcome = await deliverWebhook(job, d)
@@ -159,7 +159,7 @@ describe("a failing delivery", () => {
   it("marks intermediate attempts as not final", async () => {
     const { deps: d, markFailed } = deps({
       load: async () => record({ attempts: 1 }),
-      fetch: vi.fn(async () => new Response("", { status: 503 })),
+      fetch: mock(async () => new Response("", { status: 503 })),
     })
     await expect(deliverWebhook(job, d)).rejects.toThrow()
     expect(markFailed.mock.calls[0]![2]).toBe(false)

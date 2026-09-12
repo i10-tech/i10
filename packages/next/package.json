@@ -1,7 +1,7 @@
 {
   "name": "@i10/next",
   "version": "0.0.0",
-  "description": "i10 helpers for Next.js \u2014 server client and webhook route handler.",
+  "description": "i10 helpers for Next.js — server client and webhook route handler.",
   "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,
@@ -26,7 +26,7 @@
     "dev": "tsup --watch",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bun test"
   },
   "dependencies": {
     "@i10/node": "workspace:*"
@@ -34,11 +34,10 @@
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
+    "@types/bun": "^1.3.12",
     "eslint": "^9.39.5",
     "tsup": "^8.5.1",
-    "typescript": "6.0.3",
-    "vitest": "^4.1.11",
-    "@types/node": "^22.15.0"
+    "typescript": "6.0.3"
   },
   "engines": {
     "node": ">=20"

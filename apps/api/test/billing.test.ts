@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 import type { SubscriptionOps } from "../src/billing/db.js"
 import type { SubscriptionState } from "../src/billing/events.js"
@@ -67,7 +67,7 @@ describe("granting a plan", () => {
   })
 
   it("passes Polar's subscription id when granting the plan it bought", async () => {
-    const grantPlan = vi.fn(async () => {})
+    const grantPlan = mock(async () => {})
     const grants = subscriptionGrants({
       subscriptions: ops(),
       entitlements: { ensureCustomer: async () => {}, grantPlan },
@@ -88,7 +88,7 @@ describe("granting a plan", () => {
   // subscription that just ended, and Autumn rejects the claim with 409
   // `duplicate_subscription_id` — so every downgrade failed.
   it("withholds it when dropping the tenant back to free", async () => {
-    const grantPlan = vi.fn(async () => {})
+    const grantPlan = mock(async () => {})
     const grants = subscriptionGrants({
       subscriptions: ops(),
       entitlements: { ensureCustomer: async () => {}, grantPlan },
@@ -102,7 +102,7 @@ describe("granting a plan", () => {
   // ⚠ THE OUT-OF-ORDER GUARD. A delayed `active` arriving after `revoked` must
   // not re-grant Pro to a customer who churned.
   it("does nothing at all when a newer event has already been applied", async () => {
-    const grantPlan = vi.fn(async () => {})
+    const grantPlan = mock(async () => {})
     const grants = subscriptionGrants({
       subscriptions: ops({ record: async () => "stale" }),
       entitlements: { ensureCustomer: async () => {}, grantPlan },
@@ -114,7 +114,7 @@ describe("granting a plan", () => {
   })
 
   it("marks the grant against the exact event it was made for", async () => {
-    const markGranted = vi.fn(async () => {})
+    const markGranted = mock(async () => {})
     const grants = subscriptionGrants({
       subscriptions: ops({ markGranted }),
       entitlements: { ensureCustomer: async () => {}, grantPlan: async () => {} },
@@ -132,7 +132,7 @@ describe("granting a plan", () => {
   // The row is durable by then, so the caller answering 500 gets a retry that
   // resumes rather than one that starts over.
   it("lets an Autumn failure reach the caller, after the row is written", async () => {
-    const record = vi.fn(async () => "applied" as const)
+    const record = mock(async () => "applied" as const)
     const grants = subscriptionGrants({
       subscriptions: ops({ record }),
       entitlements: {
@@ -176,15 +176,15 @@ const row = (over: Record<string, unknown> = {}) => ({
 
 describe("reconciling against Polar", () => {
   it("leaves a tenant alone when our record already agrees", async () => {
-    const apply = vi.fn()
+    const apply = mock()
     const report = await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub()],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({ snapshot: async () => [row()] }),
       grants: { apply },
@@ -201,10 +201,10 @@ describe("reconciling against Polar", () => {
   // so without collapsing them the dead subscription gets its own turn at
   // writing the live one's row.
   it("decides once per tenant when Polar lists several of their subscriptions", async () => {
-    const apply = vi.fn()
+    const apply = mock()
     const report = await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
@@ -216,7 +216,7 @@ describe("reconciling against Polar", () => {
           }),
           polarSub({ id: "sub_new", modified_at: "2026-09-03T12:00:00Z" }),
         ],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({
         snapshot: async () => [row({ polarSubscriptionId: "sub_new" })],
@@ -235,10 +235,10 @@ describe("reconciling against Polar", () => {
   // on the ended one after that, for any reason at all, and picking the most
   // recent downgrades somebody who is paying.
   it("lets a live subscription outrank a dead one modified more recently", async () => {
-    const apply = vi.fn()
+    const apply = mock()
     const report = await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
@@ -250,7 +250,7 @@ describe("reconciling against Polar", () => {
             modified_at: "2026-09-04T12:00:00Z",
           }),
         ],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({
         snapshot: async () => [row({ polarSubscriptionId: "sub_live" })],
@@ -265,15 +265,15 @@ describe("reconciling against Polar", () => {
   })
 
   it("grants a subscription we never received a webhook for", async () => {
-    const apply = vi.fn(async () => ({ status: "applied" as const, planId: "pro" }))
+    const apply = mock(async () => ({ status: "applied" as const, planId: "pro" }))
     const report = await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub()],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({ snapshot: async () => [] }),
       grants: { apply },
@@ -288,15 +288,15 @@ describe("reconciling against Polar", () => {
   // ⚠ THE STATE THIS WHOLE DESIGN EXISTS TO SURVIVE: the row was written and
   // the Autumn call failed. Nothing else would ever surface it.
   it("repairs a row whose entitlement never reached Autumn", async () => {
-    const apply = vi.fn(async () => ({ status: "applied" as const, planId: "pro" }))
+    const apply = mock(async () => ({ status: "applied" as const, planId: "pro" }))
     await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub()],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({ snapshot: async () => [row({ grantedPlanId: null })] }),
       grants: { apply },
@@ -308,17 +308,17 @@ describe("reconciling against Polar", () => {
   })
 
   it("revokes a plan when Polar says the subscription ended", async () => {
-    const apply = vi.fn(async () => ({ status: "applied" as const, planId: "free" }))
+    const apply = mock(async () => ({ status: "applied" as const, planId: "free" }))
     await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [
           polarSub({ status: "canceled", modified_at: "2026-09-04T12:00:00Z" }),
         ],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({ snapshot: async () => [row()] }),
       grants: { apply },
@@ -335,15 +335,15 @@ describe("reconciling against Polar", () => {
   // data is wrong or the token points at the wrong organisation — and acting on
   // it would downgrade every paying customer at once.
   it("reports a row Polar has no subscription for, and never downgrades it", async () => {
-    const apply = vi.fn()
+    const apply = mock()
     const report = await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         listSubscriptions: async () => [polarSub({ id: "sub_other" })],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({ snapshot: async () => [row({ tenantId: "ten-2" })] }),
       grants: { apply },
@@ -360,7 +360,7 @@ describe("reconciling against Polar", () => {
   it("keeps going after one tenant fails, and reports it", async () => {
     const report = await reconcileSubscriptions({
       polar: {
-        getCheckout: vi.fn(),
+        getCheckout: mock(),
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
@@ -368,11 +368,11 @@ describe("reconciling against Polar", () => {
           polarSub({ id: "sub_1", customer: { external_id: "ten-1" } }),
           polarSub({ id: "sub_2", customer: { external_id: "ten-2" } }),
         ],
-        createCheckout: vi.fn(),
+        createCheckout: mock(),
       },
       subscriptions: ops({ snapshot: async () => [] }),
       grants: {
-        apply: vi.fn(async (s) => {
+        apply: mock(async (s) => {
           if (s.tenantId === "ten-1") throw new Error("autumn is down")
           return { status: "applied" as const, planId: "pro" }
         }),
@@ -410,17 +410,17 @@ const checkout = {
 
 describe("POST /billing/checkout", () => {
   it("starts a checkout for the caller's own tenant", async () => {
-    const createCheckout = vi.fn(async () => checkout)
+    const createCheckout = mock(async () => checkout)
     const app = createApp({
       apiKeyAuth,
       billing: {
         polar: {
-          getCheckout: vi.fn(),
+          getCheckout: mock(),
           createCheckout,
-          listSubscriptions: vi.fn(),
-          ingestEvents: vi.fn(),
-          updateSubscription: vi.fn(),
-          createCustomerSession: vi.fn(),
+          listSubscriptions: mock(),
+          ingestEvents: mock(),
+          updateSubscription: mock(),
+          createCustomerSession: mock(),
         },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
@@ -446,17 +446,17 @@ describe("POST /billing/checkout", () => {
   // with it — and the webhook would grant it perfectly correctly, because from
   // Polar's side the payment really did succeed.
   it("refuses a plan that is not in our own product map", async () => {
-    const createCheckout = vi.fn(async () => checkout)
+    const createCheckout = mock(async () => checkout)
     const app = createApp({
       apiKeyAuth,
       billing: {
         polar: {
-          getCheckout: vi.fn(),
+          getCheckout: mock(),
           createCheckout,
-          listSubscriptions: vi.fn(),
-          ingestEvents: vi.fn(),
-          updateSubscription: vi.fn(),
-          createCustomerSession: vi.fn(),
+          listSubscriptions: mock(),
+          ingestEvents: mock(),
+          updateSubscription: mock(),
+          createCustomerSession: mock(),
         },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
@@ -479,12 +479,12 @@ describe("POST /billing/checkout", () => {
       apiKeyAuth,
       billing: {
         polar: {
-          getCheckout: vi.fn(),
-          createCheckout: vi.fn(),
+          getCheckout: mock(),
+          createCheckout: mock(),
           ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
           updateSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
-          listSubscriptions: vi.fn(),
+          listSubscriptions: mock(),
         },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
@@ -511,12 +511,12 @@ describe("GET /billing/plan", () => {
       apiKeyAuth,
       billing: {
         polar: {
-          getCheckout: vi.fn(),
-          createCheckout: vi.fn(),
+          getCheckout: mock(),
+          createCheckout: mock(),
           ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
           updateSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
-          listSubscriptions: vi.fn(),
+          listSubscriptions: mock(),
         },
         subscriptions: ops({
           current: async () => ({
@@ -556,12 +556,12 @@ describe("GET /billing/plan", () => {
       apiKeyAuth,
       billing: {
         polar: {
-          getCheckout: vi.fn(),
-          createCheckout: vi.fn(),
+          getCheckout: mock(),
+          createCheckout: mock(),
           ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
           updateSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
-          listSubscriptions: vi.fn(),
+          listSubscriptions: mock(),
         },
         subscriptions: ops({
           current: async () => ({

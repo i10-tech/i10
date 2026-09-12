@@ -1,0 +1,50 @@
+# Bun's install configuration. THIS FILE REPLACES .npmrc AND pnpm-workspace.yaml.
+#
+# ⚠ OVERRIDES BELONG IN package.json's top-level `overrides`, NOT HERE AND NOT
+# IN A `pnpm` FIELD. pnpm 11 stopped reading `pnpm.overrides` in package.json
+# and printed one WARN before installing anyway — PSL keeps ~30 CVE pins in
+# that field, and that trap is why its pnpm 11 upgrade was abandoned. Bun reads
+# neither `pnpm.overrides` nor an `overrides:` key in this file; its own
+# mechanism is `overrides` in package.json. The trap shape is identical, so the
+# rule carries over unchanged: put a pin where the tool actually looks, and
+# check that it landed in bun.lock.
+
+[install]
+# Supply-chain gate: refuse a version published less than this long ago. A good
+# package suddenly republished is the shape of a maintainer-account compromise,
+# and the cost is one extra metadata pass at install time.
+#
+# ⚠ SECONDS, WHERE pnpm's minimumReleaseAge WAS MINUTES. The value this
+# replaced was `1440` — 1440 MINUTES, 24 hours. Carried across verbatim it
+# would have become 1440 seconds, and the gate would have silently shrunk from
+# a day to twenty-four minutes with nothing to say so.
+#
+# 86400 = 24h.
+minimumReleaseAge = 86400
+
+# Bun ignores unknown keys in this file without a word, so a misspelling here
+# is invisible exactly the way pnpm's renamed `allowBuilds` key was. Anything
+# added below should be proven to take effect, not assumed.
+
+# ⚠ `hoisted`, NOT bun's DEFAULT `isolated`, AND THIS IS A CONCESSION TO ONE
+# DEPENDENCY RATHER THAN A PREFERENCE.
+#
+# The isolated linker is the strict one — each package sees only what it
+# declares, which is what pnpm gave us and what .npmrc used to argue for by
+# refusing `shamefully-hoist`. It is also what the docs build cannot survive.
+# Astro's prerender step bundles `satteri` into a chunk under
+# apps/docs/dist/.prerender/, and that chunk still contains satteri's own
+# `require("@bruits/satteri-darwin-arm64")` — a platform-specific native binding
+# resolved BY NAME from a directory outside any package. Under `isolated` that
+# binding lives only in node_modules/.bun/satteri@<v>/node_modules, which is not
+# on the resolution path from the emitted chunk, and the build dies with
+# `Cannot find module '@bruits/satteri-darwin-arm64'`. Nothing we own can
+# declare it: the name is per-platform and is chosen at runtime.
+#
+# `hoisted` produces the npm-shaped flat tree the chunk expects. The strictness
+# it gives up is real — an undeclared import can now resolve by accident — so
+# the two undeclared ones this migration surfaced (`tailwindcss` in apps/docs
+# and packages/ui, which only ever resolved through pnpm's auto-install-peers)
+# were fixed by DECLARING them rather than by letting this setting hide them
+# again. Keep doing that.
+linker = "hoisted"

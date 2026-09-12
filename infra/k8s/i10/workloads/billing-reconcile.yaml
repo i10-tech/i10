@@ -1,7 +1,7 @@
 # Reconciles i10's entitlements against Polar, on a schedule.
 #
 # ⚠ THE SAME IMAGE AND A THIRD COMMAND, like the worker and the migration Job.
-# `node dist/reconcile.js` runs one pass and exits; there is no separate
+# `bun dist/reconcile.js` runs one pass and exits; there is no separate
 # artifact, so it cannot drift from the schema or the environment validation the
 # API is built against.
 #
@@ -72,7 +72,7 @@ spec:
             - name: reconcile
               image: ghcr.io/i10-tech/i10-api:prod-5579acc187a44cd7a45a7884ffcd23a7228de92b@sha256:03c538a9a7932e9dad0deb0930f44f75d329c70277c2a9aa3035206b35610707
               imagePullPolicy: Always
-              command: ["node", "dist/reconcile.js"]
+              command: ["bun", "dist/reconcile.js"]
               envFrom:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }

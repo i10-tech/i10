@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 import type { AcceptOps } from "../src/send/accept.js"
 import { unmetered, type Metering } from "../src/send/metering.js"
@@ -22,9 +22,9 @@ const body = {
 }
 
 function app(over: Partial<AcceptOps> = {}, metering: Metering = unmetered) {
-  const enqueue = vi.fn(async () => {})
+  const enqueue = mock(async () => {})
   const sendPath = {
-    persist: vi.fn(async (input: { messages: unknown[] }) => ({
+    persist: mock(async (input: { messages: unknown[] }) => ({
       status: "written" as const,
       ids: input.messages.map((_, i) => `id-${i}`),
       refs: input.messages.map((_, i) => ({ id: `id-${i}`, createdAt: new Date() })),
@@ -32,7 +32,7 @@ function app(over: Partial<AcceptOps> = {}, metering: Metering = unmetered) {
     suppressedFor: async () => new Set<string>(),
     enqueue,
     metering,
-    log: { warn: vi.fn(), error: vi.fn() },
+    log: { warn: mock(), error: mock() },
     ...over,
   } as never
 

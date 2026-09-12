@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createWebhookHandler, verifySignature } from "../src/webhook.js"
 
 const SECRET = `whsec_${Buffer.from("a-test-signing-key-24byt").toString("base64")}`
@@ -57,7 +57,7 @@ describe("the wire format", () => {
   })
 
   it("reads the header names the API sends", async () => {
-    const onEvent = vi.fn()
+    const onEvent = mock()
     const ts = now()
     const handler = createWebhookHandler({ secret: SECRET, onEvent })
     const body = JSON.stringify({ type: "email.sent" })
@@ -163,7 +163,7 @@ describe("createWebhookHandler", () => {
     })
 
   it("400s when the signature headers are missing", async () => {
-    const onEvent = vi.fn()
+    const onEvent = mock()
     const handler = createWebhookHandler({ secret: SECRET, onEvent })
     expect((await handler(post({}))).status).toBe(400)
     expect(onEvent).not.toHaveBeenCalled()
@@ -176,7 +176,7 @@ describe("createWebhookHandler", () => {
    * check their proxy's header stripping instead of rotating a good secret.
    */
   it("400s when only the id is missing", async () => {
-    const onEvent = vi.fn()
+    const onEvent = mock()
     const ts = now()
     const handler = createWebhookHandler({ secret: SECRET, onEvent })
     const res = await handler(
@@ -187,7 +187,7 @@ describe("createWebhookHandler", () => {
   })
 
   it("401s on a bad signature without invoking the handler", async () => {
-    const onEvent = vi.fn()
+    const onEvent = mock()
     const handler = createWebhookHandler({ secret: SECRET, onEvent })
     const res = await handler(
       post({
@@ -201,7 +201,7 @@ describe("createWebhookHandler", () => {
   })
 
   it("204s and delivers the parsed event on a good signature", async () => {
-    const onEvent = vi.fn()
+    const onEvent = mock()
     const ts = now()
     const handler = createWebhookHandler({ secret: SECRET, onEvent })
     const res = await handler(

@@ -53,24 +53,24 @@ Rules:
 
 ## Adding things
 
-| Goal                         | Action                                                                                                                                                 |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| New doc page                 | Create `src/content/docs/<slug>.mdx`. Sidebar picks it up.                                                                                             |
-| New partial                  | Create `src/content/partials/<slug>.mdx`. Use via `<Render file="<slug>" />`.                                                                          |
-| UI from registry             | `pnpm exec nimbus-docs add <slug>`. Register in `src/components.ts` if used in MDX.                                                                    |
-| Feature recipe               | `pnpm exec nimbus-docs add <feature-slug>`. Pipe the printed brief to your agent.                                                                      |
-| Check it builds              | `pnpm exec nimbus-docs check` — build-free preflight (env + structure + authoring + types). `--json` for an agent loop, `--fix` to repair what's safe. |
-| Custom page route            | Add a file under `src/pages/`.                                                                                                                         |
-| Custom OG style              | Edit `src/pages/og/_og-card-config.ts`.                                                                                                                |
-| Check for updates            | `pnpm exec nimbus-docs outdated` — starter files behind their tag + registry components behind.                                                        |
-| Upgrade a starter file       | `pnpm exec nimbus-docs diff <file>` to review, `diff --apply <file>` to pull a clean upstream change.                                                  |
-| Upgrade a registry component | `pnpm exec nimbus-docs add <slug> --overwrite`, then review with `git diff`.                                                                           |
+| Goal                         | Action                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New doc page                 | Create `src/content/docs/<slug>.mdx`. Sidebar picks it up.                                                                                        |
+| New partial                  | Create `src/content/partials/<slug>.mdx`. Use via `<Render file="<slug>" />`.                                                                     |
+| UI from registry             | `bunx nimbus-docs add <slug>`. Register in `src/components.ts` if used in MDX.                                                                    |
+| Feature recipe               | `bunx nimbus-docs add <feature-slug>`. Pipe the printed brief to your agent.                                                                      |
+| Check it builds              | `bunx nimbus-docs check` — build-free preflight (env + structure + authoring + types). `--json` for an agent loop, `--fix` to repair what's safe. |
+| Custom page route            | Add a file under `src/pages/`.                                                                                                                    |
+| Custom OG style              | Edit `src/pages/og/_og-card-config.ts`.                                                                                                           |
+| Check for updates            | `bunx nimbus-docs outdated` — starter files behind their tag + registry components behind.                                                        |
+| Upgrade a starter file       | `bunx nimbus-docs diff <file>` to review, `diff --apply <file>` to pull a clean upstream change.                                                  |
+| Upgrade a registry component | `bunx nimbus-docs add <slug> --overwrite`, then review with `git diff`.                                                                           |
 
-List installable items: `pnpm exec nimbus-docs list`.
+List installable items: `bunx nimbus-docs list`.
 
 ## Audit this site
 
-Start with `pnpm exec nimbus-docs check --json`. It runs the environment, structural, authoring, and type checks build-free — config validity, `site` placeholder, route collisions, MDX component resolution, the lint rules, and a `tsc` type-check — and returns three top-level signals plus per-scope detail:
+Start with `bunx nimbus-docs check --json`. It runs the environment, structural, authoring, and type checks build-free — config validity, `site` placeholder, route collisions, MDX component resolution, the lint rules, and a `tsc` type-check — and returns three top-level signals plus per-scope detail:
 
 - **`status`** (`passed` | `failed` | `partial`) and **`readiness`** (`buildable` | `blocked` | `unknown`) are the primary signals. `status` is the whole-run verdict; `readiness` answers "does env + structure say it builds?". `ok` (=== zero errors) is kept for back-compat only.
 - **`findings[{scope,code,severity,file,line,message,fixable,fix}]`** are problems we evaluated. Apply each `fix` (or `check --fix`).
