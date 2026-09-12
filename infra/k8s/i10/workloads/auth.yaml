@@ -53,6 +53,29 @@ spec:
           imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 3000 }
+          # ⚠ PIN THE BIND ADDRESS. KUBERNETES SETS `HOSTNAME` TO THE POD NAME,
+          # AND NEXT'S STANDALONE server.js USES IT AS THE ADDRESS TO LISTEN ON.
+          #
+          # Left alone, the server resolves that pod name and binds to whatever
+          # comes back. Under Node that was the pod's IPv4; under bun it is the
+          # IPv6 address, so the container listened on tcp6 ONLY — `/proc/net/tcp`
+          # was empty — while kubelet dialled the pod's IPv4 and got
+          # `connection refused`. The pod logs "Ready in 0ms" and looks perfectly
+          # healthy, the readiness probe never passes, liveness then restarts it,
+          # and the Deployment sits Degraded forever with the previous ReplicaSet
+          # still serving. Nothing in the application log says a word about it.
+          #
+          # `0.0.0.0` makes the bind explicit and runtime-independent. It must be
+          # set HERE rather than in the Dockerfile: the kubelet injects HOSTNAME
+          # at container start, which overrides any `ENV` baked into the image,
+          # and only an explicit `env:` entry wins against it.
+          #
+          # ⚠ DO NOT COPY THIS TO worker.yaml. There HOSTNAME is read for the
+          # claim identity (see turbo.json's passThrough list), and pinning it
+          # would give every replica the same name.
+          env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
           envFrom:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-auth }
