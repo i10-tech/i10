@@ -12,15 +12,15 @@
     "prebuild": "node scripts/vendor-scalar.mjs"
   },
   "dependencies": {
-    "@cloudflare/nimbus-docs": "^0.11.0",
+    "@cloudflare/nimbus-docs": "^0.13.1",
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@i10/api": "workspace:*",
     "@iconify-json/ph": "^1.2.0",
-    "@scalar/api-reference": "^1.67.0",
-    "@scalar/astro": "^0.4.17",
-    "astro": "~7.2.9",
-    "astro-og-canvas": "^0.13.0",
+    "@scalar/api-reference": "^1.68.0",
+    "@scalar/astro": "^0.4.18",
+    "astro": "~7.3.2",
+    "astro-og-canvas": "^0.13.1",
     "canvaskit-wasm": "^0.42.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.5.0"
