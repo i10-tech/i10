@@ -14,9 +14,11 @@ export const dynamic = "force-dynamic"
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect_url?: string | string[] }>
+  searchParams: Promise<{ redirect_url?: string | string[]; reconnected?: string }>
 }) {
-  const { redirect_url: raw } = await searchParams
+  const { redirect_url: raw, reconnected } = await searchParams
 
-  return <SsoCallback afterAuthUrl={afterAuthUrl(raw)} />
+  return (
+    <SsoCallback afterAuthUrl={afterAuthUrl(raw)} reconnected={reconnected === "1"} />
+  )
 }

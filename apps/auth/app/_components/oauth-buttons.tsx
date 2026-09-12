@@ -9,6 +9,7 @@ import { Spinner } from "@repo/ui/components/spinner"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoStrategy } from "../_lib/clerk-types"
 import type { SsoProvider } from "../_lib/providers"
+import { consentPromptFor } from "../_lib/oidc"
 import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
 
 /**
@@ -73,6 +74,7 @@ export function OAuthButtons({
   afterAuthUrl,
   redirectRaw,
   verb,
+  intent,
   providers,
   busy,
   onBusyChange,
@@ -86,6 +88,15 @@ export function OAuthButtons({
   redirectRaw?: string
   /** "Continue" reads right on both pages; the prop exists so it need not. */
   verb?: string
+  /**
+   * Which page these buttons are on.
+   *
+   * ⚠ IT CHANGES WHAT WE ASK GOOGLE FOR, not just the label — see _lib/oidc.ts.
+   * Signing up asks for consent so a refresh token comes back; signing in shows
+   * the account chooser only, so a returning customer is not made to re-consent
+   * every visit.
+   */
+  intent: "sign-in" | "sign-up"
   /**
    * What Clerk says is configured, already filtered for this device — see
    * _lib/providers.ts. An empty list renders nothing at all, which is the
@@ -188,6 +199,12 @@ export function OAuthButtons({
          * challenged.
          */
         signUpIfMissing: true,
+        /*
+         * Undefined unless this is a sign-up with a provider that needs it,
+         * which Clerk then omits from the authorize URL — so the ordinary
+         * sign-in path is untouched.
+         */
+        oidcPrompt: consentPromptFor(strategy, intent),
       })
 
       /*

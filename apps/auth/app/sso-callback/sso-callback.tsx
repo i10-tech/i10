@@ -8,7 +8,12 @@ import { Button } from "@repo/ui/components/button"
 import { FieldGroup } from "@repo/ui/components/field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { messageFor, ssoFailureMessage, TRANSPORT_FAILURE } from "../_lib/errors"
-import { finalizeAndLeave, leaveFor, setActiveAndLeave } from "../_lib/finish"
+import { leaveFor, setActiveAndLeave } from "../_lib/finish"
+import {
+  CONSENT_PROMPT,
+  MISSING_REFRESH_TOKEN,
+  needsConsentForRefreshToken,
+} from "../_lib/oidc"
 
 /**
  * Where an OAuth provider drops the browser on its way back.
@@ -36,7 +41,21 @@ const PROVIDER_LABELS: Record<string, string> = {
   oauth_apple: "Apple",
 }
 
-export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
+export function SsoCallback({
+  afterAuthUrl,
+  reconnected,
+}: {
+  afterAuthUrl: string
+  /**
+   * Set when the browser is coming back from the extra consent trip below.
+   *
+   * ⚠ IT IS AN EXPLICIT FLAG RATHER THAN AN INFERENCE. On that return there is
+   * a live session and no attempt in progress, which is indistinguishable from
+   * a dozen other dead ends — without the flag the page would decide the
+   * hand-off failed and toast at somebody who has just finished signing up.
+   */
+  reconnected?: boolean
+}) {
   const router = useRouter()
   const clerk = useClerk()
   const { signIn } = useSignIn()
@@ -130,6 +149,17 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
       done.current = true
 
       try {
+        /*
+         * ⚠ BACK FROM THE EXTRA CONSENT TRIP. The account already exists and
+         * the session is already active; whether Google handed over a refresh
+         * token this time is not worth blocking anybody on, so either way the
+         * answer is the dashboard.
+         */
+        if (reconnected) {
+          leaveFor(afterAuthUrl)
+          return
+        }
+
         if (signIn.status === "complete") {
           const { error } = await signIn.finalize({ navigate })
           if (error) toast.error(messageFor(error))
@@ -232,7 +262,16 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
      * fact. The `done` ref is still the real guard; this just keeps the
      * dependency list true.
      */
-  }, [signIn, signUp, clerk, afterAuthUrl, router, failureCode, leaveWithSession])
+  }, [
+    signIn,
+    signUp,
+    clerk,
+    afterAuthUrl,
+    router,
+    reconnected,
+    failureCode,
+    leaveWithSession,
+  ])
 
   /**
    * They said yes. This is the call that actually creates the account.
@@ -262,14 +301,54 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
       }
 
       if (signUp.createdSessionId) {
-        const result = await finalizeAndLeave(
-          (params) => signUp.finalize(params),
-          afterAuthUrl,
+        /*
+         * ⚠ THE SESSION IS ACTIVATED WITHOUT NAVIGATING, because there may be
+         * one more thing to do before leaving. `finalize()` would activate AND
+         * go, and we cannot reach the new user's connected accounts once the
+         * browser is on its way to another origin.
+         */
+        await clerk.setActive({ session: signUp.createdSessionId })
+
+        /*
+         * ⚠ ONE MORE TRIP TO GOOGLE, BUT ONLY IF THE FIRST ONE CAME BACK WITHOUT
+         * A REFRESH TOKEN. They arrived here from the SIGN-IN button, which
+         * deliberately does not ask for consent — so for anyone who had already
+         * authorised i10, Google skipped the consent screen and issued no
+         * refresh token, and Clerk flags the account as disconnected. Now that
+         * they have said yes to an account, asking once is proportionate.
+         *
+         * ⚠ AND IT IS GATED ON THE ERROR CODE RATHER THAN ON THE PROVIDER.
+         * Somebody authorising i10 for the very first time IS shown Google's
+         * consent screen and DOES come back with a token; sending them to
+         * Google a second time would be a redirect nobody needed.
+         */
+        const stale = clerk.user?.externalAccounts?.find(
+          (account) =>
+            account.verification?.error?.code === MISSING_REFRESH_TOKEN &&
+            needsConsentForRefreshToken(account.provider),
         )
-        if (result.error) {
-          toast.error(messageFor(result.error))
-          setPending(false)
+
+        if (stale) {
+          // ⚠ BUILT FROM THE CURRENT URL so `redirect_url` survives verbatim —
+          // rebuilding it by hand is how a destination gets quietly dropped.
+          const back = new URL(window.location.href)
+          back.searchParams.set("reconnected", "1")
+
+          const reauthorized = await stale.reauthorize({
+            oidcPrompt: CONSENT_PROMPT,
+            redirectUrl: back.toString(),
+          })
+
+          const target = reauthorized.verification?.externalVerificationRedirectURL
+          if (target) {
+            window.location.assign(String(target))
+            return
+          }
+          // Nowhere to send them: the account is made and they are signed in,
+          // so a missing refresh token is not worth blocking on.
         }
+
+        leaveFor(afterAuthUrl)
         return
       }
 
