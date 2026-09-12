@@ -30,21 +30,32 @@ updates:
       prefix: "chore(ci)"
 
   - package-ecosystem: docker
+    # ⚠ ALL FIVE, INCLUDING apps/auth. It was missing here while every other app
+    # with a Dockerfile was listed, so its base image was the one nobody was
+    # told about — the failure mode of an omission in a list like this is
+    # silence, not an error.
     directories:
       - "/apps/api"
+      - "/apps/auth"
       - "/apps/console"
       - "/apps/web"
       - "/apps/docs"
     schedule: { interval: weekly }
     commit-message:
       prefix: "chore(deps)"
-    # ⚠ THE NODE MAJOR IS A FIVE-FILE CHANGE, SO IT IS NEVER ONE PR HERE. A bump
-    # in one app's Dockerfile leaves that container on a runtime the other three
-    # are not on, built by a CI pinned to NODE_VERSION in ci.yml and typechecked
-    # against whatever @types/node says — three-way drift discovered at runtime.
-    # Dependabot proposed exactly that for apps/console and it had to be closed.
-    # Moving Node means all four Dockerfiles, ci.yml and @types/node together,
-    # deliberately, which is not a thing a bot can offer.
+    # ⚠ THE BUN MAJOR IS A SIX-FILE CHANGE, SO IT IS NEVER ONE PR HERE. A bump
+    # in one app's Dockerfile leaves that container on a runtime the others are
+    # not on, built by a CI pinned to BUN_VERSION in ci.yml and typechecked
+    # against whatever @types/bun says — three-way drift discovered at runtime.
+    # Dependabot proposed exactly that shape for apps/console under Node and it
+    # had to be closed. Moving bun means five Dockerfiles, `.bun-version`,
+    # `packageManager`, ci.yml and @types/bun together, deliberately, which is
+    # not a thing a bot can offer.
+    #
+    # ⚠ AND THERE IS A FLOOR UNDERNEATH IT: Next's standalone server.js does not
+    # run on bun < 1.3.14 (oven-sh/bun#25609). A downgrade proposed here would
+    # be silently accepted by every test and fail only in the three Next
+    # containers at request time.
     ignore:
-      - dependency-name: node
+      - dependency-name: oven/bun
         update-types: [version-update:semver-major]
