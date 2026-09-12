@@ -8,7 +8,7 @@
 # this version — `.bun-version`, `packageManager` in package.json, BUN_VERSION
 # in ci.yml, and every Dockerfile base image — and they move together. A
 # floating major would let the image drift away from what CI tested.
-FROM oven/bun:1.3.12-alpine AS base
+FROM oven/bun:1.4.2-alpine AS base
 
 FROM base AS deps
 WORKDIR /repo
@@ -59,6 +59,10 @@ RUN bunx turbo run build --filter=@i10/api
 # into a self-contained tree; `bun build` bundles instead, so dist/ has no
 # imports left to resolve and the runtime image is the bun binary plus a few
 # JavaScript files.
+# ⚠ `command -v node` INSIDE THIS IMAGE ANSWERS WITH A PATH, AND IT IS NOT
+# NODE. oven/bun ships /usr/local/bun-node-fallback-bin/node as a symlink to
+# bun, so third-party tooling that shells out to `node` keeps working. There is
+# no Node runtime in any i10 image; do not read that path as evidence of one.
 FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production

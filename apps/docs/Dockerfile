@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # ⚠ THE TAG IS PINNED TO THE EXACT VERSION, not `1-alpine` — see
 # apps/api/Dockerfile.
-FROM oven/bun:1.3.12-alpine AS base
+FROM oven/bun:1.4.2-alpine AS base
 
 FROM base AS build
 WORKDIR /repo

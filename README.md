@@ -60,7 +60,7 @@ bun dev
 
 |            |                                                             |
 | ---------- | ----------------------------------------------------------- |
-| Bun        | 1.3.12 — runtime, package manager and test runner. No Node. |
+| Bun        | 1.4.2 — runtime, package manager and test runner. No Node.¹ |
 | TypeScript | 6.0.3                                                       |
 | Go         | 1.26.5 — `services/authd` only, outside the workspace       |
 
@@ -78,15 +78,19 @@ that publish a `.d.ts` (`@repo/contracts`, `@repo/emails`, `@repo/metering`)
 still emit with `tsc` because `bun build` has no declaration output. What went
 away is `tsx`: bun runs a `.ts` file directly.
 
-**One Node process survives, and it is deliberate.** The three Next images —
-console, auth, web — install and build with bun and then run Next's standalone
-`server.js` with `node`. That file does not work under bun 1.3.12: it boots,
-answers the connection, and fails every render with _"Expected CommonJS module
-to have a function wrapper"_ while loading Next's precompiled server runtime.
-`next dev` and `next start` both serve fine under bun, and a `--webpack` build
-fails the same way, so this is specific to what `output: "standalone"` emits.
-Each of those Dockerfiles carries the reproduction and the one-line re-test;
-delete the stage when a bun upgrade passes it.
+**1.4.2 is a floor, not just a pin.** Next's standalone `server.js` does not run
+on bun 1.3.x — it boots, answers the connection, then fails every render with
+_"Expected CommonJS module to have a function wrapper"_ while loading Next's
+precompiled server runtime ([oven-sh/bun#25609], fixed in 1.3.14). `next dev`
+and `next start` were fine throughout and a `--webpack` build failed
+identically, so the bundler was never the variable. Do not move the base image
+in `apps/{console,auth,web}/Dockerfile` backwards.
+
+¹ `command -v node` inside an i10 image answers with a path anyway — `oven/bun`
+ships `/usr/local/bun-node-fallback-bin/node` as a symlink to bun so tooling
+that shells out to `node` keeps working. It is not a Node runtime.
+
+[oven-sh/bun#25609]: https://github.com/oven-sh/bun/issues/25609
 
 ---
 

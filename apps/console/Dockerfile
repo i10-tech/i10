@@ -2,7 +2,16 @@
 # ⚠ THE TAG IS PINNED TO THE EXACT VERSION, not `1-alpine` — see
 # apps/api/Dockerfile. `.bun-version`, `packageManager`, ci.yml's BUN_VERSION
 # and every base image here move together.
-FROM oven/bun:1.3.12-alpine AS base
+#
+# ⚠ AND 1.4.2 IS A FLOOR, NOT JUST A PIN, FOR THIS IMAGE IN PARTICULAR. Next's
+# standalone server.js does not run on bun 1.3.x: it boots, prints "Ready",
+# answers the connection, and then fails every render with "Expected CommonJS
+# module to have a function wrapper" while loading
+# next/dist/compiled/next-server/app-page-turbo.runtime.prod.js. That is
+# oven-sh/bun#25609, fixed in 1.3.14. `next dev` and `next start` were fine
+# throughout, and a --webpack build failed identically, so downgrading the
+# bundler is not a way out of it. Do not move this base image backwards.
+FROM oven/bun:1.4.2-alpine AS base
 
 FROM base AS deps
 WORKDIR /repo
@@ -32,33 +41,7 @@ ENV GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME NEXT_TELEMETRY_DISABLED=1
 # does not.
 RUN bunx turbo run build --filter=@i10/console
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ⚠ NODE, NOT BUN, AND IT IS THE ONLY NODE LEFT IN THIS REPOSITORY.
-#
-# Everything up to here is bun: the install, the workspace, the build. The
-# server process is not, because Next's STANDALONE server.js does not run under
-# bun 1.3.12. It boots, prints "Ready", accepts the connection, and then fails
-# every render with:
-#
-#   Failed to load external module
-#   next/dist/compiled/next-server/app-page-turbo.runtime.prod.js:
-#   TypeError: Expected CommonJS module to have a function wrapper.
-#   If you weren't messing around with Bun's internals, this is a bug in Bun
-#
-# Measured, not assumed — and narrowed: `next dev` and `next start` BOTH serve
-# 200 under bun. It is specifically the file `output: "standalone"` emits, whose
-# own module loader pulls Next's precompiled CJS runtime in a way bun rejects.
-# A `--webpack` build fails identically, so it is not a Turbopack artefact.
-#
-# The alternatives were both worse. Running `next start` under bun instead means
-# shipping the full node_modules tree that `standalone` exists to avoid — see
-# the note in next.config.ts. Waiting is not a deploy strategy.
-#
-# ⚠ RE-TEST THIS ON EVERY BUN UPGRADE, and delete this stage when it passes:
-#   cd apps/console/.next/standalone && bun apps/console/server.js
-#   curl -s -o /dev/null -w '%{http_code}' localhost:$PORT/   # want 200
-# ═════════════════════════════════════════════════════════════════════════════
-FROM node:22-alpine AS runtime
+FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000
 
@@ -68,6 +51,9 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000
 # NAMED user against `runAsNonRoot`: it has no way to resolve the name without
 # reading the image's /etc/passwd, so it refuses to start the container with
 # "image has non-numeric user". A number is the only form both sides agree on.
+#
+# ⚠ AND THE BASE IMAGE ALREADY HAS A `bun` USER AT 1000. That is not the one
+# the manifests name, so it is left alone rather than reused.
 RUN addgroup -S -g 1001 i10 && adduser -S -u 1001 -G i10 -h /home/i10 i10 \
     && mkdir -p /home/i10 && chown -R i10:i10 /home/i10
 ENV HOME=/home/i10
@@ -91,4 +77,6 @@ ARG GIT_SHA=dev
 ARG BUILD_TIME
 ENV GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME
 
-CMD ["node", "apps/console/server.js"]
+# Next's own server.js, run by bun. See the base image note above for the
+# version floor this depends on.
+CMD ["bun", "apps/console/server.js"]

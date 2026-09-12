@@ -20,7 +20,7 @@ env:
   # base image tag — and they move together. The toolchain action asserts the
   # version it actually got, so a drift here fails fast rather than producing a
   # run that built against something else.
-  BUN_VERSION: "1.3.12"
+  BUN_VERSION: "1.4.2"
   # services/authd is a Go module and is deliberately outside the bun
   # workspace, so Turborepo never sees it and it needs its own lane below.
   GO_VERSION: "1.26.5"
