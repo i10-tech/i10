@@ -12,6 +12,28 @@
 #
 # HookSucceeded deletes the Job once it passes, so a failed migration leaves its
 # pod behind with the logs still readable — which is when you actually want them.
+#
+# ⚠ AND BeforeHookCreation IS WHAT STOPS THAT FROM WEDGING EVERY LATER DEPLOY.
+# A Job's `spec.template` is IMMUTABLE. With HookSucceeded alone, a failed Job
+# stays under a fixed name forever, and the next sync — which has to recreate
+# the hook with a different image — is rejected by the API server with
+# `Job.batch "i10-api-migrate" is invalid: spec.template: Invalid value`. The
+# PreSync hook then never completes, so NOTHING downstream of it syncs: every
+# Deployment and CronJob in this Application sits OutOfSync behind a single dead
+# Job, with the apps themselves still Healthy on their old images. It looks like
+# Argo is idle rather than blocked.
+#
+# This happened on 2026-09-12, and the trigger is worth knowing because it can
+# recur. `command:` here changed from `node` to `bun` in the merge commit, while
+# the image below still pointed at the last NODE image — the Build workflow
+# writes the new digest in a SEPARATE commit a few minutes later. Argo polled
+# inside that window, ran `bun dist/migrate.js` against an image with no bun in
+# it, and the Job failed with `exec: "bun": executable file not found in $PATH`.
+# The window is inherent to "the commit is the deploy" and it self-heals once
+# the digest lands — but only if the corpse gets cleared, which is this policy.
+#
+# The two policies together keep both properties: a failed Job's pod survives
+# for inspection until the NEXT sync, and that next sync is never blocked by it.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -19,7 +41,7 @@ metadata:
   namespace: i10-prod
   annotations:
     argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 2
   # Bounded so a migration that hangs on a lock fails the sync rather than
