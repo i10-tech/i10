@@ -23,12 +23,12 @@
  * BEFORE SES starts signing with the private half, or every message sent in the
  * gap fails DKIM.
  *
- *   phase 1  `pnpm --filter @i10/api adopt-dkim <domain>`
+ *   phase 1  `bun run --filter @i10/api adopt-dkim <domain>`
  *            Generates the keypair, seals it into the existing row, and prints
  *            the TXT record. SES is NOT touched: mail keeps flowing on Easy
  *            DKIM exactly as before.
  *
- *   phase 2  `pnpm --filter @i10/api adopt-dkim <domain> --flip`
+ *   phase 2  `bun run --filter @i10/api adopt-dkim <domain> --flip`
  *            Refuses unless the TXT record resolves and matches the stored key,
  *            then switches SES to that key.
  *

@@ -1,6 +1,6 @@
 * text=auto eol=lf
 
-pnpm-lock.yaml linguist-generated=true -diff
+bun.lock linguist-generated=true -diff
 *.md diff=markdown
 *.ts diff=typescript
 *.tsx diff=typescript

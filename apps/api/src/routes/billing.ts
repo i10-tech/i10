@@ -207,7 +207,19 @@ const notWired = {
   message: "Billing is not configured.",
 }
 
-async function readJson(request: Request): Promise<Record<string, unknown> | null> {
+/**
+ * ⚠ STRUCTURAL, NOT `req: Request`, AND THE REASON IS A TYPES COLLISION RATHER
+ * THAN A STYLE PREFERENCE. Under @types/bun the global `Request` is the merged
+ * declaration — Bun's members and Node's — but `clone()` comes from Node's
+ * half and is declared as returning undici's `Request`, which lacks the members
+ * Bun's half adds. So `readJson(c.req.raw.clone())` failed to typecheck against
+ * a nominal `Request` while being, at runtime, exactly the object this wants.
+ * Asking only for what is used sidesteps the disagreement and says what the
+ * function actually needs.
+ */
+async function readJson(request: {
+  json(): Promise<unknown>
+}): Promise<Record<string, unknown> | null> {
   try {
     const parsed: unknown = await request.json()
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {

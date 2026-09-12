@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { domainStore, normaliseDomainName } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
@@ -110,7 +110,7 @@ describe("the plan limit", () => {
    * anywhere.
    */
   it("refuses a domain past the allowance", async () => {
-    const create = vi.fn()
+    const create = mock()
     const store = domainStore({
       db: fakeDb({}),
       identity: identity({ create }),

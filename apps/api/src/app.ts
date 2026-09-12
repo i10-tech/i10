@@ -1,4 +1,4 @@
-import { createRequire } from "node:module"
+import pkg from "../package.json" with { type: "json" }
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { HTTPException } from "hono/http-exception"
 import { routePath } from "hono/route"
@@ -27,14 +27,19 @@ import type { SessionVerifier } from "./middleware/session.js"
 import type { MailboxProvisioning } from "./mailboxes/provision.js"
 
 /**
- * Read from package.json rather than `npm_package_version`, which pnpm only
- * sets when a script runs through it — the container runs `node dist/index.js`
- * and would publish a spec claiming version 0.0.0. The relative path resolves
- * to apps/api/package.json from both `src/` and `dist/`.
+ * Read from package.json rather than `npm_package_version`, which is only set
+ * when a script runs through the package manager — the container runs
+ * `bun dist/index.js` directly and would publish a spec claiming version 0.0.0.
+ *
+ * ⚠ A STATIC IMPORT, NOT `createRequire(import.meta.url)("../package.json")`,
+ * BECAUSE THE BUILD NOW BUNDLES. That call resolved relative to the emitted
+ * file, which worked while `tsc` mirrored src/ into dist/ one file at a time.
+ * `bun build` collapses the tree into dist/index.js, so `../package.json`
+ * became /app/package.json — a file the runtime image does not have — and the
+ * process died at import time with ERR_MODULE_NOT_FOUND. A static import is
+ * resolved by the bundler and inlined, so there is nothing left to look up.
  */
-const { version: API_VERSION } = createRequire(import.meta.url)("../package.json") as {
-  version: string
-}
+const { version: API_VERSION } = pkg
 
 export interface AppDeps {
   clerkWebhooks?: ClerkWebhookDeps

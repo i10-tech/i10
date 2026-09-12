@@ -1,4 +1,4 @@
-pnpm-lock.yaml
+bun.lock
 .next/
 dist/
 .astro/
@@ -11,12 +11,12 @@ apps/docs/.nimbus/
 #
 # ⚠ apps/api/openapi.json IS CHECKED FOR DRIFT IN CI. The generator writes it
 # with JSON.stringify(…, 2); Prettier collapses short arrays onto one line. With
-# both formatting it, `pnpm run format` and `pnpm --filter @i10/api openapi`
+# both formatting it, `bun run format` and `bun run --filter @i10/api openapi`
 # produce different bytes and the drift job can never pass.
 apps/api/openapi.json
 apps/docs/public/scalar/
 
-# Vendored agent skills, installed by `pnpm dlx skills add`. Third-party files
+# Vendored agent skills, installed by `bunx skills add`. Third-party files
 # whose formatting belongs to their publisher — reformatting them would produce
 # a diff against every upstream update for no benefit, and `.claude/skills`
 # only symlinks into here.

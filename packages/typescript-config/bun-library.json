@@ -3,7 +3,7 @@
   "extends": "./base.json",
   "compilerOptions": {
     "lib": ["es2023"],
-    "types": ["node"]
+    "types": ["bun"]
   }
   // ⚠ NO `outDir` AND NO `rootDir` HERE, DELIBERATELY.
   //

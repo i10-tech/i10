@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import type { Mailbox } from "@repo/contracts"
 import {
   mailboxProvisioning,
@@ -50,8 +50,8 @@ function harness(
     passwordEnabled?: boolean
   } = {},
 ) {
-  const addVerifiedAddress = vi.fn(async () => {})
-  const activate = vi.fn(async () => mailbox())
+  const addVerifiedAddress = mock(async () => {})
+  const activate = mock(async () => mailbox())
 
   const identity: MailboxIdentity = {
     get: async () => ({
@@ -100,8 +100,8 @@ describe("the password precondition", () => {
    * who can sign up.
    */
   it("asks about the password before the address", async () => {
-    const addressTaken = vi.fn(async () => true)
-    const domainOwner = vi.fn(async () => TENANT)
+    const addressTaken = mock(async () => true)
+    const domainOwner = mock(async () => TENANT)
     const h = harness({
       passwordEnabled: false,
       directory: { addressTaken, domainOwner },
@@ -194,7 +194,7 @@ describe("the plan's seats", () => {
   })
 
   it("charges the tenant that owns the domain", async () => {
-    const check = vi.fn(async () => ({ status: "allowed" as const }))
+    const check = mock(async () => ({ status: "allowed" as const }))
     const h = harness({ capacity: { check } })
     await create(h)
 

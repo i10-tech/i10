@@ -31,7 +31,7 @@
 // so a whole release can bump patch when it should have bumped minor. That is
 // why commitlint runs in CI — the guard lives there, not here.
 //
-// Usage: node .github/scripts/next-version.mjs [--prerelease rc] [--github-output]
+// Usage: bun .github/scripts/next-version.mjs [--prerelease rc] [--github-output]
 
 import { execFileSync } from "node:child_process"
 import { appendFileSync } from "node:fs"

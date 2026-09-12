@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { decodeId, encodeId, timestampFromUuidV7 } from "../src/ids.js"
 
 // A real v7: the first 48 bits are the millisecond timestamp, the version

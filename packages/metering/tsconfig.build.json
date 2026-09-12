@@ -1,14 +1,14 @@
 {
-  // ⚠ base, NOT node-library, AND THAT IS THE PORTABILITY RULE ENFORCED BY THE
+  // ⚠ base, NOT bun-library, AND THAT IS THE PORTABILITY RULE ENFORCED BY THE
   // COMPILER RATHER THAN BY DISCIPLINE. This package has to run unchanged in a
   // Durable Object as well as in the API server, so it may not touch a Node
-  // API. `node-library.json` sets `types: ["node"]`, which would make `Buffer`,
+  // API. `bun-library.json` sets `types: ["bun"]`, which would make `Buffer`,
   // `process` and `node:crypto` resolve here and compile happily — and then
   // fail at the edge, months later, in the one place we moved this code to run.
   // Without those types the mistake is a red squiggle on the day it is made.
   "extends": "@repo/typescript-config/base.json",
   "compilerOptions": {
-    // Local, not inherited — see the note in node-library.json about paths in
+    // Local, not inherited — see the note in bun-library.json about paths in
     // an extended config resolving against the file that declares them.
     "outDir": "dist",
     "rootDir": "src"

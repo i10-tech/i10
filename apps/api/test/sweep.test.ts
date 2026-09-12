@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import type { SendJob } from "../src/queue/send-queue.js"
 import {
   planSweep,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { intervalToMs, loadEnv } from "../src/env.js"
 
 /** The minimum a process needs before the interesting checks are reachable. */

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createMeter } from "../src/meter.js"
 import { formatMeterKey } from "../src/key.js"
 import type { Assignment, Entitlement, Plan } from "../src/plan.js"
@@ -179,7 +179,7 @@ describe("no window, ever", () => {
   // The level is read as-is, at any distance from the anchor — there is no
   // boundary that could scope it and nothing that "expires".
   it("gives the same answer years after the anchor", async () => {
-    const levelOf = vi.fn(async () => 4)
+    const levelOf = mock(async () => 4)
     const meter = createMeter({
       assignments: assigned(plan),
       usage: forbiddenUsage,

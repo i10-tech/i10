@@ -1,7 +1,7 @@
 {
   "name": "@i10/node",
   "version": "0.0.0",
-  "description": "i10 SDK for Node. Drop-in for resend/node \u2014 change one import.",
+  "description": "i10 SDK for Node. Drop-in for resend/node — change one import.",
   "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,
@@ -26,7 +26,7 @@
     "dev": "tsup --watch",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bun test"
   },
   "devDependencies": {
     "@repo/contracts": "workspace:*",
@@ -34,8 +34,7 @@
     "@repo/typescript-config": "workspace:*",
     "eslint": "^9.39.5",
     "tsup": "^8.5.1",
-    "typescript": "6.0.3",
-    "vitest": "^4.1.11"
+    "typescript": "6.0.3"
   },
   "engines": {
     "node": ">=20"

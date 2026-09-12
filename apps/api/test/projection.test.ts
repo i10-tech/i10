@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { projectUser, type ClerkUser } from "../src/projection/clerk-user.js"
 
 const HOSTED = ["i10.tech", "mail.i10.tech"]

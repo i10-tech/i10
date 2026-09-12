@@ -1,22 +1,29 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, mock } from "bun:test"
 
 // ⚠ MOCKED SO THE CHECK-IN TESTS BELOW CAN ASSERT WHAT WOULD BE SENT WITHOUT
 // sending it. `initObservability` is what flips the module's `enabled` flag, so
 // a real `init` here would mean every later test in the process holds a live
 // client pointed at a fake DSN.
-// `vi.hoisted` because `vi.mock` is lifted above every const in this file, so
-// the doubles have to exist before it runs. Typed, so `mock.calls` below is a
-// real tuple rather than `[]` — the assertions are the point of the file.
-const { captureCheckIn, captureException, flush } = vi.hoisted(() => ({
-  captureCheckIn: vi.fn<(checkIn: { status: string }, config?: unknown) => string>(
-    () => "check-in-id",
-  ),
-  captureException: vi.fn<(error: unknown) => string>(() => "event-id"),
-  flush: vi.fn<(timeoutMs?: number) => Promise<boolean>>(() => Promise.resolve(true)),
-}))
+//
+// Typed, so `mock.calls` below is a real tuple rather than `[]` — the
+// assertions are the point of the file.
+//
+// ⚠ AND THE IMPORT BELOW MUST STAY DYNAMIC. Vitest hoisted `vi.mock` above
+// every const, which is why these doubles needed `vi.hoisted` to exist in
+// time. bun's `mock.module` runs where it is written instead — simpler — but
+// that makes ORDER the thing holding this together: a static
+// `import … from "../src/observability.js"` would be evaluated first and the
+// module would close over the real Sentry client.
+const captureCheckIn = mock<(checkIn: { status: string }, config?: unknown) => string>(
+  () => "check-in-id",
+)
+const captureException = mock<(error: unknown) => string>(() => "event-id")
+const flush = mock<(timeoutMs?: number) => Promise<boolean>>(() =>
+  Promise.resolve(true),
+)
 
-vi.mock("@sentry/node", () => ({
-  init: vi.fn(),
+mock.module("@sentry/node", () => ({
+  init: mock(),
   captureCheckIn,
   captureException,
   flush,
@@ -79,6 +86,16 @@ describe("scrubbing what leaves the process", () => {
     expect(scrub(frame)).toBe(frame)
   })
 
+  // Kept alongside the pnpm case rather than replacing it. The pnpm shape is
+  // the one that caused the original loss of signal and is the reason the
+  // pattern is narrow; this one is the shape frames actually have now, and a
+  // future widening has to break both to get through review.
+  it("leaves a bun store path in a stack frame readable", () => {
+    const frame =
+      "/app/node_modules/.bun/groupmq@1.1.0/node_modules/groupmq/dist/index.js:1876:8"
+    expect(scrub(frame)).toBe(frame)
+  })
+
   it("still redacts an address that sits next to a version number", () => {
     expect(scrub("ioredis@5.8.2 failed for ada@lovelace.example")).toBe(
       "ioredis@5.8.2 failed for [redacted-email]",
@@ -115,12 +132,17 @@ describe("check-ins for a scheduled job", () => {
     captureCheckIn.mockClear()
     captureException.mockClear()
     flush.mockClear()
-    process.exitCode = undefined
+    // ⚠ `0`, NOT `undefined`, AND THE DIFFERENCE IS THE RUNTIME'S. Node treats
+    // `process.exitCode = undefined` as a reset; Bun ignores the assignment and
+    // keeps whatever was there, so the exit code set by the test above this one
+    // leaked forward and made a clean run report `error`. `withMonitor` reads
+    // the value for truthiness, so 0 and undefined mean the same thing to it.
+    process.exitCode = 0
   })
 
   it("does nothing at all without a DSN, and still runs the job", async () => {
     initObservability({ environment: "test", service: "reconcile", log })
-    const run = vi.fn(async () => "done")
+    const run = mock(async () => "done")
 
     await expect(
       withMonitor({ slug: "s", schedule: "*/30 * * * *", log }, run),

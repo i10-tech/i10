@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { meterEventStore, planAssignmentStore } from "../src/metering/postgres.js"
 import type { Database } from "../src/db/client.js"
 import type { MeterKey } from "@repo/metering"
@@ -25,7 +25,7 @@ const WINDOW = {
 /** A `Database` whose only job is to hand back rows and remember the SQL. */
 function fakeDb(rowsFor: (statement: string) => unknown[]) {
   const seen: string[] = []
-  const execute = vi.fn(async (query: SQL) => {
+  const execute = mock(async (query: SQL) => {
     const { sql: statement } = dialect.sqlToQuery(query)
     seen.push(statement)
     return rowsFor(statement)

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { I10 } from "../src/client.js"
 import { I10Error } from "../src/error.js"
 
@@ -14,7 +14,7 @@ describe("I10", () => {
   })
 
   it("sends Authorization: Bearer, not a custom header", async () => {
-    const fetch = vi.fn(async () => ok({ id: crypto.randomUUID() }))
+    const fetch = mock(async () => ok({ id: crypto.randomUUID() }))
     const i10 = new I10("i10_live_test", { fetch: fetch as never })
 
     await i10.emails.send({
@@ -31,7 +31,7 @@ describe("I10", () => {
   })
 
   it("only sends Idempotency-Key when one is given", async () => {
-    const fetch = vi.fn(async () => ok({ id: crypto.randomUUID() }))
+    const fetch = mock(async () => ok({ id: crypto.randomUUID() }))
     const i10 = new I10("i10_live_test", { fetch: fetch as never })
     const email = {
       from: "hi@customer.com",
@@ -57,7 +57,7 @@ describe("I10", () => {
 
   it("marks a quota error non-retryable and a rate limit retryable", async () => {
     const fail = (name: string, statusCode: number) =>
-      vi.fn(
+      mock(
         async () =>
           new Response(JSON.stringify({ statusCode, name, message: name }), {
             status: statusCode,
@@ -72,19 +72,27 @@ describe("I10", () => {
       text: "hi",
     }
 
-    const quota = new I10("k", { fetch: fail("daily_quota_exceeded", 429) as never })
-    await expect(quota.emails.send(email)).rejects.toSatisfy(
-      (e: I10Error) => e.retryable === false,
-    )
+    // ⚠ CAUGHT BY HAND RATHER THAN `.rejects.toSatisfy(…)`. bun's `rejects`
+    // does not unwrap for `toSatisfy`: the matcher receives the pending
+    // promise, the predicate is never called, and the assertion fails on a
+    // shape nobody wrote. Catching the error makes what is being asserted —
+    // the `retryable` flag on a 429 — the visible thing anyway.
+    const thrownBy = async (name: string) => {
+      const i10 = new I10("k", { fetch: fail(name, 429) as never })
+      try {
+        await i10.emails.send(email)
+      } catch (error) {
+        return error as I10Error
+      }
+      throw new Error(`${name} did not reject`)
+    }
 
-    const rate = new I10("k", { fetch: fail("rate_limit_exceeded", 429) as never })
-    await expect(rate.emails.send(email)).rejects.toSatisfy(
-      (e: I10Error) => e.retryable === true,
-    )
+    expect((await thrownBy("daily_quota_exceeded")).retryable).toBe(false)
+    expect((await thrownBy("rate_limit_exceeded")).retryable).toBe(true)
   })
 
   it("throws an I10Error when the body is not JSON", async () => {
-    const fetch = vi.fn(async () => new Response("<html>502</html>", { status: 502 }))
+    const fetch = mock(async () => new Response("<html>502</html>", { status: 502 }))
     const i10 = new I10("k", { fetch: fetch as never })
 
     await expect(

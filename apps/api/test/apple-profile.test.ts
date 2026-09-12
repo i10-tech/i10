@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { buildMobileConfig, profileFilename } from "../src/autoconfig/apple-profile.js"
 import { createApp } from "../src/app.js"
 

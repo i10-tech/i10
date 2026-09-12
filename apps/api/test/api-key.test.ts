@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import {
   cacheKeyFor,
   hashKey,
@@ -155,7 +155,7 @@ describe("verification", () => {
   })
 
   it("never touches the database for a malformed key", async () => {
-    const byHash = vi.fn(async () => row())
+    const byHash = mock(async () => row())
     const outcome = await verifyApiKey("nope", deps(byHash))
 
     expect(outcome).toEqual({ status: "rejected", reason: "malformed key" })
@@ -164,7 +164,7 @@ describe("verification", () => {
 
   it("serves the second call from cache", async () => {
     const key = mintKey("live")
-    const byHash = vi.fn(async () => row())
+    const byHash = mock(async () => row())
     const d = deps(byHash)
 
     await verifyApiKey(key.secret, d)
@@ -175,7 +175,7 @@ describe("verification", () => {
 
   it("does not cache a rejection", async () => {
     const key = mintKey("live")
-    const byHash = vi.fn(async () => null)
+    const byHash = mock(async () => null)
     const d = deps(byHash)
 
     await verifyApiKey(key.secret, d)

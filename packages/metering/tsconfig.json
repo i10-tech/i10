@@ -1,5 +1,15 @@
 {
+  // ⚠ src ALONE, AND tsconfig.test.json COVERS test/. THE SPLIT IS THE
+  // PORTABILITY GUARD, not tidiness.
+  //
+  // This package has to run unchanged in a Durable Object, so `types` stays
+  // empty here and a `Buffer`, `process` or `node:crypto` in src/ is a red
+  // squiggle on the day it is written. The tests, however, import `bun:test`,
+  // whose declarations arrive with @types/bun — and `types: ["bun"]` is a
+  // program-wide switch, so typing the tests in THIS file would hand src/ the
+  // whole runtime surface it is forbidden to touch. Two programs is the only
+  // way to have both.
   "extends": "@repo/typescript-config/base.json",
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

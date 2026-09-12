@@ -2,8 +2,8 @@
 #
 # ⚠ THE SAME IMAGE AS THE API, WITH A DIFFERENT COMMAND. There is no
 # `i10-worker` image and no extra entry in build.yml's matrix — this runs
-# `node dist/worker.js` out of `i10-api`, exactly as the migration Job above it
-# runs `node dist/migrate.js`. One artifact means the worker cannot drift from
+# `bun dist/worker.js` out of `i10-api`, exactly as the migration Job above it
+# runs `bun dist/migrate.js`. One artifact means the worker cannot drift from
 # the API's schema, contracts or environment validation, and it means the deploy
 # job's digest pin applies to both without a second path filter to keep in step.
 #
@@ -60,7 +60,7 @@ spec:
         - name: worker
           image: ghcr.io/i10-tech/i10-api:prod-5579acc187a44cd7a45a7884ffcd23a7228de92b@sha256:03c538a9a7932e9dad0deb0930f44f75d329c70277c2a9aa3035206b35610707
           imagePullPolicy: Always
-          command: ["node", "dist/worker.js"]
+          command: ["bun", "dist/worker.js"]
           envFrom:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }

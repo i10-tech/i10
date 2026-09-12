@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 import { cacheKeyFor } from "../src/auth/api-key.js"
 import type { CreatedKey, KeyStore, KeySummary } from "../src/auth/store.js"
@@ -44,8 +44,8 @@ function harness(
   store: Partial<KeyStore> = {},
   cache: Partial<typeof apiKeyAuth.cache> = {},
 ) {
-  const del = vi.fn(async () => {})
-  const log = { error: vi.fn() }
+  const del = mock(async () => {})
+  const log = { error: mock() }
   const app = createApp({
     apiKeyAuth,
     apiKeys: {
@@ -101,7 +101,7 @@ describe("creating", () => {
   })
 
   it("defaults to a live key", async () => {
-    const create = vi.fn<KeyStore["create"]>(async () => created())
+    const create = mock<KeyStore["create"]>(async () => created())
     const { call } = harness({ create })
     await call("", { method: "POST", body: JSON.stringify({ name: "p" }) })
     expect(create.mock.calls[0]?.[0].mode).toBe("live")
@@ -125,7 +125,7 @@ describe("creating", () => {
   // ⚠ The caller names the key; the TENANT comes from the credential that
   // authenticated the request and can never be supplied in the body.
   it("takes the tenant from the caller, never from the body", async () => {
-    const create = vi.fn<KeyStore["create"]>(async () => created())
+    const create = mock<KeyStore["create"]>(async () => created())
     const { call } = harness({ create })
     await call("", {
       method: "POST",
@@ -163,7 +163,8 @@ describe("revoking", () => {
     const res = await call("/key-2", { method: "DELETE" })
 
     expect(res.status).toBe(204)
-    expect(del).toHaveBeenCalledExactlyOnceWith(cacheKeyFor("OLDHASH"))
+    expect(del).toHaveBeenCalledTimes(1)
+    expect(del).toHaveBeenCalledWith(cacheKeyFor("OLDHASH"))
   })
 
   /**
@@ -203,7 +204,8 @@ describe("rotating", () => {
     expect(((await res.json()) as { secret: string }).secret).toBe(
       "i10_live_THESECRETVALUE0000000000000000",
     )
-    expect(del).toHaveBeenCalledExactlyOnceWith(cacheKeyFor("OLDHASH"))
+    expect(del).toHaveBeenCalledTimes(1)
+    expect(del).toHaveBeenCalledWith(cacheKeyFor("OLDHASH"))
   })
 
   /**

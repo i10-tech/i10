@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import type { SQL } from "drizzle-orm"
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { Database } from "../src/db/client.js"
@@ -9,7 +9,7 @@ import {
 } from "../src/send/reconcile-run.js"
 import type { CustomerDirectory, UsageLedger } from "../src/send/reconcile.js"
 
-const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })
+const log = () => ({ info: mock(), warn: mock(), error: mock() })
 
 /**
  * A database that answers each `execute` from a queue of results, in order.
@@ -20,7 +20,7 @@ function fakeDb(results: unknown[][]) {
   const dialect = new PgDialect()
   // ⚠ `withTenant` issues its `set_config` on the same handle, so it would
   // otherwise eat the queued result the statement after it is waiting for.
-  const execute = vi.fn(async (query?: SQL) => {
+  const execute = mock(async (query?: SQL) => {
     if (query && dialect.sqlToQuery(query).sql.includes("set_config")) return []
     return results.shift() ?? []
   })
@@ -91,7 +91,7 @@ describe("the SES leg", () => {
     ]
     let call = 0
     const db = {
-      execute: vi.fn(async () => {
+      execute: mock(async () => {
         call += 1
         if (call === 1) return rows
         if (call === 2) throw new Error("deadlock detected")
@@ -128,8 +128,8 @@ describe("the SES leg", () => {
  */
 function fakeLedger(over: Partial<UsageLedger> = {}): UsageLedger {
   return {
-    track: vi.fn(async () => "recorded" as const),
-    aggregateByCustomer: vi.fn(async () => []),
+    track: mock(async () => "recorded" as const),
+    aggregateByCustomer: mock(async () => []),
     ...over,
   }
 }
@@ -142,8 +142,8 @@ function fakeLedger(over: Partial<UsageLedger> = {}): UsageLedger {
  */
 function fakeDirectory(over: Partial<CustomerDirectory> = {}): CustomerDirectory {
   return {
-    listCustomerIds: vi.fn(async () => []),
-    customerExists: vi.fn(async () => false as const),
+    listCustomerIds: mock(async () => []),
+    customerExists: mock(async () => false as const),
     ...over,
   }
 }
@@ -156,9 +156,9 @@ describe("the usage leg", () => {
       [{ tenant_id: "ten-1", period_start: DAY, count: 3 }],
       [{ id: "m-1" }, { id: "m-2" }],
     ])
-    const track = vi.fn(async () => "recorded" as const)
+    const track = mock(async () => "recorded" as const)
     const ledger = fakeLedger({
-      aggregateByCustomer: vi.fn(async () => [
+      aggregateByCustomer: mock(async () => [
         { tenantId: "ten-1", periodStart: DAY, count: 1 },
       ]),
       track,
@@ -182,10 +182,10 @@ describe("the usage leg", () => {
       [{ id: "m-1" }],
     ])
     const ledger = fakeLedger({
-      aggregateByCustomer: vi.fn(async () => [
+      aggregateByCustomer: mock(async () => [
         { tenantId: "ten-1", periodStart: DAY, count: 1 },
       ]),
-      track: vi.fn(async () => "duplicate" as const),
+      track: mock(async () => "duplicate" as const),
     })
 
     const report = await reconcileUsage(db, ledger, DAY, AT, log())
@@ -197,9 +197,9 @@ describe("the usage leg", () => {
   // duplicate somewhere, and negative usage would erase the evidence.
   it("reports a surplus without touching Autumn", async () => {
     const { db } = fakeDb([[{ tenant_id: "ten-1", period_start: DAY, count: 1 }]])
-    const track = vi.fn()
+    const track = mock()
     const ledger = fakeLedger({
-      aggregateByCustomer: vi.fn(async () => [
+      aggregateByCustomer: mock(async () => [
         { tenantId: "ten-1", periodStart: DAY, count: 5 },
       ]),
       track,
@@ -218,8 +218,8 @@ describe("the usage leg", () => {
       [{ id: "m-1" }],
     ])
     const ledger = fakeLedger({
-      aggregateByCustomer: vi.fn(async () => []),
-      track: vi.fn(async () => {
+      aggregateByCustomer: mock(async () => []),
+      track: mock(async () => {
         throw new Error("autumn is down")
       }),
     })
@@ -231,9 +231,9 @@ describe("the usage leg", () => {
 
   it("does nothing when the two sides agree", async () => {
     const { db } = fakeDb([[{ tenant_id: "ten-1", period_start: DAY, count: 4 }]])
-    const track = vi.fn()
+    const track = mock()
     const ledger = fakeLedger({
-      aggregateByCustomer: vi.fn(async () => [
+      aggregateByCustomer: mock(async () => [
         { tenantId: "ten-1", periodStart: DAY, count: 4 },
       ]),
       track,
@@ -256,7 +256,7 @@ describe("the tenant/customer leg", () => {
   it("says nothing when every tenant is a customer", async () => {
     const { db } = fakeDb([tenants])
     const directory = fakeDirectory({
-      listCustomerIds: vi.fn(async () => ["ten-1", "ten-2"]),
+      listCustomerIds: mock(async () => ["ten-1", "ten-2"]),
     })
 
     const report = await reconcileTenantCustomers(db, directory, log(), "free")
@@ -277,7 +277,7 @@ describe("the tenant/customer leg", () => {
     const { db, execute } = fakeDb([tenants])
     await reconcileTenantCustomers(
       db,
-      fakeDirectory({ listCustomerIds: vi.fn(async () => ["ten-1", "ten-2"]) }),
+      fakeDirectory({ listCustomerIds: mock(async () => ["ten-1", "ten-2"]) }),
       log(),
       "starter",
     )
@@ -289,15 +289,16 @@ describe("the tenant/customer leg", () => {
 
   it("confirms a candidate before reporting it", async () => {
     const { db } = fakeDb([tenants])
-    const customerExists = vi.fn(async () => false as const)
+    const customerExists = mock(async () => false as const)
     const directory = fakeDirectory({
-      listCustomerIds: vi.fn(async () => ["ten-1"]),
+      listCustomerIds: mock(async () => ["ten-1"]),
       customerExists,
     })
 
     const report = await reconcileTenantCustomers(db, directory, log(), "free")
 
-    expect(customerExists).toHaveBeenCalledExactlyOnceWith("ten-2")
+    expect(customerExists).toHaveBeenCalledTimes(1)
+    expect(customerExists).toHaveBeenCalledWith("ten-2")
     expect(report.missing).toEqual([{ tenantId: "ten-2", slug: "two", name: "Two" }])
   })
 
@@ -308,8 +309,8 @@ describe("the tenant/customer leg", () => {
   it("drops a candidate the point lookup finds after all", async () => {
     const { db } = fakeDb([tenants])
     const directory = fakeDirectory({
-      listCustomerIds: vi.fn(async () => ["ten-1"]),
-      customerExists: vi.fn(async () => true as const),
+      listCustomerIds: mock(async () => ["ten-1"]),
+      customerExists: mock(async () => true as const),
     })
 
     const report = await reconcileTenantCustomers(db, directory, log(), "free")
@@ -324,8 +325,8 @@ describe("the tenant/customer leg", () => {
   it("keeps an unanswerable candidate out of the findings", async () => {
     const { db } = fakeDb([tenants])
     const directory = fakeDirectory({
-      listCustomerIds: vi.fn(async () => []),
-      customerExists: vi.fn(async () => "unknown" as const),
+      listCustomerIds: mock(async () => []),
+      customerExists: mock(async () => "unknown" as const),
     })
 
     const report = await reconcileTenantCustomers(db, directory, log(), "free")
@@ -337,8 +338,8 @@ describe("the tenant/customer leg", () => {
   it("treats a thrown confirmation as unverified rather than absent", async () => {
     const { db } = fakeDb([tenants])
     const directory = fakeDirectory({
-      listCustomerIds: vi.fn(async () => ["ten-1"]),
-      customerExists: vi.fn(async () => {
+      listCustomerIds: mock(async () => ["ten-1"]),
+      customerExists: mock(async () => {
         throw new Error("the meter is down")
       }),
     })
@@ -353,7 +354,7 @@ describe("the tenant/customer leg", () => {
   it("propagates a failed list rather than reporting everyone", async () => {
     const { db } = fakeDb([tenants])
     const directory = fakeDirectory({
-      listCustomerIds: vi.fn(async () => {
+      listCustomerIds: mock(async () => {
         throw new Error("customers.list failed with 500")
       }),
     })

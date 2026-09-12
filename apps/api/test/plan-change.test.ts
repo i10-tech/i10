@@ -1,13 +1,13 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { directionOf, planChange, prorationFor } from "../src/billing/plan-change.js"
 import type { Database } from "../src/db/client.js"
 import type { PolarClient } from "../src/billing/polar.js"
 import type { SubscriptionOps } from "../src/billing/db.js"
 
 const TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
-const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+const log = { info: mock(), warn: mock(), error: mock() }
 
 const RANKS: Record<string, number> = { free: 0, pro: 10, scale: 20 }
 
@@ -107,7 +107,7 @@ describe("what Polar is asked to do", () => {
 
 describe("changing a plan", () => {
   it("patches the subscription with the upgrade behaviour", async () => {
-    const updateSubscription = vi.fn(async () => {})
+    const updateSubscription = mock(async () => {})
     const outcome = await change({ polar: polar({ updateSubscription }) }).to(
       TENANT,
       "pro",
@@ -128,7 +128,7 @@ describe("changing a plan", () => {
    * Polar's side the payment really did succeed.
    */
   it("refuses a plan that is not in the product map", async () => {
-    const updateSubscription = vi.fn()
+    const updateSubscription = mock()
     const outcome = await change({ polar: polar({ updateSubscription }) }).to(
       TENANT,
       "prod_01anything",
@@ -159,7 +159,7 @@ describe("changing a plan", () => {
   })
 
   it("does nothing when they are already on the plan", async () => {
-    const updateSubscription = vi.fn()
+    const updateSubscription = mock()
     const outcome = await change({
       polar: polar({ updateSubscription }),
       subscriptions: ops({

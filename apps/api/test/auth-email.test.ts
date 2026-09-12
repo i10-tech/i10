@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { SLUG } from "@repo/emails"
 import { authEmailDelivery, type AuthEmailSend } from "../src/auth-email/deliver.js"
 
@@ -11,7 +11,7 @@ import { authEmailDelivery, type AuthEmailSend } from "../src/auth-email/deliver
 
 function harness() {
   const sent: AuthEmailSend[] = []
-  const log = { info: vi.fn(), warn: vi.fn() }
+  const log = { info: mock(), warn: mock() }
   const delivery = authEmailDelivery({
     sender: {
       async send(input) {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { claimStatement, type MessageRef } from "../src/db/claim.js"
 import {
   batchJobId,
@@ -24,7 +24,7 @@ const job = (messages: MessageRef[]): SendJob => ({ tenantId: "ten-1", messages 
 
 /** Just enough of groupmq's Queue for the enqueue path. */
 function fakeQueue() {
-  const add = vi.fn(async (opts: Record<string, unknown>) => ({ id: "job-1", ...opts }))
+  const add = mock(async (opts: Record<string, unknown>) => ({ id: "job-1", ...opts }))
   return { add } as unknown as Parameters<typeof enqueueBatch>[0] & {
     add: typeof add
   }
@@ -169,7 +169,7 @@ describe("quota", () => {
   // ⚠ The mail has already gone. Throwing here would return the row to the
   // queue and send it twice to fix a billing record.
   it("never lets a failed usage record throw into the send path", async () => {
-    const log = { warn: vi.fn(), error: vi.fn() }
+    const log = { warn: mock(), error: mock() }
     const broken: Metering = {
       checkQuota: async () => ({ status: "allowed" }),
       recordSent: async () => {
@@ -194,13 +194,14 @@ describe("quota", () => {
   // send it. A worker clock a millisecond off would split a message across two
   // days and top it up on every run.
   it("passes message ids and their stored sent_at through", async () => {
-    const inner: Metering = { checkQuota: vi.fn(), recordSent: vi.fn() }
+    const inner: Metering = { checkQuota: mock(), recordSent: mock() }
     const at = new Date("2026-09-02T23:59:59.900Z")
     await resilient(inner).recordSent("ten-1", [
       { id: "msg-a", sentAt: at },
       { id: "msg-b", sentAt: at },
     ])
-    expect(inner.recordSent).toHaveBeenCalledExactlyOnceWith("ten-1", [
+    expect(inner.recordSent).toHaveBeenCalledTimes(1)
+    expect(inner.recordSent).toHaveBeenCalledWith("ten-1", [
       { id: "msg-a", sentAt: at },
       { id: "msg-b", sentAt: at },
     ])

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 
 const app = createApp()
@@ -63,7 +63,7 @@ describe("an unhandled route error", () => {
   // The route PATTERN, so every failure of one endpoint is one issue rather
   // than one per id.
   it("reports it with the route pattern and the method", async () => {
-    const reportError = vi.fn()
+    const reportError = mock()
     await throwing(reportError).request("/internal/queue-depth", { headers: authed })
 
     expect(reportError).toHaveBeenCalledTimes(1)

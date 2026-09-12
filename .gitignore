@@ -1,5 +1,4 @@
 node_modules/
-.pnpm-store/
 
 # Build output
 .next/
@@ -23,7 +22,6 @@ build/
 # Logs
 *.log
 npm-debug.log*
-pnpm-debug.log*
 
 # Test / coverage
 coverage/

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
 import { lastEvent } from "../src/send/lookup.js"
 
@@ -58,7 +58,7 @@ describe("GET /emails/{id}", () => {
   })
 
   it("passes the caller's own tenant, never one from the request", async () => {
-    const lookup = vi.fn(async () => email)
+    const lookup = mock(async () => email)
     const app = createApp({ apiKeyAuth, emailLookup: { get: lookup } })
     await get(app, `/emails/${ID}`)
     expect(lookup).toHaveBeenCalledWith("ten-1", ID)
@@ -131,13 +131,13 @@ describe("last_event", () => {
 
 describe("/webhook-endpoints", () => {
   const store = {
-    create: vi.fn(async () => ({
+    create: mock(async () => ({
       status: "created" as const,
       endpoint: { ...endpoint, secret: "whsec_abc" },
     })),
-    list: vi.fn(async () => [endpoint]),
-    remove: vi.fn(async () => true),
-    rotateSecret: vi.fn(async () => ({ ...endpoint, secret: "whsec_new" })),
+    list: mock(async () => [endpoint]),
+    remove: mock(async () => true),
+    rotateSecret: mock(async () => ({ ...endpoint, secret: "whsec_new" })),
   }
 
   const app = () => createApp({ apiKeyAuth, webhookEndpoints: store })
@@ -245,7 +245,7 @@ describe("POST /webhooks/ses", () => {
             record: async () => ({ status: "duplicate" as const }),
             enqueue: async () => {},
           },
-          log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+          log: { info: mock(), warn: mock(), error: mock() },
         },
       })
 

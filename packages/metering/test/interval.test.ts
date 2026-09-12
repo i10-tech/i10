@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 import { resetsAt, windowFor } from "../src/interval.js"
 
 const at = (iso: string) => new Date(iso)

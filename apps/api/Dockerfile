@@ -1,72 +1,88 @@
 # syntax=docker/dockerfile:1.7
 
-# alpine, not slim. PSL tried node:slim across all three of its images and
-# reverted — alpine is the deliberate choice, not an oversight.
-FROM node:22-alpine AS base
-ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
-RUN corepack enable
+# alpine, not the debian-based default. PSL tried node:slim across all three of
+# its images and reverted; alpine was the deliberate choice then and the reason
+# has not changed with the runtime.
+#
+# ⚠ THE TAG IS PINNED TO THE EXACT VERSION, not `1-alpine`. Four places hold
+# this version — `.bun-version`, `packageManager` in package.json, BUN_VERSION
+# in ci.yml, and every Dockerfile base image — and they move together. A
+# floating major would let the image drift away from what CI tested.
+FROM oven/bun:1.4.2-alpine AS base
 
 FROM base AS deps
 WORKDIR /repo
 # Copy only what the resolver needs, so a source edit does not invalidate the
 # install layer.
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY bun.lock bunfig.toml package.json ./
 
 # ⚠ EVERY WORKSPACE MANIFEST, NOT JUST THIS APP'S DEPENDENCIES. The build stage
-# does `COPY . .`, which brings in the manifests this stage skipped. pnpm 11
-# then sees a workspace larger than the one it installed, decides node_modules
-# is out of date, and runs `pnpm install` on its own in the middle of the build
-# step — which fails, with the error pointing at the build script rather than at
-# the missing manifests. Listing them all keeps the deps layer cacheable and
-# keeps that check quiet.
+# does `COPY . .`, which brings in the manifests this stage skipped. bun then
+# sees a workspace larger than the one it installed and re-resolves mid-build —
+# which fails against `--frozen-lockfile`, with the error pointing at the build
+# script rather than at the missing manifests. Listing them all keeps the deps
+# layer cacheable and keeps that check quiet.
 COPY apps/api/package.json apps/api/
+COPY apps/auth/package.json apps/auth/
 COPY apps/console/package.json apps/console/
 COPY apps/docs/package.json apps/docs/
 COPY apps/web/package.json apps/web/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/emails/package.json packages/emails/
 COPY packages/eslint-config/package.json packages/eslint-config/
+COPY packages/metering/package.json packages/metering/
 COPY packages/next/package.json packages/next/
 COPY packages/node/package.json packages/node/
 COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+# BUN_INSTALL_CACHE_DIR is set explicitly rather than left to default under
+# $HOME, so the cache mount below targets a path that does not move when the
+# stage's user does.
+ENV BUN_INSTALL_CACHE_DIR=/bun-cache
+RUN --mount=type=cache,id=bun,target=/bun-cache \
+    bun install --frozen-lockfile
 
 FROM deps AS build
 WORKDIR /repo
 COPY . .
-# ⚠ THE `...` SUFFIX IS LOAD-BEARING: it means "and its workspace
-# dependencies", in topological order. @repo/contracts exports dist/, which does
-# not exist until its own build has run — and the failure does not surface here.
-# It surfaces at RUNTIME, as ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING, because
-# `pnpm deploy` happily copies a package whose entry point is a .ts file that
-# plain node cannot load from node_modules. The image builds, the tests pass, and
-# the container crash-loops.
-RUN pnpm --filter "@i10/api..." build
-# `pnpm deploy` flattens the workspace into a self-contained tree, which is
-# what makes the runtime stage free of symlinks into packages/ that would not
-# resolve once the repo is gone.
-RUN pnpm --filter @i10/api deploy --prod --legacy /app
+# ⚠ TURBO, NOT A HAND-WRITTEN LIST OF PACKAGES. `build` declares
+# `dependsOn: ["^build"]`, so this one filter builds @repo/contracts,
+# @repo/emails and @repo/metering first, in topological order. It replaces
+# pnpm's `--filter "@i10/api..."`, whose `...` suffix meant the same thing —
+# and the failure mode if the dependencies are skipped is not a build error but
+# a runtime one, because `bun build` would resolve @repo/contracts through its
+# `exports` to a dist/ that does not exist yet.
+RUN bunx turbo run build --filter=@i10/api
 
+# ⚠ NO node_modules IN THE RUNTIME STAGE, AND NOTHING TO FLATTEN ONE WITH.
+# The pnpm image ran `pnpm deploy --prod --legacy /app` to turn the workspace
+# into a self-contained tree; `bun build` bundles instead, so dist/ has no
+# imports left to resolve and the runtime image is the bun binary plus a few
+# JavaScript files.
+# ⚠ `command -v node` INSIDE THIS IMAGE ANSWERS WITH A PATH, AND IT IS NOT
+# NODE. oven/bun ships /usr/local/bun-node-fallback-bin/node as a symlink to
+# bun, so third-party tooling that shells out to `node` keeps working. There is
+# no Node runtime in any i10 image; do not read that path as evidence of one.
 FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# A writable HOME. Node tooling and npm-family CLIs write to $HOME at startup,
-# and a non-root user without one exits EACCES at boot — a failure that reads
-# like a permissions bug in the app.
+# A writable HOME. Tooling writes to $HOME at startup, and a non-root user
+# without one exits EACCES at boot — a failure that reads like a permissions
+# bug in the app.
 # ⚠ THE UID IS PINNED, AND NUMERICALLY. `adduser -S` without -u picks the first
 # free system UID, which is a property of the base image rather than of us — it
 # moves when the base image does. More importantly kubelet cannot verify a
 # NAMED user against `runAsNonRoot`: it has no way to resolve the name without
 # reading the image's /etc/passwd, so it refuses to start the container with
 # "image has non-numeric user". A number is the only form both sides agree on.
+#
+# ⚠ AND THE BASE IMAGE ALREADY HAS A `bun` USER AT 1000. That is not the one
+# the manifests name, so it is left alone rather than reused.
 RUN addgroup -S -g 1001 i10 && adduser -S -u 1001 -G i10 -h /home/i10 i10 \
     && mkdir -p /home/i10 && chown -R i10:i10 /home/i10
 ENV HOME=/home/i10
 
-COPY --from=build --chown=i10:i10 /app /app
 COPY --from=build --chown=i10:i10 /repo/apps/api/dist /app/dist
 
 # ⚠ THE MIGRATIONS SHIP IN THE IMAGE. dist/migrate.js resolves them relative to
@@ -86,4 +102,4 @@ ARG GIT_SHA=dev
 ARG BUILD_TIME
 ENV GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME
 
-CMD ["node", "dist/index.js"]
+CMD ["bun", "dist/index.js"]

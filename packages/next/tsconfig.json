@@ -6,7 +6,7 @@
     "moduleResolution": "Bundler",
     "module": "ESNext",
     "lib": ["es2023", "DOM"],
-    "types": ["node"],
+    "types": ["bun"],
     // See packages/node/tsconfig.json — tsup's dts step sets `baseUrl`, which
     // TypeScript 6 errors on. Nothing here uses it.
     "ignoreDeprecations": "6.0"

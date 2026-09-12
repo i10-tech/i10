@@ -35,10 +35,19 @@ jobs:
           # clone silently makes every release look like the first one.
           fetch-depth: 0
 
+      # ⚠ SETUP, NOT THE bun-toolchain ACTION. next-version.mjs has no imports
+      # beyond node:child_process and node:fs, both of which bun implements, so
+      # this job needs the binary and nothing else — the composite action would
+      # additionally restore a cache and run a full `bun install` to support a
+      # script with no dependencies.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+
       - name: Compute the next version
         id: version
         run: |
-          node .github/scripts/next-version.mjs \
+          bun .github/scripts/next-version.mjs \
             ${{ inputs.prerelease && '--prerelease rc' || '' }} \
             --github-output
 

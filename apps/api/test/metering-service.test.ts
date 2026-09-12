@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, mock } from "bun:test"
 import {
   postgresEntitlements,
   postgresLedger,
@@ -21,7 +21,7 @@ const now = () => NOW
 
 function fakeDb(rowsFor: (statement: string) => unknown[]) {
   const seen: string[] = []
-  const execute = vi.fn(async (query: SQL) => {
+  const execute = mock(async (query: SQL) => {
     const { sql: statement } = dialect.sqlToQuery(query)
     seen.push(statement)
     return rowsFor(statement)
@@ -92,7 +92,7 @@ describe("checking quota", () => {
    */
   it("reports an unentitled tenant as unavailable, never as exceeded", async () => {
     const { db } = fakeDb(() => [])
-    const log = { warn: vi.fn(), error: vi.fn() }
+    const log = { warn: mock(), error: mock() }
     const metering = postgresMetering({ db, featureId: "emails", log, now })
 
     const outcome = await metering.checkQuota(TENANT, 1)
@@ -104,7 +104,7 @@ describe("checking quota", () => {
 
   it("reports a feature the plan does not grant the same way", async () => {
     const { db } = fakeDb(onPro(0))
-    const log = { warn: vi.fn(), error: vi.fn() }
+    const log = { warn: mock(), error: mock() }
     const metering = postgresMetering({ db, featureId: "sms", log, now })
     expect((await metering.checkQuota(TENANT, 1)).status).toBe("unavailable")
   })
@@ -127,7 +127,7 @@ describe("recording what was sent", () => {
 
   it("warns when a batch contained events already recorded", async () => {
     const { db } = fakeDb(() => [])
-    const log = { warn: vi.fn(), error: vi.fn() }
+    const log = { warn: mock(), error: mock() }
 
     await postgresMetering({ db, featureId: "emails", log, now }).recordSent(TENANT, [
       { id: "msg_1", sentAt: NOW },

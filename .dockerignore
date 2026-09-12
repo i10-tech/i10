@@ -3,10 +3,11 @@
 # Every app Dockerfile installs dependencies in an earlier stage and then does
 # `COPY . .` for the sources. With no ignore file that copy also brings whatever
 # node_modules the machine running the build happens to have — on a Mac that
-# means darwin-arm64 binaries landing in a linux image, and pnpm noticing the
-# store no longer matches and trying to purge node_modules mid-build:
-#
-#   ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
+# means darwin-arm64 binaries landing in a linux image, on top of a tree the
+# install stage just produced for linux. Under pnpm that surfaced as a mid-build
+# purge (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY); under bun the clash is
+# quieter and therefore worse — a native binding that loads on the builder's
+# architecture and not in the image.
 #
 # CI never hit it because a fresh checkout has no node_modules — which is worse,
 # not better: it means local builds and CI builds were producing different
