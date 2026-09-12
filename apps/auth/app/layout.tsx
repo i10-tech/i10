@@ -12,6 +12,42 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
+/**
+ * Stop Clerk re-running the middleware every time the auth state changes.
+ *
+ * ⚠ THIS IS WHY SIGNING IN ON A PHONE LEFT PEOPLE SITTING ON THE AUTH PAGE WITH
+ * A PERFECTLY GOOD SESSION. `@clerk/nextjs` installs two hooks that clerk-js
+ * calls around `setActive`:
+ *
+ *     window.__internal_onBeforeSetActive = () => invalidateCacheAction()
+ *     window.__internal_onAfterSetActive  = () => router.refresh()
+ *
+ * and `setActive` awaits the second. That `router.refresh()` races the redirect
+ * we are trying to perform: its RSC fetch is cut off by the navigation in
+ * flight, Next answers "Failed to fetch RSC payload, falling back to browser
+ * navigation", and the fallback reloads the page we were leaving. The pending
+ * redirect is cancelled and the person lands back on /sign-up, /mfa or /passkey
+ * — signed in, and apparently ignored. On a laptop the redirect commits first
+ * and `setActive` returns before ever calling it, which is the whole of why
+ * this looked like a phone-only bug.
+ *
+ * ⚠ AND THE REFRESH BUYS THIS APP NOTHING. It exists so server components pick
+ * up a new auth state; every page here is a form that immediately navigates to
+ * another origin once the session exists. There is nothing left to re-render.
+ * apps/console is the opposite case and must keep the default.
+ *
+ * ⚠ THE CAST IS NEEDED BECAUSE THE SERVER PROVIDER'S TYPES REMOVE THE PROP —
+ * it is declared `Without<NextClerkProviderProps, '__internal_invokeMiddlewareOnAuthStateChange'>`
+ * — WHILE THE RUNTIME FORWARDS IT. Verified in this version: the server
+ * provider destructures `{ children, dynamic, ...rest }`, `mergeNextClerkPropsWithEnv`
+ * returns `{ ...props }`, and the result is spread into `ClientClerkProvider`,
+ * which reads the flag. It is an `__internal_` name, so a Clerk upgrade may
+ * move it; if sign-in starts hanging again after one, look here first.
+ */
+const NO_AUTH_STATE_REFRESH = {
+  __internal_invokeMiddlewareOnAuthStateChange: false,
+} as unknown as Partial<React.ComponentProps<typeof ClerkProvider>>
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -19,7 +55,10 @@ export default function RootLayout({
     // `publishableKey` passed rather than inferred — see middleware.ts, and
     // apps/console/app/layout.tsx, which carries the same note for the same
     // build-time-inlining reason.
-    <ClerkProvider publishableKey={process.env.CLERK_PUBLISHABLE_KEY}>
+    <ClerkProvider
+      {...NO_AUTH_STATE_REFRESH}
+      publishableKey={process.env.CLERK_PUBLISHABLE_KEY}
+    >
       <html lang="en" suppressHydrationWarning>
         <body>
           <Theme>
