@@ -1,4 +1,6 @@
 import type { Metadata } from "next"
+import { headers } from "next/headers"
+import { ssoProviders } from "../_lib/providers"
 import { afterAuthUrl } from "../_lib/redirect"
 import { SignInForm } from "./sign-in-form"
 
@@ -30,6 +32,11 @@ export default async function Page({
   const carry =
     typeof raw === "string" ? `?redirect_url=${encodeURIComponent(raw)}` : ""
 
+  // ⚠ WHICH SSO BUTTONS EXIST IS CLERK'S ANSWER, NOT OURS, and it is
+  // resolved here so the first paint is already correct. See
+  // _lib/providers.ts — it also applies the Apple-hardware rule.
+  const providers = await ssoProviders((await headers()).get("user-agent"))
+
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
@@ -40,6 +47,7 @@ export default async function Page({
           mfaHref={`/mfa${carry}`}
           passkeyHref={`/passkey${carry}`}
           redirectRaw={typeof raw === "string" ? raw : undefined}
+          providers={providers}
         />
       </div>
     </main>

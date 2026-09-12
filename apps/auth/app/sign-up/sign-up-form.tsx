@@ -13,11 +13,14 @@ import {
   FieldSeparator,
 } from "@repo/ui/components/field"
 import { Input } from "@repo/ui/components/input"
+import { Spinner } from "@repo/ui/components/spinner"
 import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { finalizeAndLeave } from "../_lib/finish"
+import type { SsoProvider } from "../_lib/providers"
 
 /*
  * shadcn's `signup-02`, wired to Clerk, plus the verification step the block
@@ -30,26 +33,33 @@ import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
  * state of the same component — rather than a second route — keeps the
  * half-finished `signUp` object alive, which is what the code is checked
  * against.
+ *
+ * ⚠ ONE `busy` FOR THE WHOLE PAGE — see the sign-in form for the race it
+ * closes. It matters more here, because a half-built `signUp` is real state on
+ * the client: starting Google while an email attempt is mid-verification leaves
+ * two attempts on one client and the second one wins.
  */
 export function SignUpForm({
   afterAuthUrl,
   signInHref,
   redirectRaw,
+  providers,
 }: {
   afterAuthUrl: string
   signInHref: string
   redirectRaw?: string
+  providers: SsoProvider[]
 }) {
   const { signUp } = useSignUp()
   const [stage, setStage] = useState<"details" | "verify">("details")
   const [code, setCode] = useState("")
   const formRef = useRef<HTMLFormElement>(null)
-  const [pending, setPending] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
 
   async function onDetails(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     // ⚠ `signUp` IS NULL UNTIL CLERK LOADS — the only readiness signal there is.
-    if (!signUp || pending) return
+    if (!signUp || busy) return
 
     const form = new FormData(event.currentTarget)
     const password = String(form.get("password") ?? "")
@@ -63,16 +73,24 @@ export function SignUpForm({
       return
     }
 
-    setPending(true)
+    setBusy("details")
 
     try {
-      // ⚠ SPLIT ON THE FIRST SPACE ONLY. The block asks for one "Full Name" and
-      // Clerk stores two fields. Everything after the first space is the last
-      // name, so "Ada King Lovelace" keeps "King Lovelace" together rather than
-      // discarding a middle name — and a single-word name simply has no last
-      // name, which Clerk accepts.
-      const fullName = String(form.get("name") ?? "").trim()
-      const gap = fullName.indexOf(" ")
+      /*
+       * ⚠ TWO FIELDS, NOT ONE "Full Name" SPLIT ON THE FIRST SPACE. The block
+       * ships a single name box and Clerk stores `firstName` and `lastName`, so
+       * this used to guess at the boundary — which is only ever right for
+       * people whose names happen to be shaped like the guess. "Ana María
+       * García" became a first name of "Ana", and anyone with one word for a
+       * name got no surname at all. Asking is both correct and shorter than the
+       * comment explaining why splitting was not.
+       *
+       * ⚠ `lastName` GOES UNDEFINED RATHER THAN EMPTY when it is blank. Clerk
+       * accepts a missing last name; an empty string is a value, and it is the
+       * value that shows up later as a trailing space in every greeting.
+       */
+      const firstName = String(form.get("first-name") ?? "").trim()
+      const lastName = String(form.get("last-name") ?? "").trim()
 
       // ⚠ `password()`, NOT `create()` THEN A SEPARATE VERIFICATION CALL. On
       // this API `signUp.password` both creates the attempt and submits the
@@ -82,45 +100,58 @@ export function SignUpForm({
       const created = await signUp.password({
         emailAddress: String(form.get("email") ?? ""),
         password,
-        firstName: gap === -1 ? fullName : fullName.slice(0, gap),
-        lastName: gap === -1 ? undefined : fullName.slice(gap + 1),
+        firstName,
+        lastName: lastName || undefined,
       })
 
       if (created.error) {
         toast.error(messageFor(created.error))
+        setBusy(null)
         return
       }
 
       // Already done when the instance does not verify email addresses.
       if (signUp.status === "complete") {
-        await signUp.finalize({
-          navigate: ({ decorateUrl }) => {
-            window.location.href = decorateUrl(afterAuthUrl)
-          },
-        })
+        /*
+         * ⚠ NO `finally` RELEASING THE LOCK ON THIS PATH, WHICH IS WHY THE
+         * RELEASES ARE WRITTEN OUT ONE BY ONE ABOVE AND BELOW. A `finally`
+         * cannot tell "this failed, give the form back" from "this succeeded
+         * and the browser is leaving" — and re-enabling a Create Account button
+         * during the redirect that follows a successful sign-up is how somebody
+         * presses it a second time and gets told the address is taken.
+         */
+        const result = await finalizeAndLeave(
+          (params) => signUp.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) {
+          toast.error(messageFor(result.error))
+          setBusy(null)
+        }
         return
       }
 
       const sent = await signUp.verifications.sendEmailCode()
       if (sent.error) {
         toast.error(messageFor(sent.error))
+        setBusy(null)
         return
       }
 
       toast.success("We sent a code to your email.")
       setStage("verify")
+      setBusy(null)
     } catch {
       toast.error(TRANSPORT_FAILURE)
-    } finally {
-      setPending(false)
+      setBusy(null)
     }
   }
 
   async function onVerify(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!signUp || pending) return
+    if (!signUp || busy) return
 
-    setPending(true)
+    setBusy("verify")
 
     try {
       const { error } = await signUp.verifications.verifyEmailCode({ code })
@@ -129,29 +160,43 @@ export function SignUpForm({
         toast.error(messageFor(error))
         // A rejected six-digit code is never salvaged by editing one box.
         setCode("")
+        setBusy(null)
         return
       }
 
       if (signUp.status === "complete") {
-        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
-        // see the sign-in form.
-        await signUp.finalize({
-          navigate: ({ decorateUrl }) => {
-            window.location.href = decorateUrl(afterAuthUrl)
-          },
-        })
+        /*
+         * ⚠ THE LOCK IS HELD THROUGH THE REDIRECT, AND THAT IS WHY THE BUTTON
+         * NOW SAYS "Taking you in…". This step is where sign-up on a phone
+         * appeared to hang: the code was accepted, the session was created, and
+         * the page went back to looking like a sign-up form. See _lib/finish.ts
+         * — the destination is `replace`d rather than assigned so the finished
+         * page is not one back-swipe away, and the helper navigates itself if
+         * Clerk's callback never runs. Releasing `busy` here would additionally
+         * re-render the whole form underneath a navigation already in progress.
+         */
+        const result = await finalizeAndLeave(
+          (params) => signUp.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) {
+          toast.error(messageFor(result.error))
+          setBusy(null)
+        }
         return
       }
 
       toast.error(
         "That code was accepted, but the account still needs something we cannot collect yet.",
       )
+      setBusy(null)
     } catch {
       toast.error(TRANSPORT_FAILURE)
-    } finally {
-      setPending(false)
+      setBusy(null)
     }
   }
+
+  const locked = busy !== null
 
   if (stage === "verify") {
     return (
@@ -180,13 +225,27 @@ export function SignUpForm({
             onChange={setCode}
             // The code is the whole form here, so filling it is the decision.
             onComplete={() => {
-              if (!pending) formRef.current?.requestSubmit()
+              if (!locked) formRef.current?.requestSubmit()
             }}
             autoFocus
           />
           <Field>
-            <Button type="submit" disabled={pending || code.length < OTP_LENGTH}>
-              {pending ? "Verifying…" : "Verify email"}
+            <Button type="submit" disabled={locked || code.length < OTP_LENGTH}>
+              {busy === "verify" ? (
+                <>
+                  <Spinner aria-hidden="true" aria-label={undefined} />
+                  {/*
+                   * ⚠ THE COPY DESCRIBES THE WHOLE WAIT, NOT JUST THE CALL.
+                   * Verification and the redirect that follows it are one
+                   * uninterrupted pause from where the person is sitting;
+                   * "Verifying…" that stays on screen while a page loads reads
+                   * as stuck, which is precisely the complaint this step drew.
+                   */}
+                  Taking you in…
+                </>
+              ) : (
+                "Verify email"
+              )}
             </Button>
           </Field>
           <ResendButton
@@ -213,17 +272,42 @@ export function SignUpForm({
             Fill in the form below to create your account
           </p>
         </div>
-        <Field>
-          <FieldLabel htmlFor="name">Full Name</FieldLabel>
-          <Input
-            id="name"
-            name="name"
-            type="text"
-            placeholder="John Doe"
-            autoComplete="name"
-            required
-          />
-        </Field>
+        {/*
+         * ⚠ SIDE BY SIDE ONLY ONCE THERE IS ROOM. Two 40px-tall boxes sharing a
+         * 360px phone screen leaves each one narrower than the name it holds,
+         * and a field you have to scroll horizontally to read back is worse
+         * than a field on its own row. `sm:` is the same breakpoint the rest of
+         * this page's max-width is pitched at.
+         */}
+        <div className="grid gap-7 sm:grid-cols-2 sm:gap-4">
+          <Field>
+            <FieldLabel htmlFor="first-name">First name</FieldLabel>
+            <Input
+              id="first-name"
+              name="first-name"
+              type="text"
+              placeholder="Ada"
+              autoComplete="given-name"
+              disabled={locked}
+              required
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="last-name">Last name</FieldLabel>
+            <Input
+              id="last-name"
+              name="last-name"
+              type="text"
+              placeholder="Lovelace"
+              autoComplete="family-name"
+              disabled={locked}
+              // ⚠ NOT `required`, DELIBERATELY. Plenty of people have one legal
+              // name, and Clerk stores a sign-up with no last name without
+              // complaint. A required surname is a form that cannot be
+              // completed truthfully by someone who has none.
+            />
+          </Field>
+        </div>
         <Field>
           <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
@@ -232,6 +316,7 @@ export function SignUpForm({
             type="email"
             placeholder="m@example.com"
             autoComplete="email"
+            disabled={locked}
             required
           />
           <FieldDescription>
@@ -244,8 +329,8 @@ export function SignUpForm({
           <PasswordInput
             id="password"
             name="password"
-
             autoComplete="new-password"
+            disabled={locked}
             required
           />
           <FieldDescription>Must be at least 8 characters long.</FieldDescription>
@@ -255,8 +340,8 @@ export function SignUpForm({
           <PasswordInput
             id="confirm-password"
             name="confirm-password"
-
             autoComplete="new-password"
+            disabled={locked}
             required
           />
           <FieldDescription>Please confirm your password.</FieldDescription>
@@ -272,8 +357,15 @@ export function SignUpForm({
          */}
         <div id="clerk-captcha" />
         <Field>
-          <Button type="submit" disabled={!signUp || pending}>
-            {pending ? "Creating account…" : "Create Account"}
+          <Button type="submit" disabled={!signUp || locked}>
+            {busy === "details" ? (
+              <>
+                <Spinner aria-hidden="true" aria-label={undefined} />
+                Creating account…
+              </>
+            ) : (
+              "Create Account"
+            )}
           </Button>
         </Field>
         <FieldSeparator>Or continue with</FieldSeparator>
@@ -281,10 +373,20 @@ export function SignUpForm({
           afterAuthUrl={afterAuthUrl}
           redirectRaw={redirectRaw}
           verb="Sign up"
+          providers={providers}
+          busy={busy}
+          onBusyChange={setBusy}
         />
         <FieldDescription className="px-6 text-center">
           Already have an account?{" "}
-          <Link href={signInHref} className="underline underline-offset-4">
+          <Link
+            href={signInHref}
+            aria-disabled={locked}
+            tabIndex={locked ? -1 : undefined}
+            className={`underline underline-offset-4 ${
+              locked ? "pointer-events-none opacity-50" : ""
+            }`}
+          >
             Sign in
           </Link>
         </FieldDescription>
