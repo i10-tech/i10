@@ -20,7 +20,7 @@
     "@repo/typescript-config": "workspace:*",
     "@types/bun": "^1.4.2",
     "eslint": "^9.39.5",
-    "typescript": "6.0.3"
+    "typescript": "7.0.2"
   },
   "files": [
     "dist"
