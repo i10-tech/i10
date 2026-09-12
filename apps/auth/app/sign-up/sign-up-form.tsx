@@ -373,6 +373,7 @@ export function SignUpForm({
           afterAuthUrl={afterAuthUrl}
           redirectRaw={redirectRaw}
           verb="Sign up"
+          intent="sign-up"
           providers={providers}
           busy={busy}
           onBusyChange={setBusy}

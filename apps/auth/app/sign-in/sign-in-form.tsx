@@ -273,6 +273,7 @@ export function SignInForm({
         <OAuthButtons
           afterAuthUrl={afterAuthUrl}
           redirectRaw={redirectRaw}
+          intent="sign-in"
           providers={providers}
           busy={busy}
           onBusyChange={setBusy}
