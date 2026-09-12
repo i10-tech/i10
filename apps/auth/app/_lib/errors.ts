@@ -31,3 +31,40 @@ export function messageFor(error: FlowError): string {
  * be reached.
  */
 export const TRANSPORT_FAILURE = "We could not reach the server. Try again."
+
+/**
+ * What to say when an OAuth round trip comes back without a session.
+ *
+ * ⚠ "That sign-in did not complete" WAS THE ONLY THING THIS PAGE EVER SAID, AND
+ * IT IS THE ONE SENTENCE THAT HELPS NOBODY. Every one of these outcomes has a
+ * different next step — sign up, sign in, use a different provider, contact
+ * support — and a person told only that it "did not complete" has no way to
+ * pick. The codes below are the ones clerk-js itself branches on, taken from
+ * the shipped bundle rather than guessed.
+ *
+ * ⚠ THE PROVIDER IS NOT NAMED, DELIBERATELY. By the time the browser is back
+ * here the attempt that knew which provider was used may already have been
+ * replaced by the transfer, and a message that says "Google" when it was GitHub
+ * is worse than one that says neither.
+ */
+const SSO_FAILURES: Record<string, string> = {
+  // No i10 account is linked to that provider account. Normally invisible,
+  // because the callback transfers this into a sign-up — it is reachable when
+  // the instance refuses to create the account, e.g. sign-ups are restricted.
+  external_account_not_found:
+    "There is no i10 account for that yet, and we could not create one. Try signing up, or use a different provider.",
+  // Already linked, on a page that was trying to create something new.
+  external_account_exists:
+    "That account is already connected to an i10 account. Sign in with it instead.",
+  // The email is known, but it was registered a different way.
+  external_account_strategy:
+    "That email already has an i10 account created a different way. Sign in using the method you first signed up with.",
+  user_locked: "That account is locked. Contact support to unlock it.",
+  identifier_already_signed_in: "You are already signed in with that account.",
+}
+
+export const SSO_FALLBACK = "That sign-in did not complete. Try again."
+
+export function ssoFailureMessage(code: string | null | undefined): string {
+  return (code && SSO_FAILURES[code]) ?? SSO_FALLBACK
+}

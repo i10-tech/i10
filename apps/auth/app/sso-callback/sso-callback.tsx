@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { useClerk, useSignIn, useSignUp } from "@clerk/nextjs"
 import { Spinner } from "@repo/ui/components/spinner"
-import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
-import { leaveFor } from "../_lib/finish"
+import { messageFor, ssoFailureMessage, TRANSPORT_FAILURE } from "../_lib/errors"
+import { leaveFor, setActiveAndLeave } from "../_lib/finish"
 
 /**
  * Where an OAuth provider drops the browser on its way back.
@@ -61,6 +61,20 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
       }
     }
 
+    /**
+     * Whichever half of the handshake recorded why it failed.
+     *
+     * ⚠ BOTH ARE CHECKED BECAUSE EITHER CAN BE THE ONE THAT KNOWS. A sign-in
+     * that found no user records it on its first-factor verification; a sign-up
+     * that found an existing account records it on the external-account
+     * verification. Reading only one is how a perfectly well-explained failure
+     * still comes out as "did not complete".
+     */
+    const failureCode = () =>
+      clerk.client?.signIn?.firstFactorVerification?.error?.code ??
+      clerk.client?.signUp?.verifications?.externalAccount?.error?.code ??
+      null
+
     const finish = async () => {
       done.current = true
 
@@ -74,6 +88,100 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
         if (signUp.status === "complete") {
           const { error } = await signUp.finalize({ navigate })
           if (error) toast.error(messageFor(error))
+          return
+        }
+
+        /*
+         * ⚠ NO ACCOUNT FOR THIS PROVIDER IDENTITY YET — MAKE ONE. This is the
+         * whole of "sign up with GitHub does not work". An SSO round trip that
+         * finds no matching user comes back `transferable` rather than
+         * complete, and Clerk expects the callback to turn it into a sign-up.
+         * Without this branch it fell through to the catch-all below and told
+         * a brand-new customer their sign-in "did not complete", which is both
+         * wrong and unactionable — there was nothing to complete, they had
+         * never signed up.
+         *
+         * ⚠ `transfer: true` IS WHAT CARRIES THE VERIFIED IDENTITY ACROSS. The
+         * provider has already proved who they are; this reuses that proof
+         * rather than starting a second round trip. Creating a bare sign-up
+         * here instead would ask somebody who just authorised Google for an
+         * email and password.
+         */
+        if (signIn.isTransferable) {
+          const { error } = await signUp.create({ transfer: true })
+          if (error) {
+            // Clerk's own sentence when it has one, ours when the code is all
+            // we get.
+            toast.error(messageFor(error) || ssoFailureMessage(failureCode()))
+            router.replace("/sign-up")
+            return
+          }
+
+          /*
+           * ⚠ RE-READ FROM `clerk.client`, NOT FROM THE HOOK'S OBJECT. `create`
+           * replaces the resource on the client, so the value captured when the
+           * hook handed it to us is stale the moment the transfer lands — the
+           * same trap that made the SSO buttons silently do nothing. It also
+           * happens to be the only reading TypeScript will not have narrowed to
+           * "not complete" from the guard at the top of this function.
+           */
+          const transferred = clerk.client.signUp
+          if (transferred.status === "complete" && transferred.createdSessionId) {
+            await setActiveAndLeave(
+              (params) => clerk.setActive(params),
+              transferred.createdSessionId,
+              afterAuthUrl,
+            )
+            return
+          }
+
+          // ⚠ `missing_requirements` IS REACHABLE AND IS NOT AN ERROR: the
+          // instance asks for something the provider did not supply. We cannot
+          // collect it on this page, so hand back to the form that can.
+          toast.error("We need a little more before your account is ready.")
+          router.replace("/sign-up")
+          return
+        }
+
+        /*
+         * ⚠ AND THE OPPOSITE DIRECTION, which is the same bug seen from the
+         * sign-up page: somebody pressed "Sign up with Google" with an account
+         * that already exists. Clerk answers `transferable` on the SIGN-UP, and
+         * the right response is to sign them in rather than to tell them the
+         * address is taken.
+         */
+        if (signUp.isTransferable) {
+          const { error } = await signIn.create({ transfer: true })
+          if (error) {
+            toast.error(messageFor(error) || ssoFailureMessage(failureCode()))
+            router.replace("/sign-in")
+            return
+          }
+
+          // Re-read from the client for the same reason as above.
+          const transferred = clerk.client.signIn
+          if (transferred.status === "complete" && transferred.createdSessionId) {
+            await setActiveAndLeave(
+              (params) => clerk.setActive(params),
+              transferred.createdSessionId,
+              afterAuthUrl,
+            )
+            return
+          }
+
+          // Same pair as the non-transfer path above: an OAuth sign-in can
+          // still owe a second factor, and `needs_client_trust` is Clerk's
+          // device-trust step rather than an error.
+          if (
+            transferred.status === "needs_second_factor" ||
+            transferred.status === "needs_client_trust"
+          ) {
+            router.replace("/mfa")
+            return
+          }
+
+          toast.error(ssoFailureMessage(failureCode()))
+          router.replace("/sign-in")
           return
         }
 
@@ -97,7 +205,7 @@ export function SsoCallback({ afterAuthUrl }: { afterAuthUrl: string }) {
           return
         }
 
-        toast.error("That sign-in did not complete. Try again.")
+        toast.error(ssoFailureMessage(failureCode()))
         router.replace("/sign-in")
       } catch {
         toast.error(TRANSPORT_FAILURE)

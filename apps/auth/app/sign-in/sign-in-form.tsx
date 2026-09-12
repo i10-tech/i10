@@ -240,6 +240,17 @@ export function SignInForm({
             required
           />
         </Field>
+        {/*
+         * ⚠ CLERK'S BOT PROTECTION MOUNTS ITSELF INTO THIS EXACT ID, AND ITS
+         * ABSENCE IS A SILENT FAILURE — the same note as the sign-up form, and
+         * it belongs here for a reason that is easy to miss. This page carries
+         * no sign-up, but its SSO buttons pass `signUpIfMissing`, so a
+         * "Continue with Google" from somebody who has never been here before
+         * IS a sign-up, and bot protection applies to it. With no mount point
+         * Clerk rejects the attempt rather than challenging it, which is what
+         * `authorization_invalid` from FAPI turned out to be.
+         */}
+        <div id="clerk-captcha" />
         <Field>
           <Button type="submit" disabled={!signIn || locked}>
             {busy === "password" ? (

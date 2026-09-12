@@ -80,3 +80,31 @@ export async function finalizeAndLeave<R extends { error: unknown }>(
 
   return result
 }
+
+/**
+ * Activate a session that a TRANSFER produced, then leave.
+ *
+ * ⚠ IT EXISTS BECAUSE A TRANSFER HAS NO `finalize()` TO CALL. `finalize` closes
+ * the attempt you were already running; a transfer swaps one attempt for
+ * another and hands back a session id directly, which is why clerk-js's own
+ * redirect callback answers `case "complete"` with `setActive` rather than
+ * with a finalize. Same ordering rule as `finalizeAndLeave` above, and for the
+ * same reason: capture the decorated URL, let `setActive` finish its work —
+ * including Clerk's Next.js hooks — and only then navigate.
+ */
+export async function setActiveAndLeave(
+  setActive: (params: { session: string; navigate: Navigate }) => Promise<unknown>,
+  sessionId: string,
+  afterAuthUrl: string,
+): Promise<void> {
+  let target: string | null = null
+
+  await setActive({
+    session: sessionId,
+    navigate: ({ decorateUrl }) => {
+      target = decorateUrl(afterAuthUrl)
+    },
+  })
+
+  leaveFor(target ?? afterAuthUrl)
+}

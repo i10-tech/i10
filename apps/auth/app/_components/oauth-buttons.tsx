@@ -171,6 +171,23 @@ export function OAuthButtons({
         strategy,
         redirectUrl: clerk.buildUrlWithAuth(callbackUrl(redirectRaw)),
         actionCompleteRedirectUrl: afterAuthUrl,
+        /*
+         * ⚠ WITHOUT THIS, A PROVIDER ACCOUNT THAT HAS NEVER SIGNED IN HERE IS
+         * SIMPLY REFUSED. We always start a sign-IN — correctly, because one
+         * SSO round trip resolves into whichever it turns out to be — but a
+         * sign-in with no matching user has nowhere to go unless it is told it
+         * may become a sign-up. Google answered that with a hard
+         * `authorization_invalid` from FAPI, before the browser ever got back
+         * to us; GitHub came back `transferable` and died in the callback.
+         *
+         * ⚠ IT IS WHY /sign-in NOW RENDERS `#clerk-captcha` TOO. Clerk's own
+         * note on this flag: "If bot sign-up protection is enabled, captcha
+         * will also be required on sign in." A sign-in that may create an
+         * account is a sign-up as far as bot protection is concerned, and with
+         * nowhere to mount its widget the attempt is rejected rather than
+         * challenged.
+         */
+        signUpIfMissing: true,
       })
 
       /*
