@@ -92,6 +92,34 @@ COPY --from=build --chown=i10:i10 /repo/apps/api/dist /app/dist
 # nothing — a silent no-op is the worst possible outcome for a migration step.
 COPY --from=build --chown=i10:i10 /repo/apps/api/drizzle /app/drizzle
 
+# ⚠ groupmq's LUA SCRIPTS SHIP BESIDE THE BUNDLE, AND WITHOUT THIS EVERY QUEUE
+# IN THE SYSTEM IS DEAD. groupmq does not inline its scripts; it reads them off
+# disk at first use, resolving them relative to `import.meta.url`:
+#
+#     candidates = [ <dir>/<name>.lua, <dir>/lua/<name>.lua ]
+#
+# Under pnpm that `<dir>` was `/app/node_modules/groupmq/dist`, with the scripts
+# sitting right there. `bun build` erases that layout — the library is inlined
+# into the bundle, so `<dir>` becomes `/app/dist` and the runtime stage has no
+# node_modules to fall back to. Both candidates miss and the library throws
+# `ENOENT ... /app/dist/enqueue.lua` on the FIRST Redis call.
+#
+# ⚠ AND IT FAILS AS SILENCE, NOT AS A CRASH, WHICH IS WHY IT COST A DAY. The
+# api answers 200 and logs "enqueue failed after commit — the sweep will pick
+# these up"; the worker stays Running with every probe green while `reserveBatch`
+# throws on every loop; `/internal/queue-depth` 500s because `getJobCounts()` is
+# three more of these scripts, which is what leaves the KEDA ScaledObject in
+# TriggerError and `i10-workloads` Degraded. Nothing restarts, nothing pages,
+# and no mail moves.
+#
+# `dist/lua/` is the SECOND candidate, chosen over scattering thirty files next
+# to the bundle. The guard is not decoration: a silently empty directory here
+# reproduces the exact failure this COPY exists to prevent, and `linker =
+# "hoisted"` in bunfig.toml is what makes this a real directory rather than a
+# symlink into bun's store.
+COPY --from=build --chown=i10:i10 /repo/node_modules/groupmq/dist/lua /app/dist/lua
+RUN test -s /app/dist/lua/enqueue.lua && test -s /app/dist/lua/reserve-batch.lua
+
 USER 1001:1001
 EXPOSE 3001
 
