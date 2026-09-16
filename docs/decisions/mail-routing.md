@@ -22,10 +22,16 @@ decision moves underneath them, per message.
 
 ## BYODKIM, and it was never optional
 
-⚠ **This was already the decision. `core.domains` has carried `dkim_selector`,
-`dkim_public_key` and `dkim_private_key_ref` since it was written.** Migration
-0018 introduced Easy DKIM against it and 0020/0021 undo that. Recording the
-reasoning here so the next person does not make the same trade.
+⚠ **This was already the decision. `core.domains` has carried `dkim_selector`
+and `dkim_public_key` since it was written.** Migration 0018 introduced Easy
+DKIM against it and 0020/0021 undo that. Recording the reasoning here so the
+next person does not make the same trade.
+
+⚠ **It carried a `dkim_private_key_ref` too, and that column was never written.**
+It pointed at an external secret store, on the reasoning that the private key
+must not be in the table at any price. Sealing with `WEBHOOK_SECRET_KEY` buys
+the same property with no second system to run, so the pointer was superseded
+before anything used it; 0034 dropped it.
 
 With **Easy DKIM**, Amazon generates the keypair and holds the private half.
 Three CNAMEs point at them; they sign. It is less for us to hold and it is

@@ -330,17 +330,18 @@ export const domains = core.table(
     delegated: boolean("delegated").notNull().default(false),
 
     /**
-     * BYODKIM. The selector and public key are published in the customer's DNS
-     * and are not secret.
+     * BYODKIM. Both halves are published in the customer's DNS and neither is
+     * secret: the selector is the label the key is served under, the public key
+     * is the TXT record's payload. The private half is `dkimPrivateKeySealed`
+     * below.
      *
-     * ⚠ THE PRIVATE KEY IS NOT IN THIS TABLE AND MUST NOT BE. It is held where
-     * secrets are held, and this column names it. A database backup, a replica,
-     * or a read-only analytics grant must never be enough to sign mail as a
-     * customer's domain.
+     * ⚠ THE SELECTOR IS RANDOM RATHER THAN A FIXED `i10`, which is what makes
+     * rotation possible at all — see domains/dkim.ts. A fixed one means a single
+     * name per domain, so replacing a key is a destructive edit of a live record
+     * with a window in which nothing verifies.
      */
     dkimSelector: text("dkim_selector"),
     dkimPublicKey: text("dkim_public_key"),
-    dkimPrivateKeyRef: text("dkim_private_key_ref"),
 
     /** The SES tenant this domain's sending is attributed to. */
     sesTenantName: text("ses_tenant_name"),
@@ -348,11 +349,19 @@ export const domains = core.table(
     /**
      * The DKIM private key, sealed with `WEBHOOK_SECRET_KEY`.
      *
-     * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. The column
-     * above says a database backup, a replica or a read-only analytics grant
-     * must never be enough to sign mail as a customer's domain — and with the
-     * key held outside the database, none of them are. The ciphertext is inert
-     * without it.
+     * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. A database
+     * backup, a replica or a read-only analytics grant must never be enough to
+     * sign mail as a customer's domain, and none of them are: the key that
+     * opens this lives outside the database, so the ciphertext is inert without
+     * it.
+     *
+     * ⚠ AN EARLIER DESIGN PUT A `dkim_private_key_ref` HERE INSTEAD — a pointer
+     * into an external secret store, on the reasoning that the key must not be
+     * in this table at any price. Sealing buys the same property without the
+     * second system to run, so the column was superseded and never written;
+     * migration 0034 dropped it. The comment above it survived the change and
+     * claimed for a while that the private key was not in this table, directly
+     * beside the column holding it.
      *
      * ⚠ AND IT IS NEVER RETURNED BY THE API. There is no "show me my DKIM key"
      * endpoint, for the same reason there is none for a webhook signing secret:
