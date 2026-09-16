@@ -66,6 +66,30 @@ curl -s --aws-sigv4 "aws:amz:auto:s3" \
 
 Want `<ListBucketResult>`, not `<Error>`.
 
+**`i10-tofu-state-rw` IS IP-ALLOWLISTED TO psl-vps, AND THE DENIAL IS
+INDISTINGUISHABLE FROM A DEAD KEY.** The token permits only
+`178.105.164.132` and `2a01:4f8:1c18:45fb::1`. Used from anywhere else — a
+laptop, CI — R2 answers the same `<Code>AccessDenied</Code>` it returns for a
+revoked credential, with nothing naming the address as the cause. Every
+diagnostic points the wrong way: the key is well-formed, it fails on **every**
+bucket rather than one, and the dashboard shows the token active with the right
+permission. The conclusion that fits all of it is "the key is dead", and acting
+on it means rotating a perfectly good credential and watching the new one fail
+identically.
+
+⚠ **THEREFORE THIS STACK RUNS FROM psl-vps, NOT A WORKSTATION.** That is the
+posture the allowlist buys: a credential that can write DNS state is usable from
+one machine. Note the asymmetry — `CLOUDFLARE_API_TOKEN` is **not** restricted,
+so provider reads succeed from a laptop and only the state backend fails, which
+is why `tofu init` gets as far as "Successfully configured the backend" before
+erroring on `HeadObject`.
+
+Confirm where you are before believing any other diagnosis:
+
+```bash
+curl -s -4 https://ifconfig.me   # want 178.105.164.132
+```
+
 **`TF_ENCRYPTION` needs an unquoted heredoc delimiter**, so the shell
 interpolates the passphrase, and one attribute per line. Written on one line,
 `state { method = … enforced = true }` is invalid HCL and fails with an error

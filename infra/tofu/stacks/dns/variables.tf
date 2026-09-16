@@ -59,6 +59,6 @@ variable "record_ids" {
       "srv_imaps", "srv_submissions", "srv_imap_none", "srv_submission_none",
       "mta_sts",
     ], keys(var.record_ids))) == 0
-    error_message = "record_ids is missing a key. Records this stack ADOPTS have an import block, so a missing id is a record that would be CREATED alongside the live one. Two resources are deliberately absent from this list: spf_include, which never existed and is genuinely created here, and ses_byodkim, which was created by hand during the Easy DKIM migration and still needs its id captured."
+    error_message = "record_ids is missing a key. Records this stack ADOPTS have an import block, so a missing id is a record that would be CREATED alongside the live one. One resource is deliberately absent from this list: spf_include, which never existed and is genuinely created here. ses_byodkim IS listed and IS imported, but its id was never captured during the Easy DKIM migration — an empty string satisfies this check and then fails the plan on a malformed import id, which is the loud failure rather than a duplicate DKIM record."
   }
 }

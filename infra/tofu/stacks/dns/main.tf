@@ -310,10 +310,17 @@ resource "cloudflare_dns_record" "spf_include" {
 # NOT FIT IN ONE. A DNS character-string caps at 255 bytes; the resolver
 # concatenates them, so this is one value, not two.
 #
-# ⚠ AND IT HAS NO `import` BLOCK YET. It was created by hand during the
-# migration, so its Cloudflare id is not in `record_ids` — the first plan will
-# try to CREATE it and fail on a record that already exists. Add the id and the
-# import before applying; see the regeneration command in variables.tf.
+# ⚠ ITS `import` BLOCK IS BELOW AND `record_ids["ses_byodkim"]` MUST BE FILLED
+# IN. It was created by hand during the migration, so the id was never captured.
+# While it is empty the plan fails on a malformed import id — which is the
+# intended failure: without the import block at all, the plan would CREATE a
+# SECOND TXT at this name, and a DKIM selector answering with two records is
+# ambiguous to a verifier. See the regeneration command in variables.tf.
+import {
+  to = cloudflare_dns_record.ses_byodkim
+  id = "${var.zone_id}/${var.record_ids["ses_byodkim"]}"
+}
+
 resource "cloudflare_dns_record" "ses_byodkim" {
   zone_id = var.zone_id
   name    = "i10b32b408c904b._domainkey.${local.domain}"

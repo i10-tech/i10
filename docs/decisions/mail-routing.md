@@ -49,18 +49,33 @@ old one and cut over when it resolves.
 
 ---
 
-## The four records
+## The six records
 
-| record | name                             | type                   |
-| ------ | -------------------------------- | ---------------------- |
-| SPF    | `send.<domain>`                  | MX → SES feedback host |
-| SPF    | `send.<domain>`                  | TXT                    |
-| DKIM   | `<selector>._domainkey.<domain>` | TXT                    |
-| DMARC  | `_dmarc.<domain>`                | TXT                    |
+| record | name                             | type                          |
+| ------ | -------------------------------- | ----------------------------- |
+| SPF    | `send.<domain>`                  | MX → SES feedback host        |
+| SPF    | `send.<domain>`                  | TXT → `include:amazonses.com` |
+| SPF    | `bounce.<domain>`                | MX → `MAIL_BOUNCE_HOST`       |
+| SPF    | `bounce.<domain>`                | TXT → `include:_spf.i10.tech` |
+| DKIM   | `<selector>._domainkey.<domain>` | TXT                           |
+| DMARC  | `_dmarc.<domain>`                | TXT                           |
+
+⚠ **FOUR UNTIL 2026-09-14, AND THE TWO NEW ONES ARE THE DIRECT ROUTE'S RETURN
+PATH.** A delegating customer still publishes three NS record sets and nothing
+else, because both new names live under `mail.` — which makes delegation
+strictly more attractive than it was: three records either way, against six.
+
+⚠ **EACH SPF TXT CARRIES ONE INCLUDE, NOT BOTH.** A return path is only ever
+used by the route that owns it, so naming SES in `bounce.`'s record would
+authorise Amazon to send as a domain on a path Amazon never touches, and spend
+one of the ten lookups to do it.
 
 ### SPF names us with an `include:`, never an address
 
-`v=spf1 include:amazonses.com include:_spf.i10.tech ~all`
+```
+send.<domain>    TXT   v=spf1 include:amazonses.com ~all
+bounce.<domain>  TXT   v=spf1 include:_spf.i10.tech ~all
+```
 
 ⚠ **An `ip4:` would pin our infrastructure into records we cannot edit.**
 Changing a relay, adding a second, or moving provider would mean asking every
@@ -80,13 +95,26 @@ That was wrong and it is not ours to drop** — it is what gives the SES route a
 aligned return path and somewhere for bounces to land.
 
 The apparent conflict is that `send.<domain>`'s MX can only point at one host,
-and SES requires its own feedback host there. Direct sends therefore do **not**
-use the customer's return path: they use i10's own bounce domain as the envelope
-sender, which needs no record in the customer's DNS at all.
+and SES requires its own feedback host there. The answer is a **second return
+path**: `bounce.<domain>`, whose MX names our own inbound host and whose TXT
+includes `_spf.i10.tech`.
 
-⚠ **DMARC still passes on both routes**, because it needs SPF _or_ DKIM
-aligned and BYODKIM aligns on the customer's domain either way. The SES route
-has both.
+⚠ **AN EARLIER VERSION OF THIS DOCUMENT SAID DIRECT SENDS USE I10'S OWN BOUNCE
+DOMAIN AND NEED NO CUSTOMER RECORD. That was true when it was written and the
+code has since moved past it** — `dnsRecordsFor` and `delegatedZones` both emit
+the `bounce.` pair today. Bouncing to a name on i10.tech would work and would
+save the customer two labels, but the envelope domain would then be ours, SPF
+would not align with their `From:`, and DMARC would be passing on DKIM alone.
+**Decided 2026-09-14: two labels is the price of both.**
+
+⚠ **DMARC therefore passes on SPF _and_ DKIM on both routes.** It needs only
+one, and BYODKIM aligns on the customer's domain either way — but a route with
+both degrades gracefully when a forwarder breaks one of them.
+
+⚠ **AND THE ENVELOPE SENDER IS VERP, NOT A BARE ADDRESS** —
+`bounce+<messageId>@bounce.<domain>`. A DSN then arrives carrying the id of the
+message it is about, so correlating a bounce is a parse rather than a heuristic
+over `Message-ID` headers that intermediate MTAs are free to mangle.
 
 ---
 
@@ -230,7 +258,47 @@ being a single point of failure — it has to increase on every write.
 
 ## Open
 
-- [ ] The tier → route function itself, and the Stalwart config that calls it.
+- [ ] **The mailbox lever: Stalwart's `MtaOutboundStrategy` expression and the
+      `SECURITY DEFINER` function it calls**, plus the SES SMTP credentials for
+      the relay. ⚠ **Deferred 2026-09-14** — it also needs per-domain
+      provisioning into Stalwart, which nothing does, and that arrives with
+      `hosts_mailboxes`. `core.domains.mailbox_route` is stored and rendered in
+      the meantime and **read by nothing**, exactly as `delivery_route` was.
+- [x] ~~The transactional lever.~~ **Building 2026-09-14.** A `stalwartTransport`
+      beside `sesTransport`, selected per message from
+      `core.domains.transactional_route`.
+      ⚠ **THE ROUTE IS PER CLASS, NOT PER DOMAIN, AND ONE COLUMN COULD NOT SAY
+      SO.** `delivery_route` was a single value, so it could not express a
+      customer whose humans send through our MTA while their API traffic goes
+      through SES — which is the control this was built for. Split into
+      `transactional_route` and `mailbox_route`, each read by a different
+      reader, neither entitled to a different answer for its own class.
+      ⚠ **AND METERING NEEDED NOTHING.** `handleBatch` bills on the `sent`
+      outcome and never names a provider, so a direct send meters as an `emails`
+      unit at the same price the moment the transport returns. Mailbox mail is
+      billed by seats and storage and is not a send at all.
+- [x] ~~DKIM on the direct route.~~ **Decided 2026-09-14: the transport signs,
+      not Stalwart.** `dkim_private_key_sealed` was written at domain creation
+      and read by NOTHING — uploaded to SES as BYODKIM and thereafter inert. On
+      the direct route nothing would have signed at all.
+      ⚠ **UNSIGNED IS NOT A DELIVERABILITY NIT HERE, IT IS A DMARC FAILURE.**
+      Both routes now align on SPF as well, so this is no longer load-bearing
+      alone — but it was the whole of DMARC on the direct route for as long as
+      the return path was ours.
+      ⚠ **THE WORKER SIGNS BEFORE SUBMISSION** so Stalwart needs no per-domain
+      key and no config push per customer, and the key stays where
+      `secrets.unseal` already lives. Canonicalization is taken from a library:
+      relaxed/relaxed folding and body-hash CRLF rules are where hand-rolled
+      signers fail silently and late.
+- [x] ~~Automatic failover when SES is unhealthy.~~ **Rejected 2026-09-14 in
+      favour of an operator kill switch** (`SES_ENABLED`, an input to
+      `resolveRoute`). `Transport` already absorbs a bad SES day: a throttle or
+      a 500 returns `deferred` and the message goes back on the queue. A health
+      probe only helps in a sustained outage, and it would make the route
+      time-varying — so the dashboard, the API and Stalwart could disagree about
+      one domain at one moment, which is exactly what `route.ts` exists to
+      prevent. It would also move a paying customer onto our IP reputation with
+      no human deciding to.
 - [ ] The `pdns` ROLE ITSELF, WHICH 0023 NO LONGER CREATES. `CREATE ROLE` needs
       CREATEROLE and the migration connects as `i10`, which does not have it —
       so 0023 failed on its first real run and blocked 0024-0028 behind the
@@ -243,12 +311,25 @@ being a single point of failure — it has to increase on every write.
       yet** — the zones are written and nothing serves them.
 - [ ] Moving zones off the box. ⚠ **Cloudflare is not the answer for this, and
       it is verified rather than suspected** — see below.
-- [ ] i10's own bounce domain for the direct route, and ingesting those bounces
-      into `core.message_events` the way SES's already are.
+- [ ] **⚠ `_spf.i10.tech` DOES NOT RESOLVE, AND IT IS A RELEASE GATE.** The
+      `spf_include` resource exists in `infra/tofu/stacks/dns/main.tf` and has
+      never been applied — `variables.tf`'s validation message says so outright.
+      Until it is, every `bounce.<domain>` TXT includes a domain that does not
+      exist, which is an SPF **permerror**: strictly worse than publishing
+      nothing. Nothing may route direct before this applies.
+- [ ] Ingesting direct-route DSNs into `core.message_events` the way SES's
+      already are, via the VERP envelope sender.
+- [x] ~~i10's own bounce domain for the direct route.~~ **Superseded
+      2026-09-14** — the return path is the customer's `bounce.<domain>`, not a
+      name on i10.tech, so that SPF aligns. See "Custom MAIL FROM stays".
+- [x] ~~`MAIL_BOUNCE_HOST` pointing at a proxied name.~~ **Fixed 2026-09-14.**
+      It defaulted to `mx.i10.tech`, which resolves to Cloudflare's anycast
+      proxy and does not carry SMTP — every direct-route bounce would have been
+      delivered nowhere. Now `mail.i10.tech`, which is unproxied precisely
+      because `spf_include` names it with `a:`.
 - [x] ~~Which tier gets which route.~~ **Decided 2026-09-05: free sends direct,
       paid sends through SES**, with a per-domain override for support.
-      `resolveRoute` in `src/domains/route.ts`; `core.domains.delivery_route`
-      holds `auto | ses | direct`.
+      `resolveRoute` in `src/domains/route.ts`.
       ⚠ **`auto` is stored, not the resolved answer.** Freezing today's policy
       into rows would make a pricing change a backfill.
       ⚠ **Free is the default branch, not a special case** — anything not

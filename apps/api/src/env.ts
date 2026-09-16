@@ -278,8 +278,20 @@ const schema = z.object({
    * PASSES ON SPF FOR THE DIRECT ROUTE. Bouncing to a name on i10.tech instead
    * would need no customer record and would leave SPF unaligned with their
    * `From:` — DMARC would then be passing on DKIM alone.
+   *
+   * ⚠ IT MUST NAME AN UNPROXIED HOST, AND THE DEFAULT USED TO NOT. This was
+   * `mx.i10.tech`, which resolves to Cloudflare's anycast proxy
+   * (172.67.x, 104.21.x) rather than to the machine — and the proxy does not
+   * carry SMTP, so every bounce for a direct-routed message would have been
+   * delivered nowhere. `mail.i10.tech` is deliberately unproxied for exactly
+   * this reason; `infra/tofu/stacks/dns/main.tf` warns about the same trap for
+   * the apex, where `a:i10.tech` would authorise Cloudflare's range to send as
+   * every customer.
+   *
+   * ⚠ AND RFC 2181 FORBIDS AN MX TARGET THAT IS A CNAME. Whatever this names
+   * has to be an address record on a host that answers on port 25.
    */
-  MAIL_BOUNCE_HOST: z.string().min(1).default("mx.i10.tech"),
+  MAIL_BOUNCE_HOST: z.string().min(1).default("mail.i10.tech"),
 
   /**
    * i10's authoritative nameservers, for customers who delegate subdomains.
