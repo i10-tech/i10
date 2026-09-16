@@ -1,4 +1,6 @@
 import type { Transporter } from "nodemailer"
+import { describeError } from "../errors.js"
+import { domainOf } from "./address.js"
 import { signMessage } from "./dkim.js"
 import { buildRawMessage } from "./mime.js"
 import type { DomainSending } from "./signing-key.js"
@@ -38,7 +40,7 @@ export interface StalwartTransportOptions {
    * bounced to a label nobody published is a message with no working return
    * path, which is worse than one with no signature.
    */
-  domainSending: (domain: string) => Promise<DomainSending | null>
+  domainSending: (domain: string, tenantId: string) => Promise<DomainSending | null>
 }
 
 export function stalwartTransport(opts: StalwartTransportOptions): Transport {
@@ -49,27 +51,41 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
         return { status: "rejected", reason: `no domain in From: ${message.from}` }
       }
 
+      // ⚠ THE LOOKUP GETS ITS OWN try, AND CONFLATING IT WITH SIGNING COST REAL
+      // MAIL. `domainSending` is a database round trip, so it fails for reasons
+      // that say nothing about the message — a reset connection, a statement
+      // timeout, a failover. Sharing a catch with `signMessage` classified every
+      // one of those as `rejected`, which `handleBatch` treats as permanent: the
+      // row went to `failed` and a message that a retry seconds later would have
+      // delivered was destroyed instead.
+      let sending: DomainSending | null
+      try {
+        sending = await opts.domainSending(domain, message.tenantId)
+      } catch (err) {
+        return { status: "deferred", reason: describeError(err) }
+      }
+
+      // ⚠ REFUSED, NOT SENT UNSIGNED. A message we carry ourselves has no other
+      // aligned authentication to fall back on if SPF is broken by a forwarder,
+      // and sending it anyway would put the failure in the recipient's spam
+      // folder rather than in our own error count. A domain with no key is a
+      // provisioning bug, and this is where it becomes visible.
+      //
+      // ⚠ AND THIS IS `rejected` WHILE THE THROW ABOVE IS `deferred`, WHICH IS
+      // THE WHOLE DISTINCTION. A missing key reproduces exactly on every retry;
+      // a failed query does not.
+      if (!sending) {
+        return { status: "rejected", reason: `no DKIM key for ${domain}` }
+      }
+
       let raw: string
-      let sending: DomainSending | null = null
       try {
         const unsigned = buildRawMessage(message, message.attachments ?? [])
-        sending = await opts.domainSending(domain)
-
-        // ⚠ REFUSED, NOT SENT UNSIGNED. A message we carry ourselves has no
-        // other aligned authentication to fall back on if SPF is broken by a
-        // forwarder, and sending it anyway would put the failure in the
-        // recipient's spam folder rather than in our own error count. A domain
-        // with no key is a provisioning bug, and this is where it becomes
-        // visible.
-        if (!sending) {
-          return { status: "rejected", reason: `no DKIM key for ${domain}` }
-        }
-
         raw = await signMessage(unsigned, domain, sending.dkim)
       } catch (err) {
         // Building or signing failing is ours, not the network's, and retrying
         // it reproduces it exactly — so it is permanent rather than deferred.
-        return { status: "rejected", reason: describe(err) }
+        return { status: "rejected", reason: describeError(err) }
       }
 
       try {
@@ -120,29 +136,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
 function classify(err: unknown): SendOutcome {
   const code = (err as { responseCode?: number }).responseCode
   if (typeof code === "number" && code >= 500 && code < 600) {
-    return { status: "rejected", reason: describe(err) }
+    return { status: "rejected", reason: describeError(err) }
   }
-  return { status: "deferred", reason: describe(err) }
-}
-
-function describe(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-/**
- * ⚠ THE `From` MAY CARRY A DISPLAY NAME, so the domain is taken from inside the
- * angle brackets when there are any. `i10 test <noreply@pslhq.app>` otherwise
- * yields `pslhq.app>`, which is the same unwrapping bug `messageIdHeader` was
- * fixed for — and here it would produce a DKIM `d=` nothing can resolve.
- */
-function domainOf(from: string): string | null {
-  const angled = /<([^>]*)>\s*$/.exec(from)
-  const address = (angled?.[1] ?? from).trim()
-  const at = address.lastIndexOf("@")
-  if (at === -1) return null
-  const domain = address
-    .slice(at + 1)
-    .trim()
-    .toLowerCase()
-  return domain || null
+  return { status: "deferred", reason: describeError(err) }
 }

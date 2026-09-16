@@ -8,6 +8,33 @@ import { z } from "zod"
  * on real traffic. Failing here means the rollout never completes and the old
  * pod keeps serving.
  */
+/**
+ * Reads the SES kill switch out of its environment variable.
+ *
+ * ⚠ EXTRACTED SO IT CAN BE TESTED, AND IT NEEDED TO BE. Inline in the schema it
+ * was `raw !== "false"` — so `SES_ENABLED=0`, which is what somebody actually
+ * types at two in the morning, silently meant ENABLED. Every paid domain kept
+ * routing into the outage the switch was thrown to escape, with no log line and
+ * a variable that read as set in the config UI.
+ *
+ * ⚠ AN UNINTERPRETABLE VALUE THROWS RATHER THAN PICKING A SIDE. Defaulting
+ * either way is a guess about intent at the exact moment intent matters most;
+ * refusing to boot is loud, immediate, and cannot be misread.
+ *
+ * ⚠ AND ABSENT STILL MEANS ENABLED. The failure mode of defaulting off is every
+ * paying customer's mail silently moving to our own IP the first time this is
+ * missing from a config — a deliverability change nobody asked for, caused by a
+ * typo in a secret name.
+ */
+export function parseSesEnabled(value: string | undefined): boolean {
+  const raw = (value ?? "true").trim().toLowerCase()
+  if (["true", "1", "yes", "on"].includes(raw)) return true
+  if (["false", "0", "no", "off"].includes(raw)) return false
+  throw new Error(
+    `SES_ENABLED must be true/false (also 1/0, yes/no, on/off), got "${value}"`,
+  )
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -132,7 +159,14 @@ const schema = z.object({
   SES_ENABLED: z
     .string()
     .optional()
-    .transform((v) => (v ?? "true").trim().toLowerCase() !== "false"),
+    .transform((v, ctx) => {
+      try {
+        return parseSesEnabled(v)
+      } catch (err) {
+        ctx.addIssue({ code: "custom", message: (err as Error).message })
+        return z.NEVER
+      }
+    }),
 
   /**
    * Provider calls in flight per worker replica.

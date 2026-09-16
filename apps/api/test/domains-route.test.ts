@@ -70,3 +70,26 @@ describe("the operator kill switch", () => {
     expect(route({ sesEnabled: true, planId: "free" })).toBe("direct")
   })
 })
+
+describe("reading the kill switch out of the environment", () => {
+  /**
+   * ⚠ THE REGRESSION: `SES_ENABLED=0` USED TO MEAN ENABLED. The parser was
+   * `raw !== "false"`, so every conventional falsy spelling silently left SES
+   * on — on the one switch whose entire job is to be thrown mid-incident.
+   */
+  it("accepts the spellings an operator actually types", async () => {
+    const { parseSesEnabled } = await import("../src/env.js")
+    for (const on of ["true", "1", "yes", "on", "TRUE", " on ", undefined]) {
+      expect(parseSesEnabled(on)).toBe(true)
+    }
+    for (const off of ["false", "0", "no", "off", "OFF", " 0 "]) {
+      expect(parseSesEnabled(off)).toBe(false)
+    }
+  })
+
+  // ⚠ AND REFUSES ANYTHING ELSE RATHER THAN PICKING A SIDE.
+  it("throws on a value it cannot interpret", async () => {
+    const { parseSesEnabled } = await import("../src/env.js")
+    expect(() => parseSesEnabled("maybe")).toThrow(/SES_ENABLED/)
+  })
+})

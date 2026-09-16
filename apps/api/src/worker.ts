@@ -159,6 +159,13 @@ function directTransport(): Transport {
       auth: { user, pass: password },
       // One connection pool, reused across the batch's concurrency.
       pool: true,
+      // ⚠ IT MUST MATCH THE FAN-OUT OR IT SILENTLY BECOMES THE REAL LIMIT.
+      // nodemailer defaults a pool to five connections; `WORKER_CONCURRENCY`
+      // defaults to eight. Left alone, three of every eight direct sends queue
+      // behind the pool with nothing in the logs naming the ceiling, and the
+      // knob that env.ts documents as the throughput control is not the one
+      // deciding throughput.
+      maxConnections: env.WORKER_CONCURRENCY,
     }),
     // ⚠ THE BOUNCE LABEL COMES BACK ON THE SAME ROW AS THE KEY, because it is
     // per domain — `core.domains.bounce_subdomain` — and it is what the

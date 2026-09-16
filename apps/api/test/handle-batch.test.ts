@@ -33,6 +33,7 @@ const job = (count: number): SendJob => ({
 const SENT_AT = new Date("2026-09-02T10:00:01Z")
 
 function deps(over: Partial<BatchDeps> = {}) {
+  const baseTransport = fakeTransport()
   const log = { info: mock(), warn: mock(), error: mock() }
   const metering: Metering = {
     checkQuota: mock(),
@@ -43,13 +44,16 @@ function deps(over: Partial<BatchDeps> = {}) {
     markSent: mock(async () => SENT_AT),
     markFailed: mock(async () => {}),
     route: () => "ses" as const,
-    transportFor: () => fakeTransport(),
+    // ⚠ ONE INSTANCE, HOISTED. Returning `fakeTransport()` from the lambda built
+    // a fresh recorder per message, so the `sent` array every assertion would
+    // reach for was thrown away on each call and read as empty.
+    transportFor: () => baseTransport,
     metering,
     log,
     concurrency: 4,
     ...over,
   }
-  return { deps: base, log, metering }
+  return { deps: base, log, metering, transport: baseTransport }
 }
 
 describe("the happy path", () => {

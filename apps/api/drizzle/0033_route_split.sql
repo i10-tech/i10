@@ -58,10 +58,25 @@ ALTER TABLE "core"."messages"
 -- exclude everything before it. SES was the only transport the worker had, so
 -- the value is known rather than assumed — but only where we actually sent
 -- something, which is what the predicate says.
+--
+-- ⚠ IDEMPOTENT, SO A RE-RUN IS CHEAP RATHER THAN A SECOND FULL REWRITE. The
+-- `sent_route IS NULL` predicate means a migration replayed against a database
+-- that already has it touches no rows at all, and lets the backfill be finished
+-- out of band in batches if the table is ever big enough to matter.
+--
+-- ⚠ AND IT IS STILL ONE UNBOUNDED STATEMENT, WHICH IS A VOLUME BET RATHER THAN
+-- AN OVERSIGHT. `core.messages` is the billing record, so at a few million rows
+-- this rewrite and the index build below both block inserts for as long as they
+-- run — with the deploy's PreSync hook holding the rollout behind them. Batching
+-- it properly needs separate transactions, which a drizzle migration does not
+-- get, and `CREATE INDEX CONCURRENTLY` cannot run inside one either. If this
+-- table grows past comfortable, both move to a one-off job outside the
+-- migration rather than growing a batching loop in here.
 UPDATE "core"."messages"
    SET "provider_message_id" = "ses_message_id",
        "sent_route"          = 'ses'
- WHERE "status" = 'sent';
+ WHERE "status" = 'sent'
+   AND "sent_route" IS NULL;
 --> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS "messages_provider_id_idx"

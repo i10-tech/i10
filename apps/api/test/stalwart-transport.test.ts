@@ -110,6 +110,26 @@ describe("the direct transport", () => {
     expect(m.calls[0]?.envelope.from).toBe(`bounce+${msg.id}@bounce.example.com`)
   })
 
+  // ⚠ THE KEY MUST BELONG TO THE TENANT WHOSE MESSAGE THIS IS, not merely to
+  // whoever owns a row with that name — which is what scoping the lookup buys
+  // beyond fixing the RLS raise.
+  it("looks the key up for the sending message's own tenant", async () => {
+    const seen: { domain: string; tenantId: string }[] = []
+    const { t } = transport({
+      domainSending: async (domain: string, tenantId: string) => {
+        seen.push({ domain, tenantId })
+        return {
+          dkim: { selector: keypair.selector, privateKey: keypair.privateKey },
+          bounceSubdomain: "bounce",
+        }
+      },
+    })
+
+    await t.send(message({ tenantId: "ten-42" }))
+
+    expect(seen).toEqual([{ domain: "example.com", tenantId: "ten-42" }])
+  })
+
   /**
    * ⚠ BLIND COPY IS BLIND BECAUSE THE HEADER IS ABSENT. The envelope is the only
    * thing naming a bcc recipient; a `Bcc:` header would disclose them to
@@ -175,6 +195,25 @@ describe("classifying a submission failure", () => {
       })
       expect((await t.send(message())).status).toBe(status)
     }
+  })
+
+  /**
+   * ⚠ THE REGRESSION: A LOOKUP FAILURE IS NOT A VERDICT ON THE MESSAGE. This
+   * used to share a catch with signing and came back `rejected`, which
+   * handleBatch treats as permanent — so a momentary database blip marked a
+   * perfectly deliverable message `failed` and it was never retried.
+   */
+  it("defers when the key lookup itself fails, rather than failing the message", async () => {
+    const { t, mailer: m } = transport({
+      domainSending: async () => {
+        throw new Error('invalid input syntax for type uuid: ""')
+      },
+    })
+
+    const outcome = await t.send(message())
+
+    expect(outcome.status).toBe("deferred")
+    expect(m.sendMail).not.toHaveBeenCalled()
   })
 
   // ⚠ A SOCKET THAT NEVER OPENED SAYS NOTHING ABOUT THE MESSAGE.

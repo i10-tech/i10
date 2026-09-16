@@ -1,4 +1,5 @@
 import type { Attachment, Tag } from "@repo/contracts"
+import { domainOf } from "./address.js"
 
 /**
  * The boundary between i10 and whoever actually relays the mail.
@@ -85,15 +86,12 @@ export interface Transport {
  * RANDOM — it just does not survive SES. It survives a relay we run ourselves,
  * which writes the envelope rather than handing it to somebody who rewrites it.
  *
- * ⚠ THE ROUTE IS NOW RESOLVED PER MESSAGE AND THE TRANSPORT IS STILL A STUB.
- * `core.domains.transactional_route` is read on the claim, `resolveRoute`
- * decides, and `handleBatch` asks `transportFor` — so the seam is live and
- * `sent_route` records which way each message went. What is not built is the
- * direct transport itself: the worker registers one that answers `deferred`,
- * deliberately, rather than quietly falling back to SES and sending a domain
- * somebody pinned to `direct` through the route they moved it off. So this
- * header is emitted and discarded on every send today, and stays derived rather
- * than random so it is already correct on the day that stub is replaced.
+ * ⚠ SO THE HEADER SURVIVES ON ONE ROUTE AND NOT THE OTHER, AND `sent_route` ON
+ * THE ROW SAYS WHICH. `core.domains.transactional_route` is read on the claim,
+ * `resolveRoute` decides, and `handleBatch` asks `transportFor`; a direct-routed
+ * message keeps this header because `stalwartTransport` writes the envelope
+ * itself. An SES-routed one has it overwritten, which is why this stays derived
+ * rather than random — the value is already correct wherever it does survive.
  *
  * ⚠ AND db/claim.ts's TRADE IS WEAKER THAN IT READS FOR SES-ROUTED MAIL. Its
  * "a duplicate is a shrug" rests on receivers collapsing them; for SES that
@@ -115,18 +113,15 @@ export interface Transport {
  * until a valid header was sent and nothing changed.
  */
 export function messageIdHeader(id: string, fromAddress: string): string {
-  // `Name <addr>` → `addr`; a bare address is left as it is.
-  const angled = /<([^>]*)>\s*$/.exec(fromAddress)
-  const address = (angled?.[1] ?? fromAddress).trim()
-
-  const at = address.lastIndexOf("@")
-  const domain =
-    at === -1
-      ? "i10.tech"
-      : address
-          .slice(at + 1)
-          .trim()
-          .toLowerCase()
+  // ⚠ ONE PARSER, SHARED WITH THE DIRECT TRANSPORT. This used to carry its own
+  // copy of the unwrapping, and the Stalwart transport carried a second one with
+  // the same regex — see send/address.ts for why two copies of a parser that has
+  // already been fixed once is the thing worth removing.
+  //
+  // The fallback is ours rather than null: a From with no domain at all still
+  // needs a well-formed Message-ID, and i10.tech is the honest owner of one we
+  // had to invent.
+  const domain = domainOf(fromAddress) ?? "i10.tech"
   return `<${id}@${domain}>`
 }
 
