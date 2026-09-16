@@ -8,6 +8,7 @@ import {
 } from "../db/claim.js"
 import { withTenant, type Database } from "../db/client.js"
 import { messageBodies } from "../db/core.js"
+import type { RouteOverride } from "../domains/route.js"
 import type { SendJob } from "../queue/send-queue.js"
 import type { OutboundMessage } from "../send/transport.js"
 import type { BatchDeps } from "./handle-batch.js"
@@ -35,7 +36,23 @@ import type { BatchDeps } from "./handle-batch.js"
  * The transport never sees it: `OutboundMessage` is what crosses that boundary,
  * and this type only exists between the claim and the recording.
  */
-export type ClaimedMessage = OutboundMessage & { createdAt: Date }
+export type ClaimedMessage = OutboundMessage & {
+  createdAt: Date
+  /**
+   * The routing inputs, read on the same statement that won the row.
+   *
+   * ⚠ CARRIED RATHER THAN LOOKED UP AT SEND TIME. Resolving the route needs the
+   * domain's override and the tenant's plan, and fetching either per message
+   * would put two more round trips on the hot path of every send. The claim is
+   * already reading the row; these ride along on it.
+   *
+   * ⚠ AND `routeOverride` IS NULLABLE BECAUSE `domain_id` IS. A message with no
+   * domain has no override, which `resolveRoute` reads as `auto` — the same
+   * answer it would give for a domain that never set one.
+   */
+  routeOverride: RouteOverride | null
+  planId: string | null
+}
 
 type Row = Record<string, unknown>
 
@@ -88,6 +105,8 @@ export function databaseOps(
           return {
             id: String(row.id),
             createdAt: new Date(row.created_at as string),
+            routeOverride: (row.transactional_route as RouteOverride | null) ?? null,
+            planId: row.plan_id === null ? null : String(row.plan_id),
             tenantId: String(row.tenant_id),
             from: String(row.from_address),
             to: (row.to_addresses as string[] | null) ?? [],
@@ -108,9 +127,11 @@ export function databaseOps(
     // ⚠ RETURNS THE STORED `sent_at`, WHICH THE METER IS THEN BILLED ON. Null
     // means the row was not ours to record — the claim moved on — and the caller
     // must not invent a timestamp for a write that did not happen.
-    async markSent(message, providerMessageId) {
+    async markSent(message, providerMessageId, route) {
       const rows = (await withTenant(opts.db, message.tenantId, (tx) =>
-        tx.execute(markSentStatement(refOf(message), opts.workerId, providerMessageId)),
+        tx.execute(
+          markSentStatement(refOf(message), opts.workerId, providerMessageId, route),
+        ),
       )) as unknown as Row[]
 
       const at = rows[0]?.sent_at

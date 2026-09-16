@@ -19,7 +19,12 @@ import {
 } from "./queue/webhook-queue.js"
 import { postgresMetering } from "./metering/service.js"
 import { resilient } from "./send/metering.js"
+import { createTransport } from "nodemailer"
+import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
 import { sesTransport } from "./send/ses.js"
+import { domainSendingLookup } from "./send/signing-key.js"
+import { stalwartTransport } from "./send/stalwart.js"
+import type { Transport } from "./send/transport.js"
 import { webhookDeliveryOps } from "./webhooks/db.js"
 import { deliverWebhook } from "./webhooks/deliver.js"
 import { secretBox } from "./webhooks/signing.js"
@@ -97,10 +102,93 @@ try {
 const queueRedis = createQueueClient(env.REDIS_URL)
 queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
 
-const transport = sesTransport({
+const ses = sesTransport({
   client: new SESv2Client({ region: env.AWS_REGION }),
   configurationSetName: env.SES_CONFIGURATION_SET,
 })
+
+/**
+ * Our own MTA, when it is configured and the keys can be unsealed.
+ *
+ * ⚠ IT REFUSES RATHER THAN FALLS BACK TO SES, AND THAT IS THE WHOLE POINT OF
+ * BUILDING IT THIS WAY. A stub that quietly sent through SES would mean a
+ * domain pinned to `direct` — including every free tenant once the plan rule
+ * applies — leaving by the route somebody deliberately moved it off, with
+ * nothing in the logs saying so and `sent_route` recording `direct` either way.
+ * `deferred` keeps the message in the queue with its attempt counted, so
+ * nothing is lost and the backlog is what raises the alarm.
+ *
+ * ⚠ AND IT NEEDS `WEBHOOK_SECRET_KEY` AS MUCH AS IT NEEDS AN SMTP HOST. That is
+ * what seals the DKIM private keys; without it they cannot be opened, and a
+ * message signed with nothing is one that fails DMARC at the recipient.
+ */
+function directTransport(): Transport {
+  const host = env.STALWART_SUBMISSION_HOST
+  const user = env.STALWART_SUBMISSION_USER
+  const password = env.STALWART_SUBMISSION_PASSWORD
+
+  if (!host || !user || !password || !env.WEBHOOK_SECRET_KEY) {
+    const missing = [
+      !host && "STALWART_SUBMISSION_HOST",
+      !user && "STALWART_SUBMISSION_USER",
+      !password && "STALWART_SUBMISSION_PASSWORD",
+      !env.WEBHOOK_SECRET_KEY && "WEBHOOK_SECRET_KEY",
+    ].filter(Boolean)
+
+    log.warn({ missing }, "DIRECT ROUTE UNAVAILABLE — messages routed direct will wait")
+    return {
+      async send() {
+        return {
+          status: "deferred",
+          reason: `direct route not configured: ${missing.join(", ")} missing`,
+        }
+      },
+    }
+  }
+
+  return stalwartTransport({
+    mailer: createTransport({
+      host,
+      port: env.STALWART_SUBMISSION_PORT,
+      // ⚠ STARTTLS ON 587 RATHER THAN IMPLICIT TLS. `secure: true` would speak
+      // TLS from the first byte, which is 465's contract, not 587's — against a
+      // submission port that expects STARTTLS it hangs until the socket times
+      // out rather than failing with anything that names the cause.
+      secure: env.STALWART_SUBMISSION_PORT === 465,
+      requireTLS: true,
+      auth: { user, pass: password },
+      // One connection pool, reused across the batch's concurrency.
+      pool: true,
+    }),
+    // ⚠ THE BOUNCE LABEL COMES BACK ON THE SAME ROW AS THE KEY, because it is
+    // per domain — `core.domains.bounce_subdomain` — and it is what the
+    // customer actually published. The transport builds the VERP envelope from
+    // it; see docs/decisions/mail-routing.md.
+    domainSending: domainSendingLookup({
+      db,
+      secrets: secretBox(env.WEBHOOK_SECRET_KEY),
+    }),
+  })
+}
+
+// ⚠ BOTH ARE BUILT AT STARTUP, NOT PER MESSAGE. A transport owns a client and a
+// connection pool; constructing one inside the send path would open a socket per
+// message and make the route decision expensive enough to matter.
+const transports: Record<DeliveryRoute, Transport> = {
+  ses,
+  direct: directTransport(),
+}
+
+// ⚠ RESOLVED FROM WHAT THE CLAIM READ, NOT FROM A FRESH LOOKUP. The override and
+// the plan came back on the statement that won the row, so this is pure — and
+// the same rule the dashboard and Stalwart read. See domains/route.ts.
+const routeFor = (message: ClaimedMessage): DeliveryRoute =>
+  resolveRoute({
+    override: message.routeOverride ?? "auto",
+    planId: message.planId,
+    freePlanId: env.METERING_FREE_PLAN_ID,
+    sesEnabled: env.SES_ENABLED,
+  })
 
 // ⚠ THE WORKER METERS TOO, AND ITS HALF IS THE ONE THAT BILLS. The API checks
 // quota; this records what actually went — and it writes to the same
@@ -137,7 +225,8 @@ function startWorker(cls: SendClass) {
     handler: (job) =>
       handleBatch<ClaimedMessage>(reviveSendJob(job.data), {
         ...ops,
-        transport,
+        route: routeFor,
+        transportFor: (route) => transports[route],
         metering,
         log,
         // A message whose outcome could not be written down is our failure, not

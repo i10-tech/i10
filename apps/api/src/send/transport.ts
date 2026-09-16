@@ -82,13 +82,18 @@ export interface Transport {
  * so a retry that reproduced this value exactly would arrive as one message.
  *
  * ⚠ THAT REASONING IS STILL SOUND AND IS STILL WHY THIS IS DERIVED RATHER THAN
- * RANDOM — it just does not survive SES. It would survive a relay we run
- * ourselves, which writes the envelope rather than handing it to somebody who
- * rewrites it. `core.domains.delivery_route` anticipates exactly that, but NO
- * SUCH TRANSPORT EXISTS: the worker builds `sesTransport` and nothing reads
- * that column. So this header is currently emitted and discarded on every send,
- * and is kept derived rather than random so it is already correct on the day a
- * direct transport lands.
+ * RANDOM — it just does not survive SES. It survives a relay we run ourselves,
+ * which writes the envelope rather than handing it to somebody who rewrites it.
+ *
+ * ⚠ THE ROUTE IS NOW RESOLVED PER MESSAGE AND THE TRANSPORT IS STILL A STUB.
+ * `core.domains.transactional_route` is read on the claim, `resolveRoute`
+ * decides, and `handleBatch` asks `transportFor` — so the seam is live and
+ * `sent_route` records which way each message went. What is not built is the
+ * direct transport itself: the worker registers one that answers `deferred`,
+ * deliberately, rather than quietly falling back to SES and sending a domain
+ * somebody pinned to `direct` through the route they moved it off. So this
+ * header is emitted and discarded on every send today, and stays derived rather
+ * than random so it is already correct on the day that stub is replaced.
  *
  * ⚠ AND db/claim.ts's TRADE IS WEAKER THAN IT READS FOR SES-ROUTED MAIL. Its
  * "a duplicate is a shrug" rests on receivers collapsing them; for SES that

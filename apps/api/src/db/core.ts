@@ -138,6 +138,18 @@ export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
  */
 export const deliveryRoute = core.enum("delivery_route", ["auto", "ses", "direct"])
 
+/**
+ * Which MTA actually carried one message. Stamped by the worker at send.
+ *
+ * ⚠ A SEPARATE TYPE FROM `delivery_route` BECAUSE `auto` IS NOT AN ANSWER. The
+ * column above is a stored PREFERENCE and may say "ask the plan"; this one is
+ * the record of what happened, and a message that was sent went one way or the
+ * other. Reusing the override's type here would make `auto` representable on a
+ * row describing the past, and the reporting query that counts direct against
+ * SES would silently have a third bucket nobody meant to create.
+ */
+export const sentRoute = core.enum("sent_route", ["ses", "direct"])
+
 export const domainStatus = core.enum("domain_status", [
   /** No identity has been created yet. */
   "not_started",
@@ -259,14 +271,47 @@ export const domains = core.table(
     bounceSubdomain: text("bounce_subdomain").notNull().default("bounce"),
 
     /**
-     * Which MTA this domain's mail leaves through. `auto` asks the plan.
+     * Which MTA this domain's API mail leaves through. `auto` asks the plan.
      *
      * ⚠ ON THE DOMAIN, NOT THE TENANT, BECAUSE DELIVERABILITY IS PER DOMAIN. A
      * customer with a warmed sending domain and a brand-new one has different
      * needs for each, and a tenant-level switch would force the same answer on
      * both.
+     *
+     * ⚠ THIS WAS ONE COLUMN CALLED `delivery_route` AND ONE VALUE COULD NOT SAY
+     * ENOUGH. A domain has two kinds of mail leaving it — what the API sends
+     * and what its mailboxes send — and they are different products with
+     * different economics. One column forced the same answer on both, so a
+     * customer whose people send through our own MTA could not also have their
+     * transactional traffic on SES. Split 2026-09-16; the old column became
+     * this one, so every existing preference kept applying to API mail.
+     */
+    transactionalRoute: deliveryRoute("transactional_route").notNull().default("auto"),
+
+    /**
+     * @deprecated Superseded by `transactionalRoute`. Dropped in a follow-up.
+     *
+     * ⚠ STILL HERE BECAUSE A RENAME IS NOT SAFE IN ONE DEPLOY. `ALTER TABLE
+     * RENAME COLUMN` is instant, but between the migration and the last old pod
+     * rolling there are readers in flight expecting the old name, and they fail
+     * for the width of the rollout. Expand, backfill, switch readers, contract:
+     * this column is backfilled into `transactional_route` by migration and
+     * read by nothing from 2026-09-16.
      */
     deliveryRoute: deliveryRoute("delivery_route").notNull().default("auto"),
+
+    /**
+     * Which MTA this domain's MAILBOX mail leaves through. `auto` asks the plan.
+     *
+     * ⚠ STORED AND RENDERED, AND READ BY NOTHING YET. Stalwart chooses the
+     * mailbox route itself by evaluating an expression against its own queue,
+     * and that expression — plus the SES SMTP relay behind it — is not built.
+     * The column exists so the preference has somewhere to live and the API can
+     * answer with it; see docs/decisions/mail-routing.md. It is the same shape
+     * of promise `delivery_route` made before anything read that either, which
+     * is exactly why the note is here rather than implied.
+     */
+    mailboxRoute: deliveryRoute("mailbox_route").notNull().default("auto"),
 
     /**
      * Whether i10 serves this domain's mail records from its own nameservers.
@@ -553,8 +598,42 @@ export const messages = core.table(
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
 
-    /** SES's id for the accepted message, and the join key for its events. */
+    /**
+     * The relaying MTA's own id for the accepted message, and the join key for
+     * its events.
+     *
+     * ⚠ THIS WAS `ses_message_id`, AND THE NAME WAS A ROUTING ASSUMPTION IN A
+     * COLUMN. A direct-routed message has no SES id — it has whatever our own
+     * MTA called it — so the old name would have meant writing a Stalwart queue
+     * id into a column named for Amazon, and every reader would have had to
+     * know that. Renamed 2026-09-16 alongside `sent_route`, which says which
+     * provider the id belongs to.
+     */
+    providerMessageId: text("provider_message_id"),
+
+    /**
+     * @deprecated Superseded by `providerMessageId`. Dropped in a follow-up.
+     *
+     * ⚠ SAME EXPAND-AND-CONTRACT AS `delivery_route` ON `core.domains`, and it
+     * matters more here: this table is the billing record, and the SES
+     * reconcilers read it on a schedule. A column that vanished under a running
+     * reconciler would turn a repair pass into an error pass. Backfilled into
+     * `provider_message_id` by migration and read by nothing from 2026-09-16.
+     */
     sesMessageId: text("ses_message_id"),
+
+    /**
+     * Which MTA carried it. Null until the worker has actually sent it.
+     *
+     * ⚠ NULLABLE ON PURPOSE: A QUEUED MESSAGE HAS NOT BEEN ROUTED YET. The
+     * route is resolved at send, not at admission, because the domain's
+     * preference or the tenant's plan can change while a message sits in the
+     * queue — and stamping it early would record an intention rather than a
+     * fact. It is also what makes "how much went direct" answerable without
+     * joining anything.
+     */
+    sentRoute: sentRoute("sent_route"),
+
     lastError: text("last_error"),
   },
   (t) => [
@@ -564,6 +643,7 @@ export const messages = core.table(
     // Every dashboard list is "this tenant's recent messages".
     index("messages_tenant_recent_idx").on(t.tenantId, t.createdAt),
     index("messages_ses_id_idx").on(t.sesMessageId),
+    index("messages_provider_id_idx").on(t.providerMessageId),
   ],
 )
 

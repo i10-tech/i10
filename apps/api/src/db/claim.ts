@@ -28,14 +28,18 @@ import { sql, type SQL } from "drizzle-orm"
  * duplicate is a shrug. One thing narrows it — the window is one statement wide,
  * because the result is written immediately after the call returns.
  *
- * ⚠ THE SECOND MITIGATION THIS USED TO CLAIM DOES NOT HOLD ON SES. The retry
- * does reuse the same RFC 5322 Message-ID, derived from the row's id, and
- * receiving systems do collapse duplicates on it — but SES overwrites that
- * header with its own before delivery, so each retry carries a different one and
- * arrives as a visibly separate email. Measured, and documented in AWS's
- * SendRawEmail reference. It would hold on a relay we run ourselves, which
- * `core.domains.delivery_route` anticipates and which does not exist yet — SES
- * is the only transport the worker has. See send/transport.ts.
+ * ⚠ THE SECOND MITIGATION HOLDS ON ONE ROUTE AND NOT THE OTHER. The retry
+ * reuses the same RFC 5322 Message-ID, derived from the row's id, and receiving
+ * systems collapse duplicates on it — but SES overwrites that header with its
+ * own before delivery, so each SES retry carries a different one and arrives as
+ * a visibly separate email. Measured, and documented in AWS's SendRawEmail
+ * reference.
+ *
+ * ⚠ ON THE DIRECT ROUTE IT DOES HOLD, because we write the envelope rather than
+ * handing it to somebody who rewrites it. So the trade above is the honest
+ * description of an SES-routed message and a pessimistic one for a direct
+ * message, and `sent_route` on the row says which a given message was. See
+ * send/transport.ts.
  */
 
 /**
@@ -129,7 +133,25 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
            )
     returning m.id, m.created_at, m.tenant_id, m.queue, m.attempts,
               m.from_address, m.to_addresses, m.cc_addresses, m.bcc_addresses,
-              m.reply_to, m.subject
+              m.reply_to, m.subject,
+              -- ⚠ CORRELATED SUBQUERIES, NOT JOINS IN THE FROM CLAUSE, AND
+              -- THE DIFFERENCE IS WHICH ROWS GET CLAIMED AT ALL. Adding
+              -- core.domains to FROM makes it an inner join: a message whose
+              -- domain_id is null -- which the column allows -- would stop
+              -- matching and would silently never be claimed, appearing as mail
+              -- that is queued forever with no error anywhere. A subquery in
+              -- RETURNING yields null instead, which resolveRoute reads as
+              -- "no override".
+              (select d.transactional_route
+                 from core.domains d
+                where d.id = m.domain_id) as transactional_route,
+              -- The plan is per tenant and a batch is per tenant, so this is
+              -- the same value on every row. It rides along anyway rather than
+              -- being fetched separately: one statement cannot disagree with
+              -- itself halfway through a batch the way two can.
+              (select p.plan_id
+                 from core.plan_assignments p
+                where p.tenant_id = m.tenant_id) as plan_id
   `
 }
 
@@ -146,21 +168,28 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
  * ⚠ GUARDED ON `status = 'sending'` AND ON THE CLAIM. A worker whose lease
  * expired mid-send may still be alive and may still reach this line, by which
  * time another worker owns the row and may already have sent it. Writing
- * unconditionally would overwrite the second worker's `ses_message_id` with the
- * first's, and the event stream would then join to a message id we no longer
- * hold — a delivery that appears to belong to nothing.
+ * unconditionally would overwrite the second worker's `provider_message_id`
+ * with the first's, and the event stream would then join to a message id we no
+ * longer hold — a delivery that appears to belong to nothing.
+ *
+ * ⚠ `sent_route` IS WRITTEN HERE AND NOWHERE ELSE, FOR THE SAME REASON AS THE
+ * id BESIDE IT. Both are facts about the attempt that actually succeeded, so
+ * they are stamped by the same guarded statement: a row can never end up
+ * claiming SES carried it while holding an id our own MTA issued.
  */
 export function markSentStatement(
   ref: MessageRef,
   workerId: string,
-  sesMessageId: string,
+  providerMessageId: string,
+  route: "ses" | "direct",
 ): SQL {
   return sql`
     update core.messages
-       set status         = 'sent',
-           sent_at        = now(),
-           ses_message_id = ${sesMessageId},
-           last_error     = null
+       set status              = 'sent',
+           sent_at             = now(),
+           provider_message_id = ${providerMessageId},
+           sent_route          = ${route},
+           last_error          = null
      where id = ${ref.id}::uuid
        and created_at = ${ref.createdAt.toISOString()}::timestamptz
        and status = 'sending'

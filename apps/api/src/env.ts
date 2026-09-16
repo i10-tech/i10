@@ -116,6 +116,25 @@ const schema = z.object({
   SES_CONFIGURATION_SET: z.string().min(1),
 
   /**
+   * The operator kill switch. `false` routes every send through our own MTA.
+   *
+   * ⚠ IT IS A SWITCH A PERSON THROWS, AND THERE IS DELIBERATELY NO HEALTH PROBE
+   * BEHIND IT. `Transport` already handles SES being slow or throttling — those
+   * come back `deferred` and the message waits. This is for the case that
+   * outlasts a queue: SES down for long enough that waiting stops being the
+   * right answer. See `resolveRoute`, which is where it is read.
+   *
+   * ⚠ DEFAULTS TO ENABLED, AND IT HAS TO. The failure mode of defaulting off is
+   * every paying customer's mail silently moving to our own IP the first time
+   * this variable is missing from a config — a deliverability change nobody
+   * asked for, caused by a typo in a secret name.
+   */
+  SES_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "true").trim().toLowerCase() !== "false"),
+
+  /**
    * Provider calls in flight per worker replica.
    *
    * ⚠ IT IS A QUOTA KNOB AS MUCH AS A THROUGHPUT ONE. SES caps a send RATE in
@@ -322,6 +341,24 @@ const schema = z.object({
    */
   STALWART_URL: z.url().optional(),
   STALWART_API_TOKEN: z.string().min(1).optional(),
+
+  /**
+   * Stalwart's SMTP submission endpoint, for the direct route.
+   *
+   * ⚠ SUBMISSION, NOT PORT 25, AND NOT THE SAME THING AS `STALWART_URL`. That
+   * one is the management API, used to sample mailbox storage. This is where a
+   * finished message is handed over for queueing and delivery.
+   *
+   * ⚠ ALL THREE ARE OPTIONAL SO THE WORKER STARTS WITHOUT THEM, AND THE DIRECT
+   * TRANSPORT REFUSES TO SEND WHEN THEY ARE ABSENT. The alternative — requiring
+   * them — makes every deployment that only ever uses SES fail to boot over a
+   * route it does not take. The refusal is `deferred`, so the mail waits in the
+   * queue rather than being lost, and the backlog is the alarm.
+   */
+  STALWART_SUBMISSION_HOST: z.string().min(1).optional(),
+  STALWART_SUBMISSION_PORT: z.coerce.number().int().positive().default(587),
+  STALWART_SUBMISSION_USER: z.string().min(1).optional(),
+  STALWART_SUBMISSION_PASSWORD: z.string().min(1).optional(),
 
   MAIL_NAMESERVERS: z
     .string()

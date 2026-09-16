@@ -264,9 +264,11 @@ being a single point of failure — it has to increase on every write.
       provisioning into Stalwart, which nothing does, and that arrives with
       `hosts_mailboxes`. `core.domains.mailbox_route` is stored and rendered in
       the meantime and **read by nothing**, exactly as `delivery_route` was.
-- [x] ~~The transactional lever.~~ **Building 2026-09-14.** A `stalwartTransport`
+- [x] ~~The transactional lever.~~ **Built 2026-09-16.** `stalwartTransport`
       beside `sesTransport`, selected per message from
-      `core.domains.transactional_route`.
+      `core.domains.transactional_route`. The worker signs with the domain's own
+      DKIM key before submitting over SMTP, so one key serves both routes and
+      the message a recipient gets does not depend on which MTA carried it.
       ⚠ **THE ROUTE IS PER CLASS, NOT PER DOMAIN, AND ONE COLUMN COULD NOT SAY
       SO.** `delivery_route` was a single value, so it could not express a
       customer whose humans send through our MTA while their API traffic goes
@@ -287,9 +289,17 @@ being a single point of failure — it has to increase on every write.
       the return path was ours.
       ⚠ **THE WORKER SIGNS BEFORE SUBMISSION** so Stalwart needs no per-domain
       key and no config push per customer, and the key stays where
-      `secrets.unseal` already lives. Canonicalization is taken from a library:
+      `secrets.open` already lives. Canonicalization is taken from a library:
       relaxed/relaxed folding and body-hash CRLF rules are where hand-rolled
       signers fail silently and late.
+      ⚠ **AND mailauth@5's TYPES DISAGREE WITH ITS RUNTIME, WHICH COST A ROUND
+      OF THIS.** `DKIMSignOptions` requires `signingDomain`, `selector` and
+      `privateKey` at the top level and marks `signatureData` optional. Passing
+      them the way the types demand returns `{ signatures: "\r\n", errors: [] }`
+      — no signature, no error — and the message goes out unsigned. The call
+      uses `signatureData` with a cast, and `signMessage` rejects a
+      whitespace-only signature rather than a falsy one, because the empty
+      answer is `"\r\n"` and a truthy-check misses it.
 - [x] ~~Automatic failover when SES is unhealthy.~~ **Rejected 2026-09-14 in
       favour of an operator kill switch** (`SES_ENABLED`, an input to
       `resolveRoute`). `Transport` already absorbs a bad SES day: a throttle or
@@ -317,8 +327,22 @@ being a single point of failure — it has to increase on every write.
       Until it is, every `bounce.<domain>` TXT includes a domain that does not
       exist, which is an SPF **permerror**: strictly worse than publishing
       nothing. Nothing may route direct before this applies.
-- [ ] Ingesting direct-route DSNs into `core.message_events` the way SES's
-      already are, via the VERP envelope sender.
+- [ ] **Ingesting direct-route DSNs into `core.message_events`.** The envelope
+      sender is already VERP — `bounce+<messageId>@bounce.<domain>` — so the id
+      comes back on the DSN and correlating one is a parse. What does not exist
+      is anything receiving them: Stalwart accepts no inbound for customer
+      `bounce.` domains, and nothing parses a DSN into an event.
+      ⚠ **UNTIL THIS LANDS, A DIRECT-ROUTED MESSAGE HAS NO `delivered`,
+      `bounced` OR `complained`** — `core.message_events` is written only by the
+      SES ingest. `ses_unconfirmed_snapshot` no longer reports those rows as
+      discrepancies (0033), so the silence is at least not also an alarm, but a
+      customer watching webhooks sees a message that stops at `sent`.
+- [ ] **Stalwart's submission account and the NetworkPolicy to reach it.** The
+      worker dials `STALWART_SUBMISSION_HOST`; nothing creates the credential it
+      authenticates with, and `infra/k8s/i10/stalwart/networkpolicy.yaml` does
+      not admit the API pods on 587. Without both, every direct send answers
+      `deferred` and waits in the queue — which is the designed failure, not a
+      silent one.
 - [x] ~~i10's own bounce domain for the direct route.~~ **Superseded
       2026-09-14** — the return path is the customer's `bounce.<domain>`, not a
       name on i10.tech, so that SPF aligns. See "Custom MAIL FROM stays".
