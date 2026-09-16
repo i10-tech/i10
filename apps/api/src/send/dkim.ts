@@ -1,4 +1,4 @@
-import { dkimSign } from "mailauth"
+import DKIM from "nodemailer/lib/dkim"
 
 /**
  * Signing a message as the customer's domain, on the route we carry ourselves.
@@ -22,6 +22,19 @@ import { dkimSign } from "mailauth"
  * the body hash's trailing-CRLF rules and the header-ordering requirements are
  * where hand-rolled signers fail — and they fail SILENTLY and LATE, producing a
  * signature that verifies nowhere while looking correct in every log we keep.
+ *
+ * ⚠ THE LIBRARY IS NODEMAILER'S, NOT mailauth'S, AS OF 2026-09-16. Both produced
+ * a BYTE-IDENTICAL BODY HASH for the same message and key, which is the part
+ * that has to match; the signatures differ only because they cover different
+ * header sets. mailauth cost 1.4 MB and ten transitive dependencies for one
+ * function out of a full SPF/DKIM/DMARC/ARC/BIMI suite — including a `joi` with
+ * its own advisories, and a `nodemailer` pinned to a vulnerable 9.0.4 that
+ * needed a scoped override to patch. nodemailer was already a dependency here
+ * for SMTP submission, so this is one library for the whole mail subsystem.
+ *
+ * ⚠ AND `nodemailer/lib/dkim` IS A DECLARED PUBLIC SUBPATH, not a reach into
+ * `dist/`. Its `exports` map publishes it deliberately; the deep path is blocked
+ * and should stay that way.
  */
 
 export interface DkimKey {
@@ -41,52 +54,74 @@ export interface DkimKey {
  * the direct route would make the route observable in the message, and the
  * first bug it caused would look like a mail-client rendering quirk.
  */
+/**
+ * The headers the signature covers.
+ *
+ * ⚠ SET EXPLICITLY RATHER THAN INHERITED, BECAUSE THE DEFAULT IS NARROWER THAN
+ * IT LOOKS. nodemailer defaults to `from:subject:date:to` — four headers. `From`
+ * alone is what DMARC alignment needs, so the default is not wrong, but every
+ * header left out is one an intermediary can rewrite without breaking the
+ * signature. These are the headers `buildRawMessage` actually emits.
+ *
+ * ⚠ A HEADER NAMED HERE THAT THE MESSAGE DOES NOT CARRY IS SIMPLY DROPPED, so
+ * this list does not have to be conditional on whether a given message has a
+ * `Cc`. Measured rather than assumed: a message without `Cc` or `Reply-To`
+ * signs `from:to:subject:date:message-id:mime-version:content-type:
+ * content-transfer-encoding`, and the same message with both signs those two as
+ * well. (RFC 6376 §5.4 would also permit signing an absent header as empty —
+ * nodemailer does not do that, and the outcome here is the same either way.)
+ */
+const SIGNED_HEADERS = [
+  "from",
+  "to",
+  "cc",
+  "reply-to",
+  "subject",
+  "date",
+  "message-id",
+  "mime-version",
+  "content-type",
+  "content-transfer-encoding",
+].join(":")
+
 export async function signMessage(
   raw: string,
   domain: string,
   key: DkimKey,
 ): Promise<string> {
-  // mailauth wants PEM; the column holds bare base64 DER, which is what
+  // The signer wants PEM; the column holds bare base64 DER, which is what
   // `generateDkimKeypair` produces and what the SES upload expects.
   const pem = toPem(key.privateKey)
 
-  // ⚠ `signatureData`, NOT THE TOP-LEVEL FIELDS ITS TYPES DEMAND, AND THE CAST
-  // IS THERE BECAUSE mailauth@5's `.d.ts` DISAGREES WITH ITS OWN RUNTIME.
-  // `DKIMSignOptions` marks `signingDomain`, `selector` and `privateKey` as
-  // required at the top level and `signatureData` as optional. Passing them the
-  // way the types ask returns `{ signatures: "\r\n", errors: [] }` — no
-  // signature, no error, no clue — and the message goes out unsigned. Measured
-  // both ways against 5.0.3 on 2026-09-16.
-  const result = (await dkimSign(raw, {
-    canonicalization: "relaxed/relaxed",
-    algorithm: "rsa-sha256",
-    signatureData: [{ signingDomain: domain, selector: key.selector, privateKey: pem }],
-  } as never)) as { signatures?: string; errors?: Error[] }
+  const signer = new DKIM({
+    domainName: domain,
+    keySelector: key.selector,
+    privateKey: pem,
+    hashAlgo: "sha256",
+    headerFieldNames: SIGNED_HEADERS,
+  })
 
-  // ⚠ `errors` IS POPULATED WITHOUT THROWING, so a signer that failed returns a
-  // result like any other and an empty `signatures` is the only symptom. Left
-  // unchecked this would prepend nothing and send an unsigned message that our
-  // own logs would call signed.
-  if (result.errors?.length) {
-    throw new Error(
-      `DKIM signing failed for ${domain}: ${result.errors.map((e) => e.message).join("; ")}`,
-    )
+  const chunks: Buffer[] = []
+  for await (const chunk of signer.sign(raw)) {
+    chunks.push(Buffer.from(chunk as Buffer))
   }
-  // ⚠ THE EMPTY ANSWER IS `"\r\n"`, NOT `""`, SO A FALSY CHECK MISSES IT. That
-  // is precisely how the types-versus-runtime mismatch above reached a passing
-  // test once: a truthy string got prepended, the message looked signed in
-  // every log, and no verifier anywhere would have accepted it.
-  const header = result.signatures
-  if (!header?.trim()) {
+  const signed = Buffer.concat(chunks).toString("utf8")
+
+  // ⚠ AN UNUSABLE KEY PRODUCES UNSIGNED OUTPUT AND NO ERROR, so this check is
+  // the whole guard and not a formality. Measured against both signers: hand
+  // either one a key it cannot load and it returns the message essentially
+  // untouched, with nothing thrown and nothing logged. Without this the send
+  // path would hand Stalwart an unsigned message and record it as signed.
+  if (!/^DKIM-Signature:/i.test(signed)) {
     throw new Error(`DKIM signing produced no signature for ${domain}`)
   }
 
-  // ⚠ PREPENDED, NOT APPENDED, AND NOT INSERTED AMONG THE OTHERS. RFC 6376 §3.5
-  // lets a verifier find the header anywhere, but relaxed canonicalization
-  // hashes the headers named in `h=` in the order they appear — and a signature
-  // placed after a header it covers is the classic way to produce one that
-  // verifies for the signer and fails for everybody else.
-  return header + raw
+  // ⚠ THE SIGNER PREPENDS, AND THAT MATTERS RATHER THAN BEING INCIDENTAL. RFC
+  // 6376 §3.5 lets a verifier find the header anywhere, but relaxed
+  // canonicalization hashes the headers named in `h=` in the order they appear —
+  // and a signature placed after a header it covers is the classic way to
+  // produce one that verifies for the signer and fails for everybody else.
+  return signed
 }
 
 /**

@@ -111,11 +111,28 @@ const schema = z.object({
         .filter(Boolean),
     ),
 
-  // ⚠ THIS NUMBER IS HOW LONG A REVOKED KEY KEEPS WORKING. Verification is a
-  // network call to Clerk on every send, so it is cached — and the TTL is the
-  // whole trade. Longer means less Clerk on the critical path and a longer
-  // window where a key someone revoked in a panic still sends mail.
-  API_KEY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
+  /**
+   * How long a verified key stays cached. One hour.
+   *
+   * ⚠ THE COMMENT HERE USED TO SAY THIS WAS HOW LONG A REVOKED KEY KEEPS
+   * WORKING, AND THAT STOPPED BEING TRUE TWICE OVER. It was written when
+   * verification was a network call to Clerk on every send, so the TTL traded
+   * third-party latency against revocation lag. Migration 0031 moved keys into
+   * `core.api_keys`, and `index.ts` now passes `keyLookup(db)` — an indexed
+   * lookup on our own table. There is no longer a Clerk round trip to save.
+   *
+   * ⚠ AND REVOCATION DOES NOT WAIT FOR THIS TO EXPIRE. `routes/api-keys.ts`
+   * deletes the cache entry on both revoke and rotate, keyed on the same secret
+   * hash the verifier caches under — so a key revoked through the API stops
+   * working at once, whatever this says. The TTL is the window only for a key
+   * revoked OUT OF BAND: a direct UPDATE against the table, or a restore that
+   * rolls one back.
+   *
+   * ⚠ THE CEILING WAS 300 AND SILENTLY REFUSED ANYTHING LARGER. A deployment
+   * that set fifteen minutes did not get fifteen minutes — it failed schema
+   * validation at boot, which is loud, but only if somebody read the log.
+   */
+  API_KEY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(3600),
 
   // ⚠ THE DOMAINS i10 ACTUALLY HOSTS MAIL FOR. Only addresses in these domains
   // may enter the projection, because a row there makes Stalwart treat the
