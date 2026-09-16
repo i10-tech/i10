@@ -110,6 +110,26 @@ describe("the direct transport", () => {
     expect(m.calls[0]?.envelope.from).toBe(`bounce+${msg.id}@bounce.example.com`)
   })
 
+  /**
+   * ⚠ THE RECORDED ID MUST RESOLVE TO SOMETHING. It used to be nodemailer's
+   * client-side UUID, which is never sent and which Stalwart never sees — a
+   * column of values that look like ids and identify nothing. Stalwart's 250
+   * carries no queue id to use instead (`250 2.0.0 Message queued for
+   * delivery.`), so the honest identifier is the `Message-ID` we wrote, which
+   * reaches the wire unmodified and appears in Stalwart's logs.
+   */
+  it("records the Message-ID it actually sent, not the mailer's own id", async () => {
+    const { t, mailer: m } = transport()
+    const msg = message()
+
+    const outcome = await t.send(msg)
+
+    const expected = `<${msg.id}@example.com>`
+    expect(outcome).toEqual({ status: "sent", providerMessageId: expected })
+    // And it is the same value that went on the wire.
+    expect(m.calls[0]?.raw).toContain(`Message-ID: ${expected}`)
+  })
+
   // ⚠ THE KEY MUST BELONG TO THE TENANT WHOSE MESSAGE THIS IS, not merely to
   // whoever owns a row with that name — which is what scoping the lookup buys
   // beyond fixing the RLS raise.

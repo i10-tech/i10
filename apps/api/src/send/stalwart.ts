@@ -4,7 +4,12 @@ import { domainOf } from "./address.js"
 import { signMessage } from "./dkim.js"
 import { buildRawMessage } from "./mime.js"
 import type { DomainSending } from "./signing-key.js"
-import type { OutboundMessage, SendOutcome, Transport } from "./transport.js"
+import {
+  messageIdHeader,
+  type OutboundMessage,
+  type SendOutcome,
+  type Transport,
+} from "./transport.js"
 
 /**
  * Our own MTA as the relay.
@@ -89,7 +94,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
       }
 
       try {
-        const info = await opts.mailer.sendMail({
+        await opts.mailer.sendMail({
           raw,
           envelope: {
             // ⚠ VERP, AND THE CUSTOMER'S OWN DOMAIN. The label is theirs and is
@@ -107,9 +112,39 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
           },
         })
 
-        const id = (info as { messageId?: string }).messageId
+        // ⚠ OUR OWN Message-ID, NOT `info.messageId`, AND NOT A QUEUE ID FROM
+        // THE RESPONSE — BECAUSE NEITHER OF THOSE IDENTIFIES ANYTHING.
+        //
+        // `info.messageId` is a UUID nodemailer generates client-side for its
+        // own return value. It is never sent, Stalwart never sees it, and
+        // nothing can be looked up by it. Storing it made
+        // `core.messages.provider_message_id` a column of numbers that resolve
+        // nowhere — which is how it shipped, and is what this replaces.
+        //
+        // ⚠ AND STALWART'S 250 CARRIES NO ID TO PARSE INSTEAD. It answers
+        // `250 2.0.0 Message queued for delivery.` — no queue identifier, unlike
+        // Postfix's `queued as ABC123`. There is nothing in the response to
+        // reach for.
+        //
+        // What DOES identify the message is the header we wrote ourselves.
+        // `mime.ts` emits `messageIdHeader(id, from)`, it reaches the wire
+        // unmodified (measured — SES overwrites it, Stalwart does not), it is
+        // covered by the DKIM signature, and it is the value that appears in
+        // Stalwart's logs and in any DSN a receiving server generates. So on
+        // this route the column means "the id this message travels under",
+        // which is the same question it answers for SES.
+        //
+        // ⚠ IT IS DERIVABLE FROM `messages.id`, AND IS STILL STORED. Recomputing
+        // it at read time would mean every reader knowing the derivation and
+        // re-deriving it identically — including the display-name unwrapping
+        // that has been wrong once already. One column, written once, by the
+        // same function that wrote the header.
+        const id = messageIdHeader(message.id, message.from)
+
         // Mirrors sesTransport: an acceptance we cannot name is not something to
-        // record as sent, because nothing could later be joined to it.
+        // record as sent, because nothing could later be joined to it. Here that
+        // is near-unreachable — the id is derived rather than returned — but the
+        // guard costs nothing and keeps the two transports the same shape.
         if (!id) {
           return { status: "deferred", reason: "submission returned no message id" }
         }
