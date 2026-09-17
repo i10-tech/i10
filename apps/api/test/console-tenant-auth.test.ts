@@ -263,4 +263,26 @@ describe("requireTenant", () => {
     // tenant is chosen at all, rather than one chosen and then discarded.
     expect(seen).toEqual([])
   })
+
+  /**
+   * ⚠ A MISCONFIGURATION MUST NOT BE INDISTINGUISHABLE FROM A CLERK OUTAGE.
+   * `authenticateRequest` throws for reasons that are ours as often as theirs —
+   * a missing publishable key, a secret from the wrong instance — and the
+   * verifier flattens every one of them to `unavailable`. That is right for the
+   * STATUS CODE, because we genuinely do not know whether the session is good.
+   * It is wrong for the LOG: production answered "Could not verify your session
+   * right now. Retry shortly." on every console page for an unset
+   * `CLERK_PUBLISHABLE_KEY`, and the API log said nothing at all, so the first
+   * place anybody looked was Clerk's status page.
+   */
+  it("still answers 503 when verification is unavailable, as before", async () => {
+    const app = appWith({
+      sessions: sessions({ status: "unavailable" }),
+      tenants: resolver("11111111-1111-4111-8111-111111111111"),
+    })
+
+    const response = await app.request("/whoami", { headers: BEARER })
+    expect(response.status).toBe(503)
+    expect(response.headers.get("Retry-After")).toBe("5")
+  })
 })

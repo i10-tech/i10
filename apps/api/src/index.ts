@@ -101,7 +101,44 @@ try {
   captureError(error, { phase: "boot" })
 }
 
-const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+/*
+ * ⚠ THE PUBLISHABLE KEY IS PASSED, AND `authenticateRequest` DOES NOT WORK
+ * WITHOUT IT. It is not an optional nicety for a server SDK: Clerk uses it to
+ * resolve which instance a session token belongs to, and throws "Publishable
+ * key is missing" when it is absent — which the verifier reports as
+ * `unavailable`, which every session route renders as "retry shortly". See
+ * env.ts.
+ */
+const clerk = createClerkClient({
+  secretKey: env.CLERK_SECRET_KEY,
+  ...(env.CLERK_PUBLISHABLE_KEY ? { publishableKey: env.CLERK_PUBLISHABLE_KEY } : {}),
+})
+
+/*
+ * ⚠ SAID AT STARTUP RATHER THAN DISCOVERED PER REQUEST. Both of these are
+ * misconfigurations that present as something else entirely — one as a Clerk
+ * outage, one as nothing at all — so the only place they are cheap to notice is
+ * the first ten lines of the log after a deploy.
+ */
+if (!env.CLERK_PUBLISHABLE_KEY) {
+  log.error(
+    {},
+    "CLERK_PUBLISHABLE_KEY is not set — every session-authenticated route " +
+      "(/console/*, /mailboxes) will answer 503. Sending is unaffected.",
+  )
+}
+
+if (env.CONSOLE_ORIGINS.length === 0) {
+  // ⚠ THIS ONE FAILS OPEN, WHICH IS WHY IT HAS TO BE SAID OUT LOUD. `azp` is
+  // what stops a session token minted for another application on the same Clerk
+  // instance from being replayed here; empty means Clerk checks nothing, and
+  // nothing about the running system looks different.
+  log.error(
+    {},
+    "CONSOLE_ORIGINS is empty — the Clerk `azp` allowlist is disabled, so a " +
+      "token minted for any application on this Clerk instance is accepted.",
+  )
+}
 
 // ⚠ A SEPARATE CLIENT FROM THE QUEUES'. The queue connection is a dependency —
 // a job that cannot be enqueued has not been accepted. This one is a cache, and
@@ -328,8 +365,14 @@ const authEmailTenantId = await (async () => {
  * comment claiming they were shared — which is the version of this mistake that
  * survives review, because the sharing was asserted rather than done.
  */
-const sessions = clerkSessions(clerk, { authorizedParties: env.CONSOLE_ORIGINS })
-const activeOrg = clerkActiveOrg(clerk, { authorizedParties: env.CONSOLE_ORIGINS })
+const sessions = clerkSessions(clerk, {
+  authorizedParties: env.CONSOLE_ORIGINS,
+  log,
+})
+const activeOrg = clerkActiveOrg(clerk, {
+  authorizedParties: env.CONSOLE_ORIGINS,
+  log,
+})
 
 const app = createApp({
   apiKeyAuth: {

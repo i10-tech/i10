@@ -93,6 +93,33 @@ const schema = z.object({
   CLERK_SECRET_KEY: z.string().min(1),
 
   /**
+   * Clerk's publishable key, which `authenticateRequest` requires.
+   *
+   * ⚠ WITHOUT IT EVERY SESSION-AUTHENTICATED ROUTE ANSWERS 503, AND THAT IS NOT
+   * OBVIOUS FROM ANYTHING. `@clerk/backend` needs the publishable key to know
+   * which instance a token belongs to, and `authenticateRequest` THROWS
+   * "Publishable key is missing" rather than returning a signed-out state. The
+   * verifier catches that and reports `unavailable`, so `/console/*` and
+   * `/mailboxes` answer "Could not verify your session right now. Retry
+   * shortly." — a message that is correct for a Clerk outage and actively
+   * misleading here, because waiting never helps. This took the console down in
+   * production for exactly that reason.
+   *
+   * ⚠ IT IS NOT A SECRET, DESPITE SITTING BESIDE ONE. A publishable key is
+   * published — it ships to every browser that loads the sign-in page. It is
+   * here because Clerk's server SDK needs it, not because it needs protecting.
+   *
+   * ⚠ AND IT IS OPTIONAL IN THE SCHEMA WHILE `CLERK_SECRET_KEY` IS REQUIRED,
+   * which is deliberate rather than an oversight. Making it required would stop
+   * the API booting — and this process also carries `/emails`, the send path,
+   * which has nothing to do with Clerk and would be taken down by a console
+   * variable. Instead its absence is reported loudly at startup (see index.ts)
+   * and on every failed verification. Once it is set everywhere, tightening
+   * this to `.min(1)` is the better end state.
+   */
+  CLERK_PUBLISHABLE_KEY: z.string().optional(),
+
+  /**
    * Origins allowed to present a Clerk session to `/mailboxes`.
    *
    * ⚠ THIS IS THE `azp` CHECK, AND LEAVING IT EMPTY DISABLES IT. One Clerk
