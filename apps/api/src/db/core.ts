@@ -571,6 +571,24 @@ export const messages = core.table(
     domainId: uuid("domain_id"),
     apiKeyId: uuid("api_key_id"),
 
+    /**
+     * The broadcast this message was fanned out from, if any.
+     *
+     * ⚠ NOT A FOREIGN KEY, LIKE EVERY OTHER REFERENCE ON THIS TABLE.
+     * `core.messages` is partitioned, and a partitioned table cannot be the
+     * referencing side of an FK to a non-partitioned one without the constraint
+     * being declared on every partition — which the create-partition path would
+     * have to know about and would silently omit for any partition made by
+     * hand. The reference is enforced by the code that writes it, which is the
+     * same position `domain_id` and `api_key_id` already take.
+     *
+     * ⚠ AND IT IS WHAT MAKES A BROADCAST'S NUMBERS DERIVED RATHER THAN STORED.
+     * Every count on the broadcast page is an aggregate over the messages that
+     * carry this id, joined to their events — so a late bounce moves the number
+     * on its own, and there is no counter to drift.
+     */
+    broadcastId: uuid("broadcast_id"),
+
     queue: messageQueue("queue").notNull().default("transactional"),
     status: messageStatus("status").notNull().default("queued"),
 
@@ -1299,3 +1317,514 @@ export const routingSettings = core.table("routing_settings", {
 
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Marketing mail.
+//
+// ⚠ THE MODEL IS CONTACTS + SEGMENTS + TOPICS, NOT "AUDIENCES", AND THE
+// DIFFERENCE IS NOT COSMETIC. The obvious shape — a list, with people on it —
+// makes the same person a different row on every list, which means unsubscribing
+// them once unsubscribes them from one list, and a CSV re-import quietly
+// resurrects them on the others. A contact is therefore GLOBAL to a tenant and
+// unique by address; a segment is a grouping of contacts; and a topic is the
+// thing the RECIPIENT sees and controls.
+//
+// ⚠ A SEGMENT IS INTERNAL AND A TOPIC IS PUBLIC, AND CONFLATING THEM IS A
+// COMPLIANCE BUG. "Customers who bought in Q3" is a segment: the recipient must
+// never see it, and it is not something they can opt out of. "Product updates"
+// is a topic: it appears on their preference page and their choice about it is
+// binding. One table for both would either leak internal targeting to
+// recipients or make their preferences unenforceable.
+//
+// ⚠ AND A BROADCAST FANS OUT INTO ORDINARY MESSAGES. One row in `core.messages`
+// per recipient, on the `bulk` queue, carrying the broadcast's id — so metering,
+// suppression, DKIM, the event ingest, webhooks and the delivery log are the
+// code that already exists and is already in production. A parallel sending path
+// for marketing mail would be a second answer to "did this deliver", and the two
+// would disagree the first time an event arrived late.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A person a tenant can send marketing mail to. Global to the tenant.
+ *
+ * ⚠ UNIQUE BY ADDRESS PER TENANT, WHICH IS THE WHOLE POINT. The same person on
+ * "Product updates" and "Beta testers" is ONE row with two segment memberships,
+ * so unsubscribing them is one write that holds everywhere.
+ *
+ * ⚠ `unsubscribed` IS GLOBAL AND IS NOT THE SAME AS A TOPIC PREFERENCE. True
+ * here means "send me no marketing at all" and overrides every topic; a topic
+ * preference is the finer-grained control underneath it. Reading only one of the
+ * two is how somebody who unsubscribed from everything still receives a
+ * newsletter.
+ *
+ * ⚠ AND NEITHER IS `core.suppressions`. Unsubscribing from a newsletter must not
+ * stop a password reset, and a hard bounce on a transactional message must not
+ * silently remove somebody from a list they can still be reached on. Three
+ * questions, three places, all consulted at send.
+ */
+export const contacts = core.table(
+  "contacts",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /** ⚠ STORED LOWERCASED. The unique index below is on the stored value. */
+    email: text("email").notNull(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+
+    unsubscribed: boolean("unsubscribed").notNull().default(false),
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+
+    /**
+     * Custom merge fields, keyed by `contact_properties.key`.
+     *
+     * ⚠ A JSONB BAG RATHER THAN A COLUMN PER PROPERTY, because the keys are the
+     * customer's and are created at runtime. The `contact_properties` table
+     * below is what gives them a declared type and a fallback — without it this
+     * column is a free-for-all where `plan` is the string "3" for one contact
+     * and the number 3 for the next, and a template renders one of them wrong.
+     */
+    properties: jsonb("properties").$type<Record<string, unknown>>(),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("contacts_tenant_email_uq").on(t.tenantId, t.email),
+    index("contacts_tenant_idx").on(t.tenantId, t.createdAt),
+  ],
+)
+
+export const propertyType = core.enum("property_type", ["string", "number", "boolean"])
+
+/**
+ * A declared custom field on a contact.
+ *
+ * ⚠ THE DECLARATION IS WHAT MAKES A FALLBACK POSSIBLE, AND A FALLBACK IS WHAT
+ * STOPS "Hi {{first_name}}," GOING OUT AS "Hi ,". A template references a key;
+ * the contacts who have no value for it are the majority on any real import.
+ * Without a declared default the choice is between rendering an empty string and
+ * refusing to send.
+ */
+export const contactProperties = core.table(
+  "contact_properties",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /**
+     * ⚠ CASE-SENSITIVE, AND THE UNIQUE INDEX BELOW IS TOO. `plan` and `Plan`
+     * are two properties. That is surprising, and the alternative is worse: a
+     * case-insensitive key means a CSV import with both spellings silently
+     * merges two columns of different data into one field.
+     */
+    key: text("key").notNull(),
+    type: propertyType("type").notNull().default("string"),
+    /** Rendered when a contact has no value. Stored as text; cast on read. */
+    fallbackValue: text("fallback_value"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("contact_properties_tenant_key_uq").on(t.tenantId, t.key)],
+)
+
+/**
+ * An internal grouping of contacts. Never visible to a recipient.
+ *
+ * ⚠ STATIC MEMBERSHIP, NOT A STORED QUERY, AND THAT IS A DELIBERATE FIRST
+ * VERSION. A rule-based segment ("everyone who opened in the last 30 days") has
+ * to be evaluated at send time against the event log, which makes a broadcast's
+ * recipient list unreproducible after the fact — somebody asks "why did she get
+ * this" and the answer is "she matched at 09:04". Explicit membership is
+ * auditable, and a rules engine can be added later as a thing that WRITES
+ * membership rather than replaces it.
+ */
+export const segments = core.table(
+  "segments",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("segments_tenant_idx").on(t.tenantId, t.createdAt)],
+)
+
+export const segmentContacts = core.table(
+  "segment_contacts",
+  {
+    segmentId: uuid("segment_id")
+      .notNull()
+      .references(() => segments.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    /**
+     * ⚠ DENORMALISED ONTO THE JOIN TABLE SO RLS IS A PLAIN EQUALITY. Every other
+     * policy in `core` compares one column to `app.tenant_id`; a join table
+     * without its own `tenant_id` would need a policy that joins to `segments`,
+     * which is itself under RLS — evaluated per row, on the table that grows
+     * fastest here.
+     */
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.segmentId, t.contactId] }),
+    index("segment_contacts_contact_idx").on(t.contactId),
+    index("segment_contacts_tenant_idx").on(t.tenantId),
+  ],
+)
+
+export const topicDefault = core.enum("topic_default", ["opt_in", "opt_out"])
+export const topicVisibility = core.enum("topic_visibility", ["private", "public"])
+
+/**
+ * A kind of email a recipient can choose to receive or not.
+ *
+ * ⚠ THIS IS THE RECIPIENT'S SURFACE, NOT THE SENDER'S. It appears on the
+ * preference page behind every unsubscribe link, and a person's answer to it is
+ * binding on us. That is why it is a different table from `segments` — see the
+ * block comment above.
+ *
+ * ⚠ `default_subscription` IS IMMUTABLE ONCE SET, AND THE APPLICATION ENFORCES
+ * IT. Flipping a topic from opt-out to opt-in would retroactively subscribe
+ * every contact who had simply never answered — which is sending marketing mail
+ * to people who did not ask, at scale, because of a dropdown.
+ */
+export const topics = core.table(
+  "topics",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    defaultSubscription: topicDefault("default_subscription").notNull().default("opt_in"),
+    visibility: topicVisibility("visibility").notNull().default("public"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("topics_tenant_idx").on(t.tenantId, t.createdAt)],
+)
+
+/**
+ * A contact's explicit answer about one topic.
+ *
+ * ⚠ A ROW HERE MEANS THEY CHOSE; ITS ABSENCE MEANS THEY HAVE NOT. That is why
+ * `subscribed` is NOT NULL and the row is optional, rather than a nullable
+ * column on a row that always exists. The default comes from the topic, and
+ * "never asked" has to stay distinguishable from "said yes" — otherwise
+ * switching a topic's default silently rewrites people's stated preferences.
+ */
+export const contactTopics = core.table(
+  "contact_topics",
+  {
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    topicId: uuid("topic_id")
+      .notNull()
+      .references(() => topics.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    subscribed: boolean("subscribed").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.contactId, t.topicId] }),
+    index("contact_topics_topic_idx").on(t.topicId),
+    index("contact_topics_tenant_idx").on(t.tenantId),
+  ],
+)
+
+export const broadcastStatus = core.enum("broadcast_status", [
+  "draft",
+  "scheduled",
+  /** Fan-out in progress. Some recipients have messages, some do not yet. */
+  "sending",
+  "sent",
+  "canceled",
+])
+
+/**
+ * One marketing send to one segment.
+ *
+ * ⚠ IT HOLDS THE CONTENT, NOT THE DELIVERY. Once fan-out starts, what happened
+ * lives in `core.messages` and `core.message_events` like every other email,
+ * joined back by `broadcast_id`. The counters a person sees on the broadcast
+ * page are aggregates over those, computed on read — a denormalised
+ * `delivered_count` would be wrong within a day, because events arrive for hours
+ * after a send, and nothing would ever recompute it to disagree.
+ */
+export const broadcasts = core.table(
+  "broadcasts",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /**
+     * ⚠ `set null`, NOT `cascade`. Deleting a segment must not delete the record
+     * of a broadcast already sent to it — that record is what a customer needs
+     * when somebody asks why they received an email.
+     */
+    segmentId: uuid("segment_id").references(() => segments.id, {
+      onDelete: "set null",
+    }),
+    /** Which topic's preferences this send respects. Null means every contact. */
+    topicId: uuid("topic_id").references(() => topics.id, { onDelete: "set null" }),
+
+    name: text("name").notNull(),
+    fromAddress: text("from_address").notNull(),
+    replyTo: text("reply_to")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    subject: text("subject").notNull(),
+    previewText: text("preview_text"),
+    html: text("html"),
+    text: text("text"),
+
+    status: broadcastStatus("status").notNull().default("draft"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+
+    /** How many contacts the fan-out resolved to. Written once, at fan-out. */
+    recipientCount: integer("recipient_count"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("broadcasts_tenant_idx").on(t.tenantId, t.createdAt)],
+)
+
+/**
+ * A reusable email, referenced by id from a send.
+ *
+ * ⚠ DRAFT AND PUBLISHED ARE TWO DIFFERENT COLUMNS, NOT ONE COLUMN AND A FLAG.
+ * A template is referenced by `template_id` from production code that is sending
+ * mail right now; editing it has to be possible without that edit going live
+ * mid-sentence. `published_html` is what a send renders and `html` is what the
+ * editor shows, and "Publish" is the one operation that copies one to the other.
+ */
+export const templates = core.table(
+  "templates",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    name: text("name").notNull(),
+    /** A path like `transactional/auth`. Flat storage, rendered as a tree. */
+    folder: text("folder"),
+
+    subject: text("subject"),
+    html: text("html"),
+    text: text("text"),
+
+    /** ⚠ WHAT A SEND ACTUALLY RENDERS. See the note above. */
+    publishedHtml: text("published_html"),
+    publishedText: text("published_text"),
+    publishedSubject: text("published_subject"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    /** Bumped on every publish. Cheap provenance for "which one went out". */
+    version: integer("version").notNull().default(0),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("templates_tenant_idx").on(t.tenantId, t.createdAt),
+    uniqueIndex("templates_tenant_name_uq").on(t.tenantId, t.name),
+  ],
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Console state: what the dashboard needs to remember that is not the product.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How far through onboarding a tenant is.
+ *
+ * ⚠ THIS DECIDES WHERE WE SEND SOMEBODY, NEVER WHERE THEY MAY GO. `/onboarding`
+ * is a route anyone can open at any time — see docs/decisions/console.md — and
+ * this row only answers "should the console redirect them there on arrival".
+ * A flag that gated access would make re-running the flow after an upgrade
+ * impossible, which is the exact thing it is required to support.
+ *
+ * ⚠ `last_onboarded_plan` IS WHAT MAKES "RE-RUN ON UPGRADE FROM FREE" WORK
+ * WITHOUT RE-RUNNING ON EVERY UPGRADE. The rule is: re-run when the plan changed
+ * AND the plan we last onboarded on was the free one. A boolean would force a
+ * choice between never re-running and re-running on pro → scale, and the second
+ * is an insult to somebody who just paid us more.
+ */
+export const onboarding = core.table("onboarding", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+
+  /** The step last reached. A string, not an int — see the console's STEPS. */
+  step: text("step").notNull().default("workspace"),
+
+  /**
+   * ⚠ SET WHEN THE FLOW IS FINISHED *OR* SKIPPED, AND THE TWO ARE NOT
+   * DISTINGUISHED ON PURPOSE. Both mean "stop redirecting me". Whether somebody
+   * completed step 4 is answerable from the things themselves — do they have a
+   * verified domain, do they have a key — and those answers stay true when this
+   * row is wrong.
+   */
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+
+  /** The plan in force when `completed_at` was last set. See above. */
+  lastOnboardedPlan: text("last_onboarded_plan"),
+
+  /** Free-text, from step 1. Product research, never logic. */
+  useCase: text("use_case"),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * A customer's credential for their own DNS provider.
+ *
+ * ⚠ THE SECRET IS SEALED WITH THE SAME KEY AND THE SAME ENVELOPE AS A WEBHOOK
+ * SIGNING SECRET (`webhook_endpoints.secret_ciphertext`), and it is never
+ * returned by any route. A DNS API token is the most dangerous credential this
+ * product stores: it can rewrite a customer's MX records and take delivery of
+ * their mail. It is written once, read only by the record writer, and the
+ * console sees a label and a timestamp.
+ *
+ * ⚠ AND THE SCOPE IS THE ZONE, NOT THE ACCOUNT, WHEREVER THE PROVIDER ALLOWS IT.
+ * Cloudflare and Route 53 can both restrict to one zone; the connect flow asks
+ * for that and says why. Where a provider only issues account-wide credentials
+ * the UI says so plainly rather than implying a narrower blast radius than
+ * exists — see `ProviderApi.zoneScoped` in @repo/dns-providers.
+ *
+ * ⚠ NOTHING WRITES THIS TABLE YET, AND THAT IS KNOWN RATHER THAN OVERLOOKED.
+ * The console's "Connect <provider>" button is rendered disabled and labelled
+ * `soon` — deliberately, because the capability is real and the adapters are
+ * the next piece of work — and `@repo/dns-providers` already carries the per-
+ * provider facts those adapters need. It is here now because it arrives with
+ * the RLS policy and the `tenant_id` cascade that 0037 applies to all eleven
+ * console tables in one place; adding the only table that handles a
+ * zone-rewriting credential in a later, separate migration is how one ends up
+ * without a policy. If the connect flow is abandoned, drop it — an empty table
+ * is not free, it is a thing every future reader has to ask about.
+ */
+export const dnsConnections = core.table(
+  "dns_connections",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /** The registry slug. See packages/dns-providers. */
+    provider: text("provider").notNull(),
+
+    /** What the customer called it. Shown in the console; never a secret. */
+    label: text("label"),
+
+    /**
+     * ⚠ THE WHOLE CREDENTIAL, SEALED. Some providers need two parts (a key and a
+     * secret, or a key id and a region), so this is a sealed JSON object rather
+     * than a sealed string — otherwise the second provider to need two fields
+     * forces a migration.
+     */
+    credentialSealed: text("credential_sealed").notNull(),
+
+    /** Which zones this credential was proven to reach, at connect time. */
+    zones: text("zones")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    lastError: text("last_error"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("dns_connections_tenant_idx").on(t.tenantId, t.provider)],
+)
+
+/**
+ * The API request log behind the console's Logs page.
+ *
+ * ⚠ IT RECORDS THE ENVELOPE AND NEVER THE BODY. A request body on this API
+ * contains the customer's mail — subject lines, recipients, and the HTML of
+ * whatever they sent. Keeping it would turn an operational log into a copy of
+ * every email the platform has ever carried, retained under a policy nobody
+ * wrote, readable by anyone who can read logs. Method, path, status, duration
+ * and the key that was used answer every question this page exists to answer.
+ *
+ * ⚠ AND IT IS NOT PARTITIONED, WHICH IS A DECISION WITH AN EXPIRY DATE.
+ * `core.messages` is partitioned because it is the product; this is a 30-day
+ * operational window swept on a schedule. When request volume makes the sweep
+ * expensive it becomes partitioned like its neighbour — the index below is
+ * already ordered to make that a mechanical change.
+ */
+export const apiRequests = core.table(
+  "api_requests",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /** Null for a request that failed before a key resolved. */
+    apiKeyId: uuid("api_key_id"),
+
+    method: text("method").notNull(),
+    /** ⚠ THE ROUTE PATTERN, NOT THE URL. `/emails/{id}`, never the message id. */
+    path: text("path").notNull(),
+    status: integer("status").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+
+    /** The error `name` from the response envelope, when there was one. */
+    errorName: text("error_name"),
+
+    /**
+     * ⚠ TRUNCATED TO A PREFIX. A user agent is unbounded and attacker-
+     * controlled; 200 characters identifies an SDK and a version, which is the
+     * question somebody is actually asking ("is this the old client?").
+     */
+    userAgent: text("user_agent"),
+
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("api_requests_tenant_idx").on(t.tenantId, t.occurredAt)],
+)

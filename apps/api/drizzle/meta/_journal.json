@@ -260,6 +260,20 @@
       "when": 1789615098423,
       "tag": "0036_mailbox_lever",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789617347617,
+      "tag": "0037_console",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789617348617,
+      "tag": "0038_tenant_for_principal",
+      "breakpoints": true
     }
   ]
 }

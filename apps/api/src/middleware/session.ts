@@ -122,3 +122,73 @@ export const requireUser: MiddlewareHandler = async (c, next) => {
       )
   }
 }
+
+/**
+ * The active organization on a verified session, if there is one.
+ *
+ * ⚠ A SECOND, SEPARATE READER RATHER THAN A WIDER `SessionOutcome`, AND THE
+ * SEPARATION IS THE POINT. `SessionVerifier` was built for `/mailboxes`, where
+ * the organization is irrelevant — and a field on that interface is a field
+ * every existing caller can suddenly authorise against. Keeping the org behind
+ * its own function means only `requireTenant` can see it, which is the only
+ * thing that should.
+ *
+ * ⚠ IT RE-AUTHENTICATES RATHER THAN THREADING STATE THROUGH, WHICH COSTS
+ * NOTHING. `authenticateRequest` verifies a JWT locally against Clerk's cached
+ * JWKS — there is no network call on the common path — so calling it twice on
+ * one request is two signature checks, not two round trips. Threading the state
+ * object out of `verify()` would mean widening the interface, which is the
+ * thing this exists to avoid.
+ *
+ * ⚠ AND THE ANSWER IS THREE-STATE, BECAUSE "NO ORGANIZATION" AND "WE COULD NOT
+ * TELL" ARE DIFFERENT FACTS WITH DIFFERENT CONSEQUENCES. `tenant_for_principal`
+ * reads a null org as "use the personal tenant" — see 0038 — so collapsing a
+ * failure into null does not degrade gracefully, it SILENTLY SWITCHES WORKSPACE.
+ * Somebody working in their company account would, for the duration of a Clerk
+ * hiccup, mint an API key into their personal tenant, rename the wrong
+ * workspace, or start a checkout billing the wrong one — and every page would
+ * look plausible, because the personal tenant is a real tenant with real data.
+ * `unknown` lets `requireTenant` answer 503 and refuse to guess.
+ */
+export type ActiveOrgOutcome =
+  /** A session with an organization activated. */
+  | { status: "org"; orgId: string }
+  /** A verified session with no organization activated — the personal tenant. */
+  | { status: "personal" }
+  /** Clerk did not answer, or contradicted the verification. Do NOT guess. */
+  | { status: "unknown" }
+
+export type ActiveOrgReader = (request: Request) => Promise<ActiveOrgOutcome>
+
+export function clerkActiveOrg(
+  clerk: ClerkClient,
+  options: ClerkSessionOptions = {},
+): ActiveOrgReader {
+  const authorizedParties = options.authorizedParties?.length
+    ? [...options.authorizedParties]
+    : undefined
+
+  return async (request) => {
+    try {
+      const state = await clerk.authenticateRequest(request, { authorizedParties })
+      /*
+       * ⚠ NOT-AUTHENTICATED HERE IS A CONTRADICTION, NOT A SIGN-OUT. The same
+       * request was verified signed-in moments ago by `SessionVerifier`; if the
+       * second check disagrees, something is wrong with Clerk rather than with
+       * the caller. Reporting `personal` would be the silent workspace switch
+       * described above, so this is `unknown` and the request fails loudly.
+       */
+      if (!state.isAuthenticated) return { status: "unknown" }
+      const auth = state.toAuth()
+      // `orgId` is present only on a session that has ACTIVATED an organization.
+      // A user who belongs to three and has activated none has none here, and
+      // that is the correct input to `tenant_for_principal` — see 0038.
+      const orgId = (auth as { orgId?: string | null }).orgId
+      return typeof orgId === "string" && orgId
+        ? { status: "org", orgId }
+        : { status: "personal" }
+    } catch {
+      return { status: "unknown" }
+    }
+  }
+}

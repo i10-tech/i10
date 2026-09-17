@@ -20,7 +20,7 @@ import { timestampFromUuidV7 } from "../ids.js"
  * costs nothing (the planner still drops every other partition) and cannot be
  * defeated by clock skew between the database and whoever generated the id.
  */
-const PRUNE_WINDOW_MS = 60 * 60 * 1000
+export const PRUNE_WINDOW_MS = 60 * 60 * 1000
 
 /**
  * The furthest a message has got, as one value.

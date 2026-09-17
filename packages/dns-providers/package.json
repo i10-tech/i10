@@ -1,0 +1,28 @@
+{
+  "name": "@repo/dns-providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint . --max-warnings 0",
+    "check-types": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "^1.4.2",
+    "eslint": "^9.39.5",
+    "typescript": "6.0.3"
+  },
+  "files": [
+    "dist"
+  ]
+}

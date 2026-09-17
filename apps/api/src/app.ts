@@ -8,6 +8,7 @@ import {
   createCheckoutStatus,
   type CheckoutStatusDeps,
 } from "./routes/checkout-status.js"
+import { createConsole, type ConsoleDeps } from "./routes/console.js"
 import { createPolarWebhooks, type PolarWebhookDeps } from "./routes/polar-events.js"
 import type { AcceptOps, Logger as AcceptLogger } from "./send/accept.js"
 import type { Metering } from "./send/metering.js"
@@ -132,6 +133,20 @@ export interface AppDeps {
    */
   checkoutStatus?: CheckoutStatusDeps
   /**
+   * The dashboard's own surface, at `/console`.
+   *
+   * ⚠ SESSION AUTHENTICATED AND DELIBERATELY OUTSIDE THE OPENAPI DOCUMENT. It is
+   * the console's private contract, not the product's API — publishing it would
+   * put "list my invoices" in every generated SDK, and then it would have to be
+   * supported there. Same rule `/billing` and `/webhooks` already follow.
+   *
+   * ⚠ AND NOTHING UNDER IT ACCEPTS AN API KEY. See routes/console.ts: a sending
+   * key's advertised blast radius is "can send mail", and rotating keys or
+   * connecting a customer's DNS provider is emphatically not that.
+   */
+  console?: ConsoleDeps
+
+  /**
    * Queue depth, for the autoscaler and for whoever is asking why mail is slow.
    *
    * ⚠ TOKEN-GUARDED AND OUTSIDE THE OPENAPI DOCUMENT. It is not a customer
@@ -209,6 +224,64 @@ export function createApp(deps: AppDeps = {}) {
       if (sessions) c.set("sessionAuth", sessions)
       if (mailboxStore) c.set("mailboxes", mailboxStore)
       await next()
+    })
+  }
+
+  /*
+   * The API request log the console's Logs page reads.
+   *
+   * ⚠ IT IS A MIDDLEWARE RATHER THAN A CALL IN EACH ROUTE, BECAUSE THE VALUE OF
+   * THIS LOG IS THAT IT IS COMPLETE. Somebody opens it to answer "did my server
+   * actually call you, and what did you say" — and a log that covers the routes
+   * whoever added it remembered answers that question wrongly in exactly the
+   * case it is opened for. A wildcard covers the route somebody adds tomorrow.
+   *
+   * ⚠ ONLY API-KEY REQUESTS ARE RECORDED, WHICH THE `apiKeyId` GUARD ENFORCES
+   * FOR FREE. `requireTenant` deliberately sets an EMPTY key id for a console
+   * session (see middleware/tenant.ts), so a person clicking around the
+   * dashboard does not fill their own request log with their own page loads —
+   * which would bury the one integration call they came here to find. Anything
+   * unauthenticated — health probes, inbound webhooks — has no `auth` at all.
+   *
+   * ⚠ AND IT IS FIRE-AND-FORGET, DELIBERATELY. The insert happens after the
+   * response is built, off the request's critical path; awaiting it would let a
+   * slow or full log table add latency to sending mail, and a failing one refuse
+   * it. A logging failure is reported to the API's own logger so a silently
+   * empty page is distinguishable from a genuinely quiet account.
+   */
+  const requestLog = deps.console?.queries
+  const requestLogger = deps.console?.log
+  if (requestLog) {
+    app.use("*", async (c, next) => {
+      const started = Date.now()
+      await next()
+
+      // ⚠ TYPED AS PRESENT BECAUSE EVERY AUTHENTICATED ROUTE SETS IT; at this
+      // point in the stack the request may not have authenticated at all.
+      const auth = c.get("auth") as { tenantId: string; apiKeyId: string } | undefined
+      if (!auth?.apiKeyId || !auth.tenantId) return
+
+      const status = c.res.status
+      void (async () => {
+        await requestLog.recordRequest({
+          tenantId: auth.tenantId,
+          apiKeyId: auth.apiKeyId,
+          // ⚠ THE ROUTE PATTERN, NOT THE URL — the invariant `core.api_requests`
+          // states. `/emails/{id}` groups a tenant's calls into rows that can be
+          // counted; the concrete path would make every message id its own.
+          method: c.req.method,
+          path: routePath(c) ?? new URL(c.req.url).pathname,
+          status,
+          durationMs: Date.now() - started,
+          errorName: status >= 400 ? await errorNameOf(c.res) : null,
+          userAgent: c.req.header("user-agent") ?? null,
+        })
+      })().catch((error: unknown) => {
+        requestLogger?.warn(
+          { err: error, path: routePath(c) },
+          "could not record the API request",
+        )
+      })
     })
   }
 
@@ -317,6 +390,11 @@ export function createApp(deps: AppDeps = {}) {
   // the authorisation — see routes/polar-events.ts.
   app.route("/webhooks", createPolarWebhooks(deps.polarWebhooks))
 
+  // The dashboard. Mounted unconditionally so an unconfigured deployment
+  // answers 501 with a reason rather than 404 — which would read as the console
+  // being pointed at the wrong origin.
+  app.route("/console", createConsole(deps.console))
+
   // ⚠ ALSO OUTSIDE THE OPENAPI DOCUMENT, AND NOT FOR THE SAME REASON. The two
   // routers above implement somebody else's contract; this one is ours, but it
   // is a console action rather than part of the email API, and publishing it
@@ -398,6 +476,40 @@ export function createApp(deps: AppDeps = {}) {
     // caller and report their bad request as our bug.
     if (error instanceof HTTPException) return error.getResponse()
 
+    /*
+     * ⚠ A MALFORMED ID IS A 422, NOT A 500, AND IT IS NOT REPORTED. Ids on the
+     * console surface are uuids, and `where id = 'banana'` does not return zero
+     * rows — Postgres raises `22P02 invalid_text_representation` before the
+     * planner looks at a tuple. Left alone, a typo in the address bar, a stale
+     * bookmark or a crawler following a truncated link spends the error budget
+     * and opens a Sentry issue for a request that was simply wrong.
+     *
+     * ⚠ AND IT IS HERE RATHER THAN IN A MIDDLEWARE ON THE CONSOLE ROUTER,
+     * BECAUSE HONO'S `compose` CATCHES AT EVERY LEVEL. A `try { await next() }`
+     * wrapper never sees a handler's throw: the inner dispatch has its own
+     * try/catch and routes the error straight to this function. A sub-app's own
+     * `onError` is no better — `app.route()` discards it. This handler is the
+     * one place that genuinely runs.
+     *
+     * ⚠ THE CONDITION IS ONE SQLSTATE, WHICH IS WHAT MAKES IT SAFE. A deadlock,
+     * a constraint violation and a dead connection all still fall through to
+     * the 500 below and to the reporter — answering "your request was
+     * malformed" while the database is on fire would tell a customer their
+     * input is wrong and hide the outage from us.
+     */
+    if (isMalformedValue(error)) {
+      return c.json(
+        {
+          statusCode: 422,
+          name: "validation_error" as const,
+          message:
+            "One of the ids in this request is not a valid identifier. Ids are " +
+            "uuids, as returned by the API.",
+        },
+        422,
+      )
+    }
+
     // ⚠ THE ROUTE PATTERN, NOT THE URL. `/emails/{id}` groups every failure of
     // one endpoint into one issue; the concrete path would open a new issue per
     // message id and bury the signal under its own volume.
@@ -423,4 +535,46 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
       setTimeout(() => reject(new Error("timed out")), ms).unref?.(),
     ),
   ])
+}
+
+/**
+ * The `name` out of this API's error envelope, for the request log.
+ *
+ * ⚠ READ FROM A CLONE, AND ONLY FOR A BODY THAT IS ALREADY JSON. The response
+ * has not been sent yet at this point; reading the real one would consume the
+ * stream and the caller would receive nothing. The content-type guard keeps
+ * this away from a streamed or binary response, where cloning would buffer
+ * whatever the route was streaming.
+ *
+ * ⚠ AND IT SWALLOWS ITS OWN FAILURES, WHICH IS THE ONE PLACE THAT IS RIGHT.
+ * This value is a convenience column on a log row; nothing branches on it, and
+ * an unparseable body must not turn into a missing log entry.
+ */
+async function errorNameOf(response: Response): Promise<string | null> {
+  const type = response.headers.get("content-type") ?? ""
+  if (!type.includes("application/json")) return null
+  try {
+    const body = (await response.clone().json()) as { name?: unknown }
+    return typeof body.name === "string" ? body.name.slice(0, 100) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Postgres `22P02 invalid_text_representation`: a literal that cannot be read
+ * as its column's type.
+ *
+ * ⚠ THE CODE, NOT THE MESSAGE. Message text is localised by `lc_messages` and
+ * is rewritten between major versions; SQLSTATE is part of the wire protocol
+ * and has not changed in twenty years. Matching on "invalid input syntax for
+ * type uuid" would work on the development machine and stop working on a server
+ * whose locale is not English.
+ */
+function isMalformedValue(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "22P02"
+  )
 }

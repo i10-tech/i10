@@ -1,0 +1,132 @@
+"use client"
+
+import * as React from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { ExternalLink } from "lucide-react"
+import { Button } from "@repo/ui/components/button"
+import { Status } from "@/components/status"
+import { VerifyButton } from "@/components/verify-button"
+import { EmptyState } from "@/components/empty-state"
+import type { DomainSummary } from "@/lib/types"
+
+/**
+ * Waiting for DNS.
+ *
+ * ⚠ THIS STEP'S REAL JOB IS MANAGING EXPECTATIONS, NOT RUNNING A CHECK. DNS
+ * propagation is minutes at best and up to 72 hours, and the failure mode of a
+ * setup flow is somebody concluding after 90 seconds that it is broken and
+ * changing records that were correct. Saying the number out loud is the whole
+ * intervention.
+ *
+ * ⚠ AND IT POLLS RATHER THAN ASKING SOMEBODY TO KEEP PRESSING A BUTTON — but it
+ * stops after a few minutes rather than hammering the API forever on a tab
+ * somebody left open. The manual Verify button is always there.
+ */
+export function StepVerify({
+  domains,
+  onDone,
+}: {
+  domains: DomainSummary[]
+  onDone: () => void
+}) {
+  const router = useRouter()
+  const pending = domains.filter((d) => d.status !== "verified")
+  const verified = domains.filter((d) => d.status === "verified")
+
+  const [polls, setPolls] = React.useState(0)
+  const MAX_POLLS = 20
+
+  React.useEffect(() => {
+    if (pending.length === 0 || polls >= MAX_POLLS) return
+    const timer = setTimeout(() => {
+      setPolls((n) => n + 1)
+      // ⚠ `router.refresh()` RE-RUNS THE SERVER COMPONENT, which re-reads the
+      // domain list. It does NOT ask SES to re-check — that is what the Verify
+      // button does. Polling a verification endpoint every ten seconds would be
+      // a provider call per tab per person.
+      router.refresh()
+    }, 10_000)
+    return () => clearTimeout(timer)
+  }, [pending.length, polls, router])
+
+  if (domains.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Verify your domain</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Nothing to verify yet — add a domain first.
+          </p>
+        </div>
+        <EmptyState
+          title="No domains yet"
+          description="Go back a step and add the domain you send from."
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Publish your records</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Open each domain to copy its records. DNS usually propagates within
+          minutes, but providers are allowed up to 72 hours — a pending domain is
+          not a broken one.
+        </p>
+      </div>
+
+      <ul className="divide-y overflow-hidden rounded-lg border">
+        {domains.map((domain) => (
+          <li
+            key={domain.id}
+            className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-mono text-sm">{domain.name}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {domain.delegated
+                  ? "Delegated — three NS records to publish"
+                  : "Manual — six records to publish"}
+              </p>
+            </div>
+
+            <Status status={domain.status} />
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/domains/${domain.id}`}>
+                  Records
+                  <ExternalLink />
+                </Link>
+              </Button>
+              <VerifyButton id={domain.id} status={domain.status} />
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {pending.length > 0 && polls < MAX_POLLS && (
+        <p className="text-xs text-muted-foreground">
+          Checking automatically every few seconds. You can carry on and come back
+          — verification continues without this page open.
+        </p>
+      )}
+
+      {pending.length > 0 && polls >= MAX_POLLS && (
+        <p className="text-xs text-muted-foreground">
+          Still waiting. That is normal — leave it with us and check back later, or
+          press Verify to look again now.
+        </p>
+      )}
+
+      {verified.length > 0 && (
+        <Button onClick={onDone}>
+          Continue with {verified[0]!.name}
+        </Button>
+      )}
+    </div>
+  )
+}

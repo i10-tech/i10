@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "console-preview",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--filter", "@i10/console", "dev:preview"],
+      "port": 3000
+    }
+  ]
+}
