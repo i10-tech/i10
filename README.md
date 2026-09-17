@@ -67,7 +67,17 @@ bun dev
 `bun run build` · `bun run lint` · `bun run check-types` · `bun run test` · `bun run format`
 
 **`bun install` also installs the git hooks**, by pointing `core.hooksPath` at
-`.githooks/`. There is one: a `pre-push` that runs `check-images`,
+`.githooks/`. There are two.
+
+`commit-msg` runs commitlint on the message you just wrote. The scope list is
+closed — `fix(docker):` reads perfectly and is not a scope this repository has —
+and `.github/scripts/next-version.mjs` derives release versions from these
+messages, skipping a malformed one silently rather than failing. So a bad
+message does not break a release; it quietly produces the wrong version. Caught
+at commit time it costs nothing to fix, which is why it is not a `pre-push`
+step: by then the fix is an amend or a rebase and a force-push.
+
+`pre-push` runs `check-images`,
 `format:check`, `lint` and `check-types` — fastest first, each one stopping the
 push on its own, quiet unless something fails. About four seconds warm.
 `test` and `build` are deliberately left out: they are the slow ones, and a
