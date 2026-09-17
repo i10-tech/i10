@@ -65,6 +65,39 @@ spec:
           env:
             - name: HOSTNAME
               value: "0.0.0.0"
+            # ⚠ WITHOUT THIS THE CONSOLE RENDERS AN ERROR PAGE ON EVERY ROUTE,
+            # and it did. `lib/api.ts` falls back to `http://localhost:3001`
+            # when it is unset — correct for a developer running the API beside
+            # the console, and in a pod it means "talk to myself on a port
+            # nothing listens on". Every server component then fails with bun's
+            # `Unable to connect. Is the computer able to access the url?`,
+            # which surfaces in the browser as a minified React error and the
+            # console's own "could not load" boundary. Nothing about that names
+            # the missing variable.
+            #
+            # ⚠ IT IS HERE RATHER THAN IN DOPPLER BECAUSE IT IS NOT A SECRET. It
+            # is the in-cluster address of a Service defined a few files away,
+            # and a value in git next to the thing it names is one somebody can
+            # review. The code comment used to claim Doppler supplied it; it
+            # never did, which is exactly how this reached production.
+            #
+            # ⚠ AND IT IS THE CLUSTER ADDRESS, NOT `https://api.i10.tech`. The
+            # public name resolves out through the ingress and back in, so every
+            # server-side render would leave the cluster, pay TLS, and depend on
+            # public DNS being healthy to draw a page for somebody already
+            # inside it.
+            - name: API_BASE_URL
+              value: "http://i10-api.i10-prod.svc.cluster.local"
+            # ⚠ THE SAME TARGET UNDER THE SDK'S NAME, FOR ONE ROUTE.
+            # `app/api/checkout-status/[checkoutId]/route.ts` proxies the
+            # post-checkout poll and reads `I10_BASE_URL` — the variable
+            # `@i10/next` publishes for customers pointing the SDK elsewhere. It
+            # defaults to `https://api.i10.tech`, so unset it WORKS, which is
+            # why this was not the outage; it just sends an internal request out
+            # to the internet and back on the one page somebody lands on after
+            # paying.
+            - name: I10_BASE_URL
+              value: "http://i10-api.i10-prod.svc.cluster.local"
           envFrom:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-console }

@@ -32,13 +32,45 @@ import {
  */
 
 /**
+ * Where `apps/api` is.
+ *
  * ⚠ THE LOCAL DEFAULT IS THE API'S DEV PORT, SO A FRESH CHECKOUT WORKS WITH NO
- * ENVIRONMENT AT ALL. In production Doppler supplies `API_BASE_URL`; the
- * fallback is never reached there because the variable is always set, and if it
- * somehow were, pointing at localhost fails loudly and immediately rather than
- * silently talking to the wrong environment.
+ * ENVIRONMENT AT ALL — and it must NOT apply in production. An earlier version
+ * of this file defaulted unconditionally and carried a comment saying the
+ * variable "is always set" in production and that the fallback "fails loudly
+ * and immediately" if it were not. All of that was wrong, and it shipped:
+ * `API_BASE_URL` was absent from the console's deployment, every server
+ * component fetched `http://localhost:3001`, and bun answered `Unable to
+ * connect. Is the computer able to access the url?` — which reaches the browser
+ * as a minified React error and an error boundary. Nothing in that names a
+ * missing variable. A default that is right for a laptop is a silent
+ * misconfiguration in a pod.
+ *
+ * ⚠ IT IS RESOLVED PER CALL RATHER THAN AT MODULE SCOPE, WHICH IS THE WHOLE
+ * REASON THIS IS A FUNCTION. `next build` evaluates module scope while
+ * collecting page data, with `NODE_ENV=production` and no deployment
+ * environment — exactly the state this refuses. Throwing at module scope would
+ * fail every CI build to guard against a misconfiguration that can only exist
+ * at runtime. The header note above makes the same point about `NEXT_PUBLIC_`.
  */
-const BASE = (process.env.API_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "")
+function baseUrl(): string {
+  const configured = process.env.API_BASE_URL?.trim()
+  if (configured) return configured.replace(/\/$/, "")
+
+  if (process.env.NODE_ENV === "production") {
+    throw new ApiRequestError(500, {
+      statusCode: 500,
+      name: "internal_server_error",
+      message:
+        "API_BASE_URL is not set. The console cannot reach the API. Set it on " +
+        "the deployment to the in-cluster address of the api Service, e.g. " +
+        "http://i10-api.i10-prod.svc.cluster.local — see " +
+        "infra/k8s/i10/workloads/console.yaml.",
+    })
+  }
+
+  return "http://localhost:3001"
+}
 
 export interface ApiError {
   statusCode: number
@@ -199,7 +231,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     })
   }
 
-  const url = new URL(`${BASE}${path}`)
+  const url = new URL(`${baseUrl()}${path}`)
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value === undefined || value === null || value === "") continue
     url.searchParams.set(key, String(value))
