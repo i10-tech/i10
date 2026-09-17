@@ -81,13 +81,13 @@ bun --filter @i10/console dev    # listens on :3000
 
 The console itself needs three variables:
 
-| Variable                | What it is                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------ |
-| `API_BASE_URL`          | Where `apps/api` is. Defaults to `http://localhost:3001`.                                              |
-| `CLERK_PUBLISHABLE_KEY` | Your Clerk instance. Without it the console renders unauthenticated and the API refuses every request. |
-| `CLERK_SECRET_KEY`      | Same instance. Read from runtime env by Clerk's own default.                                           |
-| `CLERK_SIGN_IN_URL`     | Points at `apps/auth`. Unset, Clerk silently falls back to its hosted Account Portal.                  |
-| `CLERK_SIGN_UP_URL`     | Same.                                                                                                  |
+| Variable                | What it is                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `API_BASE_URL`          | Where `apps/api` is. Defaults to `http://localhost:3001` in development; **required in production** — unset there, every page fails. |
+| `CLERK_PUBLISHABLE_KEY` | Your Clerk instance. Without it the console renders unauthenticated and the API refuses every request.                               |
+| `CLERK_SECRET_KEY`      | Same instance. Read from runtime env by Clerk's own default.                                                                         |
+| `CLERK_SIGN_IN_URL`     | Points at `apps/auth`. Unset, Clerk silently falls back to its hosted Account Portal.                                                |
+| `CLERK_SIGN_UP_URL`     | Same.                                                                                                                                |
 
 **None of them carry a `NEXT_PUBLIC_` prefix, and that is not an oversight.**
 Next replaces `NEXT_PUBLIC_*` textually at _build_ time — in server code too —
