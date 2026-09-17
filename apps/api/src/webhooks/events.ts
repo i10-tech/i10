@@ -332,16 +332,39 @@ export async function ingestSesEvent(
 ): Promise<IngestOutcome> {
   const event = interpretSesEvent(raw, sourceEventId, fallbackAt)
   if (!event) return { status: "ignored" }
+  return ingestEvent(event, deps)
+}
 
+/**
+ * Writing an already-interpreted event.
+ *
+ * ⚠ ONE PERSISTENCE PATH FOR EVERY ROUTE, WHICH IS THE POINT OF SPLITTING IT OUT
+ * OF `ingestSesEvent`. The direct route's outcomes arrive from Stalwart in a
+ * completely different shape and reach exactly this function — so the dedupe,
+ * the suppression write, the endpoint fan-out and the ordering guarantees are
+ * the same code, not two copies that agree today. A customer must not be able to
+ * tell from a webhook which MTA carried their message, and the surest way to
+ * guarantee that is for there to be only one piece of code that writes one.
+ */
+export async function ingestEvent(
+  event: NormalisedEvent,
+  deps: EventOps & { log: Logger },
+): Promise<IngestOutcome> {
   const owner = await deps.ownerOf(event.messageId)
   if (!owner) {
     // ⚠ NOT AN ERROR, AND NOT A RETRY. The likeliest cause is retention: the
     // partition holding a months-old message was dropped and a very late event
-    // arrived for it. Answering non-2xx would make SNS retry for hours over a
-    // message that no longer exists.
+    // arrived for it. Answering non-2xx would make the sender retry for hours
+    // over a message that no longer exists — SNS for hours, Stalwart until its
+    // `discardAfter` elapses.
+    //
+    // ⚠ AND ON THE DIRECT ROUTE IT IS ALSO THE ORDINARY CASE FOR MAIL THAT IS
+    // NOT OURS. Stalwart carries human mailbox mail through the same queue; a
+    // VERP envelope is what marks a message as transactional, so anything
+    // without one is filtered before it reaches here.
     deps.log.warn(
       { messageId: event.messageId, type: event.type },
-      "ses event for an unknown message",
+      "event for an unknown message",
     )
     return { status: "unknown_message" }
   }

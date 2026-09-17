@@ -408,16 +408,58 @@ being a single point of failure — it has to increase on every write.
       ⚠ **THIS WAS THE RELEASE GATE ON THE DIRECT ROUTE.** Until it applied,
       every `bounce.<domain>` TXT included a domain that did not exist, which is
       an SPF **permerror** — strictly worse than publishing nothing.
-- [ ] **Ingesting direct-route DSNs into `core.message_events`.** The envelope
-      sender is already VERP — `bounce+<messageId>@bounce.<domain>` — so the id
-      comes back on the DSN and correlating one is a parse. What does not exist
-      is anything receiving them: Stalwart accepts no inbound for customer
-      `bounce.` domains, and nothing parses a DSN into an event.
-      ⚠ **UNTIL THIS LANDS, A DIRECT-ROUTED MESSAGE HAS NO `delivered`,
-      `bounced` OR `complained`** — `core.message_events` is written only by the
-      SES ingest. `ses_unconfirmed_snapshot` no longer reports those rows as
-      discrepancies (0033), so the silence is at least not also an alarm, but a
-      customer watching webhooks sees a message that stops at `sent`.
+- [x] ~~Ingesting direct-route DSNs into `core.message_events`.~~ **Done
+      2026-09-17, and NOT by parsing DSNs.** Stalwart pushes its own delivery
+      outcomes to `/webhooks/stalwart`, signed HMAC-SHA256 over the raw body in
+      `X-Signature`. It is the process attempting delivery, so it knows the
+      answer before any DSN could be written — and it reports `delivered`, which
+      a DSN never does unless success notification was requested. The alternative
+      needed an MX for every customer's `bounce.<domain>`, Stalwart configured to
+      accept those domains, a mailbox to read and an RFC 3464
+      `multipart/report` parser; none of that exists and none of it was needed.
+      ⚠ **THE JOIN KEY IS STILL THE VERP ENVELOPE, AND IT ARRIVES FROM THE SPAN
+      RATHER THAN THE EVENT.** `delivery.delivered` carries only `spanId`,
+      `hostname`, `to`, `code`, `details` and `elapsed`; the envelope sender is
+      set on `delivery.attempt-start`, which opens the span. Stalwart's collector
+      attaches the open span to every event sharing its id and the webhook
+      serializer is built `.with_spans()`, so the span's keys merge into `data`.
+      Read out of the source rather than assumed — the alternative, correlating
+      outcomes to an earlier `attempt-start` by `queueId`, needs state we would
+      have to keep and expire ourselves.
+      ⚠ **STALWART'S OWN EVENT `id` IS NOT A DEDUPE KEY, AND USING IT WOULD HAVE
+      BEEN THE BUG.** It is `{timestamp}{counter}{typeId}` where the counter is a
+      process-global atomic incremented AT SERIALISATION TIME. A failed POST puts
+      the same events back on the pending list and the next batch serialises them
+      again with fresh values — so the "unique identifier" differs on every
+      redelivery, and keying `(source_event_id, occurred_at)` on it would turn
+      each retry into a second `email.bounced`, a second suppression and a second
+      customer webhook. `sourceEventIdFor` derives a stable key from type,
+      timestamp, queue id and recipient, namespaced `stalwart_` so it cannot
+      collide with an SNS message id in the same column.
+      ⚠ **AND THAT DEDUPE IS A SECURITY CONTROL HERE, NOT TIDINESS.** Stalwart's
+      signature covers the body and nothing else — no timestamp, no nonce — so a
+      captured request is replayable forever.
+      ⚠ **ONE SUPPRESSION PATH, AND ONLY ON A 5xx REFUSAL OF THE RECIPIENT.**
+      `delivery.failed` is the retry window expiring (the receiver was down,
+      which says nothing about the address) and `delivery.message-rejected` is
+      about the message. Both are `email.bounced`; neither suppresses. That is
+      the same Permanent/Transient discipline the SES ingest applies, in a
+      different vocabulary.
+      ⚠ **BOTH ROUTES WRITE THROUGH ONE `ingestEvent`.** The dedupe, the
+      suppression write, the endpoint fan-out and the customer payload shape are
+      one implementation rather than two that agree today — a customer must not
+      be able to tell from a webhook which MTA carried their message.
+- [ ] **Asynchronous bounces on the direct route.** A receiver that answers `250`
+      and only later decides the mailbox is gone sends a DSN to the envelope
+      sender, and we accept no inbound mail for customer `bounce.` domains. Those
+      bounces are invisible. This is the half the VERP envelope was originally
+      built for and it is still open — it needs the MX, the accepted domains, a
+      mailbox and a `multipart/report` parser.
+- [ ] **Complaints on the direct route.** Feedback loops arrive as ARF reports by
+      mail, not as delivery outcomes. SES subscribes to them on our behalf; our
+      own MTA does not, so a direct-routed message can be complained about and
+      `email.complained` will never fire. Needs the same inbound path as the item
+      above, plus FBL enrolment per sending IP.
 - [x] ~~The NetworkPolicy does not admit the API pods on 587.~~ **It never
       needed to. Disproved 2026-09-17.** NetworkPolicies are ADDITIVE, and
       `i10-prod` carries `allow-same-namespace` — `podSelector: {}` with

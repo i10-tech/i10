@@ -394,6 +394,23 @@ const schema = z.object({
   STALWART_API_TOKEN: z.string().min(1).optional(),
 
   /**
+   * The HMAC key on Stalwart's `WebHook` object, and the only thing standing
+   * between a public endpoint and a stranger's suppression list.
+   *
+   * ⚠ WITHOUT IT THE DIRECT ROUTE HAS NO DELIVERY EVENTS AT ALL — a
+   * direct-routed message stops at `sent` and never reaches `delivered` or
+   * `bounced`. `/webhooks/stalwart` answers 503 rather than accepting unsigned
+   * notifications, which is the same refusal the direct transport makes when
+   * its own credentials are missing: visible, and not a quiet downgrade.
+   *
+   * ⚠ NOT BASE64-DECODED BEFORE IT KEYS THE HMAC, unlike every other secret in
+   * this file. Stalwart signs with the configured string's own bytes; see
+   * `webhooks/stalwart.ts` for why reusing `decodeSecret` here rejects every
+   * genuine notification.
+   */
+  STALWART_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  /**
    * Stalwart's SMTP submission endpoint, for the direct route.
    *
    * ⚠ SUBMISSION, NOT PORT 25, AND NOT THE SAME THING AS `STALWART_URL`. That

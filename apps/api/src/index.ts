@@ -471,6 +471,24 @@ const app = createApp({
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,
         },
+        // ⚠ THE SAME OPS, A DIFFERENT INTERPRETER. Both routes write through
+        // `ingestEvent`, so the dedupe, the suppression write and the customer
+        // payload shape are one implementation rather than two that agree today.
+        //
+        // ⚠ AND IT IS GATED ON THE SECRET SEPARATELY FROM THE REST. Without
+        // `STALWART_WEBHOOK_SECRET` the route answers 503 rather than accepting
+        // unsigned notifications — a public endpoint that writes suppressions
+        // must never be reachable without a signature, not even in a
+        // half-configured environment.
+        ...(env.STALWART_WEBHOOK_SECRET
+          ? {
+              stalwartWebhooks: {
+                events: webhookEventOps({ db, queue: webhookQueue }),
+                log,
+                secret: env.STALWART_WEBHOOK_SECRET,
+              },
+            }
+          : {}),
       }
     : {}),
   pingDb: async () => {
