@@ -68,8 +68,8 @@ export function StepWorkspace({
           Let&rsquo;s set up your workspace
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Four short steps and you will be sending. Nothing here is permanent —
-          you can change all of it later.
+          Four short steps and you will be sending. Nothing here is permanent — you can
+          change all of it later.
         </p>
       </div>
 
@@ -83,15 +83,11 @@ export function StepWorkspace({
           maxLength={120}
           autoFocus
         />
-        <p className="text-xs text-muted-foreground">
-          What appears on your invoices.
-        </p>
+        <p className="text-xs text-muted-foreground">What appears on your invoices.</p>
       </div>
 
       <fieldset className="space-y-2">
-        <legend className="mb-2 text-sm font-medium">
-          What will you be sending?
-        </legend>
+        <legend className="mb-2 text-sm font-medium">What will you be sending?</legend>
         <div className="flex flex-wrap gap-2">
           {USE_CASES.map((option) => (
             <button
@@ -112,8 +108,8 @@ export function StepWorkspace({
           ))}
         </div>
         <p className="text-xs text-muted-foreground">
-          Optional. It helps us work out what to build next — nothing you pick
-          changes what you can do.
+          Optional. It helps us work out what to build next — nothing you pick changes
+          what you can do.
         </p>
       </fieldset>
 

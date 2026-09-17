@@ -21,7 +21,20 @@ import type { MarketingStore } from "./types.js"
  */
 export function segmentsStore(
   db: Database,
-): Pick<MarketingStore, "listSegments" | "createSegment" | "updateSegment" | "deleteSegments" | "addToSegment" | "removeFromSegment" | "listTopics" | "createTopic" | "updateTopic" | "deleteTopic" | "setTopicSubscription"> {
+): Pick<
+  MarketingStore,
+  | "listSegments"
+  | "createSegment"
+  | "updateSegment"
+  | "deleteSegments"
+  | "addToSegment"
+  | "removeFromSegment"
+  | "listTopics"
+  | "createTopic"
+  | "updateTopic"
+  | "deleteTopic"
+  | "setTopicSubscription"
+> {
   return {
     // ── Segments ────────────────────────────────────────────────────────────
 

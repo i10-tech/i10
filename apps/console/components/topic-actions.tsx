@@ -30,7 +30,11 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${topic.name}`}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Actions for ${topic.name}`}
+          >
             <MoreHorizontal />
           </Button>
         </DropdownMenuTrigger>

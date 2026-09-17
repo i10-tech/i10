@@ -217,7 +217,14 @@ describe("registry integrity", () => {
     const replacing = PROVIDERS.filter((p) => p.api?.replacesZone)
       .map((p) => p.slug)
       .sort()
-    expect(replacing).toEqual(["dynadot", "enom", "gandi", "godaddy", "namecheap", "opensrs"])
+    expect(replacing).toEqual([
+      "dynadot",
+      "enom",
+      "gandi",
+      "godaddy",
+      "namecheap",
+      "opensrs",
+    ])
   })
 
   test("providers gated by eligibility or an IP allowlist are recorded", () => {

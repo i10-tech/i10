@@ -1,12 +1,7 @@
 import type { Hono } from "hono"
 import { cacheKeyFor } from "../../auth/api-key.js"
 import type { ConsoleDeps } from "./deps.js"
-import {
-  notFound,
-  notWired,
-  readJson,
-  validation,
-} from "./http.js"
+import { notFound, notWired, readJson, validation } from "./http.js"
 
 /**
  * The two things a customer's own systems authenticate with: API keys, and the

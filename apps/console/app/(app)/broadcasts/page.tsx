@@ -42,14 +42,17 @@ export default async function BroadcastsPage() {
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          One email to a segment. Delivery, bounces and complaints are reported the
-          same way as any other send.
+          One email to a segment. Delivery, bounces and complaints are reported the same
+          way as any other send.
         </PageDescription>
       </PageHeader>
 
       <PageBody>
         {!result.ok ? (
-          <PanelError title="Could not load broadcasts" message={result.error.message} />
+          <PanelError
+            title="Could not load broadcasts"
+            message={result.error.message}
+          />
         ) : result.data.data.length === 0 ? (
           <EmptyState
             title="No broadcasts yet"
@@ -66,9 +69,7 @@ export default async function BroadcastsPage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{broadcast.name}</p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {broadcast.subject || (
-                        <em>No subject yet</em>
-                      )}
+                      {broadcast.subject || <em>No subject yet</em>}
                       {broadcast.segment_name && ` · ${broadcast.segment_name}`}
                     </p>
                   </div>

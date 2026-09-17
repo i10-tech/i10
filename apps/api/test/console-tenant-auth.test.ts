@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { Hono } from "hono"
 import { requireTenant, type TenantResolver } from "../src/middleware/tenant.js"
-import type { ActiveOrgReader,
-  SessionOutcome, SessionVerifier } from "../src/middleware/session.js"
+import type {
+  ActiveOrgReader,
+  SessionOutcome,
+  SessionVerifier,
+} from "../src/middleware/session.js"
 
 /**
  * The gate in front of the whole console surface.

@@ -30,8 +30,8 @@ export default function AccountPage() {
         <Section className="pt-0">
           <SectionTitle>Your account</SectionTitle>
           <SectionDescription>
-            Your profile, password, two-factor authentication and active sessions
-            are managed by Clerk, which is not configured in this environment. Set{" "}
+            Your profile, password, two-factor authentication and active sessions are
+            managed by Clerk, which is not configured in this environment. Set{" "}
             <code>CLERK_PUBLISHABLE_KEY</code> to see the real panel here.
           </SectionDescription>
         </Section>
@@ -44,9 +44,8 @@ export default function AccountPage() {
       <Section className="pt-0">
         <SectionTitle>Your account</SectionTitle>
         <SectionDescription>
-          Your name, sign-in methods, two-factor authentication and the devices
-          you are signed in on. This is your account across every workspace you
-          belong to.
+          Your name, sign-in methods, two-factor authentication and the devices you are
+          signed in on. This is your account across every workspace you belong to.
         </SectionDescription>
         <SectionContent>
           <UserProfile

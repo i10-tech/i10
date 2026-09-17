@@ -35,7 +35,9 @@ export default async function UsagePage() {
   )
 
   if (!result.ok) {
-    return <PanelError title="Could not load your usage" message={result.error.message} />
+    return (
+      <PanelError title="Could not load your usage" message={result.error.message} />
+    )
   }
 
   const { usage, billing } = result.data
@@ -48,8 +50,8 @@ export default async function UsagePage() {
           {billing.plan
             ? `You are on ${billing.plan.name}.`
             : "No plan is assigned to this workspace yet."}{" "}
-          Allowances reset on a rolling window from when your plan started, not on
-          the first of the month.
+          Allowances reset on a rolling window from when your plan started, not on the
+          first of the month.
         </SectionDescription>
         <SectionContent className="max-w-2xl space-y-6">
           {usage.map((feature) => {

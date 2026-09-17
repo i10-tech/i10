@@ -56,9 +56,8 @@ export default async function ApiKeysPage({
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          Keys authenticate your servers. They are shown once when created and
-          stored only as a hash — if you lose one, rotate it rather than looking
-          for it.
+          Keys authenticate your servers. They are shown once when created and stored
+          only as a hash — if you lose one, rotate it rather than looking for it.
         </PageDescription>
       </PageHeader>
 

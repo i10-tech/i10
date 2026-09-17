@@ -120,7 +120,12 @@ export interface UsageDeps {
   log?: { warn: (o: object, m: string) => void }
 }
 
-export function usageStore({ db, meter, now = () => new Date(), log }: UsageDeps): UsageStore {
+export function usageStore({
+  db,
+  meter,
+  now = () => new Date(),
+  log,
+}: UsageDeps): UsageStore {
   return {
     async usage(tenantId) {
       const at = now()

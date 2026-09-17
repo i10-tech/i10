@@ -30,7 +30,6 @@ export const notFound = (message = "Not found.") => ({
   message,
 })
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function readJson(c: Context): Promise<Record<string, unknown> | null> {

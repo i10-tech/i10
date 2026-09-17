@@ -62,7 +62,9 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     inspection: DnsInspection | null
   } | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
-  const [error, setError] = React.useState<{ message: string; name: string } | null>(null)
+  const [error, setError] = React.useState<{ message: string; name: string } | null>(
+    null,
+  )
 
   const candidate = name.trim().toLowerCase()
   const plausible = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(candidate)
@@ -220,7 +222,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
               {provider ? (
                 <>
                   <p className="text-sm">
-                    DNS hosted by <strong className="font-medium">{provider.name}</strong>
+                    DNS hosted by{" "}
+                    <strong className="font-medium">{provider.name}</strong>
                     {current.confidence === "partial" && (
                       <span className="text-muted-foreground">
                         {" "}
@@ -238,8 +241,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
                      */
                     <p className="flex items-start gap-1.5 text-xs text-warning">
                       <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-                      Your nameservers are split between providers. Records added at
-                      one of them may not resolve until the migration finishes.
+                      Your nameservers are split between providers. Records added at one
+                      of them may not resolve until the migration finishes.
                     </p>
                   )}
                 </>
@@ -340,8 +343,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
             />
             <p className="text-xs text-muted-foreground">
               Where bounces are collected. Defaults to{" "}
-              <code className="font-mono">send</code>. Changing it after
-              verification means re-publishing records, so pick it now if you care.
+              <code className="font-mono">send</code>. Changing it after verification
+              means re-publishing records, so pick it now if you care.
             </p>
           </div>
         </CollapsibleContent>

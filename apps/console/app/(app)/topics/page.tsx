@@ -47,8 +47,8 @@ export default async function TopicsPage() {
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          The choices a recipient gets on their preference page. Their answer here
-          is binding on every broadcast that names the topic.
+          The choices a recipient gets on their preference page. Their answer here is
+          binding on every broadcast that names the topic.
         </PageDescription>
       </PageHeader>
 
@@ -75,7 +75,9 @@ export default async function TopicsPage() {
                         ? "Opt-out by default"
                         : "Opt-in required"}
                     </Badge>
-                    <Badge variant={topic.visibility === "public" ? "secondary" : "outline"}>
+                    <Badge
+                      variant={topic.visibility === "public" ? "secondary" : "outline"}
+                    >
                       {topic.visibility}
                     </Badge>
                   </div>

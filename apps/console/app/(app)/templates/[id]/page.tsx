@@ -21,7 +21,9 @@ export async function generateMetadata({
   params: Promise<{ id: string }>
 }): Promise<Metadata> {
   const { id } = await params
-  const result = await tryApi<TemplateRow>(`/console/templates/${encodeURIComponent(id)}`)
+  const result = await tryApi<TemplateRow>(
+    `/console/templates/${encodeURIComponent(id)}`,
+  )
   return { title: result.ok ? result.data.name : "Template" }
 }
 
@@ -37,7 +39,9 @@ export default async function TemplatePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const result = await tryApi<TemplateRow>(`/console/templates/${encodeURIComponent(id)}`)
+  const result = await tryApi<TemplateRow>(
+    `/console/templates/${encodeURIComponent(id)}`,
+  )
 
   if (!result.ok) {
     if (result.error.statusCode === 404) notFound()

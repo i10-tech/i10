@@ -43,7 +43,10 @@ export function RenameWorkspace({ current }: { current: string }) {
         maxLength={120}
         aria-label="Workspace name"
       />
-      <Button type="submit" disabled={pending || !name.trim() || name.trim() === current}>
+      <Button
+        type="submit"
+        disabled={pending || !name.trim() || name.trim() === current}
+      >
         {pending && <Spinner />}
         Save
       </Button>

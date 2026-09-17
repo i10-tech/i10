@@ -106,7 +106,11 @@ export function EmailBodyTabs({
         </TabsContent>
 
         <TabsContent value="html" className="m-0">
-          {html ? <Source>{html}</Source> : <Empty>This message had no HTML body.</Empty>}
+          {html ? (
+            <Source>{html}</Source>
+          ) : (
+            <Empty>This message had no HTML body.</Empty>
+          )}
         </TabsContent>
 
         <TabsContent value="text" className="m-0">

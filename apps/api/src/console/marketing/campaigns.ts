@@ -3,12 +3,7 @@ import { withTenant, type Database } from "../../db/client.js"
 import { broadcasts, segments, templates, topics } from "../../db/core.js"
 import type { MarketingStore } from "./types.js"
 import type { Tx } from "./shared.js"
-import {
-  LIST_CAP,
-  broadcastStats,
-  toBroadcastRow,
-  toTemplateRow,
-} from "./shared.js"
+import { LIST_CAP, broadcastStats, toBroadcastRow, toTemplateRow } from "./shared.js"
 
 /**
  * Broadcasts and the templates they are written from.
@@ -19,7 +14,20 @@ import {
  */
 export function campaignsStore(
   db: Database,
-): Pick<MarketingStore, "listBroadcasts" | "getBroadcast" | "createBroadcast" | "updateBroadcast" | "deleteBroadcast" | "listTemplates" | "getTemplate" | "createTemplate" | "updateTemplate" | "publishTemplate" | "deleteTemplate"> {
+): Pick<
+  MarketingStore,
+  | "listBroadcasts"
+  | "getBroadcast"
+  | "createBroadcast"
+  | "updateBroadcast"
+  | "deleteBroadcast"
+  | "listTemplates"
+  | "getTemplate"
+  | "createTemplate"
+  | "updateTemplate"
+  | "publishTemplate"
+  | "deleteTemplate"
+> {
   /**
    * Refuses a `segment_id` or `topic_id` that is not this workspace's.
    *
@@ -204,7 +212,10 @@ export function campaignsStore(
            * both write.
            */
           .where(
-            and(eq(broadcasts.id, id), sql`${broadcasts.status} in ('draft', 'scheduled')`),
+            and(
+              eq(broadcasts.id, id),
+              sql`${broadcasts.status} in ('draft', 'scheduled')`,
+            ),
           )
           .returning()
 
@@ -265,7 +276,11 @@ export function campaignsStore(
 
     async getTemplate(tenantId, id) {
       return withTenant(db, tenantId, async (tx) => {
-        const rows = await tx.select().from(templates).where(eq(templates.id, id)).limit(1)
+        const rows = await tx
+          .select()
+          .from(templates)
+          .where(eq(templates.id, id))
+          .limit(1)
         return rows[0] ? toTemplateRow(rows[0]) : null
       })
     },

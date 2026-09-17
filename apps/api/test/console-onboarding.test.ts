@@ -10,7 +10,9 @@ import { shouldOnboard } from "../src/console/onboarding.js"
  * way of getting it wrong is a bad first impression that nobody reports. A
  * function with a database inside it could not be checked at this resolution.
  */
-const facts = (overrides: Partial<Parameters<typeof shouldOnboard>[0]["facts"]> = {}) => ({
+const facts = (
+  overrides: Partial<Parameters<typeof shouldOnboard>[0]["facts"]> = {},
+) => ({
   has_domain: false,
   has_verified_domain: false,
   has_api_key: false,
@@ -42,7 +44,11 @@ describe("shouldOnboard", () => {
         completedAt: null,
         lastOnboardedPlan: null,
         currentPlan: "free",
-        facts: facts({ has_domain: true, has_verified_domain: true, has_api_key: true }),
+        facts: facts({
+          has_domain: true,
+          has_verified_domain: true,
+          has_api_key: true,
+        }),
         freePlanId: "free",
       }),
     ).toBe(false)
@@ -138,7 +144,11 @@ describe("shouldOnboard", () => {
         completedAt: new Date("2026-01-01"),
         lastOnboardedPlan: "free",
         currentPlan: "pro",
-        facts: facts({ has_domain: true, has_verified_domain: true, has_api_key: true }),
+        facts: facts({
+          has_domain: true,
+          has_verified_domain: true,
+          has_api_key: true,
+        }),
         freePlanId: "free",
       }),
     ).toBe(true)
@@ -157,7 +167,11 @@ describe("shouldOnboard", () => {
         completedAt: null,
         lastOnboardedPlan: null,
         currentPlan: "pro",
-        facts: facts({ has_domain: true, has_verified_domain: true, has_api_key: true }),
+        facts: facts({
+          has_domain: true,
+          has_verified_domain: true,
+          has_api_key: true,
+        }),
         freePlanId: "free",
       }),
     ).toBe(false)

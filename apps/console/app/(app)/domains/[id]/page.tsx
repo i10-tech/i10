@@ -94,14 +94,14 @@ export default async function DomainDetailPage({
           <SectionDescription>
             {domain.delegated ? (
               <>
-                Publish these three NS records at your DNS provider. Once they
-                resolve, i10 serves those subdomains — SPF, DKIM, DMARC and MX stay
-                correct without you touching them again.
+                Publish these three NS records at your DNS provider. Once they resolve,
+                i10 serves those subdomains — SPF, DKIM, DMARC and MX stay correct
+                without you touching them again.
               </>
             ) : (
               <>
-                Publish all of these at your DNS provider. We re-check them every
-                time you press Verify, and continuously for the first 72 hours.
+                Publish all of these at your DNS provider. We re-check them every time
+                you press Verify, and continuously for the first 72 hours.
               </>
             )}
           </SectionDescription>

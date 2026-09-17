@@ -147,7 +147,9 @@ export default async function EmailsPage({
                     <TableHead className="w-[9rem]">Status</TableHead>
                     <TableHead className="w-[16rem]">To</TableHead>
                     <TableHead>Subject</TableHead>
-                    <TableHead className="hidden w-[16rem] lg:table-cell">From</TableHead>
+                    <TableHead className="hidden w-[16rem] lg:table-cell">
+                      From
+                    </TableHead>
                     <TableHead className="w-[9rem] text-right">Sent</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -163,7 +165,10 @@ export default async function EmailsPage({
                        * the anchor is more markup and the only correct answer.
                        */}
                       <TableCell className="p-0">
-                        <Link href={`/emails/${email.id}`} className="block px-3 py-2.5">
+                        <Link
+                          href={`/emails/${email.id}`}
+                          className="block px-3 py-2.5"
+                        >
                           <Status status={email.last_event} />
                         </Link>
                       </TableCell>

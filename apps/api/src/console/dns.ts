@@ -123,10 +123,7 @@ export function dnsInspector(options: DnsInspectorOptions = {}): DnsInspector {
       const [ns, txt, mx, dmarc] = await Promise.all([
         safe(() => r.resolveNs(name), [] as string[]),
         safe(() => r.resolveTxt(name), [] as string[][]),
-        safe(
-          () => r.resolveMx(name),
-          [] as { exchange: string; priority: number }[],
-        ),
+        safe(() => r.resolveMx(name), [] as { exchange: string; priority: number }[]),
         safe(() => r.resolveTxt(`_dmarc.${name}`), [] as string[][]),
       ])
 
@@ -173,8 +170,7 @@ export function dnsInspector(options: DnsInspectorOptions = {}): DnsInspector {
   }
 }
 
-const HOSTNAME =
-  /^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)+[a-z]{2,}$/
+const HOSTNAME = /^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)+[a-z]{2,}$/
 
 /**
  * Suffixes this will not resolve, whatever the caller asks for.
@@ -225,7 +221,8 @@ function isPrivateName(name: string): boolean {
  */
 function normaliseDomain(raw: string): string | null {
   const name = raw.trim().toLowerCase().replace(/\.$/, "")
-  if (!name || name.includes("/") || name.includes(" ") || name.includes("@")) return null
+  if (!name || name.includes("/") || name.includes(" ") || name.includes("@"))
+    return null
   // ⚠ REFUSED BEFORE THE SHAPE CHECK PASSES THEM. `db.svc.cluster.local` is a
   // perfectly well-formed hostname; what disqualifies it is that it names
   // something inside our network rather than something a customer owns. See

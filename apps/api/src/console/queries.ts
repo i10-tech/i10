@@ -1,15 +1,4 @@
-import {
-  and,
-  desc,
-  eq,
-  gte,
-  inArray,
-  lt,
-  lte,
-  or,
-  sql,
-  type SQL,
-} from "drizzle-orm"
+import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { withTenant, type Database } from "../db/client.js"
 import {
@@ -667,7 +656,9 @@ export function consoleQueries(db: Database): ConsoleQueries {
       return withTenant(db, tenantId, async (tx) => {
         const where: SQL[] = []
         if (opts.search) {
-          where.push(sql`${suppressions.address} ilike ${`%${escapeLike(opts.search)}%`}`)
+          where.push(
+            sql`${suppressions.address} ilike ${`%${escapeLike(opts.search)}%`}`,
+          )
         }
         if (cursor) {
           where.push(
@@ -847,7 +838,8 @@ export function consoleQueries(db: Database): ConsoleQueries {
             api_key_id: r.apiKeyId,
             occurred_at: r.occurredAt.toISOString(),
           })),
-          nextCursor: hasMore && last ? encodeCursor(last.occurredAtRaw, last.id) : null,
+          nextCursor:
+            hasMore && last ? encodeCursor(last.occurredAtRaw, last.id) : null,
         }
       })
     },

@@ -34,9 +34,7 @@ describe("parseContactCsv", () => {
    * reports "2 contacts added".
    */
   it("keeps a quoted field containing a comma in one piece", () => {
-    const { rows } = parseContactCsv(
-      'email,name\njane@acme.com,"Smith, Jane"\n',
-    )
+    const { rows } = parseContactCsv('email,name\njane@acme.com,"Smith, Jane"\n')
 
     expect(rows).toHaveLength(1)
     expect(rows[0]?.properties).toEqual({ name: "Smith, Jane" })
@@ -122,9 +120,7 @@ describe("parseContactCsv", () => {
    * is why an import is worth doing at all rather than just pasting addresses.
    */
   it("turns unknown columns into merge fields", () => {
-    const { rows } = parseContactCsv(
-      "email,plan,seats\nbob@acme.com,pro,4\n",
-    )
+    const { rows } = parseContactCsv("email,plan,seats\nbob@acme.com,pro,4\n")
     expect(rows[0]?.properties).toEqual({ plan: "pro", seats: "4" })
   })
 

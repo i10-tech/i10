@@ -65,7 +65,10 @@ export default async function OverviewPage({
 
       <PageBody className="space-y-6">
         {!overview.ok ? (
-          <PanelError title="Could not load your metrics" message={overview.error.message} />
+          <PanelError
+            title="Could not load your metrics"
+            message={overview.error.message}
+          />
         ) : (
           <>
             <StatRow>
@@ -95,7 +98,10 @@ export default async function OverviewPage({
                     ? "danger"
                     : undefined
                 }
-                sub={formatRate(overview.data.totals.bounced, overview.data.totals.sent)}
+                sub={formatRate(
+                  overview.data.totals.bounced,
+                  overview.data.totals.sent,
+                )}
               />
               <Stat
                 label="Complained"
@@ -150,8 +156,8 @@ export default async function OverviewPage({
               <div className="px-4 py-10 text-center">
                 <p className="text-sm font-medium">Nothing sent yet</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Your first send will appear here within a second of the API
-                  accepting it.
+                  Your first send will appear here within a second of the API accepting
+                  it.
                 </p>
               </div>
             ) : (
@@ -179,7 +185,9 @@ export default async function OverviewPage({
                         className="shrink-0"
                       />
                       <span className="min-w-0 flex-1 truncate text-sm">
-                        {email.subject || <em className="text-muted-foreground">No subject</em>}
+                        {email.subject || (
+                          <em className="text-muted-foreground">No subject</em>
+                        )}
                       </span>
                       <span className="hidden min-w-0 shrink-0 truncate font-mono text-xs text-muted-foreground sm:block sm:max-w-[14rem]">
                         {email.to[0] ? bareAddress(email.to[0]) : "—"}
@@ -225,8 +233,8 @@ export default async function OverviewPage({
             <div className="rounded-lg border p-4">
               <h2 className="text-sm font-medium">Set-up</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Add a domain, publish its records and send a test — the same flow
-                you saw on your first visit, available whenever you need it.
+                Add a domain, publish its records and send a test — the same flow you
+                saw on your first visit, available whenever you need it.
               </p>
               <Button variant="outline" size="sm" className="mt-3" asChild>
                 <Link href="/onboarding">Open set-up</Link>

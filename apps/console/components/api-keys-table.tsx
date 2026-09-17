@@ -71,7 +71,9 @@ export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
               <TableHead>Name</TableHead>
               <TableHead className="w-[10rem]">Key</TableHead>
               <TableHead className="w-[6rem]">Mode</TableHead>
-              <TableHead className="hidden w-[10rem] md:table-cell">Last used</TableHead>
+              <TableHead className="hidden w-[10rem] md:table-cell">
+                Last used
+              </TableHead>
               <TableHead className="hidden w-[10rem] lg:table-cell">Created</TableHead>
               <TableHead className="w-12" />
             </TableRow>
@@ -215,8 +217,8 @@ export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
           <DialogHeader>
             <DialogTitle>Your new key</DialogTitle>
             <DialogDescription>
-              The previous key stopped working the moment this one was issued. Copy
-              it now — it will not be shown again.
+              The previous key stopped working the moment this one was issued. Copy it
+              now — it will not be shown again.
             </DialogDescription>
           </DialogHeader>
           {rotated && <CopyField value={rotated.secret} className="py-2" />}

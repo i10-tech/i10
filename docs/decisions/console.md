@@ -330,7 +330,7 @@ something.
      the sandbox disproved it.
   2. **`POST /v1/customer-sessions` needs a scope Polar does not grant by
      default.** With the organisation access token as issued, it answers `403
-     insufficient_scope`, so the card form never opens — for anybody, with no
+insufficient_scope`, so the card form never opens — for anybody, with no
      hint that the token is the problem. `customer_sessions:write` has to be
      added to the token in Polar's dashboard. The client turns that specific 403
      into a message naming the scope, and the route turns it into "this is on
@@ -353,6 +353,7 @@ something.
      checkout object. So the card form is correct for production and
      unverifiable before it gets there; it is the first thing to check on the
      first real deployment.
+
 - **Filtering the log by delivery state, in SQL.** `last_event` is not a column
   — it is the worst-by-severity of a message's events — so the status filter is
   applied in TypeScript after the page. The consequence is visible and

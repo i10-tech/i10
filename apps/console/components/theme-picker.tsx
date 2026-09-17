@@ -25,11 +25,7 @@ export function ThemePicker() {
   const mounted = useMounted()
 
   return (
-    <div
-      className="flex flex-wrap gap-2"
-      role="radiogroup"
-      aria-label="Theme"
-    >
+    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Theme">
       {OPTIONS.map((option) => {
         const selected = mounted && theme === option.value
         return (

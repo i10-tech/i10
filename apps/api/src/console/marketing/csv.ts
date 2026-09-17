@@ -47,7 +47,12 @@ export function parseContactCsv(input: string): {
   // writes "e-mail". Accepting only one would make the feature useless for the
   // exact case it exists for — moving off somebody else's product.
   const emailIdx = findColumn(header, ["email", "email address", "e-mail", "mail"])
-  const firstIdx = findColumn(header, ["first name", "firstname", "first", "given name"])
+  const firstIdx = findColumn(header, [
+    "first name",
+    "firstname",
+    "first",
+    "given name",
+  ])
   const lastIdx = findColumn(header, [
     "last name",
     "lastname",

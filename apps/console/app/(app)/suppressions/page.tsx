@@ -53,14 +53,17 @@ export default async function SuppressionsPage({
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          Addresses that hard-bounced or complained, plus any you have added by
-          hand. We skip them rather than sending and damaging your reputation.
+          Addresses that hard-bounced or complained, plus any you have added by hand. We
+          skip them rather than sending and damaging your reputation.
         </PageDescription>
       </PageHeader>
 
       <PageBody>
         {!result.ok ? (
-          <PanelError title="Could not load suppressions" message={result.error.message} />
+          <PanelError
+            title="Could not load suppressions"
+            message={result.error.message}
+          />
         ) : (
           <SuppressionsTable
             rows={result.data.data}

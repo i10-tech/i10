@@ -93,8 +93,8 @@ export default async function BillingPage() {
       <Section>
         <SectionTitle>Plans</SectionTitle>
         <SectionDescription>
-          Changing plan takes effect when the payment clears — usually a second or
-          two. Your allowances move at that moment, not before.
+          Changing plan takes effect when the payment clears — usually a second or two.
+          Your allowances move at that moment, not before.
         </SectionDescription>
         <SectionContent>
           {!plans.ok ? (
@@ -116,8 +116,8 @@ export default async function BillingPage() {
       <Section>
         <SectionTitle>Payment method and invoices</SectionTitle>
         <SectionDescription>
-          Card details and receipts are held by our payment provider — we never see
-          or store a card number.
+          Card details and receipts are held by our payment provider — we never see or
+          store a card number.
         </SectionDescription>
         <SectionContent className="space-y-3">
           {/*
@@ -145,8 +145,7 @@ export default async function BillingPage() {
           )}
 
           <p className="text-sm text-muted-foreground">
-            To download an invoice, reply to any billing email from us, or
-            contact{" "}
+            To download an invoice, reply to any billing email from us, or contact{" "}
             <a
               href="mailto:support@i10.tech"
               className="text-foreground underline underline-offset-4"

@@ -201,7 +201,9 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
   app.delete("/contact-properties/:id", async (c) => {
     const { tenantId } = c.get("auth")
     const ok = await d.marketing.deleteProperty(tenantId, c.req.param("id"))
-    return ok ? c.json({ id: c.req.param("id"), deleted: true }) : c.json(notFound(), 404)
+    return ok
+      ? c.json({ id: c.req.param("id"), deleted: true })
+      : c.json(notFound(), 404)
   })
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -237,7 +239,9 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
         ? { description: asNullableString(body.description) }
         : {}),
     })
-    return ok ? c.json({ id: c.req.param("id"), updated: true }) : c.json(notFound(), 404)
+    return ok
+      ? c.json({ id: c.req.param("id"), updated: true })
+      : c.json(notFound(), 404)
   })
 
   app.delete("/segments/:id", async (c) => {
@@ -342,13 +346,17 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
         : {}),
     })
 
-    return ok ? c.json({ id: c.req.param("id"), updated: true }) : c.json(notFound(), 404)
+    return ok
+      ? c.json({ id: c.req.param("id"), updated: true })
+      : c.json(notFound(), 404)
   })
 
   app.delete("/topics/:id", async (c) => {
     const { tenantId } = c.get("auth")
     const ok = await d.marketing.deleteTopic(tenantId, c.req.param("id"))
-    return ok ? c.json({ id: c.req.param("id"), deleted: true }) : c.json(notFound(), 404)
+    return ok
+      ? c.json({ id: c.req.param("id"), deleted: true })
+      : c.json(notFound(), 404)
   })
 
   app.put("/contacts/:id/topics/:topicId", async (c) => {

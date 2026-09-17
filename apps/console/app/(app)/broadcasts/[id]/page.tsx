@@ -16,12 +16,7 @@ import { BroadcastEditor } from "@/components/broadcast-editor"
 import { Stat, StatRow } from "@/components/stat"
 import { tryApi } from "@/lib/api"
 import { formatRate } from "@/lib/format"
-import type {
-  BroadcastDetail,
-  DomainSummary,
-  SegmentRow,
-  TopicRow,
-} from "@/lib/types"
+import type { BroadcastDetail, DomainSummary, SegmentRow, TopicRow } from "@/lib/types"
 
 export async function generateMetadata({
   params,
@@ -29,7 +24,9 @@ export async function generateMetadata({
   params: Promise<{ id: string }>
 }): Promise<Metadata> {
   const { id } = await params
-  const result = await tryApi<BroadcastDetail>(`/console/broadcasts/${encodeURIComponent(id)}`)
+  const result = await tryApi<BroadcastDetail>(
+    `/console/broadcasts/${encodeURIComponent(id)}`,
+  )
   return { title: result.ok ? result.data.name : "Broadcast" }
 }
 

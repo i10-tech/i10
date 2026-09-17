@@ -78,7 +78,10 @@ export function Meter({
       aria-valuemin={0}
       aria-valuemax={limit}
       aria-valuetext={`${used.toLocaleString()} of ${limit.toLocaleString()}`}
-      className={cn("flex h-1.5 w-full overflow-hidden rounded-full bg-muted", className)}
+      className={cn(
+        "flex h-1.5 w-full overflow-hidden rounded-full bg-muted",
+        className,
+      )}
       {...props}
     >
       <div

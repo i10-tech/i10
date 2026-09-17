@@ -1520,7 +1520,9 @@ export const topics = core.table(
       .references(() => tenants.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description"),
-    defaultSubscription: topicDefault("default_subscription").notNull().default("opt_in"),
+    defaultSubscription: topicDefault("default_subscription")
+      .notNull()
+      .default("opt_in"),
     visibility: topicVisibility("visibility").notNull().default("public"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

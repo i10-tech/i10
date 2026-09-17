@@ -63,7 +63,10 @@ export default async function DomainsPage() {
 
       <PageBody>
         {!result.ok ? (
-          <PanelError title="Could not load your domains" message={result.error.message} />
+          <PanelError
+            title="Could not load your domains"
+            message={result.error.message}
+          />
         ) : result.data.data.length === 0 ? (
           <EmptyState
             title="No domains yet"
@@ -78,7 +81,9 @@ export default async function DomainsPage() {
                   <TableHead>Domain</TableHead>
                   <TableHead className="w-[11rem]">Status</TableHead>
                   <TableHead className="w-[9rem]">Setup</TableHead>
-                  <TableHead className="hidden w-[9rem] md:table-cell">Region</TableHead>
+                  <TableHead className="hidden w-[9rem] md:table-cell">
+                    Region
+                  </TableHead>
                   <TableHead className="w-[9rem] text-right">Added</TableHead>
                 </TableRow>
               </TableHeader>
@@ -94,12 +99,18 @@ export default async function DomainsPage() {
                       </Link>
                     </TableCell>
                     <TableCell className="p-0">
-                      <Link href={`/domains/${domain.id}`} className="block px-3 py-2.5">
+                      <Link
+                        href={`/domains/${domain.id}`}
+                        className="block px-3 py-2.5"
+                      >
                         <Status status={domain.status} />
                       </Link>
                     </TableCell>
                     <TableCell className="p-0">
-                      <Link href={`/domains/${domain.id}`} className="block px-3 py-2.5">
+                      <Link
+                        href={`/domains/${domain.id}`}
+                        className="block px-3 py-2.5"
+                      >
                         <Badge variant={domain.delegated ? "secondary" : "outline"}>
                           {domain.delegated ? "Delegated" : "Manual records"}
                         </Badge>

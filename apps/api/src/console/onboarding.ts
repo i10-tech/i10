@@ -50,7 +50,11 @@ export function onboardingStore(db: Database, freePlanId = "free"): OnboardingSt
     async get(tenantId, currentPlan) {
       return withTenant(db, tenantId, async (tx) => {
         const [row, domainCounts, keyCount] = await Promise.all([
-          tx.select().from(onboarding).where(eq(onboarding.tenantId, tenantId)).limit(1),
+          tx
+            .select()
+            .from(onboarding)
+            .where(eq(onboarding.tenantId, tenantId))
+            .limit(1),
           tx
             .select({
               total: sql<number>`count(*)::int`,
@@ -94,7 +98,10 @@ export function onboardingStore(db: Database, freePlanId = "free"): OnboardingSt
            * upgraded, correctly told to onboard, and pointed at the wrong step.
            * One rule, evaluated on read, cannot disagree with itself.
            */
-          step: should && state?.completedAt ? "domain" : ((state?.step as Step) ?? "workspace"),
+          step:
+            should && state?.completedAt
+              ? "domain"
+              : ((state?.step as Step) ?? "workspace"),
           completed_at: state?.completedAt?.toISOString() ?? null,
           last_onboarded_plan: state?.lastOnboardedPlan ?? null,
           use_case: state?.useCase ?? null,
@@ -153,7 +160,6 @@ export function onboardingStore(db: Database, freePlanId = "free"): OnboardingSt
           })
       })
     },
-
   }
 }
 

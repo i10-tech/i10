@@ -72,9 +72,9 @@ export function StepVerify({
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Publish your records</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Open each domain to copy its records. DNS usually propagates within
-          minutes, but providers are allowed up to 72 hours — a pending domain is
-          not a broken one.
+          Open each domain to copy its records. DNS usually propagates within minutes,
+          but providers are allowed up to 72 hours — a pending domain is not a broken
+          one.
         </p>
       </div>
 
@@ -110,8 +110,8 @@ export function StepVerify({
 
       {pending.length > 0 && polls < MAX_POLLS && (
         <p className="text-xs text-muted-foreground">
-          Checking automatically every few seconds. You can carry on and come back
-          — verification continues without this page open.
+          Checking automatically every few seconds. You can carry on and come back —
+          verification continues without this page open.
         </p>
       )}
 
@@ -123,9 +123,7 @@ export function StepVerify({
       )}
 
       {verified.length > 0 && (
-        <Button onClick={onDone}>
-          Continue with {verified[0]!.name}
-        </Button>
+        <Button onClick={onDone}>Continue with {verified[0]!.name}</Button>
       )}
     </div>
   )

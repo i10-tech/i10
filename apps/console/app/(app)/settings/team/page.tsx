@@ -39,8 +39,8 @@ export default function TeamSettingsPage() {
           <SectionTitle>Members</SectionTitle>
           <SectionDescription>
             Membership, roles and invitations are managed by Clerk, which is not
-            configured in this environment. Set <code>CLERK_PUBLISHABLE_KEY</code>{" "}
-            to see the real panel here.
+            configured in this environment. Set <code>CLERK_PUBLISHABLE_KEY</code> to
+            see the real panel here.
           </SectionDescription>
         </Section>
       </div>
@@ -52,8 +52,8 @@ export default function TeamSettingsPage() {
       <Section className="pt-0">
         <SectionTitle>Members</SectionTitle>
         <SectionDescription>
-          Everyone here shares this workspace: its domains, its keys, its contacts
-          and its bill. Invitations are sent by email.
+          Everyone here shares this workspace: its domains, its keys, its contacts and
+          its bill. Invitations are sent by email.
         </SectionDescription>
         <SectionContent>
           <OrganizationProfile

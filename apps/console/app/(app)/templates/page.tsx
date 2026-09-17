@@ -56,8 +56,8 @@ export default async function TemplatesPage() {
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          Write once, send by id. Editing a template does not change what is going
-          out until you publish it.
+          Write once, send by id. Editing a template does not change what is going out
+          until you publish it.
         </PageDescription>
       </PageHeader>
 

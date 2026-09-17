@@ -38,8 +38,7 @@ import type {
  */
 
 export type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; name: string; status: number }
+  { ok: true; data: T } | { ok: false; error: string; name: string; status: number }
 
 async function run<T>(
   fn: () => Promise<T>,
@@ -77,10 +76,11 @@ async function run<T>(
 
 export async function renameWorkspace(name: string) {
   return run(
-    () => api<{ ok: true; name: string }>("/console/me/tenant", {
-      method: "PATCH",
-      body: { name },
-    }),
+    () =>
+      api<{ ok: true; name: string }>("/console/me/tenant", {
+        method: "PATCH",
+        body: { name },
+      }),
     ["/settings"],
   )
 }
@@ -100,14 +100,20 @@ export async function createDomain(input: {
 
 export async function verifyDomain(id: string) {
   return run(
-    () => api<Domain>(`/console/domains/${encodeURIComponent(id)}/verify`, { method: "POST" }),
+    () =>
+      api<Domain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
+        method: "POST",
+      }),
     [`/domains/${encodeURIComponent(id)}`, "/domains"],
   )
 }
 
 export async function deleteDomain(id: string) {
   return run(
-    () => api<{ deleted: true }>(`/console/domains/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    () =>
+      api<{ deleted: true }>(`/console/domains/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/domains", "/"],
   )
 }
@@ -141,14 +147,20 @@ export async function createApiKey(input: { name: string; mode: "live" | "test" 
 
 export async function revokeApiKey(id: string) {
   return run(
-    () => api<{ deleted: true }>(`/console/api-keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    () =>
+      api<{ deleted: true }>(`/console/api-keys/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/api-keys"],
   )
 }
 
 export async function rotateApiKey(id: string) {
   return run(
-    () => api<CreatedApiKey>(`/console/api-keys/${encodeURIComponent(id)}/rotate`, { method: "POST" }),
+    () =>
+      api<CreatedApiKey>(`/console/api-keys/${encodeURIComponent(id)}/rotate`, {
+        method: "POST",
+      }),
     ["/api-keys"],
   )
 }
@@ -173,7 +185,9 @@ export async function createWebhook(input: {
 export async function deleteWebhook(id: string) {
   return run(
     () =>
-      api<{ deleted: true }>(`/console/webhook-endpoints/${encodeURIComponent(id)}`, { method: "DELETE" }),
+      api<{ deleted: true }>(`/console/webhook-endpoints/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/webhooks"],
   )
 }
@@ -181,9 +195,12 @@ export async function deleteWebhook(id: string) {
 export async function rotateWebhookSecret(id: string) {
   return run(
     () =>
-      api<WebhookEndpoint>(`/console/webhook-endpoints/${encodeURIComponent(id)}/rotate-secret`, {
-        method: "POST",
-      }),
+      api<WebhookEndpoint>(
+        `/console/webhook-endpoints/${encodeURIComponent(id)}/rotate-secret`,
+        {
+          method: "POST",
+        },
+      ),
     ["/webhooks", `/webhooks/${encodeURIComponent(id)}`],
   )
 }
@@ -256,7 +273,11 @@ export async function updateContact(
   },
 ) {
   return run(
-    () => api<ContactRow>(`/console/contacts/${encodeURIComponent(id)}`, { method: "PATCH", body: patch }),
+    () =>
+      api<ContactRow>(`/console/contacts/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: patch,
+      }),
     ["/contacts", `/contacts/${encodeURIComponent(id)}`],
   )
 }
@@ -300,7 +321,9 @@ export async function createProperty(input: {
 export async function deleteProperty(id: string) {
   return run(
     () =>
-      api<{ deleted: true }>(`/console/contact-properties/${encodeURIComponent(id)}`, { method: "DELETE" }),
+      api<{ deleted: true }>(`/console/contact-properties/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/contacts", "/contacts/properties"],
   )
 }
@@ -319,14 +342,21 @@ export async function updateSegment(
   patch: { name?: string; description?: string | null },
 ) {
   return run(
-    () => api(`/console/segments/${encodeURIComponent(id)}`, { method: "PATCH", body: patch }),
+    () =>
+      api(`/console/segments/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: patch,
+      }),
     ["/segments", `/segments/${encodeURIComponent(id)}`],
   )
 }
 
 export async function deleteSegment(id: string) {
   return run(
-    () => api<{ deleted: true }>(`/console/segments/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    () =>
+      api<{ deleted: true }>(`/console/segments/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/segments"],
   )
 }
@@ -334,10 +364,13 @@ export async function deleteSegment(id: string) {
 export async function addToSegment(segmentId: string, contactIds: string[]) {
   return run(
     () =>
-      api<{ added: number }>(`/console/segments/${encodeURIComponent(segmentId)}/contacts`, {
-        method: "POST",
-        body: { contact_ids: contactIds },
-      }),
+      api<{ added: number }>(
+        `/console/segments/${encodeURIComponent(segmentId)}/contacts`,
+        {
+          method: "POST",
+          body: { contact_ids: contactIds },
+        },
+      ),
     ["/segments", `/segments/${encodeURIComponent(segmentId)}`, "/contacts"],
   )
 }
@@ -345,10 +378,13 @@ export async function addToSegment(segmentId: string, contactIds: string[]) {
 export async function removeFromSegment(segmentId: string, contactIds: string[]) {
   return run(
     () =>
-      api<{ removed: number }>(`/console/segments/${encodeURIComponent(segmentId)}/contacts/remove`, {
-        method: "POST",
-        body: { contact_ids: contactIds },
-      }),
+      api<{ removed: number }>(
+        `/console/segments/${encodeURIComponent(segmentId)}/contacts/remove`,
+        {
+          method: "POST",
+          body: { contact_ids: contactIds },
+        },
+      ),
     ["/segments", `/segments/${encodeURIComponent(segmentId)}`],
   )
 }
@@ -372,14 +408,21 @@ export async function updateTopic(
   patch: { name?: string; description?: string | null; visibility?: string },
 ) {
   return run(
-    () => api(`/console/topics/${encodeURIComponent(id)}`, { method: "PATCH", body: patch }),
+    () =>
+      api(`/console/topics/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: patch,
+      }),
     ["/topics"],
   )
 }
 
 export async function deleteTopic(id: string) {
   return run(
-    () => api<{ deleted: true }>(`/console/topics/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    () =>
+      api<{ deleted: true }>(`/console/topics/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/topics"],
   )
 }
@@ -391,10 +434,13 @@ export async function setTopicSubscription(
 ) {
   return run(
     () =>
-      api(`/console/contacts/${encodeURIComponent(contactId)}/topics/${encodeURIComponent(topicId)}`, {
-        method: "PUT",
-        body: { subscribed },
-      }),
+      api(
+        `/console/contacts/${encodeURIComponent(contactId)}/topics/${encodeURIComponent(topicId)}`,
+        {
+          method: "PUT",
+          body: { subscribed },
+        },
+      ),
     [`/contacts/${encodeURIComponent(contactId)}`, "/topics"],
   )
 }
@@ -436,17 +482,23 @@ export interface BroadcastPatch {
 export async function updateBroadcast(id: string, patch: BroadcastPatch) {
   return run(
     () =>
-      api<import("@/lib/types").BroadcastRow>(`/console/broadcasts/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: patch,
-      }),
+      api<import("@/lib/types").BroadcastRow>(
+        `/console/broadcasts/${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          body: patch,
+        },
+      ),
     ["/broadcasts", `/broadcasts/${encodeURIComponent(id)}`],
   )
 }
 
 export async function deleteBroadcast(id: string) {
   return run(
-    () => api<{ deleted: true }>(`/console/broadcasts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    () =>
+      api<{ deleted: true }>(`/console/broadcasts/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/broadcasts"],
   )
 }
@@ -463,21 +515,30 @@ export async function createTemplate(input: { name: string; folder?: string | nu
 export async function updateTemplate(id: string, patch: Record<string, unknown>) {
   return run(
     () =>
-      api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}`, { method: "PATCH", body: patch }),
+      api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: patch,
+      }),
     ["/templates", `/templates/${encodeURIComponent(id)}`],
   )
 }
 
 export async function publishTemplate(id: string) {
   return run(
-    () => api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}/publish`, { method: "POST" }),
+    () =>
+      api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}/publish`, {
+        method: "POST",
+      }),
     ["/templates", `/templates/${encodeURIComponent(id)}`],
   )
 }
 
 export async function deleteTemplate(id: string) {
   return run(
-    () => api<{ deleted: true }>(`/console/templates/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    () =>
+      api<{ deleted: true }>(`/console/templates/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     ["/templates"],
   )
 }

@@ -187,7 +187,13 @@ function Row({ label, value }: { label: string; value: string }) {
   )
 }
 
-function Th({ children, className }: { children: React.ReactNode; className?: string }) {
+function Th({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
   return (
     <th
       className={`px-3 py-2 text-xs font-medium text-muted-foreground ${className ?? ""}`}

@@ -124,8 +124,8 @@ export function ImportContactsButton() {
           <DialogHeader>
             <DialogTitle>Import contacts</DialogTitle>
             <DialogDescription>
-              A CSV with an email column. Anything else becomes a merge field you
-              can use in a broadcast.
+              A CSV with an email column. Anything else becomes a merge field you can
+              use in a broadcast.
             </DialogDescription>
           </DialogHeader>
 
@@ -144,8 +144,8 @@ export function ImportContactsButton() {
               {result.invalid > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {formatNumber(result.invalid)}{" "}
-                  {result.invalid === 1 ? "row was" : "rows were"} skipped because
-                  the address was missing or did not look like one.
+                  {result.invalid === 1 ? "row was" : "rows were"} skipped because the
+                  address was missing or did not look like one.
                 </p>
               )}
 
@@ -203,9 +203,7 @@ export function ImportContactsButton() {
                     <span className="text-sm font-medium">
                       Drop a CSV here, or click to choose
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      Up to 20 MB
-                    </span>
+                    <span className="text-xs text-muted-foreground">Up to 20 MB</span>
                   </>
                 )}
               </label>

@@ -107,8 +107,8 @@ client.emails.send({
         <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
           <span>
-            No domain is verified yet, so a send will be refused. The snippet is
-            still worth copying — come back to it once verification finishes.
+            No domain is verified yet, so a send will be refused. The snippet is still
+            worth copying — come back to it once verification finishes.
           </span>
         </p>
       )}
@@ -118,8 +118,8 @@ client.emails.send({
           <p className="text-sm font-medium">Your API key</p>
           <CopyField value={key.secret} className="py-2" />
           <p className="text-xs text-warning">
-            This is the only time it is shown. It is already in the snippet below —
-            copy that and you have both.
+            This is the only time it is shown. It is already in the snippet below — copy
+            that and you have both.
           </p>
         </div>
       ) : (
@@ -151,7 +151,11 @@ client.emails.send({
           { value: "node", code: node },
           { value: "python", code: python },
         ].map((snippet) => (
-          <TabsContent key={snippet.value} value={snippet.value} className="relative m-0">
+          <TabsContent
+            key={snippet.value}
+            value={snippet.value}
+            className="relative m-0"
+          >
             <CopyButton
               value={snippet.code}
               label="Copy snippet"

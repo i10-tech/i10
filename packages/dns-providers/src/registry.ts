@@ -45,7 +45,8 @@ export const PROVIDERS: DnsProvider[] = [
       scope: "EdgeGrid client token with DNS—Zone Record Management",
       zoneScoped: false,
     },
-    manualPath: "Akamai Control Center → Edge DNS Zone Management → your zone → Add record",
+    manualPath:
+      "Akamai Control Center → Edge DNS Zone Management → your zone → Add record",
   },
   {
     slug: "alibaba-dns",
@@ -231,7 +232,8 @@ export const PROVIDERS: DnsProvider[] = [
       },
     },
     manualPath: "Networking → Domains → your domain → Create new record",
-    helpUrl: "https://docs.digitalocean.com/products/networking/dns/how-to/manage-records/",
+    helpUrl:
+      "https://docs.digitalocean.com/products/networking/dns/how-to/manage-records/",
     unverified:
       "The domain must already exist as a Domain resource in the account — a " +
       "customer who pointed NS at DO but never added the domain in the panel " +
@@ -333,7 +335,8 @@ export const PROVIDERS: DnsProvider[] = [
       auth: "basic",
       zoneScoped: false,
       replacesZone: true,
-      eligibility: "Reseller account required; retail customers cannot mint credentials.",
+      eligibility:
+        "Reseller account required; retail customers cannot mint credentials.",
     },
     manualPath: "Domains → Manage Domains → Host Records",
   },
@@ -594,8 +597,7 @@ export const PROVIDERS: DnsProvider[] = [
        * registry.
        */
       replacesZone: true,
-      eligibility:
-        "20+ domains, or a $50 balance, or $50 spent in the last two years.",
+      eligibility: "20+ domains, or a $50 balance, or $50 spent in the last two years.",
       /*
        * ⚠ AN INFRASTRUCTURE CONSTRAINT WE HAVE NOT MET. Namecheap pins API
        * access to IPv4 addresses registered in the account — so this works only
@@ -930,7 +932,12 @@ export const PROVIDERS: DnsProvider[] = [
     slug: "ultradns",
     name: "Vercara UltraDNS",
     kind: "authoritative",
-    nameserverPatterns: ["ultradns.com", "ultradns.net", "ultradns.org", "ultradns.biz"],
+    nameserverPatterns: [
+      "ultradns.com",
+      "ultradns.net",
+      "ultradns.org",
+      "ultradns.biz",
+    ],
     // Also the backend behind Namecheap PremiumDNS, which answers with
     // `pdns*.registrar-servers.com` rather than an UltraDNS hostname.
     isBackend: true,

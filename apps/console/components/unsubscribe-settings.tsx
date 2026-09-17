@@ -30,9 +30,9 @@ export function UnsubscribePageSettings() {
   return (
     <div className="max-w-2xl space-y-6">
       <p className="rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
-        The hosted preference page is not live yet, so nothing here is saved. The
-        fields are the ones it will have — the page itself needs a public route
-        and a signed per-recipient token before it can ship.
+        The hosted preference page is not live yet, so nothing here is saved. The fields
+        are the ones it will have — the page itself needs a public route and a signed
+        per-recipient token before it can ship.
       </p>
 
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_16rem]">

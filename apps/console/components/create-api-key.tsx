@@ -16,10 +16,7 @@ import {
 } from "@repo/ui/components/dialog"
 import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@repo/ui/components/radio-group"
+import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
 import { Spinner } from "@repo/ui/components/spinner"
 import { createApiKey } from "@/lib/actions"
 import type { CreatedApiKey } from "@/lib/types"
@@ -102,8 +99,8 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
               <DialogHeader>
                 <DialogTitle>Copy your key now</DialogTitle>
                 <DialogDescription>
-                  This is the only time it will ever be shown. We store a hash of
-                  it, not the key itself — there is nothing to reveal later.
+                  This is the only time it will ever be shown. We store a hash of it,
+                  not the key itself — there is nothing to reveal later.
                 </DialogDescription>
               </DialogHeader>
 
@@ -113,9 +110,8 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
                 <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
                   <span>
-                    Treat it like a password. If it leaks, rotate it — a rotated
-                    key stops working immediately, not at the end of a cache
-                    window.
+                    Treat it like a password. If it leaks, rotate it — a rotated key
+                    stops working immediately, not at the end of a cache window.
                   </span>
                 </p>
               </div>
@@ -136,8 +132,8 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
               <DialogHeader>
                 <DialogTitle>Create an API key</DialogTitle>
                 <DialogDescription>
-                  Name it after where it will live, so you know what you are
-                  revoking later.
+                  Name it after where it will live, so you know what you are revoking
+                  later.
                 </DialogDescription>
               </DialogHeader>
 
@@ -168,8 +164,8 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
                       <span className="space-y-0.5">
                         <span className="block text-sm font-medium">Live</span>
                         <span className="block text-xs text-muted-foreground">
-                          Sends real mail and counts against your allowance.
-                          Prefixed <code className="font-mono">i10_live_</code>.
+                          Sends real mail and counts against your allowance. Prefixed{" "}
+                          <code className="font-mono">i10_live_</code>.
                         </span>
                       </span>
                     </label>
@@ -178,9 +174,8 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
                       <span className="space-y-0.5">
                         <span className="block text-sm font-medium">Test</span>
                         <span className="block text-xs text-muted-foreground">
-                          Prefixed <code className="font-mono">i10_test_</code> so
-                          it is greppable in a leak scan and obvious in your own
-                          logs.
+                          Prefixed <code className="font-mono">i10_test_</code> so it is
+                          greppable in a leak scan and obvious in your own logs.
                         </span>
                       </span>
                     </label>

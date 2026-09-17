@@ -164,9 +164,9 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
           <DialogHeader>
             <DialogTitle>Your new signing secret</DialogTitle>
             <DialogDescription>
-              The previous secret stopped verifying the moment this was issued.
-              Deploy it before the next event arrives, or your handler will reject
-              a legitimate request.
+              The previous secret stopped verifying the moment this was issued. Deploy
+              it before the next event arrives, or your handler will reject a legitimate
+              request.
             </DialogDescription>
           </DialogHeader>
           {rotated?.secret && <CopyField value={rotated.secret} className="py-2" />}

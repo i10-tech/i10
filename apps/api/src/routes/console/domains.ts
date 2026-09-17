@@ -1,11 +1,6 @@
 import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
-import {
-  notFound,
-  notWired,
-  readJson,
-  validation,
-} from "./http.js"
+import { notFound, notWired, readJson, validation } from "./http.js"
 
 /**
  * Sending domains, and the live DNS behind them.

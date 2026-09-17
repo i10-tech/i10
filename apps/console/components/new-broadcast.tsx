@@ -25,9 +25,7 @@ export function NewBroadcastButton() {
   // close does it while the dialog is still animating out, which reads as
   // the input being wiped from under you. Adjusted during render rather
   // than in an effect; see lib/react.ts.
-  useResetOnOpen(open, () => {
-
-  })
+  useResetOnOpen(open, () => {})
 
   return (
     <FormDialog

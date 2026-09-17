@@ -62,7 +62,10 @@ export default async function ContactsPage({
 
       <PageBody width="full">
         {!contacts.ok ? (
-          <PanelError title="Could not load contacts" message={contacts.error.message} />
+          <PanelError
+            title="Could not load contacts"
+            message={contacts.error.message}
+          />
         ) : (
           <ContactsTable
             contacts={contacts.data.data}

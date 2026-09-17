@@ -2,12 +2,7 @@ import type { Hono } from "hono"
 import type { Step } from "../../console/onboarding.js"
 import { STEPS } from "../../console/onboarding.js"
 import type { ConsoleDeps } from "./deps.js"
-import {
-  notFound,
-  notWired,
-  readJson,
-  validation,
-} from "./http.js"
+import { notFound, notWired, readJson, validation } from "./http.js"
 
 /**
  * Who this workspace is, what it has used, and what it is paying for.
@@ -40,10 +35,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       d.profile.get(tenantId),
       d.usage.billing(tenantId),
     ])
-    const onboardingState = await d.onboarding.get(
-      tenantId,
-      billing.plan?.id ?? null,
-    )
+    const onboardingState = await d.onboarding.get(tenantId, billing.plan?.id ?? null)
 
     return c.json({
       user: { id: userId },
@@ -101,7 +93,8 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
      * succeed. The same rule routes/billing.ts states at length.
      */
     const productId = d.billing.products[plan]
-    if (!productId) return c.json(validation(`No such plan: ${plan || "(missing)"}.`), 422)
+    if (!productId)
+      return c.json(validation(`No such plan: ${plan || "(missing)"}.`), 422)
 
     try {
       const checkout = await d.billing.polar.createCheckout({

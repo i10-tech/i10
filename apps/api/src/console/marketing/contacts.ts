@@ -8,16 +8,9 @@ import {
   segments,
   topics,
 } from "../../db/core.js"
-import {
-  clampLimit,
-  decodeCursor,
-  encodeCursor,
-  escapeLike,
-} from "../queries.js"
+import { clampLimit, decodeCursor, encodeCursor, escapeLike } from "../queries.js"
 import type { MarketingStore } from "./types.js"
-import {
-  toContactRow,
-} from "./shared.js"
+import { toContactRow } from "./shared.js"
 import { parseContactCsv } from "./csv.js"
 
 /**
@@ -30,7 +23,18 @@ import { parseContactCsv } from "./csv.js"
  */
 export function contactsStore(
   db: Database,
-): Pick<MarketingStore, "listContacts" | "getContact" | "upsertContact" | "updateContact" | "deleteContacts" | "importContacts" | "listProperties" | "createProperty" | "deleteProperty"> {
+): Pick<
+  MarketingStore,
+  | "listContacts"
+  | "getContact"
+  | "upsertContact"
+  | "updateContact"
+  | "deleteContacts"
+  | "importContacts"
+  | "listProperties"
+  | "createProperty"
+  | "deleteProperty"
+> {
   return {
     // ── Contacts ────────────────────────────────────────────────────────────
 
@@ -99,7 +103,11 @@ export function contactsStore(
 
     async getContact(tenantId, id) {
       return withTenant(db, tenantId, async (tx) => {
-        const rows = await tx.select().from(contacts).where(eq(contacts.id, id)).limit(1)
+        const rows = await tx
+          .select()
+          .from(contacts)
+          .where(eq(contacts.id, id))
+          .limit(1)
         const contact = rows[0]
         if (!contact) return null
 
@@ -207,7 +215,10 @@ export function contactsStore(
            * local Postgres in this repo, so this has been reasoned about rather
            * than executed; it is the first thing to check on the first real run.
            */
-          .returning({ ...getTableColumns(contacts), inserted: sql<boolean>`(xmax = 0)` })
+          .returning({
+            ...getTableColumns(contacts),
+            inserted: sql<boolean>`(xmax = 0)`,
+          })
 
         if (!row) throw new Error("upsert returned nothing")
         return { contact: toContactRow(row), created: row.inserted }
@@ -315,7 +326,10 @@ export function contactsStore(
 
     async listProperties(tenantId) {
       return withTenant(db, tenantId, async (tx) => {
-        const rows = await tx.select().from(contactProperties).orderBy(contactProperties.key)
+        const rows = await tx
+          .select()
+          .from(contactProperties)
+          .orderBy(contactProperties.key)
         return rows.map((r) => ({
           id: r.id,
           key: r.key,

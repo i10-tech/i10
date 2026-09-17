@@ -48,8 +48,8 @@ export default async function SegmentsPage() {
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          Groups you target a broadcast at. Recipients never see them — that is
-          what topics are for.
+          Groups you target a broadcast at. Recipients never see them — that is what
+          topics are for.
         </PageDescription>
       </PageHeader>
 

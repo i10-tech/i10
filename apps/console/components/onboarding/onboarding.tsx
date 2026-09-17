@@ -76,16 +76,13 @@ export function Onboarding({
 
   const index = STEPS.findIndex((s) => s.id === step)
 
-  const go = React.useCallback(
-    (next: StepId) => {
-      setStep(next)
-      // ⚠ NOT AWAITED. The person is already looking at the next step; making
-      // them wait for a write whose only purpose is resuming later would add
-      // latency to every click for no visible benefit.
-      void updateOnboarding({ step: next })
-    },
-    [],
-  )
+  const go = React.useCallback((next: StepId) => {
+    setStep(next)
+    // ⚠ NOT AWAITED. The person is already looking at the next step; making
+    // them wait for a write whose only purpose is resuming later would add
+    // latency to every click for no visible benefit.
+    void updateOnboarding({ step: next })
+  }, [])
 
   async function finish() {
     await updateOnboarding({ completed: true })

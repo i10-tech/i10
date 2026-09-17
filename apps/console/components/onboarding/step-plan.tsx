@@ -43,8 +43,8 @@ export function StepPlan({
           {current ? `You are on ${current.name}` : "Your plan"}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Here is what that includes. You can change plan at any time — allowances
-          move the moment the payment clears.
+          Here is what that includes. You can change plan at any time — allowances move
+          the moment the payment clears.
         </p>
       </div>
 
@@ -53,9 +53,7 @@ export function StepPlan({
           {entitlements.map((entitlement) => (
             <MeterRow
               key={entitlement.featureId}
-              label={
-                LABELS[entitlement.featureId] ?? entitlement.featureId
-              }
+              label={LABELS[entitlement.featureId] ?? entitlement.featureId}
               used={0}
               limit={entitlement.allowance}
               format={

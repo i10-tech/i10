@@ -1,13 +1,7 @@
 import type { Hono } from "hono"
 import type { BroadcastInput } from "../../console/marketing.js"
 import type { ConsoleDeps } from "./deps.js"
-import {
-  asNullableString,
-  notFound,
-  parseDate,
-  readJson,
-  validation,
-} from "./http.js"
+import { asNullableString, notFound, parseDate, readJson, validation } from "./http.js"
 
 /**
  * Broadcasts and the templates they are written from.
@@ -134,11 +128,15 @@ export function mountCampaigns(app: Hono, d: ConsoleDeps): void {
     const updated = await d.marketing.updateTemplate(tenantId, c.req.param("id"), {
       ...(typeof body?.name === "string" ? { name: body.name } : {}),
       ...(body?.folder !== undefined ? { folder: asNullableString(body.folder) } : {}),
-      ...(body?.subject !== undefined ? { subject: asNullableString(body.subject) } : {}),
+      ...(body?.subject !== undefined
+        ? { subject: asNullableString(body.subject) }
+        : {}),
       ...(body?.html !== undefined ? { html: asNullableString(body.html) } : {}),
       ...(body?.text !== undefined ? { text: asNullableString(body.text) } : {}),
     })
-    return updated ? c.json(updated) : c.json(notFound("No template with that id."), 404)
+    return updated
+      ? c.json(updated)
+      : c.json(notFound("No template with that id."), 404)
   })
 
   /**
@@ -159,7 +157,9 @@ export function mountCampaigns(app: Hono, d: ConsoleDeps): void {
   app.delete("/templates/:id", async (c) => {
     const { tenantId } = c.get("auth")
     const ok = await d.marketing.deleteTemplate(tenantId, c.req.param("id"))
-    return ok ? c.json({ id: c.req.param("id"), deleted: true }) : c.json(notFound(), 404)
+    return ok
+      ? c.json({ id: c.req.param("id"), deleted: true })
+      : c.json(notFound(), 404)
   })
 }
 

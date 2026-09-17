@@ -31,8 +31,8 @@ export function StepDomain({
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Add your domain</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Mail leaves from a domain you control. We will detect who hosts its DNS
-          and show you the shortest path from here.
+          Mail leaves from a domain you control. We will detect who hosts its DNS and
+          show you the shortest path from here.
         </p>
       </div>
 

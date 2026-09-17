@@ -82,8 +82,8 @@ export function HtmlEditor({
            * nothing at all. Left empty, the send path derives one from the HTML
            * — which is better than nothing and worse than one somebody wrote.
            */}
-          Left empty, we generate one from the HTML. A hand-written version reads
-          better and scores better with spam filters.
+          Left empty, we generate one from the HTML. A hand-written version reads better
+          and scores better with spam filters.
         </p>
       </TabsContent>
 

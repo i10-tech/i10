@@ -25,7 +25,9 @@ export default async function GeneralSettingsPage() {
   const me = await tryApi<Me>("/console/me")
 
   if (!me.ok) {
-    return <PanelError title="Could not load your workspace" message={me.error.message} />
+    return (
+      <PanelError title="Could not load your workspace" message={me.error.message} />
+    )
   }
 
   const tenant = me.data.tenant
@@ -35,8 +37,8 @@ export default async function GeneralSettingsPage() {
       <Section className="pt-0">
         <SectionTitle>Workspace name</SectionTitle>
         <SectionDescription>
-          What appears on your invoices. Your team sees the organization name from
-          the switcher, which is set separately under Team.
+          What appears on your invoices. Your team sees the organization name from the
+          switcher, which is set separately under Team.
         </SectionDescription>
         <SectionContent>
           <RenameWorkspace current={tenant?.name ?? ""} />
@@ -46,8 +48,8 @@ export default async function GeneralSettingsPage() {
       <Section>
         <SectionTitle>Identifiers</SectionTitle>
         <SectionDescription>
-          Quote the workspace ID if you ever contact support — it is what we look
-          you up by.
+          Quote the workspace ID if you ever contact support — it is what we look you up
+          by.
         </SectionDescription>
         <SectionContent className="grid max-w-md gap-4">
           <div className="space-y-1">
@@ -74,8 +76,7 @@ export default async function GeneralSettingsPage() {
         <SectionTitle>Danger zone</SectionTitle>
         <SectionDescription>
           Deleting a workspace deletes its domains, keys, contacts and the record of
-          every message it has ever sent. There is no undo and no export
-          afterwards.
+          every message it has ever sent. There is no undo and no export afterwards.
         </SectionDescription>
         <SectionContent>
           {/*
@@ -88,8 +89,8 @@ export default async function GeneralSettingsPage() {
            * single most destructive control in the product.
            */}
           <p className="text-sm text-muted-foreground">
-            Workspace deletion is handled by support so we can export your data
-            first and check that nobody else is relying on your mailboxes. Email{" "}
+            Workspace deletion is handled by support so we can export your data first
+            and check that nobody else is relying on your mailboxes. Email{" "}
             <a
               href="mailto:support@i10.tech"
               className="text-foreground underline underline-offset-4"

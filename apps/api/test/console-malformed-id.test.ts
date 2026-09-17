@@ -63,9 +63,12 @@ function appWith(thrown: Error, reported: unknown[] = []) {
 
 describe("a malformed id", () => {
   it("is a 422 with an explanation, not a 500", async () => {
-    const response = await appWith(pgError("22P02")).request("/console/contacts/banana", {
-      headers: BEARER,
-    })
+    const response = await appWith(pgError("22P02")).request(
+      "/console/contacts/banana",
+      {
+        headers: BEARER,
+      },
+    )
 
     expect(response.status).toBe(422)
     const body = (await response.json()) as { name: string; message: string }

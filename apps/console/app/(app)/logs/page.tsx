@@ -34,7 +34,8 @@ export default async function LogsPage({
   searchParams: Promise<{ status?: string; cursor?: string }>
 }) {
   const params = await searchParams
-  const status = params.status === "error" || params.status === "ok" ? params.status : undefined
+  const status =
+    params.status === "error" || params.status === "ok" ? params.status : undefined
 
   const result = await tryApi<ApiPage<RequestRow>>("/console/requests", {
     query: { status, cursor: params.cursor, limit: 50 },
@@ -47,14 +48,17 @@ export default async function LogsPage({
           <PageTitle>Logs</PageTitle>
         </PageHeaderRow>
         <PageDescription>
-          Requests your servers have made to the API, with what we answered. Bodies
-          are never recorded — they contain your customers&rsquo; mail.
+          Requests your servers have made to the API, with what we answered. Bodies are
+          never recorded — they contain your customers&rsquo; mail.
         </PageDescription>
       </PageHeader>
 
       <PageBody width="full">
         {!result.ok ? (
-          <PanelError title="Could not load the request log" message={result.error.message} />
+          <PanelError
+            title="Could not load the request log"
+            message={result.error.message}
+          />
         ) : (
           <LogsTable
             rows={result.data.data}

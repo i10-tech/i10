@@ -56,8 +56,8 @@ export default async function WebhooksPage({
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          We POST every delivery event to your endpoints, signed so you can verify
-          it came from us. Failed deliveries are retried with backoff.
+          We POST every delivery event to your endpoints, signed so you can verify it
+          came from us. Failed deliveries are retried with backoff.
         </PageDescription>
       </PageHeader>
 

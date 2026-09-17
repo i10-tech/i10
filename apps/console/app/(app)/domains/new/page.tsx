@@ -35,8 +35,8 @@ export default function NewDomainPage() {
           </div>
         </PageHeaderRow>
         <PageDescription>
-          We will look up who hosts its DNS and show you the shortest path from here
-          to sending.
+          We will look up who hosts its DNS and show you the shortest path from here to
+          sending.
         </PageDescription>
       </PageHeader>
 

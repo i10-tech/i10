@@ -7,12 +7,7 @@ import {
   messages,
   templates,
 } from "../../db/core.js"
-import type {
-  BroadcastRow,
-  BroadcastStats,
-  ContactRow,
-  TemplateRow,
-} from "./types.js"
+import type { BroadcastRow, BroadcastStats, ContactRow, TemplateRow } from "./types.js"
 
 /**
  * What the four store modules have in common: the row mappers that turn a
@@ -27,7 +22,6 @@ import type {
  * bound their lists with it, and a ceiling that differs between them is a
  * ceiling nobody can state.
  */
-
 
 export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
@@ -59,7 +53,10 @@ export async function broadcastStats(
       ),
     )
     .where(
-      and(eq(messages.broadcastId, broadcastId), sql`${messages.createdAt} >= ${floor}`),
+      and(
+        eq(messages.broadcastId, broadcastId),
+        sql`${messages.createdAt} >= ${floor}`,
+      ),
     )
 
   return rows[0] ?? { total: 0, delivered: 0, bounced: 0, complained: 0, failed: 0 }

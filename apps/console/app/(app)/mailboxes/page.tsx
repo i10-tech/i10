@@ -39,8 +39,8 @@ export default function MailboxesPage() {
           <PageTitle>Mailboxes</PageTitle>
         </PageHeaderRow>
         <PageDescription>
-          Real IMAP mailboxes on your own domains — one address, one password, the
-          same account you sign in with.
+          Real IMAP mailboxes on your own domains — one address, one password, the same
+          account you sign in with.
         </PageDescription>
       </PageHeader>
 
@@ -56,10 +56,10 @@ export default function MailboxesPage() {
           <div className="space-y-1 text-sm">
             <p className="font-medium">What exists today</p>
             <p className="text-muted-foreground">
-              A domain marked as hosting mailboxes accepts mail through our own MTA
-              and authenticates over LDAP against your i10 account — so a mailbox
-              holder has one password, not two. Creating one is an API call that
-              takes your session, not an API key.
+              A domain marked as hosting mailboxes accepts mail through our own MTA and
+              authenticates over LDAP against your i10 account — so a mailbox holder has
+              one password, not two. Creating one is an API call that takes your
+              session, not an API key.
             </p>
           </div>
         </div>

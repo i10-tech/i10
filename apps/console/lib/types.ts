@@ -196,7 +196,10 @@ export interface ApiKeyRow {
 }
 
 /** ⚠ `secret` IS PRESENT EXACTLY ONCE, IN THE CREATE RESPONSE. Nothing stores it. */
-export interface CreatedApiKey extends Omit<ApiKeyRow, "last_used_at" | "expires_at" | "revoked_at"> {
+export interface CreatedApiKey extends Omit<
+  ApiKeyRow,
+  "last_used_at" | "expires_at" | "revoked_at"
+> {
   secret: string
 }
 

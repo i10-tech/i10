@@ -123,8 +123,8 @@ export function NewTopicButton() {
         <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
           <span>
-            This cannot be changed later. Switching it would retroactively change
-            what every existing contact has agreed to.
+            This cannot be changed later. Switching it would retroactively change what
+            every existing contact has agreed to.
           </span>
         </p>
       </fieldset>

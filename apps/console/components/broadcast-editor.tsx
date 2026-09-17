@@ -113,8 +113,8 @@ export function BroadcastEditor({
     <div className="space-y-6">
       {!editable && (
         <p className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          This broadcast has started sending, so its content is fixed. Changing it
-          now would mean two different emails going out under one name.
+          This broadcast has started sending, so its content is fixed. Changing it now
+          would mean two different emails going out under one name.
         </p>
       )}
 
@@ -275,12 +275,10 @@ export function BroadcastEditor({
           disabled={!editable}
         />
         <p className="text-xs text-muted-foreground">
-          Merge fields:{" "}
-          <code className="font-mono">{"{{first_name}}"}</code>,{" "}
+          Merge fields: <code className="font-mono">{"{{first_name}}"}</code>,{" "}
           <code className="font-mono">{"{{last_name}}"}</code>,{" "}
-          <code className="font-mono">{"{{email}}"}</code>, plus any contact
-          property. Include{" "}
-          <code className="font-mono">{"{{unsubscribe_url}}"}</code> — it is
+          <code className="font-mono">{"{{email}}"}</code>, plus any contact property.
+          Include <code className="font-mono">{"{{unsubscribe_url}}"}</code> — it is
           required by law in most places and by every major inbox provider.
         </p>
       </div>

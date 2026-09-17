@@ -1,12 +1,6 @@
 import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
-import {
-  clampInt,
-  notFound,
-  parseDate,
-  readJson,
-  validation,
-} from "./http.js"
+import { clampInt, notFound, parseDate, readJson, validation } from "./http.js"
 
 /**
  * The mail itself: what was sent, what happened to it, and who is blocked.

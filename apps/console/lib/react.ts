@@ -29,7 +29,9 @@ import * as React from "react"
  * when that changes from somewhere else — pressing back, or a "clear filters"
  * button elsewhere on the page.
  */
-export function useSyncedState<T>(external: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+export function useSyncedState<T>(
+  external: T,
+): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [local, setLocal] = React.useState(external)
   const [seen, setSeen] = React.useState(external)
 

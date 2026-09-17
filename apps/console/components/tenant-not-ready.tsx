@@ -49,7 +49,9 @@ export function TenantNotReady() {
       {!givenUp && <Spinner className="size-5 text-muted-foreground" />}
       <div className="space-y-1.5">
         <h1 className="text-lg font-semibold tracking-tight">
-          {givenUp ? "This is taking longer than it should" : "Setting up your workspace"}
+          {givenUp
+            ? "This is taking longer than it should"
+            : "Setting up your workspace"}
         </h1>
         <p className="text-sm text-muted-foreground">
           {givenUp

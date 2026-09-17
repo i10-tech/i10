@@ -67,7 +67,8 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
     }
 
     try {
-      const { PolarEmbedPaymentMethod } = await import("@polar-sh/checkout/payment-method")
+      const { PolarEmbedPaymentMethod } =
+        await import("@polar-sh/checkout/payment-method")
 
       const embed = await PolarEmbedPaymentMethod.create({
         sessionToken: session.data.token,

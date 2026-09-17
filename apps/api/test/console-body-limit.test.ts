@@ -50,7 +50,7 @@ function app() {
       usage: {} as ConsoleDeps["usage"],
       onboarding: {} as ConsoleDeps["onboarding"],
       profile: {} as ConsoleDeps["profile"],
-        log: { error: () => {}, warn: () => {} },
+      log: { error: () => {}, warn: () => {} },
     },
   })
 }

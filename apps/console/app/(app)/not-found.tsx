@@ -15,9 +15,9 @@ export default function NotFound() {
       <div className="space-y-1">
         <h1 className="text-lg font-semibold tracking-tight">Not found</h1>
         <p className="max-w-md text-sm text-muted-foreground">
-          That page does not exist, or it belongs to a different workspace. If you
-          were switching organizations, the thing you were looking at may live in
-          the other one.
+          That page does not exist, or it belongs to a different workspace. If you were
+          switching organizations, the thing you were looking at may live in the other
+          one.
         </p>
       </div>
       <Button asChild>

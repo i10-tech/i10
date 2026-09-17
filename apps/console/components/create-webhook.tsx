@@ -108,8 +108,8 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
               <DialogHeader>
                 <DialogTitle>Copy your signing secret</DialogTitle>
                 <DialogDescription>
-                  Use it to verify that a request came from us. It is stored
-                  encrypted and cannot be shown again — rotate it if you lose it.
+                  Use it to verify that a request came from us. It is stored encrypted
+                  and cannot be shown again — rotate it if you lose it.
                 </DialogDescription>
               </DialogHeader>
 
@@ -118,8 +118,8 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
                 <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
                   <span>
-                    An endpoint that does not verify the signature will accept a
-                    forged POST from anyone who guesses the URL.
+                    An endpoint that does not verify the signature will accept a forged
+                    POST from anyone who guesses the URL.
                   </span>
                 </p>
               </div>
@@ -160,8 +160,8 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
                     autoFocus
                   />
                   <p className="text-xs text-muted-foreground">
-                    Must be HTTPS and publicly reachable. Localhost will not work —
-                    use a tunnel while developing.
+                    Must be HTTPS and publicly reachable. Localhost will not work — use
+                    a tunnel while developing.
                   </p>
                 </div>
 

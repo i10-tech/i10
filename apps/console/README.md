@@ -33,7 +33,7 @@ the bundler deletes every `if (PREVIEW)` block. The compiled `api()` goes
 straight from its path guard to `fetch`; nothing in the build reads a fixture.
 There is no variable anybody can set in a pod to change that.
 
-The fixture *data* is still emitted into the server chunk, unreferenced — a few
+The fixture _data_ is still emitted into the server chunk, unreferenced — a few
 kilobytes of dead weight that Turbopack does not shake out. To re-check both
 halves of that after a Next upgrade:
 
