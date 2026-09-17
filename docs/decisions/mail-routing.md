@@ -535,4 +535,29 @@ being a single point of failure — it has to increase on every write.
       catalogue cannot start spending SES money on tenants who pay nothing.
       ⚠ Free traffic on our own IP is still the abuse surface, on an address
       shared with PSL. Revisit when there is volume.
+- [x] **A readout for `sent_route`. Added 2026-09-17.** The column had been
+      written on every `sent` row since 0033 and read by NOTHING — the only way
+      to ask "how much went direct" was to open psql and write the query by
+      hand, which is how a column quietly stops being correct.
+      `core.route_split_snapshot(from, to)` (0035) returns tenant, day, route and
+      count; the reconcile CronJob folds it into one `route split` log line per
+      run, which is the surface that needs no auth design and that somebody is
+      already looking at. An HTTP endpoint was the alternative and would have
+      been dead weight from the first commit.
+      ⚠ **IT IS NOT METERING AND MUST NEVER BECOME IT.** `sent_usage_snapshot`
+      counts `sent` rows with NO route predicate — one price, both routes, which
+      is the whole commercial decision. This asks a different question of the
+      same rows: how much SES are we buying, and how much of our own IP
+      reputation are we spending. There is a test asserting the billing query
+      contains no route predicate, because the day one migrates into the other,
+      free-tier mail silently stops being billable.
+      ⚠ **AND IT IS OURS, NOT THE CUSTOMER'S.** Publishing the split on the
+      customer API would make the route visible in the product — a customer
+      would see their mail move to our MTA when their plan changed and would
+      reasonably ask to choose. The lever is an operational decision with no
+      product surface, so the readout is privileged and stops at the reconciler.
+      ⚠ **`unknown` IS A FAULT, NOT A CATEGORY.** Every `sent` row has carried a
+      route since 0033, so one without means a write path skipped it. It is
+      counted separately and raises in the reconcile job rather than being folded
+      into `ses`, where it would add up to a plausible number and never be found.
 - [ ] DKIM key rotation. The random selector makes it possible; nothing does it.
