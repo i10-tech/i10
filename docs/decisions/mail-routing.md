@@ -298,14 +298,86 @@ being a single point of failure — it has to increase on every write.
       `secrets.open` already lives. Canonicalization is taken from a library:
       relaxed/relaxed folding and body-hash CRLF rules are where hand-rolled
       signers fail silently and late.
-      ⚠ **AND mailauth@5's TYPES DISAGREE WITH ITS RUNTIME, WHICH COST A ROUND
-      OF THIS.** `DKIMSignOptions` requires `signingDomain`, `selector` and
-      `privateKey` at the top level and marks `signatureData` optional. Passing
-      them the way the types demand returns `{ signatures: "\r\n", errors: [] }`
-      — no signature, no error — and the message goes out unsigned. The call
-      uses `signatureData` with a cast, and `signMessage` rejects a
-      whitespace-only signature rather than a falsy one, because the empty
-      answer is `"\r\n"` and a truthy-check misses it.
+      ⚠ **THE LIBRARY IS upyo AS OF 2026-09-17, AFTER mailauth AND THEN
+      nodemailer.** mailauth cost 1.4 MB and ten transitive dependencies for one
+      function out of a full SPF/DKIM/DMARC/ARC/BIMI suite, and its types
+      disagreed with its runtime — passing the options the way `DKIMSignOptions`
+      demanded returned `{ signatures: "\r\n", errors: [] }`, no signature and
+      no error, and the message went out unsigned. nodemailer replaced it and was
+      correct, but it fails a constraint that is not negotiable: it needs
+      `node:net` and `node:crypto`, so it can never run in a Worker.
+      ⚠ **upyo SIGNS WITH WEB CRYPTO, WHICH IS THE WHOLE REASON.** Only its
+      `smtp` package imports `node:` at all — `core`, `mime`, `jmap`, `ses` and
+      the rest are edge-safe — so the signer, the SES route and a future JMAP
+      transport all run wherever `fetch` does. Stalwart implements JMAP
+      `EmailSubmission/set` natively, so the direct route has a path off sockets
+      entirely when sending moves to Workers.
+      ⚠ **AND IT IMPROVED TWO THINGS BESIDES.** It takes the bare base64 DER the
+      column already holds, so the PEM re-armouring step is gone; and it THROWS
+      on a key it cannot import, where nodemailer returned the message
+      essentially untouched and left a hand-written regex as the only thing
+      between an unusable key and mail recorded as signed.
+      ⚠ **THE SIGNER IS `@upyo/mime/internal`, A DECLARED SUBPATH WITH A WEAKER
+      PROMISE THAN THE ROOT.** The package documents it as "additively
+      compatible within a minor release line", so `@upyo/mime` is PINNED EXACTLY
+      rather than carried on a caret — a minor bump is the one thing allowed to
+      move this surface. The root API is not an option: `composeMessage` signs a
+      message it builds itself, and we need the signature over the bytes
+      `buildRawMessage` already produced, because the SES route sends those same
+      bytes. Composing twice is how a route lever stops being invisible.
+      ⚠ **VERIFIED AGAINST AN INDEPENDENT VERIFIER, NOT AGAINST ITSELF.**
+      Seventeen message shapes — plain, `multipart/alternative`,
+      `multipart/mixed`, unicode subjects and bodies, emoji, 50 recipients,
+      custom headers, attachments with non-ASCII and apostrophed filenames — were
+      signed and then checked with mailauth's verifier, plus one full SMTP round
+      trip against a local server. All `pass`. A signer tested only by its own
+      library is a signer tested by nobody.
+- [x] **Two latent composer bugs, found because upyo validates the bytes.**
+      `sendRaw` is handed the message with no `encoding`, which makes upyo read
+      it once to classify it — and that pass enforces CRLF endings, the
+      998-octet line limit and the absence of NUL. It immediately refused two
+      messages the SES route had been accepting.
+      ⚠ **`To:` WAS NEVER FOLDED, AND THE CONTRACT ALLOWS 50 ADDRESSES OF 320
+      CHARACTERS.** That is sixteen kilobytes on ONE LINE, against RFC 5322's
+      998-octet hard limit. SES took those messages and did whatever it does;
+      the direct route refuses them outright — so the same send worked or failed
+      depending on the route, which is precisely the difference this design
+      exists to prevent. `mime.ts` now folds address lists between addresses,
+      unstructured headers at whitespace, and splits over-long RFC 2047
+      encoded-words (which are capped at 75 characters and cannot be folded,
+      because folding needs whitespace and there is none inside one).
+      ⚠ **AND A NON-ASCII ATTACHMENT FILENAME WENT INTO THE HEADERS RAW.**
+      `réçu.pdf` put UTF-8 bytes straight into `Content-Type` and
+      `Content-Disposition`. Headers are ASCII; upyo classified such a message
+      as needing SMTPUTF8 and would refuse it to a server without that
+      capability. Now RFC 2047 for the deprecated `name=` and RFC 2231
+      (`filename*=UTF-8''…`) for `Content-Disposition` — with `'`, `(`, `)` and
+      `*` percent-escaped, since `encodeURIComponent` leaves all four and the
+      first two are the delimiters of the syntax itself. An ASCII filename is
+      untouched, byte for byte.
+      ⚠ **THE ENVELOPE ALSO NEEDED UNWRAPPING, WHICH nodemailer DID FOR US.**
+      `RCPT TO` takes a bare addr-spec; `Bob <bob@x.test>` parses as a local part
+      of `Bob <bob` and is invalid. Every send with a display name in `to` was
+      relying on behaviour the new client does not have — `addressOf` in
+      send/address.ts is now the one place that strips it, and an unparseable
+      recipient REJECTS the message rather than being quietly dropped from the
+      envelope and reported as sent.
+- [x] **A 5xx on `AUTH`, `EHLO`, `STARTTLS` or the greeting is deferred, not
+      rejected.** A mistyped submission password answers `535` for EVERY
+      message, so classifying a hard 5xx as a verdict on the message would burn
+      the entire backlog to `failed` within one batch, each row blaming the
+      message rather than the credential. Only `MAIL FROM`, `RCPT TO` and `DATA`
+      carry a verdict about this message.
+      ⚠ **AND `receipt.retryable` IS NOT TRUSTED.** upyo sets it from a
+      structured classification when it recognises the failure and from
+      SUBSTRING MATCHING ON THE ERROR TEXT when it does not — a fallback that
+      ends `{ category: "unknown", retryable: false }`. Taken at face value, an
+      expired certificate ("unable to verify the first certificate" matches
+      nothing) would be permanent and would destroy every message in the queue.
+      The `smtp.` prefix is the discriminator: upyo emits it only from branches
+      where it recognised a specific condition, and its guessing fallback
+      produces bare codes. Our rule is unchanged — an error we cannot read is
+      temporary.
 - [x] ~~Automatic failover when SES is unhealthy.~~ **Rejected 2026-09-14 in
       favour of an operator kill switch** (`SES_ENABLED`, an input to
       `resolveRoute`). `Transport` already absorbs a bad SES day: a throttle or

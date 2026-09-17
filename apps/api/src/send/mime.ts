@@ -75,17 +75,17 @@ export function buildRawMessage(
   now: Date = new Date(),
 ): string {
   const headers: string[] = [
-    `From: ${formatAddressList([message.from])}`,
-    `To: ${formatAddressList(message.to)}`,
+    addressHeader("From", [message.from]),
+    addressHeader("To", message.to),
   ]
 
-  if (message.cc.length) headers.push(`Cc: ${formatAddressList(message.cc)}`)
+  if (message.cc.length) headers.push(addressHeader("Cc", message.cc))
   if (message.replyTo.length) {
-    headers.push(`Reply-To: ${formatAddressList(message.replyTo)}`)
+    headers.push(addressHeader("Reply-To", message.replyTo))
   }
 
   headers.push(
-    `Subject: ${encodeWord(message.subject)}`,
+    foldUnstructured("Subject", encodeWord(message.subject)),
     `Date: ${now.toUTCString().replace("GMT", "+0000")}`,
     // ⚠ WRITTEN, AND THEN OVERWRITTEN BY SES — both this and `Date` above.
     // Emitted anyway: it costs nothing, and it is what a relay we run ourselves
@@ -97,10 +97,13 @@ export function buildRawMessage(
 
   for (const [name, value] of Object.entries(message.headers ?? {})) {
     if (OWNED.has(name.toLowerCase())) continue
-    // A header value cannot span lines here: a CR or LF in one is header
-    // injection, and folding it correctly is not worth the risk when the value
-    // came from a request body.
-    headers.push(`${name}: ${String(value).replace(/[\r\n]+/g, " ")}`)
+    // ⚠ THE CALLER'S LINE BREAKS ARE STILL FLATTENED FIRST, AND THEN WE FOLD.
+    // A CR or LF arriving in a header value is header injection — the caller
+    // could otherwise append headers, or a whole second MIME part, to their own
+    // message — so it collapses to a space before anything else touches it.
+    // `foldUnstructured` reintroduces line breaks only as RFC 5322 folding
+    // whitespace, which a parser unfolds back to the single logical line.
+    headers.push(foldUnstructured(name, String(value).replace(/[\r\n]+/g, " ")))
   }
 
   const body = bodyPart(message)
@@ -175,12 +178,42 @@ function textPart(contentType: string, body: string): string {
   ].join(CRLF)
 }
 
+/**
+ * ⚠ A NON-ASCII FILENAME IS NOT LEGAL RAW IN A HEADER, AND IT USED TO GO IN RAW.
+ * `réçu.pdf` put UTF-8 bytes straight into `Content-Type` and
+ * `Content-Disposition`. That is not RFC 5322 — headers are ASCII — and the
+ * damage was the quiet kind: some clients rendered it, some showed mojibake, and
+ * the message needed an SMTPUTF8-capable path to leave at all.
+ *
+ * ⚠ IT BECAME LOUD WHEN THE DIRECT ROUTE MOVED TO upyo, WHICH IS HOW IT WAS
+ * FOUND. upyo inspects the bytes and classifies a message with non-ASCII headers
+ * as `utf8`, then refuses to send it to a server that does not advertise
+ * SMTPUTF8 — a permanent failure, on the direct route only. A customer's
+ * attachment named in their own language would have failed or succeeded
+ * depending on which MTA carried it, which is precisely the route-visible
+ * difference this whole design exists to prevent.
+ *
+ * ⚠ TWO PARAMETERS, TWO MECHANISMS, BECAUSE THE HEADERS DIFFER. `name=` on
+ * `Content-Type` is the deprecated one and takes an RFC 2047 encoded-word, which
+ * is what clients that still read it expect. `filename*=` on
+ * `Content-Disposition` is RFC 2231 — `UTF-8''` followed by percent-encoding —
+ * which is the actual standard for a parameter value that is not ASCII, and the
+ * one every current client prefers.
+ *
+ * ⚠ AND AN ASCII FILENAME TAKES NEITHER, BYTE FOR BYTE AS BEFORE. The common
+ * case is unchanged, so this cannot regress a message that works today.
+ */
 function attachmentPart(attachment: MimeAttachment): string {
+  const { filename } = attachment
+  const ascii = ASCII.test(filename)
+
   return [
     `Content-Type: ${attachment.content_type ?? "application/octet-stream"}; ` +
-      `name="${attachment.filename}"`,
+      `name="${ascii ? filename : encodeWord(filename)}"`,
     "Content-Transfer-Encoding: base64",
-    `Content-Disposition: attachment; filename="${attachment.filename}"`,
+    ascii
+      ? `Content-Disposition: attachment; filename="${filename}"`
+      : `Content-Disposition: attachment; filename*=UTF-8''${rfc2231(filename)}`,
     "",
     // ⚠ RE-WRAPPED, NOT RE-ENCODED. The caller already sent base64 and the
     // contract validated it; decoding it to encode it again would double the
@@ -214,16 +247,170 @@ function wrap(base64: string): string {
 const ASCII = /^[\x20-\x7e]*$/
 
 /**
+ * RFC 2231 percent-encoding for a header PARAMETER that is not plain ASCII.
+ *
+ * ⚠ NOT `encodeURIComponent` ALONE. It leaves `'`, `(`, `)` and `*` unescaped,
+ * and all four are outside RFC 2231's `attr-char` set — `*` and `'` especially,
+ * since they are the delimiters of the `filename*=UTF-8''…` syntax itself. A
+ * filename containing an apostrophe would otherwise terminate the charset
+ * section early and produce a parameter every client reads differently.
+ */
+function rfc2231(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
+}
+
+/**
+ * RFC 5322 §2.1.1: 78 octets per line is the recommendation, 998 the hard limit.
+ *
+ * ⚠ 998 IS NOT A STYLE PREFERENCE, IT IS THE POINT AT WHICH A MESSAGE STOPS
+ * BEING SENDABLE. `To:` accepts 50 addresses of up to 320 characters, so an
+ * unfolded recipient list reaches sixteen kilobytes on ONE LINE — and did, until
+ * this existed. SES accepted those messages and silently did whatever it does;
+ * the direct route's validator refuses them outright, so the same send worked or
+ * failed depending on the route, which is the one difference this design is
+ * supposed to make impossible.
+ *
+ * We fold at 78 rather than 998 because that is what the RFC recommends and what
+ * every other mail agent emits; the hard limit is what makes it mandatory.
+ */
+const FOLD_AT = 78
+
+/**
  * RFC 2047 encoding for a header value that is not plain ASCII.
  *
  * ⚠ A RAW UTF-8 SUBJECT IS NOT LEGAL IN A HEADER AND FAILS QUIETLY. Some
  * receivers render it, some show mojibake, and some drop the header — so a
  * subject with an emoji or an accent in it is a bug that only appears for some
  * of the recipients.
+ *
+ * ⚠ AND AN ENCODED-WORD IS CAPPED AT 75 CHARACTERS, WHICH ONE LONG SUBJECT
+ * BLOWS PAST. RFC 2047 §2 sets the limit, and a single encoded-word cannot be
+ * folded because folding needs whitespace and there is none inside one. A
+ * 200-character accented subject produced one 545-character word: illegal,
+ * unfoldable, and — on the direct route — unsendable.
+ *
+ * The fix is the one the RFC provides: adjacent encoded-words separated by
+ * whitespace are concatenated WITHOUT that whitespace, so splitting is lossless
+ * and the spaces between them become the fold points.
+ *
+ * ⚠ SPLIT ON CODE POINTS, NEVER ON BYTES. `=?UTF-8?B?` chunks are decoded
+ * independently, so a multi-byte character cut across two words decodes to
+ * replacement characters in both. `Array.from` iterates code points, which is
+ * what makes the 45-byte budget safe to fill greedily.
  */
 export function encodeWord(value: string): string {
   if (ASCII.test(value)) return value
-  return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`
+
+  // `=?UTF-8?B?` + `?=` is 12 characters of overhead against a 75-character
+  // limit, leaving 63 for base64 — rounded down to 60, the nearest multiple of
+  // four, which is 45 bytes of UTF-8 per word.
+  const MAX_BYTES = 45
+
+  const words: string[] = []
+  let chunk: string[] = []
+  let bytes = 0
+
+  for (const char of value) {
+    const size = Buffer.byteLength(char, "utf8")
+    if (bytes + size > MAX_BYTES && chunk.length > 0) {
+      words.push(chunk.join(""))
+      chunk = []
+      bytes = 0
+    }
+    chunk.push(char)
+    bytes += size
+  }
+  if (chunk.length > 0) words.push(chunk.join(""))
+
+  return words
+    .map((word) => `=?UTF-8?B?${Buffer.from(word, "utf8").toString("base64")}?=`)
+    .join(" ")
+}
+
+/**
+ * A header whose value is text, folded onto continuation lines if it is long.
+ *
+ * ⚠ FOLDING WHITESPACE IS THE SPACE THAT WAS ALREADY THERE, NOT AN ADDED ONE.
+ * RFC 5322 unfolding removes the CRLF before leading whitespace and keeps that
+ * whitespace, so breaking at a space and starting the next line with one space
+ * reproduces the original value exactly. Inserting an extra space instead —
+ * which is the easy mistake — silently rewrites every long subject a customer
+ * sends.
+ *
+ * ⚠ A RUN OF SPACES IS NEVER A FOLD POINT, FOR THE SAME REASON. Breaking inside
+ * `"a  b"` would collapse the run to a single space on unfold. Rare, but it is
+ * the customer's text, and quietly editing it is not ours to do.
+ *
+ * ⚠ AND A SINGLE TOKEN LONGER THAN THE LIMIT IS EMITTED WHOLE. There is no
+ * legal way to fold inside one — a 1200-character URL in a `List-Unsubscribe`
+ * genuinely cannot be sent — so this does not mangle it into something that
+ * looks sendable. The transport's validator then rejects it, which is the
+ * honest answer rather than a header the receiver silently truncates.
+ */
+function foldUnstructured(name: string, value: string): string {
+  const header = `${name}: ${value}`
+  if (Buffer.byteLength(header, "utf8") <= FOLD_AT) return header
+
+  const lines: string[] = []
+  let line = `${name}:`
+
+  for (const token of value.split(" ")) {
+    const candidate = `${line} ${token}`
+    // Never fold at an empty token: that is a run of spaces, and the run is the
+    // customer's.
+    if (
+      token !== "" &&
+      line !== `${name}:` &&
+      Buffer.byteLength(candidate, "utf8") > FOLD_AT
+    ) {
+      lines.push(line)
+      line = ` ${token}`
+    } else {
+      line = candidate
+    }
+  }
+  lines.push(line)
+
+  return lines.join(CRLF)
+}
+
+/**
+ * An address-list header, folded between addresses rather than inside one.
+ *
+ * ⚠ THE COMMA GOES AT THE END OF THE LINE, NOT THE START OF THE NEXT. Both
+ * unfold to the same value, but every mail agent in existence emits it this way
+ * and a `Cc:` that does not is the kind of difference a spam filter notices
+ * without ever telling you which one it was.
+ *
+ * ⚠ AND ONE ADDRESS IS NEVER SPLIT. A display name can carry spaces, so folding
+ * this as unstructured text would break a line inside `"Some Long Name" <a@b>`
+ * — legal, but it puts the fold in the middle of a phrase where some parsers
+ * handle it and some do not.
+ */
+function addressHeader(name: string, addresses: readonly string[]): string {
+  const header = `${name}: ${formatAddressList(addresses)}`
+  if (Buffer.byteLength(header, "utf8") <= FOLD_AT) return header
+
+  const formatted = addresses.map(formatAddress)
+  const lines: string[] = []
+  let line = `${name}:`
+
+  formatted.forEach((address, index) => {
+    const piece = index === formatted.length - 1 ? address : `${address},`
+    const candidate = `${line} ${piece}`
+    if (line !== `${name}:` && Buffer.byteLength(candidate, "utf8") > FOLD_AT) {
+      lines.push(line)
+      line = ` ${piece}`
+    } else {
+      line = candidate
+    }
+  })
+  lines.push(line)
+
+  return lines.join(CRLF)
 }
 
 /**

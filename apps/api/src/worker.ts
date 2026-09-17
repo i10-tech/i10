@@ -19,11 +19,12 @@ import {
 } from "./queue/webhook-queue.js"
 import { postgresMetering } from "./metering/service.js"
 import { resilient } from "./send/metering.js"
-import { createTransport } from "nodemailer"
+import { SmtpTransport } from "@upyo/smtp"
 import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
 import { sesTransport } from "./send/ses.js"
 import { domainSendingLookup } from "./send/signing-key.js"
 import { stalwartTransport } from "./send/stalwart.js"
+import { submissionConfig } from "./send/submission.js"
 import type { Transport } from "./send/transport.js"
 import { webhookDeliveryOps } from "./webhooks/db.js"
 import { deliverWebhook } from "./webhooks/deliver.js"
@@ -108,6 +109,16 @@ const ses = sesTransport({
 })
 
 /**
+ * ⚠ HELD SO SHUTDOWN CAN CLOSE IT, WHICH THE PREVIOUS CLIENT'S POOL NEVER WAS.
+ * A pooled submission client keeps idle TCP connections open; exiting without
+ * closing them leaves Stalwart to notice the sockets died, which on an ordinary
+ * rolling deploy means a handful of half-open connections per pod per release.
+ * Nothing breaks, and it is the kind of thing that only ever gets diagnosed
+ * from the other end.
+ */
+let submissionPool: SmtpTransport | null = null
+
+/**
  * Our own MTA, when it is configured and the keys can be unsealed.
  *
  * ⚠ IT REFUSES RATHER THAN FALLS BACK TO SES, AND THAT IS THE WHOLE POINT OF
@@ -146,27 +157,28 @@ function directTransport(): Transport {
     }
   }
 
-  return stalwartTransport({
-    mailer: createTransport({
+  submissionPool = new SmtpTransport(
+    submissionConfig({
       host,
       port: env.STALWART_SUBMISSION_PORT,
-      // ⚠ STARTTLS ON 587 RATHER THAN IMPLICIT TLS. `secure: true` would speak
-      // TLS from the first byte, which is 465's contract, not 587's — against a
-      // submission port that expects STARTTLS it hangs until the socket times
-      // out rather than failing with anything that names the cause.
-      secure: env.STALWART_SUBMISSION_PORT === 465,
-      requireTLS: true,
-      auth: { user, pass: password },
-      // One connection pool, reused across the batch's concurrency.
-      pool: true,
-      // ⚠ IT MUST MATCH THE FAN-OUT OR IT SILENTLY BECOMES THE REAL LIMIT.
-      // nodemailer defaults a pool to five connections; `WORKER_CONCURRENCY`
-      // defaults to eight. Left alone, three of every eight direct sends queue
-      // behind the pool with nothing in the logs naming the ceiling, and the
-      // knob that env.ts documents as the throughput control is not the one
-      // deciding throughput.
-      maxConnections: env.WORKER_CONCURRENCY,
+      user,
+      password,
+      localName: env.MAIL_BOUNCE_HOST,
+      poolSize: env.WORKER_CONCURRENCY,
     }),
+  )
+
+  return stalwartTransport({
+    mailer: submissionPool,
+    // ⚠ SMTP CAN TAKE A MESSAGE AND STILL REFUSE SOME OF ITS RECIPIENTS, and
+    // before upyo we could not see it happen. `warn` rather than `error`: the
+    // message was delivered to everyone else, so this is not a failed send — it
+    // is the only record that somebody on the envelope did not get it.
+    onRejectedRecipients: ({ messageId, tenantId, recipients }) =>
+      log.warn(
+        { messageId, tenantId, recipients },
+        "submission accepted with rejected recipients",
+      ),
     // ⚠ THE BOUNCE LABEL COMES BACK ON THE SAME ROW AS THE KEY, because it is
     // per domain — `core.domains.bounce_subdomain` — and it is what the
     // customer actually published. The transport builds the VERP envelope from
@@ -383,7 +395,14 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     log.info({ signal }, "shutting down")
 
     void Promise.allSettled(workers.map((w) => w.close(CLOSE_TIMEOUT_MS)))
-      .then(() => Promise.allSettled([sql.end({ timeout: 10 }), queueRedis.quit()]))
+      .then(() =>
+        Promise.allSettled([
+          sql.end({ timeout: 10 }),
+          queueRedis.quit(),
+          // Idle submission connections, closed politely rather than dropped.
+          submissionPool?.closeAllConnections() ?? Promise.resolve(),
+        ]),
+      )
       // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
       // queues and the transport sends on a timer, so an error raised in the
       // last seconds before a rolling deploy — which is a common moment for one

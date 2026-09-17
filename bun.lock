@@ -26,11 +26,13 @@
         "@repo/emails": "workspace:*",
         "@repo/metering": "workspace:*",
         "@sentry/node": "10.73.0",
+        "@upyo/core": "^0.6.0",
+        "@upyo/mime": "^0.6.0",
+        "@upyo/smtp": "^0.6.0",
         "drizzle-orm": "^0.45.2",
         "groupmq": "^1.1.0",
         "hono": "^4.13.5",
         "ioredis": "^6.0.0",
-        "nodemailer": "^10.0.10",
         "pino": "^10.3.1",
         "postgres": "^3.4.9",
         "zod": "^4.5.4",
@@ -756,6 +758,8 @@
 
     "@next/swc-win32-x64-msvc": ["@next/swc-win32-x64-msvc@16.3.3", "", { "os": "win32", "cpu": "x64" }, "sha512-2VR4cTBzHXaBjnGsuH6GyJjENzQOmHeAh11uY1iUhjm3j5dEUrVJuUj+VL78jaGi/Dik8xS76zEj18BsFhlVZQ=="],
 
+    "@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
+
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "1.2.0" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 
     "@nodelib/fs.stat": ["@nodelib/fs.stat@2.0.5", "", {}, "sha512-RkhPPp2zrqDAQA/2jNhnztcPAlv64XdhIp7a7454A5ovI7Bukxgt7MX7udwAu3zg1DcpPU0rz3VV1SeaqvY4+A=="],
@@ -1281,6 +1285,12 @@
     "@ungap/structured-clone": ["@ungap/structured-clone@1.4.0", "", {}, "sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ=="],
 
     "@unhead/vue": ["@unhead/vue@2.1.17", "", { "dependencies": { "hookable": "6.1.1", "unhead": "2.1.17" }, "peerDependencies": { "vue": "3.5.42" } }, "sha512-pnC8x9HLV3qQXdvWfylUEU25uhfCAy3ly9nmpQz84j9py818DRfU8jOsQ5wjdWtxyU1vX/fW2udfm4jtxUK8Bg=="],
+
+    "@upyo/core": ["@upyo/core@0.6.0", "", {}, "sha512-zgNNXOcUe5662vQ5qmGJcwioy7KvrOKUeuDifb6oA23MYz3MvRWmhaMlbjAnZWt6OzutKAP/lR3C9/afTld7EQ=="],
+
+    "@upyo/mime": ["@upyo/mime@0.6.0", "", { "dependencies": { "@noble/hashes": "^1.8.0" }, "peerDependencies": { "@upyo/core": "0.6.0" } }, "sha512-mcRKpQpGEEkVcOGIch0jg9qa8g6D/NoAm7IGieE7+DLUekYC9xpGC7XrRfHFIyXrgKNpPxqVlVKrZm+B2rdaHw=="],
+
+    "@upyo/smtp": ["@upyo/smtp@0.6.0", "", { "dependencies": { "@upyo/mime": "0.6.0" }, "peerDependencies": { "@upyo/core": "0.6.0" } }, "sha512-0x9IhMYXoQjMDSwe0gu4t6q6IMMUZg9f9zrvTdW57dIwATik8ejp1uv1gyK3zZoSa6IOdWboPgCfvdo9993F/g=="],
 
     "@vercel/detect-agent": ["@vercel/detect-agent@1.2.5", "", {}, "sha512-0krENrjuitlW8s6TJu0MlqCevyCU7K7JK63jZAf7xZ6n17tx+vUEwzHT3sTxawtwZxaW21hu+oFUpoOrm49FsQ=="],
 
@@ -2243,8 +2253,6 @@
     "node-mock-http": ["node-mock-http@1.0.5", "", {}, "sha512-KQyt/wLjG3TAc7DOUhpqWzgd4ERxR80JOlTK5VE5R1S12IaPVN5qkj4klBce9HPG1Njuup4Sb5bljaT34lIyjw=="],
 
     "node-releases": ["node-releases@2.0.54", "", {}, "sha512-YHs7BmmcsdAI5Ozuf8JZo6PT0mv2GIWC9vMfvUC3dp65M8hn7Ux8CPL+2oBI7juNuj9d0ndhTcznq2ODBps9cQ=="],
-
-    "nodemailer": ["nodemailer@10.0.10", "", {}, "sha512-He9XskOFms62SyAKkLu8CcGcYHAo+BSHSsORI8s4PJH8qZgZY4L4lDfvyN0twvmbpyG+eGrxpyBlskj9d9rJ8A=="],
 
     "normalize-path": ["normalize-path@3.0.0", "", {}, "sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA=="],
 
