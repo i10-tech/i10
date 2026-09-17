@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+#
+# The commit message, checked while it is still free to change.
+#
+# ⚠ THIS IS A `commit-msg` HOOK RATHER THAN ANOTHER STEP IN `pre-push`, AND THE
+# DIFFERENCE IS WHAT IT COSTS TO FIX. Rejected here, the message has not been
+# written yet: git leaves it in `.git/COMMIT_EDITMSG`, `git commit` again with a
+# corrected one and nothing has happened. Caught at push time, the commit
+# already exists — so fixing it is `--amend` if it is the tip and an interactive
+# rebase if it is not, and then a force-push over a branch somebody may have
+# pulled. Same check, two very different afternoons.
+#
+# ⚠ AND THE RULES ARE NOT A STYLE PREFERENCE. `.github/scripts/next-version.mjs`
+# derives every release version by reading `feat:` / `fix:` / `!` out of the
+# commit log, and it SKIPS a non-conventional subject silently rather than
+# failing — so a malformed message does not break a release, it quietly makes it
+# the wrong version. `commitlint.config.mjs` says the same thing at more length.
+#
+# ⚠ THE SCOPE LIST IS THE PART THAT ACTUALLY CATCHES PEOPLE. `fix(docker):`
+# reads perfectly and is not a scope this repository has; the enum exists
+# because a typo'd scope still renders fine in a changelog while grouping the
+# change under a heading nobody will look in.
+#
+# Skip it with `git commit --no-verify` when you genuinely need to.
+
+set -euo pipefail
+
+if [ -n "${CI:-}" ]; then
+  exit 0
+fi
+
+if ! command -v bunx >/dev/null 2>&1; then
+  # ⚠ SILENT, UNLIKE pre-push. A commit is a local act and this hook fires on
+  # every one of them; a machine with no toolchain should not print a warning
+  # dozens of times a day for a check CI still performs.
+  exit 0
+fi
+
+# ⚠ THE CONFIG IS NAMED EXPLICITLY RATHER THAN DISCOVERED. commitlint resolves
+# `commitlint.config.mjs` upward from the CURRENT DIRECTORY, and git does not
+# promise that a hook runs at the top of the working tree — a linked worktree or
+# a `GIT_DIR` set by tooling can leave it elsewhere. When the lookup misses, it
+# does not skip the check: it fails with "Please add rules to your
+# commitlint.config.js", which rejects a perfectly good message for a reason
+# that has nothing to do with the message. Found while testing this hook.
+config="$(git rev-parse --show-toplevel)/commitlint.config.mjs"
+
+# ⚠ `--edit "$1"` READS THE FILE GIT IS ABOUT TO COMMIT, which is the whole
+# point of this hook's argument. It also makes commitlint apply its default
+# ignores — merge commits, reverts, `fixup!` and `squash!` — so an ordinary
+# `git merge` or an autosquash workflow is not rejected for a message neither
+# git nor we wrote.
+if ! bunx commitlint --config "$config" --edit "$1"; then
+  cat >&2 <<'MESSAGE'
+
+commit-msg: that message does not match this repository's rules.
+
+  <type>(<scope>): <subject>
+
+  type   feat fix docs style refactor perf test build ci chore revert
+  scope  api auth console web docs sdk ui contracts emails metering
+         authd billing send stalwart bulwark infra ci deps repo
+         (optional — `chore: …` with no scope is fine)
+
+The scope list is in commitlint.config.mjs, with a note on each of the
+non-obvious ones. Releases are versioned from these messages, so a malformed
+one does not fail the release — it silently produces the wrong version.
+
+Your message is still in .git/COMMIT_EDITMSG. Commit again with a corrected
+one, or use --no-verify if you know what you are doing.
+MESSAGE
+  exit 1
+fi
+
+exit 0

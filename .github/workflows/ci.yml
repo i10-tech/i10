@@ -134,6 +134,25 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+  # ⚠ ITS OWN LANE, NOT PART OF THE `verify` MATRIX, BECAUSE IT IS NOT A TURBO
+  # TASK — it reads Dockerfiles and manifests rather than building a package, so
+  # there is nothing for turbo to cache and nothing to key a cache on. It also
+  # guards a failure the matrix structurally cannot see: `lint`, `check-types`,
+  # `test` and `build` all run against the real repository, where every workspace
+  # is on disk. The image build is the only thing that runs against a pruned
+  # checkout, and it runs on push to `main` — after the merge.
+  images:
+    name: Image manifests
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bun-toolchain
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          turbo-cache: "false"
+      - run: bun run check-images
+
   format:
     name: Format
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}

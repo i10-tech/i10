@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#
+# The checks that fail CI, run before the push instead of after it.
+#
+# ⚠ IT RUNS ON PUSH RATHER THAN ON COMMIT, ON PURPOSE. Committing is how you
+# save your work, and it should stay cheap enough to do mid-thought; a
+# twenty-second wait on every `git commit` is how `--no-verify` gets into
+# somebody's muscle memory, which disables every hook including the ones that
+# matter. Pushing is the moment the work becomes shared, and it is already slow.
+#
+# ⚠ THE ORDER IS FASTEST-FIRST, AND THAT IS THE WHOLE ERGONOMICS OF IT. The two
+# cheap checks are also the two that fail most often on a branch that "looks
+# fine", so the common failure costs four seconds rather than twenty. Each step
+# stops the push on its own.
+#
+#     check-images    0.02s   static read of five Dockerfiles
+#     format:check    ~4s     prettier over the repo
+#     lint            ~4s     turbo, cached
+#     check-types     ~12s    turbo, cached; ~14s cold
+#
+# ⚠ `test` AND `build` ARE DELIBERATELY NOT HERE. They are the slow ones, they
+# are the ones people already run while working, and a pre-push that takes a
+# minute is a pre-push that gets bypassed — at which point it protects nothing.
+# CI still runs all four.
+#
+# Skip it with `git push --no-verify` when you genuinely need to.
+
+set -euo pipefail
+
+# ⚠ NEVER IN CI. GitHub Actions checks out a real repository and runs
+# `bun install`, so `prepare` sets `core.hooksPath` there too. Nothing in CI
+# pushes today, but a release workflow that did would run this hook inside the
+# job that already has its own lanes for these checks — paying for them twice
+# and, worse, failing a release on a check that has its own red X elsewhere.
+if [ -n "${CI:-}" ]; then
+  exit 0
+fi
+
+if ! command -v bun >/dev/null 2>&1; then
+  # ⚠ A MISSING TOOLCHAIN IS NOT A REASON TO BLOCK A PUSH. Somebody pushing a
+  # README edit from a machine with no bun should not be stopped by a hook they
+  # cannot satisfy; CI still runs the same checks and is the actual gate.
+  echo "pre-push: bun not found, skipping checks." >&2
+  exit 0
+fi
+
+# ⚠ OUTPUT IS CAPTURED AND SHOWN ONLY ON FAILURE. Turbo prints a few hundred
+# lines for a successful `lint` or `check-types`, and a hook that dumps that on
+# every push trains people to stop reading it — at which point the one time it
+# says something useful scrolls past unread. Silence on success, the full log on
+# failure.
+log="$(mktemp -t pre-push)"
+cleanup() { rm -f "$log"; }
+trap cleanup EXIT
+
+step() {
+  local label="$1" command="$2" remedy="$3"
+  printf 'pre-push: %s… ' "$label" >&2
+
+  if bun run "$command" >"$log" 2>&1; then
+    printf 'ok\n' >&2
+    return 0
+  fi
+
+  printf 'FAILED\n\n' >&2
+  cat "$log" >&2
+  cat >&2 <<MESSAGE
+
+pre-push: ${label} failed.
+
+  ${remedy}
+
+CI runs the same check, so pushing now fails the run.
+Push anyway with --no-verify if you know what you are doing.
+MESSAGE
+  exit 1
+}
+
+# ⚠ FIRST, BECAUSE IT IS THE ONE NOTHING ELSE CATCHES. Each Dockerfile copies a
+# hand-maintained list of workspace manifests before `bun install
+# --frozen-lockfile`. Add a package, depend on it, forget the COPY line, and
+# lint, types, tests and `bun run build` all still pass — they run against the
+# real repository, where the package is on disk. The image build fails, and only
+# on a push to `main`, which is after the merge. See the script's own note.
+step "image manifests" check-images \
+  "Run: bun run check-images   (it names the missing COPY line)"
+
+# ⚠ PRETTIER BEFORE LINT AND TYPES, BECAUSE BOTH OF THOSE PASS ON UNFORMATTED
+# CODE. That makes formatting the one CI job a branch can fail while every other
+# local signal is green.
+step "formatting" format:check \
+  "Run: bun run format   then amend or add a commit"
+
+step "lint" lint \
+  "Fix the warnings above. Note --max-warnings 0: a warning is an error here."
+
+step "types" check-types \
+  "Fix the type errors above."
+
+exit 0

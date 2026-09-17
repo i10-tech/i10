@@ -14,7 +14,9 @@
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,mjs,md,json,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,mjs,md,json,yaml,yml}\"",
-    "version:next": "bun .github/scripts/next-version.mjs"
+    "version:next": "bun .github/scripts/next-version.mjs",
+    "check-images": "bun .github/scripts/check-dockerfile-workspaces.mjs",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.2",
