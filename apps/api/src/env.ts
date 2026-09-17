@@ -407,7 +407,20 @@ const schema = z.object({
    * queue rather than being lost, and the backlog is the alarm.
    */
   STALWART_SUBMISSION_HOST: z.string().min(1).optional(),
-  STALWART_SUBMISSION_PORT: z.coerce.number().int().positive().default(587),
+  /**
+   * ⚠ 465, NOT 587, AND THE DEFAULT USED TO BE WRONG. There is no 587 listener
+   * on our Stalwart — `NetworkListener` has `smtp` on 25 and `submissions` on
+   * 465, and nothing else speaks SMTP. A worker pointed at 587 got no
+   * connection at all, which surfaces as `deferred` on every direct send with
+   * an ECONNREFUSED nobody reads.
+   *
+   * ⚠ AND THERE IS NO REASON TO ADD ONE. 465 is implicit TLS from the first
+   * byte; 587 is cleartext until STARTTLS succeeds. RFC 8314 §3 prefers the
+   * former for exactly that reason — there is no plaintext phase to strip.
+   * `submissionConfig` reads this number and picks the TLS mode from it, so the
+   * port is the only thing that has to be right.
+   */
+  STALWART_SUBMISSION_PORT: z.coerce.number().int().positive().default(465),
   STALWART_SUBMISSION_USER: z.string().min(1).optional(),
   STALWART_SUBMISSION_PASSWORD: z.string().min(1).optional(),
 

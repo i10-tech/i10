@@ -16,6 +16,12 @@
 #   ./bootstrap.sh --verify     verify only, change nothing
 #   ./bootstrap.sh --no-restart apply and reload, skip the restart
 #
+#   ./bootstrap.sh --set-submission-password
+#                               prompt for the send worker's SMTP password and
+#                               set it. Not part of a normal run: Stalwart keeps
+#                               a hash, so there is nothing to converge on and
+#                               re-setting it would invalidate Doppler's copy.
+#
 # ⚠ ON A GENUINELY FRESH INSTALL, READ config/README.md FIRST. The first
 # administrator comes from STALWART_RECOVERY_ADMIN, which must already be in the
 # i10-stalwart secret before this can authenticate at all. This script does not
@@ -31,12 +37,14 @@ CONFIGMAP_PREFIX="i10-stalwart-config"
 
 VERIFY_ONLY=false
 RESTART=true
+SET_SUBMISSION_PASSWORD=false
 for arg in "$@"; do
   case "$arg" in
     --verify) VERIFY_ONLY=true ;;
     --no-restart) RESTART=false ;;
+    --set-submission-password) SET_SUBMISSION_PASSWORD=true ;;
     -h | --help)
-      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -138,6 +146,65 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# sw_file — like sw, but the JSON payload comes from a mounted Secret.
+#
+# ⚠ THIS EXISTS SO A CREDENTIAL NEVER TRAVELS IN `args`. A pod's arguments live
+# in its spec: readable by anything that can `get pod -o yaml`, logged by
+# admission webhooks, and retained in the API server until the pod is reaped.
+# `sw` builds its args from its parameters, so the moment a payload contains a
+# secret it must not use it.
+#
+#   sw_file <Object> <id> <secret-name>   # the Secret holds key `payload.json`
+# ─────────────────────────────────────────────────────────────────────────────
+sw_file() {
+  local object="$1" id="$2" secret="$3"
+  local name="swf-$RANDOM-$RANDOM"
+
+  kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $name
+  namespace: $NS
+  labels: { app.kubernetes.io/name: stalwart-bootstrap }
+spec:
+  restartPolicy: OnFailure
+  volumes:
+    - name: payload
+      secret: { secretName: $secret }
+  containers:
+    - name: cli
+      image: $CLI_IMAGE
+      args: ["update", "$object", "$id", "--file", "/payload/payload.json"]
+      volumeMounts:
+        - { name: payload, mountPath: /payload, readOnly: true }
+      env:
+        - { name: STALWART_URL, value: "$SVC_URL" }
+        - { name: STALWART_USER, value: "$CLI_USER" }
+        - name: STALWART_PASSWORD
+          valueFrom: { secretKeyRef: { name: $TMP_SECRET, key: password } }
+EOF
+
+  local phase=""
+  for _ in $(seq 1 40); do
+    phase=$(kubectl get pod -n "$NS" "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ] && break
+    sleep 3
+  done
+
+  # ⚠ THE LOG IS NOT PRINTED ON SUCCESS. `update` echoes the object back, and for
+  # a credential that means the value we just set — into a terminal, a CI log and
+  # whatever scrapes them. Only the failure path is shown, and Stalwart's errors
+  # name the property rather than quoting it.
+  if [ "$phase" != "Succeeded" ]; then
+    kubectl logs -n "$NS" "$name" 2>&1 | sed 's/^/   /'
+  fi
+  kubectl delete pod -n "$NS" "$name" --ignore-not-found >/dev/null 2>&1
+
+  [ "$phase" = "Succeeded" ]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Verification — used at the end, and on its own with --verify.
 # ─────────────────────────────────────────────────────────────────────────────
 verify() {
@@ -201,6 +268,27 @@ verify() {
     ok "authd is listening"
   else
     warn "authd has not logged 'listening' recently"
+  fi
+
+  # The direct route's whole dependency on this server, in one line. Without an
+  # account to authenticate as, every direct-routed message answers `deferred`
+  # and waits in the queue — the designed failure, but a silent one until the
+  # backlog is large enough to notice.
+  if sw query Account --json 2>/dev/null | grep -q '"emailAddress":"submission@i10.tech"'; then
+    ok "the submission account exists"
+  else
+    warn "no submission@i10.tech — the direct route cannot send"
+    failures=$((failures + 1))
+  fi
+
+  # ⚠ THE LISTENER THE SEND WORKER DIALS, CHECKED BY NAME RATHER THAN ASSUMED.
+  # 587 has no listener on this server and does not need one; 465 is implicit
+  # TLS, which is what submission.ts configures from the port number.
+  if sw query NetworkListener --json 2>/dev/null | grep -q '"submissions"'; then
+    ok "the submissions listener (465, implicit TLS) is configured"
+  else
+    warn "no submissions listener — nothing accepts authenticated mail"
+    failures=$((failures + 1))
   fi
 
   # ⚠ THE TRAP THAT COST A DAY. The default Tracer writes to /var/log/stalwart,
@@ -301,6 +389,147 @@ else
   if [ -n "$log_id" ]; then
     sw update Tracer "$log_id" --field enable=false >/dev/null && ok "disabled the file tracer ($log_id)"
   fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+say "Ensuring the submission account"
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The identity the send worker authenticates as to hand us transactional mail
+# for the direct route. See docs/decisions/mail-routing.md.
+#
+# ⚠ AN ACCOUNT IN STALWART'S OWN STORE, NOT IN authd, AND THAT IS THE WHOLE
+# POINT. Every principal authd knows is a Clerk user — `filterLogin` is
+# `(objectClass=inetOrgPerson)(mail=?)` against a projection of Clerk, and a bind
+# is a `verify_password` call against Clerk. Putting a machine in there would
+# mean inventing a person: a Clerk user with a password we rotate, visible to the
+# identity system that exists for customers, and one Clerk outage away from the
+# send worker being unable to send. `metering@i10.tech` established this pattern
+# on 2026-09-06 for the same reason; this is the second one.
+#
+# ⚠ THE ACCOUNT IS IDEMPOTENT; THE PASSWORD IS NOT AND CANNOT BE. Stalwart
+# stores a hash, so there is nothing to compare a desired value against — a
+# re-run that "ensured" the password would have to overwrite it every time,
+# invalidating whatever is in Doppler. So this creates the account when absent
+# and sets a password ONLY when explicitly asked:
+#
+#   ./bootstrap.sh --set-submission-password
+#
+# ⚠ AND THE SECRET IS NEVER PRINTED, WRITTEN TO A FILE, OR PASSED AS AN
+# ARGUMENT. A pod's `args` are readable by anyone who can `get pod -o yaml`, so
+# the payload travels as a mounted Secret instead. The value is read from your
+# terminal, sent to Stalwart, and put in a Secret for you to copy into Doppler.
+SUB_LOCAL="${SUB_LOCAL:-submission}"
+SUB_DOMAIN="${SUB_DOMAIN:-i10.tech}"
+SUB_EMAIL="$SUB_LOCAL@$SUB_DOMAIN"
+
+# ⚠ `emailAddress` IS SERVER-SET, DERIVED FROM `name` AND `domainId`. Sending it
+# is rejected outright, and the domain id is a registry id rather than the name —
+# so it has to be looked up rather than written down. Hardcoding the current `b`
+# would work today and break on any rebuild of this server.
+#
+# ⚠ THE `id` IS TAKEN FROM THE END OF THE LINE, WHICH IS MEASURED RATHER THAN
+# ASSUMED. These records nest — `{"name":"i10.tech",…,"certificateManagement":
+# {"@type":"Manual"},…,"id":"b"}` — so a `[^}]*` window stops at the FIRST inner
+# brace and never reaches the id, which is how the obvious version of this
+# silently extracts nothing. Anchoring on `"id":"…"` immediately before the
+# closing brace is what survives the nesting; the server puts it last in both
+# Domain and Account. If that ever changes, the `die` below is the alarm — an
+# empty id must never fall through into a create.
+sub_domain_id=$(sw query Domain --json 2>/dev/null |
+  grep "\"name\":\"$SUB_DOMAIN\"" |
+  sed -n 's/.*"id":"\([^"]*\)"[^"]*$/\1/p' | head -1)
+[ -n "$sub_domain_id" ] || die "no Domain named $SUB_DOMAIN — apply plan.ndjson first"
+
+if sw query Account --json 2>/dev/null | grep -q "\"emailAddress\":\"$SUB_EMAIL\""; then
+  ok "$SUB_EMAIL already exists"
+else
+  # ⚠ TWO PERMISSIONS OUT OF 660, AND `Replace` RATHER THAN `Inherit`. The
+  # default user role carries the whole mailbox surface — IMAP, JMAP, sieve,
+  # every folder — none of which a submission client has any use for.
+  # `authenticate` opens the session and `emailSend` submits; a credential that
+  # leaks can post mail and cannot read any.
+  #
+  # ⚠ AND NOTHING IS EVER DELIVERED HERE. The account exists to be authenticated
+  # as. The description says so for whoever finds it in the admin UI at three in
+  # the morning and wonders whose mailbox it is.
+  sw create Account/User --json "{
+    \"@type\": \"User\",
+    \"name\": \"$SUB_LOCAL\",
+    \"domainId\": \"$sub_domain_id\",
+    \"description\": \"i10 send worker - direct-route SMTP submission. Not a mailbox.\",
+    \"roles\": {\"@type\": \"User\"},
+    \"permissions\": {
+      \"@type\": \"Replace\",
+      \"enabledPermissions\": {\"authenticate\": true, \"emailSend\": true},
+      \"disabledPermissions\": {}
+    }
+  }" >/dev/null || die "could not create $SUB_EMAIL"
+  ok "created $SUB_EMAIL"
+fi
+
+if [ "$SET_SUBMISSION_PASSWORD" = true ]; then
+  say "Setting the submission password"
+  # ⚠ THE ACCOUNT'S OWN PASSWORD, NOT AN AppPassword, AND NOT FOR WANT OF
+  # TRYING. `AppPassword` carries `allowedIps` and its own permission set, which
+  # would both be worth having — but it is not creatable by an administrator:
+  # `create AppPassword` answers `notFound` with or without an account id,
+  # because an app password is minted by the account holder inside their own
+  # session. There is no holder here to log in as. `AccountPassword.secret` is
+  # mutable and is what is left.
+  #
+  # ⚠ THE NARROW GRANT IS THE CONTROL, THEN, RATHER THAN THE SOURCE ADDRESS.
+  # The account has two permissions and no mailbox, so the blast radius of this
+  # credential is "can post mail through our MTA" — which is the thing it is for.
+  # The table rather than the JSON: `query Account` prints `Id  Email Address …`,
+  # and two whitespace-separated columns are less to get wrong than a nested
+  # record. See the note on the domain lookup above for why the JSON is awkward.
+  sub_id=$(sw query Account 2>/dev/null | awk -v e="$SUB_EMAIL" '$2 == e { print $1; exit }')
+  [ -n "$sub_id" ] || die "could not resolve the id of $SUB_EMAIL"
+
+  printf '   Paste a password for %s (input hidden): ' "$SUB_EMAIL"
+  read -rs sub_pw
+  printf '\n'
+  [ -n "$sub_pw" ] || die "empty password"
+
+  # ⚠ THROUGH A MOUNTED Secret, NEVER THROUGH `args`. A pod's arguments are in
+  # its spec, readable by anything with `get pod`, and they persist in the API
+  # server until the pod is reaped.
+  kubectl create secret generic i10-stalwart-submission -n "$NS" \
+    --from-literal=STALWART_SUBMISSION_HOST="i10-stalwart-mail.$NS.svc.cluster.local" \
+    --from-literal=STALWART_SUBMISSION_PORT=465 \
+    --from-literal=STALWART_SUBMISSION_USER="$SUB_EMAIL" \
+    --from-literal=STALWART_SUBMISSION_PASSWORD="$sub_pw" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl create secret generic sw-password-payload -n "$NS" \
+    --from-literal=payload.json="{\"secret\":\"$sub_pw\"}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  unset sub_pw
+
+  sw_file AccountPassword "$sub_id" sw-password-payload ||
+    die "could not set the password for $SUB_EMAIL"
+  kubectl delete secret sw-password-payload -n "$NS" --ignore-not-found >/dev/null
+  ok "password set for $SUB_EMAIL"
+
+  cat <<DOPPLER
+
+   The four values are now in the Secret i10-stalwart-submission, for you to
+   copy into Doppler's prod_api config — which is what the i10-api Secret syncs
+   and what worker.yaml already mounts wholesale, so no manifest change is
+   needed. Exactly as with STALWART_API_TOKEN:
+
+     kubectl get secret i10-stalwart-submission -n $NS \\
+       -o go-template='{{range \$k,\$v := .data}}{{\$k}}={{\$v | base64decode}}{{"\\n"}}{{end}}'
+
+   ⚠ 465, NOT 587. There is no 587 listener on this server and no reason to add
+   one: 465 is implicit TLS from the first byte, which RFC 8314 §3 prefers over
+   STARTTLS precisely because it has no cleartext phase to strip.
+   apps/api/src/send/submission.ts derives the TLS mode from the port.
+
+   ⚠ AND DELETE i10-stalwart-submission ONCE IT IS IN DOPPLER. Two homes for one
+   credential is one that gets rotated and one that does not.
+
+DOPPLER
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -399,12 +399,15 @@ being a single point of failure — it has to increase on every write.
       yet** — the zones are written and nothing serves them.
 - [ ] Moving zones off the box. ⚠ **Cloudflare is not the answer for this, and
       it is verified rather than suspected** — see below.
-- [ ] **⚠ `_spf.i10.tech` DOES NOT RESOLVE, AND IT IS A RELEASE GATE.** The
-      `spf_include` resource exists in `infra/tofu/stacks/dns/main.tf` and has
-      never been applied — `variables.tf`'s validation message says so outright.
-      Until it is, every `bounce.<domain>` TXT includes a domain that does not
-      exist, which is an SPF **permerror**: strictly worse than publishing
-      nothing. Nothing may route direct before this applies.
+- [x] ~~`_spf.i10.tech` does not resolve.~~ **Applied and verified
+      2026-09-17.** `dig TXT _spf.i10.tech` answers
+      `v=spf1 include:amazonses.com a:mail.i10.tech -all`, and
+      `mail.i10.tech` resolves to an unproxied address — which is the whole
+      point of the `a:` mechanism, since a Cloudflare-proxied name would
+      authorise their anycast range to send as every customer.
+      ⚠ **THIS WAS THE RELEASE GATE ON THE DIRECT ROUTE.** Until it applied,
+      every `bounce.<domain>` TXT included a domain that did not exist, which is
+      an SPF **permerror** — strictly worse than publishing nothing.
 - [ ] **Ingesting direct-route DSNs into `core.message_events`.** The envelope
       sender is already VERP — `bounce+<messageId>@bounce.<domain>` — so the id
       comes back on the DSN and correlating one is a parse. What does not exist
@@ -415,12 +418,63 @@ being a single point of failure — it has to increase on every write.
       SES ingest. `ses_unconfirmed_snapshot` no longer reports those rows as
       discrepancies (0033), so the silence is at least not also an alarm, but a
       customer watching webhooks sees a message that stops at `sent`.
-- [ ] **Stalwart's submission account and the NetworkPolicy to reach it.** The
-      worker dials `STALWART_SUBMISSION_HOST`; nothing creates the credential it
-      authenticates with, and `infra/k8s/i10/stalwart/networkpolicy.yaml` does
-      not admit the API pods on 587. Without both, every direct send answers
-      `deferred` and waits in the queue — which is the designed failure, not a
-      silent one.
+- [x] ~~The NetworkPolicy does not admit the API pods on 587.~~ **It never
+      needed to. Disproved 2026-09-17.** NetworkPolicies are ADDITIVE, and
+      `i10-prod` carries `allow-same-namespace` — `podSelector: {}` with
+      `from: namespaceSelector(i10-prod)` — which admits every pod in the
+      namespace to every other pod on EVERY port. `allow-public-mail` governs
+      only what the INTERNET may reach, because it has no `from` at all.
+      Confirmed by probing from a throwaway pod in the namespace: EHLO answered,
+      `AUTH PLAIN LOGIN XOAUTH2 OAUTHBEARER` advertised.
+- [x] ~~The worker dials 587.~~ **Wrong port, fixed 2026-09-17.** The real
+      blocker was never the policy: **Stalwart has no 587 listener.** Its
+      `NetworkListener` set is `smtp` on 25, `submissions` on 465, plus IMAP,
+      POP3, ManageSieve and HTTP — `ss -ltn` in the pod agrees. A worker pointed
+      at 587 gets no connection at all.
+      ⚠ **AND 465 IS THE BETTER PORT, NOT A WORKAROUND.** It is implicit TLS
+      from the first byte; 587 is cleartext until STARTTLS succeeds. RFC 8314 §3
+      prefers the former precisely because there is no plaintext phase to strip,
+      so there is no reason to add a listener. `STALWART_SUBMISSION_PORT` now
+      defaults to 465 and `submissionConfig` derives the TLS mode from it.
+      ⚠ **THE OLD DEFAULT WAS 587, WHICH MEANS THE DEFAULT WAS UNUSABLE.** A
+      deployment that set the host, user and password and trusted the rest would
+      have had every direct send refused at the socket — `deferred`, in the
+      queue, behind an ECONNREFUSED nobody reads.
+- [ ] **The submission account's password.** The account exists —
+      `submission@i10.tech`, created 2026-09-17 in Stalwart's own store — but it
+      has no credential yet, so the worker still cannot authenticate.
+      `./bootstrap.sh --set-submission-password` prompts for one, sets it, and
+      leaves the four values in the `i10-stalwart-submission` Secret to copy into
+      Doppler's `prod_api` config. That config is what `i10-api` syncs and what
+      `worker.yaml` already mounts wholesale, so **no manifest change is needed**
+      — the same route `STALWART_API_TOKEN` took.
+      ⚠ **AN ACCOUNT IN STALWART'S OWN STORE, NOT IN authd, AND THAT IS THE
+      POINT.** Every principal authd knows is a Clerk user: `filterLogin` is
+      `(objectClass=inetOrgPerson)(mail=?)` over a projection of Clerk, and a
+      bind is a `verify_password` call. A machine in there would be an invented
+      person — a Clerk user with a password we rotate, visible to the identity
+      system that exists for customers, and one Clerk outage away from the send
+      worker being unable to send. `metering@i10.tech` set this precedent on
+      2026-09-06.
+      ⚠ **TWO PERMISSIONS OUT OF 660**, as `Replace` rather than `Inherit`:
+      `authenticate` and `emailSend`. The default user role carries the whole
+      mailbox surface, none of which a submission client can use. A credential
+      that leaks can post mail and cannot read any.
+      ⚠ **AND IT IS THE ACCOUNT PASSWORD RATHER THAN AN `AppPassword`, WHICH WAS
+      NOT THE FIRST CHOICE.** `AppPassword` carries `allowedIps` and its own
+      permission set, both worth having — but an administrator cannot create
+      one: `create AppPassword` answers `notFound` with or without an account
+      id, because an app password is minted by the holder inside their own
+      session, and there is no holder here to log in as. Setting `credentials`
+      on the account directly is refused too ("Secondary credentials cannot be
+      set directly"). `AccountPassword.secret` is mutable and is what is left, so
+      the narrow grant is the control rather than the source address.
+- [x] ~~Sender validation would refuse arbitrary customer domains.~~ **Not a
+      problem, checked 2026-09-17.** `MtaStageMail.isSenderAllowed` is
+      `!is_empty(authenticated_as) || !key_exists('spam-block', sender_domain)`
+      and `MtaStageRcpt.allowRelaying` is `!is_empty(authenticated_as)` — so an
+      authenticated session may already send as any domain to any recipient. No
+      MTA rule changes are needed for the direct route.
 - [x] ~~i10's own bounce domain for the direct route.~~ **Superseded
       2026-09-14** — the return path is the customer's `bounce.<domain>`, not a
       name on i10.tech, so that SPF aligns. See "Custom MAIL FROM stays".

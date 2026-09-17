@@ -81,8 +81,16 @@ spec:
           ports:
             - { name: smtp, containerPort: 25, hostPort: 25 }
             - { name: submissions, containerPort: 465, hostPort: 465 }
-            # No hostPort: nothing is listening on 587 yet, and claiming the
-            # port would answer connections with a hang instead of a refusal.
+            # ⚠ DECLARED, NOT LISTENED ON, AND THAT IS NOT CHANGING. Stalwart
+            # serves `smtp` on 25 and `submissions` on 465; there is no 587
+            # listener and the send worker does not want one — 465 is implicit
+            # TLS from the first byte, which RFC 8314 prefers over STARTTLS
+            # because it has no cleartext phase to downgrade.
+            #
+            # The port stays here because `i10-stalwart-mail` maps 587 to this
+            # name and a Service may not target a port the pod does not declare.
+            # No hostPort: claiming it on the node would answer the internet with
+            # a hang instead of a refusal.
             - { name: submission, containerPort: 587 }
             - { name: imaps, containerPort: 993, hostPort: 993 }
             # Deliberately NOT exposed on the host. The management API reaches
