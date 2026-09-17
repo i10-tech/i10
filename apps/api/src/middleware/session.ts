@@ -35,6 +35,20 @@ export interface SessionVerifier {
 
 export interface ClerkSessionOptions {
   /**
+   * Where a verification failure is reported.
+   *
+   * ⚠ WITHOUT IT A MISCONFIGURATION IS INDISTINGUISHABLE FROM A CLERK OUTAGE,
+   * and that cost a production debugging session. `authenticateRequest` throws
+   * for reasons that are OURS as often as theirs — a missing publishable key,
+   * a malformed secret, a key from the wrong instance — and this catch turns
+   * every one of them into the same `unavailable`, which `requireTenant`
+   * renders as "Could not verify your session right now. Retry shortly." That
+   * message is correct for an outage and actively misleading for a variable
+   * nobody set: it says wait, when the answer is that waiting will never help.
+   * The console showed it on every page and the API log said nothing at all.
+   */
+  log?: { error: (o: object, m: string) => void }
+  /**
    * The origins allowed to present a session here.
    *
    * ⚠ EMPTY MEANS CLERK CHECKS NOTHING, which is why this is threaded through
@@ -65,7 +79,22 @@ export function clerkSessions(
         // `userId`. Treating that as signed-in would hand provisioning an
         // undefined subject to create a mailbox for.
         return userId ? { status: "signed-in", userId } : { status: "signed-out" }
-      } catch {
+      } catch (error) {
+        /*
+         * ⚠ REPORTED BEFORE IT IS FLATTENED. The outcome stays `unavailable`,
+         * because the CALLER's decision is the same either way — never answer
+         * 401 when we do not know whether the session is good. What changes is
+         * that the reason survives: "Publishable key is missing" in a log line
+         * is a five-minute fix, and the same condition with no log is an
+         * afternoon spent looking at Clerk's status page.
+         *
+         * ⚠ AND IT IS `error`, NOT `warn`. A session that cannot be verified
+         * means nobody can use the console at all. That is not a degraded mode.
+         */
+        options.log?.error(
+          { err: String(error) },
+          "clerk could not verify a session — check CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY",
+        )
         return { status: "unavailable" }
       }
     },
@@ -187,7 +216,14 @@ export function clerkActiveOrg(
       return typeof orgId === "string" && orgId
         ? { status: "org", orgId }
         : { status: "personal" }
-    } catch {
+    } catch (error) {
+      // ⚠ THE SAME REPORTING, FOR THE SAME REASON — see `clerkSessions`. This
+      // one answers 503 too, so an unset variable would otherwise present as an
+      // intermittent Clerk problem rather than as our own configuration.
+      options.log?.error(
+        { err: String(error) },
+        "clerk could not resolve the active organization",
+      )
       return { status: "unknown" }
     }
   }
