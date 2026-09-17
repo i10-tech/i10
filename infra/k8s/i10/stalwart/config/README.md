@@ -382,13 +382,13 @@ which changes on every redelivery. See `sourceEventIdFor`.
 message stopped at `sent` and never reached `delivered` or `bounced`. The five
 events in the plan's include list are what close that:
 
-| Stalwart event              | i10 event                | suppresses?               |
-| --------------------------- | ------------------------ | ------------------------- |
-| `delivery.delivered`        | `email.delivered`        | no                        |
-| `delivery.rcpt-to-rejected` | `email.bounced`          | **yes, on 5xx only**      |
-| `delivery.message-rejected` | `email.bounced`          | no — the address is fine  |
+| Stalwart event              | i10 event                | suppresses?                   |
+| --------------------------- | ------------------------ | ----------------------------- |
+| `delivery.delivered`        | `email.delivered`        | no                            |
+| `delivery.rcpt-to-rejected` | `email.bounced`          | **yes, on 5xx only**          |
+| `delivery.message-rejected` | `email.bounced`          | no — the address is fine      |
 | `delivery.failed`           | `email.bounced`          | no — the retry window ran out |
-| `queue.rescheduled`         | `email.delivery_delayed` | no                        |
+| `queue.rescheduled`         | `email.delivery_delayed` | no                            |
 
 ⚠ **The join key is the VERP envelope sender**, which arrives on these events
 from the `delivery.attempt-start` **span** rather than from the event itself.
@@ -401,3 +401,92 @@ no `from`, which this ingest ignores.
 only later decides the mailbox is gone sends a DSN to the envelope sender, and we
 accept no inbound mail for customer `bounce.` domains. That is what the VERP
 envelope was originally built for and it remains the open half.
+
+## The mailbox lever, and the one piece that is not here yet
+
+`MtaOutboundStrategy.route` is an expression evaluated **per recipient**, and it
+is awaited — so it can ask Postgres:
+
+```
+sql_query('i10', 'SELECT core.mailbox_route($1)', [sender_domain])
+```
+
+`core.mailbox_route` (migration 0036) returns the **name of a route**:
+`mx` to deliver ourselves, `ses-relay` to hand the message to SES's SMTP
+endpoint. It applies the same rule as `resolveRoute` in the API — kill switch,
+then the domain's override, then the plan — so a plan change takes effect on the
+next message rather than the next deploy.
+
+⚠ **`sender_domain` IS THE RETURN PATH, NOT THE `From:` HEADER.** For human mail
+that is the sender's own domain, which is what this wants. For our own
+transactional mail on the direct route it is `bounce.<domain>` — the VERP
+envelope — which matches no row, so it answers `mx` and the worker's decision
+stands. That is not incidental: this expression sees **every** message in the
+queue, and re-routing a transactional message onto SES here would give it a
+return path SES does not own and break the SPF alignment the direct route exists
+for. The `hosts_mailboxes` join is what prevents it.
+
+⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX, WHICH IS WHY THIS SHIPS SAFELY.**
+`get_route_or_default` answers `MX_GATEWAY` for a name it cannot resolve and logs
+`Smtp(IdNotFound)`. So the worst case is mail leaving the way it does today.
+
+### What is missing: `ses-relay`
+
+The `MtaRoute` is deliberately **not** in `plan.ndjson`, because it needs SES SMTP
+credentials that do not exist yet — and a plan referencing a missing environment
+variable is a plan that may not apply. Until it exists,
+`core.routing_settings.ses_relay_enabled` stays `false` and `mailbox_route`
+returns `mx` for everybody, so nothing routes to a gateway that is not there.
+
+To turn the lever on, in this order:
+
+1. **Create SES SMTP credentials** in the AWS console (IAM → SES → SMTP
+   settings). These are NOT an access key pair; SES derives an SMTP password from
+   a secret key and they are not interchangeable.
+2. Put them in Doppler's Stalwart config as `SES_SMTP_USER` and
+   `SES_SMTP_PASSWORD`, so they reach the pod through `i10-stalwart`.
+3. Add this line to `plan.ndjson` and run `./bootstrap.sh`:
+
+   ```json
+   {
+     "@type": "upsert",
+     "object": "MtaRoute",
+     "matchOn": ["description"],
+     "value": {
+       "ses-relay": {
+         "@type": "Relay",
+         "description": "SES SMTP relay for mailbox mail",
+         "host": "email-smtp.eu-central-1.amazonaws.com",
+         "port": 587,
+         "tls": { "@type": "StartTls" },
+         "auth": {
+           "@type": "Basic",
+           "username": {
+             "@type": "EnvironmentVariable",
+             "variableName": "SES_SMTP_USER"
+           },
+           "secret": {
+             "@type": "EnvironmentVariable",
+             "variableName": "SES_SMTP_PASSWORD"
+           }
+         }
+       }
+     }
+   }
+   ```
+
+   ⚠ Check the object's field names with `stalwart-cli describe MtaRoute` before
+   pasting. This block is written from the schema's shape and has not been
+   applied against a running server.
+
+4. Set `SES_RELAY_ENABLED=true` in Doppler's API config and roll the API. It
+   publishes the flag into `core.routing_settings` at boot; nothing reads the
+   environment variable directly.
+
+⚠ **STEP 4 IS THE ONE THAT MOVES MAIL**, and today that means i10.tech's own
+human mail, because it is the only mailbox domain and it is on `pro`. Verify the
+relay works before throwing it — `SES_RELAY_ENABLED=false` puts it straight back.
+
+⚠ **AND SES MUST BE ABLE TO SEND AS THOSE DOMAINS.** Relaying through SES means
+SES applies its own policy: the sending identity has to be verified there, or it
+refuses the message. A domain that only ever sent direct may not be.

@@ -1254,3 +1254,48 @@ export const meterEvents = core.table(
     index("meter_events_window_idx").on(t.tenantId, t.featureId, t.shard, t.occurredAt),
   ],
 )
+
+/**
+ * The two routing inputs that are configuration rather than rows.
+ *
+ * ⚠ A PROJECTION OF THE ENVIRONMENT, NOT A SECOND SOURCE OF TRUTH. `SES_ENABLED`
+ * and `METERING_FREE_PLAN_ID` are authored in Doppler and read from `env` by the
+ * API and the worker; this row is a copy the API upserts at boot. It exists for
+ * one reader that cannot see our pods' environment: the `core.mailbox_route`
+ * function Stalwart calls to decide where a mailbox domain's human mail goes.
+ *
+ * ⚠ WITHOUT IT THE KILL SWITCH WOULD ONLY MOVE HALF THE MAIL. `SES_ENABLED` is
+ * thrown during an incident and the transactional path honours it immediately;
+ * mailbox mail is routed inside Stalwart, which would keep relaying to the thing
+ * that is down. "One rule, three readers" has to include the reader that lives
+ * in another process.
+ */
+export const routingSettings = core.table("routing_settings", {
+  /**
+   * ⚠ ONE ROW, ENFORCED BY THE KEY. A second would give the function two answers
+   * and a `limit 1` would pick one of them silently.
+   */
+  id: boolean("id").primaryKey().default(true),
+
+  /** Mirrors `SES_ENABLED`. */
+  sesEnabled: boolean("ses_enabled").notNull().default(true),
+
+  /**
+   * Whether SES's SMTP endpoint is configured as a relay for mailbox mail.
+   *
+   * ⚠ A SECOND SWITCH, AND NOT A DUPLICATE OF THE FIRST. The transactional route
+   * uses the SES API; mailbox mail can only use SES SMTP, because Stalwart's
+   * outbound has no HTTP hook. Different credentials, which can exist
+   * independently — so one flag cannot govern both.
+   *
+   * ⚠ DEFAULTS FALSE SO THE MIGRATION MOVES NO MAIL. i10.tech is on `pro` and
+   * hosts mailboxes, so a default of true would silently put our own human mail
+   * onto a relay with no credentials behind it.
+   */
+  sesRelayEnabled: boolean("ses_relay_enabled").notNull().default(false),
+
+  /** Mirrors `METERING_FREE_PLAN_ID`. */
+  freePlanId: text("free_plan_id").notNull().default("free"),
+
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})

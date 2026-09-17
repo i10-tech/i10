@@ -186,6 +186,43 @@ const schema = z.object({
     }),
 
   /**
+   * Whether SES's SMTP endpoint is configured as a relay for MAILBOX mail.
+   *
+   * ⚠ A SECOND SWITCH, AND NOT A DUPLICATE OF `SES_ENABLED`. The transactional
+   * route calls the SES **API**; mailbox mail can only use SES **SMTP**, because
+   * Stalwart's outbound has no HTTP hook and taking messages out of its queue
+   * would mean rebuilding queueing, retries and DSN generation it already does
+   * properly. Those are different credentials that can exist independently, so
+   * one flag cannot honestly govern both.
+   *
+   * ⚠ IT DEFAULTS OFF, WHICH IS THE OPPOSITE OF `SES_ENABLED` AND DELIBERATE.
+   * That one defaults on because defaulting off would silently move every paying
+   * customer onto our own IP. This one defaults off because defaulting on would
+   * point human mail at an SMTP relay that may have no credentials behind it —
+   * and the first symptom would be our own mail queueing. Off until somebody
+   * creates the credentials and means it.
+   *
+   * ⚠ IT IS READ AT BOOT AND PUBLISHED TO `core.routing_settings`, not read on
+   * the send path. Stalwart decides this route inside Postgres; see
+   * domains/routing-settings.ts.
+   */
+  SES_RELAY_ENABLED: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      try {
+        // ⚠ THE SAME PARSER, SO `0`, `no` AND `off` MEAN THE SAME THING IN BOTH.
+        // Two hand-rolled boolean readers is two chances for `SES_ENABLED=0` to
+        // mean disabled in one place and enabled in the other — which is exactly
+        // the bug `parseSesEnabled` was written to fix.
+        return v === undefined ? false : parseSesEnabled(v)
+      } catch (err) {
+        ctx.addIssue({ code: "custom", message: (err as Error).message })
+        return z.NEVER
+      }
+    }),
+
+  /**
    * Provider calls in flight per worker replica.
    *
    * ⚠ IT IS A QUOTA KNOB AS MUCH AS A THROUGHPUT ONE. SES caps a send RATE in

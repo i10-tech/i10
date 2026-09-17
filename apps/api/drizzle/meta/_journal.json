@@ -253,6 +253,13 @@
       "when": 1789614464234,
       "tag": "0035_route_split_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789615098423,
+      "tag": "0036_mailbox_lever",
+      "breakpoints": true
     }
   ]
 }

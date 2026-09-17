@@ -264,12 +264,58 @@ being a single point of failure — it has to increase on every write.
 
 ## Open
 
-- [ ] **The mailbox lever: Stalwart's `MtaOutboundStrategy` expression and the
-      `SECURITY DEFINER` function it calls**, plus the SES SMTP credentials for
-      the relay. ⚠ **Deferred 2026-09-14** — it also needs per-domain
-      provisioning into Stalwart, which nothing does, and that arrives with
-      `hosts_mailboxes`. `core.domains.mailbox_route` is stored and rendered in
-      the meantime and **read by nothing**, exactly as `delivery_route` was.
+- [x] **The mailbox lever. Built 2026-09-17.** `core.mailbox_route(sender_domain)`
+      (0036) returns the name of a Stalwart route — `mx` or `ses-relay` — and
+      `MtaOutboundStrategy.route` calls it with
+      `sql_query('i10', 'SELECT core.mailbox_route($1)', [sender_domain])`. The
+      expression is evaluated per recipient and awaited, so the tier is a live
+      lookup: a plan change takes effect on the next message, not the next
+      deploy.
+      ⚠ **THE RULE NOW EXISTS TWICE, AND THAT IS UNAVOIDABLE RATHER THAN
+      SLOPPY.** Transactional mail is routed in TypeScript because our worker
+      owns the message; mailbox mail is submitted straight into Stalwart's queue
+      by a person's mail client, so the only place left to decide is Stalwart and
+      the only way to ask us is a query. `core.resolve_route` mirrors
+      `resolveRoute`, and the case table is asserted in BOTH — `ASSERT`s in the
+      migration, which fail the DEPLOY if the SQL is wrong, and the identical
+      table in test/domains-route.test.ts. Same order, same values, so they read
+      side by side in a diff.
+      ⚠ **`sender_domain` IS THE RETURN PATH, NOT THE `From:` HEADER, AND THAT IS
+      THE TRAP.** `QueueEnvelope::resolve_variable` maps it to
+      `return_path.domain_part()`. This expression sees EVERY message in the
+      queue including our own transactional sends, whose envelope is
+      `bounce.<domain>` — so without a guard it could re-route a direct-routed
+      message onto SES, giving it a return path SES does not own and breaking the
+      SPF alignment the whole direct route was built for. The `hosts_mailboxes`
+      join is the guard: a `bounce.` subdomain matches no row, a send-only domain
+      is not a mailbox domain, and both answer `mx`.
+      ⚠ **TWO SWITCHES, NOT ONE.** The transactional route uses the SES API;
+      mailbox mail can only use SES SMTP, because Stalwart's outbound has no HTTP
+      hook. Different credentials, independently available, so
+      `SES_RELAY_ENABLED` is separate from `SES_ENABLED` — and it defaults OFF,
+      where `SES_ENABLED` defaults on. Shipping this migration moves no mail.
+      ⚠ **AND THE RULE'S OTHER TWO INPUTS ARE ENVIRONMENT VARIABLES A FUNCTION IN
+      POSTGRES CANNOT SEE.** `core.routing_settings` is a one-row projection the
+      API upserts at boot from `env`. Without it the kill switch would move
+      transactional mail and leave human mail pointed at the thing that is down.
+      The environment stays the authored source; nobody edits that row by hand.
+- [ ] **The `ses-relay` route itself.** Deliberately NOT in `plan.ndjson`: it
+      needs SES SMTP credentials that do not exist yet, and a plan referencing a
+      missing environment variable is a plan that may not apply. Paste-ready
+      block and the exact order of operations are in
+      `infra/k8s/i10/stalwart/config/README.md`.
+      ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX**, logging `Smtp(IdNotFound)` —
+      `get_route_or_default` in crates/common/src/network/mta.rs. So the failure
+      mode of shipping the lever early is mail leaving the way it does today.
+- [ ] **`resolveRoute`'s comment and its code disagree, and the code wins.** The
+      comment says "free is the DEFAULT... anything we do not recognise as a paid
+      plan lands here", warning that otherwise "a plan id renamed in the
+      catalogue would start spending SES money on free tenants". The code
+      recognises FREE by name and treats everything else as paid — so renaming
+      the free plan without moving `METERING_FREE_PLAN_ID` puts every free tenant
+      on SES, which is exactly the outcome the comment claims to prevent. Found
+      2026-09-17 while mirroring the rule into SQL. The SQL mirrors the CODE, so
+      the two levers agree; whether the rule should change is a pricing decision.
 - [x] ~~The transactional lever.~~ **Built 2026-09-16.** `stalwartTransport`
       beside `sesTransport`, selected per message from
       `core.domains.transactional_route`. The worker signs with the domain's own
