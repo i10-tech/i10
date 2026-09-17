@@ -10,6 +10,7 @@ import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { keyLookup, keyStore } from "./auth/store.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
+import { publishRoutingSettings } from "./domains/routing-settings.js"
 import { loadEnv } from "./env.js"
 import { captureError, flushObservability, initObservability } from "./observability.js"
 import { createSendQueue } from "./queue/send-queue.js"
@@ -69,6 +70,28 @@ try {
   // one where there is no later chance to send it.
   await flushObservability()
   process.exit(1)
+}
+
+// ⚠ AFTER THE RLS ASSERTION, BEFORE ANYTHING SERVES. This publishes
+// `SES_ENABLED` and `METERING_FREE_PLAN_ID` into `core.routing_settings`, which
+// is the only way the mailbox lever — a function Stalwart calls inside Postgres
+// — can see them. See domains/routing-settings.ts.
+//
+// ⚠ AND IT IS NOT FATAL. A failure leaves Stalwart reading the previous deploy's
+// values, which are stale rather than nonsense; refusing to boot over a routing
+// flag would turn it into an outage.
+try {
+  await publishRoutingSettings(db, {
+    sesEnabled: env.SES_ENABLED,
+    sesRelayEnabled: env.SES_RELAY_ENABLED,
+    freePlanId: env.METERING_FREE_PLAN_ID,
+  })
+} catch (error) {
+  log.error(
+    { err: error },
+    "could not publish routing settings — Stalwart keeps the old ones",
+  )
+  captureError(error, { phase: "boot" })
 }
 
 const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
@@ -471,6 +494,24 @@ const app = createApp({
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,
         },
+        // ⚠ THE SAME OPS, A DIFFERENT INTERPRETER. Both routes write through
+        // `ingestEvent`, so the dedupe, the suppression write and the customer
+        // payload shape are one implementation rather than two that agree today.
+        //
+        // ⚠ AND IT IS GATED ON THE SECRET SEPARATELY FROM THE REST. Without
+        // `STALWART_WEBHOOK_SECRET` the route answers 503 rather than accepting
+        // unsigned notifications — a public endpoint that writes suppressions
+        // must never be reachable without a signature, not even in a
+        // half-configured environment.
+        ...(env.STALWART_WEBHOOK_SECRET
+          ? {
+              stalwartWebhooks: {
+                events: webhookEventOps({ db, queue: webhookQueue }),
+                log,
+                secret: env.STALWART_WEBHOOK_SECRET,
+              },
+            }
+          : {}),
       }
     : {}),
   pingDb: async () => {

@@ -1,7 +1,7 @@
 {
   "name": "i10",
   "private": true,
-  "description": "i10 — transactional and human email.",
+  "description": "i10 \u2014 transactional and human email.",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -29,5 +29,10 @@
   "trustedDependencies": [
     "esbuild",
     "vue-demi"
-  ]
+  ],
+  "overrides": {
+    "@react-email/ui": {
+      "next": "^16.3.3"
+    }
+  }
 }

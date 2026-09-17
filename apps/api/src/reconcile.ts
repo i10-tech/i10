@@ -66,6 +66,7 @@ import {
   reconcileSes,
   reconcileTenantCustomers,
   reconcileUsage,
+  reportRouteSplit,
 } from "./send/reconcile-run.js"
 
 const log = pino({ name: "i10-reconcile" })
@@ -205,6 +206,37 @@ await withMonitor(
           ),
           { surpluses: usage.surpluses.slice(0, 20) },
         )
+      }
+
+      // ⚠ THE SAME WINDOW, A DIFFERENT QUESTION. The leg above asks whether we
+      // billed for everything we sent — one price, both routes, no route
+      // predicate anywhere in it. This asks which MTA carried it, which is what
+      // decides how much SES we are buying and how much of our own IP
+      // reputation we are spending. `sent_route` has been written on every row
+      // since 0033 and read by nothing until now.
+      //
+      // ⚠ INSIDE THE USAGE LEG'S `try`, SO ITS OWN FAILURE CANNOT REACH THE
+      // OTHER LEGS — and it deliberately does NOT set `process.exitCode`. A
+      // readout that could fail a job which repairs entitlements would be the
+      // tail wagging the dog.
+      try {
+        const split = await reportRouteSplit(db, from, to)
+        log.info({ ...split, from, to }, "route split")
+
+        // ⚠ `unknown` IS A FAULT, NOT A CATEGORY. Every `sent` row has carried a
+        // route since 0033, so one without means a write path skipped it. Loud
+        // here rather than folded into `ses`, where it would add up to a
+        // plausible number and never be found.
+        if (split.unknown > 0) {
+          log.error(
+            { unknown: split.unknown, total: split.total },
+            "sent messages with no recorded route",
+          )
+          captureError(new Error(`${split.unknown} sent message(s) have no sent_route`))
+        }
+      } catch (error) {
+        log.error({ err: error }, "route split readout failed")
+        captureError(error)
       }
     } catch (error) {
       log.error({ err: error }, "usage reconciliation failed")

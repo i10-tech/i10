@@ -105,3 +105,29 @@ describe("production must name its environment", () => {
     )
   })
 })
+
+/**
+ * ⚠ THE DEFAULT PORT IS A FACT ABOUT OUR SERVER, NOT A CONVENTION, AND IT WAS
+ * WRONG. Stalwart's listeners are `smtp` on 25 and `submissions` on 465 —
+ * checked on the running server 2026-09-17 — and nothing answers on 587. This
+ * defaulted to 587 for as long as the direct route existed, so a deployment that
+ * set the host, user and password and trusted the default would have had every
+ * direct send refused at the socket: `deferred`, in the queue, behind an
+ * ECONNREFUSED nobody reads.
+ *
+ * ⚠ AND 465 IS NOT A COMPROMISE. It is implicit TLS from the first byte; 587 is
+ * cleartext until STARTTLS succeeds. RFC 8314 §3 prefers the former precisely
+ * because there is no plaintext phase to strip. `submissionConfig` derives the
+ * TLS mode from this number, so the port is the only thing that has to be right.
+ */
+describe("the submission port", () => {
+  it("defaults to 465, the listener that exists", () => {
+    expect(loadEnv(base).STALWART_SUBMISSION_PORT).toBe(465)
+  })
+
+  it("is still overridable", () => {
+    expect(
+      loadEnv({ ...base, STALWART_SUBMISSION_PORT: "2525" }).STALWART_SUBMISSION_PORT,
+    ).toBe(2525)
+  })
+})

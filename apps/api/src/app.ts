@@ -14,6 +14,10 @@ import type { Metering } from "./send/metering.js"
 import { createAutoconfig, type AutoconfigDeps } from "./routes/autoconfig.js"
 import { emails } from "./routes/emails.js"
 import { createSesWebhooks, type SesWebhookDeps } from "./routes/ses-events.js"
+import {
+  createStalwartWebhooks,
+  type StalwartWebhookDeps,
+} from "./routes/stalwart-events.js"
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
 import { domains } from "./routes/domains.js"
 import { mailboxes } from "./routes/mailboxes.js"
@@ -100,6 +104,17 @@ export interface AppDeps {
   mailboxes?: MailboxProvisioning
   /** SES delivery events over SNS. Unauthenticated; signature-verified. */
   sesWebhooks?: SesWebhookDeps
+  /**
+   * Direct-route delivery outcomes, pushed by Stalwart. Unauthenticated;
+   * signature-verified.
+   *
+   * ⚠ ITS ABSENCE IS NOT NEUTRAL: a direct-routed message then has no
+   * `delivered` and no `bounced`, only `sent`. The route answers 503 rather
+   * than accepting unsigned notifications, so the gap is visible in the logs
+   * instead of being a customer noticing months later that half their mail
+   * never reports.
+   */
+  stalwartWebhooks?: StalwartWebhookDeps
   /**
    * Polar subscription events. Unauthenticated; signature-verified.
    *
@@ -288,6 +303,14 @@ export function createApp(deps: AppDeps = {}) {
   // document, and the same rule: nothing reaches the database before the
   // signature verifies — here it protects a tenant's suppression list.
   app.route("/webhooks", createSesWebhooks(deps.sesWebhooks))
+
+  // ⚠ THE SAME EVENTS FOR THE OTHER ROUTE, AND WITHOUT IT A DIRECT-ROUTED
+  // MESSAGE STOPS AT `sent`. `core.message_events` was written only by the SES
+  // ingest, so a customer watching webhooks saw SES mail progress and their own
+  // MTA's mail go silent — the one difference the per-domain route lever is
+  // supposed to keep invisible. Both interpreters write through `ingestEvent`,
+  // so what a customer receives does not say which MTA carried the message.
+  app.route("/webhooks", createStalwartWebhooks(deps.stalwartWebhooks))
 
   // Polar subscription events, same prefix and the same rule. This is the one
   // that moves money into entitlement, so the signature check is the whole of

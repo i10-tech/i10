@@ -37,7 +37,15 @@ describe("the claim", () => {
     const { sql: statement } = claim()
     expect(statement).toMatch(/^\s*update core\.messages/)
     expect(statement).toContain("returning")
-    expect(statement).not.toContain("select")
+
+    // ⚠ THIS USED TO ASSERT THE STATEMENT CONTAINED NO `select` AT ALL, WHICH
+    // STOPPED BEING THE RIGHT TEST WHEN THE ROUTING INPUTS ARRIVED. The claim
+    // now reads the domain's override and the tenant's plan as correlated
+    // subqueries inside `returning` — still one statement, still one round
+    // trip, still atomic. What must never appear is a SEPARATE statement: a
+    // select-then-update is the race two workers lose together.
+    expect(statement).not.toContain(";")
+    expect(statement.match(/\bupdate\b/g) ?? []).toHaveLength(1)
   })
 
   it("matches on the full primary key, because the table is partitioned", () => {
@@ -128,7 +136,7 @@ describe("recording the outcome", () => {
   // would then join to an id we no longer hold.
   it("only writes a result for the row this worker still holds", () => {
     for (const statement of [
-      render(markSentStatement(A, "worker-1", "ses-abc")).sql,
+      render(markSentStatement(A, "worker-1", "ses-abc", "ses")).sql,
       render(markFailedStatement(A, "worker-1", "boom", false)).sql,
     ]) {
       expect(statement).toContain("status = 'sending'")
@@ -138,13 +146,13 @@ describe("recording the outcome", () => {
   })
 
   it("clears the last error on success, so a stale one cannot linger", () => {
-    expect(render(markSentStatement(A, "w", "ses-abc")).sql).toContain(
-      "last_error     = null",
+    expect(render(markSentStatement(A, "w", "ses-abc", "ses")).sql).toMatch(
+      /last_error\s+= null/,
     )
   })
 
   it("binds the SES id", () => {
-    const { params } = render(markSentStatement(A, "w", "ses-abc"))
+    const { params } = render(markSentStatement(A, "w", "ses-abc", "ses"))
     expect(params).toContain("ses-abc")
   })
 

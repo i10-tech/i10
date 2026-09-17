@@ -19,7 +19,13 @@ import {
 } from "./queue/webhook-queue.js"
 import { postgresMetering } from "./metering/service.js"
 import { resilient } from "./send/metering.js"
+import { SmtpTransport } from "@upyo/smtp"
+import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
 import { sesTransport } from "./send/ses.js"
+import { domainSendingLookup } from "./send/signing-key.js"
+import { stalwartTransport } from "./send/stalwart.js"
+import { submissionConfig } from "./send/submission.js"
+import type { Transport } from "./send/transport.js"
 import { webhookDeliveryOps } from "./webhooks/db.js"
 import { deliverWebhook } from "./webhooks/deliver.js"
 import { secretBox } from "./webhooks/signing.js"
@@ -97,10 +103,111 @@ try {
 const queueRedis = createQueueClient(env.REDIS_URL)
 queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
 
-const transport = sesTransport({
+const ses = sesTransport({
   client: new SESv2Client({ region: env.AWS_REGION }),
   configurationSetName: env.SES_CONFIGURATION_SET,
 })
+
+/**
+ * ⚠ HELD SO SHUTDOWN CAN CLOSE IT, WHICH THE PREVIOUS CLIENT'S POOL NEVER WAS.
+ * A pooled submission client keeps idle TCP connections open; exiting without
+ * closing them leaves Stalwart to notice the sockets died, which on an ordinary
+ * rolling deploy means a handful of half-open connections per pod per release.
+ * Nothing breaks, and it is the kind of thing that only ever gets diagnosed
+ * from the other end.
+ */
+let submissionPool: SmtpTransport | null = null
+
+/**
+ * Our own MTA, when it is configured and the keys can be unsealed.
+ *
+ * ⚠ IT REFUSES RATHER THAN FALLS BACK TO SES, AND THAT IS THE WHOLE POINT OF
+ * BUILDING IT THIS WAY. A stub that quietly sent through SES would mean a
+ * domain pinned to `direct` — including every free tenant once the plan rule
+ * applies — leaving by the route somebody deliberately moved it off, with
+ * nothing in the logs saying so and `sent_route` recording `direct` either way.
+ * `deferred` keeps the message in the queue with its attempt counted, so
+ * nothing is lost and the backlog is what raises the alarm.
+ *
+ * ⚠ AND IT NEEDS `WEBHOOK_SECRET_KEY` AS MUCH AS IT NEEDS AN SMTP HOST. That is
+ * what seals the DKIM private keys; without it they cannot be opened, and a
+ * message signed with nothing is one that fails DMARC at the recipient.
+ */
+function directTransport(): Transport {
+  const host = env.STALWART_SUBMISSION_HOST
+  const user = env.STALWART_SUBMISSION_USER
+  const password = env.STALWART_SUBMISSION_PASSWORD
+
+  if (!host || !user || !password || !env.WEBHOOK_SECRET_KEY) {
+    const missing = [
+      !host && "STALWART_SUBMISSION_HOST",
+      !user && "STALWART_SUBMISSION_USER",
+      !password && "STALWART_SUBMISSION_PASSWORD",
+      !env.WEBHOOK_SECRET_KEY && "WEBHOOK_SECRET_KEY",
+    ].filter(Boolean)
+
+    log.warn({ missing }, "DIRECT ROUTE UNAVAILABLE — messages routed direct will wait")
+    return {
+      async send() {
+        return {
+          status: "deferred",
+          reason: `direct route not configured: ${missing.join(", ")} missing`,
+        }
+      },
+    }
+  }
+
+  submissionPool = new SmtpTransport(
+    submissionConfig({
+      host,
+      port: env.STALWART_SUBMISSION_PORT,
+      user,
+      password,
+      localName: env.MAIL_BOUNCE_HOST,
+      poolSize: env.WORKER_CONCURRENCY,
+    }),
+  )
+
+  return stalwartTransport({
+    mailer: submissionPool,
+    // ⚠ SMTP CAN TAKE A MESSAGE AND STILL REFUSE SOME OF ITS RECIPIENTS, and
+    // before upyo we could not see it happen. `warn` rather than `error`: the
+    // message was delivered to everyone else, so this is not a failed send — it
+    // is the only record that somebody on the envelope did not get it.
+    onRejectedRecipients: ({ messageId, tenantId, recipients }) =>
+      log.warn(
+        { messageId, tenantId, recipients },
+        "submission accepted with rejected recipients",
+      ),
+    // ⚠ THE BOUNCE LABEL COMES BACK ON THE SAME ROW AS THE KEY, because it is
+    // per domain — `core.domains.bounce_subdomain` — and it is what the
+    // customer actually published. The transport builds the VERP envelope from
+    // it; see docs/decisions/mail-routing.md.
+    domainSending: domainSendingLookup({
+      db,
+      secrets: secretBox(env.WEBHOOK_SECRET_KEY),
+    }),
+  })
+}
+
+// ⚠ BOTH ARE BUILT AT STARTUP, NOT PER MESSAGE. A transport owns a client and a
+// connection pool; constructing one inside the send path would open a socket per
+// message and make the route decision expensive enough to matter.
+const transports: Record<DeliveryRoute, Transport> = {
+  ses,
+  direct: directTransport(),
+}
+
+// ⚠ RESOLVED FROM WHAT THE CLAIM READ, NOT FROM A FRESH LOOKUP. The override and
+// the plan came back on the statement that won the row, so this is pure — and
+// the same rule the dashboard and Stalwart read. See domains/route.ts.
+const routeFor = (message: ClaimedMessage): DeliveryRoute =>
+  resolveRoute({
+    override: message.routeOverride ?? "auto",
+    planId: message.planId,
+    freePlanId: env.METERING_FREE_PLAN_ID,
+    sesEnabled: env.SES_ENABLED,
+  })
 
 // ⚠ THE WORKER METERS TOO, AND ITS HALF IS THE ONE THAT BILLS. The API checks
 // quota; this records what actually went — and it writes to the same
@@ -137,7 +244,8 @@ function startWorker(cls: SendClass) {
     handler: (job) =>
       handleBatch<ClaimedMessage>(reviveSendJob(job.data), {
         ...ops,
-        transport,
+        route: routeFor,
+        transportFor: (route) => transports[route],
         metering,
         log,
         // A message whose outcome could not be written down is our failure, not
@@ -287,7 +395,14 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     log.info({ signal }, "shutting down")
 
     void Promise.allSettled(workers.map((w) => w.close(CLOSE_TIMEOUT_MS)))
-      .then(() => Promise.allSettled([sql.end({ timeout: 10 }), queueRedis.quit()]))
+      .then(() =>
+        Promise.allSettled([
+          sql.end({ timeout: 10 }),
+          queueRedis.quit(),
+          // Idle submission connections, closed politely rather than dropped.
+          submissionPool?.closeAllConnections() ?? Promise.resolve(),
+        ]),
+      )
       // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
       // queues and the transport sends on a timer, so an error raised in the
       // last seconds before a rolling deploy — which is a common moment for one

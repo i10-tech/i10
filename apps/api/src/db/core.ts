@@ -138,6 +138,18 @@ export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
  */
 export const deliveryRoute = core.enum("delivery_route", ["auto", "ses", "direct"])
 
+/**
+ * Which MTA actually carried one message. Stamped by the worker at send.
+ *
+ * ⚠ A SEPARATE TYPE FROM `delivery_route` BECAUSE `auto` IS NOT AN ANSWER. The
+ * column above is a stored PREFERENCE and may say "ask the plan"; this one is
+ * the record of what happened, and a message that was sent went one way or the
+ * other. Reusing the override's type here would make `auto` representable on a
+ * row describing the past, and the reporting query that counts direct against
+ * SES would silently have a third bucket nobody meant to create.
+ */
+export const sentRoute = core.enum("sent_route", ["ses", "direct"])
+
 export const domainStatus = core.enum("domain_status", [
   /** No identity has been created yet. */
   "not_started",
@@ -259,14 +271,47 @@ export const domains = core.table(
     bounceSubdomain: text("bounce_subdomain").notNull().default("bounce"),
 
     /**
-     * Which MTA this domain's mail leaves through. `auto` asks the plan.
+     * Which MTA this domain's API mail leaves through. `auto` asks the plan.
      *
      * ⚠ ON THE DOMAIN, NOT THE TENANT, BECAUSE DELIVERABILITY IS PER DOMAIN. A
      * customer with a warmed sending domain and a brand-new one has different
      * needs for each, and a tenant-level switch would force the same answer on
      * both.
+     *
+     * ⚠ THIS WAS ONE COLUMN CALLED `delivery_route` AND ONE VALUE COULD NOT SAY
+     * ENOUGH. A domain has two kinds of mail leaving it — what the API sends
+     * and what its mailboxes send — and they are different products with
+     * different economics. One column forced the same answer on both, so a
+     * customer whose people send through our own MTA could not also have their
+     * transactional traffic on SES. Split 2026-09-16; the old column became
+     * this one, so every existing preference kept applying to API mail.
+     */
+    transactionalRoute: deliveryRoute("transactional_route").notNull().default("auto"),
+
+    /**
+     * @deprecated Superseded by `transactionalRoute`. Dropped in a follow-up.
+     *
+     * ⚠ STILL HERE BECAUSE A RENAME IS NOT SAFE IN ONE DEPLOY. `ALTER TABLE
+     * RENAME COLUMN` is instant, but between the migration and the last old pod
+     * rolling there are readers in flight expecting the old name, and they fail
+     * for the width of the rollout. Expand, backfill, switch readers, contract:
+     * this column is backfilled into `transactional_route` by migration and
+     * read by nothing from 2026-09-16.
      */
     deliveryRoute: deliveryRoute("delivery_route").notNull().default("auto"),
+
+    /**
+     * Which MTA this domain's MAILBOX mail leaves through. `auto` asks the plan.
+     *
+     * ⚠ STORED AND RENDERED, AND READ BY NOTHING YET. Stalwart chooses the
+     * mailbox route itself by evaluating an expression against its own queue,
+     * and that expression — plus the SES SMTP relay behind it — is not built.
+     * The column exists so the preference has somewhere to live and the API can
+     * answer with it; see docs/decisions/mail-routing.md. It is the same shape
+     * of promise `delivery_route` made before anything read that either, which
+     * is exactly why the note is here rather than implied.
+     */
+    mailboxRoute: deliveryRoute("mailbox_route").notNull().default("auto"),
 
     /**
      * Whether i10 serves this domain's mail records from its own nameservers.
@@ -285,17 +330,18 @@ export const domains = core.table(
     delegated: boolean("delegated").notNull().default(false),
 
     /**
-     * BYODKIM. The selector and public key are published in the customer's DNS
-     * and are not secret.
+     * BYODKIM. Both halves are published in the customer's DNS and neither is
+     * secret: the selector is the label the key is served under, the public key
+     * is the TXT record's payload. The private half is `dkimPrivateKeySealed`
+     * below.
      *
-     * ⚠ THE PRIVATE KEY IS NOT IN THIS TABLE AND MUST NOT BE. It is held where
-     * secrets are held, and this column names it. A database backup, a replica,
-     * or a read-only analytics grant must never be enough to sign mail as a
-     * customer's domain.
+     * ⚠ THE SELECTOR IS RANDOM RATHER THAN A FIXED `i10`, which is what makes
+     * rotation possible at all — see domains/dkim.ts. A fixed one means a single
+     * name per domain, so replacing a key is a destructive edit of a live record
+     * with a window in which nothing verifies.
      */
     dkimSelector: text("dkim_selector"),
     dkimPublicKey: text("dkim_public_key"),
-    dkimPrivateKeyRef: text("dkim_private_key_ref"),
 
     /** The SES tenant this domain's sending is attributed to. */
     sesTenantName: text("ses_tenant_name"),
@@ -303,11 +349,19 @@ export const domains = core.table(
     /**
      * The DKIM private key, sealed with `WEBHOOK_SECRET_KEY`.
      *
-     * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. The column
-     * above says a database backup, a replica or a read-only analytics grant
-     * must never be enough to sign mail as a customer's domain — and with the
-     * key held outside the database, none of them are. The ciphertext is inert
-     * without it.
+     * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. A database
+     * backup, a replica or a read-only analytics grant must never be enough to
+     * sign mail as a customer's domain, and none of them are: the key that
+     * opens this lives outside the database, so the ciphertext is inert without
+     * it.
+     *
+     * ⚠ AN EARLIER DESIGN PUT A `dkim_private_key_ref` HERE INSTEAD — a pointer
+     * into an external secret store, on the reasoning that the key must not be
+     * in this table at any price. Sealing buys the same property without the
+     * second system to run, so the column was superseded and never written;
+     * migration 0034 dropped it. The comment above it survived the change and
+     * claimed for a while that the private key was not in this table, directly
+     * beside the column holding it.
      *
      * ⚠ AND IT IS NEVER RETURNED BY THE API. There is no "show me my DKIM key"
      * endpoint, for the same reason there is none for a webhook signing secret:
@@ -553,8 +607,42 @@ export const messages = core.table(
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
 
-    /** SES's id for the accepted message, and the join key for its events. */
+    /**
+     * The relaying MTA's own id for the accepted message, and the join key for
+     * its events.
+     *
+     * ⚠ THIS WAS `ses_message_id`, AND THE NAME WAS A ROUTING ASSUMPTION IN A
+     * COLUMN. A direct-routed message has no SES id — it has whatever our own
+     * MTA called it — so the old name would have meant writing a Stalwart queue
+     * id into a column named for Amazon, and every reader would have had to
+     * know that. Renamed 2026-09-16 alongside `sent_route`, which says which
+     * provider the id belongs to.
+     */
+    providerMessageId: text("provider_message_id"),
+
+    /**
+     * @deprecated Superseded by `providerMessageId`. Dropped in a follow-up.
+     *
+     * ⚠ SAME EXPAND-AND-CONTRACT AS `delivery_route` ON `core.domains`, and it
+     * matters more here: this table is the billing record, and the SES
+     * reconcilers read it on a schedule. A column that vanished under a running
+     * reconciler would turn a repair pass into an error pass. Backfilled into
+     * `provider_message_id` by migration and read by nothing from 2026-09-16.
+     */
     sesMessageId: text("ses_message_id"),
+
+    /**
+     * Which MTA carried it. Null until the worker has actually sent it.
+     *
+     * ⚠ NULLABLE ON PURPOSE: A QUEUED MESSAGE HAS NOT BEEN ROUTED YET. The
+     * route is resolved at send, not at admission, because the domain's
+     * preference or the tenant's plan can change while a message sits in the
+     * queue — and stamping it early would record an intention rather than a
+     * fact. It is also what makes "how much went direct" answerable without
+     * joining anything.
+     */
+    sentRoute: sentRoute("sent_route"),
+
     lastError: text("last_error"),
   },
   (t) => [
@@ -564,6 +652,7 @@ export const messages = core.table(
     // Every dashboard list is "this tenant's recent messages".
     index("messages_tenant_recent_idx").on(t.tenantId, t.createdAt),
     index("messages_ses_id_idx").on(t.sesMessageId),
+    index("messages_provider_id_idx").on(t.providerMessageId),
   ],
 )
 
@@ -1165,3 +1254,48 @@ export const meterEvents = core.table(
     index("meter_events_window_idx").on(t.tenantId, t.featureId, t.shard, t.occurredAt),
   ],
 )
+
+/**
+ * The two routing inputs that are configuration rather than rows.
+ *
+ * ⚠ A PROJECTION OF THE ENVIRONMENT, NOT A SECOND SOURCE OF TRUTH. `SES_ENABLED`
+ * and `METERING_FREE_PLAN_ID` are authored in Doppler and read from `env` by the
+ * API and the worker; this row is a copy the API upserts at boot. It exists for
+ * one reader that cannot see our pods' environment: the `core.mailbox_route`
+ * function Stalwart calls to decide where a mailbox domain's human mail goes.
+ *
+ * ⚠ WITHOUT IT THE KILL SWITCH WOULD ONLY MOVE HALF THE MAIL. `SES_ENABLED` is
+ * thrown during an incident and the transactional path honours it immediately;
+ * mailbox mail is routed inside Stalwart, which would keep relaying to the thing
+ * that is down. "One rule, three readers" has to include the reader that lives
+ * in another process.
+ */
+export const routingSettings = core.table("routing_settings", {
+  /**
+   * ⚠ ONE ROW, ENFORCED BY THE KEY. A second would give the function two answers
+   * and a `limit 1` would pick one of them silently.
+   */
+  id: boolean("id").primaryKey().default(true),
+
+  /** Mirrors `SES_ENABLED`. */
+  sesEnabled: boolean("ses_enabled").notNull().default(true),
+
+  /**
+   * Whether SES's SMTP endpoint is configured as a relay for mailbox mail.
+   *
+   * ⚠ A SECOND SWITCH, AND NOT A DUPLICATE OF THE FIRST. The transactional route
+   * uses the SES API; mailbox mail can only use SES SMTP, because Stalwart's
+   * outbound has no HTTP hook. Different credentials, which can exist
+   * independently — so one flag cannot govern both.
+   *
+   * ⚠ DEFAULTS FALSE SO THE MIGRATION MOVES NO MAIL. i10.tech is on `pro` and
+   * hosts mailboxes, so a default of true would silently put our own human mail
+   * onto a relay with no credentials behind it.
+   */
+  sesRelayEnabled: boolean("ses_relay_enabled").notNull().default(false),
+
+  /** Mirrors `METERING_FREE_PLAN_ID`. */
+  freePlanId: text("free_plan_id").notNull().default("free"),
+
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})

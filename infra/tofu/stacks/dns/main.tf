@@ -310,10 +310,17 @@ resource "cloudflare_dns_record" "spf_include" {
 # NOT FIT IN ONE. A DNS character-string caps at 255 bytes; the resolver
 # concatenates them, so this is one value, not two.
 #
-# ⚠ AND IT HAS NO `import` BLOCK YET. It was created by hand during the
-# migration, so its Cloudflare id is not in `record_ids` — the first plan will
-# try to CREATE it and fail on a record that already exists. Add the id and the
-# import before applying; see the regeneration command in variables.tf.
+# ⚠ ITS `import` BLOCK IS BELOW AND `record_ids["ses_byodkim"]` MUST BE FILLED
+# IN. It was created by hand during the migration, so the id was never captured.
+# While it is empty the plan fails on a malformed import id — which is the
+# intended failure: without the import block at all, the plan would CREATE a
+# SECOND TXT at this name, and a DKIM selector answering with two records is
+# ambiguous to a verifier. See the regeneration command in variables.tf.
+import {
+  to = cloudflare_dns_record.ses_byodkim
+  id = "${var.zone_id}/${var.record_ids["ses_byodkim"]}"
+}
+
 resource "cloudflare_dns_record" "ses_byodkim" {
   zone_id = var.zone_id
   name    = "i10b32b408c904b._domainkey.${local.domain}"
@@ -324,56 +331,23 @@ resource "cloudflare_dns_record" "ses_byodkim" {
   comment = module.labels.comment
 }
 
-# Clerk sends i10's authentication mail — verification codes, password resets —
-# from its own infrastructure on our domain. These are its DKIM keys and its
-# return path. They are mail-authentication records, so they belong to this
-# stack rather than to the hand-managed web half, for exactly the blast-radius
-# reason at the top of this file: if they break, sign-in emails start failing
-# DMARC and nobody sees an error.
-import {
-  to = cloudflare_dns_record.clerk_dkim_1
-  id = "${var.zone_id}/${var.record_ids["clerk_dkim_1"]}"
-}
-
-resource "cloudflare_dns_record" "clerk_dkim_1" {
-  zone_id = var.zone_id
-  name    = "clk._domainkey.${local.domain}"
-  type    = "CNAME"
-  content = "dkim1.974jc88qjof5.clerk.services"
-  ttl     = 3600
-  proxied = false
-  comment = module.labels.comment
-}
-
-import {
-  to = cloudflare_dns_record.clerk_dkim_2
-  id = "${var.zone_id}/${var.record_ids["clerk_dkim_2"]}"
-}
-
-resource "cloudflare_dns_record" "clerk_dkim_2" {
-  zone_id = var.zone_id
-  name    = "clk2._domainkey.${local.domain}"
-  type    = "CNAME"
-  content = "dkim2.974jc88qjof5.clerk.services"
-  ttl     = 3600
-  proxied = false
-  comment = module.labels.comment
-}
-
-import {
-  to = cloudflare_dns_record.clerk_mail
-  id = "${var.zone_id}/${var.record_ids["clerk_mail"]}"
-}
-
-resource "cloudflare_dns_record" "clerk_mail" {
-  zone_id = var.zone_id
-  name    = "clkmail.${local.domain}"
-  type    = "CNAME"
-  content = "mail.974jc88qjof5.clerk.services"
-  ttl     = 3600
-  proxied = false
-  comment = module.labels.comment
-}
+# ⚠ CLERK'S THREE MAIL RECORDS USED TO LIVE HERE AND ARE DELIBERATELY GONE.
+# `clk._domainkey`, `clk2._domainkey` and `clkmail` were Clerk's DKIM pair and
+# its return path, from when Clerk sent i10's authentication mail from its own
+# infrastructure on our domain.
+#
+# It no longer does. `apps/api/src/auth-email/sender.ts` takes Clerk's mail
+# through i10's own send path — Clerk webhooks us, we send it, and it leaves
+# signed by `ses_byodkim` above like every other message we send as i10.tech.
+# So Clerk needs no authentication records here, and the ones it had were
+# removed from the zone.
+#
+# ⚠ THEY WERE STILL DECLARED HERE AFTERWARDS, AND THAT BROKE THE PLAN RATHER
+# THAN THE ZONE. Their import blocks named ids that no longer resolve, so every
+# plan failed with `81044 Record does not exist` — which is `record_ids`
+# working exactly as its comment in variables.tf promises. Removed 2026-09-16.
+# If Clerk ever sends as i10.tech again, the records come back WITH their ids
+# captured, not as a bare resource.
 
 # ⚠ START AT p=none AND MOVE UP ON EVIDENCE. Enforcing before the reports are
 # clean quarantines your own mail, and for a company whose product is email
@@ -394,11 +368,27 @@ import {
   id = "${var.zone_id}/${var.record_ids["dmarc"]}"
 }
 
+# ⚠ RELAXED ALIGNMENT, NOT STRICT, AND THE DIFFERENCE IS WHETHER SES-ROUTED
+# MAIL HAS AN SPF FALLBACK. This said `adkim=s; aspf=s` until 2026-09-16 and had
+# never been applied; the live record was set relaxed by hand on 2026-09-08 and
+# the code is now what the zone actually says.
+#
+# Strict `aspf=s` requires the envelope domain to equal the `From:` domain
+# exactly, and i10's own transactional mail leaves with a MAIL FROM of
+# `send.i10.tech` against a `From:` of `i10.tech` — a subdomain, which aligns
+# under relaxed and does NOT under strict. Under strict, DMARC would rest
+# entirely on `ses_byodkim` with nothing behind it if that key ever failed to
+# verify. Relaxed keeps both SPF and DKIM aligned on both routes.
+#
+# ⚠ THIS IS i10.tech's OWN POLICY AND NOT WHAT CUSTOMERS GET. `dnsRecordsFor`
+# in apps/api emits `v=DMARC1; p=none;` with no alignment tags at all, which
+# RFC 7489 defaults to relaxed — so a customer domain is unaffected by anything
+# decided here.
 resource "cloudflare_dns_record" "dmarc" {
   zone_id = var.zone_id
   name    = "_dmarc.${local.domain}"
   type    = "TXT"
-  content = "\"v=DMARC1; p=none; rua=mailto:${var.dmarc_rua}; adkim=s; aspf=s\""
+  content = "\"v=DMARC1; p=none; rua=mailto:${var.dmarc_rua}; adkim=r; aspf=r\""
   ttl     = 60
   comment = module.labels.comment
 }

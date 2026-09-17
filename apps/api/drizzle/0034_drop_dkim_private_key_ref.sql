@@ -1,0 +1,29 @@
+-- The column from the design that sealing replaced.
+--
+-- `core.domains` carried `dkim_private_key_ref` from 0002, when the intent was
+-- that the DKIM private key live in an external secret store and this column
+-- hold a pointer to it. The reasoning was sound — a database backup, a replica
+-- or a read-only analytics grant must never be enough to sign mail as a
+-- customer's domain — and sealing the key with `WEBHOOK_SECRET_KEY` buys the
+-- same property without a second system to run and depend on. The ciphertext in
+-- `dkim_private_key_sealed` is inert to every one of those readers.
+--
+-- ⚠ IT WAS NEVER WRITTEN, NOT ONCE. `domainStore` seals into
+-- `dkim_private_key_sealed` and has since BYODKIM landed; nothing has ever
+-- issued an INSERT or UPDATE naming this column. So there is no data here to
+-- migrate and nothing to back up before dropping it.
+--
+-- ⚠ AND A PLAIN DROP IS SAFE FOR A ROLLING DEPLOY HERE, WHICH IS NOT TRUE OF
+-- EVERY COLUMN. 0033 had to expand-and-contract because `core.messages` is read
+-- by SQL that names its columns explicitly, and pods mid-rollout would have
+-- queried one that had just vanished. Every read of `core.domains` uses an
+-- explicit column list — `COLUMNS` in domains/store.ts, and the three-column
+-- select in send/signing-key.ts — and neither names this one. The two bare
+-- `.select()` calls in the codebase are against `core.api_keys` and
+-- `authd.accounts`, so no deployed query can reference it.
+--
+-- What made it worth removing rather than leaving inert: the comment above it
+-- still described the superseded design, and said the private key was not in
+-- this table — eighteen lines above the column that holds it.
+
+ALTER TABLE "core"."domains" DROP COLUMN IF EXISTS "dkim_private_key_ref";

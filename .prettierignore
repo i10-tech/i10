@@ -16,6 +16,18 @@ apps/docs/.nimbus/
 apps/api/openapi.json
 apps/docs/public/scalar/
 
+# ⚠ WRITTEN BY `drizzle-kit generate`, AND THE SAME TRAP AS openapi.json ABOVE.
+# Prettier and drizzle-kit format JSON differently, so with both owning these
+# files `bun run format` and `bun run db:generate` produce different bytes — and
+# whichever ran last makes the other look like a pending change. 0034 landed
+# unformatted and would have failed `format:check` on the next push; ignoring the
+# directory is the fix, not reformatting files their generator will rewrite.
+apps/api/drizzle/meta/
+
+# Local Terraform working directories. Untracked, so CI never sees them — this
+# only stops `format:check` failing on a developer's machine after a `tofu init`.
+**/.terraform/
+
 # Vendored agent skills, installed by `bunx skills add`. Third-party files
 # whose formatting belongs to their publisher — reformatting them would produce
 # a diff against every upstream update for no benefit, and `.claude/skills`

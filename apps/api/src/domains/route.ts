@@ -22,6 +22,23 @@ export interface RouteInput {
   planId: string | null
   /** Which plan id counts as free. From `METERING_FREE_PLAN_ID`. */
   freePlanId: string
+  /**
+   * Whether SES may be used at all. From `SES_ENABLED`.
+   *
+   * ⚠ AN OPERATOR SWITCH, NOT A HEALTH PROBE, AND THE DISTINCTION IS
+   * DELIBERATE. `Transport` already absorbs SES having a bad day: a throttle or
+   * a five hundred comes back `deferred` and the message returns to the queue
+   * with its attempt counted, so nothing is lost. A route flip only buys
+   * anything in a SUSTAINED outage.
+   *
+   * ⚠ AND AUTOMATING IT WOULD BREAK THE PROPERTY THIS FILE EXISTS FOR. A health
+   * signal makes the answer time-varying, so the dashboard, the API and
+   * Stalwart could each hold a different answer for one domain at one moment —
+   * "one rule, three readers" stops being true. It would also move a paying
+   * customer onto our own IP reputation, with a different return path, without
+   * a person deciding to.
+   */
+  sesEnabled: boolean
 }
 
 /**
@@ -40,7 +57,14 @@ export function resolveRoute({
   override,
   planId,
   freePlanId,
+  sesEnabled,
 }: RouteInput): DeliveryRoute {
+  // ⚠ FIRST, AND IT BEATS AN EXPLICIT `ses` OVERRIDE TOO. The switch exists to
+  // be thrown during an incident, and a route that a support override could
+  // pin past it would leave exactly the domains somebody cared enough to pin
+  // still pointed at the thing that is down.
+  if (!sesEnabled) return "direct"
+
   if (override !== "auto") return override
   // ⚠ Free is the DEFAULT, not the exception: anything we do not recognise as a
   // paid plan lands here. A plan id renamed in the catalogue would otherwise

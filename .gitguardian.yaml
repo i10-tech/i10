@@ -1,0 +1,44 @@
+version: 2
+
+# GitGuardian / ggshield.
+#
+# ⚠ EVERY ENTRY BELOW IS A VERIFIED FALSE POSITIVE, AND THE VERIFICATION IS THE
+# POINT OF THE COMMENT BESIDE IT. An ignore list is only safe if each line says
+# why the thing it silences is not a credential — otherwise the next real leak
+# gets appended to it by somebody in a hurry, and the file that was supposed to
+# reduce noise is what hides the incident.
+#
+# ⚠ IGNORED BY SECRET HASH, NEVER BY PATH. A path ignore silences whatever a
+# file comes to contain later; a hash ignores exactly one value. If one of these
+# test vectors is ever replaced with a real credential, the hash changes and the
+# scan fires again — which is the behaviour we want.
+#
+# Re-check the whole history at any time with:
+#   ggshield secret scan repo .
+secret:
+  ignored-matches:
+    # `emailAddress: "mo@i10.tech"` beside `passkeyName: "iCloud Keychain"` in a
+    # React Email preview fixture. The detector reads the address as a username
+    # and the PASSKEY'S NAME as its password. "iCloud Keychain" is the label
+    # Apple gives a passkey — it is the subject of the email being previewed,
+    # not a credential, and there is no password anywhere in these templates.
+    # packages/emails/src/templates/passkey-changed.tsx
+    - name: "passkey preview fixture — passkey NAME read as a password"
+      match: 329f1702fbe87ea83477ce14e4f2581af7ed2d33f72c3e45e0d3f5bc4dfcdfa2
+
+    # `whsec_` + base64("secret-bytes-for-testing"). Decoded and confirmed.
+    # apps/api/test/polar-signature.test.ts
+    - name: "polar signature test vector — decodes to 'secret-bytes-for-testing'"
+      match: 2762ac1103c75ecceaaea6fe9d9299e683b637688c710718aebe5fc5a1658a1c
+
+    # `whsec_` + base64("a-32-byte-test-signing-key-here!"), constructed in the
+    # test itself rather than pasted — the literal string is right there in the
+    # source beside it.
+    # apps/api/test/webhooks.test.ts, apps/api/test/svix.test.ts
+    - name: "svix/webhook test vector — built from a literal test string"
+      match: a51c5f2aa8609db89854514a75853fbc3cba64c1e8febb8a099af6b5519ddc1f
+
+    # The same shape in the webhook delivery test's VECTOR constant.
+    # apps/api/test/webhook-deliver.test.ts
+    - name: "webhook delivery test vector — synthetic signing key"
+      match: 442595b779e5081faf949038affc13c9ace15a5a7e28ce0c1ad5be346a0e9f32

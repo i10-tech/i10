@@ -8,6 +8,33 @@ import { z } from "zod"
  * on real traffic. Failing here means the rollout never completes and the old
  * pod keeps serving.
  */
+/**
+ * Reads the SES kill switch out of its environment variable.
+ *
+ * ⚠ EXTRACTED SO IT CAN BE TESTED, AND IT NEEDED TO BE. Inline in the schema it
+ * was `raw !== "false"` — so `SES_ENABLED=0`, which is what somebody actually
+ * types at two in the morning, silently meant ENABLED. Every paid domain kept
+ * routing into the outage the switch was thrown to escape, with no log line and
+ * a variable that read as set in the config UI.
+ *
+ * ⚠ AN UNINTERPRETABLE VALUE THROWS RATHER THAN PICKING A SIDE. Defaulting
+ * either way is a guess about intent at the exact moment intent matters most;
+ * refusing to boot is loud, immediate, and cannot be misread.
+ *
+ * ⚠ AND ABSENT STILL MEANS ENABLED. The failure mode of defaulting off is every
+ * paying customer's mail silently moving to our own IP the first time this is
+ * missing from a config — a deliverability change nobody asked for, caused by a
+ * typo in a secret name.
+ */
+export function parseSesEnabled(value: string | undefined): boolean {
+  const raw = (value ?? "true").trim().toLowerCase()
+  if (["true", "1", "yes", "on"].includes(raw)) return true
+  if (["false", "0", "no", "off"].includes(raw)) return false
+  throw new Error(
+    `SES_ENABLED must be true/false (also 1/0, yes/no, on/off), got "${value}"`,
+  )
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -84,11 +111,28 @@ const schema = z.object({
         .filter(Boolean),
     ),
 
-  // ⚠ THIS NUMBER IS HOW LONG A REVOKED KEY KEEPS WORKING. Verification is a
-  // network call to Clerk on every send, so it is cached — and the TTL is the
-  // whole trade. Longer means less Clerk on the critical path and a longer
-  // window where a key someone revoked in a panic still sends mail.
-  API_KEY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
+  /**
+   * How long a verified key stays cached. One hour.
+   *
+   * ⚠ THE COMMENT HERE USED TO SAY THIS WAS HOW LONG A REVOKED KEY KEEPS
+   * WORKING, AND THAT STOPPED BEING TRUE TWICE OVER. It was written when
+   * verification was a network call to Clerk on every send, so the TTL traded
+   * third-party latency against revocation lag. Migration 0031 moved keys into
+   * `core.api_keys`, and `index.ts` now passes `keyLookup(db)` — an indexed
+   * lookup on our own table. There is no longer a Clerk round trip to save.
+   *
+   * ⚠ AND REVOCATION DOES NOT WAIT FOR THIS TO EXPIRE. `routes/api-keys.ts`
+   * deletes the cache entry on both revoke and rotate, keyed on the same secret
+   * hash the verifier caches under — so a key revoked through the API stops
+   * working at once, whatever this says. The TTL is the window only for a key
+   * revoked OUT OF BAND: a direct UPDATE against the table, or a restore that
+   * rolls one back.
+   *
+   * ⚠ THE CEILING WAS 300 AND SILENTLY REFUSED ANYTHING LARGER. A deployment
+   * that set fifteen minutes did not get fifteen minutes — it failed schema
+   * validation at boot, which is loud, but only if somebody read the log.
+   */
+  API_KEY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(3600),
 
   // ⚠ THE DOMAINS i10 ACTUALLY HOSTS MAIL FOR. Only addresses in these domains
   // may enter the projection, because a row there makes Stalwart treat the
@@ -114,6 +158,69 @@ const schema = z.object({
    * removes half the safety net, so this is required rather than optional.
    */
   SES_CONFIGURATION_SET: z.string().min(1),
+
+  /**
+   * The operator kill switch. `false` routes every send through our own MTA.
+   *
+   * ⚠ IT IS A SWITCH A PERSON THROWS, AND THERE IS DELIBERATELY NO HEALTH PROBE
+   * BEHIND IT. `Transport` already handles SES being slow or throttling — those
+   * come back `deferred` and the message waits. This is for the case that
+   * outlasts a queue: SES down for long enough that waiting stops being the
+   * right answer. See `resolveRoute`, which is where it is read.
+   *
+   * ⚠ DEFAULTS TO ENABLED, AND IT HAS TO. The failure mode of defaulting off is
+   * every paying customer's mail silently moving to our own IP the first time
+   * this variable is missing from a config — a deliverability change nobody
+   * asked for, caused by a typo in a secret name.
+   */
+  SES_ENABLED: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      try {
+        return parseSesEnabled(v)
+      } catch (err) {
+        ctx.addIssue({ code: "custom", message: (err as Error).message })
+        return z.NEVER
+      }
+    }),
+
+  /**
+   * Whether SES's SMTP endpoint is configured as a relay for MAILBOX mail.
+   *
+   * ⚠ A SECOND SWITCH, AND NOT A DUPLICATE OF `SES_ENABLED`. The transactional
+   * route calls the SES **API**; mailbox mail can only use SES **SMTP**, because
+   * Stalwart's outbound has no HTTP hook and taking messages out of its queue
+   * would mean rebuilding queueing, retries and DSN generation it already does
+   * properly. Those are different credentials that can exist independently, so
+   * one flag cannot honestly govern both.
+   *
+   * ⚠ IT DEFAULTS OFF, WHICH IS THE OPPOSITE OF `SES_ENABLED` AND DELIBERATE.
+   * That one defaults on because defaulting off would silently move every paying
+   * customer onto our own IP. This one defaults off because defaulting on would
+   * point human mail at an SMTP relay that may have no credentials behind it —
+   * and the first symptom would be our own mail queueing. Off until somebody
+   * creates the credentials and means it.
+   *
+   * ⚠ IT IS READ AT BOOT AND PUBLISHED TO `core.routing_settings`, not read on
+   * the send path. Stalwart decides this route inside Postgres; see
+   * domains/routing-settings.ts.
+   */
+  SES_RELAY_ENABLED: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      try {
+        // ⚠ THE SAME PARSER, SO `0`, `no` AND `off` MEAN THE SAME THING IN BOTH.
+        // Two hand-rolled boolean readers is two chances for `SES_ENABLED=0` to
+        // mean disabled in one place and enabled in the other — which is exactly
+        // the bug `parseSesEnabled` was written to fix.
+        return v === undefined ? false : parseSesEnabled(v)
+      } catch (err) {
+        ctx.addIssue({ code: "custom", message: (err as Error).message })
+        return z.NEVER
+      }
+    }),
 
   /**
    * Provider calls in flight per worker replica.
@@ -278,8 +385,20 @@ const schema = z.object({
    * PASSES ON SPF FOR THE DIRECT ROUTE. Bouncing to a name on i10.tech instead
    * would need no customer record and would leave SPF unaligned with their
    * `From:` — DMARC would then be passing on DKIM alone.
+   *
+   * ⚠ IT MUST NAME AN UNPROXIED HOST, AND THE DEFAULT USED TO NOT. This was
+   * `mx.i10.tech`, which resolves to Cloudflare's anycast proxy
+   * (172.67.x, 104.21.x) rather than to the machine — and the proxy does not
+   * carry SMTP, so every bounce for a direct-routed message would have been
+   * delivered nowhere. `mail.i10.tech` is deliberately unproxied for exactly
+   * this reason; `infra/tofu/stacks/dns/main.tf` warns about the same trap for
+   * the apex, where `a:i10.tech` would authorise Cloudflare's range to send as
+   * every customer.
+   *
+   * ⚠ AND RFC 2181 FORBIDS AN MX TARGET THAT IS A CNAME. Whatever this names
+   * has to be an address record on a host that answers on port 25.
    */
-  MAIL_BOUNCE_HOST: z.string().min(1).default("mx.i10.tech"),
+  MAIL_BOUNCE_HOST: z.string().min(1).default("mail.i10.tech"),
 
   /**
    * i10's authoritative nameservers, for customers who delegate subdomains.
@@ -310,6 +429,54 @@ const schema = z.object({
    */
   STALWART_URL: z.url().optional(),
   STALWART_API_TOKEN: z.string().min(1).optional(),
+
+  /**
+   * The HMAC key on Stalwart's `WebHook` object, and the only thing standing
+   * between a public endpoint and a stranger's suppression list.
+   *
+   * ⚠ WITHOUT IT THE DIRECT ROUTE HAS NO DELIVERY EVENTS AT ALL — a
+   * direct-routed message stops at `sent` and never reaches `delivered` or
+   * `bounced`. `/webhooks/stalwart` answers 503 rather than accepting unsigned
+   * notifications, which is the same refusal the direct transport makes when
+   * its own credentials are missing: visible, and not a quiet downgrade.
+   *
+   * ⚠ NOT BASE64-DECODED BEFORE IT KEYS THE HMAC, unlike every other secret in
+   * this file. Stalwart signs with the configured string's own bytes; see
+   * `webhooks/stalwart.ts` for why reusing `decodeSecret` here rejects every
+   * genuine notification.
+   */
+  STALWART_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  /**
+   * Stalwart's SMTP submission endpoint, for the direct route.
+   *
+   * ⚠ SUBMISSION, NOT PORT 25, AND NOT THE SAME THING AS `STALWART_URL`. That
+   * one is the management API, used to sample mailbox storage. This is where a
+   * finished message is handed over for queueing and delivery.
+   *
+   * ⚠ ALL THREE ARE OPTIONAL SO THE WORKER STARTS WITHOUT THEM, AND THE DIRECT
+   * TRANSPORT REFUSES TO SEND WHEN THEY ARE ABSENT. The alternative — requiring
+   * them — makes every deployment that only ever uses SES fail to boot over a
+   * route it does not take. The refusal is `deferred`, so the mail waits in the
+   * queue rather than being lost, and the backlog is the alarm.
+   */
+  STALWART_SUBMISSION_HOST: z.string().min(1).optional(),
+  /**
+   * ⚠ 465, NOT 587, AND THE DEFAULT USED TO BE WRONG. There is no 587 listener
+   * on our Stalwart — `NetworkListener` has `smtp` on 25 and `submissions` on
+   * 465, and nothing else speaks SMTP. A worker pointed at 587 got no
+   * connection at all, which surfaces as `deferred` on every direct send with
+   * an ECONNREFUSED nobody reads.
+   *
+   * ⚠ AND THERE IS NO REASON TO ADD ONE. 465 is implicit TLS from the first
+   * byte; 587 is cleartext until STARTTLS succeeds. RFC 8314 §3 prefers the
+   * former for exactly that reason — there is no plaintext phase to strip.
+   * `submissionConfig` reads this number and picks the TLS mode from it, so the
+   * port is the only thing that has to be right.
+   */
+  STALWART_SUBMISSION_PORT: z.coerce.number().int().positive().default(465),
+  STALWART_SUBMISSION_USER: z.string().min(1).optional(),
+  STALWART_SUBMISSION_PASSWORD: z.string().min(1).optional(),
 
   MAIL_NAMESERVERS: z
     .string()

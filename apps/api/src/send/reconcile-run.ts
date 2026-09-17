@@ -13,6 +13,12 @@ import {
   type UsageLedger,
 } from "./reconcile.js"
 import {
+  routeSplitStatement,
+  summariseRouteSplit,
+  type RouteSplitBucket,
+  type RouteSplitSummary,
+} from "./route-split.js"
+import {
   billedButUnconfirmedStatement,
   needsAttention,
   orphanEventsStatement,
@@ -310,3 +316,42 @@ export async function reconcileTenantCustomers(
 }
 
 export { needsAttention }
+
+/**
+ * How much mail left by which route, for the same window the books were checked
+ * over.
+ *
+ * ⚠ A READOUT, NOT A RECONCILIATION, AND IT REPAIRS NOTHING. The other legs of
+ * this job compare two sources and fix a disagreement; this one asks a question
+ * of a single table. It lives here because the column it reads had no reader at
+ * all — `sent_route` has been written on every row since 0033 and nothing has
+ * ever looked at it, which is how a column quietly stops being correct.
+ *
+ * ⚠ IT RUNS IN THE RECONCILE JOB BECAUSE THAT IS WHERE SOMEBODY IS ALREADY
+ * LOOKING. A daily line in a log that is already watched answers "how much are
+ * we sending ourselves" without anybody deciding to ask, and the SQL function
+ * behind it answers any other window for whoever opens psql. An HTTP endpoint
+ * nobody calls would have been the other option, and it would have been dead
+ * weight from the first commit.
+ *
+ * ⚠ AND IT MUST NOT FAIL THE JOB. Nothing downstream depends on the number and
+ * the other legs repair real things, so a broken readout that stopped
+ * entitlements being fixed would be the tail wagging the dog. The caller logs
+ * and moves on.
+ */
+export async function reportRouteSplit(
+  db: Database,
+  from: Date,
+  to: Date,
+): Promise<RouteSplitSummary> {
+  const buckets: RouteSplitBucket[] = (
+    (await db.execute(routeSplitStatement(from, to))) as unknown as Row[]
+  ).map((r) => ({
+    tenantId: String(r.tenant_id),
+    periodStart: toDate(r.period_start),
+    route: String(r.route),
+    count: Number(r.count),
+  }))
+
+  return summariseRouteSplit(buckets)
+}

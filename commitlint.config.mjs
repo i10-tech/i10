@@ -61,6 +61,19 @@ export default {
         // because `infra`, `ci`, `repo` and `deps` already show this list is
         // about grouping rather than about packages.
         "billing",
+        // apps/api/src/send — the transactional mail path: admission, the
+        // queue claim, the MIME builder, DKIM signing, both transports and the
+        // reconcilers. Inside the API rather than beside it, so listed for the
+        // same reason `billing` is: a changelog reads better when "how a message
+        // gets to a recipient" is not filed under the same heading as a route
+        // handler, and this list is about grouping rather than about packages.
+        //
+        // ⚠ NOT `stalwart`, WHICH IS THE MAIL SERVER ITSELF. A change to how we
+        // choose a route or build a message is ours; a change to the server's
+        // deployment, config plan or bootstrap is `stalwart`. The two travel
+        // together often enough that filing them under one name would make the
+        // release notes useless for exactly the question people ask of them.
+        "send",
         "stalwart",
         "bulwark",
         "infra",

@@ -1,3 +1,4 @@
+import type { DeliveryRoute } from "../domains/route.js"
 import { describeError } from "../errors.js"
 import type { SendJob } from "../queue/send-queue.js"
 import type { Metering, SentMessage } from "../send/metering.js"
@@ -57,10 +58,33 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
    * Null means the write did not happen: the claim had moved on, and nothing
    * about this message is ours to bill.
    */
-  markSent: (message: M, providerMessageId: string) => Promise<Date | null>
+  markSent: (
+    message: M,
+    providerMessageId: string,
+    route: DeliveryRoute,
+  ) => Promise<Date | null>
   /** Records one attempt as failed. `permanent` stops further attempts. */
   markFailed: (message: M, reason: string, permanent: boolean) => Promise<void>
-  transport: Transport
+
+  /**
+   * Which MTA carries this message.
+   *
+   * ⚠ PER MESSAGE, NOT PER BATCH, BECAUSE A BATCH IS PER TENANT AND A ROUTE IS
+   * PER DOMAIN. One tenant can hold a warmed domain pinned to SES and a new one
+   * sending direct, and both can appear in the same job — so resolving once for
+   * the batch would send some of it the wrong way.
+   */
+  route: (message: M) => DeliveryRoute
+
+  /**
+   * The transport for a resolved route.
+   *
+   * ⚠ A LOOKUP RATHER THAN A SINGLE `transport`, AND THAT IS THE WHOLE OF THE
+   * ROUTING CHANGE ON THIS SIDE. Everything else here — the claim, the
+   * concurrency, the metering, the stranded-write handling — is written against
+   * three outcomes and does not care who produced them.
+   */
+  transportFor: (route: DeliveryRoute) => Transport
   metering: Metering
   log: Logger
   /**
@@ -132,9 +156,13 @@ export async function handleBatch<M extends OutboundMessage>(
     messages,
     deps.concurrency,
     async (message) => {
+      // Resolved before the send so the same value decides who carries the
+      // message and what the row records about it afterwards.
+      const route = deps.route(message)
+
       let outcome: SendOutcome
       try {
-        outcome = await deps.transport.send(message)
+        outcome = await deps.transportFor(route).send(message)
       } catch (err) {
         // ⚠ A THROW IS `deferred`, NEVER `rejected`. An exception is the transport
         // failing to give an answer — a socket, a timeout, a bug — and that is not
@@ -147,7 +175,7 @@ export async function handleBatch<M extends OutboundMessage>(
         case "sent": {
           // Immediately, before anything else. This statement is the whole of the
           // at-least-once window.
-          const at = await deps.markSent(message, outcome.providerMessageId)
+          const at = await deps.markSent(message, outcome.providerMessageId, route)
           // ⚠ ONLY BILLED IF THE ROW WAS ACTUALLY OURS TO RECORD. A null means
           // another worker owns it and will record — and bill — it itself.
           if (at) sent.push({ id: message.id, sentAt: at })

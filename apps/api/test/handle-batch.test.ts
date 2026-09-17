@@ -33,6 +33,7 @@ const job = (count: number): SendJob => ({
 const SENT_AT = new Date("2026-09-02T10:00:01Z")
 
 function deps(over: Partial<BatchDeps> = {}) {
+  const baseTransport = fakeTransport()
   const log = { info: mock(), warn: mock(), error: mock() }
   const metering: Metering = {
     checkQuota: mock(),
@@ -42,13 +43,17 @@ function deps(over: Partial<BatchDeps> = {}) {
     claim: async (j) => j.messages.map((_, i) => outbound(i)),
     markSent: mock(async () => SENT_AT),
     markFailed: mock(async () => {}),
-    transport: fakeTransport(),
+    route: () => "ses" as const,
+    // ⚠ ONE INSTANCE, HOISTED. Returning `fakeTransport()` from the lambda built
+    // a fresh recorder per message, so the `sent` array every assertion would
+    // reach for was thrown away on each call and read as empty.
+    transportFor: () => baseTransport,
     metering,
     log,
     concurrency: 4,
     ...over,
   }
-  return { deps: base, log, metering }
+  return { deps: base, log, metering, transport: baseTransport }
 }
 
 describe("the happy path", () => {
@@ -57,7 +62,7 @@ describe("the happy path", () => {
       status: "sent",
       providerMessageId: "ses-1",
     }))
-    const { deps: d, metering } = deps({ transport })
+    const { deps: d, metering } = deps({ transportFor: () => transport })
 
     const result = await handleBatch(job(3), d)
 
@@ -122,7 +127,10 @@ describe("losing the claim", () => {
   // hand-off into a duplicate.
   it("does nothing and does not throw", async () => {
     const transport = fakeTransport()
-    const { deps: d, metering } = deps({ claim: async () => [], transport })
+    const { deps: d, metering } = deps({
+      claim: async () => [],
+      transportFor: () => transport,
+    })
 
     const result = await handleBatch(job(3), d)
 
@@ -139,7 +147,10 @@ describe("losing the claim", () => {
 
   it("sends only what it won, not the whole job", async () => {
     const transport = fakeTransport()
-    const { deps: d } = deps({ claim: async () => [outbound(0)], transport })
+    const { deps: d } = deps({
+      claim: async () => [outbound(0)],
+      transportFor: () => transport,
+    })
 
     const result = await handleBatch(job(5), d)
 
@@ -154,7 +165,7 @@ describe("failures", () => {
       status: "rejected",
       reason: "malformed address",
     }))
-    const { deps: d, metering } = deps({ transport })
+    const { deps: d, metering } = deps({ transportFor: () => transport })
 
     const result = await handleBatch(job(2), d)
 
@@ -169,7 +180,7 @@ describe("failures", () => {
 
   it("returns a deferral to the queue", async () => {
     const transport = fakeTransport(() => ({ status: "deferred", reason: "throttled" }))
-    const { deps: d } = deps({ transport })
+    const { deps: d } = deps({ transportFor: () => transport })
 
     const result = await handleBatch(job(2), d)
 
@@ -186,7 +197,7 @@ describe("failures", () => {
         throw new Error("ECONNRESET")
       },
     }
-    const { deps: d } = deps({ transport })
+    const { deps: d } = deps({ transportFor: () => transport })
 
     const result = await handleBatch(job(1), d)
 
@@ -204,7 +215,7 @@ describe("failures", () => {
       if (m.id === "msg-1") return { status: "rejected", reason: "bad" }
       return { status: "deferred", reason: "slow" }
     })
-    const { deps: d, metering } = deps({ transport })
+    const { deps: d, metering } = deps({ transportFor: () => transport })
 
     const result = await handleBatch(job(3), d)
 
@@ -265,7 +276,7 @@ describe("concurrency", () => {
         return { status: "sent", providerMessageId: "ses" }
       },
     }
-    const { deps: d } = deps({ transport, concurrency: 3 })
+    const { deps: d } = deps({ transportFor: () => transport, concurrency: 3 })
 
     await handleBatch(job(20), d)
 
@@ -275,14 +286,14 @@ describe("concurrency", () => {
 
   it("still sends everything with a width of one", async () => {
     const transport = fakeTransport()
-    const { deps: d } = deps({ transport, concurrency: 1 })
+    const { deps: d } = deps({ transportFor: () => transport, concurrency: 1 })
     await handleBatch(job(6), d)
     expect(transport.sent).toHaveLength(6)
   })
 
   it("tolerates a width larger than the batch", async () => {
     const transport = fakeTransport()
-    const { deps: d } = deps({ transport, concurrency: 100 })
+    const { deps: d } = deps({ transportFor: () => transport, concurrency: 100 })
     await handleBatch(job(2), d)
     expect(transport.sent).toHaveLength(2)
   })
@@ -339,7 +350,8 @@ describe("a failure to record the outcome", () => {
     const boom = new Error("connection terminated unexpectedly")
     const reportError = mock()
     const { deps: d, log } = deps({
-      transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
+      transportFor: () =>
+        fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
       markSent: mock(async () => {
         throw boom
       }),
@@ -365,7 +377,8 @@ describe("a failure to record the outcome", () => {
       return SENT_AT
     })
     const { deps: d, metering } = deps({
-      transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
+      transportFor: () =>
+        fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
       markSent,
       // Serial, so the failure is guaranteed to land mid-run rather than in
       // parallel with the others.
@@ -388,7 +401,8 @@ describe("a failure to record the outcome", () => {
   // could still lose the remaining messages.
   it("survives a reporter that throws", async () => {
     const { deps: d } = deps({
-      transport: fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
+      transportFor: () =>
+        fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" })),
       markSent: mock(async () => {
         throw new Error("write failed")
       }),
@@ -398,5 +412,47 @@ describe("a failure to record the outcome", () => {
     })
 
     await expect(handleBatch(job(2), d)).resolves.toMatchObject({ stranded: 2 })
+  })
+})
+
+describe("routing within one batch", () => {
+  /**
+   * ⚠ A BATCH IS PER TENANT AND A ROUTE IS PER DOMAIN, so one job can legitimately
+   * contain both. Resolving once for the batch would send half of it the wrong way.
+   */
+  it("sends each message through its own route's transport", async () => {
+    const ses = fakeTransport(() => ({ status: "sent", providerMessageId: "ses-1" }))
+    const direct = fakeTransport(() => ({ status: "sent", providerMessageId: "mta-1" }))
+
+    const { deps: d } = deps({
+      // Even messages direct, odd through SES.
+      route: (m) => (Number(m.id.replace(/\D/g, "")) % 2 === 0 ? "direct" : "ses"),
+      transportFor: (r) => (r === "direct" ? direct : ses),
+    })
+
+    const result = await handleBatch(job(4), d)
+
+    expect(result.sent).toBe(4)
+    expect(ses.sent).toHaveLength(2)
+    expect(direct.sent).toHaveLength(2)
+  })
+
+  /**
+   * ⚠ THE ROW MUST RECORD THE ROUTE THAT ACTUALLY CARRIED IT. `sent_route` and
+   * `provider_message_id` are written by one statement precisely so a row can
+   * never claim SES carried it while holding an id our own MTA issued.
+   */
+  it("stamps the route it actually used alongside the provider's id", async () => {
+    const markSent = mock(async () => SENT_AT)
+    const { deps: d } = deps({
+      markSent,
+      route: () => "direct" as const,
+      transportFor: () =>
+        fakeTransport(() => ({ status: "sent", providerMessageId: "mta-7" })),
+    })
+
+    await handleBatch(job(1), d)
+
+    expect(markSent).toHaveBeenCalledWith(expect.anything(), "mta-7", "direct")
   })
 })
