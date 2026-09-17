@@ -1,0 +1,10 @@
+{
+  // The tests, and the sources as the tests see them. See tsconfig.json for why
+  // this is a second program rather than one `include` with `types: ["bun"]`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

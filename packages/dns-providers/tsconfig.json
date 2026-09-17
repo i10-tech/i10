@@ -1,0 +1,12 @@
+{
+  // ⚠ src ALONE, AND tsconfig.test.json COVERS test/. The same split
+  // @repo/metering uses, for the same reason: this package is imported by the
+  // browser as well as by bun, so `types` stays empty here and a `process` or
+  // `node:dns` in src/ is a red squiggle on the day it is written. The tests
+  // import `bun:test`, whose declarations arrive with @types/bun — and `types`
+  // is a program-wide switch, so typing them here would hand src/ a runtime
+  // surface it must not touch.
+  "extends": "@repo/typescript-config/base.json",
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

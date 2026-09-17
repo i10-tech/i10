@@ -1,0 +1,13 @@
+{
+  // ⚠ base, NOT bun-library, for the same reason @repo/contracts gives: this is
+  // a plain data registry with no runtime dependency at all. It is imported by
+  // the API (bun), by the console (the browser AND a Next server), and it must
+  // not drag `@types/bun` into either.
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

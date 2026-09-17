@@ -290,9 +290,43 @@ export function polarClient(opts: PolarOptions): PolarClient {
       })
 
       if (!response.ok) {
-        throw new Error(
-          `polar customer session failed: ${response.status} ${await response.text()}`,
-        )
+        const detail = await response.text()
+
+        /*
+         * ⚠ A 403 HERE IS ALMOST ALWAYS A MISSING SCOPE ON OUR OWN TOKEN, NOT
+         * ANYTHING ABOUT THE CUSTOMER — and the generic message sent somebody
+         * looking at the customer record instead. `/v1/customer-sessions`
+         * requires `customer_sessions:write`, which is NOT included in the
+         * scope set a Polar organisation access token is created with by
+         * default. Verified against the sandbox: with the default scopes this
+         * endpoint answers `403 insufficient_scope` for every customer, so the
+         * card form never opens for anybody and nothing about the failure
+         * points at the token.
+         */
+        if (response.status === 403 && detail.includes("insufficient_scope")) {
+          throw new Error(
+            "polar customer session refused: the access token is missing the " +
+              "`customer_sessions:write` scope. Add it to the organisation " +
+              "access token in Polar's dashboard and redeploy.",
+          )
+        }
+
+        /*
+         * ⚠ A 422 HERE MEANS POLAR HAS NEVER HEARD OF THIS TENANT, which is the
+         * normal state of anybody who has not been through checkout — Polar
+         * creates the customer at the first payment, not at our sign-up. The
+         * caller has to be able to tell that apart from a real failure, because
+         * the answer is "you have nothing to pay with yet", not "try again".
+         */
+        if (response.status === 422 && detail.includes("Customer does not exist")) {
+          throw new Error(
+            `polar customer session refused: no Polar customer for tenant ${tenantId}. ` +
+              "Polar creates a customer at the first checkout, so this is expected " +
+              "for a tenant that has never subscribed.",
+          )
+        }
+
+        throw new Error(`polar customer session failed: ${response.status} ${detail}`)
       }
 
       const body = (await response.json()) as { token?: string }

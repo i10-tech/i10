@@ -21,7 +21,14 @@ import { domainStore } from "./domains/store.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
 import { clerkIdentity } from "./mailboxes/clerk.js"
-import { clerkSessions } from "./middleware/session.js"
+import { clerkActiveOrg, clerkSessions } from "./middleware/session.js"
+import { consoleQueries } from "./console/queries.js"
+import { dnsInspector } from "./console/dns.js"
+import { marketingStore } from "./console/marketing.js"
+import { onboardingStore } from "./console/onboarding.js"
+import { tenantProfileStore } from "./console/tenant.js"
+import { usageStore } from "./console/usage.js"
+import { tenantResolver } from "./middleware/tenant.js"
 import { projectClerkUser } from "./projection/writer.js"
 import { MAILBOXES } from "./metering/levels.js"
 import { sesIdentity } from "./domains/identity.js"
@@ -309,6 +316,21 @@ const authEmailTenantId = await (async () => {
   }
 })()
 
+/*
+ * Clerk session verification, built ONCE.
+ *
+ * ⚠ ONE VERIFIER AND ONE ORG READER FOR THE WHOLE PROCESS, BECAUSE THE
+ * `authorizedParties` ALLOWLIST IS A SECURITY CONTROL AND IT IS CONFIGURED
+ * HERE. `azp` is what stops a token minted for another application on the same
+ * Clerk instance from being replayed against this API, and every separate
+ * construction is another chance for one of them to be built without it. Three
+ * copies of this call used to be spread through the deps object below with a
+ * comment claiming they were shared — which is the version of this mistake that
+ * survives review, because the sharing was asserted rather than done.
+ */
+const sessions = clerkSessions(clerk, { authorizedParties: env.CONSOLE_ORIGINS })
+const activeOrg = clerkActiveOrg(clerk, { authorizedParties: env.CONSOLE_ORIGINS })
+
 const app = createApp({
   apiKeyAuth: {
     // ⚠ OUR OWN TABLE, NOT CLERK. See auth/api-key.ts for why, and note the
@@ -475,7 +497,77 @@ const app = createApp({
    * cannot reach Clerk fails at the session, which answers 503, rather than at
    * a 501 that would claim mailboxes are not a feature.
    */
-  sessionAuth: clerkSessions(clerk, { authorizedParties: env.CONSOLE_ORIGINS }),
+  sessionAuth: sessions,
+
+  /**
+   * The dashboard, at `/console`.
+   *
+   * ⚠ IT SHARES `sessionAuth`'s VERIFIER RATHER THAN BUILDING A SECOND ONE —
+   * the same `sessions` object, not a second call with the same arguments — so
+   * there is exactly one place the `authorizedParties` allowlist is configured.
+   * See the two constants above.
+   *
+   * ⚠ AND EVERY STORE IT IS GIVEN IS ONE THAT ALREADY EXISTS. The console reads
+   * through its own query module and writes through `domainStore`, `keyStore`
+   * and `webhookEndpointStore` — the objects that own the plan limits and the
+   * cache eviction. Handing it a second path to those tables would put the
+   * domain limit in two places, and the console is where somebody would notice
+   * it was missing last.
+   */
+  console: {
+    sessions,
+    tenants: tenantResolver(db),
+    activeOrg,
+    queries: consoleQueries(db),
+    usage: usageStore({ db, meter: postgresMeter(db), log }),
+    onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
+    marketing: marketingStore(db),
+    profile: tenantProfileStore(db),
+    // ⚠ NO CREDENTIAL AND NO OUTBOUND HTTP BEYOND DNS-OVER-HTTPS TO TWO FIXED
+    // HOSTS. See console/dns.ts: it resolves names the customer types, which is
+    // a capability anybody already has with `dig`, and it must never become a
+    // general-purpose fetcher running inside the cluster.
+    dns: dnsInspector(),
+    ...(secrets
+      ? {
+          domains: domainStore({
+            db,
+            identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
+            capacity: postgresMeter(db),
+            region: env.AWS_REGION,
+            dns: {
+              spfInclude: env.MAIL_SPF_INCLUDE,
+              bounceHost: env.MAIL_BOUNCE_HOST,
+              nameservers: env.MAIL_NAMESERVERS,
+            },
+            zones: powerDnsZones(db),
+            secrets,
+          }),
+        }
+      : {}),
+    keys: { store: keyStore(db), cache: redisKeyCache(cache) },
+    ...(secrets ? { webhooks: webhookEndpointStore(db, secrets) } : {}),
+    // ⚠ THE SAME POLAR CLIENT AND THE SAME PRODUCT MAP `/billing` USES, NOT A
+    // SECOND ONE. Two maps is two price lists, and the one that is wrong is
+    // always the one a customer just bought from.
+    ...(polar
+      ? {
+          billing: {
+            polar,
+            products: env.POLAR_PRODUCTS,
+            successUrl: env.POLAR_SUCCESS_URL,
+            planChange: planChange({
+              db,
+              polar,
+              subscriptions,
+              products: env.POLAR_PRODUCTS,
+              log,
+            }),
+          },
+        }
+      : {}),
+    log,
+  },
   mailboxes: mailboxProvisioning({
     identity: clerkIdentity(clerk),
     directory: mailboxDirectory(db),

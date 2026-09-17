@@ -44,6 +44,21 @@
     // and apps/auth. CLERK_SIGN_IN_URL and CLERK_SIGN_UP_URL point the console
     // at apps/auth (auth.i10.tech); left unset, Clerk silently falls back to
     // its own hosted Account Portal, which is a page we do not control.
+    // ⚠ A LOCAL-REVIEW SWITCH THAT CANNOT BE REACHED IN PRODUCTION. See
+    // apps/console/lib/preview.ts: the flag is ANDed with
+    // `process.env.NODE_ENV !== "production"`, which Next replaces with a
+    // literal at build time — so in a production image the whole expression
+    // folds to `false` and the fixture module is removed by the bundler.
+    // Declared here because `turbo/no-undeclared-env-vars` is an error in this
+    // repo, and passed through rather than hashed because it changes nothing
+    // about what gets built.
+    "CONSOLE_PREVIEW",
+    // Where apps/console reaches apps/api. ⚠ UNPREFIXED FOR THE SAME REASON THE
+    // CLERK KEYS ARE: Next inlines `NEXT_PUBLIC_*` at BUILD time, even in server
+    // code, so a prefixed name absent from a CI build is compiled in as
+    // `undefined` and cannot be set later in the pod. Read at request time by
+    // apps/console/lib/api.ts.
+    "API_BASE_URL",
     "CLERK_PUBLISHABLE_KEY",
     "CLERK_SECRET_KEY",
     "CLERK_SIGN_IN_URL",

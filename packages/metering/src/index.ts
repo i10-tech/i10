@@ -41,6 +41,7 @@ export type {
 
 export { createMeter } from "./meter.js"
 export type {
+  BalanceOutcome,
   CheckInput,
   CheckOutcome,
   Meter,

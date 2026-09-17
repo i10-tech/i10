@@ -24,19 +24,20 @@
  * case is that it feels better to use than Resend, Clerk, Attio, Twenty and
  * Cloudflare's dashboard. Those are the comparison set.
  *
- * ⚠ NOTHING HERE IS GENERATED OR APPROXIMATED. Two rules hold:
+ * ⚠ ONE RULE STILL HOLDS, UNCHANGED:
  *
- *   1. THERE IS NO BRAND ACCENT YET. `--brand` is deliberately unset. Do not
- *      pick one — focus and emphasis use the neutral ring until the accent is
- *      chosen by a person. A colour invented here becomes a default that is
- *      hard to argue with later.
+ *   THERE IS NO BRAND ACCENT. `--brand` is deliberately unset. Do not pick one
+ *   — focus and emphasis use the neutral ring until the accent is chosen by a
+ *   person. A colour invented here becomes a default that is hard to argue with
+ *   later.
  *
- *   2. MOTION VALUES ARE NOT INVENTED. The durations and easing curves below
- *      are PLACEHOLDERS carrying obvious round numbers so they read as
- *      unfinished. Real values come from Uber Base's motion page, which is a
- *      JS-rendered portal that WebFetch returns empty — they have to be pasted
- *      in by hand. Approximating them from memory is the exact failure this
- *      standard exists to prevent.
+ * ⚠ AND ONE HAS BEEN DISCHARGED. The motion values below are no longer
+ * placeholders: they are Uber Base's published timing and easing, transcribed
+ * from base.uber.com/6d2425e9f/p/116184-motion and its `77fcaf-timing` and
+ * `312fab-transitions` children. The curves are the standard quintic and
+ * quadratic beziers Base names; the durations are theirs verbatim. Anything
+ * added here later needs the same provenance — an approximation from memory is
+ * the exact failure this standard exists to prevent.
  *
  * ⚠ THE TOKENS ARE DECLARED TWICE, ON PURPOSE, AND COLLAPSING THE TWO LAYERS
  * BREAKS SHADCN COMPONENTS SILENTLY. `:root` carries the BARE shadcn names —
@@ -94,28 +95,146 @@
    * `--border-radius: var(--radius)` — and by `--radius-sm/md/lg` below.
    * Changing this one number moves every corner in the system together, which
    * is the point of it being a single base rather than four literals.
+   *
+   * ⚠ AND IT IS LEFT AT 10px RATHER THAN MOVED TO BASE'S 8, BECAUSE THE DERIVED
+   * SCALE IS WHAT COMPONENTS ACTUALLY USE AND IT ALREADY LANDS ON BASE'S
+   * NUMBERS. Base publishes radius100–500 as 2/4/8/12/16 with buttons at 8 and
+   * cards at 12. From 10px: `--radius-md` — what Button reaches for — is 8, and
+   * `--radius-xl`, which Card uses, is 14. Setting the base to 8 to "match"
+   * would move the button to 6 and the card to 12: one closer, one further.
    */
   --radius: 0.625rem;
+
+  /*
+   * The sidebar surface.
+   *
+   * ⚠ REWRITTEN FROM WHAT `shadcn add sidebar` GENERATED, AND THE REASON IS THE
+   * FIRST RULE AT THE TOP OF THIS FILE. The CLI seeds `--sidebar-ring` and the
+   * dark `--sidebar-primary` as hsl(217/224 …) — Tailwind's blue-500 and
+   * blue-700. That is a brand accent, arriving by default, in the one component
+   * that frames every screen in the console. Replaced with the neutral ramp the
+   * rest of the sheet uses, so the sidebar is a slightly recessed plane rather
+   * than a second palette.
+   *
+   * ⚠ AND THEY ARE oklch LIKE EVERY OTHER COLOUR HERE, NOT hsl. Mixing spaces
+   * makes `color-mix()` and the `/50` opacity modifiers interpolate differently
+   * on the sidebar than everywhere else, which shows up as a hover state that
+   * is subtly the wrong grey and nothing to explain why.
+   */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.955 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  /*
+   * State colour, and the ONLY colour in the system.
+   *
+   * ⚠ THESE ARE NOT A PALETTE AND MUST NOT BECOME ONE. The console is
+   * monochrome; these five exist because a delivery log is a wall of near
+   * identical rows and the one thing a person scans for is which of them went
+   * wrong. Colour here carries meaning that shape and position cannot. Using
+   * `--success` to make a button feel positive, or `--info` to decorate a
+   * header, spends the only signal the interface has.
+   *
+   * ⚠ CHROMA IS DELIBERATELY LOW (0.11–0.15, against `--destructive`'s 0.245).
+   * At full saturation six of these in a table read as a parking ticket. They
+   * are used as a 6px dot and a tinted badge, never as a fill behind body text.
+   *
+   * ⚠ AND `--destructive` IS NOT REUSED FOR `bounced`. Destructive means "this
+   * button deletes something"; bounced means "this message came back". They
+   * look similar on purpose and mean different things, and a shared token would
+   * make a future change to one silently move the other.
+   */
+  --success: oklch(0.55 0.13 152);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.68 0.15 75);
+  --warning-foreground: oklch(0.145 0 0);
+  --danger: oklch(0.58 0.2 25);
+  --danger-foreground: oklch(0.985 0 0);
+  --info: oklch(0.6 0.11 250);
+  --info-foreground: oklch(0.985 0 0);
+  /* Queued, scheduled, not-started. Absence of outcome, not an outcome. */
+  --neutral: oklch(0.708 0 0);
+  --neutral-foreground: oklch(0.145 0 0);
 }
 
+/*
+ * ⚠ THE DARK CANVAS IS TRUE BLACK, NOT NEAR-BLACK, AND THAT IS A DECISION
+ * RATHER THAN A DEFAULT. shadcn ships `oklch(0.145 0 0)` — about #1a1a1a — which
+ * reads as dark grey next to the surfaces this product is compared against.
+ * Resend, Vercel and Linear all sit on #000, and the reason it works is the
+ * second half of the decision: with a true-black ground, ELEVATION IS A 1px
+ * HAIRLINE BORDER AND A SLIGHTLY LIFTED SURFACE, never a drop shadow. A shadow
+ * on black is invisible; a grey canvas needs shadows to separate anything, and
+ * then every card has a soft halo and the whole interface goes muddy.
+ *
+ * ⚠ SO `--border` IS BRIGHTER HERE THAN SHADCN'S DEFAULT (12% rather than 10%)
+ * AND IT IS LOAD-BEARING. It is the ONLY thing separating a card from the page.
+ * Lowering it to taste makes tables lose their rows.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.12 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.14 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --primary-foreground: oklch(0.12 0 0);
+  --secondary: oklch(0.18 0 0);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --muted: oklch(0.17 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.2 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+
+  /*
+   * ⚠ IN DARK MODE THE SIDEBAR IS THE SAME TRUE BLACK AS THE PAGE, AND ONLY THE
+   * HAIRLINE SEPARATES THEM. With a #000 canvas there is nowhere darker to go,
+   * so the usual trick — recede the chrome — is unavailable, and lifting the
+   * sidebar instead would make the navigation read as floating ABOVE the
+   * content it is subordinate to. One border, and the active item carries the
+   * only fill.
+   *
+   * In light mode the relationship is the ordinary one: the sidebar is very
+   * slightly off-white against a white page.
+   */
+  --sidebar: oklch(0 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.985 0 0);
+  --sidebar-primary-foreground: oklch(0.12 0 0);
+  --sidebar-accent: oklch(0.2 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: oklch(0.556 0 0);
+
+  /*
+   * ⚠ LIGHTER AND LESS SATURATED THAN THE LIGHT VALUES, NOT THE SAME HEX.
+   * A colour that passes contrast on white fails on near-black, and the
+   * failure is worst for the two that matter most — a green and a red at
+   * L=0.55 on an L=0.145 canvas are both illegible. Each is lifted to ~0.72
+   * and pulled in slightly, which is the dark-mode convention shadcn's own
+   * palette follows.
+   */
+  --success: oklch(0.72 0.14 152);
+  --success-foreground: oklch(0.145 0 0);
+  --warning: oklch(0.78 0.14 75);
+  --warning-foreground: oklch(0.145 0 0);
+  --danger: oklch(0.68 0.18 25);
+  --danger-foreground: oklch(0.145 0 0);
+  --info: oklch(0.72 0.1 250);
+  --info-foreground: oklch(0.145 0 0);
+  --neutral: oklch(0.556 0 0);
+  --neutral-foreground: oklch(0.985 0 0);
 }
 
 /*
@@ -149,16 +268,136 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-neutral: var(--neutral);
+  --color-neutral-foreground: var(--neutral-foreground);
+
+  /*
+   * ⚠ THE CHART SERIES ARE GREYS, AND THAT IS NOT AN OVERSIGHT. shadcn's chart
+   * component expects `--chart-1..5` and its own default is five hues. Every
+   * chart in this console plots ONE quantity over time — sends per day,
+   * delivery rate, queue depth — where a second colour would imply a second
+   * meaning. Where a chart genuinely splits by outcome it uses the state
+   * tokens above, which already carry that meaning everywhere else.
+   */
+  --color-chart-1: var(--foreground);
+  --color-chart-2: oklch(0.556 0 0);
+  --color-chart-3: oklch(0.708 0 0);
+  --color-chart-4: oklch(0.85 0 0);
+  --color-chart-5: oklch(0.922 0 0);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  /* PLACEHOLDER — see rule 2 above. */
-  --duration-fast: 100ms;
-  --duration-base: 200ms;
-  --duration-slow: 300ms;
-  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  /*
+   * Typography.
+   *
+   * ⚠ GEIST, AND IT IS SELF-HOSTED PER APP RATHER THAN FETCHED. `--font-sans`
+   * and `--font-mono` are wired to the CSS variables `next/font/local` emits,
+   * with a system stack behind each so a page still has correct metrics if the
+   * font file 404s. Uber Move is proprietary and is not what we use.
+   *
+   * ⚠ MONO IS LOAD-BEARING HERE, NOT DECORATIVE. API keys, message ids, DNS
+   * record values, DKIM public keys and raw header dumps are all things a
+   * person compares by eye against another screen. In a proportional face `l`,
+   * `1` and `I` are one glyph and `rn` is `m`, which is how somebody spends
+   * twenty minutes on a TXT record that was right the first time.
+   */
+  --font-sans:
+    var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    monospace;
+
+  /*
+   * The ramp: a major second (1.125) from a 14px base, with line height
+   * computed as size × 1.45 rounded to the nearest 4 — Base's sizing rule,
+   * from zeroheight.com/6d2425e9f/p/976582-typography.
+   *
+   * ⚠ THE BASE IS 14px, NOT 16. This is a dense data surface: tables, logs,
+   * record lists. Tailwind's own `text-sm` is 14px and every shadcn component
+   * is authored against it, so a 16px base would mean overriding the size on
+   * essentially every component in the package.
+   */
+  --text-2xs: 0.6875rem; /* 11 */
+  --text-2xs--line-height: 1rem; /* 16 */
+  --text-xs: 0.75rem; /* 12 */
+  --text-xs--line-height: 1rem; /* 16 */
+  --text-sm: 0.875rem; /* 14 — base */
+  --text-sm--line-height: 1.25rem; /* 20 */
+  --text-base: 1rem; /* 16 */
+  --text-base--line-height: 1.5rem; /* 24 */
+  --text-lg: 1.125rem; /* 18 */
+  --text-lg--line-height: 1.75rem; /* 28 */
+  --text-xl: 1.25rem; /* 20 */
+  --text-xl--line-height: 1.75rem; /* 28 */
+  --text-2xl: 1.375rem; /* 22 */
+  --text-2xl--line-height: 2rem; /* 32 */
+  --text-3xl: 1.75rem; /* 28 */
+  --text-3xl--line-height: 2.5rem; /* 40 */
+  --text-4xl: 2rem; /* 32 */
+  --text-4xl--line-height: 3rem; /* 48 */
+
+  /*
+   * Motion — Uber Base's published timing, not an approximation.
+   *
+   * | curve                 | ms  | for                      |
+   * | --------------------- | --- | ------------------------ |
+   * | quintic ease-in-out   | 500 | moving, pushing          |
+   * | quintic ease-out      | 500 | entering, snapping       |
+   * | quintic ease-in       | 400 | passive exiting          |
+   * | quadratic ease-in     | 200 | dismissing               |
+   * | linear                | 200 | opacity and colour ONLY  |
+   *
+   * ⚠ LINEAR IS FOR NON-TRANSLATING PROPERTIES. Anything that MOVES gets an
+   * eased curve; a linear translate is the single most recognisable tell of
+   * motion nobody thought about.
+   *
+   * ⚠ AND 500ms IS FOR A SCREEN, NOT FOR A BUTTON. The long durations belong to
+   * view transitions — a drawer entering, a panel pushing. A hover state that
+   * takes half a second is broken. Hover, focus and colour changes use
+   * `--duration-instant` with `--ease-linear`, which is the fifth row.
+   */
+  --ease-quint-in-out: cubic-bezier(0.83, 0, 0.17, 1);
+  --ease-quint-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-quint-in: cubic-bezier(0.64, 0, 0.78, 0);
+  --ease-quad-in: cubic-bezier(0.11, 0, 0.5, 0);
+  --ease-linear: linear;
+
+  --duration-instant: 100ms;
+  --duration-dismiss: 200ms;
+  --duration-exit: 400ms;
+  --duration-move: 500ms;
+
+  /*
+   * ⚠ KEPT AS ALIASES BECAUSE SHADCN COMPONENTS AND `tw-animate-css` REFERENCE
+   * THEM. Removing them would silently un-animate every Radix popover in the
+   * package. They now point at the Base values rather than at round numbers
+   * invented to look unfinished.
+   */
+  --duration-fast: var(--duration-instant);
+  --duration-base: var(--duration-dismiss);
+  --duration-slow: var(--duration-move);
+  --ease-standard: var(--ease-quint-in-out);
 }
 
 @layer base {
@@ -169,6 +408,24 @@
   body {
     background-color: var(--background);
     color: var(--foreground);
+    font-family: var(--font-sans);
+    /*
+     * ⚠ `text-rendering: optimizeLegibility` IS DELIBERATELY ABSENT. It enables
+     * kerning and ligatures at every size and is a known source of layout jank
+     * on long documents in WebKit; Geist's default kerning is already correct.
+     */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /*
+   * ⚠ TABULAR FIGURES EVERYWHERE A NUMBER SITS IN A COLUMN. Proportional digits
+   * make a table of counts ragged down its right edge, and the eye reads the
+   * ragged edge as the data being noisy. Applied by an opt-in class rather than
+   * globally, because prose with tabular figures looks mechanical.
+   */
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -180,3 +437,16 @@
     }
   }
 }
+
+/*
+ * ⚠ THE `--sidebar-*` TOKENS ABOVE ARE USED, EVEN THOUGH shadcn's `sidebar.tsx`
+ * IS NOT IN THIS PACKAGE. `shadcn add sidebar` was run once and its component
+ * was removed again: the console's rail is hand-built (apps/console/components/
+ * sidebar-nav.tsx) because the generated one carries a provider, a cookie, a
+ * keyboard shortcut and a `Math.random()` skeleton that this product has no use
+ * for — and the last of those is impure in a `useMemo`, which the React
+ * Compiler rightly refuses.
+ *
+ * The TOKENS stayed because the rail still needs a name for "the surface the
+ * navigation sits on". Do not delete them as unused; grep for `bg-sidebar`.
+ */
