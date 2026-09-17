@@ -66,6 +66,24 @@ bun dev
 
 `bun run build` · `bun run lint` · `bun run check-types` · `bun run test` · `bun run format`
 
+**`bun install` also installs the git hooks**, by pointing `core.hooksPath` at
+`.githooks/`. There is one: a `pre-push` that runs `check-images`,
+`format:check`, `lint` and `check-types` — fastest first, each one stopping the
+push on its own, quiet unless something fails. About four seconds warm.
+`test` and `build` are deliberately left out: they are the slow ones, and a
+pre-push that takes a minute is a pre-push that gets bypassed. Skip it with
+`git push --no-verify`; it no-ops in CI and on a machine with no bun.
+
+**`bun run check-images` is the one you have not seen before.** Each Dockerfile
+copies a hand-maintained list of workspace `package.json` files before
+`bun install --frozen-lockfile`, so that editing source does not invalidate the
+dependency layer. Add a package, have an app depend on it, forget the COPY line,
+and `lint`, `check-types`, `test` and `build` all still pass — they run against
+the real repository, where the package is on disk. Only the image build fails,
+and only on a push to `main`, which is after the merge. This reads the
+Dockerfiles and the manifests and says which COPY line is missing, in about
+twenty milliseconds.
+
 **The Bun version is pinned in four places and they move together:**
 `.bun-version`, `packageManager` in `package.json`, `BUN_VERSION` in
 `.github/workflows/ci.yml`, and the base image tag in every `Dockerfile`. The
