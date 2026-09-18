@@ -64,19 +64,45 @@ export function PlanCards({
   plans,
   currentPlanId,
   hasSubscription,
+  endingAt = null,
 }: {
   plans: PlanSummary[]
   currentPlanId: string | null
   hasSubscription: boolean
+  /**
+   * ⚠ SET WHEN THE SUBSCRIPTION IS ALREADY CANCELLING. Without it the free card
+   * keeps offering "Cancel subscription" to somebody who has already cancelled,
+   * and pressing it a second time looks like the first press did nothing.
+   */
+  endingAt?: string | null
 }) {
   const router = useRouter()
   const { resolvedTheme } = useTheme()
   const [pending, setPending] = React.useState<string | null>(null)
+  const [confirming, setConfirming] = React.useState<PlanSummary | null>(null)
 
   const current = plans.find((plan) => plan.id === currentPlanId) ?? null
 
+  /*
+   * ⚠ LEAVING A PAID PLAN IS A CONFIRMED ACTION, NOT A ONE-CLICK DOWNGRADE.
+   * Every other button here moves between things somebody is paying for;
+   * `free` ends the subscription, and it sits in the same row of identical
+   * cards as the rest. The confirmation exists because the consequence is
+   * different in kind, not because it is severe — it is reversible by
+   * subscribing again, and the dialog says when it takes effect.
+   */
+  const leavingPaidPlan = (plan: PlanSummary) =>
+    hasSubscription && current !== null && plan.rank === 0 && plan.rank < current.rank
+
   async function choose(plan: PlanSummary) {
     if (pending) return
+
+    if (leavingPaidPlan(plan) && confirming?.id !== plan.id) {
+      setConfirming(plan)
+      return
+    }
+
+    setConfirming(null)
     setPending(plan.id)
 
     if (hasSubscription) {
@@ -98,10 +124,22 @@ export function PlanCards({
        * entitlement moves when their webhook lands, a second or two later. The
        * refresh picks it up — and the message is worded so that somebody who
        * reloads immediately and sees the old plan is not confused.
+       *
+       * ⚠ AND CANCELLING GETS ITS OWN SENTENCE, because "your allowances move
+       * as soon as the payment clears" is wrong for it in both halves: there is
+       * no payment, and nothing moves until the period ends.
        */
-      toast.success("Plan change requested", {
-        description: "Your allowances move as soon as the payment clears.",
-      })
+      if (leavingPaidPlan(plan)) {
+        toast.success("Subscription ending", {
+          description:
+            "You keep your current plan until the end of the period you have " +
+            "paid for, then move to the free allowance.",
+        })
+      } else {
+        toast.success("Plan change requested", {
+          description: "Your allowances move as soon as the payment clears.",
+        })
+      }
       router.refresh()
       return
     }
@@ -140,14 +178,31 @@ export function PlanCards({
 
       setPending(null)
 
-      // ⚠ REFRESHED ON `success`, NOT ON `close`. The plan moves when Polar's
-      // webhook lands, which is a second or two after the customer sees a
-      // confirmation — so the refresh is a best effort and the message is
-      // worded for somebody whose plan has not updated yet.
+      /*
+       * ⚠ THE OVERLAY IS CLOSED EXPLICITLY, AND NOT CLOSING IT WAS THE BUG.
+       * Polar locks the embed closed on its `confirmed` event — deliberately,
+       * so nobody navigates away mid-charge — and only re-opens it on
+       * `success`. This listener refreshed the page BEHIND the iframe and
+       * returned, so the customer was left looking at Polar's post-payment
+       * frame with no way out of it: payment taken, console updated underneath,
+       * and a modal on top saying it was waiting for confirmation. Reloading
+       * by hand was the only escape, and it showed the plan already granted.
+       *
+       * ⚠ `close()` RATHER THAN LEAVING IT TO THE DEFAULT HANDLER. The default
+       * only re-enables closing and redirects when Polar asks for a redirect —
+       * which it does not when the checkout has no success URL configured. That
+       * makes whether the modal ever goes away depend on an environment
+       * variable, which is not a thing the customer should be able to feel.
+       */
       checkout.addEventListener("success", () => {
+        checkout.close()
         toast.success("Payment received", {
           description: "Your new allowances appear as soon as it clears.",
         })
+        // ⚠ AND THE PAGE IS REFRESHED AFTER THE CLOSE, NOT INSTEAD OF IT. The
+        // plan moves when Polar's webhook lands, a second or two later, so this
+        // is a best effort — the wording above is written for somebody whose
+        // allowance has not moved yet.
         router.refresh()
       })
       return
@@ -185,6 +240,7 @@ export function PlanCards({
         // being read as a downgrade and deferring a charge.
         const isUpgrade = current !== null && plan.rank > current.rank
         const isDowngrade = current !== null && plan.rank < current.rank
+        const leaving = leavingPaidPlan(plan)
 
         return (
           <li
@@ -222,22 +278,80 @@ export function PlanCards({
 
             <Button
               className="mt-4 w-full"
-              variant={isCurrent ? "outline" : isUpgrade ? "default" : "outline"}
-              disabled={isCurrent || pending !== null}
+              variant={
+                isCurrent
+                  ? "outline"
+                  : leaving && confirming?.id === plan.id
+                    ? "destructive"
+                    : isUpgrade
+                      ? "default"
+                      : "outline"
+              }
+              // ⚠ ALREADY-CANCELLING DISABLES THE FREE CARD RATHER THAN HIDING
+              // IT. There is nothing left to ask for — the subscription ends on
+              // its own — and a live button would send a second cancel that
+              // Polar treats as a no-op, which reads as the first one having
+              // failed.
+              disabled={isCurrent || pending !== null || (leaving && endingAt !== null)}
               onClick={() => choose(plan)}
             >
               {pending === plan.id && <Spinner />}
-              {isCurrent
-                ? "Current plan"
-                : isUpgrade
-                  ? "Upgrade"
-                  : isDowngrade
-                    ? "Downgrade"
-                    : "Choose"}
+              {label({
+                isCurrent,
+                isUpgrade,
+                isDowngrade,
+                leaving,
+                ending: endingAt !== null,
+                confirming: confirming?.id === plan.id,
+              })}
             </Button>
+
+            {/*
+             * ⚠ THE CONSEQUENCE IS SPELLED OUT UNDER THE BUTTON THAT CAUSES IT,
+             * not in a dialog that covers the plan being left. The two facts
+             * somebody needs are that sending continues and when it stops, and
+             * both are short enough to sit here.
+             */}
+            {leaving && confirming?.id === plan.id && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Your {current?.name} allowance continues until the end of the period you
+                have paid for. Press again to confirm, or pick another plan.
+              </p>
+            )}
+
+            {leaving && endingAt !== null && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Your subscription already ends on {endingAt}. You move here then.
+              </p>
+            )}
           </li>
         )
       })}
     </ul>
   )
+}
+
+/**
+ * ⚠ THE WORD ON THE BUTTON IS WHAT THE BUTTON DOES. "Downgrade" on the free
+ * card was wrong in a way that mattered: it does not move somebody to a cheaper
+ * plan, it ends their subscription, and the two have different consequences and
+ * different timing. Naming it correctly is most of the fix for "there is
+ * nowhere to downgrade or cancel" — the path existed and did not say so.
+ */
+function label(state: {
+  isCurrent: boolean
+  isUpgrade: boolean
+  isDowngrade: boolean
+  leaving: boolean
+  ending: boolean
+  confirming: boolean
+}): string {
+  if (state.isCurrent) return "Current plan"
+  if (state.leaving) {
+    if (state.ending) return "Ending"
+    return state.confirming ? "Confirm cancellation" : "Cancel subscription"
+  }
+  if (state.isUpgrade) return "Upgrade"
+  if (state.isDowngrade) return "Downgrade"
+  return "Choose"
 }

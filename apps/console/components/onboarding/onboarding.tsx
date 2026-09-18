@@ -163,6 +163,21 @@ export function Onboarding({
         )}
       </div>
 
+      {/*
+       * ⚠ THERE IS EXACTLY ONE WAY FORWARD FROM EACH STEP, AND IT IS THE STEP'S
+       * OWN BUTTON. This bar used to carry a primary "Next" as well, so every
+       * screen showed two buttons that did the same thing — "Continue" inside
+       * the step and "Next" underneath it — and a person had to work out
+       * whether they differed. They did not, except on the workspace step,
+       * where "Continue" saved the name and "Next" silently discarded it. Two
+       * controls for one action is not a convenience; it is a question.
+       *
+       * ⚠ "Skip this step" SURVIVES, BECAUSE IT IS WHAT "Next" WAS ACTUALLY
+       * FOR. The original note is still right: a wizard that refuses to advance
+       * until DNS propagates is a wizard people close. What it needed was an
+       * escape, not a second primary action — so the escape stays and says what
+       * it does.
+       */}
       <div className="mt-8 flex items-center justify-between border-t pt-4">
         <Button
           variant="ghost"
@@ -174,20 +189,9 @@ export function Onboarding({
           Back
         </Button>
 
-        {index < STEPS.length - 1 ? (
-          <Button size="sm" onClick={() => go(STEPS[index + 1]!.id)}>
-            {/*
-             * ⚠ "Next" IS ALWAYS ENABLED. See the block comment — a step that
-             * refuses to advance until it is satisfied is how somebody waiting
-             * on their IT department to add a DNS record gets stuck in a wizard
-             * and closes the tab.
-             */}
-            Next
-            <ArrowRight />
-          </Button>
-        ) : (
-          <Button size="sm" onClick={finish}>
-            Finish
+        {index < STEPS.length - 1 && (
+          <Button variant="ghost" size="sm" onClick={() => go(STEPS[index + 1]!.id)}>
+            Skip this step
             <ArrowRight />
           </Button>
         )}

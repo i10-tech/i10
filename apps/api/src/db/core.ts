@@ -9,6 +9,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
@@ -236,7 +237,15 @@ export const domains = core.table(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
 
-    name: text("name").notNull().unique(),
+    /**
+     * ⚠ NOT GLOBALLY UNIQUE, AND THAT IS A DELIBERATE REVERSAL. It was, and the
+     * consequence was that the first account to type `spotify.com` held it for
+     * ever — without publishing a single record. The real owner then hit "That
+     * domain is already registered" with no route past it. Exclusivity now
+     * follows PROOF instead of arrival order: see the two indexes below and
+     * migration 0039.
+     */
+    name: text("name").notNull(),
 
     /** What the domain is used for. A domain may do both, or only one. */
     sends: boolean("sends").notNull().default(true),
@@ -383,7 +392,27 @@ export const domains = core.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("domains_tenant_idx").on(t.tenantId)],
+  (t) => [
+    index("domains_tenant_idx").on(t.tenantId),
+
+    /**
+     * ⚠ ONE WORKSPACE, ONE ROW PER NAME. Without this, dropping the global
+     * constraint would let a single tenant add `example.com` twice — two DKIM
+     * keys and two record sets for one name, with no way to tell which of two
+     * identical rows is the one that verified.
+     */
+    unique("domains_tenant_name_unique").on(t.tenantId, t.name),
+
+    /**
+     * ⚠ THE EXCLUSIVITY, SCOPED TO PROOF. Any number of tenants may hold a name
+     * as pending; exactly one may hold it verified. The second tenant to verify
+     * gets 23505 on the UPDATE, which `domainStore.verify` turns into a
+     * `conflict` — true, and the only safe direction for the race to fall.
+     */
+    uniqueIndex("domains_verified_name_unique")
+      .on(t.name)
+      .where(sql`${t.status} = 'verified'`),
+  ],
 )
 
 /**

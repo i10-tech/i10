@@ -76,8 +76,80 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   app.post("/domains/:id/verify", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
-    const domain = await d.domains.verify(tenantId, c.req.param("id"))
-    return domain ? c.json(domain) : c.json(notFound("No domain with that id."), 404)
+    const outcome = await d.domains.verify(tenantId, c.req.param("id"))
+
+    switch (outcome.status) {
+      case "ok":
+        return c.json(outcome.domain)
+      case "missing":
+        return c.json(notFound("No domain with that id."), 404)
+      default:
+        /*
+         * ⚠ 409, NOT 403 AND NOT A `failed` DOMAIN. Their records may well be
+         * perfect — they lost a race to prove ownership, which is a conflict
+         * over a name rather than a problem with their DNS or their permission.
+         */
+        return c.json(
+          {
+            statusCode: 409,
+            name: "domain_already_claimed" as const,
+            message:
+              `${outcome.domain.name} has just been verified by another ` +
+              `workspace, so it cannot be verified here as well. If that is ` +
+              `also yours, remove it there; otherwise contact support@i10.tech.`,
+          },
+          409,
+        )
+    }
+  })
+
+  /**
+   * Why a delegated domain has not verified.
+   *
+   * ⚠ SEPARATE FROM `verify`, AND DELIBERATELY NOT FOLDED INTO IT. Verifying is
+   * a write that asks SES and stores the answer; this is a read that asks
+   * public DNS and stores nothing. Merging them would put three DNS lookups on
+   * the path of a button somebody presses repeatedly, and would make a slow
+   * resolver look like a failed verification.
+   *
+   * ⚠ IT IS ONLY MEANINGFUL FOR A DELEGATED DOMAIN. A manual one publishes six
+   * records into its own zone and there is no delegation to diagnose — the
+   * record-by-record status the domain already carries is the better answer
+   * there.
+   */
+  app.get("/domains/:id/delegation", async (c) => {
+    if (!d.domains) return c.json(notWired("Domains"), 501)
+    if (!d.delegation) return c.json(notWired("Delegation checks"), 501)
+
+    const { tenantId } = c.get("auth")
+    const domain = await d.domains.get(tenantId, c.req.param("id"))
+    if (!domain) return c.json(notFound("No domain with that id."), 404)
+
+    if (!domain.delegated) {
+      return c.json(
+        validation("That domain publishes its own records; there is no delegation."),
+        422,
+      )
+    }
+
+    try {
+      return c.json(await d.delegation.check(domain.name))
+    } catch (error) {
+      // ⚠ A FAILED DIAGNOSIS IS NOT A FAILED PAGE. This is advisory; answering
+      // 502 would replace a domain's records with a red box because a resolver
+      // was slow.
+      d.log.warn({ err: String(error), domain: domain.name }, "delegation check failed")
+      return c.json(
+        {
+          domain: domain.name,
+          nameservers: [],
+          nameserversAnswering: true,
+          zones: [],
+          error: "check_failed",
+        },
+        200,
+      )
+    }
   })
 
   app.delete("/domains/:id", async (c) => {

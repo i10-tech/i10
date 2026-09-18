@@ -24,6 +24,7 @@ const polar = (checkout: CheckoutState | null): PolarClient => ({
   getCheckout: async () => checkout,
   ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
   updateSubscription: async () => {},
+  cancelSubscription: async () => {},
   createCustomerSession: async () => ({ token: "polar_cst_test" }),
   listSubscriptions: async () => [],
 })

@@ -11,6 +11,7 @@ import { WorkspaceBar } from "@/components/workspace-bar"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
+import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
 import type { Me } from "@/lib/types"
 
 /**
@@ -69,7 +70,14 @@ export default async function AppLayout({
   // ⚠ THE FLAG DECIDES THE REDIRECT AND NOTHING ELSE. `/onboarding` is outside
   // this layout precisely so it stays reachable when this fires — see
   // docs/decisions/console.md §4. A guard that ran there too would be a loop.
-  if (me.data.onboarding.should_onboard) redirect("/onboarding")
+  //
+  // ⚠ AND THE SKIP IS CHECKED HERE, BECAUSE THIS REDIRECT IS WHAT IT OVERRIDES.
+  // Without it "Skip to the console" was a link to a page that immediately sent
+  // people back, which is indistinguishable from a broken button. See
+  // lib/onboarding-skip.ts for why this is a cookie and not a stored fact.
+  if (me.data.onboarding.should_onboard && !(await hasSkippedOnboarding())) {
+    redirect("/onboarding")
+  }
 
   // See WorkspaceBar: Clerk's hooks throw outside a provider, and the provider
   // is only mounted when a key exists.

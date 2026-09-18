@@ -47,9 +47,22 @@ export interface DomainStore {
   get(tenantId: string, id: string): Promise<Domain | null>
   list(tenantId: string): Promise<DomainSummary[]>
   remove(tenantId: string, id: string): Promise<boolean>
-  /** Re-reads the provider and stores what it says. `null` if no such domain. */
-  verify(tenantId: string, id: string): Promise<Domain | null>
+  /** Re-reads the provider and stores what it says. */
+  verify(tenantId: string, id: string): Promise<VerifyOutcome>
 }
+
+/**
+ * ⚠ `claimed` EXISTS BECAUSE TWO TENANTS MAY HOLD THE SAME NAME AS PENDING.
+ * Only one may hold it verified (migration 0039), so the loser of that race
+ * needs an answer that is neither "verified" nor "your DNS is wrong" — both
+ * would be lies, and the second sends somebody to go and break records that are
+ * correct. It is a distinct outcome rather than a `failed` status for exactly
+ * that reason.
+ */
+export type VerifyOutcome =
+  | { status: "ok"; domain: Domain }
+  | { status: "missing" }
+  | { status: "claimed"; domain: Domain }
 
 export interface DomainStoreDeps {
   db: Database
@@ -71,7 +84,20 @@ export interface DomainStoreDeps {
    * form a backup or a replica could use.
    */
   secrets: SecretBox
+  /**
+   * ⚠ OPTIONAL, AND IT EXISTS FOR `remove`'s CLEANUP. Deleting a domain is a
+   * row delete followed by two best-effort tidies at other systems; those
+   * tidies must not fail the delete, so their failures need somewhere to go
+   * that is not the caller. Without it they would be swallowed silently, which
+   * is the half of this that would be worse.
+   */
+  log?: Logger
   now?: () => Date
+}
+
+/** The slice of the logger this module uses. Structurally satisfied by pino. */
+export interface Logger {
+  warn: (o: object, m: string) => void
 }
 
 /**
@@ -153,9 +179,21 @@ export interface DnsSettings {
   nameservers: readonly string[]
 }
 
-/** Postgres's unique violation. The name is unique across every tenant. */
+/** Postgres's unique violation. Which constraint fired decides what it means. */
 const isUniqueViolation = (error: unknown) =>
   (error as { code?: string }).code === "23505"
+
+/**
+ * ⚠ MATCHED ON `constraint` FIRST AND THE MESSAGE ONLY AS A FALLBACK. Postgres
+ * puts the constraint name in its own field on the error, which is exact;
+ * driver wrappers do not all forward it, and the ones that do not still carry
+ * the name inside the message text. Reading only the message would misclassify
+ * a constraint whose name is a substring of another's.
+ */
+const isViolationOf = (error: unknown, constraint: string) => {
+  const e = error as { constraint?: string; message?: string }
+  return e.constraint === constraint || (e.message?.includes(constraint) ?? false)
+}
 
 export function domainStore({
   db,
@@ -165,6 +203,7 @@ export function domainStore({
   dns,
   secrets,
   zones,
+  log,
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
   return {
@@ -285,13 +324,34 @@ export function domainStore({
         }
       } catch (error) {
         if (isUniqueViolation(error)) {
-          // ⚠ THE NAME IS UNIQUE ACROSS TENANTS, so this is either their own
-          // duplicate or somebody else's domain — and the message must not say
-          // which. "Somebody already has example.com" tells an attacker which
-          // domains are customers of ours.
+          /*
+           * ⚠ TWO CONSTRAINTS REACH HERE AND THEY MEAN OPPOSITE THINGS, so the
+           * message is chosen by which one fired rather than by one sentence
+           * covering both. `domains_tenant_name_unique` is this tenant's own
+           * duplicate — say so plainly, they can see the other row.
+           * `domains_verified_name_unique` is somebody else having PROVED
+           * ownership, which is the only case worth refusing at all.
+           */
+          if (isViolationOf(error, "domains_tenant_name_unique")) {
+            return {
+              status: "conflict",
+              reason: `You have already added ${name}.`,
+            }
+          }
+
+          /*
+           * ⚠ THE WORDING STILL DOES NOT NAME THE OTHER TENANT, and that has
+           * not changed. "Acme Ltd already has example.com" turns this endpoint
+           * into a way to ask which domains are customers of ours. It does now
+           * say what would resolve it, because for the person who genuinely
+           * owns the domain there IS something to do.
+           */
           return {
             status: "conflict",
-            reason: "That domain is already registered.",
+            reason:
+              `${name} is already verified by another workspace. If that is ` +
+              `yours, remove it there first; if you believe it is not, contact ` +
+              `support@i10.tech and we will check ownership.`,
           }
         }
         throw error
@@ -335,18 +395,48 @@ export function domainStore({
           .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id))),
       )
 
-      await identity.remove(existing.name)
+      /*
+       * ⚠ EVERYTHING BELOW IS CLEANUP AFTER AN ALREADY-COMMITTED DELETE, AND A
+       * FAILURE IN IT MUST NOT BE REPORTED AS A FAILED DELETE. The row is gone
+       * the moment the statement above returns; throwing from here made the
+       * route answer 500 while the domain had in fact been deleted, so the
+       * console said "Could not delete the domain" and a reload showed it
+       * deleted anyway. That is the worst shape an error can take — it teaches
+       * people that our errors are noise, and the next real one is ignored too.
+       *
+       * ⚠ AND BOTH TIDIES ARE GENUINELY ALLOWED TO FAIL. SES answers
+       * NotFoundException for an identity that was never created — which is
+       * every domain added while the identity call was failing — and the zone
+       * delete touches a second system that can be down. Neither can resurrect
+       * the domain, so neither is worth a 500 the customer cannot act on.
+       */
+      await tidy("ses identity", () => identity.remove(existing.name))
 
       // ⚠ THE ZONES GO TOO, OR THE DELEGATION OUTLIVES THE DOMAIN. The customer's
       // NS records still point here after a delete, so a zone left behind keeps
       // answering — with a DKIM key and a return path for a domain nobody owns.
       if (existing.delegated && zones) {
         for (const zone of Object.values(delegatedZoneNames(existing.name))) {
-          await zones.remove(zone)
+          await tidy("delegated zone", () => zones.remove(zone))
         }
       }
 
       return true
+
+      async function tidy(what: string, run: () => Promise<unknown>): Promise<void> {
+        try {
+          await run()
+        } catch (error) {
+          // ⚠ WARN, NOT ERROR, AND NOT SILENCE. Nothing is broken for the
+          // customer — their domain is deleted — but an identity or a zone we
+          // failed to remove is a real leak somebody has to reconcile, and it
+          // is invisible unless it is written down.
+          log?.warn(
+            { err: String(error), tenantId, domain: existing!.name, what },
+            `domain deleted, but its ${what} could not be removed — left behind`,
+          )
+        }
+      }
     },
 
     async verify(tenantId, id) {
@@ -358,7 +448,7 @@ export function domainStore({
           .limit(1)
         return row as Row | undefined
       })
-      if (!existing) return null
+      if (!existing) return { status: "missing" }
 
       const seen = await identity.status(existing.name)
 
@@ -370,20 +460,44 @@ export function domainStore({
       const verifiedAt =
         seen.status === "verified" && existing.status !== "verified" ? now() : undefined
 
-      const [row] = await withTenant(db, tenantId, async (tx) =>
-        tx
-          .update(domains)
-          .set({
-            status: seen.status,
-            dnsCheckedAt: now(),
-            updatedAt: now(),
-            ...(verifiedAt ? { verifiedAt } : {}),
-          })
-          .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
-          .returning(COLUMNS),
-      )
+      const write = (status: DomainStatus, stamp?: Date) =>
+        withTenant(db, tenantId, async (tx) =>
+          tx
+            .update(domains)
+            .set({
+              status,
+              dnsCheckedAt: now(),
+              updatedAt: now(),
+              ...(stamp ? { verifiedAt: stamp } : {}),
+            })
+            .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
+            .returning(COLUMNS),
+        )
 
-      return row ? present(row as Row, region, dns) : null
+      try {
+        const [row] = await write(seen.status, verifiedAt)
+        return row
+          ? { status: "ok", domain: present(row as Row, region, dns) }
+          : { status: "missing" }
+      } catch (error) {
+        /*
+         * ⚠ THE ONLY WAY THIS UPDATE CAN VIOLATE A UNIQUE CONSTRAINT IS THE
+         * VERIFIED-NAME INDEX, and it means another tenant proved ownership of
+         * this name first. Rethrowing left the console pressing Verify against
+         * a 500 for ever, with no sentence anywhere saying why.
+         *
+         * ⚠ THE ROW IS LEFT UNVERIFIED AND THE CHECK IS STILL STAMPED. Marking
+         * it `failed` would tell somebody to go and fix DNS that is correct;
+         * marking it verified is what the index just refused. Pending is the
+         * honest state, and `claimed` is how the route says why.
+         */
+        if (!isUniqueViolation(error)) throw error
+
+        const [row] = await write(existing.status)
+        return row
+          ? { status: "claimed", domain: present(row as Row, region, dns) }
+          : { status: "missing" }
+      }
     },
   }
 }

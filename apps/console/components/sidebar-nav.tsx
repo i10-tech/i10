@@ -2,8 +2,9 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { ArrowLeft } from "lucide-react"
 import { cn } from "cn"
-import { isActive, NAV, type NavGroup } from "@/lib/nav"
+import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
 /**
  * The left rail.
@@ -20,12 +21,54 @@ import { isActive, NAV, type NavGroup } from "@/lib/nav"
  * a refactor and produces a nav that twitches as you move through it. A
  * background fill changes nothing about layout.
  */
-export function SidebarNav({ groups = NAV }: { groups?: NavGroup[] }) {
+export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
   const pathname = usePathname()
 
+  /*
+   * ⚠ THE RAIL SWAPS RATHER THAN THE PAGE GROWING A SECOND COLUMN. Settings
+   * used to render its own narrow nav inside the content area, so on a settings
+   * page the screen carried two vertical lists of links a few pixels apart —
+   * one for the console, one for settings — and the eye had to work out which
+   * of them it was reading. Replacing the rail keeps exactly one navigation on
+   * screen at a time, and the back link is what the main rail's continued
+   * presence used to provide.
+   *
+   * ⚠ DECIDED FROM THE PATH, IN THE ONE COMPONENT THAT ALREADY KNOWS IT. The
+   * shell is a server component and cannot read the pathname; threading it down
+   * as a prop would mean the layout re-rendering on every navigation. This
+   * component is already a client component for the active highlight, so the
+   * branch is free.
+   */
+  const settings = groups === undefined && inSettings(pathname)
+  const shown = groups ?? (settings ? SETTINGS_NAV : NAV)
+
   return (
-    <nav className="flex flex-col gap-5 px-2 py-1" aria-label="Primary">
-      {groups.map((group, i) => (
+    <nav
+      className="flex flex-col gap-5 px-2 py-1"
+      aria-label={settings ? "Settings" : "Primary"}
+    >
+      {settings && (
+        /*
+         * ⚠ "Back to the console" RATHER THAN A BARE ARROW. An arrow alone in a
+         * sidebar reads as "collapse", and somebody who clicks it expecting a
+         * narrower rail and lands on the overview has lost their place. It also
+         * has to be the first focusable thing in the rail, so keyboard users
+         * reach the way out before the eight settings pages.
+         */
+        <Link
+          href="/"
+          className={cn(
+            "flex h-8 items-center gap-2.5 rounded-md px-2 text-sm transition-colors",
+            "duration-(--duration-instant) ease-(--ease-linear)",
+            "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+          )}
+        >
+          <ArrowLeft className="size-4 shrink-0" />
+          <span className="truncate">Back to the console</span>
+        </Link>
+      )}
+
+      {shown.map((group, i) => (
         <div key={group.label ?? `group-${i}`} className="flex flex-col gap-0.5">
           {group.label && (
             <h2 className="px-2 pt-1 pb-1.5 text-2xs font-medium tracking-wide text-muted-foreground uppercase">

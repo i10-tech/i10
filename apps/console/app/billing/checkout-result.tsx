@@ -31,6 +31,12 @@ interface Result {
 const POLL_MS = 2000
 const GIVE_UP_MS = 90_000
 
+const STATUSES = ["granted", "paid", "unpaid", "unknown", "unavailable"] as const
+
+/** ⚠ A REAL CHECK, NOT A CAST. See the poll: the cast is what broke this page. */
+const isStatus = (value: unknown): value is Status =>
+  typeof value === "string" && (STATUSES as readonly string[]).includes(value)
+
 export function CheckoutResult({ checkoutId }: { checkoutId: string | null }) {
   const [result, setResult] = useState<Result | null>(
     checkoutId ? null : { status: "unknown", plan: null },
@@ -49,9 +55,32 @@ export function CheckoutResult({ checkoutId }: { checkoutId: string | null }) {
         const response = await fetch(`/api/checkout-status/${checkoutId}`, {
           cache: "no-store",
         })
-        const body = (await response.json()) as Result
+        const body = (await response.json()) as Partial<Result>
         if (!live) return
-        setResult(body)
+
+        /*
+         * ⚠ AN UNRECOGNISED BODY IS TREATED AS "KEEP WAITING", NOT AS A
+         * VERDICT. The proxy answers the API's own error shape verbatim when
+         * something upstream fails — `{ statusCode, name, message }`, with no
+         * `status` field at all. That used to be cast to `Result`, stored, and
+         * then compared: `undefined` is neither `paid` nor `unavailable`, so
+         * the poll STOPPED, having just written a result that `present` renders
+         * as "We could not find that checkout" — to somebody who had paid.
+         */
+        if (!isStatus(body.status)) {
+          if (Date.now() - startedAt > GIVE_UP_MS) {
+            setTimedOut(true)
+            return
+          }
+          timer = setTimeout(poll, POLL_MS)
+          return
+        }
+
+        setResult({
+          status: body.status,
+          plan: body.plan ?? null,
+          ...(body.detail ? { detail: body.detail } : {}),
+        })
 
         // Only `paid` is worth waiting on: it is the second between Polar
         // taking the money and our webhook landing. Everything else is settled.
@@ -136,13 +165,29 @@ interface View {
 
 function present(result: Result | null, timedOut: boolean): View {
   if (!result) {
-    return {
-      glyph: "clock",
-      circle: AMBER,
-      halo: halo(AMBER),
-      title: "Checking your payment",
-      body: "One moment.",
-    }
+    /*
+     * ⚠ `timedOut` IS CHECKED HERE TOO, AND ITS ABSENCE WAS THE STUCK SPINNER.
+     * This branch used to return "Checking your payment / One moment"
+     * unconditionally, so a status endpoint that never answered usefully left
+     * that on screen FOR EVER — the ceiling below it had already fired and had
+     * nowhere to show itself, because `result` was still null. Somebody who had
+     * just paid watched a spinner until they gave up and reloaded.
+     */
+    return timedOut
+      ? {
+          glyph: "clock",
+          circle: AMBER,
+          halo: halo(AMBER),
+          title: "This is taking longer than usual",
+          body: "If you completed the payment, nothing is lost — open the console to see your plan. We also check for stragglers every half hour. Email support@i10.tech if it has not appeared.",
+        }
+      : {
+          glyph: "clock",
+          circle: AMBER,
+          halo: halo(AMBER),
+          title: "Checking your payment",
+          body: "One moment.",
+        }
   }
 
   switch (result.status) {
@@ -151,7 +196,12 @@ function present(result: Result | null, timedOut: boolean): View {
         glyph: "check",
         circle: GREEN,
         halo: halo(GREEN),
-        title: "You're on Pro",
+        // ⚠ THE PLAN THEY ACTUALLY BOUGHT, NOT THE WORD "Pro". This was
+        // hardcoded, so every future plan — and every bespoke one — congratulated
+        // the customer on a subscription they had not purchased. The API already
+        // returns the name; `plan` is null only when the grant landed without
+        // one, where a generic sentence is the honest fallback.
+        title: result.plan ? `You're on ${result.plan}` : "You're all set",
         body: "Thank you — your subscription is active and your new sending allowance is available right away.",
       }
 

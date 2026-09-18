@@ -167,7 +167,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     toast.success(`${result.data.name} added`, {
       description:
         mode === "delegate"
-          ? "Publish the three NS records to finish."
+          ? "Publish the NS records to finish."
           : "Publish the records to finish.",
     })
 
@@ -307,7 +307,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           description={
             delegationBlocked
               ? `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`
-              : "Publish three NS records once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever — including when they change."
+              : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever — including when they change."
           }
         />
 

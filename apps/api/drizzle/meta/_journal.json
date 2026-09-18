@@ -274,6 +274,13 @@
       "when": 1789617348617,
       "tag": "0038_tenant_for_principal",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789617349617,
+      "tag": "0039_domain_claims",
+      "breakpoints": true
     }
   ]
 }

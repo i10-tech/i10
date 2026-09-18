@@ -48,14 +48,22 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps =>
   }) as SubscriptionOps
 
 const polar = (over: Partial<PolarClient> = {}): PolarClient =>
-  ({ updateSubscription: async () => {}, ...over }) as PolarClient
+  ({
+    updateSubscription: async () => {},
+    cancelSubscription: async () => {},
+    ...over,
+  }) as PolarClient
 
 const change = (deps: { polar?: PolarClient; subscriptions?: SubscriptionOps } = {}) =>
   planChange({
     db: fakeDb(),
     polar: deps.polar ?? polar(),
     subscriptions: deps.subscriptions ?? ops(),
-    products: { free: "prod_free", pro: "prod_pro", scale: "prod_scale" },
+    products: { pro: "prod_pro", scale: "prod_scale" },
+    // ⚠ NO `free` IN `products`, WHICH MIRRORS PRODUCTION. The free plan is not
+    // sold, so it has no Polar product; naming it here is what tells the change
+    // apart from a plan that is simply missing from POLAR_PRODUCTS.
+    freePlanId: "free",
     log,
   })
 
@@ -156,6 +164,55 @@ describe("changing a plan", () => {
     expect(outcome).toMatchObject({ status: "rejected" })
     if (outcome.status !== "rejected") return
     expect(outcome.reason).toMatch(/checkout/i)
+  })
+
+  /**
+   * ⚠ LEAVING A PAID PLAN IS THE ONE MOVE THAT IS NOT A PRODUCT SWAP, and
+   * before this it was simply impossible. The free plan has no Polar product —
+   * nothing is charged for it — so `products["free"]` is undefined and the
+   * change was refused with `No such plan: free`. The console rendered a
+   * "Downgrade" button next to the free plan that answered that every time, so
+   * a paying customer had no way off a plan they no longer wanted.
+   */
+  it("cancels at the period end when moving to the free plan", async () => {
+    const updateSubscription = mock()
+    const cancelSubscription = mock(async () => {})
+
+    const outcome = await change({
+      polar: polar({ updateSubscription, cancelSubscription }),
+      subscriptions: ops({
+        current: async () => ({
+          plan: "pro",
+          status: "active",
+          cancelAtPeriodEnd: false,
+          currentPeriodEnd: null,
+          polarSubscriptionId: "sub_1",
+        }),
+      }),
+    }).to(TENANT, "free")
+
+    expect(outcome).toMatchObject({ status: "requested", direction: "downgrade" })
+    expect(cancelSubscription).toHaveBeenCalledWith("sub_1")
+
+    // ⚠ AND IT IS NOT ALSO A PRODUCT SWAP. Moving the subscription to a product
+    // that does not exist would 404 from Polar after the cancel had landed.
+    expect(updateSubscription).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⚠ THE FREE PLAN IS NAMED, NOT INFERRED FROM A MISSING PRODUCT. Treating any
+   * plan absent from `POLAR_PRODUCTS` as a cancellation would end somebody's
+   * subscription because of a typo in an environment variable — a silent,
+   * revenue-losing failure with no error anywhere.
+   */
+  it("still refuses an unknown plan rather than cancelling", async () => {
+    const cancelSubscription = mock()
+    const outcome = await change({
+      polar: polar({ cancelSubscription }),
+    }).to(TENANT, "enterprise")
+
+    expect(outcome.status).toBe("rejected")
+    expect(cancelSubscription).not.toHaveBeenCalled()
   })
 
   it("does nothing when they are already on the plan", async () => {

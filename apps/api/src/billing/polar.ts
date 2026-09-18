@@ -108,6 +108,24 @@ export interface PolarClient {
   updateSubscription(input: UpdateSubscription): Promise<void>
 
   /**
+   * Ends a live subscription at the end of the period it has been paid for.
+   *
+   * ⚠ THIS IS HOW SOMEBODY GETS BACK TO THE FREE PLAN, and without it there was
+   * no way down at all. `updateSubscription` moves between Polar PRODUCTS, and
+   * the free plan deliberately has none — nothing is charged for it, so there
+   * is nothing to sell. A customer on Pro could therefore upgrade, and could
+   * move sideways, and could not leave: the console showed a "Downgrade" button
+   * for free that answered `No such plan: free`.
+   *
+   * ⚠ AT THE PERIOD END, NOT IMMEDIATELY, WHICH IS THE SAME RULE EVERY OTHER
+   * DOWNGRADE FOLLOWS. They have paid for the month; taking the allowance away
+   * the moment they click is both a refund question and a nasty surprise for
+   * whatever is sending through it. `prorationFor("downgrade")` defers for
+   * exactly this reason, and cancelling is the largest downgrade there is.
+   */
+  cancelSubscription(subscriptionId: string): Promise<void>
+
+  /**
    * A short-lived token for the embedded payment-method form.
    *
    * ⚠ MINTED SERVER-SIDE, WHICH IS WHY THIS EXISTS AT ALL. The embed needs a
@@ -277,6 +295,29 @@ export function polarClient(opts: PolarOptions): PolarClient {
       if (!response.ok) {
         throw new Error(
           `polar subscription update failed: ${response.status} ${await response.text()}`,
+        )
+      }
+    },
+
+    async cancelSubscription(subscriptionId) {
+      /*
+       * ⚠ `PATCH` WITH `cancel_at_period_end`, NEVER `DELETE`. Polar's DELETE on
+       * a subscription revokes it there and then — benefits gone, mail stops —
+       * for a customer who has paid through to the end of the month. This marks
+       * it to end when the period does, which is what every other downgrade in
+       * this file already does and what the console's copy already promises.
+       */
+      const response = await call(
+        `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ cancel_at_period_end: true }),
+        },
+      )
+
+      if (!response.ok) {
+        throw new Error(
+          `polar subscription cancel failed: ${response.status} ${await response.text()}`,
         )
       }
     },

@@ -27,15 +27,34 @@ export const errorNames = [
   // on these already needs a default branch.
   "idempotency_conflict",
   /**
-   * ⚠ 409, AND IT DELIBERATELY DOES NOT SAY WHOSE. `core.domains.name` is
-   * unique across every tenant — two customers cannot both own example.com,
-   * because a second claim on a verified domain could send as it and receive
-   * its mail. So this answer is returned whether the domain is the caller's own
-   * duplicate or somebody else's, and the message must never distinguish them:
-   * "another customer has example.com" is a way to enumerate who our customers
-   * are.
+   * ⚠ 409, AND SINCE MIGRATION 0039 IT MEANS *THE CALLER'S OWN* DUPLICATE.
+   * `core.domains.name` used to be unique across every tenant, and this answer
+   * covered both cases deliberately so that it could not be used to enumerate
+   * customers. That constraint turned out to be a denial-of-service: the first
+   * account to type `spotify.com` held it for ever without publishing a single
+   * record, and the real owner had no route past this error. Exclusivity now
+   * follows proof of ownership, so a name nobody has verified is simply
+   * available and this error no longer fires for it.
    */
   "domain_already_exists",
+  /**
+   * The name is held, verified, by a workspace that is not the caller's.
+   *
+   * ⚠ THIS DOES LEAK ONE BIT, AND THE LEAK IS INHERENT RATHER THAN A WORDING
+   * CHOICE. Two workspaces must not both hold a verified domain — the second
+   * could send as it and receive its mail — so SOME request has to be refused,
+   * and being refused is itself the signal that somebody proved ownership. No
+   * phrasing removes that; vague phrasing only costs the legitimate owner the
+   * sentence telling them what to do. Every domain provider has this property
+   * for the same reason.
+   *
+   * ⚠ IT IS SEPARATE FROM `domain_already_exists` BECAUSE THE REMEDIES ARE
+   * OPPOSITE. That one means "look in your own domain list"; this one means
+   * "the name is spoken for, talk to us if it is yours". A client that showed
+   * one message for both would send half the people who hit it to the wrong
+   * place.
+   */
+  "domain_already_claimed",
   /**
    * ⚠ NOT `daily_quota_exceeded`, AND NOT A 429. That one is volume — a
    * customer who waits gets more. This is a plan limit on a resource that is

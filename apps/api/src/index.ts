@@ -24,6 +24,7 @@ import { clerkIdentity } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { dnsInspector } from "./console/dns.js"
+import { delegationChecker } from "./console/delegation.js"
 import { marketingStore } from "./console/marketing.js"
 import { onboardingStore } from "./console/onboarding.js"
 import { tenantProfileStore } from "./console/tenant.js"
@@ -492,6 +493,7 @@ const app = createApp({
             polar,
             subscriptions,
             products: env.POLAR_PRODUCTS,
+            freePlanId: env.METERING_FREE_PLAN_ID,
             log,
           }),
           log,
@@ -524,6 +526,7 @@ const app = createApp({
           // provider that can be down. Swapping this for Cloudflare or Route 53
           // later is an adapter, not a migration.
           zones: powerDnsZones(db),
+          log,
           // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is
           // nowhere safe to keep a DKIM private key, so the routes answer 501
           // rather than storing one in the clear — the same rule webhooks
@@ -571,6 +574,14 @@ const app = createApp({
     // a capability anybody already has with `dig`, and it must never become a
     // general-purpose fetcher running inside the cluster.
     dns: dnsInspector(),
+    /*
+     * ⚠ IT IS GIVEN THE SAME `MAIL_NAMESERVERS` THE RECORDS ARE BUILT FROM, so
+     * the check and the instructions cannot disagree. Handing it a second list
+     * would let the console tell somebody to publish one set of nameservers and
+     * then diagnose against another — which would report a correct delegation
+     * as pointed elsewhere.
+     */
+    delegation: delegationChecker({ nameservers: env.MAIL_NAMESERVERS }),
     ...(secrets
       ? {
           domains: domainStore({
@@ -584,6 +595,7 @@ const app = createApp({
               nameservers: env.MAIL_NAMESERVERS,
             },
             zones: powerDnsZones(db),
+            log,
             secrets,
           }),
         }
@@ -604,6 +616,7 @@ const app = createApp({
               polar,
               subscriptions,
               products: env.POLAR_PRODUCTS,
+              freePlanId: env.METERING_FREE_PLAN_ID,
               log,
             }),
           },

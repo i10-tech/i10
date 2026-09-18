@@ -33,6 +33,21 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
     setPending(false)
 
     if (!result.ok) {
+      /*
+       * ⚠ A CLAIMED NAME IS NOT A FAILED CHECK, AND MUST NOT SAY "try again".
+       * It is the one refusal on this button that will never clear by itself:
+       * another workspace has proved ownership, so pressing Verify for the next
+       * hour changes nothing. The message names what to do instead.
+       */
+      if (result.name === "domain_already_claimed") {
+        toast.error("This domain is spoken for", {
+          description: result.error,
+          duration: 10_000,
+        })
+        router.refresh()
+        return
+      }
+
       toast.error("Could not check the records", { description: result.error })
       return
     }

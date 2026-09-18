@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { api, ApiRequestError } from "@/lib/api"
+import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import type {
   ContactRow,
   CreatedApiKey,
@@ -240,6 +241,17 @@ export async function updateOnboarding(input: {
   use_case?: string
   completed?: boolean
 }) {
+  /*
+   * ⚠ FINISHING CLEARS THE SKIP, OR THE SKIP OUTLIVES THE REASON FOR IT. The
+   * cookie suppresses the console's redirect into this flow; the flow is also
+   * re-opened deliberately when somebody upgrades off the free plan, which is
+   * the one time there is genuinely something new to show them. A week-old
+   * "I skipped it once" would swallow that, and the upgrade would look like it
+   * did nothing. Completing is the moment the preference has served its
+   * purpose.
+   */
+  if (input.completed === true) await forgetOnboardingSkip()
+
   return run(
     () =>
       api<import("@/lib/types").OnboardingState>("/console/onboarding", {

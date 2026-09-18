@@ -148,6 +148,31 @@ export const NAV: NavGroup[] = [
       },
     ],
   },
+  {
+    /*
+     * ⚠ SETTINGS NEEDS A LINK IN THE SIDEBAR, AND FOR A WHILE IT HAD NONE AT
+     * ALL. `SETTINGS_NAV` below has always described the settings pages, but
+     * nothing rendered a route INTO them: not this list, not the workspace bar,
+     * not the mobile drawer. The only way to reach `/settings` — and therefore
+     * billing, the team, and the usage detail — was ⌘K, which is a shortcut
+     * people learn after they have found a thing, not before. Billing in
+     * particular was unreachable by clicking, so "there is nowhere to change my
+     * plan" was literally true.
+     *
+     * ⚠ ONE ENTRY, NOT THE WHOLE SETTINGS TREE. The note on `SETTINGS_NAV`
+     * stands: flattening five settings pages into the primary sidebar pushes
+     * the ten daily destinations below the fold. This is a door, and the
+     * settings shell has its own second column behind it.
+     */
+    items: [
+      {
+        href: "/settings",
+        label: "Settings",
+        icon: Settings,
+        keywords: ["billing", "plan", "team", "usage", "workspace", "account"],
+      },
+    ],
+  },
 ]
 
 /**
@@ -190,9 +215,23 @@ export const SETTINGS_NAV: NavGroup[] = [
   },
 ]
 
-/** Every navigable destination, flattened. Used by the command menu. */
+/**
+ * Every navigable destination, flattened. Used by the command menu.
+ *
+ * ⚠ DEDUPED BY `href`, BECAUSE `/settings` IS NOW IN BOTH LISTS. The sidebar
+ * needs a door into settings and `SETTINGS_NAV` needs a "General" tab, and both
+ * are the same route — so without this the command menu offers it twice, one
+ * line apart, labelled differently.
+ */
 export function allDestinations(): NavItem[] {
-  return [...NAV, ...SETTINGS_NAV].flatMap((g) => g.items)
+  const seen = new Set<string>()
+  return [...NAV, ...SETTINGS_NAV]
+    .flatMap((g) => g.items)
+    .filter((item) => {
+      if (seen.has(item.href)) return false
+      seen.add(item.href)
+      return true
+    })
 }
 
 /**
@@ -205,4 +244,23 @@ export function isActive(pathname: string, item: NavItem): boolean {
   if (item.exact) return pathname === item.href
   if (pathname === item.href) return true
   return pathname.startsWith(`${item.href}/`)
+}
+
+/**
+ * Whether a path belongs to the settings world rather than the console.
+ *
+ * ⚠ `/account` COUNTS, EVEN THOUGH IT IS NOT UNDER `/settings`. The profile and
+ * appearance pages are listed in `SETTINGS_NAV` and reached from it, so a rail
+ * that reverted to the console navigation on them would drop somebody out of
+ * the section they were still in — with the links they had just been using
+ * gone from the screen.
+ *
+ * ⚠ AND IT MATCHES ON A SEGMENT BOUNDARY, for the same reason `isActive` does.
+ * A future `/settings-export` is not settings, and a naive `startsWith` would
+ * put the wrong navigation on it.
+ */
+export function inSettings(pathname: string): boolean {
+  return ["/settings", "/account"].some(
+    (root) => pathname === root || pathname.startsWith(`${root}/`),
+  )
 }

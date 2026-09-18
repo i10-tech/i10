@@ -356,3 +356,25 @@ export interface TemplateRow {
   created_at: string
   updated_at: string
 }
+
+/**
+ * Why a delegated domain has not verified. See apps/api/src/console/delegation.ts.
+ *
+ * ⚠ THE FINDINGS ARE A UNION RATHER THAN A STRING, because the console's whole
+ * job with them is to say a different sentence for each — and one of those
+ * sentences blames us rather than the customer.
+ */
+export type ZoneFinding =
+  | { zone: string; code: "ok" }
+  | { zone: string; code: "not_published" }
+  | { zone: string; code: "delegated_elsewhere"; observed: string[] }
+  | { zone: string; code: "nameserver_silent" }
+  | { zone: string; code: "lookup_failed" }
+
+export interface DelegationReport {
+  domain: string
+  nameservers: string[]
+  nameserversAnswering: boolean
+  zones: ZoneFinding[]
+  error?: string
+}
