@@ -77,7 +77,10 @@ export default async function AppLayout({
   // Without it "Skip to the console" was a link to a page that immediately sent
   // people back, which is indistinguishable from a broken button. See
   // lib/onboarding-skip.ts for why this is a cookie and not a stored fact.
-  if (me.data.onboarding.should_onboard && !(await hasSkippedOnboarding())) {
+  if (
+    me.data.onboarding.should_onboard &&
+    !(await hasSkippedOnboarding(me.data.tenant?.id ?? ""))
+  ) {
     redirect("/onboarding")
   }
 

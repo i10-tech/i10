@@ -181,10 +181,33 @@ export function SignUpForm({
    * `redirect()` would land on the console with no session and bounce straight
    * back here.
    */
+  /*
+   * ⚠ LATCHED AT FIRST RENDER, AND WITHOUT THIS THE WHOLE FLOW ENDS AT THE
+   * PASSKEY STEP. `alreadySignedIn` is a PROP computed from `auth()` on the
+   * server, and this page re-renders on the server DURING the flow: `finalize`
+   * calls `setActive`, and `@clerk/nextjs` installs
+   * `window.__internal_onAfterSetActive = () => router.refresh()`. That refresh
+   * re-runs the server component with the session this form just created, so
+   * the prop flips from false to true the instant the account exists — and the
+   * effect below reads that as "somebody wandered in already signed in" and
+   * leaves for the dashboard, skipping passkey, two-factor and the providers.
+   *
+   * ⚠ IT PRESENTS AS A PHONE BUG, WHICH IS THE TELL. Whether the refresh lands
+   * before or after the person presses the next button is a race, and the same
+   * race is already written up in _lib/finish.ts — on a laptop the flow usually
+   * wins, on a phone the refresh does. Same code, opposite outcome, entirely
+   * down to which finished first.
+   *
+   * `useState` with an initialiser captures the value from the FIRST render and
+   * ignores every later prop, which is exactly the question being asked: was
+   * there a session before this form did anything?
+   */
+  const [arrivedSignedIn] = useState(alreadySignedIn)
+
   useEffect(() => {
-    if (!alreadySignedIn || !clerk.loaded) return
+    if (!arrivedSignedIn || !clerk.loaded) return
     leaveFor(clerk.buildUrlWithAuth(afterAuthUrl))
-  }, [alreadySignedIn, clerk, afterAuthUrl])
+  }, [arrivedSignedIn, clerk, afterAuthUrl])
 
   /** The next step, or out. */
   function advance(from: Stage = stage) {
