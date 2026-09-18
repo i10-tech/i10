@@ -108,18 +108,35 @@ const LABEL = cn(
    * another — and it was wrong for a label that crosses eighteen pixels and
    * changes size while it does.
    *
-   * ⚠ AND `quint-in-out` RATHER THAN `quint-out`, WHICH IS THE HALF THAT MADE
-   * THE LONGER DURATION USABLE. `quint-out` is violently front-loaded: it
-   * covers 99% of the distance in the first HALF of the duration, so "200ms"
-   * was really a 100ms jump followed by 100ms of invisible settling. Slowing it
-   * down did not make it read as slower, it made the mismatch with the notch
-   * below visible — the gap opened while the label was still nowhere near it.
-   * `quint-in-out` eases in and out symmetrically, so the label is at the
-   * halfway point at 100ms and reaches the border near the END of the
-   * transition, which is what the notch timing below is choreographed against.
+   * ⚠ AND A CRITICALLY DAMPED SPRING, WHICH IS THE THIRD ANSWER AFTER TWO WRONG
+   * ONES. Both failures are worth keeping because they are opposite:
+   *
+   *   `quint-out` at 200ms — the original curve, simply slowed down. It is a
+   *   fifth-power ease-out, so it covers 99% of the distance in the first HALF
+   *   of the duration. Doubling the time did not make it read as slower; it
+   *   made it read as the same jump followed by a tenth of a second of nothing.
+   *
+   *   `quint-in-out` at 200ms — the overcorrection, and worse. It eases IN, so
+   *   measured at 3% travelled after 40ms and 14% after 80ms: the label simply
+   *   sits there for the first fifth of a second after the click, then lurches.
+   *   A curve that starts slowly is correct for something that moves on its own
+   *   and wrong for anything answering a person — the pause before it starts is
+   *   indistinguishable from the interface being slow to respond.
+   *
+   * A spring has neither problem. It leaves at full speed, so the answer is
+   * immediate, and it decelerates across the whole duration rather than
+   * arriving early and idling. `--ease-spring-soft` is the critically damped
+   * one: see the spring note in styles/tokens.css for why the overshooting
+   * variant is wrong here — a label that travelled past the notch and came back
+   * would cross the border twice.
+   *
+   * ⚠ `color` RIDES THE SAME CURVE, WHICH THE SPRING NOTE OTHERWISE FORBIDS.
+   * The rule there is about OVERSHOOT: a colour animated past its target
+   * renders a value outside the palette. This spring is critically damped and
+   * never exceeds 1, so there is no out-of-gamut frame to have.
    */
   "-translate-y-1/2 transition-[top,font-size,color]",
-  "duration-(--duration-dismiss) ease-(--ease-quint-in-out)",
+  "duration-(--duration-dismiss) ease-(--ease-spring-soft)",
   "peer-[:placeholder-shown:not(:focus)]:text-base",
   "peer-[:placeholder-shown:not(:focus)]:font-normal",
 )
@@ -210,18 +227,22 @@ const LEGEND = cn(
    *
    * ⚠ SO THE GAP IS DELAYED UNTIL THE LABEL IS ALMOST THERE. Measured in the
    * browser rather than tuned by eye, sampling `getBoundingClientRect()` on both
-   * elements every 14ms through a real transition:
+   * elements every 12ms through a real transition:
    *
-   *     90ms   the gap starts opening   (label ~28% risen)
-   *    119ms   the label's box first touches the border line
-   *    150ms   the gap is fully open
-   *    200ms   the label is home
+   *     97ms   the gap starts opening   (label ~55% risen)
+   *    126ms   the gap is fully open
+   *    126ms   the label's box first touches the border line
+   *    200ms   the label settles
    *
-   * So the notch makes room just ahead of the word and finishes underneath it.
-   * It is not perfect — for about 30ms the label overlaps a gap that is still
-   * widening — and that is the better side of the trade: the artifact being
-   * avoided is an empty black slot sitting in the border for a fifth of a second
-   * with nothing in it, which is what 140ms of delay, or none at all, produced.
+   * The gap finishes opening in the same frame the label arrives at it, which is
+   * the whole thing this is buying: the notch makes room just ahead of the word
+   * rather than a fifth of a second before it. 140ms of delay put the gap 30ms
+   * LATE, so the label crossed a solid border; no delay at all put it 110ms
+   * EARLY, which is the black slot appearing out of nowhere.
+   *
+   * ⚠ THE NUMBERS ABOVE DEPEND ON THE LABEL'S CURVE, NOT JUST ITS DURATION, so
+   * this delay is not independent of `LABEL`. Changing the easing there moves
+   * when the word reaches the border and this has to be re-measured with it.
    *
    * ⚠ THE SAME DELAY IS CORRECT IN BOTH DIRECTIONS, which is why it is one
    * number and not a pair. Opening, the gap must not appear before the label;
