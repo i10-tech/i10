@@ -539,3 +539,103 @@ resource "cloudflare_dns_record" "mta_sts" {
 # wildcard every 60 days and nothing here would update the pins, so inbound
 # delivery would break at the first renewal. They also do nothing without
 # DNSSEC, which this zone does not have.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THE RECORDS i10's OWN DOMAIN NEEDS FROM i10
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# ⚠ THESE ARE FLAT IN CLOUDFLARE RATHER THAN DELEGATED, AND THAT IS THE WHOLE
+# POINT OF THEM. `i10.tech` is registered as a domain in i10's own console like
+# any customer's, so the product generated it a DKIM key, handed the private
+# half to SES, and told us to delegate `_domainkey.i10.tech`, `_dmarc.i10.tech`
+# and `mail.i10.tech` to ns1/ns2.i10.tech — which is exactly right for a
+# customer and exactly wrong for us.
+#
+# It creates a circle. Our nameserver runs in the cluster; if it stops
+# answering, the DKIM record under the delegated subtree stops resolving; SES
+# re-checks, finds nothing, and moves the identity to PENDING; and then EVERY
+# message i10 sends is rejected — including the sign-up codes and every alert
+# that would have told somebody the nameserver was down.
+#
+# That is not hypothetical. On 2026-09-18 the PowerDNS pod crashlooped on a
+# `dnsPolicy` bug, SES lost the identity within hours (verified 01:55, PENDING
+# by 17:27), and every authentication email failed with
+#
+#   MessageRejected: Email address is not verified …
+#
+# with no other symptom than "I am not receiving the code".
+#
+# Cloudflare is not part of that circle. Publishing i10's own records here means
+# our mail keeps working when our cluster does not, which is precisely when it
+# matters most. Customer domains keep using the delegation; this one must not.
+
+# ⚠ THE SELECTOR IS THE ONE THE PRODUCT GENERATED, NOT THE ONE ABOVE. SES holds
+# the private half for `i105bfe22eb2288` — see `core.domains.dkim_selector` for
+# i10.tech — so this is the public key that has to be published for the identity
+# to verify. The older `ses_byodkim` record above is now ORPHANED: nothing signs
+# with it, because the product overwrote SES's signing attributes when the
+# domain was onboarded. It is left in place deliberately rather than deleted in
+# the same change that restores mail; retiring it is its own small change, and
+# an unused selector resolves to a key nobody can sign with.
+resource "cloudflare_dns_record" "domain_dkim" {
+  zone_id = var.zone_id
+  name    = "i105bfe22eb2288._domainkey.${local.domain}"
+  type    = "TXT"
+  # Two quoted strings: a 2048-bit key exceeds the 255-character limit on a
+  # single character-string, same as `ses_byodkim` above.
+  content = "\"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApyC+vyKPhs0PkcdzSuls8tu5iwn+/5AKubarZM1R3oLI9rUbrkGkpNA3onnoY26IB5gfxugi79eT49Zdw+Sj48mFWmteKOctTLZXCzW2VFGfZ783k41HPKvgD9bZzvyAlFsnPlb1GTww/8w+RlCH6GQq4ISaHMgV9k/b5ieJY+/ZTyt2Xjed52EgUgMLohaN8\" \"6cBtyzzzHLbNlB+wxt4W04kV7Ip6bUQA+RG1NIBez+QI+ZZd4DR81ldUVQsmCC9irkhpUJU47hrRiGHvr9VLXrg2/BERWW0VXaxWkykVJStFJDsqT7LTtt6010arVzjQD8zquT2SPOu32+KFyH9CQIDAQAB\""
+  ttl     = 60
+  proxied = false
+  comment = module.labels.comment
+}
+
+# ⚠ SES's CUSTOM MAIL FROM, WHICH IS WHAT PUTS THE BOUNCE ADDRESS ON OUR DOMAIN
+# RATHER THAN ON amazonses.com. `MailFromAttributes.MailFromDomain` on the
+# identity is `send.mail.i10.tech`; without these two records that attribute
+# sits at PENDING and SES silently falls back to its own domain, which costs the
+# DMARC alignment the record set exists to produce.
+resource "cloudflare_dns_record" "send_mail_mx" {
+  zone_id  = var.zone_id
+  name     = "send.mail.${local.domain}"
+  type     = "MX"
+  content  = "feedback-smtp.eu-central-1.amazonses.com"
+  priority = 10
+  ttl      = 60
+  proxied  = false
+  comment  = module.labels.comment
+}
+
+resource "cloudflare_dns_record" "send_mail_spf" {
+  zone_id = var.zone_id
+  name    = "send.mail.${local.domain}"
+  type    = "TXT"
+  content = "\"v=spf1 include:amazonses.com ~all\""
+  ttl     = 60
+  proxied = false
+  comment = module.labels.comment
+}
+
+# ⚠ THE SECOND ROUTE. `bounce.mail` is the return path for mail that leaves
+# through our own MTA rather than SES — see docs/decisions/mail-routing.md. Both
+# are published because one key signs both routes, and which route a message
+# takes is not a DNS decision.
+resource "cloudflare_dns_record" "bounce_mail_mx" {
+  zone_id  = var.zone_id
+  name     = "bounce.mail.${local.domain}"
+  type     = "MX"
+  content  = "mail.${local.domain}"
+  priority = 10
+  ttl      = 60
+  proxied  = false
+  comment  = module.labels.comment
+}
+
+resource "cloudflare_dns_record" "bounce_mail_spf" {
+  zone_id = var.zone_id
+  name    = "bounce.mail.${local.domain}"
+  type    = "TXT"
+  content = "\"v=spf1 include:_spf.${local.domain} ~all\""
+  ttl     = 60
+  proxied = false
+  comment = module.labels.comment
+}
