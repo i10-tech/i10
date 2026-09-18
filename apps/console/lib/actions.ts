@@ -702,7 +702,7 @@ export async function deleteTemplate(id: string) {
  */
 export async function startCheckout(plan: string) {
   return run(async () => {
-    const result = await api<{ url?: string; expiresAt?: string }>(
+    const result = await api<{ id?: string; url?: string; expiresAt?: string }>(
       "/console/billing/checkout",
       { method: "POST", body: { plan } },
     )
@@ -729,7 +729,14 @@ export async function startCheckout(plan: string) {
       })
     }
 
-    return { url: result.url, expiresAt: result.expiresAt ?? null }
+    return {
+      // ⚠ MAY BE ABSENT, AND THE CALLER TREATS IT AS OPTIONAL. An older API
+      // build returns no id; the checkout still works, it just falls back to
+      // trusting Polar's event alone. See lib/polar-embed.ts.
+      id: result.id ?? null,
+      url: result.url,
+      expiresAt: result.expiresAt ?? null,
+    }
   })
 }
 

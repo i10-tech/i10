@@ -116,7 +116,24 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
        * Polar does not appear to enforce, plus an environment variable an
        * operator had to set for the upgrade button to use the better flow.
        */
-      return c.json({ url: checkout.url, expiresAt: checkout.expiresAt })
+      /*
+       * ⚠ THE ID IS RETURNED SO THE CONSOLE CAN ASK US WHETHER THE MONEY
+       * LANDED, RATHER THAN ONLY BELIEVING POLAR'S IFRAME. Their embedded
+       * checkout is supposed to `postMessage` a `success` event to the parent
+       * when it completes; measured on 2026-09-18 it did not — the checkout
+       * reached `succeeded` on Polar's side, their page's follow-up
+       * `PATCH /v1/checkouts/client/…` answered 403, and no message was ever
+       * posted. The customer sat in front of a modal saying "waiting for
+       * confirmation" for a payment that had already gone through.
+       *
+       * The id is what lets the console poll `/checkout-status/{id}` instead.
+       * See @repo/console lib/polar-embed.ts.
+       */
+      return c.json({
+        id: checkout.id,
+        url: checkout.url,
+        expiresAt: checkout.expiresAt,
+      })
     } catch (error) {
       d.log.error({ err: String(error), tenantId, plan }, "console checkout failed")
       return c.json(
