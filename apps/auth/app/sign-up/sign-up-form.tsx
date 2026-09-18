@@ -9,10 +9,9 @@ import {
   Field,
   FieldDescription,
   FieldGroup,
-  FieldLabel,
   FieldSeparator,
 } from "@repo/ui/components/field"
-import { Input } from "@repo/ui/components/input"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
@@ -279,73 +278,64 @@ export function SignUpForm({
          * than a field on its own row. `sm:` is the same breakpoint the rest of
          * this page's max-width is pitched at.
          */}
-        <div className="grid gap-7 sm:grid-cols-2 sm:gap-4">
-          <Field>
-            <FieldLabel htmlFor="first-name">First name</FieldLabel>
-            <Input
-              id="first-name"
-              name="first-name"
-              type="text"
-              placeholder="Ada"
-              autoComplete="given-name"
-              disabled={locked}
-              required
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="last-name">Last name</FieldLabel>
-            <Input
-              id="last-name"
-              name="last-name"
-              type="text"
-              placeholder="Lovelace"
-              autoComplete="family-name"
-              disabled={locked}
-              // ⚠ NOT `required`, DELIBERATELY. Plenty of people have one legal
-              // name, and Clerk stores a sign-up with no last name without
-              // complaint. A required surname is a form that cannot be
-              // completed truthfully by someone who has none.
-            />
-          </Field>
+        <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+          <FloatingInput
+            id="first-name"
+            name="first-name"
+            type="text"
+            label="First name"
+            autoComplete="given-name"
+            disabled={locked}
+            required
+          />
+          <FloatingInput
+            id="last-name"
+            name="last-name"
+            type="text"
+            label="Last name"
+            autoComplete="family-name"
+            disabled={locked}
+            // ⚠ NOT `required`, DELIBERATELY. Plenty of people have one legal
+            // name, and Clerk stores a sign-up with no last name without
+            // complaint. A required surname is a form that cannot be
+            // completed truthfully by someone who has none.
+          />
         </div>
-        <Field>
-          <FieldLabel htmlFor="email">Email</FieldLabel>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="m@example.com"
-            autoComplete="email"
-            disabled={locked}
-            required
-          />
-          <FieldDescription>
-            We&apos;ll use this to contact you. We will not share your email with anyone
-            else.
-          </FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="password">Password</FieldLabel>
-          <PasswordInput
-            id="password"
-            name="password"
-            autoComplete="new-password"
-            disabled={locked}
-            required
-          />
-          <FieldDescription>Must be at least 8 characters long.</FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="confirm-password">Confirm Password</FieldLabel>
-          <PasswordInput
-            id="confirm-password"
-            name="confirm-password"
-            autoComplete="new-password"
-            disabled={locked}
-            required
-          />
-          <FieldDescription>Please confirm your password.</FieldDescription>
-        </Field>
+        {/*
+         * ⚠ THE DESCRIPTIONS ARE `hint` PROPS NOW RATHER THAN SEPARATE
+         * `<FieldDescription>` NODES, AND THAT IS WHAT REMOVES THE JUMP. The
+         * floating field always reserves a line under itself; putting the
+         * helper text in that reserved line means a validation message replaces
+         * it in place instead of being inserted below it and pushing every
+         * field after it down the page.
+         */}
+        <FloatingInput
+          id="email"
+          name="email"
+          type="email"
+          label="Email address"
+          autoComplete="email"
+          disabled={locked}
+          required
+          hint="We'll use this to contact you, and will not share it."
+        />
+        <PasswordInput
+          id="password"
+          name="password"
+          label="Password"
+          autoComplete="new-password"
+          disabled={locked}
+          required
+          hint="At least 8 characters."
+        />
+        <PasswordInput
+          id="confirm-password"
+          name="confirm-password"
+          label="Confirm password"
+          autoComplete="new-password"
+          disabled={locked}
+          required
+        />
         {/*
          * ⚠ CLERK'S BOT PROTECTION MOUNTS ITSELF INTO THIS EXACT ID, AND ITS
          * ABSENCE IS A SILENT FAILURE. With Smart CAPTCHA enabled on the

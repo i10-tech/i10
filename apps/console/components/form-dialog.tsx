@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -15,7 +14,7 @@ import {
 } from "@repo/ui/components/dialog"
 import { Spinner } from "@repo/ui/components/spinner"
 import type { ActionResult } from "@/lib/actions"
-import { useResetOnOpen } from "@/lib/react"
+import { toastDone, toastFailure } from "@/lib/toast"
 
 /**
  * The shape every small create/edit dialog in the console shares.
@@ -60,34 +59,41 @@ export function FormDialog<T>({
   const router = useRouter()
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
   const [pending, setPending] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
 
   const open = controlledOpen ?? uncontrolledOpen
   const setOpen = setControlledOpen ?? setUncontrolledOpen
-
-  // ⚠ CLEARED ON OPEN, NOT ON CLOSE — resetting on close empties the form while
-  // the dialog is still animating out, which looks like the input being wiped.
-  useResetOnOpen(open, () => setError(null))
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (pending || !canSubmit) return
 
     setPending(true)
-    setError(null)
     const result = await onSubmit()
     setPending(false)
 
     if (!result.ok) {
-      // ⚠ INLINE, NOT A TOAST. The error almost always names a field — "a
-      // property with that key already exists" — and a toast puts it where the
-      // person is not looking while the form still shows what they typed.
-      setError(result.error)
+      /*
+       * ⚠ A TOAST, AND THE DIALOG STAYS OPEN. This used to render inline, on
+       * the reasoning that the message often names a field — "a property with
+       * that key already exists" — and a toast puts it where the person is not
+       * looking. That trade was made the other way deliberately: errors in this
+       * product are now reported in ONE place so that none of them can leak
+       * wording nobody reviewed, and a red panel appearing inside the dialog
+       * also pushed the footer down and moved the submit button under the
+       * cursor mid-click.
+       *
+       * ⚠ WHAT MAKES IT SURVIVABLE IS THAT THE DIALOG DOES NOT CLOSE. The
+       * form still shows everything that was typed, so the toast names the
+       * problem and the answer is still on screen — which is the half of the
+       * original argument that actually mattered. The eight-second duration in
+       * lib/toast.ts is set for exactly this case.
+       */
+      toastFailure(result)
       return
     }
 
     if (successMessage) {
-      toast.success(
+      toastDone(
         typeof successMessage === "function"
           ? successMessage(result.data)
           : successMessage,
@@ -109,14 +115,7 @@ export function FormDialog<T>({
             {description && <DialogDescription>{description}</DialogDescription>}
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            {children}
-            {error && (
-              <p className="rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-sm text-danger">
-                {error}
-              </p>
-            )}
-          </div>
+          <div className="space-y-4 py-4">{children}</div>
 
           <DialogFooter>
             <Button

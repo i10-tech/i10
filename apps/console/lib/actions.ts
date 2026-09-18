@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { api, ApiRequestError } from "@/lib/api"
+import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import type {
   ContactRow,
@@ -81,11 +82,20 @@ async function run<T>(
         body: error.body as unknown as Record<string, unknown>,
       }
     }
+
+    /*
+     * ⚠ NOT `error.message`. Anything reaching here was thrown by the runtime
+     * rather than written by the API — `getaddrinfo ENOTFOUND
+     * i10-api.i10-prod.svc.cluster.local`, or a TypeError naming one of our
+     * own properties — and this string is rendered to the customer. See
+     * lib/failure.ts; the real error is logged there.
+     */
+    const safe = safeFailure(error, "server action")
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Something went wrong.",
-      name: "internal_server_error",
-      status: 500,
+      error: safe.message,
+      name: safe.name,
+      status: safe.statusCode,
     }
   }
 }

@@ -71,7 +71,7 @@ export default async function OnboardingPage() {
           <Wordmark />
         </Link>
         {/*
-         * ⚠ "Skip to the console" RATHER THAN A CLOSE ICON. An × in the corner
+         * ⚠ "Skip to the dashboard" RATHER THAN A CLOSE ICON. An × in the corner
          * of a set-up flow reads as "cancel", and people hesitate over whether
          * cancelling loses the domain they just added. Words say what happens.
          *
@@ -82,7 +82,7 @@ export default async function OnboardingPage() {
          * them on. See lib/onboarding-skip.ts.
          */}
         <Button variant="ghost" size="sm" asChild>
-          <Link href="/onboarding/skip">Skip to the console</Link>
+          <Link href="/onboarding/skip">Skip to the dashboard</Link>
         </Button>
       </header>
 

@@ -73,7 +73,7 @@ export function MobileNav({
              * announces the drawer with no context at all without one.
              */}
             <SheetDescription className="sr-only">
-              Navigate the i10 console.
+              Navigate the i10 dashboard.
             </SheetDescription>
           </SheetHeader>
 

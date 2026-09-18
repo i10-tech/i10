@@ -10,12 +10,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@repo/ui/components/collapsible"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { ProviderMark } from "@/components/provider-mark"
 import { createDomain, lookupDns } from "@/lib/actions"
+import { toastFailure } from "@/lib/toast"
 import type { DnsInspection } from "@/lib/types"
 
 /**
@@ -62,9 +62,6 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     inspection: DnsInspection | null
   } | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
-  const [error, setError] = React.useState<{ message: string; name: string } | null>(
-    null,
-  )
 
   const candidate = name.trim().toLowerCase()
   const plausible = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(candidate)
@@ -149,7 +146,6 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     if (submitting) return
 
     setSubmitting(true)
-    setError(null)
 
     const result = await createDomain({
       name: name.trim().toLowerCase(),
@@ -160,7 +156,23 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     setSubmitting(false)
 
     if (!result.ok) {
-      setError({ message: result.error, name: result.name })
+      /*
+       * ⚠ A PLAN LIMIT GETS A BUTTON, NOT JUST A MESSAGE. It is the one refusal
+       * on this surface that the person can resolve in ten seconds, and leaving
+       * them to find the billing page themselves turns a sale into a support
+       * ticket. This used to be a red panel under the form with the button
+       * inside it; the toast carries the same action.
+       */
+      toastFailure(result, {
+        ...(result.name === "plan_limit_exceeded"
+          ? {
+              action: {
+                label: "See plans",
+                onClick: () => router.push("/settings/billing"),
+              },
+            }
+          : {}),
+      })
       return
     }
 
@@ -177,34 +189,36 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
 
   return (
     <form onSubmit={submit} className="space-y-6">
-      <div className="space-y-2">
-        <Label htmlFor="domain">Domain</Label>
-        <div className="relative">
-          <Input
-            id="domain"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="example.com"
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            // ⚠ `url` WOULD BE WRONG HERE. It offers a keyboard with a "/" key
-            // and browsers autofill it with whole URLs — and `https://acme.com`
-            // creates a domain that can never verify.
-            inputMode="url"
-            className="font-mono"
-            required
-          />
-          {looking && (
-            <Spinner className="absolute top-1/2 right-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          The apex, or a subdomain you send from. A subdomain like{" "}
-          <code className="font-mono">mail.example.com</code> keeps your sending
-          reputation separate from the rest of your mail.
-        </p>
-      </div>
+      {/*
+       * ⚠ THE FIELD GOES AMBER WHILE THE NAMESERVER LOOKUP IS IN FLIGHT, which
+       * is the same fact the disabled submit button below is already acting on
+       * — it just was not visible anywhere. `looking` is derived from what has
+       * been typed against what has been answered, so it cannot latch on.
+       */}
+      <FloatingInput
+        id="domain"
+        label="Domain"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        autoComplete="off"
+        autoCapitalize="none"
+        spellCheck={false}
+        // ⚠ `url` WOULD BE WRONG HERE. It offers a keyboard with a "/" key
+        // and browsers autofill it with whole URLs — and `https://acme.com`
+        // creates a domain that can never verify.
+        inputMode="url"
+        className="font-mono"
+        required
+        state={looking ? "pending" : "idle"}
+        adornment={looking ? <Spinner className="size-3.5" /> : undefined}
+        hint={
+          <>
+            The apex, or a subdomain you send from — a subdomain like{" "}
+            <code className="font-mono">mail.example.com</code> keeps your sending
+            reputation separate.
+          </>
+        }
+      />
 
       {current && (
         <div className="rounded-lg border">
@@ -330,49 +344,24 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           Advanced
         </CollapsibleTrigger>
         <CollapsibleContent className="pt-3">
-          <div className="space-y-2">
-            <Label htmlFor="return-path">Return-Path subdomain</Label>
-            <Input
-              id="return-path"
-              value={returnPath}
-              onChange={(event) => setReturnPath(event.target.value)}
-              placeholder="send"
-              className="max-w-xs font-mono"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <p className="text-xs text-muted-foreground">
-              Where bounces are collected. Defaults to{" "}
-              <code className="font-mono">send</code>. Changing it after verification
-              means re-publishing records, so pick it now if you care.
-            </p>
-          </div>
+          <FloatingInput
+            id="return-path"
+            label="Return-Path subdomain"
+            value={returnPath}
+            onChange={(event) => setReturnPath(event.target.value)}
+            className="font-mono"
+            containerClassName="max-w-xs"
+            autoComplete="off"
+            spellCheck={false}
+            hint={
+              <>
+                Where bounces go. Defaults to <code className="font-mono">send</code>.
+                Changing it later means re-publishing records.
+              </>
+            }
+          />
         </CollapsibleContent>
       </Collapsible>
-
-      {error && (
-        <div
-          className={cn(
-            "rounded-lg border px-4 py-3 text-sm",
-            error.name === "plan_limit_exceeded"
-              ? "border-warning/25 bg-warning/5"
-              : "border-danger/25 bg-danger/5",
-          )}
-        >
-          <p>{error.message}</p>
-          {/*
-           * ⚠ A PLAN LIMIT GETS A BUTTON, NOT JUST A MESSAGE. It is the one
-           * refusal on this surface that the person can resolve in ten seconds,
-           * and burying the route to it inside a red error box turns a sale
-           * into a support ticket.
-           */}
-          {error.name === "plan_limit_exceeded" && (
-            <Button size="sm" className="mt-2" asChild>
-              <a href="/settings/billing">See plans</a>
-            </Button>
-          )}
-        </div>
-      )}
 
       <div className="flex items-center gap-2">
         {/*

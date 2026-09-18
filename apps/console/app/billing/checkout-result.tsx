@@ -133,7 +133,7 @@ export function CheckoutResult({ checkoutId }: { checkoutId: string | null }) {
         href="/"
         className="rounded-lg bg-white/10 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none"
       >
-        Back to the console
+        Back to the dashboard
       </Link>
     </main>
   )
@@ -179,7 +179,7 @@ function present(result: Result | null, timedOut: boolean): View {
           circle: AMBER,
           halo: halo(AMBER),
           title: "This is taking longer than usual",
-          body: "If you completed the payment, nothing is lost — open the console to see your plan. We also check for stragglers every half hour. Email support@i10.tech if it has not appeared.",
+          body: "If you completed the payment, nothing is lost — open the dashboard to see your plan. We also check for stragglers every half hour. Email support@i10.tech if it has not appeared.",
         }
       : {
           glyph: "clock",
@@ -234,8 +234,8 @@ function present(result: Result | null, timedOut: boolean): View {
             : "Payment not completed",
         body:
           result.detail === "expired"
-            ? "Nothing was charged. Start again from the console when you are ready."
-            : "Nothing was charged. You can try again from the console.",
+            ? "Nothing was charged. Start again from the dashboard when you are ready."
+            : "Nothing was charged. You can try again from the dashboard.",
       }
 
     default:
@@ -244,7 +244,7 @@ function present(result: Result | null, timedOut: boolean): View {
         circle: GREY,
         halo: halo(GREY),
         title: "We could not find that checkout",
-        body: "The link may be incomplete. If you have paid, your plan is safe — open the console to see it.",
+        body: "The link may be incomplete. If you have paid, your plan is safe — open the dashboard to see it.",
       }
   }
 }

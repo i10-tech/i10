@@ -23,8 +23,12 @@ Then, every day:
 
 ```bash
 bun run dev:up
-bun run dev
+doppler run -- bun run dev
 ```
+
+`bun run dev` runs `dev/preflight.sh` first, which refuses to start when one of
+the six ports is already held — almost always by a previous run that was closed
+without being stopped — and names the process holding it.
 
 | URL                          | App     | Port |
 | ---------------------------- | ------- | ---- |
@@ -98,16 +102,33 @@ Only Clerk. Everything else has a local default or degrades honestly.
 > variable cannot stop the send path booting — which is a different question
 > from whether the console works.
 
-In your Clerk development instance, set the paths so the redirect actually goes
-somewhere:
+### The Clerk dashboard needs almost nothing
 
-- **Sign-in URL** `https://auth.i10.localhost/sign-in`
-- **Sign-up URL** `https://auth.i10.localhost/sign-up`
-- **After sign-in** `https://dash.i10.localhost`
+> ⚠ DO NOT PUT THE LOCAL URLs IN THE DASHBOARD'S **Paths** SCREEN. It rejects
+> them — "The path must be either relative or an empty string" — and that is
+> correct rather than a limitation: those fields configure Clerk's own hosted
+> Account Portal, which is a single instance-wide setting and cannot describe a
+> sign-in page living on a different origin from the app.
 
-And add `https://dash.i10.localhost` to `CONSOLE_ORIGINS`, which is the `azp`
-allowlist — empty means Clerk checks nothing, and a token minted for any
-application on the instance is accepted.
+The two URLs arrive at runtime instead, from `CLERK_SIGN_IN_URL` and
+`CLERK_SIGN_UP_URL`, which are already set in the `dev` config:
+
+```
+CLERK_SIGN_IN_URL   https://auth.i10.localhost/sign-in
+CLERK_SIGN_UP_URL   https://auth.i10.localhost/sign-up
+```
+
+Both the middleware and `<ClerkProvider>` are handed them explicitly — see the
+note in `apps/console/app/layout.tsx` about why omitting either half is what made
+sign-in visibly bounce through `clerk.i10.tech`. They accept absolute,
+cross-origin URLs, which is exactly what the dashboard field cannot.
+
+So leave **Paths** alone. The one screen that does need an edit is
+**Sessions → Allowed origins** if your instance restricts them.
+
+`CONSOLE_ORIGINS` is likewise already set to `https://dash.i10.localhost`. It is
+the `azp` allowlist — empty means Clerk checks nothing, and a token minted for
+any application on the instance is accepted.
 
 ### Webhooks from Clerk
 
@@ -116,8 +137,25 @@ on "Your workspace is still being created" for ever. Point a tunnel at the API:
 
 ```bash
 bunx untun@latest tunnel http://localhost:3001
-# then set the Clerk webhook endpoint to <tunnel>/webhooks/clerk
 ```
+
+Then in Clerk → **Webhooks** → **Add endpoint**:
+
+| Field        | Value                                  |
+| ------------ | -------------------------------------- |
+| Endpoint URL | `<tunnel>/webhooks/clerk`              |
+| Events       | `user.created`, `organization.created` |
+
+and copy the **signing secret** (`whsec_…`) into `CLERK_WEBHOOK_SECRET`.
+
+> ⚠ DO NOT SUBSCRIBE TO `email.created` LOCALLY. That event is not a
+> notification — it is how this product takes delivery of authentication mail
+> away from Clerk, so that verification codes come from `i10` rather than from
+> `accounts.dev`. Locally `SES_ENABLED` is `false`, so accepting it would route
+> your own sign-up code into a sender that is switched off and drop it: Clerk
+> would consider the mail handed over, and nothing would arrive. It stays off
+> until there is a tenant to send as, which is why the API logs "no tenant for
+> auth email — clerk keeps delivering its own" at boot.
 
 ## The nameserver
 

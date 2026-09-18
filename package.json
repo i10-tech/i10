@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "bash dev/preflight.sh && turbo run dev",
     "dev:down": "docker compose -f compose.dev.yaml down",
     "dev:hosts": "bash dev/hosts.sh add",
     "dev:logs": "docker compose -f compose.dev.yaml logs -f",

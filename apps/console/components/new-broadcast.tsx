@@ -4,8 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createBroadcast } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -44,18 +43,16 @@ export function NewBroadcastButton() {
       onSubmit={() => createBroadcast({ name: name.trim() })}
       onSuccess={(broadcast) => router.push(`/broadcasts/${broadcast.id}`)}
     >
-      <div className="space-y-2">
-        <Label htmlFor="broadcast-name">Name</Label>
-        <Input
-          id="broadcast-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="March product update"
-          autoComplete="off"
-          required
-          autoFocus
-        />
-      </div>
+      <FloatingInput
+        label="Name"
+        id="broadcast-name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        autoComplete="off"
+        required
+        autoFocus
+        hint="e.g. March product update"
+      />
     </FormDialog>
   )
 }

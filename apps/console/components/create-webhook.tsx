@@ -15,9 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
 import { Spinner } from "@repo/ui/components/spinner"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { createWebhook } from "@/lib/actions"
 import { WEBHOOK_EVENTS } from "@/components/webhook-events"
 import type { WebhookEndpoint } from "@/lib/types"
@@ -145,36 +144,28 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
               </DialogHeader>
 
               <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="webhook-url">Endpoint URL</Label>
-                  <Input
-                    id="webhook-url"
-                    value={url}
-                    onChange={(event) => setUrl(event.target.value)}
-                    placeholder="https://api.example.com/webhooks/i10"
-                    type="url"
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="font-mono text-xs"
-                    required
-                    autoFocus
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Must be HTTPS and publicly reachable. Localhost will not work — use
-                    a tunnel while developing.
-                  </p>
-                </div>
+                <FloatingInput
+                  label="Endpoint URL"
+                  id="webhook-url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  type="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono text-xs"
+                  required
+                  autoFocus
+                  hint="Must be HTTPS and publicly reachable. Localhost will not work — use a tunnel while developing."
+                />
 
-                <div className="space-y-2">
-                  <Label htmlFor="webhook-description">Description</Label>
-                  <Input
-                    id="webhook-description"
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder="Production handler"
-                    autoComplete="off"
-                  />
-                </div>
+                <FloatingInput
+                  label="Description"
+                  id="webhook-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  autoComplete="off"
+                  hint="e.g. Production handler"
+                />
 
                 <fieldset className="space-y-2">
                   <legend className="mb-1 text-sm font-medium">Events</legend>

@@ -1,5 +1,6 @@
 import "server-only"
 import { auth } from "@clerk/nextjs/server"
+import { safeFailure } from "@/lib/failure"
 import {
   previewFor,
   PREVIEW,
@@ -312,13 +313,8 @@ export async function tryApi<T>(
     return { ok: true, data: await api<T>(path, options) }
   } catch (error) {
     if (error instanceof ApiRequestError) return { ok: false, error: error.body }
-    return {
-      ok: false,
-      error: {
-        statusCode: 500,
-        name: "internal_server_error",
-        message: error instanceof Error ? error.message : "Something went wrong.",
-      },
-    }
+    // ⚠ SANITISED, BECAUSE THIS MESSAGE IS RENDERED BY `PanelError`. See
+    // lib/failure.ts for what the unsanitised version was publishing.
+    return { ok: false, error: safeFailure(error, `GET ${path}`) }
   }
 }

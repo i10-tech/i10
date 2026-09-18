@@ -49,7 +49,7 @@ export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
     >
       {settings && (
         /*
-         * ⚠ "Back to the console" RATHER THAN A BARE ARROW. An arrow alone in a
+         * ⚠ "Back to the dashboard" RATHER THAN A BARE ARROW. An arrow alone in a
          * sidebar reads as "collapse", and somebody who clicks it expecting a
          * narrower rail and lands on the overview has lost their place. It also
          * has to be the first focusable thing in the rail, so keyboard users
@@ -64,7 +64,7 @@ export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
           )}
         >
           <ArrowLeft className="size-4 shrink-0" />
-          <span className="truncate">Back to the console</span>
+          <span className="truncate">Back to the dashboard</span>
         </Link>
       )}
 

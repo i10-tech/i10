@@ -10,9 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
 import { Spinner } from "@repo/ui/components/spinner"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { useResetOnOpen } from "@/lib/react"
 
 /**
@@ -81,19 +80,33 @@ export function ConfirmDialog({
         </DialogHeader>
 
         {confirmWord !== undefined && (
-          <div className="space-y-2">
-            <Label htmlFor="confirm-word" className="text-xs font-normal">
-              Type <span className="font-mono font-medium">{confirmWord}</span> to
-              confirm
-            </Label>
-            <Input
+          <div>
+            {/*
+             * ⚠ THE WORD IS IN THE LABEL, WHICH MEANS IT LOSES THE MONOSPACE
+             * EMPHASIS IT USED TO HAVE. A floating label is a plain string —
+             * it animates `font-size`, and a nested element with its own family
+             * shifts at a different rate and lands a pixel out. The word is
+             * repeated in the hint below in mono, where it can be compared
+             * character by character, which is what it is actually for.
+             */}
+            <FloatingInput
               id="confirm-word"
+              label={`Type ${confirmWord} to confirm`}
               value={typed}
               onChange={(event) => setTyped(event.target.value)}
               autoComplete="off"
               autoCapitalize="none"
               spellCheck={false}
               className="font-mono"
+              /*
+               * ⚠ IT GOES GREEN ONLY ON AN EXACT MATCH, AND STAYS NEUTRAL WHILE
+               * EMPTY RATHER THAN GOING RED. A field that turns red the moment
+               * you focus it is scolding somebody for not having typed yet;
+               * red here means "this is not the word", which is only true once
+               * there is something to compare.
+               */
+              state={typed.length === 0 ? "idle" : armed ? "valid" : "invalid"}
+              hint={<span className="font-mono">{confirmWord}</span>}
               // ⚠ SUBMITS ON ENTER ONLY WHEN ARMED. Without the guard, Enter in
               // a half-typed field would fire a disabled-looking button.
               onKeyDown={(event) => {

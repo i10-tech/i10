@@ -46,7 +46,7 @@ export default function MailboxesPage() {
 
       <PageBody>
         <EmptyState
-          title="Not connected to the console yet"
+          title="Not connected to the dashboard yet"
           description="Mailbox provisioning is live on the API and authenticated per person rather than per workspace, so who may see this list is still an open question. Until it is answered, this page deliberately shows nothing rather than guessing."
           action={{ label: "Read the routing decision", href: "/domains" }}
         />

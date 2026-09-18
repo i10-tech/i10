@@ -10,10 +10,9 @@ import {
   Field,
   FieldDescription,
   FieldGroup,
-  FieldLabel,
   FieldSeparator,
 } from "@repo/ui/components/field"
-import { Input } from "@repo/ui/components/input"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
@@ -207,25 +206,53 @@ export function SignInForm({
             Enter your email below to login to your account
           </p>
         </div>
-        <Field>
-          <FieldLabel htmlFor="email">Email</FieldLabel>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="m@example.com"
-            // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
-            // This is the hook the conditional-mediation call above attaches
-            // to: without it the browser has nowhere to surface a saved
-            // passkey, and the effect silently does nothing.
-            autoComplete="email webauthn"
+        {/*
+         * ⚠ THE LABEL IS INSIDE THE FIELD NOW, AND THE PLACEHOLDER IS GONE WITH
+         * IT. `m@example.com` and a "Email" caption above the box were saying
+         * the same thing twice, and the placeholder was the half that vanished
+         * the moment anybody typed — taking the only remaining explanation of
+         * what the field wants with it. See @repo/ui/components/floating-field.
+         */}
+        <FloatingInput
+          id="email"
+          name="email"
+          type="email"
+          label="Email address"
+          // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
+          // This is the hook the conditional-mediation call above attaches
+          // to: without it the browser has nowhere to surface a saved
+          // passkey, and the effect silently does nothing.
+          autoComplete="email webauthn"
+          disabled={locked}
+          required
+        />
+        <div>
+          <PasswordInput
+            id="password"
+            name="password"
+            label="Password"
+            // ⚠ `current-password`, NOT `password`. It is what tells a password
+            // manager to offer the saved credential rather than to propose a
+            // new one, and getting it wrong is how people end up with a second
+            // entry for the same site.
+            autoComplete="current-password"
             disabled={locked}
             required
           />
-        </Field>
-        <Field>
-          <div className="flex items-center">
-            <FieldLabel htmlFor="password">Password</FieldLabel>
+          {/*
+           * ⚠ ITS OWN ROW RATHER THAN `self-end` INSIDE A `<Field>`. Field sets
+           * `[&>*]:w-full` on every direct child, so a flex item that is already
+           * 100% wide has nowhere to align to — the link rendered hard left with
+           * `align-self: flex-end` computed and doing nothing. A wrapper that
+           * justifies its own content sidesteps the question, and keeps the hit
+           * area the width of the words rather than the width of the form.
+           *
+           * ⚠ `-mt-4` PUTS IT IN THE HINT ROW THE FIELD ALREADY RESERVES. Every
+           * floating field keeps sixteen pixels under it so a validation message
+           * cannot shove the form downwards; this link costs no extra height by
+           * sitting in that space.
+           */}
+          <div className="-mt-4 flex justify-end">
             <Link
               href={resetHref}
               // ⚠ THE LINKS GO DEAD WITH THE BUTTONS, and they are the half
@@ -235,25 +262,14 @@ export function SignInForm({
               // second from being signed in to.
               aria-disabled={locked}
               tabIndex={locked ? -1 : undefined}
-              className={`ml-auto text-sm underline-offset-4 hover:underline ${
+              className={`text-xs underline-offset-4 hover:underline ${
                 locked ? "pointer-events-none opacity-50" : ""
               }`}
             >
               Forgot your password?
             </Link>
           </div>
-          <PasswordInput
-            id="password"
-            name="password"
-            // ⚠ `current-password`, NOT `password`. It is what tells a password
-            // manager to offer the saved credential rather than to propose a
-            // new one, and getting it wrong is how people end up with a second
-            // entry for the same site.
-            autoComplete="current-password"
-            disabled={locked}
-            required
-          />
-        </Field>
+        </div>
         {/*
          * ⚠ CLERK'S BOT PROTECTION MOUNTS ITSELF INTO THIS EXACT ID, AND ITS
          * ABSENCE IS A SILENT FAILURE — the same note as the sign-up form, and

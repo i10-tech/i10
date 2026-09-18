@@ -120,14 +120,30 @@
    * Changing this one number moves every corner in the system together, which
    * is the point of it being a single base rather than four literals.
    *
-   * ⚠ AND IT IS LEFT AT 10px RATHER THAN MOVED TO BASE'S 8, BECAUSE THE DERIVED
-   * SCALE IS WHAT COMPONENTS ACTUALLY USE AND IT ALREADY LANDS ON BASE'S
-   * NUMBERS. Base publishes radius100–500 as 2/4/8/12/16 with buttons at 8 and
-   * cards at 12. From 10px: `--radius-md` — what Button reaches for — is 8, and
-   * `--radius-xl`, which Card uses, is 14. Setting the base to 8 to "match"
-   * would move the button to 6 and the card to 12: one closer, one further.
+   * ⚠ RAISED FROM 10px TO 14px. The derived scale is what components actually
+   * reach for, so the base is chosen by where the DERIVED values land, not by
+   * how this number reads on its own: from 14 the scale is 10 / 12 / 14 / 18,
+   * which puts Button at 12 and Card at 18. Base publishes radius100–500 as
+   * 2/4/8/12/16; 12 is Base's own button corner, and the card sits one step
+   * above its largest, which is the intent — this console is meant to read
+   * softer than a stock shadcn build, not identical to one.
    */
-  --radius: 0.625rem;
+  --radius: 0.875rem;
+
+  /*
+   * The pill, for controls whose height is fixed and known.
+   *
+   * ⚠ IT IS A SEPARATE TOKEN RATHER THAN A BIGGER `--radius`, BECAUSE A PILL IS
+   * NOT A CORNER — it is `height / 2`, and it only reads as intentional on a
+   * shape short enough for the two arcs to meet. Applied to a card it produces
+   * a lozenge; applied to a `<textarea>` that grows, the corners swell as the
+   * box does. So single-line inputs, buttons, badges and chips take this, and
+   * everything with variable height takes the scale above.
+   *
+   * ⚠ AND IT IS 9999px RATHER THAN 50%. A percentage radius is resolved against
+   * BOTH axes, so a wide button gets an ellipse rather than a stadium.
+   */
+  --pill: 9999px;
 
   /*
    * The sidebar surface.
@@ -330,6 +346,18 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* ⚠ `rounded-pill`, NOT Tailwind's own `rounded-full`. Same computed value
+   * today; the point is that a grep for `rounded-pill` finds every control that
+   * opted into the stadium shape on purpose, and leaves alone the avatars and
+   * status dots that are round because they are circles.
+   *
+   * ⚠ THE ROOT TOKEN IS `--pill`, NOT `--radius-pill`, AND THE TWO NAMES MUST
+   * STAY DIFFERENT. `@theme inline` resolves a key by inlining the `var()` it
+   * points at, so `--radius-pill: var(--radius-pill)` is a variable defined as
+   * itself — which does not error, it simply resolves to nothing, and every
+   * `rounded-pill` in the product silently becomes a square corner. */
+  --radius-pill: var(--pill);
 
   /*
    * Typography.
