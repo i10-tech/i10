@@ -640,6 +640,27 @@
   --ease-quint-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-quint-in: cubic-bezier(0.64, 0, 0.78, 0);
   --ease-quad-in: cubic-bezier(0.11, 0, 0.5, 0);
+  /*
+   * ⚠ THE GENTLE EASE-OUT, AND IT EXISTS BECAUSE `--ease-quint-out` IS TOO
+   * SHARP FOR ANYTHING THAT SHOULD BE WATCHED. A fifth-power ease-out is 48%
+   * travelled inside one frame and 97% by half the duration — which is exactly
+   * right for a control that must feel instant, and useless when the movement
+   * itself is meant to be legible. Lengthening the duration does not help: it
+   * adds time to a tail nobody can see, so the movement looks identical and
+   * merely finishes later.
+   *
+   * A second-power ease-out has the property both of those lack: it still
+   * leaves at once — non-zero velocity at t=0, so there is no pause between the
+   * click and the response — while spending the whole duration arriving. Half
+   * the travel is done at half the time, where a fifth-power ease-out is 97%
+   * done by then.
+   *
+   * ⚠ IT IS NOT A SUBSTITUTE FOR THE SPRINGS. Those start from REST, which is
+   * what makes them read as weight — and as elastic on a short travel. This has
+   * no overshoot and no ramp-up; it is the plainest possible "moves off
+   * immediately, slows into place".
+   */
+  --ease-quad-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --ease-linear: linear;
 
   --duration-instant: 100ms;

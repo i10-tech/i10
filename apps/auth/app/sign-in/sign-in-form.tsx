@@ -102,7 +102,7 @@ export function SignInForm({
    * mismatch and resolves by discarding the markup.
    */
   const lastUsed = useLastSignInMethod()
-  const identifierState = emailVerdict(identifier, identifierField.show)
+  const identifierState = emailVerdict(identifier, identifierField)
 
   /**
    * Offer a saved passkey without anybody asking.
@@ -333,6 +333,9 @@ export function SignInForm({
                   {...identifierField.props}
                   state={identifierState.state}
                   hint={identifierState.hint}
+                  // See the sign-up form: a validation message is drawn into the
+                  // gap FieldGroup already leaves, not given a row of its own.
+                  reserveHint={false}
                   // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
                   // This is the hook the conditional-mediation call above attaches
                   // to: without it the browser has nowhere to surface a saved

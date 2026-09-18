@@ -1,5 +1,6 @@
 import type { FieldState } from "@repo/ui/components/floating-field"
 import type { PasswordRules } from "./environment"
+import type { FieldFocus } from "./field-state"
 
 /**
  * Telling somebody their address is wrong before we spend a round trip finding
@@ -40,28 +41,39 @@ export interface Verdict {
  */
 const EMAIL = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[a-z]{2,}$/i
 
-export function emailVerdict(
-  value: string,
-  /**
-   * Whether a red border is allowed yet. See `useFieldFocus` in field-state.ts,
-   * which is what every caller passes: wrong **and** not currently focused.
-   *
-   * ⚠ GREEN IS IMMEDIATE AND RED WAITS, AND THE ASYMMETRY IS THE WHOLE DESIGN.
-   * Every address is invalid while it is being typed — `m`, `mi`, `mid` — so a
-   * field that goes red on the first keystroke is a field that is red for the
-   * entire time anybody is using it, and the colour stops meaning anything.
-   * Confirming correctness the moment it is correct has no such problem: there
-   * is no state where "this is fine" is premature.
-   */
-  show: boolean,
-): Verdict {
+/**
+ * ⚠ TWO SIGNALS, NOT ONE, BECAUSE EMPTY AND WRONG ARE NOT THE SAME FAULT. See
+ * `useFieldFocus` in field-state.ts: `blurred` is "you stopped typing and what
+ * is there is malformed", `submitted` is "you pressed the button and this is
+ * still empty". One boolean governed both once, and the result was a field that
+ * turned red because somebody tabbed past a box they had not answered yet.
+ */
+type Reveal = Pick<FieldFocus, "blurred" | "submitted">
+
+export function emailVerdict(value: string, reveal: Reveal): Verdict {
   const trimmed = value.trim()
-  if (trimmed === "")
-    return show
+
+  /*
+   * ⚠ EMPTY IS NEVER MALFORMED. An unanswered field is a field somebody has not
+   * got to yet, right up until they say the form is finished — so the blur that
+   * reddens `mido@` leaves an empty box alone, and only `submitted` speaks for
+   * it.
+   */
+  if (trimmed === "") {
+    return reveal.submitted
       ? { state: "invalid", hint: "Enter your email address." }
       : { state: "idle" }
+  }
+
+  // ⚠ GREEN IS IMMEDIATE AND RED WAITS, AND THE ASYMMETRY IS THE WHOLE DESIGN.
+  // Every address is invalid while it is being typed — `m`, `mi`, `mid` — so a
+  // field that goes red on the first keystroke is a field that is red for the
+  // entire time anybody is using it, and the colour stops meaning anything.
+  // Confirming correctness the moment it is correct has no such problem: there
+  // is no state where "this is fine" is premature.
   if (EMAIL.test(trimmed)) return { state: "valid" }
-  return show
+
+  return reveal.blurred
     ? { state: "invalid", hint: "That does not look like an email address." }
     : { state: "idle" }
 }
@@ -82,10 +94,14 @@ export function emailVerdict(
 export function passwordVerdict(
   value: string,
   rules: PasswordRules,
-  show: boolean,
+  reveal: Reveal,
 ): Verdict {
-  if (value === "")
-    return show ? { state: "invalid", hint: "Choose a password." } : { state: "idle" }
+  // ⚠ SAME RULE AS THE ADDRESS ABOVE: an empty box is unanswered, not wrong.
+  if (value === "") {
+    return reveal.submitted
+      ? { state: "invalid", hint: "Choose a password." }
+      : { state: "idle" }
+  }
 
   const unmet = firstUnmet(value, rules)
   if (!unmet) return { state: "valid" }
@@ -96,13 +112,13 @@ export function passwordVerdict(
    * "needs a number" on the second character is a complaint about a password
    * nobody has finished writing. So the count shows as a neutral GREY hint from
    * the start — it is information, not a refusal — and only the red border
-   * waits for `show`.
+   * waits.
    */
-  if (unmet.kind === "length" && !show) {
+  if (unmet.kind === "length" && !reveal.blurred) {
     return { state: "idle", hint: unmet.hint }
   }
 
-  return show ? { state: "invalid", hint: unmet.hint } : { state: "idle" }
+  return reveal.blurred ? { state: "invalid", hint: unmet.hint } : { state: "idle" }
 }
 
 type Unmet = { kind: "length" | "class"; hint: string }

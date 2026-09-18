@@ -217,8 +217,8 @@ export function SignUpForm({
    * storing it would mean three more `setState` calls per keystroke and a state
    * that can disagree with the input it describes.
    */
-  const emailState = emailVerdict(email, emailField.show)
-  const secretState = passwordVerdict(secret, passwordPolicy, secretField.show)
+  const emailState = emailVerdict(email, emailField)
+  const secretState = passwordVerdict(secret, passwordPolicy, secretField)
 
   /**
    * Somebody who is already signed in, with no step to resume onto.
@@ -600,6 +600,10 @@ export function SignUpForm({
                 {...emailField.props}
                 state={emailState.state}
                 hint={emailState.hint}
+                // ⚠ NO RESERVED ROW: this hint is a validation message rather than a
+                // description, so it is drawn into the gap FieldGroup already
+                // leaves rather than making every field permanently taller.
+                reserveHint={false}
                 autoComplete="email"
                 disabled={locked}
                 autoFocus
@@ -631,6 +635,7 @@ export function SignUpForm({
                  * once you have left the box.
                  */
                 hint={secretState.hint ?? describeRules(passwordPolicy)}
+                reserveHint={false}
                 autoComplete="new-password"
                 disabled={locked}
                 required

@@ -19,23 +19,46 @@ import { useState } from "react"
  * `emailVerdict` in validate.ts, which confirms a valid value the instant it
  * becomes valid, focused or not.
  *
- * ⚠ AND IT IS TWO BOOLEANS RATHER THAN ONE, BECAUSE "HAS BEEN LEFT AT LEAST
- * ONCE" AND "IS BEING EDITED RIGHT NOW" ARE DIFFERENT QUESTIONS. Collapsing
- * them — clearing `touched` on focus — would mean a field that was left wrong,
- * focused, and then abandoned without an edit goes quietly back to grey. The
- * person tabbed through it twice and the form now says nothing about a value it
- * has already refused once.
+ * ⚠ AND IT IS THREE BOOLEANS, BECAUSE THREE DIFFERENT QUESTIONS ARE BEING
+ * ASKED. "Has this been left at least once", "is it being edited right now" and
+ * "has the form been submitted" are independent, and collapsing any pair of
+ * them produces a specific wrong screen:
+ *
+ *   touched merged into focused — a field left wrong, focused, then abandoned
+ *   without an edit goes quietly back to grey. The person tabbed through it
+ *   twice and the form now says nothing about a value it already refused.
+ *
+ *   submitted merged into touched — this is the one that shipped and was wrong.
+ *   Tabbing through an EMPTY field marked it touched, so a box nobody had
+ *   answered yet turned red for the crime of being looked at. Emptiness is not
+ *   a mistake until somebody presses the button; malformedness is a mistake as
+ *   soon as they stop typing it.
  */
 export interface FieldFocus {
-  /** Whether an error may be painted right now. */
-  show: boolean
   /**
-   * Mark it as left, for a submit that was refused.
+   * Whether a MALFORMED value may be painted red right now.
+   *
+   * ⚠ IT SAYS NOTHING ABOUT AN EMPTY ONE, AND THAT SEPARATION IS THE POINT.
+   * Tabbing through a field you have not filled in yet is not a mistake — it is
+   * how anybody reads a form before answering it, and reddening it is the
+   * interface telling somebody off for looking. Emptiness is only a fault at the
+   * moment they say they are finished, which is `submitted` below.
+   */
+  blurred: boolean
+  /**
+   * Whether an EMPTY value may be painted red right now.
+   *
+   * ⚠ ONLY EVER TRUE AFTER A REFUSED SUBMIT. Nothing a person does inside the
+   * form sets this; pressing the button is the only thing that turns "you have
+   * not filled this in" from an observation into a complaint.
+   */
+  submitted: boolean
+  /**
+   * Mark it as answered-for, for a submit that was refused.
    *
    * ⚠ NEEDED FOR THE FIELD NOBODY VISITED. Pressing the submit button with an
-   * untouched password box has to say something about it, and `show` alone
-   * would stay false because the field was never blurred — it was never
-   * focused either.
+   * untouched password box has to say something about it, and `blurred` alone
+   * would stay false because the field was never focused, so never blurred.
    */
   reveal: () => void
   /** Spread onto the input. */
@@ -47,11 +70,16 @@ export interface FieldFocus {
 
 export function useFieldFocus(): FieldFocus {
   const [touched, setTouched] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
   const [focused, setFocused] = useState(false)
 
   return {
-    show: touched && !focused,
-    reveal: () => setTouched(true),
+    blurred: touched && !focused,
+    // ⚠ `!focused` ON THIS ONE TOO, so an empty field that went red on submit
+    // goes quiet the moment somebody clicks into it to answer it. Same rule as
+    // everywhere else: red means "you stopped, and it is still wrong".
+    submitted: submitted && !focused,
+    reveal: () => setSubmitted(true),
     props: {
       onFocus: () => setFocused(true),
       onBlur: () => {
