@@ -123,10 +123,10 @@ bunx untun@latest tunnel http://localhost:3001
 
 PowerDNS runs against the same `pdns` schema the API writes, which is the whole
 design — creating a delegated domain and publishing its zone are one
-transaction. It is on 5353 because macOS keeps mDNSResponder on 53:
+transaction. It is on 5354 — 53 needs root, and 5353 is mDNS's own port, which macOS already holds:
 
 ```bash
-dig @127.0.0.1 -p 5353 SOA mail.example.com
+dig @127.0.0.1 -p 5354 SOA mail.example.com
 ```
 
 ## Resetting

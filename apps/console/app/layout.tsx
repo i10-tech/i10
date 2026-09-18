@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
 import { GeistMono } from "geist/font/mono"
 import { GeistSans } from "geist/font/sans"
+import { clerkAppearance } from "@repo/ui/clerk"
 import { Theme } from "@repo/ui/components/theme"
 import { Toaster } from "@repo/ui/components/sonner"
 import { TooltipProvider } from "@repo/ui/components/tooltip"
@@ -51,19 +52,20 @@ function Providers({ children }: { children: React.ReactNode }) {
       publishableKey={publishableKey}
       signInUrl={process.env.CLERK_SIGN_IN_URL}
       signUpUrl={process.env.CLERK_SIGN_UP_URL}
-      appearance={{
-        variables: {
-          colorPrimary: "#fafafa",
-          colorBackground: "#0a0a0a",
-          colorForeground: "#fafafa",
-          colorInput: "#141414",
-          colorInputForeground: "#fafafa",
-          colorMutedForeground: "#a1a1a1",
-          colorBorder: "#262626",
-          borderRadius: "0.5rem",
-          fontFamily: "var(--font-geist-sans)",
-        },
-      }}
+      /*
+       * ⚠ THIS USED TO BE A HARDCODED DARK PALETTE, AND IN LIGHT MODE IT WAS
+       * SIMPLY WRONG. Nine literal hex values — `colorBackground: "#0a0a0a"`,
+       * `colorForeground: "#fafafa"` — so every Clerk surface rendered dark on
+       * a white page for anybody who had not chosen dark mode, with no way for
+       * it to follow the theme. The `fontFamily` named `--font-geist-sans`,
+       * which is not a variable this design system defines, so Clerk fell back
+       * to its own font on top of that.
+       *
+       * ⚠ AND IT IS SET HERE RATHER THAN PER COMPONENT, so a Clerk surface
+       * added tomorrow inherits it. See @repo/ui/clerk for why the values are
+       * `var(--…)` and how that makes dark mode free.
+       */
+      appearance={clerkAppearance}
     >
       {children}
     </ClerkProvider>

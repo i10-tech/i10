@@ -1,50 +1,34 @@
--- The roles and schemas the application expects, created once on an empty data
--- directory.
+-- The two login roles, and nothing else.
 --
--- ⚠ `i10_api` IS NOT THE OWNER, AND THAT IS THE WHOLE REASON THIS FILE EXISTS.
--- Row level security does not apply to a table's owner: every tenant policy in
--- the `core` schema is a silent no-op for the role that created the tables. A
--- local database where the app connects as the owner is one where the tenant
--- boundary does not exist — so every RLS bug ships, because development could
--- never have shown it. `apps/api/src/db/client.ts` refuses to start against an
--- owning, superuser or BYPASSRLS role, which turns a subtle leak into a startup
--- failure; this file is what lets it start at all.
+-- ⚠ ONLY THE ROLES, BECAUSE THE MIGRATIONS OWN EVERYTHING ELSE. An earlier
+-- version of this file also created the `core`, `authd` and `pdns` schemas and
+-- set default privileges on them — and that broke migrations outright:
+-- migration 0000 opens with a bare `CREATE SCHEMA "authd"`, which fails on a
+-- schema that already exists, and the migrator stops on the first file. The
+-- grants were redundant too; 0001, 0002 and 0003 already issue exactly the same
+-- `ALTER DEFAULT PRIVILEGES` for `i10_api`, and 0040 does it for `pdns`.
 --
--- ⚠ THE PASSWORDS ARE WORTHLESS ON PURPOSE. This database listens on a laptop's
--- loopback and holds fixtures. A real secret here would be a real secret
--- committed to the repository.
+-- In production these roles come from CNPG's `managed.roles` — see
+-- infra/k8s/i10/platform-db/cluster.yaml. This file is that, for a laptop.
+--
+-- ⚠ `i10_api` IS NOT THE OWNER, AND THAT IS THE WHOLE POINT. Row level security
+-- does not apply to a table's owner: every tenant policy in the `core` schema
+-- is a silent no-op for the role that created the tables. A local database
+-- where the app connects as the owner is one where the tenant boundary does not
+-- exist — so an RLS bug could never be caught before production.
+-- `apps/api/src/db/client.ts` refuses to start against an owning, superuser or
+-- BYPASSRLS role, which turns that from a quiet leak into a startup failure.
+--
+-- ⚠ AND THE PASSWORDS ARE WORTHLESS ON PURPOSE. This database listens on a
+-- laptop's loopback and holds fixtures. A real secret here would be a real
+-- secret committed to the repository.
+-- ⚠ ALL FOUR, BECAUSE THE MIGRATIONS GRANT TO ALL FOUR. `stalwart` and
+-- `authd` have no local process to log in as — the mail server and the LDAP
+-- bridge are not part of `bun dev` — but migrations 0001 and onwards issue
+-- `GRANT … TO authd` and `… TO stalwart`, and a GRANT to a role that does not
+-- exist is an error that stops the migrator on the first file. They exist here
+-- so the schema can be built, not because anything connects as them.
 CREATE ROLE i10_api LOGIN PASSWORD 'i10_api';
+CREATE ROLE authd LOGIN PASSWORD 'authd';
+CREATE ROLE stalwart LOGIN PASSWORD 'stalwart';
 CREATE ROLE pdns LOGIN PASSWORD 'pdns';
-
-GRANT CONNECT ON DATABASE i10 TO i10_api;
-GRANT CONNECT ON DATABASE i10 TO pdns;
-
--- ⚠ THE SCHEMAS ARE CREATED HERE EVEN THOUGH MIGRATIONS ALSO CREATE THEM, and
--- the reason is the statement below. `ALTER DEFAULT PRIVILEGES IN SCHEMA` fails
--- outright on a schema that does not exist yet — so without these three lines
--- this script aborts, Postgres reports the initdb step as failed, and the
--- container comes up with no roles at all. Every migration uses
--- `CREATE SCHEMA IF NOT EXISTS`, so creating them early costs nothing.
-CREATE SCHEMA IF NOT EXISTS core;
-CREATE SCHEMA IF NOT EXISTS authd;
-CREATE SCHEMA IF NOT EXISTS pdns;
-
-GRANT USAGE ON SCHEMA core, authd, pdns TO i10_api;
-GRANT USAGE ON SCHEMA pdns TO pdns;
-
--- ⚠ DEFAULT PRIVILEGES APPLY TO WHAT IS CREATED *AFTERWARDS*, BY THIS ROLE.
--- Migrations run as `i10`, so everything they create lands granted — the same
--- mechanism migration 0002 relies on in production. A plain `GRANT ON ALL
--- TABLES` here would cover the zero tables that exist right now and nothing
--- else.
-ALTER DEFAULT PRIVILEGES FOR ROLE i10 IN SCHEMA core, authd, pdns
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO i10_api;
-ALTER DEFAULT PRIVILEGES FOR ROLE i10 IN SCHEMA core, authd, pdns
-  GRANT USAGE, SELECT ON SEQUENCES TO i10_api;
-
--- The nameserver reads and writes only its own schema. See migration 0040 for
--- why it needs more than SELECT.
-ALTER DEFAULT PRIVILEGES FOR ROLE i10 IN SCHEMA pdns
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pdns;
-ALTER DEFAULT PRIVILEGES FOR ROLE i10 IN SCHEMA pdns
-  GRANT USAGE, SELECT ON SEQUENCES TO pdns;

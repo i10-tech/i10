@@ -1,0 +1,90 @@
+# The nameserver's configuration, replacing the image's own.
+#
+# ⚠ THE IMAGE'S DEFAULT pdns.conf IS WHY THIS EXISTS, AND THE FAILURE IT CAUSES
+# NAMES THE WRONG THING. It ships:
+#
+#     launch=gsqlite3
+#     gsqlite3-dnssec
+#     gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
+#
+# Overriding `launch` on the command line means the sqlite backend is never
+# loaded — and the two settings below it are then settings for a backend that
+# does not exist, which PowerDNS treats as fatal:
+#
+#     Fatal error: Trying to set unknown setting 'gsqlite3-dnssec'
+#
+# It names a backend nobody asked for, mentions neither the config file nor the
+# flag, and no arrangement of arguments fixes it. The file has to be replaced.
+# Found by running the local stack in compose.dev.yaml; this manifest carried
+# command-line flags and would have crashlooped on the first sync.
+#
+# ⚠ KEEP THIS IN STEP WITH dev/powerdns/pdns.conf. They are the same file minus
+# the password, and a setting added to one and not the other is a difference
+# that only appears under real traffic.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: i10-powerdns
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-powerdns
+data:
+  pdns.conf: |
+    launch=gpgsql
+
+    gpgsql-host=i10-platform-pooler
+    gpgsql-port=5432
+    gpgsql-dbname=i10
+    gpgsql-user=pdns
+
+    # ⚠ THE PASSWORD IS NOT HERE, AND MUST NOT BE. A ConfigMap is world-readable
+    # to anything with `get` on the namespace. It is supplied on the command
+    # line from the Secret — see the Deployment — and a command-line setting
+    # overrides the file.
+
+    # ⚠ THE SCHEMA IS SELECTED BY `search_path`, NOT BY QUALIFYING THE QUERIES.
+    # PowerDNS's gpgsql backend emits unqualified table names and offers no way
+    # to prefix them, so this is the only thing that makes it find
+    # `pdns.domains` rather than looking in `public` and serving nothing.
+    gpgsql-extra-connection-parameters=options=-csearch_path=pdns
+
+    # ⚠ OFF BECAUSE OUR WRITER DOES NOT MAINTAIN THE COLUMNS IT NEEDS. With
+    # DNSSEC on, PowerDNS expects `ordername` and `auth` on every record, and
+    # apps/api/src/domains/powerdns.ts writes neither — the result is a zone
+    # that answers NXDOMAIN for names that exist.
+    gpgsql-dnssec=no
+
+    # ⚠ THE ZONE CACHE IS REFRESHED EVERY MINUTE, NOT EVERY FIVE. PowerDNS
+    # caches the LIST of zones it serves and re-reads it only on this interval;
+    # the default is 300 seconds, and until then a zone the API has just written
+    # answers REFUSED — as though we were not authoritative for it at all.
+    # Measured locally: a zone inserted while the server ran was invisible until
+    # the interval elapsed.
+    #
+    # ⚠ THAT MATTERS BECAUSE CREATING A DOMAIN AND PUBLISHING ITS ZONE ARE ONE
+    # TRANSACTION. The customer adds a domain, publishes records, presses
+    # Verify — and for five minutes our own nameserver would deny knowing the
+    # zone, which the delegation check reports as `nameserver_silent`: our
+    # fault, correctly, and clearing on its own. The worst kind of intermittent.
+    #
+    # ⚠ NOT ZERO. Disabling the cache puts a database query on the path of every
+    # DNS question, so a Postgres hiccup becomes a DNS outage.
+    zone-cache-refresh-interval=60
+
+    # An authoritative server that recurses is an open resolver, which is an
+    # amplification reflector with our address on it. There is also no secondary
+    # to transfer to, and an open transfer hands anybody every customer domain.
+    disable-axfr=yes
+
+    local-address=0.0.0.0
+    local-port=53
+
+    # ⚠ BOUND TO THE POD, NOT THE HOST. It is the readiness probe's target and
+    # has no hostPort, so it is not reachable from outside the cluster.
+    webserver=yes
+    webserver-address=0.0.0.0
+    webserver-port=8081
+    webserver-allow-from=0.0.0.0/0
+
+    loglevel=4
+    log-dns-queries=no

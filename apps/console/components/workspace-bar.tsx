@@ -73,10 +73,11 @@ export function WorkspaceBar({
           afterCreateOrganizationUrl="/onboarding"
           appearance={{
             elements: {
-              // ⚠ THE TRIGGER IS RESTYLED TO SIT IN OUR RAIL RATHER THAN LEFT
-              // AS A CARD. Clerk's default trigger carries its own padding,
+              // ⚠ LAYOUT ONLY. Clerk's default trigger carries its own padding,
               // border and shadow, which on a true-black sidebar renders as a
-              // pale box floating inside the navigation.
+              // pale box floating inside the navigation — but the COLOURS come
+              // from the provider now, so there is nothing to restate here.
+              // See @repo/ui/clerk.
               rootBox: "w-full min-w-0",
               organizationSwitcherTrigger:
                 "w-full min-w-0 justify-start gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-sidebar-accent",

@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { UserProfile } from "@clerk/nextjs"
+import { CLERK_PANEL } from "@repo/ui/clerk"
 import {
   Section,
   SectionContent,
@@ -48,17 +49,13 @@ export default function AccountPage() {
           signed in on. This is your account across every workspace you belong to.
         </SectionDescription>
         <SectionContent>
-          <UserProfile
-            routing="hash"
-            appearance={{
-              elements: {
-                rootBox: "w-full",
-                cardBox: "w-full max-w-none shadow-none border-0",
-                card: "w-full max-w-none shadow-none border-0 bg-transparent p-0",
-                pageScrollBox: "p-0",
-              },
-            }}
-          />
+          {/*
+           * ⚠ ONLY THE CHROME IS OVERRIDDEN HERE; THE COLOURS COME FROM THE
+           * PROVIDER. This used to carry its own copy of the card overrides,
+           * which is how four call sites ended up with four slightly different
+           * ideas of what "remove Clerk's card" means. See @repo/ui/clerk.
+           */}
+          <UserProfile routing="hash" appearance={{ elements: CLERK_PANEL }} />
         </SectionContent>
       </Section>
     </div>

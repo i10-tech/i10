@@ -35,7 +35,14 @@ services:
       # while `psql` connects perfectly well to the wrong database.
       - "5433:5432"
     volumes:
-      - postgres:/var/lib/postgresql/data
+      # ⚠ `/var/lib/postgresql`, NOT `/var/lib/postgresql/data`. Postgres 18's
+      # image changed the convention: it now expects a single mount one level up
+      # and puts the cluster in a MAJOR-VERSION subdirectory beneath it, so that
+      # `pg_upgrade --link` does not have to cross a mount boundary. Mounting the
+      # old path makes the entrypoint refuse to start with a long essay about
+      # finding "PostgreSQL data in /var/lib/postgresql/data (unused
+      # mount/volume)" — which reads like a corrupt volume and is not.
+      - postgres:/var/lib/postgresql
       # ⚠ RUNS ONCE, ON AN EMPTY DATA DIRECTORY. Changing it later does nothing
       # until the volume is removed — `bun run dev:reset`.
       - ./dev/postgres/init.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
@@ -88,31 +95,28 @@ services:
 
   # ⚠ THE AUTHORITATIVE NAMESERVER, SO DELEGATION CAN BE EXERCISED LOCALLY. It
   # reads the same `pdns` schema the API writes, which is the whole design —
-  # see infra/k8s/i10/powerdns. Bound to 5353 rather than 53 because macOS keeps
-  # mDNSResponder on 53 and binding it needs root.
+  # see infra/k8s/i10/powerdns.
   #
-  #   dig @127.0.0.1 -p 5353 SOA mail.example.com
+  # ⚠ 5354, NOT 53 AND NOT 5353. Binding 53 needs root, and 5353 is mDNS's OWN
+  # port — macOS runs mDNSResponder there, so a container asking for it fails
+  # with "address already in use" on every Mac in the building. 5354 is the
+  # next free one and belongs to nobody.
+  #
+  #   dig @127.0.0.1 -p 5354 SOA mail.example.com
   powerdns:
-    image: powerdns/pdns-auth-49:4.9.9
+    image: powerdns/pdns-auth-51:5.1.4
     depends_on:
       postgres:
         condition: service_healthy
-    command:
-      - "--launch=gpgsql"
-      - "--gpgsql-host=postgres"
-      - "--gpgsql-port=5432"
-      - "--gpgsql-dbname=i10"
-      - "--gpgsql-user=pdns"
-      - "--gpgsql-password=pdns"
-      - "--gpgsql-extra-connection-parameters=options=-csearch_path=pdns"
-      - "--dnssec=no"
-      - "--disable-axfr=yes"
-      - "--local-address=0.0.0.0"
-      - "--local-port=53"
-      - "--loglevel=4"
+    volumes:
+      # ⚠ REPLACES THE IMAGE'S OWN pdns.conf RATHER THAN ADDING TO IT. Read the
+      # header of that file: the default config launches sqlite and carries two
+      # sqlite-only settings, which become fatal "unknown setting" errors the
+      # moment `launch` names a different backend.
+      - ./dev/powerdns/pdns.conf:/etc/powerdns/pdns.conf:ro
     ports:
-      - "5353:53/udp"
-      - "5353:53/tcp"
+      - "5354:53/udp"
+      - "5354:53/tcp"
 
 volumes:
   postgres:

@@ -1,6 +1,7 @@
 "use client"
 
 import { CreateOrganization, OrganizationProfile, useOrganization } from "@clerk/nextjs"
+import { CLERK_PANEL } from "@repo/ui/clerk"
 import { Skeleton } from "@repo/ui/components/skeleton"
 
 /**
@@ -51,28 +52,11 @@ export function TeamPanel() {
           // on the dashboard makes them navigate back to finish the thing they
           // started.
           afterCreateOrganizationUrl="/settings/team"
-          appearance={CHROMELESS}
+          appearance={{ elements: CLERK_PANEL }}
         />
       </div>
     )
   }
 
-  return <OrganizationProfile routing="hash" appearance={CHROMELESS} />
+  return <OrganizationProfile routing="hash" appearance={{ elements: CLERK_PANEL }} />
 }
-
-/**
- * ⚠ CLERK'S CARD CHROME IS REMOVED, NOT RESTYLED. Its default is a bordered,
- * shadowed card — on a settings page that is already a list of sections, that
- * renders as a box inside a box, and the shadow is the only one in the whole
- * console.
- */
-const CHROMELESS = {
-  elements: {
-    rootBox: "w-full",
-    cardBox: "w-full max-w-none shadow-none border-0",
-    card: "w-full max-w-none shadow-none border-0 bg-transparent p-0",
-    navbar: "hidden",
-    navbarMobileMenuRow: "hidden",
-    pageScrollBox: "p-0",
-  },
-} as const

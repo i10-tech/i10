@@ -8,10 +8,17 @@
  * ../clerk.ts) and ordering it here makes our overrides win by construction.
  *
  * ⚠ IT MUST COME FIRST. A layer's position is fixed by where its name is FIRST
- * seen, so this statement has to precede `@import "tailwindcss"` — which
- * declares `theme, base, components, utilities` itself. Declaring `clerk`
- * afterwards would append it after `utilities`, which is the opposite of what
- * is wanted and looks identical until an override fails.
+ * seen, so this statement has to precede `@import "tailwindcss"`. Declaring
+ * `clerk` afterwards would append it AFTER `utilities`, which is the opposite
+ * of what is wanted and looks identical until an override fails.
+ *
+ * ⚠ THE BUILD DOES NOT EMIT THIS LINE VERBATIM, AND THAT IS FINE. Tailwind
+ * rewrites it — the compiled stylesheet carries `@layer clerk,components;` and
+ * then `theme`, `base` and `utilities` as blocks after it. What matters is the
+ * resulting order, and that was checked rather than assumed: `.bg-muted` is
+ * emitted inside `@layer utilities`, which resolves after `clerk`. So a
+ * Tailwind class passed through `appearance.elements` outranks Clerk's own rule
+ * for the same element.
  */
 @layer theme, base, clerk, components, utilities;
 

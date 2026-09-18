@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
+import { clerkAppearance } from "@repo/ui/clerk"
 import { Toaster } from "@repo/ui/components/sonner"
 import { Theme } from "@repo/ui/components/theme"
 import "./globals.css"
@@ -58,6 +59,15 @@ export default function RootLayout({
     <ClerkProvider
       {...NO_AUTH_STATE_REFRESH}
       publishableKey={process.env.CLERK_PUBLISHABLE_KEY}
+      /*
+       * ⚠ THE SAME APPEARANCE THE CONSOLE USES, AND THIS APP HAD NONE AT ALL.
+       * Most of the auth flow is our own markup — see the forms under `app/` —
+       * but the pieces that are Clerk's (the CAPTCHA widget, anything rendered
+       * by a prebuilt component) were drawing themselves in Clerk's palette in
+       * the middle of ours. Sign-in is the first screen anybody sees of this
+       * product; it is the worst place to look like two products.
+       */
+      appearance={clerkAppearance}
     >
       <html lang="en" suppressHydrationWarning>
         <body>

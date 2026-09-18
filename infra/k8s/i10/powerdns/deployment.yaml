@@ -64,12 +64,22 @@ spec:
           # the process that answers for customers' mail DNS means a restart can
           # change behaviour with no commit to point at.
           #
+          # ⚠ 5.1.4, NOT THE 4.9 BRANCH, AND THE REASON IS A SECURITY ADVISORY.
+          # This was first written against `pdns-auth-49:4.9.9`, which starts up
+          # and prints "PowerDNS Security Update Mandatory". Advisory 2026-11 is
+          # High severity — a crafted DNS packet drives memory and CPU — and is
+          # fixed in 4.9.17, 5.0.7 and 5.1.4. The `pdns-auth-49` image repository
+          # publishes nothing past 4.9.9, so the 4.9 branch cannot be patched by
+          # image at all. 5.1.4 reports "no known issues" at startup and was
+          # verified against our 4.x gpgsql schema locally — it serves the zones
+          # `powerdns.ts` writes without a schema change.
+          #
           # ⚠ AND `runAsUser: 953` BELOW MATCHES THIS IMAGE'S `pdns` ACCOUNT.
           # The image declares `User: pdns` by NAME, and `runAsNonRoot` cannot
           # verify a name — the kubelet refuses the pod with "has non-numeric
           # user (pdns), cannot verify user is non-root". 953 is that account's
           # uid, read out of the image's own /etc/passwd.
-          image: powerdns/pdns-auth-49:4.9.9@sha256:ef1a3df6e82392456a607e31df381a7c6b8945112a701bb7a6a559b52b9c0a61
+          image: powerdns/pdns-auth-51:5.1.4@sha256:bb5b1c133bcca1dd455075321de7d55db4945a8d7f2ba23339e3c7bbe416b205
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -80,42 +90,16 @@ spec:
               # a privileged port. Everything else is dropped; the process runs
               # as an unprivileged uid and cannot escalate.
               add: ["NET_BIND_SERVICE"]
+          # ⚠ NO `args` BEYOND THE PASSWORD. Everything else lives in the
+          # ConfigMap mounted below, which REPLACES the image's own pdns.conf —
+          # see that file for why a config full of command-line flags could not
+          # work at all.
           args:
-            - "--launch=gpgsql"
-            - "--gpgsql-host=$(PDNS_DB_HOST)"
-            - "--gpgsql-port=5432"
-            - "--gpgsql-dbname=i10"
-            - "--gpgsql-user=$(PDNS_DB_USER)"
+            # ⚠ THE ONE SETTING THAT CANNOT BE IN THE CONFIGMAP. A ConfigMap is
+            # readable by anything with `get` on this namespace; a command-line
+            # setting overrides the file, so the password arrives from the
+            # Secret through the environment and nowhere else.
             - "--gpgsql-password=$(PDNS_DB_PASSWORD)"
-            # ⚠ THE SCHEMA IS SELECTED BY `search_path`, NOT BY QUALIFYING THE
-            # QUERIES. PowerDNS's gpgsql backend emits unqualified table names
-            # and there is no option to prefix them, so this is the only way it
-            # finds `pdns.domains` instead of looking in `public` and reporting
-            # an empty server.
-            - "--gpgsql-extra-connection-parameters=options=-csearch_path=pdns"
-            # ⚠ DNSSEC OFF FOR NOW, AND SAYING SO EXPLICITLY. With it on,
-            # PowerDNS expects `ordername` and `auth` to be maintained on every
-            # record — which our writer in apps/api/src/domains/powerdns.ts does
-            # not do. Turning this on before that writer does is a zone that
-            # serves NXDOMAIN for names that exist.
-            - "--dnssec=no"
-            # Answer for the zones we hold and refuse everything else. An
-            # authoritative server that recurses is an open resolver, which is
-            # an amplification reflector with our IP on it.
-            - "--disable-axfr=yes"
-            - "--local-address=0.0.0.0"
-            - "--local-port=53"
-            # ⚠ THE WEBSERVER IS THE HEALTH PROBE AND IS BOUND TO THE POD ONLY.
-            # `/api/v1/servers/localhost` needs the API key; `/` does not and is
-            # enough to prove the process is up. It has no hostPort, so it is
-            # not reachable from outside the cluster.
-            - "--webserver=yes"
-            - "--webserver-address=0.0.0.0"
-            - "--webserver-port=8081"
-            - "--webserver-allow-from=0.0.0.0/0"
-            # Structured enough to grep, quiet enough not to log every query.
-            - "--loglevel=4"
-            - "--log-dns-queries=no"
           env:
             # ⚠ THE POOLER, NOT THE PRIMARY. Everything else in this namespace
             # goes through `i10-platform-pooler`, and a nameserver holding direct
@@ -164,10 +148,29 @@ spec:
             requests: { cpu: 20m, memory: 64Mi }
             limits: { memory: 192Mi }
           volumeMounts:
+            # ⚠ MOUNTED AS A SINGLE FILE OVER THE IMAGE'S OWN, not as a
+            # directory. Mounting the directory would hide everything else in
+            # /etc/powerdns — including `pdns.d`, which the image's entrypoint
+            # writes into when an API key is set, and which it would then fail
+            # to create on a read-only mount.
+            #
+            # ⚠ A `subPath` MOUNT DOES NOT UPDATE WHEN THE ConfigMap CHANGES.
+            # That is the documented trade and it is the right one here: a
+            # nameserver silently reloading its backend config under live
+            # queries is worse than one that waits for a rollout. Argo restarts
+            # the pod when the ConfigMap's hash changes, which is the intended
+            # path for a config edit.
+            - name: config
+              mountPath: /etc/powerdns/pdns.conf
+              subPath: pdns.conf
+              readOnly: true
             # `readOnlyRootFilesystem` with a writable run directory: PowerDNS
             # wants a control socket and a pid file, and neither needs to
             # survive a restart.
             - { name: run, mountPath: /var/run/pdns }
       volumes:
+        - name: config
+          configMap:
+            name: i10-powerdns
         - name: run
           emptyDir: {}
