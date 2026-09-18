@@ -480,6 +480,18 @@ jobs:
       # alternative is publishing one of them so a runner can call it, which
       # buys a convenience with a lot of attack surface.
       #
+      # ⚠ AND IT GOES OVER TAILSCALE, BECAUSE SSH IS NOT ON THE PUBLIC INTERNET
+      # EITHER. `sshd` on psl-vps binds ONLY the tailnet addresses —
+      # `100.127.102.63:22` and its IPv6 — so a GitHub-hosted runner has no
+      # route to port 22 at all; it is not a firewall rule that could be opened,
+      # there is nothing listening. Measured, after a first version of this step
+      # was written assuming a public address.
+      #
+      # ⚠ THE RUNNER JOINS AS AN EPHEMERAL NODE, which is the point of using an
+      # OAuth client rather than a reusable auth key: the node is created for
+      # this job and removed when it ends, so a tailnet does not slowly fill
+      # with dead CI machines that still hold an ACL grant.
+      #
       # ⚠ AND THE KEY CAN DO NOTHING ELSE. `authorized_keys` on the box pins
       # `infra/scripts/verify-rollout.sh` as a forced command with `restrict`,
       # so this credential cannot open a shell, read a secret or change a
@@ -490,9 +502,21 @@ jobs:
       # keeps working on a fork and on a repository that has not set this up.
       # A verification step that fails closed on a missing secret is a step
       # somebody deletes.
+      # ⚠ SCOPED BY AN ACL TAG, NOT BY BEING ON THE TAILNET. Joining a tailnet is
+      # not an authorisation; `tag:ci` is, and the tailnet policy should grant it
+      # nothing but port 22 on the one host. Without that, a CI credential is a
+      # route to every machine on the network.
+      - name: Join the tailnet
+        if: ${{ steps.push.outputs.pushed == 'true' && secrets.TAILSCALE_OAUTH_CLIENT_ID != '' }}
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+          tags: tag:ci
+
       - name: Verify the rollout
         id: verify
-        if: ${{ steps.push.outputs.pushed == 'true' && secrets.DEPLOY_SSH_KEY != '' }}
+        if: ${{ steps.push.outputs.pushed == 'true' && secrets.DEPLOY_SSH_KEY != '' && secrets.TAILSCALE_OAUTH_CLIENT_ID != '' }}
         continue-on-error: true
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -560,7 +584,9 @@ jobs:
                 if [ "${PUSHED:-false}" != "true" ]; then
                   echo "Nothing to deploy — the manifests already referenced these digests."
                 else
-                  echo "⚠ Rollout not verified — no \`DEPLOY_SSH_KEY\` is configured."
+                  echo "⚠ Rollout not verified — \`DEPLOY_SSH_KEY\` or"
+                  echo "\`TAILSCALE_OAUTH_CLIENT_ID\` is not configured. The box's sshd"
+                  echo "listens only on the tailnet, so both are required."
                   echo "See infra/scripts/README.md."
                 fi
                 ;;

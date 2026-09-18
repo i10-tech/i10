@@ -8,25 +8,27 @@ answered nothing on port 53.
 
 ## What it needs that is not in this directory
 
-Three things have to exist outside the repo before the pod is useful. Two of them
-are credentials and the third is public DNS.
+Three things have to exist outside the repo before the pod is useful. The first
+is done; the other two need a hand on a console this repository cannot reach.
 
-### 1. Doppler: the database role's password
+### 1. Doppler: the database role's password — **done**
 
 CNPG creates the `pdns` Postgres role from `platform-db/cluster.yaml` and reads
-its password from the `i10-pdns-db-role` Secret, which the Doppler operator syncs
-from the `prod_platform` config.
+its password from the `i10-pdns-db-role` Secret, which the Doppler operator syncs.
 
-In Doppler (`i10` project, `prod_platform` config), add:
+This is already in place:
 
-| Name               | Value                                          |
-| ------------------ | ---------------------------------------------- |
-| `PDNS_DB_USERNAME` | `pdns`                                         |
-| `PDNS_DB_PASSWORD` | a fresh random string — `openssl rand -hex 32` |
+- Doppler config **`prod_pdns_db`** created in the `prod` environment, holding
+  `PDNS_DB_USERNAME=pdns` and a freshly generated 32-byte
+  `PDNS_DB_PASSWORD`.
+- A service token `k8s-i10-pdns-db` scoped to that config, stored as the
+  Kubernetes Secret `doppler-token-i10-pdns-db` in `i10-prod`.
 
-The Kubernetes Secret holding the Doppler service token for that config must be
-named `doppler-token-i10-pdns-db` in `i10-prod`. Every other database role here
-has one; create this one the same way.
+> ⚠ ITS OWN CONFIG, NOT `prod_platform` — an earlier draft of this file said
+> otherwise and was wrong. Every database role here has a dedicated config:
+> `prod_api_db`, `prod_authd_db`, `prod_stalwart_db`. Putting a role's password
+> in the shared platform config would hand it to every workload that reads
+> `prod_platform`, which is the opposite of why these roles are separate.
 
 > ⚠ `PDNS_DB_USERNAME` must be exactly `pdns`. CNPG matches the managed role by
 > the `name:` in `cluster.yaml`, and the Secret is what the role's password is
@@ -41,14 +43,23 @@ proxied. **A proxied record cannot serve DNS.** Cloudflare's proxy terminates
 HTTP and HTTPS; it does not forward UDP/53, so `dig @ns1.i10.tech` times out and
 every delegated zone is unreachable however correct its contents.
 
-Set both to the node's own addresses with the proxy **off** (grey cloud):
+Set both names on **both** address families, proxy **off** (grey cloud):
 
 | Name  | Type | Value                   | Proxy    |
 | ----- | ---- | ----------------------- | -------- |
 | `ns1` | A    | `178.105.164.132`       | DNS only |
-| `ns2` | A    | `178.105.164.132`       | DNS only |
 | `ns1` | AAAA | `2a01:4f8:1c18:45fb::1` | DNS only |
+| `ns2` | A    | `178.105.164.132`       | DNS only |
 | `ns2` | AAAA | `2a01:4f8:1c18:45fb::1` | DNS only |
+
+> ⚠ ALL FOUR, NOT ONE EACH. A delegation names nameserver HOSTNAMES, and a
+> resolver has to turn one into an address it can actually reach. Give `ns1`
+> only an A record and `ns2` only an AAAA, and an IPv4-only resolver can never
+> use `ns2` while an IPv6-only resolver can never use `ns1` — each of them is
+> down to a single nameserver, and the one lookup that picks the wrong name
+> costs a timeout and a retry before it recovers. Some resolvers cache that
+> absence. Both names on both families is the only configuration where every
+> resolver sees two usable nameservers.
 
 > ⚠ BOTH NAMES POINT AT ONE MACHINE, AND THAT IS THE APPEARANCE OF REDUNDANCY
 > RATHER THAN THE FACT OF IT. Resolvers expect more than one nameserver and will

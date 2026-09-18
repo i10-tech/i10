@@ -16,62 +16,84 @@
   // `turbo/no-undeclared-env-vars` is an error here, and that rule is a
   // correctness guard, not style: reading an undeclared variable produces a
   // build cached against the wrong key and silently reused with stale values.
+  // ⚠ IT IS AN ALLOWLIST, AND IT WAS MISSING 47 OF THE 62 VARIABLES THE CODE
+  // READS — WHICH MEANT `bun run dev` COULD NOT START THE API AT ALL. Turbo
+  // strips anything not named here before it spawns a task, so `doppler run --
+  // bun run dev` injected a complete environment and the API still died with
+  // "Invalid environment: REDIS_URL … MAIL_DOMAINS … SES_CONFIGURATION_SET".
+  // The variables were present in the parent process and filtered out one layer
+  // down, which is the least visible place for them to go missing: `printenv`
+  // shows them, the app does not see them.
+  //
+  // ⚠ SO IT IS DERIVED, NOT CURATED. Every key the API's zod schema declares,
+  // plus every `process.env.X` our own source reads, plus the three the AWS SDK
+  // reads on its own behalf. Keeping it by hand is what let it drift this far.
   "globalPassThroughEnv": [
-    // Read by drizzle.config.ts and src/migrate.ts at migrate time only. Passed
-    // through rather than hashed: a connection string does not change what gets
-    // built. MIGRATE_DATABASE_URL is the migration Job's override — it points at
-    // the primary rather than the pooler, because DDL and advisory locks do not
-    // survive transaction pooling.
-    "DATABASE_URL",
-    "MIGRATE_DATABASE_URL",
-    // Read directly by scripts/adopt-dkim.ts, which unseals the stored DKIM
-    // private key and talks to SES. Runtime only: they change nothing about
-    // what gets built.
-    "WEBHOOK_SECRET_KEY",
-    "AWS_REGION",
-    "I10_API_KEY",
-    "I10_BASE_URL",
-    // The pod name, read by the worker to build a claim identity. Runtime only
-    // and per-replica by definition, so it could not be a build input even if
-    // it wanted to be.
+    "PORT",
     "HOSTNAME",
-    // The console's Clerk wiring. ⚠ UNPREFIXED ON PURPOSE, AND THAT IS WHY THEY
-    // BELONG HERE RATHER THAN IN A TASK'S `env`. Next inlines `NEXT_PUBLIC_*`
-    // at BUILD time — server code included — so a prefixed key absent from a CI
-    // build is compiled in as `undefined` and cannot be set later in the pod.
-    // Unprefixed, read at request time, they stay genuinely runtime, which is
-    // what lets one image serve every environment. Read by BOTH apps/console
-    // and apps/auth. CLERK_SIGN_IN_URL and CLERK_SIGN_UP_URL point the console
-    // at apps/auth (auth.i10.tech); left unset, Clerk silently falls back to
-    // its own hosted Account Portal, which is a page we do not control.
-    // ⚠ A LOCAL-REVIEW SWITCH THAT CANNOT BE REACHED IN PRODUCTION. See
-    // apps/console/lib/preview.ts: the flag is ANDed with
-    // `process.env.NODE_ENV !== "production"`, which Next replaces with a
-    // literal at build time — so in a production image the whole expression
-    // folds to `false` and the fixture module is removed by the bundler.
-    // Declared here because `turbo/no-undeclared-env-vars` is an error in this
-    // repo, and passed through rather than hashed because it changes nothing
-    // about what gets built.
-    "CONSOLE_PREVIEW",
-    // Where apps/console reaches apps/api. ⚠ UNPREFIXED FOR THE SAME REASON THE
-    // CLERK KEYS ARE: Next inlines `NEXT_PUBLIC_*` at BUILD time, even in server
-    // code, so a prefixed name absent from a CI build is compiled in as
-    // `undefined` and cannot be set later in the pod. Read at request time by
-    // apps/console/lib/api.ts.
+    "GIT_SHA",
     "API_BASE_URL",
+    "API_KEY_CACHE_TTL_SECONDS",
+    "AUTH_ALLOWED_REDIRECT_ORIGINS",
+    "AUTH_DEFAULT_REDIRECT_URL",
+    "AUTH_EMAIL_FROM",
+    "AUTH_EMAIL_TENANT_SLUG",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_REGION",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
     "CLERK_PUBLISHABLE_KEY",
     "CLERK_SECRET_KEY",
     "CLERK_SIGN_IN_URL",
     "CLERK_SIGN_UP_URL",
-    // apps/auth. Where a completed sign-in lands, and the origins it is allowed
-    // to land on. ⚠ THE ALLOWLIST IS A SECURITY CONTROL, NOT CONFIGURATION —
-    // see apps/auth/app/_lib/redirect.ts. Empty means every `?redirect_url=` is
-    // refused and everyone goes to the default, which fails closed.
-    "AUTH_DEFAULT_REDIRECT_URL",
-    "AUTH_ALLOWED_REDIRECT_ORIGINS",
+    "CLERK_WEBHOOK_SECRET",
+    "CONSOLE_ORIGINS",
+    "CONSOLE_PREVIEW",
+    "DATABASE_URL",
+    "DNS_OAUTH_APPS",
+    "DNS_OAUTH_REDIRECT_BASE",
+    "I10_API_KEY",
+    "I10_BASE_URL",
+    "MAIL_BOUNCE_HOST",
+    "MAIL_DOMAINS",
+    "MAIL_HOSTNAME",
+    "MAIL_NAMESERVERS",
+    "MAIL_SPF_INCLUDE",
+    "METERING_EVENT_NAME",
+    "METERING_FEATURE_ID",
+    "METERING_FREE_PLAN_ID",
+    "METRICS_TOKEN",
+    "MIGRATE_DATABASE_URL",
+    "POLAR_ACCESS_TOKEN",
+    "POLAR_PRODUCTS",
+    "POLAR_SERVER",
+    "POLAR_SUCCESS_URL",
+    "POLAR_TIMEOUT_MS",
+    "POLAR_WEBHOOK_SECRET",
+    "RECONCILE_LOOKBACK_DAYS",
+    "REDIS_URL",
+    "SENTRY_DSN",
     "SENTRY_ENVIRONMENT",
-    "OTEL_EXPORTER_OTLP_ENDPOINT",
-    "OTEL_SERVICE_NAME"
+    "SES_CONFIGURATION_SET",
+    "SES_ENABLED",
+    "SES_RELAY_ENABLED",
+    "STALWART_API_TOKEN",
+    "STALWART_SUBMISSION_HOST",
+    "STALWART_SUBMISSION_PASSWORD",
+    "STALWART_SUBMISSION_PORT",
+    "STALWART_SUBMISSION_USER",
+    "STALWART_URL",
+    "STALWART_WEBHOOK_SECRET",
+    "SWEEP_MAX_ROWS",
+    "SWEEP_QUEUED_GRACE",
+    "WEBHOOK_CONCURRENCY",
+    "WEBHOOK_MAX_ATTEMPTS",
+    "WEBHOOK_SECRET_KEY",
+    "WORKER_BATCH_CONCURRENCY",
+    "WORKER_CLAIM_STALE_AFTER",
+    "WORKER_CONCURRENCY",
+    "WORKER_JOB_TIMEOUT_MS",
+    "WORKER_MAX_ATTEMPTS"
   ],
 
   "tasks": {

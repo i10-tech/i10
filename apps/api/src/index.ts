@@ -36,7 +36,7 @@ import { usageStore } from "./console/usage.js"
 import { tenantResolver } from "./middleware/tenant.js"
 import { projectClerkUser } from "./projection/writer.js"
 import { MAILBOXES } from "./metering/levels.js"
-import { sesIdentity } from "./domains/identity.js"
+import { offlineIdentity, sesIdentity } from "./domains/identity.js"
 import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
@@ -517,7 +517,16 @@ const app = createApp({
     ? {
         domains: domainStore({
           db,
-          identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
+          /*
+           * ⚠ `SES_ENABLED` GATES THE IDENTITY, NOT JUST THE SENDING. It used to
+           * gate only the latter, so a deployment with SES off still called
+           * `CreateEmailIdentity` on every domain creation — which on a laptop
+           * holding production AWS credentials wrote into the real account. The
+           * flag now means what it says. See `offlineIdentity`.
+           */
+          identity: env.SES_ENABLED
+            ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
+            : offlineIdentity(),
           capacity: postgresMeter(db),
           region: env.AWS_REGION,
           dns: {
@@ -621,7 +630,11 @@ const app = createApp({
       ? {
           domains: domainStore({
             db,
-            identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
+            // ⚠ THE SAME GATE AS THE STORE ABOVE. Two stores, one rule —
+            // see the note there for why `SES_ENABLED` has to cover this.
+            identity: env.SES_ENABLED
+              ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
+              : offlineIdentity(),
             capacity: postgresMeter(db),
             region: env.AWS_REGION,
             dns: {

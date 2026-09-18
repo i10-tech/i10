@@ -7,12 +7,30 @@ polled, the image had not been pulled and nothing had started. An
 ImagePullBackOff, a missing secret or a container that crashlooped on a config
 error were all invisible to the pipeline.
 
-## Why SSH and not the Argo API
+## Why SSH, and why over Tailscale
 
 `argocd-server` is a ClusterIP with no ingress, and the Kubernetes API is not
 public. Both of those are deliberate. The alternative to SSH is publishing one
 of them to the internet so a GitHub runner can call it, which buys a
 convenience with a large amount of attack surface on a control plane.
+
+**And SSH is not on the public internet either.** `sshd` on psl-vps binds only
+the tailnet addresses:
+
+```
+LISTEN  100.127.102.63:22
+LISTEN  [fd7a:115c:a1e0::9932:663f]:22
+```
+
+There is nothing listening on the public address, so this is not a firewall rule
+that could be opened — a GitHub-hosted runner simply has no route to it. The job
+joins the tailnet first, as an **ephemeral** node created for that run and
+removed when it ends.
+
+> ⚠ JOINING A TAILNET IS NOT AN AUTHORISATION. The runner is tagged `tag:ci`,
+> and the tailnet ACL should grant that tag port 22 on this one host and nothing
+> else. Without that rule a CI credential is a route to every machine on the
+> network, which is a larger blast radius than the public SSH we were avoiding.
 
 ## One-time setup on psl-vps
 
@@ -59,6 +77,15 @@ sudo install -m 755 infra/scripts/verify-rollout.sh /usr/local/bin/i10-verify-ro
 
 ### 3. The key, pinned to that one command
 
+> ⚠ THE EXISTING DEPLOY KEY CANNOT BE REUSED, AND IT IS WORTH SAYING WHY. The
+> repository has one — `argocd-k3s`, read-only — and it is a **GitHub** deploy
+> key: it authenticates Argo _to GitHub_ so it can clone this repository. It
+> travels in the opposite direction to what is needed here and is not trusted by
+> the box's sshd at all. Reusing the human key in `~mo/.ssh/authorized_keys`
+> would work and is the thing not to do: it is a full shell on the machine that
+> runs the database, the mail server and every credential, and putting it in a
+> CI secret makes a workflow compromise a box compromise.
+
 ```bash
 ssh-keygen -t ed25519 -C "github-actions i10 rollout verify" -f /tmp/i10-deploy -N ""
 ```
@@ -84,20 +111,26 @@ restrict,command="/usr/local/bin/i10-verify-rollout" ssh-ed25519 AAAA… github-
 
 ### 4. Repository secrets
 
-| Secret                   | Value                                                     |
-| ------------------------ | --------------------------------------------------------- |
-| `DEPLOY_SSH_KEY`         | the **private** half of the key above                     |
-| `DEPLOY_SSH_HOST`        | the box's hostname or address                             |
-| `DEPLOY_SSH_USER`        | `i10-deploy` (the default; set it only if you renamed it) |
-| `DEPLOY_SSH_KNOWN_HOSTS` | output of `ssh-keyscan -t ed25519 <host>`                 |
+| Secret                      | Value                                                     |
+| --------------------------- | --------------------------------------------------------- |
+| `DEPLOY_SSH_KEY`            | the **private** half of the key above                     |
+| `DEPLOY_SSH_HOST`           | the box's **tailnet** address — `100.127.102.63`          |
+| `DEPLOY_SSH_USER`           | `i10-deploy` (the default; set it only if you renamed it) |
+| `DEPLOY_SSH_KNOWN_HOSTS`    | `ssh-keyscan -t ed25519 100.127.102.63`                   |
+| `TAILSCALE_OAUTH_CLIENT_ID` | an OAuth client with the `auth_keys` scope and `tag:ci`   |
+| `TAILSCALE_OAUTH_SECRET`    | its secret                                                |
+
+> ⚠ `DEPLOY_SSH_HOST` IS THE TAILNET ADDRESS, NOT THE PUBLIC ONE. Nothing
+> listens on port 22 publicly; pointing this at `178.105.164.132` produces a
+> connection timeout that reads like the box being down.
 
 > ⚠ `DEPLOY_SSH_KNOWN_HOSTS` IS NOT OPTIONAL AND MUST NOT BECOME
 > `StrictHostKeyChecking=no`. Turning the check off means the first machine to
 > answer on that address receives a CI credential and the commands it runs.
 
-Without `DEPLOY_SSH_KEY` the step **skips** and the workflow still passes, so a
-fork and a repository that has not set this up both keep working. The job
-summary says which happened.
+Without `DEPLOY_SSH_KEY` or the Tailscale credentials the step **skips** and the
+workflow still passes, so a fork and a repository that has not set this up both
+keep working. The job summary says which happened.
 
 ## What it does and does not do
 
