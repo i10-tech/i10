@@ -282,6 +282,10 @@ export function OAuthButtons({
             variant="outline"
             size="xl"
             type="button"
+            // ⚠ THE POSITIONING CONTEXT FOR THE "Last used" CHIP, which is
+            // absolutely positioned on this button's top edge. Without it the
+            // chip would anchor to whatever ancestor happens to be relative.
+            className="relative"
             // ⚠ DISABLED UNTIL CLERK HAS LOADED. `signIn` is null until then,
             // and a click before that point is a dead button rather than a slow
             // one. `busy` covers the rest of the page, including the password

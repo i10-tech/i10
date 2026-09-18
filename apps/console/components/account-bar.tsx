@@ -149,14 +149,33 @@ export function AccountBar() {
  * menu when it is chosen, and a theme toggle that shuts the menu makes trying
  * the other one a second trip. This is a row that happens to live in a menu.
  *
- * ⚠ AND `system` IS NOT OFFERED HERE. Three options need three targets in a
- * 200px row and the third is the one nobody picks deliberately; the full
- * picker, including System, is still on the appearance page. Choosing light or
- * dark here sets an explicit preference, which is what somebody reaching for
- * this control means.
+ * ⚠ AND `system` IS NOT OFFERED HERE, BUT IT IS REPRESENTED. Three options need
+ * three targets in a 200px row and the third is the one nobody picks
+ * deliberately; the full picker, including System, is still on the appearance
+ * page. What this row shows while the preference is `system` is the theme that
+ * preference RESOLVED to — see `resolvedTheme` below — so the control always has
+ * exactly one side lit, and it is the side matching what is on screen.
  */
 function AppearanceRow() {
-  const { theme, setTheme } = useTheme()
+  /*
+   * ⚠ `resolvedTheme`, NOT `theme`, AND THE DIFFERENCE WAS A ROW WITH NOTHING
+   * LIT UP. `theme` is the stored PREFERENCE, and its default is `"system"` —
+   * which is neither of the two values offered here, so a fresh account opened
+   * this menu and saw a segmented control with no segment selected. Not wrong
+   * exactly, but unreadable: there is no way to tell "no preference" from "this
+   * control is broken".
+   *
+   * `resolvedTheme` is what `system` actually resolved to against
+   * `prefers-color-scheme` — always `"light"` or `"dark"` — so the highlight now
+   * answers the question the person is really asking, which is "what am I
+   * looking at". Somebody on a dark laptop sees Dark lit.
+   *
+   * ⚠ AND IT KEEPS FOLLOWING THE SYSTEM UNTIL SOMEBODY PRESSES SOMETHING.
+   * `resolvedTheme` re-renders when the OS flips at sunset, so the highlight
+   * moves with it; pressing either side stores an explicit preference and stops
+   * that, which is exactly what reaching for this control means.
+   */
+  const { resolvedTheme, setTheme } = useTheme()
   // ⚠ SEE `ThemePicker`: `useTheme()` cannot know the stored preference on the
   // server, so marking a side selected before hydration is a mismatch React
   // resolves by discarding the markup.
@@ -176,7 +195,7 @@ function AppearanceRow() {
             { value: "dark", icon: Moon, label: "Dark" },
           ] as const
         ).map((option) => {
-          const selected = mounted && theme === option.value
+          const selected = mounted && resolvedTheme === option.value
           return (
             <button
               key={option.value}

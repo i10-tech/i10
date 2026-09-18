@@ -57,35 +57,41 @@ export type FieldState = "idle" | "pending" | "invalid" | "valid"
  * stylistic — it is the only form the compiler can see.
  */
 /*
- * ⚠ THE HORIZONTAL GEOMETRY IS ARITHMETIC, NOT TASTE, AND GETTING IT WRONG EATS
- * THE CORNER OF THE BORDER. Four numbers have to agree:
+ * ⚠ THE HORIZONTAL GEOMETRY IS ARITHMETIC, NOT TASTE, AND ALL OF IT IS ONE
+ * NUMBER. Four things have to agree on 24px:
  *
- *     control radius        28px   `rounded-pill` on `h-14` is height / 2
- *     legend box starts at  28px   fieldset border (1) + legend `ms-[27px]`
- *     label box starts at   28px   `start-7`
- *     glyphs start at       32px   both carry `px-1`, so the gap is 4px
- *                                  wider than the word on EACH side
- *     value inset           32px   `px-8`, BOTH sides
+ *     label glyphs      24px   `start-5` (20) + `px-1` (4), both states
+ *     legend glyphs     24px   `ms-[19px]` + fieldset border (1) + `px-1` (4)
+ *     value inset       24px   `px-6`, BOTH sides
+ *     hint inset        24px   `px-6` on the row under the control
  *
- * The first line is the constraint. A stadium's top border is only horizontal
- * from x = radius onward — before that it is the corner arc — so a notch that
- * opens at 16px, which is where this started, deletes the arc instead of
- * interrupting a straight line. On screen that is a field whose top-left corner
- * is simply missing, with the label hanging off the end of it.
+ * ⚠ THE LABEL DOES NOT MOVE SIDEWAYS AS IT RISES, AND THAT IS THE WHOLE
+ * ILLUSION. It starts where the value will be, at the value's size, and travels
+ * straight up while shrinking. A version of this shipped briefly with the
+ * resting position at 24 and the floated one at 32, on the theory that the notch
+ * had to clear the corner arc — it looked like the label sliding diagonally, and
+ * it put the resting placeholder a quarter of an inch off the rounded edge it is
+ * supposed to sit inside.
  *
- * ⚠ AND THE LABEL AND THE LEGEND USED TO BE 4px OUT OF STEP, which is the other
- * half of the same screenshot. The label sat at `start-3` (12) and the legend at
- * `ms-2` (16), so the gap opened four pixels to the RIGHT of the word: no
- * clearance before the first letter, double after the last. They are written as
- * one sum now so the next person changing either has to change both.
+ * ⚠ THE CORNER ARC IS NOT THE CONSTRAINT IT WAS TAKEN FOR. `rounded-pill` on
+ * `h-14` is a 28px radius, and the top border is only truly horizontal from
+ * x = 28 onward — but the arc is almost flat well before that. At x = 20 it sits
+ * 1.2px below the horizontal (28 − √(28² − 8²)), which is less than the border
+ * is wide. Opening the notch there interrupts what looks like a straight line;
+ * opening it at 16, which is where this started, leaves 2.7px of orphaned arc
+ * and reads as a missing corner.
  *
- * ⚠ SO THE VALUE IS PADDED TO 32px TOO, which is what keeps the resting label
- * sitting exactly where the text it names will appear. That is the whole
- * illusion — the label does not move sideways when it rises, it only goes up
- * and gets smaller.
+ * ⚠ AND THE LABEL AND THE LEGEND MUST NOT DRIFT APART. They were 4px out of step
+ * once — label at `start-3` (12), legend at `ms-2` (16) — so the gap opened four
+ * pixels to the RIGHT of the word: no clearance before the first letter, double
+ * after the last. The 20s above are one number written twice, and changing
+ * either means changing both.
  */
 const LABEL = cn(
-  "pointer-events-none absolute start-7 z-10 truncate px-1",
+  // ⚠ ONE HORIZONTAL POSITION FOR BOTH STATES. 20px + the `px-1` below puts the
+  // glyphs at 24px, which is where the VALUE starts — see `CONTROL_INPUT`. The
+  // label does not move sideways as it rises; only `top` and `font-size` do.
+  "pointer-events-none absolute start-5 z-10 truncate px-1",
   // ⚠ 14px FLOATED AGAINST A 16px VALUE, AND `leading-none` IS THE HALF THAT
   // FIXES THE ALIGNMENT. Tailwind pairs `text-sm` with a 20px line height, so
   // the label's BOX is 20px tall while the gap in the border is 14 — centre the
@@ -93,12 +99,27 @@ const LABEL = cn(
   // exactly the "too much on the top" the field was showing. `leading-none`
   // collapses the box onto the glyphs so the thing being centred is the text.
   "max-w-[calc(100%-3.5rem)] text-sm leading-none font-medium",
-  // ⚠ ONLY `top` AND `font-size` MOVE. The label keeps `-translate-y-1/2` in
-  // both states, so the animation is a single property travelling from the
-  // middle of the box to its top edge — no transform to interpolate, and
-  // nothing to land half a pixel off at the end.
+  // ⚠ NO TRANSFORM IS INTERPOLATED. The label keeps `-translate-y-1/2` in both
+  // states, so what animates is `top` and `font-size` — two lengths, each with
+  // an exact end value, and nothing to land half a pixel off.
+  /*
+   * ⚠ 200ms RATHER THAN 100. `--duration-instant` is the token for things that
+   * should not read as animated at all — a background going from one colour to
+   * another — and it was wrong for a label that crosses eighteen pixels and
+   * changes size while it does.
+   *
+   * ⚠ AND `quint-in-out` RATHER THAN `quint-out`, WHICH IS THE HALF THAT MADE
+   * THE LONGER DURATION USABLE. `quint-out` is violently front-loaded: it
+   * covers 99% of the distance in the first HALF of the duration, so "200ms"
+   * was really a 100ms jump followed by 100ms of invisible settling. Slowing it
+   * down did not make it read as slower, it made the mismatch with the notch
+   * below visible — the gap opened while the label was still nowhere near it.
+   * `quint-in-out` eases in and out symmetrically, so the label is at the
+   * halfway point at 100ms and reaches the border near the END of the
+   * transition, which is what the notch timing below is choreographed against.
+   */
   "-translate-y-1/2 transition-[top,font-size,color]",
-  "duration-(--duration-instant) ease-(--ease-quint-out)",
+  "duration-(--duration-dismiss) ease-(--ease-quint-in-out)",
   "peer-[:placeholder-shown:not(:focus)]:text-base",
   "peer-[:placeholder-shown:not(:focus)]:font-normal",
 )
@@ -166,13 +187,48 @@ const LEGEND = cn(
   // border clips the last character, if it is larger there is a visible slot of
   // missing border after it, and if it is SHORTER than the label's line box the
   // label rides up out of the gap.
-  // ⚠ `ms-[27px]` IS THE LABEL'S 28px LESS THE FIELDSET'S OWN 1px BORDER, which
-  // a legend is laid out INSIDE. Measured, not derived: with `ms-5` the gap
-  // opened at 29px against a label at 28, and the border clipped the first
-  // letter by a pixel on every field in the product.
-  "invisible ms-[27px] block h-[14px] w-auto max-w-full overflow-hidden p-0",
+  // ⚠ `ms-[19px]` IS THE LABEL'S 20px LESS THE FIELDSET'S OWN 1px BORDER, which
+  // a legend is laid out INSIDE. Measured, not derived: an earlier version had
+  // the legend one pixel outboard of the label and the border clipped the first
+  // letter on every field in the product.
+  "invisible ms-[19px] block h-[14px] w-auto max-w-full overflow-hidden p-0",
   "text-sm leading-none font-medium whitespace-nowrap",
-  "transition-[max-width] duration-(--duration-instant) ease-(--ease-quint-out)",
+  /*
+   * ⚠ A SHORT TRANSITION ON A DELAY, NOT A LONG ONE MATCHING THE LABEL, AND THE
+   * OBVIOUS VERSION OF THIS PRODUCED A VISIBLE BLIP. `max-width` animates from
+   * `0.01px` to `100%` — 100% of the FIELDSET, which is the whole control, so
+   * on a 350px field the range is 350px while the legend's own content is about
+   * 90. The gap is therefore fully open as soon as `max-width` passes 90, which
+   * is 26% of the range; under `quint-out` that is reached at 6% of the
+   * duration. The notch snapped open in roughly TWELVE MILLISECONDS and then
+   * spent the rest of the transition growing a max-width nothing could see —
+   * while the label was still travelling up towards it.
+   *
+   * What that looks like is a black slot appearing in the border out of nowhere
+   * and the label arriving in it a fifth of a second later, which is exactly
+   * how it was reported: "the background blips, then the placeholder moves up".
+   *
+   * ⚠ SO THE GAP IS DELAYED UNTIL THE LABEL IS ALMOST THERE. Measured in the
+   * browser rather than tuned by eye, sampling `getBoundingClientRect()` on both
+   * elements every 14ms through a real transition:
+   *
+   *     90ms   the gap starts opening   (label ~28% risen)
+   *    119ms   the label's box first touches the border line
+   *    150ms   the gap is fully open
+   *    200ms   the label is home
+   *
+   * So the notch makes room just ahead of the word and finishes underneath it.
+   * It is not perfect — for about 30ms the label overlaps a gap that is still
+   * widening — and that is the better side of the trade: the artifact being
+   * avoided is an empty black slot sitting in the border for a fifth of a second
+   * with nothing in it, which is what 140ms of delay, or none at all, produced.
+   *
+   * ⚠ THE SAME DELAY IS CORRECT IN BOTH DIRECTIONS, which is why it is one
+   * number and not a pair. Opening, the gap must not appear before the label;
+   * closing, it must not shut until the label has left.
+   */
+  "transition-[max-width] duration-(--duration-instant) delay-[75ms]",
+  "ease-(--ease-quint-in-out)",
 )
 
 /**
@@ -233,17 +289,17 @@ const CONTROL_INPUT = cn(
    * every sign-in. The console's 14px base is a density decision for tables;
    * a field somebody types their password into is not a table.
    */
-  // ⚠ `px-8` IS 32px, WHICH IS WHERE THE RESTING LABEL'S GLYPHS ARE. See the
+  // ⚠ `px-6` IS 24px, WHICH IS WHERE THE RESTING LABEL'S GLYPHS ARE. See the
   // sum in LABEL — if the LEADING value disagrees, the label jumps sideways as
-  // it rises.
+  // it rises, and the jump is at the instant somebody types their first
+  // character, which is the worst possible moment to move the thing they are
+  // reading.
   //
   // ⚠ AND THE TRAILING VALUE MATCHES IT RATHER THAN STAYING AT THE 16px A
-  // SQUARE INPUT WOULD USE. The leading inset is not a taste decision here — it
-  // is forced to 32px by the corner arc the notch has to clear — so leaving the
-  // other side at 16 makes a long value sit visibly off-centre in its own box,
-  // closer to the right edge than the left. Whatever the notch costs on one
-  // side, the other side pays too.
-  "peer h-full w-full min-w-0 bg-transparent px-8 text-base outline-none",
+  // SQUARE INPUT WOULD USE. Whatever the leading side costs, the other side
+  // pays too; a long value with 24px on the left and 16 on the right sits
+  // visibly off-centre in its own box.
+  "peer h-full w-full min-w-0 bg-transparent px-6 text-base outline-none",
   "selection:bg-primary selection:text-primary-foreground",
   "disabled:cursor-not-allowed",
   // ⚠ CHROME PAINTS AUTOFILLED FIELDS WITH ITS OWN YELLOW AND IGNORES
@@ -283,9 +339,10 @@ function Frame({
       {children}
       <div
         className={cn(
-          // ⚠ `px-8` MATCHES THE VALUE'S OWN INSET, so a validation message
-          // starts under the first character of what it is about.
-          "min-h-4 px-8 pt-1.5 text-2xs leading-4",
+          // ⚠ `px-6` MATCHES THE VALUE'S OWN INSET, so a validation message
+          // starts under the first character of what it is about. It moves with
+          // `CONTROL_INPUT`'s padding and has no independent opinion.
+          "min-h-4 px-6 pt-1.5 text-2xs leading-4",
           "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
           TONES[state].hint,
         )}
@@ -382,10 +439,12 @@ export function FloatingInput({
          */}
         <Notch label={label} className={cn(FRAME, tone.frame)} />
         {adornment && (
-          // ⚠ `end-8` IS THE SAME 32px THE VALUE IS INSET BY, so the reveal
+          // ⚠ `end-6` IS THE SAME 24px THE VALUE IS INSET BY, so the reveal
           // icon lines up with the right-hand edge of the text rather than
-          // hanging out over the corner arc. `pe-14` below clears its width.
-          <div className="absolute end-8 z-10 flex items-center text-muted-foreground">
+          // hanging out over the corner arc. `pe-14` on the input clears its
+          // width: the button is 36px wide and carries `-me-1`, so its leading
+          // edge lands at exactly 56px from the right.
+          <div className="absolute end-6 z-10 flex items-center text-muted-foreground">
             {adornment}
           </div>
         )}

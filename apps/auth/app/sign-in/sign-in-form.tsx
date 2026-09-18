@@ -15,6 +15,8 @@ import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave } from "../_lib/finish"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
+import { emailVerdict, isEmailUsable } from "../_lib/validate"
+import { releaseFocus, useFieldFocus } from "../_lib/field-state"
 import { LastUsedBadge } from "../_components/last-used-badge"
 import type { SsoProvider } from "../_lib/providers"
 
@@ -77,6 +79,20 @@ export function SignInForm({
    */
   const [stage, setStage] = useState<"identifier" | "password">("identifier")
   const [identifier, setIdentifier] = useState("")
+  /*
+   * ⚠ VALIDATING THE IDENTIFIER IS ONLY SAFE BECAUSE AN EMAIL IS THE ONLY ONE
+   * THIS INSTANCE HAS. `signIn.create({ identifier })` accepts a username or a
+   * phone number on instances configured for them, and a red border under
+   * somebody's username would be the form refusing a credential that works.
+   * Checked against the instance: `email_address` is the sole attribute with
+   * `used_for_first_factor`. If a username is ever switched on, this check has
+   * to go or learn about it — see _lib/environment.ts.
+   *
+   * ⚠ AND IT ONLY GOES RED WHILE THE CARET IS ELSEWHERE. See
+   * _lib/field-state.ts: red means "you stopped and it is still wrong", not
+   * "you are part-way through typing it".
+   */
+  const identifierField = useFieldFocus()
   const [direction, setDirection] = useState<"forward" | "back">("forward")
 
   /*
@@ -86,6 +102,7 @@ export function SignInForm({
    * mismatch and resolves by discarding the markup.
    */
   const lastUsed = useLastSignInMethod()
+  const identifierState = emailVerdict(identifier, identifierField.show)
 
   /**
    * Offer a saved passkey without anybody asking.
@@ -146,6 +163,20 @@ export function SignInForm({
 
     const value = identifier.trim()
     if (!value) return
+
+    /*
+     * ⚠ THE SHAPE IS CHECKED HERE RATHER THAN BY CLERK, for the same reason as
+     * the sign-up form: `mido@` cannot be anybody's address, and finding that
+     * out took a spinner and a round trip. Pressing the button on a malformed
+     * address is what reveals the error rather than a dead control.
+     */
+    if (!isEmailUsable(value)) {
+      // See the sign-up form: Enter from inside the box leaves it focused, and
+      // a focused field is never painted red.
+      releaseFocus()
+      identifierField.reveal()
+      return
+    }
 
     setBusy("identifier")
     try {
@@ -276,22 +307,42 @@ export function SignInForm({
                 </p>
               </div>
 
-              <FloatingInput
-                id="email"
-                name="email"
-                type="email"
-                label="Email address"
-                value={identifier}
-                onChange={(event) => setIdentifier(event.target.value)}
-                // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
-                // This is the hook the conditional-mediation call above attaches
-                // to: without it the browser has nowhere to surface a saved
-                // passkey, and the effect silently does nothing.
-                autoComplete="email webauthn"
-                disabled={locked}
-                autoFocus
-                required
-              />
+              {/*
+               * ⚠ THE FIELD IS WRAPPED SO THE CHIP HAS SOMETHING TO ANCHOR TO,
+               * rather than `FloatingInput` growing a `badge` prop. This is the
+               * only field in the product that carries one, and a prop on the
+               * shared component would be an API every other call site has to
+               * ignore — see @repo/ui/components/floating-field, which is
+               * already carrying more geometry than it wants to.
+               *
+               * ⚠ AND IT IS ON THE EMAIL BOX, NOT ONLY ON THE BUTTON TWO STEPS
+               * LATER. Somebody who signed in with a password last time is
+               * looking at this field, deciding between it and the provider
+               * buttons above — which is the moment the hint is worth anything.
+               * By the password step they have already chosen.
+               */}
+              <div className="relative">
+                {lastUsed === "password" && <LastUsedBadge placement="field" />}
+                <FloatingInput
+                  id="email"
+                  name="email"
+                  type="email"
+                  label="Email address"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
+                  {...identifierField.props}
+                  state={identifierState.state}
+                  hint={identifierState.hint}
+                  // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
+                  // This is the hook the conditional-mediation call above attaches
+                  // to: without it the browser has nowhere to surface a saved
+                  // passkey, and the effect silently does nothing.
+                  autoComplete="email webauthn"
+                  disabled={locked}
+                  autoFocus
+                  required
+                />
+              </div>
 
               <Button
                 type="submit"
@@ -399,7 +450,13 @@ export function SignInForm({
                 </Link>
               </div>
 
-              <Button type="submit" size="xl" disabled={!signIn || locked}>
+              <Button
+                type="submit"
+                size="xl"
+                // See oauth-buttons: the chip below is positioned against this.
+                className="relative"
+                disabled={!signIn || locked}
+              >
                 {busy === "password" ? (
                   <>
                     {/*

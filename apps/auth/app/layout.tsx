@@ -4,6 +4,7 @@ import { clerkAppearance } from "@repo/ui/clerk"
 import { Toaster } from "@repo/ui/components/sonner"
 import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
+import { TooltipProvider } from "@repo/ui/components/tooltip"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -50,6 +51,32 @@ const NO_AUTH_STATE_REFRESH = {
   __internal_invokeMiddlewareOnAuthStateChange: false,
 } as unknown as Partial<React.ComponentProps<typeof ClerkProvider>>
 
+/**
+ * ⚠ THE WHOLE APP RENDERS AT REQUEST TIME, AND THIS LINE IS LOAD-BEARING RATHER
+ * THAN CAUTIOUS. Every PAGE here is already `force-dynamic`, but Next generates
+ * one route nobody declares — `/_not-found` — and with no config it is
+ * PRERENDERED AT BUILD TIME. The image is built in CI with no access to any
+ * environment's Clerk instance, so `process.env.CLERK_PUBLISHABLE_KEY` is
+ * undefined at that moment, and the 404's copy of this layout was baked with no
+ * `<ClerkProvider>` in it at all.
+ *
+ * ⚠ AND A ROOT LAYOUT IS SHARED ACROSS CLIENT NAVIGATIONS, WHICH IS WHAT TURNED
+ * THAT INTO A CRASH. Landing on a 404 and pressing "Go to the dashboard" is a
+ * soft navigation: Next keeps the layout it already has — the provider-less one
+ * from the static build — and mounts the dashboard shell inside it. The shell
+ * contains `<OrganizationSwitcher>`, which throws "can only be used within
+ * <ClerkProvider>". Reloading the same URL re-rendered the layout on the server,
+ * with the key, and everything worked, which is exactly the signature of a
+ * build-time value baked into one route.
+ *
+ * ⚠ AND ON THIS APP IT IS ALSO WHAT KEEPS THE BUILD HONEST. Every other route
+ * here declares `force-dynamic` already, so `/_not-found` was the only page Next
+ * would have tried to prerender — through a `<ClerkProvider>` given
+ * `publishableKey={undefined}`, which is the one argument it refuses outright.
+ * The 404 page could not have been added without this line.
+ */
+export const dynamic = "force-dynamic"
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -87,7 +114,32 @@ export default function RootLayout({
            */}
           <link rel="preconnect" href="https://cdn.i10.tech" crossOrigin="anonymous" />
           <Theme>
-            <MotionProvider>{children}</MotionProvider>
+            {/*
+             * ⚠ THIS IS NOT DECORATION, AND ITS ABSENCE CRASHED THE SIGN-UP
+             * FLOW. Radix's `Tooltip.Root`, `Trigger` and `Content` all call
+             * `useTooltipProviderContext`, and a Radix context consumer with no
+             * provider above it THROWS rather than falling back — so any
+             * component that happens to contain a tooltip is a component that
+             * takes this app down. `@repo/ui`'s `CopyButton` contains one.
+             *
+             * ⚠ WHICH IS WHY THE FAILURE LOOKED LIKE A TWO-FACTOR BUG. The only
+             * two screens in this app that mount a `CopyButton` are the TOTP
+             * scan step (copy the setup key) and the recovery codes step — so
+             * everything worked until somebody answered "yes" to two-factor,
+             * and then the whole page was replaced by Next's built-in error
+             * screen: "This page couldn't load", a Reload button and a Back
+             * button, with the half-finished sign-up thrown away.
+             *
+             * ⚠ THE DELAYS DIFFER FROM THE CONSOLE'S ON PURPOSE. There are
+             * three tooltips in the entire app and they are all "what does this
+             * button do"; opening on hover with no delay is right for a copy
+             * icon somebody is already pointing at. The console sets 300ms
+             * because its tooltips sit in dense tables where a delay is what
+             * stops the screen flickering as the pointer crosses it.
+             */}
+            <TooltipProvider>
+              <MotionProvider>{children}</MotionProvider>
+            </TooltipProvider>
             {/*
              * ⚠ ONE TOASTER FOR THE WHOLE APP, MOUNTED HERE. `toast()` is a
              * module-level call that pushes onto whichever Toaster is mounted;
