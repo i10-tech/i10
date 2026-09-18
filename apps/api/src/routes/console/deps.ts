@@ -8,6 +8,10 @@ import type { KeyCache } from "../../auth/api-key.js"
 import type { KeyStore } from "../../auth/store.js"
 import type { WebhookEndpointStore } from "../../webhooks/store.js"
 import type { DnsInspector } from "../../console/dns.js"
+import type { DelegationChecker } from "../../console/delegation.js"
+import type { DnsConnectionStore } from "../../dns/connections.js"
+import type { DnsOAuth } from "../../dns/oauth.js"
+import type { DnsPublisher } from "../../dns/publish.js"
 import type { TenantProfileStore } from "../../console/tenant.js"
 import type { PolarClient } from "../../billing/polar.js"
 import type { PlanChange } from "../../billing/plan-change.js"
@@ -29,6 +33,28 @@ export interface ConsoleDeps extends TenantAuthDeps {
   keys?: { store: KeyStore; cache?: KeyCache }
   webhooks?: WebhookEndpointStore
   dns?: DnsInspector
+  /**
+   * Why a delegated domain has not verified yet.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE HIDES THE PANEL RATHER THAN FAILING THE PAGE.
+   * The domain still renders its records and its status; what is lost is the
+   * sentence explaining which of four indistinguishable reasons is the live
+   * one. Degrading to the old behaviour is correct — that behaviour was
+   * uninformative, not broken.
+   */
+  delegation?: DelegationChecker
+  /**
+   * Customers' credentials for their own DNS, and the machinery that uses them.
+   *
+   * ⚠ ALL THREE ARE OPTIONAL TOGETHER, BECAUSE THEY DEPEND ON THE SEALING KEY.
+   * Without `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a credential that
+   * can rewrite a customer's MX records, so the routes answer 501 rather than
+   * storing one in the clear — the same rule `core.domains` and the webhook
+   * secrets already follow.
+   */
+  dnsConnections?: DnsConnectionStore
+  dnsOAuth?: DnsOAuth
+  dnsPublisher?: DnsPublisher
   /**
    * Buying a plan, and moving between them.
    *

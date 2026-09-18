@@ -20,7 +20,14 @@ export function Wordmark() {
       >
         i
       </span>
-      <span className="text-sm font-semibold tracking-tight">i10</span>
+      {/*
+       * ⚠ THE WORDMARK IS THE ONE PLACE THE DISPLAY FACE EARNS ITS KEEP AT A
+       * SMALL SIZE. It is two characters, read as a shape rather than as text,
+       * and it is the only string in the product that is a brand rather than
+       * information — which is exactly the job a display cut is drawn for. It
+       * falls back to Geist like every other use; see styles/fonts.css.
+       */}
+      <span className="font-display text-sm font-semibold tracking-tight">i10</span>
     </span>
   )
 }

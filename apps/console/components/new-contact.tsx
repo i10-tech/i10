@@ -3,8 +3,7 @@
 import * as React from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createContact } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -55,41 +54,35 @@ export function NewContactButton() {
         })
       }
     >
-      <div className="space-y-2">
-        <Label htmlFor="contact-email">Email address</Label>
-        <Input
-          id="contact-email"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="person@example.com"
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-          className="font-mono text-xs"
-          required
-          autoFocus
-        />
-      </div>
+      <FloatingInput
+        label="Email address"
+        id="contact-email"
+        type="email"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        autoComplete="off"
+        autoCapitalize="none"
+        spellCheck={false}
+        className="font-mono text-xs"
+        required
+        autoFocus
+        hint="e.g. person@example.com"
+      />
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-2">
-          <Label htmlFor="contact-first">First name</Label>
-          <Input
-            id="contact-first"
-            value={firstName}
-            onChange={(event) => setFirstName(event.target.value)}
-            autoComplete="off"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="contact-last">Last name</Label>
-          <Input
-            id="contact-last"
-            value={lastName}
-            onChange={(event) => setLastName(event.target.value)}
-            autoComplete="off"
-          />
-        </div>
+        <FloatingInput
+          label="First name"
+          id="contact-first"
+          value={firstName}
+          onChange={(event) => setFirstName(event.target.value)}
+          autoComplete="off"
+        />
+        <FloatingInput
+          label="Last name"
+          id="contact-last"
+          value={lastName}
+          onChange={(event) => setLastName(event.target.value)}
+          autoComplete="off"
+        />
       </div>
     </FormDialog>
   )

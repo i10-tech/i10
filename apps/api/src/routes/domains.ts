@@ -199,6 +199,11 @@ const verify = createRoute({
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     404: errorResponse("No domain with that id."),
+    409: errorResponse(
+      "Another workspace verified this domain first. A name may be held by " +
+        "any number of workspaces while it is pending, but only by one once " +
+        "ownership has been proved.",
+    ),
     501: errorResponse("Domains are not configured."),
   },
 })
@@ -207,8 +212,27 @@ domains.openapi(verify, async (c) => {
   const store = c.get("domains")
   if (!store) return c.json(notWired, 501)
   const auth = c.get("auth")
-  const domain = await store.verify(auth.tenantId, c.req.valid("param").id)
-  return domain ? c.json(domain, 200) : c.json(notFound, 404)
+  const outcome = await store.verify(auth.tenantId, c.req.valid("param").id)
+
+  switch (outcome.status) {
+    case "ok":
+      return c.json(outcome.domain, 200)
+    case "missing":
+      return c.json(notFound, 404)
+    default:
+      // ⚠ A CONFLICT OVER THE NAME, NOT A VERDICT ON THEIR DNS. See the console
+      // route for the long version; the records may be entirely correct.
+      return c.json(
+        {
+          statusCode: 409,
+          name: "domain_already_claimed" as const,
+          message:
+            `${outcome.domain.name} has already been verified by another ` +
+            `workspace. If it is also yours, remove it there first.`,
+        },
+        409,
+      )
+  }
 })
 
 const remove = createRoute({

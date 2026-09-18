@@ -3,9 +3,8 @@
 import * as React from "react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
 import { Spinner } from "@repo/ui/components/spinner"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { cn } from "cn"
 import { renameWorkspace, updateOnboarding } from "@/lib/actions"
 
@@ -73,18 +72,15 @@ export function StepWorkspace({
         </p>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="workspace-name">Workspace name</Label>
-        <Input
-          id="workspace-name"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          placeholder="Acme"
-          maxLength={120}
-          autoFocus
-        />
-        <p className="text-xs text-muted-foreground">What appears on your invoices.</p>
-      </div>
+      <FloatingInput
+        label="Workspace name"
+        id="workspace-name"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        maxLength={120}
+        autoFocus
+        hint="What appears on your invoices."
+      />
 
       <fieldset className="space-y-2">
         <legend className="mb-2 text-sm font-medium">What will you be sending?</legend>

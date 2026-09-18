@@ -18,10 +18,18 @@ import {
 import { Status } from "@/components/status"
 import { DnsRecords } from "@/components/dns-records"
 import { DomainActions } from "@/components/domain-actions"
+import { DelegationNote } from "@/components/delegation-note"
+import { PublishRecords } from "@/components/publish-records"
 import { VerifyButton } from "@/components/verify-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
-import type { Domain } from "@/lib/types"
+import type {
+  ConnectableProvider,
+  DelegationReport,
+  DnsConnection,
+  DnsInspection,
+  Domain,
+} from "@/lib/types"
 
 export async function generateMetadata({
   params,
@@ -57,6 +65,46 @@ export default async function DomainDetailPage({
 
   const domain = result.data
 
+  /*
+   * ⚠ FETCHED ONLY FOR AN UNVERIFIED DELEGATED DOMAIN, AND THAT IS THREE DNS
+   * LOOKUPS THIS PAGE DOES NOT OTHERWISE DO. A verified domain has nothing to
+   * diagnose, and a manual one has no delegation — running it for either would
+   * put a resolver on the critical path of a page that currently renders from
+   * one call.
+   */
+  const delegation =
+    domain.delegated && domain.status !== "verified"
+      ? await tryApi<DelegationReport>(
+          `/console/domains/${encodeURIComponent(id)}/delegation`,
+        )
+      : null
+
+  /*
+   * ⚠ THREE READS, AND ALL THREE ARE NEEDED TO ANSWER ONE QUESTION: can we
+   * publish these records for them. Who hosts the domain's DNS (the lookup),
+   * whether we have an adapter and an app for that host (the providers list),
+   * and whether this workspace has already authorised us (the connections).
+   * Any two of the three would render a button that fails when pressed.
+   *
+   * ⚠ AND A FAILURE IN ANY OF THEM HIDES THE BUTTON RATHER THAN THE PAGE. This
+   * is an accelerator; the records table below is the thing somebody came for.
+   */
+  const [inspection, providers, connections] = await Promise.all([
+    tryApi<DnsInspection>("/console/dns/lookup", { query: { domain: domain.name } }),
+    tryApi<{ data: ConnectableProvider[] }>("/console/dns/providers"),
+    tryApi<{ data: DnsConnection[] }>("/console/dns/connections"),
+  ])
+
+  const hostedBy = inspection.ok ? inspection.data.provider?.slug : undefined
+  const connectable =
+    hostedBy && providers.ok
+      ? (providers.data.data.find((p) => p.slug === hostedBy) ?? null)
+      : null
+  const connection =
+    connectable && connections.ok
+      ? (connections.data.data.find((c) => c.provider === connectable.slug) ?? null)
+      : null
+
   return (
     <Page>
       <PageHeader>
@@ -71,6 +119,20 @@ export default async function DomainDetailPage({
             <Status status={domain.status} variant="pill" />
           </div>
           <PageActions>
+            {/*
+             * ⚠ ONLY WHERE WE CAN ACTUALLY DO IT. The button appears when the
+             * domain's DNS is hosted somewhere we have an adapter for; anywhere
+             * else the records table is still the answer, and offering a
+             * shortcut that cannot work is worse than not offering one.
+             */}
+            {connectable && domain.status !== "verified" && (
+              <PublishRecords
+                domainId={domain.id}
+                connection={connection}
+                providerSlug={connectable.slug}
+                providerName={connectable.name}
+              />
+            )}
             <VerifyButton id={domain.id} status={domain.status} />
             <DomainActions id={domain.id} name={domain.name} />
           </PageActions>
@@ -85,7 +147,18 @@ export default async function DomainDetailPage({
          * retrying — and a customer who reads it as "failed" goes and changes
          * records that were correct.
          */}
-        <StatusNote status={domain.status} delegated={domain.delegated} />
+        <StatusNote
+          status={domain.status}
+          delegated={domain.delegated}
+          // ⚠ SUPPRESSED WHEN THERE IS A REAL DIAGNOSIS TO SHOW. The generic
+          // "propagation can take 72 hours" note and a specific "your records
+          // point somewhere else" note contradict each other, and the generic
+          // one is the reassuring half — so shown together, it is the one people
+          // believe.
+          quiet={delegation?.ok === true}
+        />
+
+        {delegation?.ok && <DelegationNote report={delegation.data} />}
 
         <Section className="border-b-0 pt-0">
           <SectionTitle>
@@ -94,9 +167,19 @@ export default async function DomainDetailPage({
           <SectionDescription>
             {domain.delegated ? (
               <>
-                Publish these three NS records at your DNS provider. Once they resolve,
-                i10 serves those subdomains — SPF, DKIM, DMARC and MX stay correct
-                without you touching them again.
+                {/*
+                 * ⚠ THE COUNT IS COUNTED, NOT WRITTEN DOWN. This said "three NS
+                 * records" while the table below listed six — three delegated
+                 * names times two nameservers — so the first thing the page did
+                 * was contradict itself, and the second was make somebody
+                 * wonder which three of the six they needed. `MAIL_NAMESERVERS`
+                 * is configuration and can change; a number typed here cannot.
+                 */}
+                Publish {domain.records.length} NS records at your DNS provider — the{" "}
+                {new Set(domain.records.map((record) => record.name)).size} names below,
+                each pointing at every one of our nameservers. Once they resolve, i10
+                serves those subdomains, so SPF, DKIM, DMARC and MX stay correct without
+                you touching them again.
               </>
             ) : (
               <>
@@ -129,14 +212,23 @@ export default async function DomainDetailPage({
   )
 }
 
-function StatusNote({ status, delegated }: { status: string; delegated: boolean }) {
+function StatusNote({
+  status,
+  delegated,
+  quiet = false,
+}: {
+  status: string
+  delegated: boolean
+  quiet?: boolean
+}) {
   if (status === "verified") return null
+  if (quiet) return null
 
   const copy: Record<string, { title: string; body: string; tone: string }> = {
     not_started: {
       title: "Not started",
       body: delegated
-        ? "Publish the three NS records below, then press Verify."
+        ? "Publish the NS records below, then press Verify."
         : "Publish the records below, then press Verify.",
       tone: "border-border bg-muted/30",
     },

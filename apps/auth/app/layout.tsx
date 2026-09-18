@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
+import { clerkAppearance } from "@repo/ui/clerk"
 import { Toaster } from "@repo/ui/components/sonner"
+import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
 import "./globals.css"
 
@@ -58,11 +60,34 @@ export default function RootLayout({
     <ClerkProvider
       {...NO_AUTH_STATE_REFRESH}
       publishableKey={process.env.CLERK_PUBLISHABLE_KEY}
+      /*
+       * ⚠ THE SAME APPEARANCE THE CONSOLE USES, AND THIS APP HAD NONE AT ALL.
+       * Most of the auth flow is our own markup — see the forms under `app/` —
+       * but the pieces that are Clerk's (the CAPTCHA widget, anything rendered
+       * by a prebuilt component) were drawing themselves in Clerk's palette in
+       * the middle of ours. Sign-in is the first screen anybody sees of this
+       * product; it is the worst place to look like two products.
+       */
+      appearance={clerkAppearance}
     >
       <html lang="en" suppressHydrationWarning>
         <body>
+          {/*
+           * ⚠ `preconnect` FOR THE FONT ORIGIN, AND `crossOrigin` IS NOT OPTIONAL
+           * ON IT. Fonts are fetched in CORS mode whatever the stylesheet says, so
+           * a preconnect without the attribute opens a SECOND, non-CORS connection
+           * that the font request cannot reuse — it costs an extra DNS lookup and
+           * TLS handshake rather than saving one, which is the exact opposite of
+           * the point and is invisible in every tool except a waterfall.
+           *
+           * ⚠ AND IT IS `preconnect`, NOT `preload`. Preloading a font the page
+           * may not use — this one is only on headings and the wordmark — makes it
+           * a render-blocking download on every route. Warming the connection is
+           * the half that is free.
+           */}
+          <link rel="preconnect" href="https://cdn.i10.tech" crossOrigin="anonymous" />
           <Theme>
-            {children}
+            <MotionProvider>{children}</MotionProvider>
             {/*
              * ⚠ ONE TOASTER FOR THE WHOLE APP, MOUNTED HERE. `toast()` is a
              * module-level call that pushes onto whichever Toaster is mounted;

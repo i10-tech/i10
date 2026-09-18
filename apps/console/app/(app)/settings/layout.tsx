@@ -5,20 +5,21 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
-import { SettingsNav } from "@/components/settings-nav"
 
 /**
  * The settings shell.
  *
- * ⚠ A SECOND COLUMN RATHER THAN A SECOND TOP-LEVEL NAVIGATION. Settings is
- * eight pages that somebody visits once a quarter; promoting them into the main
- * rail would push the ten things used daily below the fold. Keeping the main
- * rail visible also means leaving settings is one click rather than a back
- * button.
+ * ⚠ THE SECOND COLUMN IS GONE, AND THE LEFT RAIL DOES ITS JOB INSTEAD. Settings
+ * used to render its own narrow navigation beside the content while the console
+ * rail stayed on screen, which put two vertical lists of links within a few
+ * pixels of each other and left the content column squeezed into whatever was
+ * left. `SidebarNav` now swaps itself for `SETTINGS_NAV` on these routes and
+ * carries a way back — one navigation, in the place navigation already lives.
  *
- * ⚠ AND THE HEADING LIVES HERE, NOT IN EACH PAGE. Eight pages each rendering
- * their own "Settings" title is eight chances for one of them to be two pixels
- * out — which nobody can name and everybody feels as they move between tabs.
+ * ⚠ AND THE HEADING STILL LIVES HERE, NOT IN EACH PAGE. Eight pages each
+ * rendering their own "Settings" title is eight chances for one of them to be
+ * two pixels out — which nobody can name and everybody feels as they move
+ * between tabs.
  */
 export default function SettingsLayout({
   children,
@@ -31,9 +32,13 @@ export default function SettingsLayout({
         </PageHeaderRow>
       </PageHeader>
 
-      <PageBody className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-10">
-        <SettingsNav />
-        <div className="min-w-0">{children}</div>
+      {/*
+       * ⚠ A MAX WIDTH, BECAUSE SETTINGS IS PROSE AND FORMS. Without the second
+       * column the content is free to run the full width of a desktop window,
+       * where a label and its field end up a hand's width apart.
+       */}
+      <PageBody>
+        <div className="min-w-0 max-w-3xl">{children}</div>
       </PageBody>
     </Page>
   )

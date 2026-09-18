@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { api, ApiRequestError } from "@/lib/api"
+import { safeFailure } from "@/lib/failure"
+import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import type {
   ContactRow,
   CreatedApiKey,
@@ -38,7 +40,23 @@ import type {
  */
 
 export type ActionResult<T = undefined> =
-  { ok: true; data: T } | { ok: false; error: string; name: string; status: number }
+  | { ok: true; data: T }
+  | {
+      ok: false
+      error: string
+      name: string
+      status: number
+      /**
+       * ⚠ THE WHOLE ERROR BODY, BECAUSE SOME REFUSALS CARRY DATA. A 409 from
+       * `/domains/:id/publish` lists the records standing in the way, and that
+       * list IS the remedy — flattening every failure to a message would leave
+       * the caller with a dialog it cannot fill in. Everything else ignores it.
+       *
+       * ⚠ IT IS THE API'S OWN JSON AND IS TREATED AS DATA, NOT AS TRUSTED SHAPE.
+       * Whoever reads a field off it narrows first.
+       */
+      body?: Record<string, unknown>
+    }
 
 async function run<T>(
   fn: () => Promise<T>,
@@ -61,13 +79,23 @@ async function run<T>(
         error: error.body.message,
         name: error.body.name,
         status: error.status,
+        body: error.body as unknown as Record<string, unknown>,
       }
     }
+
+    /*
+     * ⚠ NOT `error.message`. Anything reaching here was thrown by the runtime
+     * rather than written by the API — `getaddrinfo ENOTFOUND
+     * i10-api.i10-prod.svc.cluster.local`, or a TypeError naming one of our
+     * own properties — and this string is rendered to the customer. See
+     * lib/failure.ts; the real error is logged there.
+     */
+    const safe = safeFailure(error, "server action")
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Something went wrong.",
-      name: "internal_server_error",
-      status: 500,
+      error: safe.message,
+      name: safe.name,
+      status: safe.statusCode,
     }
   }
 }
@@ -126,6 +154,110 @@ export async function lookupDns(domain: string) {
     api<import("@/lib/types").DnsInspection>("/console/dns/lookup", {
       query: { domain },
     }),
+  )
+}
+
+// ── DNS connections ─────────────────────────────────────────────────────────
+
+/**
+ * ⚠ THESE HANDLE THE MOST DANGEROUS CREDENTIAL IN THE PRODUCT, AND NONE OF THEM
+ * EVER RETURNS ONE. A DNS write token can rewrite a customer's MX records and
+ * take delivery of their mail; it is written once, sealed, and read only by the
+ * publisher on the server. What comes back here is a provider, a label and the
+ * zones it reaches.
+ */
+export async function dnsProviders() {
+  return run(() =>
+    api<{ data: import("@/lib/types").ConnectableProvider[] }>(
+      "/console/dns/providers",
+    ),
+  )
+}
+
+export async function dnsConnections() {
+  return run(() =>
+    api<{ data: import("@/lib/types").DnsConnection[] }>("/console/dns/connections"),
+  )
+}
+
+export async function startDnsConnect(provider: string) {
+  return run(() =>
+    api<{ url: string }>(`/console/dns/connect/${encodeURIComponent(provider)}`, {
+      method: "POST",
+    }),
+  )
+}
+
+export async function finishDnsConnect(input: {
+  provider: string
+  code: string
+  state: string
+}) {
+  return run(
+    () =>
+      api<import("@/lib/types").DnsConnection>(
+        `/console/dns/callback/${encodeURIComponent(input.provider)}`,
+        { method: "POST", body: { code: input.code, state: input.state } },
+      ),
+    ["/domains", "/settings"],
+  )
+}
+
+export async function connectDnsWithToken(input: {
+  provider: string
+  token: string
+  label?: string
+}) {
+  return run(
+    () =>
+      api<import("@/lib/types").DnsConnection>(
+        `/console/dns/connections/${encodeURIComponent(input.provider)}/token`,
+        {
+          method: "POST",
+          body: { token: input.token, ...(input.label ? { label: input.label } : {}) },
+        },
+      ),
+    ["/domains", "/settings"],
+  )
+}
+
+export async function disconnectDns(provider: string) {
+  return run(
+    () =>
+      api<{ deleted: true }>(
+        `/console/dns/connections/${encodeURIComponent(provider)}`,
+        { method: "DELETE" },
+      ),
+    ["/domains", "/settings"],
+  )
+}
+
+/**
+ * Publishes a domain's records through a connected provider.
+ *
+ * ⚠ THE FIRST CALL IS A DRY RUN WHEREVER ANYTHING WOULD BE DELETED. The API
+ * answers 409 with the conflicting records and writes nothing; the caller shows
+ * them and calls again with `replaceConflicts`. That protocol is the reason this
+ * returns the raw error rather than a boolean — the conflicts are in the body.
+ */
+export async function publishDnsRecords(input: {
+  domainId: string
+  provider: string
+  replaceConflicts?: boolean
+}) {
+  return run(
+    () =>
+      api<import("@/lib/types").PublishOutcome>(
+        `/console/domains/${encodeURIComponent(input.domainId)}/publish`,
+        {
+          method: "POST",
+          body: {
+            provider: input.provider,
+            ...(input.replaceConflicts ? { replace_conflicts: true } : {}),
+          },
+        },
+      ),
+    [`/domains/${encodeURIComponent(input.domainId)}`, "/domains"],
   )
 }
 
@@ -240,6 +372,17 @@ export async function updateOnboarding(input: {
   use_case?: string
   completed?: boolean
 }) {
+  /*
+   * ⚠ FINISHING CLEARS THE SKIP, OR THE SKIP OUTLIVES THE REASON FOR IT. The
+   * cookie suppresses the console's redirect into this flow; the flow is also
+   * re-opened deliberately when somebody upgrades off the free plan, which is
+   * the one time there is genuinely something new to show them. A week-old
+   * "I skipped it once" would swallow that, and the upgrade would look like it
+   * did nothing. Completing is the moment the preference has served its
+   * purpose.
+   */
+  if (input.completed === true) await forgetOnboardingSkip()
+
   return run(
     () =>
       api<import("@/lib/types").OnboardingState>("/console/onboarding", {

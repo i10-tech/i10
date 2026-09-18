@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { cn } from "cn"
+import { PointerGlow } from "@repo/ui/components/pointer-glow"
 import { formatNumber } from "@/lib/format"
 
 /**
@@ -75,8 +76,18 @@ export function Stat({
  */
 export function StatRow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border md:grid-cols-3 lg:grid-cols-6">
-      {children}
-    </div>
+    /*
+     * ⚠ THE ONLY CLIENT COMPONENT ON THIS SCREEN, AND IT WRAPS THE STRIP RATHER
+     * THAN THE TILES. `Stat` stays a server component — six of them tracking
+     * their own pointer would be six listeners, six bundles and six gradients
+     * that stop at their own edges, so the wash would visibly break at every
+     * divider. See @repo/ui/components/pointer-glow: it sets two CSS variables
+     * and never calls setState, so following the cursor costs no React renders.
+     */
+    <PointerGlow className="overflow-hidden rounded-lg border">
+      <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-3 lg:grid-cols-6">
+        {children}
+      </div>
+    </PointerGlow>
   )
 }

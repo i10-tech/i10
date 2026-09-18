@@ -6,19 +6,16 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldSeparator,
-} from "@repo/ui/components/field"
-import { Input } from "@repo/ui/components/input"
+import { FieldDescription, FieldGroup, FieldSeparator } from "@repo/ui/components/field"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
+import { StepStage } from "@repo/ui/components/step-stage"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave } from "../_lib/finish"
+import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
+import { LastUsedBadge } from "../_components/last-used-badge"
 import type { SsoProvider } from "../_lib/providers"
 
 /*
@@ -60,6 +57,35 @@ export function SignInForm({
   const router = useRouter()
   const { signIn } = useSignIn()
   const [busy, setBusy] = useState<string | null>(null)
+
+  /**
+   * Email first, password second.
+   *
+   * ⚠ THE SPLIT IS NOT COSMETIC — IT IS WHAT LETS THE SECOND SCREEN BE
+   * CORRECT. `signIn.create({ identifier })` answers with the factors this
+   * particular account actually supports, so somebody who has only ever used a
+   * passkey is not shown a password box they have never filled in, and an SSO
+   * domain can be redirected before being asked for a credential it does not
+   * have. Asking for both at once means guessing.
+   *
+   * ⚠ AND IT DOES DISCLOSE WHETHER AN ADDRESS HAS AN ACCOUNT, which is the
+   * honest cost of this pattern and worth writing down rather than discovering.
+   * Clerk answers `form_identifier_not_found` for an unknown identifier, so the
+   * first step is an enumeration oracle — the same one Google, Apple and Clerk's
+   * own hosted pages accept. It is a deliberate trade for a flow that can route
+   * to the right factor, not an oversight.
+   */
+  const [stage, setStage] = useState<"identifier" | "password">("identifier")
+  const [identifier, setIdentifier] = useState("")
+  const [direction, setDirection] = useState<"forward" | "back">("forward")
+
+  /*
+   * ⚠ READ IN AN EFFECT, NOT DURING RENDER. It comes from `localStorage`, which
+   * the server does not have — reading it inline renders one thing on the
+   * server and another in the browser, which React reports as a hydration
+   * mismatch and resolves by discarding the markup.
+   */
+  const lastUsed = useLastSignInMethod()
 
   /**
    * Offer a saved passkey without anybody asking.
@@ -108,6 +134,37 @@ export function SignInForm({
       .catch(() => setBusy(null))
   }, [signIn, afterAuthUrl])
 
+  /**
+   * ⚠ THE FIRST STEP CREATES THE SIGN-IN RATHER THAN JUST REMEMBERING THE
+   * EMAIL. That call is what makes Clerk resolve the identifier and populate
+   * `supportedFirstFactors`; skipping it and carrying the string forward would
+   * turn this into two screens with one screen's worth of information.
+   */
+  async function onIdentifier(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!signIn || busy) return
+
+    const value = identifier.trim()
+    if (!value) return
+
+    setBusy("identifier")
+    try {
+      const { error } = await signIn.create({ identifier: value })
+      if (error) {
+        toast.error(messageFor(error))
+        setBusy(null)
+        return
+      }
+
+      setDirection("forward")
+      setStage("password")
+      setBusy(null)
+    } catch {
+      toast.error(TRANSPORT_FAILURE)
+      setBusy(null)
+    }
+  }
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     // ⚠ `signIn` IS NULL UNTIL CLERK LOADS. It is the only readiness signal the
@@ -117,9 +174,18 @@ export function SignInForm({
     const form = new FormData(event.currentTarget)
     setBusy("password")
 
+    // ⚠ AN ATTEMPT, NOT A RESULT — promoted only once a session exists. A wrong
+    // password must not teach the badge that a password is what works here.
+    markSignInAttempt("password")
+
     try {
       const { error } = await signIn.password({
-        identifier: String(form.get("email") ?? ""),
+        // ⚠ PASSED AGAIN RATHER THAN RELYING ON THE SIGN-IN CREATED ABOVE.
+        // Clerk will use the in-progress attempt's identifier when this is
+        // omitted, which works — until the attempt is garbage-collected by a
+        // reload or a second tab, and then the password lands on nothing with
+        // an error that reads like a wrong password.
+        identifier: identifier.trim(),
         password: String(form.get("password") ?? ""),
       })
 
@@ -184,126 +250,192 @@ export function SignInForm({
 
   const locked = busy !== null
 
+  /** Back to the email step, keeping what was typed. */
+  function changeIdentifier() {
+    setDirection("back")
+    setStage("identifier")
+  }
+
   return (
-    <form className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
-      <FieldGroup>
-        <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-bold">Login to your account</h1>
-          <p className="text-sm text-balance text-muted-foreground">
-            Enter your email below to login to your account
-          </p>
-        </div>
-        <Field>
-          <FieldLabel htmlFor="email">Email</FieldLabel>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="m@example.com"
-            // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
-            // This is the hook the conditional-mediation call above attaches
-            // to: without it the browser has nowhere to surface a saved
-            // passkey, and the effect silently does nothing.
-            autoComplete="email webauthn"
-            disabled={locked}
-            required
-          />
-        </Field>
-        <Field>
-          <div className="flex items-center">
-            <FieldLabel htmlFor="password">Password</FieldLabel>
-            <Link
-              href={resetHref}
-              // ⚠ THE LINKS GO DEAD WITH THE BUTTONS, and they are the half
-              // that is easy to forget. Navigating to "Forgot your password?"
-              // mid-redirect abandons a flow that is already creating a session
-              // — the person lands on a reset page for an account they were one
-              // second from being signed in to.
-              aria-disabled={locked}
-              tabIndex={locked ? -1 : undefined}
-              className={`ml-auto text-sm underline-offset-4 hover:underline ${
-                locked ? "pointer-events-none opacity-50" : ""
-              }`}
-            >
-              Forgot your password?
-            </Link>
-          </div>
-          <PasswordInput
-            id="password"
-            name="password"
-            // ⚠ `current-password`, NOT `password`. It is what tells a password
-            // manager to offer the saved credential rather than to propose a
-            // new one, and getting it wrong is how people end up with a second
-            // entry for the same site.
-            autoComplete="current-password"
-            disabled={locked}
-            required
-          />
-        </Field>
-        {/*
-         * ⚠ CLERK'S BOT PROTECTION MOUNTS ITSELF INTO THIS EXACT ID, AND ITS
-         * ABSENCE IS A SILENT FAILURE — the same note as the sign-up form, and
-         * it belongs here for a reason that is easy to miss. This page carries
-         * no sign-up, but its SSO buttons pass `signUpIfMissing`, so a
-         * "Continue with Google" from somebody who has never been here before
-         * IS a sign-up, and bot protection applies to it. With no mount point
-         * Clerk rejects the attempt rather than challenging it, which is what
-         * `authorization_invalid` from FAPI turned out to be.
-         */}
-        <div id="clerk-captcha" />
-        <Field>
-          <Button type="submit" disabled={!signIn || locked}>
-            {busy === "password" ? (
-              <>
+    <div className="flex flex-col gap-6">
+      {/*
+       * ⚠ THE STAGE IS KEYED ON `stage`, AND THE HEADING IS INSIDE IT. Keeping
+       * a fixed heading above the swap would leave one line of the card
+       * stationary while everything under it moved, which reads as the page
+       * partially failing to update. The whole panel is one object changing
+       * state — see @repo/ui/components/step-stage.
+       */}
+      <StepStage step={stage} direction={direction}>
+        {stage === "identifier" ? (
+          <form className="flex flex-col gap-6" onSubmit={onIdentifier} noValidate>
+            <FieldGroup>
+              <div className="flex flex-col items-center gap-1 text-center">
+                <h1 className="text-2xl font-bold">Login to your account</h1>
+                <p className="text-sm text-balance text-muted-foreground">
+                  Enter your email to continue
+                </p>
+              </div>
+
+              <FloatingInput
+                id="email"
+                name="email"
+                type="email"
+                label="Email address"
+                value={identifier}
+                onChange={(event) => setIdentifier(event.target.value)}
+                // ⚠ `webauthn` ALONGSIDE `email`, AND BOTH TOKENS ARE REQUIRED.
+                // This is the hook the conditional-mediation call above attaches
+                // to: without it the browser has nowhere to surface a saved
+                // passkey, and the effect silently does nothing.
+                autoComplete="email webauthn"
+                disabled={locked}
+                autoFocus
+                required
+              />
+
+              <Button
+                type="submit"
+                size="xl"
+                disabled={!signIn || locked || identifier.trim().length === 0}
+              >
+                {busy === "identifier" ? (
+                  <>
+                    <Spinner aria-hidden="true" aria-label={undefined} />
+                    Checking…
+                  </>
+                ) : (
+                  "Continue"
+                )}
+              </Button>
+
+              <FieldSeparator>Or continue with</FieldSeparator>
+              <OAuthButtons
+                afterAuthUrl={afterAuthUrl}
+                redirectRaw={redirectRaw}
+                intent="sign-in"
+                providers={providers}
+                busy={busy}
+                onBusyChange={setBusy}
+              />
+
+              <FieldDescription className="text-center">
+                <Link
+                  href={passkeyHref}
+                  aria-disabled={locked}
+                  tabIndex={locked ? -1 : undefined}
+                  className={`underline underline-offset-4 ${
+                    locked ? "pointer-events-none opacity-50" : ""
+                  }`}
+                >
+                  Use a passkey instead
+                </Link>
+              </FieldDescription>
+              <FieldDescription className="text-center">
+                Don&apos;t have an account?{" "}
+                <Link
+                  href={signUpHref}
+                  aria-disabled={locked}
+                  tabIndex={locked ? -1 : undefined}
+                  className={`underline underline-offset-4 ${
+                    locked ? "pointer-events-none opacity-50" : ""
+                  }`}
+                >
+                  Sign up
+                </Link>
+              </FieldDescription>
+            </FieldGroup>
+          </form>
+        ) : (
+          <form className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
+            <FieldGroup>
+              <div className="flex flex-col items-center gap-2 text-center">
+                <h1 className="text-2xl font-bold">Enter your password</h1>
                 {/*
-                 * ⚠ `aria-hidden`, AND THE LABEL CARRIES THE STATE. The Spinner
-                 * ships with `role="status"`; leaving that on next to text that
-                 * already says "Signing in…" makes a screen reader announce the
-                 * same thing twice.
+                 * ⚠ THE ADDRESS IS A BUTTON, NOT A LINE OF TEXT. Somebody who
+                 * mistyped their email on the previous step has no other way
+                 * back — the browser's back button leaves Clerk's sign-in
+                 * attempt behind and produces a confusing half-state. Making the
+                 * thing they want to change the thing they can click is the
+                 * shortest route, and it is where they are already looking.
                  */}
-                <Spinner aria-hidden="true" aria-label={undefined} />
-                Signing in…
-              </>
-            ) : (
-              "Login"
-            )}
-          </Button>
-        </Field>
-        <FieldSeparator>Or continue with</FieldSeparator>
-        <OAuthButtons
-          afterAuthUrl={afterAuthUrl}
-          redirectRaw={redirectRaw}
-          intent="sign-in"
-          providers={providers}
-          busy={busy}
-          onBusyChange={setBusy}
-        />
-        <FieldDescription className="text-center">
-          <Link
-            href={passkeyHref}
-            aria-disabled={locked}
-            tabIndex={locked ? -1 : undefined}
-            className={`underline underline-offset-4 ${
-              locked ? "pointer-events-none opacity-50" : ""
-            }`}
-          >
-            Use a passkey instead
-          </Link>
-        </FieldDescription>
-        <FieldDescription className="text-center">
-          Don&apos;t have an account?{" "}
-          <Link
-            href={signUpHref}
-            aria-disabled={locked}
-            tabIndex={locked ? -1 : undefined}
-            className={`underline underline-offset-4 ${
-              locked ? "pointer-events-none opacity-50" : ""
-            }`}
-          >
-            Sign up
-          </Link>
-        </FieldDescription>
-      </FieldGroup>
-    </form>
+                <button
+                  type="button"
+                  onClick={changeIdentifier}
+                  disabled={locked}
+                  className="max-w-full truncate rounded-pill border px-3 py-1 text-xs text-muted-foreground transition-colors duration-(--duration-instant) hover:bg-accent hover:text-foreground disabled:opacity-50"
+                >
+                  {identifier} · Change
+                </button>
+              </div>
+
+              <PasswordInput
+                id="password"
+                name="password"
+                label="Password"
+                // ⚠ `current-password`, NOT `password`. It is what tells a
+                // password manager to offer the saved credential rather than to
+                // propose a new one, and getting it wrong is how people end up
+                // with a second entry for the same site.
+                autoComplete="current-password"
+                disabled={locked}
+                autoFocus
+                required
+              />
+
+              <div className="-mt-4 flex justify-end">
+                <Link
+                  href={resetHref}
+                  // ⚠ THE LINKS GO DEAD WITH THE BUTTONS, and they are the half
+                  // that is easy to forget. Navigating to "Forgot your
+                  // password?" mid-redirect abandons a flow that is already
+                  // creating a session.
+                  aria-disabled={locked}
+                  tabIndex={locked ? -1 : undefined}
+                  className={`text-xs underline-offset-4 hover:underline ${
+                    locked ? "pointer-events-none opacity-50" : ""
+                  }`}
+                >
+                  Forgot your password?
+                </Link>
+              </div>
+
+              <Button type="submit" size="xl" disabled={!signIn || locked}>
+                {busy === "password" ? (
+                  <>
+                    {/*
+                     * ⚠ `aria-hidden`, AND THE LABEL CARRIES THE STATE. The
+                     * Spinner ships with `role="status"`; leaving that on next to
+                     * text that already says "Signing in…" makes a screen reader
+                     * announce the same thing twice.
+                     */}
+                    <Spinner aria-hidden="true" aria-label={undefined} />
+                    Signing in…
+                  </>
+                ) : (
+                  <>
+                    Login
+                    {lastUsed === "password" && <LastUsedBadge />}
+                  </>
+                )}
+              </Button>
+            </FieldGroup>
+          </form>
+        )}
+      </StepStage>
+
+      {/*
+       * ⚠ OUTSIDE THE STAGE, SO IT IS NEVER UNMOUNTED. Clerk's bot protection
+       * mounts itself into this exact id and its absence is a silent failure:
+       * with Smart CAPTCHA on and no `#clerk-captcha` in the DOM, Clerk rejects
+       * the attempt rather than challenging it — which is what
+       * `authorization_invalid` from FAPI turned out to be. Inside the step
+       * swap it would be torn out from under Clerk halfway through the flow.
+       *
+       * ⚠ AND THIS PAGE NEEDS IT DESPITE CARRYING NO SIGN-UP. The SSO buttons
+       * pass `signUpIfMissing`, so "Continue with Google" from somebody who has
+       * never been here before IS a sign-up, and bot protection applies to it.
+       */}
+      <div id="clerk-captcha" />
+    </div>
   )
 }

@@ -39,7 +39,27 @@ export function StepSend({
   const [pending, setPending] = React.useState(false)
 
   const verified = domains.filter((d) => d.status === "verified")
-  const from = verified[0] ? `hello@${verified[0].name}` : "hello@yourdomain.com"
+
+  /*
+   * ⚠ THE SNIPPET USES A DOMAIN THEY ACTUALLY ADDED, VERIFIED OR NOT. It used
+   * to fall back to `yourdomain.com` the moment nothing was verified — which is
+   * every person still waiting on DNS, i.e. almost everybody who reaches this
+   * step. They had just typed their domain two screens ago and were then handed
+   * a snippet addressed to a placeholder, so the one thing they had to edit by
+   * hand was the thing we already knew.
+   *
+   * ⚠ VERIFIED FIRST, THOUGH, BECAUSE THAT IS THE ONE THAT WILL SEND. With a
+   * verified domain and a pending one, the snippet has to name the verified
+   * one or it is a copy-pasteable 403. The placeholder survives only for
+   * somebody who has added no domain at all, where there is genuinely nothing
+   * better to say.
+   *
+   * ⚠ AND IT IS STILL ONLY A DEFAULT. The warning below already says a send
+   * from an unverified domain is refused; naming the domain does not promise it
+   * works, it saves retyping it once it does.
+   */
+  const preferred = verified[0] ?? domains[0] ?? null
+  const from = preferred ? `hello@${preferred.name}` : "hello@yourdomain.com"
 
   // ⚠ THE PLACEHOLDER IS OBVIOUSLY A PLACEHOLDER. `i10_live_xxxxxxxx` in a
   // snippet somebody pastes into a terminal produces an immediate 401 that they

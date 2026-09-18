@@ -108,6 +108,17 @@ export default async function BillingPage() {
               plans={plans.data.data}
               currentPlanId={billing.plan?.id ?? null}
               hasSubscription={billing.subscription !== null}
+              // ⚠ ONLY WHEN IT IS ACTUALLY ENDING. `cancel_at_period_end` with no
+              // date is a subscription Polar has marked but not yet dated; the
+              // cards use the presence of a date to decide whether to disable
+              // the free plan, so an empty string would disable it with nothing
+              // to show.
+              endingAt={
+                billing.subscription?.cancel_at_period_end &&
+                billing.subscription.current_period_end
+                  ? formatExact(billing.subscription.current_period_end)
+                  : null
+              }
             />
           )}
         </SectionContent>

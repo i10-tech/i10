@@ -88,7 +88,7 @@ export function StepVerify({
               <p className="truncate font-mono text-sm">{domain.name}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {domain.delegated
-                  ? "Delegated — three NS records to publish"
+                  ? "Delegated — NS records to publish"
                   : "Manual — six records to publish"}
               </p>
             </div>

@@ -15,6 +15,7 @@ import {
 } from "@repo/ui/components/sheet"
 import { Separator } from "@repo/ui/components/separator"
 import { SidebarNav } from "@/components/sidebar-nav"
+import { AccountBar } from "@/components/account-bar"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { Wordmark } from "@/components/wordmark"
 import type { PlanSummary, TenantProfile } from "@/lib/types"
@@ -61,7 +62,7 @@ export function MobileNav({
             <Menu />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-72 bg-sidebar p-0">
+        <SheetContent side="left" className="flex w-72 flex-col bg-sidebar p-0">
           <SheetHeader className="h-14 justify-center border-b px-4">
             <SheetTitle className="text-left">
               <Wordmark />
@@ -72,7 +73,7 @@ export function MobileNav({
              * announces the drawer with no context at all without one.
              */}
             <SheetDescription className="sr-only">
-              Navigate the i10 console.
+              Navigate the i10 dashboard.
             </SheetDescription>
           </SheetHeader>
 
@@ -80,9 +81,29 @@ export function MobileNav({
             <WorkspaceBar tenant={tenant} plan={plan} clerkEnabled={clerkEnabled} />
           </div>
           <Separator />
-          <div className="overflow-y-auto py-2">
-            <SidebarNav />
+          {/*
+           * ⚠ `flex-1` AND `min-h-0` SO THE ACCOUNT ROW CAN BE PINNED BELOW IT.
+           * Without `min-h-0` a flex child with overflow refuses to shrink past
+           * its content, so a long navigation pushes the account row off the
+           * bottom of the drawer rather than scrolling inside it.
+           */}
+          <div className="min-h-0 flex-1 overflow-y-auto py-2">
+            {/*
+             * ⚠ ITS OWN `scope`, SO THE DRAWER'S ACTIVE HIGHLIGHT AND THE
+             * DESKTOP RAIL'S ARE DIFFERENT OBJECTS. Both are mounted while the
+             * drawer is open; sharing a `layoutId` would have Motion morph one
+             * into the other across the screen every time either re-rendered.
+             */}
+            <SidebarNav scope="drawer" />
           </div>
+
+          {/* The same reading order as the desktop rail: workspace, then where
+              to go, then who I am. */}
+          {clerkEnabled && (
+            <div className="border-t p-2">
+              <AccountBar />
+            </div>
+          )}
         </SheetContent>
       </Sheet>
 

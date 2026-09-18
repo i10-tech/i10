@@ -5,13 +5,8 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@repo/ui/components/field"
-import { Input } from "@repo/ui/components/input"
+import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
@@ -164,27 +159,21 @@ export function ResetPasswordForm({
            * digit lands would send an empty password and burn the code.
            */}
           <OtpField value={code} onChange={setCode} autoFocus />
-          <Field>
-            <FieldLabel htmlFor="password">New password</FieldLabel>
-            <PasswordInput
-              id="password"
-              name="password"
-
-              autoComplete="new-password"
-              required
-            />
-            <FieldDescription>Must be at least 8 characters long.</FieldDescription>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="confirm-password">Confirm new password</FieldLabel>
-            <PasswordInput
-              id="confirm-password"
-              name="confirm-password"
-
-              autoComplete="new-password"
-              required
-            />
-          </Field>
+          <PasswordInput
+            id="password"
+            name="password"
+            label="New password"
+            autoComplete="new-password"
+            required
+            hint="At least 8 characters."
+          />
+          <PasswordInput
+            id="confirm-password"
+            name="confirm-password"
+            label="Confirm new password"
+            autoComplete="new-password"
+            required
+          />
           <Field>
             <Button type="submit" disabled={pending || code.length < OTP_LENGTH}>
               {pending ? "Saving…" : "Set new password"}
@@ -214,17 +203,14 @@ export function ResetPasswordForm({
             Enter your email and we&apos;ll send you a code.
           </p>
         </div>
-        <Field>
-          <FieldLabel htmlFor="email">Email</FieldLabel>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="m@example.com"
-            autoComplete="email"
-            required
-          />
-        </Field>
+        <FloatingInput
+          id="email"
+          name="email"
+          type="email"
+          label="Email address"
+          autoComplete="email"
+          required
+        />
         <Field>
           <Button type="submit" disabled={!signIn || pending}>
             {pending ? "Sending…" : "Send code"}

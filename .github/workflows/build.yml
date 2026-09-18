@@ -421,6 +421,7 @@ jobs:
           echo "pinned=${pinned[*]}" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push
+        id: push
         env:
           PINNED: ${{ steps.pin.outputs.pinned }}
         run: |
@@ -431,6 +432,11 @@ jobs:
 
           if git diff --cached --quiet; then
             echo "Manifests already reference these digests — nothing to deploy."
+            # ⚠ RECORDED, BECAUSE THE VERIFY STEP MUST NOT RUN. With no new
+            # commit there is nothing for Argo to move to, so waiting for one
+            # would spend the whole timeout and then report a failed rollout
+            # for a deploy that correctly did nothing.
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -443,6 +449,7 @@ jobs:
           for attempt in 1 2 3; do
             if git push origin "HEAD:${GITHUB_REF_NAME}"; then
               echo "Pushed on attempt ${attempt}."
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "Push rejected — rebasing onto origin/${GITHUB_REF_NAME} and retrying."
@@ -452,15 +459,146 @@ jobs:
           echo "::error::Could not push the deploy commit after 3 attempts."
           exit 1
 
+      # ⚠ THE DEPLOY COMMIT'S SHA, NOT `GITHUB_SHA`. Argo syncs to whatever is at
+      # the head of `main`, and the head is now the commit the step above
+      # created — pinning the digests. Waiting for `GITHUB_SHA` would wait for
+      # the merge commit, which Argo passed through on its way here and which
+      # does NOT carry the new image references.
+      - name: Record the deployed revision
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # ⚠ "PUSHED" AND "DEPLOYED" WERE THE SAME SENTENCE HERE AND ARE NOT THE
+      # SAME EVENT. Until this step existed the workflow went green the moment
+      # git accepted the commit, while Argo had not polled, the image had not
+      # been pulled and nothing had started — so an ImagePullBackOff, a missing
+      # secret or a container that crashlooped on a config error were all
+      # invisible to CI. The first anybody knew was opening the site.
+      #
+      # ⚠ IT IS SSH BECAUSE THE CONTROL PLANE IS NOT PUBLIC. `argocd-server` is a
+      # ClusterIP with no ingress and the Kubernetes API is not exposed. The
+      # alternative is publishing one of them so a runner can call it, which
+      # buys a convenience with a lot of attack surface.
+      #
+      # ⚠ AND IT GOES OVER TAILSCALE, BECAUSE SSH IS NOT ON THE PUBLIC INTERNET
+      # EITHER. `sshd` on psl-vps binds ONLY the tailnet addresses —
+      # `100.127.102.63:22` and its IPv6 — so a GitHub-hosted runner has no
+      # route to port 22 at all; it is not a firewall rule that could be opened,
+      # there is nothing listening. Measured, after a first version of this step
+      # was written assuming a public address.
+      #
+      # ⚠ THE RUNNER JOINS AS AN EPHEMERAL NODE, which is the point of using an
+      # OAuth client rather than a reusable auth key: the node is created for
+      # this job and removed when it ends, so a tailnet does not slowly fill
+      # with dead CI machines that still hold an ACL grant.
+      #
+      # ⚠ AND THE KEY CAN DO NOTHING ELSE. `authorized_keys` on the box pins
+      # `infra/scripts/verify-rollout.sh` as a forced command with `restrict`,
+      # so this credential cannot open a shell, read a secret or change a
+      # workload — see infra/scripts/README.md. If it were a general-purpose
+      # deploy key, it would be the most valuable secret in the organisation.
+      #
+      # ⚠ SKIPPED RATHER THAN FAILED WHEN NO KEY IS CONFIGURED, so the pipeline
+      # keeps working on a fork and on a repository that has not set this up.
+      # A verification step that fails closed on a missing secret is a step
+      # somebody deletes.
+      # ⚠ SCOPED BY AN ACL TAG, NOT BY BEING ON THE TAILNET. Joining a tailnet is
+      # not an authorisation; `tag:ci` is, and the tailnet policy should grant it
+      # nothing but port 22 on the one host. Without that, a CI credential is a
+      # route to every machine on the network.
+      - name: Join the tailnet
+        if: ${{ steps.push.outputs.pushed == 'true' && secrets.TAILSCALE_OAUTH_CLIENT_ID != '' }}
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Verify the rollout
+        id: verify
+        if: ${{ steps.push.outputs.pushed == 'true' && secrets.DEPLOY_SSH_KEY != '' && secrets.TAILSCALE_OAUTH_CLIENT_ID != '' }}
+        continue-on-error: true
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER || 'i10-deploy' }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          PINNED: ${{ steps.pin.outputs.pinned }}
+          REVISION: ${{ steps.revision.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+
+          # ⚠ A PINNED HOST KEY, NEVER `StrictHostKeyChecking=no`. Turning the
+          # check off means the first machine to answer on that address gets a
+          # CI credential and the commands it runs — which is the entire attack
+          # this file is otherwise careful about.
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+          images=$(tr ' ' ',' <<<"${PINNED:-}")
+
+          ssh -i ~/.ssh/deploy \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" \
+              "${REVISION} ${images}"
+
       - name: Summarise
         env:
           PINNED: ${{ steps.pin.outputs.pinned }}
+          VERIFIED: ${{ steps.verify.outcome }}
+          REVISION: ${{ steps.revision.outputs.sha }}
+          PUSHED: ${{ steps.push.outputs.pushed }}
         run: |
           {
             echo "## Deployed"
             echo ""
             echo "Pinned at \`${GITHUB_SHA:0:7}\`: \`${PINNED:-nothing}\`"
+            echo "Deploy commit: \`${REVISION:0:7}\`"
             echo ""
-            echo "Argo syncs \`main\` automatically, so the commit above IS the rollout."
-            echo "Rollback is \`git revert\` of that commit."
+            case "${VERIFIED:-skipped}" in
+              success)
+                echo "✅ Argo synced to that commit and every deployment is ready."
+                ;;
+              failure)
+                echo "❌ **The rollout did not come up.** The commit is on \`main\` and Argo"
+                echo "will keep trying, so production may be part-way between two versions."
+                echo ""
+                echo "To put the previous images back:"
+                echo ""
+                echo '```bash'
+                echo "git revert --no-edit ${REVISION}"
+                echo "git push"
+                echo '```'
+                echo ""
+                echo "⚠ \`kubectl rollout undo\` will NOT work: every app here has Argo"
+                echo "selfHeal on, so the cluster is reverted to git within about 35 seconds."
+                echo "Reverting the commit is the rollback."
+                ;;
+              *)
+                if [ "${PUSHED:-false}" != "true" ]; then
+                  echo "Nothing to deploy — the manifests already referenced these digests."
+                else
+                  echo "⚠ Rollout not verified — \`DEPLOY_SSH_KEY\` or"
+                  echo "\`TAILSCALE_OAUTH_CLIENT_ID\` is not configured. The box's sshd"
+                  echo "listens only on the tailnet, so both are required."
+                  echo "See infra/scripts/README.md."
+                fi
+                ;;
+            esac
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # ⚠ THE JOB FAILS *AFTER* THE SUMMARY IS WRITTEN. `continue-on-error` above
+      # is what lets the summary explain the failure and print the revert
+      # command; without this step the job would then go green on a rollout that
+      # never came up, which is worse than not checking at all.
+      - name: Fail if the rollout did not come up
+        if: ${{ steps.verify.outcome == 'failure' }}
+        run: |
+          echo "::error::The deploy commit is on main but the rollout is not healthy. See the job summary."
+          exit 1

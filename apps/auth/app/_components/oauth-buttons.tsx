@@ -10,6 +10,8 @@ import { TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoStrategy } from "../_lib/clerk-types"
 import type { SsoProvider } from "../_lib/providers"
 import { consentPromptFor } from "../_lib/oidc"
+import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
+import { LastUsedBadge } from "./last-used-badge"
 import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
 
 /**
@@ -110,6 +112,16 @@ export function OAuthButtons({
   const clerk = useClerk()
   const handoff = useRef<number | null>(null)
 
+  /*
+   * ⚠ READ IN AN EFFECT RATHER THAN DURING RENDER, because it comes from
+   * `localStorage` and the server has no such thing. Reading it inline would
+   * render one thing on the server and another in the browser, which React
+   * reports as a hydration mismatch and resolves by throwing away the markup.
+   * `null` on the first paint means no badge for one frame, which is the
+   * correct trade for a hint.
+   */
+  const lastUsed = useLastSignInMethod()
+
   const clearHandoff = useCallback(() => {
     if (handoff.current === null) return
     window.clearTimeout(handoff.current)
@@ -155,6 +167,16 @@ export function OAuthButtons({
     // slow one.
     if (!clerk.loaded || busy) return
     onBusyChange(strategy)
+
+    /*
+     * ⚠ AN ATTEMPT, NOT A RESULT. This is the last moment before the browser
+     * leaves for the provider, so it is the only place the intention can be
+     * recorded — but it is written to the PENDING slot and is promoted to "last
+     * used" only when a session actually exists. Somebody who backs out of
+     * Google's consent screen and then signs in with a password must not be
+     * told next time that Google is what they used. See _lib/last-used.ts.
+     */
+    markSignInAttempt(strategy)
 
     handoff.current = window.setTimeout(() => {
       handoff.current = null
@@ -258,6 +280,7 @@ export function OAuthButtons({
           <Button
             key={strategy}
             variant="outline"
+            size="xl"
             type="button"
             // ⚠ DISABLED UNTIL CLERK HAS LOADED. `signIn` is null until then,
             // and a click before that point is a dead button rather than a slow
@@ -280,6 +303,15 @@ export function OAuthButtons({
             {loading
               ? `Continuing with ${name}…`
               : `${verb ?? "Continue"} with ${name}`}
+            {/*
+             * ⚠ ON THE SIGN-IN PAGE ONLY. "Last used" beside a button on the
+             * SIGN-UP page is telling somebody who is creating an account about
+             * an account they already have — which is either confusing or, if
+             * they act on it, the thing the badge exists to prevent in reverse.
+             */}
+            {intent === "sign-in" && lastUsed === strategy && !loading && (
+              <LastUsedBadge />
+            )}
           </Button>
         )
       })}

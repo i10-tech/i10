@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@repo/ui/components/select"
 import { Spinner } from "@repo/ui/components/spinner"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { HtmlEditor } from "@/components/html-editor"
 import { updateBroadcast } from "@/lib/actions"
 import type { BroadcastDetail, DomainSummary, SegmentRow, TopicRow } from "@/lib/types"
@@ -119,15 +120,13 @@ export function BroadcastEditor({
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="broadcast-name">Internal name</Label>
-          <Input
-            id="broadcast-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            disabled={!editable}
-          />
-        </div>
+        <FloatingInput
+          label="Internal name"
+          id="broadcast-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          disabled={!editable}
+        />
 
         <div className="space-y-2">
           <Label htmlFor="broadcast-segment">Send to</Label>
@@ -202,37 +201,23 @@ export function BroadcastEditor({
         )}
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="broadcast-subject">Subject</Label>
-        <Input
-          id="broadcast-subject"
-          value={subject}
-          onChange={(event) => setSubject(event.target.value)}
-          disabled={!editable}
-          placeholder="What we shipped in March"
-        />
-      </div>
+      <FloatingInput
+        label="Subject"
+        id="broadcast-subject"
+        value={subject}
+        onChange={(event) => setSubject(event.target.value)}
+        disabled={!editable}
+        hint="e.g. What we shipped in March"
+      />
 
-      <div className="space-y-2">
-        <Label htmlFor="broadcast-preview">Preview text</Label>
-        <Input
-          id="broadcast-preview"
-          value={previewText}
-          onChange={(event) => setPreviewText(event.target.value)}
-          disabled={!editable}
-          placeholder="The line under the subject in the inbox"
-        />
-        <p className="text-xs text-muted-foreground">
-          {/*
-           * ⚠ REAL ADVICE, NOT FILLER. Left empty, every mail client falls back
-           * to the first words of the body — which for most templates is "View
-           * this email in your browser". It is the most-read and least-edited
-           * line in any marketing email.
-           */}
-          Left empty, clients show the first words of your body — usually the
-          unsubscribe preamble.
-        </p>
-      </div>
+      <FloatingInput
+        label="Preview text"
+        id="broadcast-preview"
+        value={previewText}
+        onChange={(event) => setPreviewText(event.target.value)}
+        disabled={!editable}
+        hint='{/* * ⚠ REAL ADVICE, NOT FILLER. Left empty, every mail client falls back * to the first words of the body — which for most templates is "View * this email in your browser". It is the most-read and least-edited * line in any marketing email. */} Left empty, clients show the first words of your body — usually the unsubscribe preamble.'
+      />
 
       <div className="space-y-2">
         <Label htmlFor="broadcast-topic">Topic</Label>

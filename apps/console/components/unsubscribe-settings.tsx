@@ -4,7 +4,7 @@ import * as React from "react"
 import { Button } from "@repo/ui/components/button"
 import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
-import { Textarea } from "@repo/ui/components/textarea"
+import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
 
 /**
  * ⚠ FIXTURE — THE FORM IS REAL AND THE PERSISTENCE IS NOT.
@@ -37,24 +37,20 @@ export function UnsubscribePageSettings() {
 
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_16rem]">
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="unsub-title">Title</Label>
-            <Input
-              id="unsub-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </div>
+          <FloatingInput
+            label="Title"
+            id="unsub-title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
 
-          <div className="space-y-2">
-            <Label htmlFor="unsub-description">Description</Label>
-            <Textarea
-              id="unsub-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              rows={3}
-            />
-          </div>
+          <FloatingTextarea
+            label="Description"
+            id="unsub-description"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={3}
+          />
 
           <div className="space-y-2">
             <Label htmlFor="unsub-accent">Accent colour</Label>

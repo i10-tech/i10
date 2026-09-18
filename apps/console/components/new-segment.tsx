@@ -3,9 +3,7 @@
 import * as React from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
-import { Textarea } from "@repo/ui/components/textarea"
+import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createSegment } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -42,28 +40,24 @@ export function NewSegmentButton() {
         createSegment({ name: name.trim(), description: description.trim() })
       }
     >
-      <div className="space-y-2">
-        <Label htmlFor="segment-name">Name</Label>
-        <Input
-          id="segment-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Paying customers"
-          autoComplete="off"
-          required
-          autoFocus
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="segment-description">Description</Label>
-        <Textarea
-          id="segment-description"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="Who is in this and why"
-          rows={2}
-        />
-      </div>
+      <FloatingInput
+        label="Name"
+        id="segment-name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        autoComplete="off"
+        required
+        autoFocus
+        hint="e.g. Paying customers"
+      />
+      <FloatingTextarea
+        label="Description"
+        id="segment-description"
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
+        rows={2}
+        hint="e.g. Who is in this and why"
+      />
     </FormDialog>
   )
 }

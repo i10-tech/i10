@@ -1,6 +1,7 @@
 import { desc, eq, isNull, or } from "drizzle-orm"
 import type { Meter } from "@repo/metering"
 import { withTenant, type Database } from "../db/client.js"
+import { describeErrorChain } from "../errors.js"
 import { planAssignments, plans, subscriptions, tenantStorage } from "../db/core.js"
 import {
   MAILBOX_DOMAINS,
@@ -194,8 +195,12 @@ export function usageStore({
               status: "ok",
             }
           } catch (error) {
+            // ⚠ `describeErrorChain`, NOT `String(error)`. This exact line printed
+            // "Failed query: select coalesce(sum(value)…" sixty-nine times in
+            // production without once saying WHY the query failed — the driver's
+            // reason was on `cause` and never made it to the log. See errors.ts.
             log?.warn(
-              { err: String(error), tenantId, featureId: feature.id },
+              { err: describeErrorChain(error), tenantId, featureId: feature.id },
               "could not read usage for a feature",
             )
             return {

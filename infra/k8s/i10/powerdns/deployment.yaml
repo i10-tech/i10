@@ -1,0 +1,176 @@
+# The authoritative nameserver for delegated customer subdomains.
+#
+# ⚠ WITHOUT THIS, DELEGATION IS A FEATURE THAT CANNOT WORK. The API has written
+# zones into `pdns.domains` and `pdns.records` since migration 0023 and the
+# console has been telling customers to point NS records at `ns1.i10.tech` —
+# with nothing anywhere serving those zones. `ns1`/`ns2` resolved to
+# Cloudflare's HTTP proxy addresses and answered nothing on port 53, so every
+# delegated domain sat `pending` for ever while the console said propagation can
+# take 72 hours. This is the missing half.
+#
+# ⚠ IT READS THE ZONES; IT DOES NOT OWN THEM. The API writes a domain row and
+# its zone in one transaction — that atomicity is the entire reason the `pdns`
+# schema lives inside the `i10` database rather than beside it. PowerDNS here is
+# a renderer of rows somebody else wrote, which is why it needs no persistence,
+# no leader election and no state of its own.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-powerdns
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-powerdns
+spec:
+  # ⚠ ONE REPLICA, AND THE `hostPort` BELOW IS WHY IT CANNOT SIMPLY BE TWO. Two
+  # pods on one node cannot both claim :53, so a second replica would sit
+  # Pending for ever and read as a broken rollout rather than a port conflict.
+  # Real redundancy here means a second NODE, which is a cluster change; see the
+  # note on `MAIL_NAMESERVERS` in apps/api/src/env.ts, which has said since it
+  # was written that two names pointing at one machine buys the appearance of
+  # redundancy and not the fact of it.
+  replicas: 1
+  strategy:
+    # ⚠ Recreate, NOT RollingUpdate. A rolling update would start the new pod
+    # before the old one released :53, and the new one would fail to bind — so
+    # every deploy would stall with the old pod already terminating. A few
+    # seconds of downtime on a zone whose records have a 300-second TTL is not
+    # something a resolver notices; a wedged rollout is.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-powerdns
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-powerdns
+    spec:
+      # ⚠ THE POD MUST NOT USE THE CLUSTER'S DNS FOR ITS OWN LOOKUPS. CoreDNS
+      # forwards what it cannot answer, and a nameserver that resolves through
+      # the thing that may end up forwarding to it is a loop waiting for the
+      # first misconfiguration. It only ever needs to reach Postgres, which it
+      # does by ClusterIP through the env below — so `Default` (the node's
+      # resolver) is both sufficient and safer.
+      dnsPolicy: Default
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 953
+        runAsGroup: 953
+        fsGroup: 953
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pdns
+          # ⚠ PINNED BY DIGEST, LIKE EVERY OTHER IMAGE HERE. A floating tag on
+          # the process that answers for customers' mail DNS means a restart can
+          # change behaviour with no commit to point at.
+          #
+          # ⚠ 5.1.4, NOT THE 4.9 BRANCH, AND THE REASON IS A SECURITY ADVISORY.
+          # This was first written against `pdns-auth-49:4.9.9`, which starts up
+          # and prints "PowerDNS Security Update Mandatory". Advisory 2026-11 is
+          # High severity — a crafted DNS packet drives memory and CPU — and is
+          # fixed in 4.9.17, 5.0.7 and 5.1.4. The `pdns-auth-49` image repository
+          # publishes nothing past 4.9.9, so the 4.9 branch cannot be patched by
+          # image at all. 5.1.4 reports "no known issues" at startup and was
+          # verified against our 4.x gpgsql schema locally — it serves the zones
+          # `powerdns.ts` writes without a schema change.
+          #
+          # ⚠ AND `runAsUser: 953` BELOW MATCHES THIS IMAGE'S `pdns` ACCOUNT.
+          # The image declares `User: pdns` by NAME, and `runAsNonRoot` cannot
+          # verify a name — the kubelet refuses the pod with "has non-numeric
+          # user (pdns), cannot verify user is non-root". 953 is that account's
+          # uid, read out of the image's own /etc/passwd.
+          image: powerdns/pdns-auth-51:5.1.4@sha256:bb5b1c133bcca1dd455075321de7d55db4945a8d7f2ba23339e3c7bbe416b205
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              # ⚠ THE ONE CAPABILITY IT GENUINELY NEEDS, and only because 53 is
+              # a privileged port. Everything else is dropped; the process runs
+              # as an unprivileged uid and cannot escalate.
+              add: ["NET_BIND_SERVICE"]
+          # ⚠ NO `args` BEYOND THE PASSWORD. Everything else lives in the
+          # ConfigMap mounted below, which REPLACES the image's own pdns.conf —
+          # see that file for why a config full of command-line flags could not
+          # work at all.
+          args:
+            # ⚠ THE ONE SETTING THAT CANNOT BE IN THE CONFIGMAP. A ConfigMap is
+            # readable by anything with `get` on this namespace; a command-line
+            # setting overrides the file, so the password arrives from the
+            # Secret through the environment and nowhere else.
+            - "--gpgsql-password=$(PDNS_DB_PASSWORD)"
+          env:
+            # ⚠ THE POOLER, NOT THE PRIMARY. Everything else in this namespace
+            # goes through `i10-platform-pooler`, and a nameserver holding direct
+            # backend connections would compete with the API for the same pool
+            # that the rest of the product depends on.
+            - name: PDNS_DB_HOST
+              value: i10-platform-pooler
+            - name: PDNS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: i10-pdns-db-role
+                  key: username
+            - name: PDNS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-pdns-db-role
+                  key: password
+          ports:
+            # ⚠ hostPort, FOR THE SAME REASON STALWART USES IT. k3s serves
+            # `type: LoadBalancer` with klipper-lb, whose path DNATs twice and
+            # re-enters the host on a NodePort — and MASQUERADEs, so the server
+            # would see the node as the source of every query. hostPort is one
+            # hop through the CNI portmap plugin.
+            #
+            # ⚠ AND BOTH PROTOCOLS ARE REQUIRED, NOT JUST UDP. A response larger
+            # than 512 bytes sets TC and the resolver retries over TCP; a zone
+            # with two NS records and an SOA will exceed that as soon as DNSSEC
+            # or a longer DKIM answer is involved. A UDP-only nameserver fails
+            # intermittently and only for the larger answers, which is the
+            # hardest shape of DNS bug to see.
+            - { name: dns-udp, containerPort: 53, hostPort: 53, protocol: UDP }
+            - { name: dns-tcp, containerPort: 53, hostPort: 53, protocol: TCP }
+            - { name: http, containerPort: 8081, protocol: TCP }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 192Mi }
+          volumeMounts:
+            # ⚠ MOUNTED AS A SINGLE FILE OVER THE IMAGE'S OWN, not as a
+            # directory. Mounting the directory would hide everything else in
+            # /etc/powerdns — including `pdns.d`, which the image's entrypoint
+            # writes into when an API key is set, and which it would then fail
+            # to create on a read-only mount.
+            #
+            # ⚠ A `subPath` MOUNT DOES NOT UPDATE WHEN THE ConfigMap CHANGES.
+            # That is the documented trade and it is the right one here: a
+            # nameserver silently reloading its backend config under live
+            # queries is worse than one that waits for a rollout. Argo restarts
+            # the pod when the ConfigMap's hash changes, which is the intended
+            # path for a config edit.
+            - name: config
+              mountPath: /etc/powerdns/pdns.conf
+              subPath: pdns.conf
+              readOnly: true
+            # `readOnlyRootFilesystem` with a writable run directory: PowerDNS
+            # wants a control socket and a pid file, and neither needs to
+            # survive a restart.
+            - { name: run, mountPath: /var/run/pdns }
+      volumes:
+        - name: config
+          configMap:
+            name: i10-powerdns
+        - name: run
+          emptyDir: {}

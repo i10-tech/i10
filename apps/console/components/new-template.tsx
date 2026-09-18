@@ -4,8 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createTemplate } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -50,33 +49,26 @@ export function NewTemplateButton() {
       }
       onSuccess={(template) => router.push(`/templates/${template.id}`)}
     >
-      <div className="space-y-2">
-        <Label htmlFor="template-name">Name</Label>
-        <Input
-          id="template-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="password-reset"
-          autoComplete="off"
-          className="font-mono text-xs"
-          required
-          autoFocus
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="template-folder">Folder</Label>
-        <Input
-          id="template-folder"
-          value={folder}
-          onChange={(event) => setFolder(event.target.value)}
-          placeholder="transactional/auth"
-          autoComplete="off"
-          className="font-mono text-xs"
-        />
-        <p className="text-xs text-muted-foreground">
-          Optional. Use slashes to nest — it is only a label for the list.
-        </p>
-      </div>
+      <FloatingInput
+        label="Name"
+        id="template-name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        autoComplete="off"
+        className="font-mono text-xs"
+        required
+        autoFocus
+        hint="e.g. password-reset"
+      />
+      <FloatingInput
+        label="Folder"
+        id="template-folder"
+        value={folder}
+        onChange={(event) => setFolder(event.target.value)}
+        autoComplete="off"
+        className="font-mono text-xs"
+        hint="Optional. Use slashes to nest — it is only a label for the list."
+      />
     </FormDialog>
   )
 }

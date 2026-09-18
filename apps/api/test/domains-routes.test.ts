@@ -45,7 +45,7 @@ const store = (over: Partial<DomainStore> = {}): DomainStore =>
     get: async () => domain,
     list: async () => [{ ...domain, records: undefined as never }],
     remove: async () => true,
-    verify: async () => domain,
+    verify: async () => ({ status: "ok", domain }),
     ...over,
   }) as DomainStore
 

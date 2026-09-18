@@ -1,0 +1,25 @@
+# A stable name for the nameserver's HTTP side, in-cluster only.
+#
+# ⚠ THE DNS PORTS ARE DELIBERATELY NOT HERE, for the same reason Stalwart's mail
+# ports are not in its Service. On k3s a `type: LoadBalancer` is served by
+# klipper-lb, which DNATs twice, re-enters the host on a NodePort and
+# MASQUERADEs — so the nameserver would see the node as the source of every
+# query in the world. The container claims :53 on the host directly; see the
+# note on `ports:` in deployment.yaml.
+#
+# ⚠ AND THIS MUST NOT BECOME A LoadBalancer while those hostPorts exist. svclb
+# would try to bind the same ports on the same node and its DaemonSet would sit
+# unschedulable, which reads as a broken LoadBalancer rather than a conflict.
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-powerdns
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-powerdns
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: i10-powerdns
+  ports:
+    - { name: http, port: 8081, targetPort: http }

@@ -74,6 +74,16 @@ export interface PlanChangeDeps {
   subscriptions: SubscriptionOps
   /** Our plan id → Polar product id. The only plans that can be bought. */
   products: Record<string, string>
+  /**
+   * ⚠ THE ONE PLAN WITH NO POLAR PRODUCT, AND THE REASON THIS IS CONFIGURED
+   * RATHER THAN INFERRED. "Moving to a plan we cannot sell" is the shape of
+   * both *leaving* (correct, and the only way back to free) and a missing entry
+   * in `POLAR_PRODUCTS` (a misconfiguration that must stay an error). Naming the
+   * free plan explicitly is what tells those two apart; treating any absent
+   * product as a cancellation would silently end somebody's subscription
+   * because of a typo in an environment variable.
+   */
+  freePlanId: string
   log: Logger
 }
 
@@ -105,12 +115,22 @@ async function rankOf(
 export function planChange(deps: PlanChangeDeps): PlanChange {
   return {
     async to(tenantId, planId) {
+      /*
+       * ⚠ LEAVING IS NOT BUYING, SO IT DOES NOT NEED A PRODUCT. The free plan
+       * has none — there is nothing to charge for — and requiring one here is
+       * what made "Downgrade to free" answer `No such plan: free` and leave a
+       * paying customer with no way off a plan they no longer wanted. Cancelling
+       * at the period end IS the move to free: the subscription lapses and the
+       * tenant falls back to the included allowance.
+       */
+      const leaving = planId === deps.freePlanId
+
       // ⚠ THE PRODUCT COMES FROM OUR MAP, NEVER FROM THE REQUEST — the same
       // rule the checkout route already follows. A caller who could name a
       // Polar product id could name a one-cent one and move themselves to Pro,
       // and the webhook would grant it perfectly correctly.
       const productId = deps.products[planId]
-      if (!productId) {
+      if (!productId && !leaving) {
         return { status: "rejected", reason: `No such plan: ${planId}.` }
       }
 
@@ -144,11 +164,15 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       }
 
       try {
-        await deps.polar.updateSubscription({
-          subscriptionId: current.polarSubscriptionId,
-          productId,
-          prorationBehavior: prorationFor(direction),
-        })
+        if (leaving) {
+          await deps.polar.cancelSubscription(current.polarSubscriptionId)
+        } else {
+          await deps.polar.updateSubscription({
+            subscriptionId: current.polarSubscriptionId,
+            productId: productId!,
+            prorationBehavior: prorationFor(direction),
+          })
+        }
       } catch (error) {
         // ⚠ FOR `invoice`, POLAR APPLIES THE CHANGE ONLY IF THE PAYMENT
         // SUCCEEDS — so this is usually a declined card, and the subscription is

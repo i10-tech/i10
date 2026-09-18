@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
 import { GeistMono } from "geist/font/mono"
 import { GeistSans } from "geist/font/sans"
+import { clerkAppearance } from "@repo/ui/clerk"
+import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
 import { Toaster } from "@repo/ui/components/sonner"
 import { TooltipProvider } from "@repo/ui/components/tooltip"
@@ -51,19 +53,20 @@ function Providers({ children }: { children: React.ReactNode }) {
       publishableKey={publishableKey}
       signInUrl={process.env.CLERK_SIGN_IN_URL}
       signUpUrl={process.env.CLERK_SIGN_UP_URL}
-      appearance={{
-        variables: {
-          colorPrimary: "#fafafa",
-          colorBackground: "#0a0a0a",
-          colorForeground: "#fafafa",
-          colorInput: "#141414",
-          colorInputForeground: "#fafafa",
-          colorMutedForeground: "#a1a1a1",
-          colorBorder: "#262626",
-          borderRadius: "0.5rem",
-          fontFamily: "var(--font-geist-sans)",
-        },
-      }}
+      /*
+       * ⚠ THIS USED TO BE A HARDCODED DARK PALETTE, AND IN LIGHT MODE IT WAS
+       * SIMPLY WRONG. Nine literal hex values — `colorBackground: "#0a0a0a"`,
+       * `colorForeground: "#fafafa"` — so every Clerk surface rendered dark on
+       * a white page for anybody who had not chosen dark mode, with no way for
+       * it to follow the theme. The `fontFamily` named `--font-geist-sans`,
+       * which is not a variable this design system defines, so Clerk fell back
+       * to its own font on top of that.
+       *
+       * ⚠ AND IT IS SET HERE RATHER THAN PER COMPONENT, so a Clerk surface
+       * added tomorrow inherits it. See @repo/ui/clerk for why the values are
+       * `var(--…)` and how that makes dark mode free.
+       */
+      appearance={clerkAppearance}
     >
       {children}
     </ClerkProvider>
@@ -105,6 +108,20 @@ export default function RootLayout({
     >
       <body className="min-h-dvh antialiased">
         {/*
+         * ⚠ `preconnect` FOR THE FONT ORIGIN, AND `crossOrigin` IS NOT OPTIONAL
+         * ON IT. Fonts are fetched in CORS mode whatever the stylesheet says, so
+         * a preconnect without the attribute opens a SECOND, non-CORS connection
+         * that the font request cannot reuse — it costs an extra DNS lookup and
+         * TLS handshake rather than saving one, which is the exact opposite of
+         * the point and is invisible in every tool except a waterfall.
+         *
+         * ⚠ AND IT IS `preconnect`, NOT `preload`. Preloading a font the page
+         * may not use — this one is only on headings and the wordmark — makes it
+         * a render-blocking download on every route. Warming the connection is
+         * the half that is free.
+         */}
+        <link rel="preconnect" href="https://cdn.i10.tech" crossOrigin="anonymous" />
+        {/*
          * ⚠ THE CONSOLE HAD NO THEME PROVIDER AT ALL, WHICH IS WHY IT WAS WHITE.
          * See @repo/ui/components/theme: the dark palette is a `.dark` class in
          * the token sheet and nothing was applying it.
@@ -117,9 +134,11 @@ export default function RootLayout({
            * in its own provider gives every one of them the full delay, which in
            * a table of copy buttons feels broken.
            */}
-          <TooltipProvider delayDuration={300} skipDelayDuration={500}>
-            <Providers>{children}</Providers>
-          </TooltipProvider>
+          <MotionProvider>
+            <TooltipProvider delayDuration={300} skipDelayDuration={500}>
+              <Providers>{children}</Providers>
+            </TooltipProvider>
+          </MotionProvider>
           <Toaster />
         </Theme>
       </body>

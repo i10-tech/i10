@@ -13,8 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { addSuppression } from "@/lib/actions"
 
@@ -70,20 +69,20 @@ export function AddSuppressionButton() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-2 py-4">
-              <Label htmlFor="suppress-address">Email address</Label>
-              <Input
+            <div className="py-4">
+              <FloatingInput
                 id="suppress-address"
+                label="Email address"
                 type="email"
                 value={address}
                 onChange={(event) => setAddress(event.target.value)}
-                placeholder="bounced@example.com"
                 autoComplete="off"
                 autoCapitalize="none"
                 spellCheck={false}
                 className="font-mono text-xs"
                 required
                 autoFocus
+                hint="e.g. bounced@example.com"
               />
             </div>
 

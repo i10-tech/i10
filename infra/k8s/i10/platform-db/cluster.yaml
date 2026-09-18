@@ -115,6 +115,30 @@ spec:
         passwordSecret:
           name: i10-api-db-role
 
+      # What the authoritative nameserver connects as.
+      #
+      # ⚠ IT IS THE ONE PROCESS HERE ANSWERING THE WHOLE INTERNET WITHOUT
+      # AUTHENTICATION, so it gets the narrowest role in the cluster: grants on
+      # the `pdns` schema and nothing else. No `core`, no `authd`, no mailbox,
+      # no message, no API key. A parser bug in a DNS server reached over UDP
+      # from anywhere must not be a route into the product's data.
+      #
+      # ⚠ AND IT NEEDS WRITE, NOT JUST SELECT. PowerDNS maintains
+      # `domains.notified_serial` and, once DNSSEC is on, `records.ordername`
+      # and `records.auth`. A read-only grant produces a server that starts,
+      # answers, and then fails at whichever of those it reaches first — which
+      # is a failure mode that looks like a corrupt zone. The grants themselves
+      # live in apps/api/drizzle/0040_pdns_role_grants.sql; migration 0023
+      # wrote them out in a comment and deferred them to this moment.
+      - name: pdns
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: i10-pdns-db-role
+
       # ⚠ THE `autumn` ROLE AND ITS DATABASE ARE GONE FROM HERE BUT STILL EXIST,
       # AND THAT IS DELIBERATE. Autumn was retired; its 13 MB database is the
       # only surviving record of what it counted before the swap, and dropping

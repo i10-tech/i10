@@ -1,0 +1,57 @@
+# What may reach the nameserver, and what it may reach.
+#
+# ⚠ `i10-prod` CARRIES `default-deny-ingress`, SO WITHOUT THIS THE HEALTH PROBE
+# FAILS AND THE POD NEVER GOES READY. The kubelet probes from the node, which is
+# not a pod and matches no namespace selector — so the probe is dropped and the
+# deployment crashloops on a liveness failure that looks like PowerDNS refusing
+# to start. That is the single most confusing way for this to be broken, because
+# the DNS side would be working the whole time.
+#
+# ⚠ THE DNS PORTS ARE NOT LISTED, AND DO NOT NEED TO BE. hostPort traffic is
+# DNATed by the CNI portmap plugin before it reaches the pod network, so it is
+# not subject to a NetworkPolicy at all. The firewall on the node is what
+# controls who may ask; this file controls the cluster-internal side.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: i10-powerdns
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-powerdns
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # ⚠ THE NODE ITSELF, FOR THE PROBES. `ipBlock` rather than a namespace
+    # selector because a kubelet probe originates from the node's address and
+    # belongs to no namespace.
+    - from:
+        - ipBlock: { cidr: 0.0.0.0/0 }
+      ports:
+        - { port: 8081, protocol: TCP }
+  egress:
+    # ⚠ POSTGRES AND NOTHING ELSE. This process needs exactly one destination:
+    # the pooler, where it reads the zones the API wrote. It does not recurse,
+    # does not fetch, and has no reason to open a connection anywhere else — so
+    # a bug in it cannot become a route out of the cluster.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: i10-prod
+          podSelector:
+            matchLabels:
+              cnpg.io/podRole: pooler
+      ports:
+        - { port: 5432, protocol: TCP }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - { port: 5432, protocol: TCP }
+    # ⚠ DNS RESOLUTION FOR ITS OWN LOOKUPS. `dnsPolicy: Default` sends these to
+    # the node's resolver rather than CoreDNS, but the egress rule still has to
+    # permit the packets leaving the pod.
+    - ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }

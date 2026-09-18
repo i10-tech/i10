@@ -71,12 +71,18 @@ export default async function OnboardingPage() {
           <Wordmark />
         </Link>
         {/*
-         * ⚠ "Skip to the console" RATHER THAN A CLOSE ICON. An × in the corner
+         * ⚠ "Skip to the dashboard" RATHER THAN A CLOSE ICON. An × in the corner
          * of a set-up flow reads as "cancel", and people hesitate over whether
          * cancelling loses the domain they just added. Words say what happens.
+         *
+         * ⚠ AND IT POINTS AT `/onboarding/skip`, NOT AT `/`. The console layout
+         * redirects here while `should_onboard` is true, so a link straight to
+         * `/` was bounced back to this page — the button appeared to do nothing
+         * at all. The route records the choice for this browser and then sends
+         * them on. See lib/onboarding-skip.ts.
          */}
         <Button variant="ghost" size="sm" asChild>
-          <Link href="/">Skip to the console</Link>
+          <Link href="/onboarding/skip">Skip to the dashboard</Link>
         </Button>
       </header>
 

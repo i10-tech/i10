@@ -5,13 +5,8 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@repo/ui/components/field"
-import { Input } from "@repo/ui/components/input"
+import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { OtpField } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
@@ -207,18 +202,16 @@ export function MfaForm({
         </div>
 
         {active === "backup_code" ? (
-          <Field>
-            <FieldLabel htmlFor="code">Backup code</FieldLabel>
-            <Input
-              id="code"
-              name="code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              autoComplete="one-time-code"
-              autoFocus
-              required
-            />
-          </Field>
+          <FloatingInput
+            id="code"
+            name="code"
+            label="Backup code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            autoComplete="one-time-code"
+            autoFocus
+            required
+          />
         ) : (
           <OtpField
             value={code}

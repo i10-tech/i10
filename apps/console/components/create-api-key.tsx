@@ -14,10 +14,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
-import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
 import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
 import { Spinner } from "@repo/ui/components/spinner"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { createApiKey } from "@/lib/actions"
 import type { CreatedApiKey } from "@/lib/types"
 
@@ -138,19 +138,17 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
               </DialogHeader>
 
               <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="key-name">Name</Label>
-                  <Input
-                    id="key-name"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="production-api"
-                    autoComplete="off"
-                    maxLength={50}
-                    required
-                    autoFocus
-                  />
-                </div>
+                <FloatingInput
+                  label="Name"
+                  id="key-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  autoComplete="off"
+                  maxLength={50}
+                  required
+                  autoFocus
+                  hint="e.g. production-api"
+                />
 
                 <div className="space-y-2">
                   <Label>Mode</Label>

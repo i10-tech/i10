@@ -3,10 +3,8 @@
 import * as React from "react"
 import { Info, Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
 import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
-import { Textarea } from "@repo/ui/components/textarea"
+import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createTopic } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -62,32 +60,25 @@ export function NewTopicButton() {
         })
       }
     >
-      <div className="space-y-2">
-        <Label htmlFor="topic-name">Name</Label>
-        <Input
-          id="topic-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Product updates"
-          autoComplete="off"
-          required
-          autoFocus
-        />
-        <p className="text-xs text-muted-foreground">
-          Recipients see this. Write it the way you would say it to them.
-        </p>
-      </div>
+      <FloatingInput
+        label="Name"
+        id="topic-name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        autoComplete="off"
+        required
+        autoFocus
+        hint="Recipients see this. Write it the way you would say it to them."
+      />
 
-      <div className="space-y-2">
-        <Label htmlFor="topic-description">Description</Label>
-        <Textarea
-          id="topic-description"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="What we ship, roughly once a month."
-          rows={2}
-        />
-      </div>
+      <FloatingTextarea
+        label="Description"
+        id="topic-description"
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
+        rows={2}
+        hint="e.g. What we ship, roughly once a month."
+      />
 
       <fieldset className="space-y-2">
         <legend className="mb-1.5 text-sm font-medium">Default</legend>

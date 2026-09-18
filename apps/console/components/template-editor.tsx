@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation"
 import { Save, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
 import { Spinner } from "@repo/ui/components/spinner"
+import { FloatingInput } from "@repo/ui/components/floating-field"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { HtmlEditor } from "@/components/html-editor"
 import { deleteTemplate, publishTemplate, updateTemplate } from "@/lib/actions"
@@ -109,15 +109,13 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <Label htmlFor="template-subject">Subject</Label>
-        <Input
-          id="template-subject"
-          value={subject}
-          onChange={(event) => setSubject(event.target.value)}
-          placeholder="Reset your password"
-        />
-      </div>
+      <FloatingInput
+        label="Subject"
+        id="template-subject"
+        value={subject}
+        onChange={(event) => setSubject(event.target.value)}
+        hint="e.g. Reset your password"
+      />
 
       <div className="space-y-2">
         <Label>Body</Label>

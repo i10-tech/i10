@@ -356,3 +356,71 @@ export interface TemplateRow {
   created_at: string
   updated_at: string
 }
+
+/**
+ * Why a delegated domain has not verified. See apps/api/src/console/delegation.ts.
+ *
+ * ⚠ THE FINDINGS ARE A UNION RATHER THAN A STRING, because the console's whole
+ * job with them is to say a different sentence for each — and one of those
+ * sentences blames us rather than the customer.
+ */
+export type ZoneFinding =
+  | { zone: string; code: "ok" }
+  | { zone: string; code: "not_published" }
+  | { zone: string; code: "delegated_elsewhere"; observed: string[] }
+  | { zone: string; code: "nameserver_silent" }
+  | { zone: string; code: "lookup_failed" }
+
+export interface DelegationReport {
+  domain: string
+  nameservers: string[]
+  nameserversAnswering: boolean
+  zones: ZoneFinding[]
+  error?: string
+}
+
+/**
+ * A DNS provider we can actually write to.
+ *
+ * ⚠ THE API DECIDES THIS, NOT THE CONSOLE. Whether a provider is connectable
+ * depends on an adapter existing and, for the one-click path, on an OAuth app
+ * being registered — one is a deploy and the other is configuration. Deciding it
+ * from `@repo/dns-providers` here would render a live Connect button for the
+ * twenty-nine providers we cannot write to.
+ */
+export interface ConnectableProvider {
+  slug: string
+  name: string
+  /** A registered OAuth app exists, so the browser can be sent to authorise. */
+  oauth: boolean
+  /** A token can be pasted. True wherever an adapter exists. */
+  token: boolean
+  scope: string | null
+  docs: string | null
+  zoneScoped: boolean
+}
+
+/** A stored connection, as the console is allowed to see it. Never a credential. */
+export interface DnsConnection {
+  id: string
+  provider: string
+  label: string | null
+  zones: string[]
+  lastUsedAt: string | null
+  lastError: string | null
+  createdAt: string
+}
+
+export interface ConflictingRecord {
+  name: string
+  type: string
+  value: string
+  reason: string
+}
+
+export interface PublishOutcome {
+  status: "published"
+  created: { name: string; type: string; value: string }[]
+  unchanged: { name: string; type: string; value: string }[]
+  removed: ConflictingRecord[]
+}

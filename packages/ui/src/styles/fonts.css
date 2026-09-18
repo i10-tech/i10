@@ -1,0 +1,69 @@
+/*
+ * The display face, served from cdn.i10.tech.
+ *
+ * ⚠ THIS IS THE ONE FONT THAT IS *NOT* SHIPPED IN THE BUNDLE, AND THE REASON IS
+ * THAT IT IS NOT OURS TO SHIP. Geist arrives through npm (`geist/font/sans`) and
+ * `next/font/local` fingerprints it into each app's own `_next/static` — which
+ * is correct for an OFL face we redistribute freely. A licensed display face is
+ * different: it lives in one place we control, is served under our own name, and
+ * can be revoked or replaced without rebuilding five applications.
+ *
+ * ⚠ IT IS USED FOR HEADINGS AND THE WORDMARK, NEVER FOR BODY OR DATA. A display
+ * cut is drawn for size — tight spacing, high contrast, closed apertures — and
+ * every one of those properties is wrong at 14px in a table of message ids. The
+ * `--font-sans` and `--font-mono` tokens keep every job they already had; this
+ * one exists for text somebody reads once, large.
+ *
+ * ⚠ AND THE PRODUCT IS CORRECT WITHOUT IT. Every declaration below names a
+ * fallback stack, `font-display: swap` means text paints immediately in that
+ * fallback, and nothing in the interface depends on a glyph that only exists in
+ * the display face. If the CDN is unreachable, the file was never uploaded, or
+ * the licence lapses and it is pulled, headings render in Geist and no layout
+ * moves. That is the whole reason a third-party origin is acceptable here at
+ * all — see the README beside this file for the metric overrides that make the
+ * swap itself invisible.
+ *
+ * ⚠ THE URL IS A LITERAL, NOT A BUILD-TIME VARIABLE, BECAUSE CSS CANNOT TAKE
+ * ONE. `src: url(var(--x))` is not valid CSS — custom properties do not
+ * substitute inside a `url()` token — so an environment-specific origin would
+ * mean generating this file at build time in five applications. The CDN is
+ * public and the same in every environment, including development, which is
+ * what makes one literal honest rather than lazy.
+ */
+
+/* ── i10 Display ─────────────────────────────────────────────────────────
+ *
+ * ⚠ THE FILES ARE NAMED FOR THE ROLE, NOT FOR THE FOUNDRY. Whatever face is
+ * licensed is uploaded as `i10-display-400.woff2` and `i10-display-700.woff2`
+ * — see infra/scripts/publish-fonts.sh. Naming the path after a specific
+ * typeface would mean changing every app's CSS to change the typeface, which is
+ * the coupling this indirection exists to remove.
+ *
+ * ⚠ woff2 ONLY, WITH NO woff OR ttf BESIDE IT. Every browser that can render
+ * this product's `oklch()` palette has supported woff2 for years, so a second
+ * format is a second file nobody downloads and a third of the bytes wasted on
+ * whoever does.
+ */
+@font-face {
+  font-family: "i10 Display";
+  src: url("https://cdn.i10.tech/fonts/i10-display-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  /*
+   * ⚠ `swap`, NOT `optional` OR `block`. `block` hides headings for up to three
+   * seconds on a slow connection, which on the sign-in page means a blank card.
+   * `optional` never swaps at all after the first paint, so a returning visitor
+   * with a warm cache gets the display face and a first-time visitor
+   * permanently does not — the same page rendering two different ways with
+   * nothing to explain it. `swap` is the only one that is consistent.
+   */
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "i10 Display";
+  src: url("https://cdn.i10.tech/fonts/i10-display-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

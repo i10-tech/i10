@@ -188,17 +188,36 @@ export default async function EmailsPage({
                         </Link>
                       </TableCell>
                       <TableCell className="max-w-0 p-0">
+                        {/*
+                         * ⚠ THE ERROR SITS UNDER THE SUBJECT, NOT AFTER IT. Both
+                         * used to share one truncating line, so a failed message
+                         * read "131871 is your verification code MessageRejected:
+                         * Email addr…" — the reason was cut off exactly where it
+                         * started to say something, and it ran into the subject
+                         * as though it were part of it. Two lines let each
+                         * truncate on its own, which is the only way both can be
+                         * readable in a fixed column.
+                         *
+                         * ⚠ AND THE `title` CARRIES BOTH, so the full reason is
+                         * one hover away without opening the message.
+                         */}
                         <Link
                           href={`/emails/${email.id}`}
-                          className="block truncate px-3 py-2.5 text-sm"
-                          title={email.subject}
+                          className="block px-3 py-2.5"
+                          title={
+                            email.last_error
+                              ? `${email.subject}\n\n${email.last_error}`
+                              : email.subject
+                          }
                         >
-                          {email.subject || (
-                            <em className="text-muted-foreground">No subject</em>
-                          )}
+                          <span className="block truncate text-sm">
+                            {email.subject || (
+                              <em className="text-muted-foreground">No subject</em>
+                            )}
+                          </span>
                           {email.last_error && (
-                            <span className="ml-2 text-xs text-danger">
-                              {firstLine(email.last_error, 60)}
+                            <span className="mt-0.5 block truncate text-xs text-danger">
+                              {firstLine(email.last_error, 120)}
                             </span>
                           )}
                         </Link>

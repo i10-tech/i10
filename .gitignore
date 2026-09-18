@@ -2,6 +2,9 @@ node_modules/
 
 # Build output
 .next/
+# `dev:preview` builds here so it can run beside a live `next dev`, which holds
+# a lock on `.next` — see apps/console/next.config.ts.
+.next-preview/
 out/
 dist/
 build/
@@ -50,3 +53,10 @@ apps/*/src/**/*.d.ts.map
 
 # Added by ggshield
 .cache_ggshield
+
+# ⚠ CADDY'S LOCAL ROOT, EXPORTED BY `bun run dev:trust`. It is per-machine —
+# regenerated whenever the `caddy-data` volume is — so a committed copy would be
+# a certificate everybody is told to trust and nobody's Caddy actually signs
+# with. It is not secret (the private key never leaves the container), it is
+# simply meaningless anywhere but the laptop that produced it.
+dev/.caddy-root.crt

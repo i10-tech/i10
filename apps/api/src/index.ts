@@ -1,4 +1,5 @@
 import { createClerkClient } from "@clerk/backend"
+import { createHmac } from "node:crypto"
 import pino from "pino"
 import { createApp } from "./app.js"
 import { subscriptionOps } from "./billing/db.js"
@@ -24,6 +25,10 @@ import { clerkIdentity } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { dnsInspector } from "./console/dns.js"
+import { delegationChecker } from "./console/delegation.js"
+import { dnsConnectionStore } from "./dns/connections.js"
+import { dnsOAuth } from "./dns/oauth.js"
+import { dnsPublisher } from "./dns/publish.js"
 import { marketingStore } from "./console/marketing.js"
 import { onboardingStore } from "./console/onboarding.js"
 import { tenantProfileStore } from "./console/tenant.js"
@@ -31,7 +36,7 @@ import { usageStore } from "./console/usage.js"
 import { tenantResolver } from "./middleware/tenant.js"
 import { projectClerkUser } from "./projection/writer.js"
 import { MAILBOXES } from "./metering/levels.js"
-import { sesIdentity } from "./domains/identity.js"
+import { offlineIdentity, sesIdentity } from "./domains/identity.js"
 import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
@@ -492,6 +497,7 @@ const app = createApp({
             polar,
             subscriptions,
             products: env.POLAR_PRODUCTS,
+            freePlanId: env.METERING_FREE_PLAN_ID,
             log,
           }),
           log,
@@ -511,7 +517,16 @@ const app = createApp({
     ? {
         domains: domainStore({
           db,
-          identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
+          /*
+           * ⚠ `SES_ENABLED` GATES THE IDENTITY, NOT JUST THE SENDING. It used to
+           * gate only the latter, so a deployment with SES off still called
+           * `CreateEmailIdentity` on every domain creation — which on a laptop
+           * holding production AWS credentials wrote into the real account. The
+           * flag now means what it says. See `offlineIdentity`.
+           */
+          identity: env.SES_ENABLED
+            ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
+            : offlineIdentity(),
           capacity: postgresMeter(db),
           region: env.AWS_REGION,
           dns: {
@@ -524,6 +539,7 @@ const app = createApp({
           // provider that can be down. Swapping this for Cloudflare or Route 53
           // later is an adapter, not a migration.
           zones: powerDnsZones(db),
+          log,
           // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is
           // nowhere safe to keep a DKIM private key, so the routes answer 501
           // rather than storing one in the clear — the same rule webhooks
@@ -571,11 +587,54 @@ const app = createApp({
     // a capability anybody already has with `dig`, and it must never become a
     // general-purpose fetcher running inside the cluster.
     dns: dnsInspector(),
+    /*
+     * ⚠ IT IS GIVEN THE SAME `MAIL_NAMESERVERS` THE RECORDS ARE BUILT FROM, so
+     * the check and the instructions cannot disagree. Handing it a second list
+     * would let the console tell somebody to publish one set of nameservers and
+     * then diagnose against another — which would report a correct delegation
+     * as pointed elsewhere.
+     */
+    delegation: delegationChecker({ nameservers: env.MAIL_NAMESERVERS }),
+    /*
+     * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
+     * why all three arrive together or not at all. A credential that can rewrite
+     * a customer's MX records must not be stored in the clear, so without a box
+     * to seal it in the routes answer 501 — the same rule `domains` above
+     * follows for a DKIM private key.
+     */
+    ...(secrets
+      ? {
+          dnsConnections: dnsConnectionStore(db, secrets),
+          dnsOAuth: dnsOAuth({
+            apps: env.DNS_OAUTH_APPS,
+            redirectBase: env.DNS_OAUTH_REDIRECT_BASE,
+            /*
+             * ⚠ DERIVED FROM THE SEALING KEY RATHER THAN BEING ITS OWN
+             * VARIABLE, and domain-separated so it is not the same value. It
+             * signs the OAuth `state`, which is what stops somebody attaching
+             * their DNS credential to another workspace — a real key, but not
+             * one an operator should have to remember to set separately from
+             * the key this feature already cannot run without.
+             */
+            stateSecret: createHmac("sha256", env.WEBHOOK_SECRET_KEY ?? "")
+              .update("dns-oauth-state")
+              .digest("hex"),
+          }),
+          dnsPublisher: dnsPublisher({
+            connections: dnsConnectionStore(db, secrets),
+            log,
+          }),
+        }
+      : {}),
     ...(secrets
       ? {
           domains: domainStore({
             db,
-            identity: sesIdentity(new SESv2Client({ region: env.AWS_REGION })),
+            // ⚠ THE SAME GATE AS THE STORE ABOVE. Two stores, one rule —
+            // see the note there for why `SES_ENABLED` has to cover this.
+            identity: env.SES_ENABLED
+              ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
+              : offlineIdentity(),
             capacity: postgresMeter(db),
             region: env.AWS_REGION,
             dns: {
@@ -584,6 +643,7 @@ const app = createApp({
               nameservers: env.MAIL_NAMESERVERS,
             },
             zones: powerDnsZones(db),
+            log,
             secrets,
           }),
         }
@@ -604,6 +664,7 @@ const app = createApp({
               polar,
               subscriptions,
               products: env.POLAR_PRODUCTS,
+              freePlanId: env.METERING_FREE_PLAN_ID,
               log,
             }),
           },

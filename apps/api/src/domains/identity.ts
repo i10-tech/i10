@@ -131,3 +131,37 @@ export function sesIdentity(client: SESv2Client): DomainIdentity {
     },
   }
 }
+
+/**
+ * A domain identity for a deployment that is not talking to SES.
+ *
+ * ⚠ IT EXISTS BECAUSE `SES_ENABLED=false` DID NOT MEAN WHAT IT SAYS. The flag
+ * gated SENDING, and the SES client was wired unconditionally — so adding a
+ * domain on a laptop pointed at the production AWS credentials called
+ * `CreateEmailIdentity` against the real account. The database is isolated
+ * locally and the mail server is absent, but this one call reached straight
+ * through into production and left an identity there for `test.example.com`:
+ * invisible, billable, and indistinguishable from a real customer's.
+ *
+ * ⚠ IT REPORTS `pending`, NOT `verified`, AND THE DIFFERENCE IS THE WHOLE
+ * VALUE. A stub that claimed verification would let local work pass through
+ * every gate that exists to stop unverified mail, and the first place that
+ * assumption would be tested is production. Pending is honest: the domain was
+ * created, the zone was published, and nothing has confirmed anything — which
+ * is exactly the state a real domain is in before its records resolve.
+ *
+ * ⚠ AND IT IS NOT A TEST DOUBLE. Tests construct their own; this is a
+ * production code path for a deployment configured without SES, chosen at
+ * startup by the same flag the send path reads.
+ */
+export function offlineIdentity(): DomainIdentity {
+  return {
+    async create() {
+      return { status: "pending" }
+    },
+    async status() {
+      return { status: "pending" }
+    },
+    async remove() {},
+  }
+}

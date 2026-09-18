@@ -3,14 +3,17 @@ import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
+import { PageFrame } from "@/components/page-frame"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { CommandMenu } from "@/components/command-menu"
 import { MobileNav } from "@/components/mobile-nav"
 import { UsageRail } from "@/components/usage-rail"
 import { WorkspaceBar } from "@/components/workspace-bar"
+import { AccountBar } from "@/components/account-bar"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
+import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
 import type { Me } from "@/lib/types"
 
 /**
@@ -69,7 +72,14 @@ export default async function AppLayout({
   // ⚠ THE FLAG DECIDES THE REDIRECT AND NOTHING ELSE. `/onboarding` is outside
   // this layout precisely so it stays reachable when this fires — see
   // docs/decisions/console.md §4. A guard that ran there too would be a loop.
-  if (me.data.onboarding.should_onboard) redirect("/onboarding")
+  //
+  // ⚠ AND THE SKIP IS CHECKED HERE, BECAUSE THIS REDIRECT IS WHAT IT OVERRIDES.
+  // Without it "Skip to the console" was a link to a page that immediately sent
+  // people back, which is indistinguishable from a broken button. See
+  // lib/onboarding-skip.ts for why this is a cookie and not a stored fact.
+  if (me.data.onboarding.should_onboard && !(await hasSkippedOnboarding())) {
+    redirect("/onboarding")
+  }
 
   // See WorkspaceBar: Clerk's hooks throw outside a provider, and the provider
   // is only mounted when a key exists.
@@ -87,7 +97,7 @@ export default async function AppLayout({
         <div className="flex h-14 items-center px-4">
           <Link
             href="/"
-            className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Wordmark />
           </Link>
@@ -117,10 +127,20 @@ export default async function AppLayout({
          * ⚠ IN ITS OWN SUSPENSE BOUNDARY so a slow meter read cannot hold up
          * the navigation. The rail renders, the number arrives.
          */}
-        <div className="mt-auto border-t p-2">
+        <div className="mt-auto space-y-1 border-t p-2">
           <Suspense fallback={<Skeleton className="h-16 w-full rounded-md" />}>
             <UsageRail />
           </Suspense>
+
+          {/*
+           * ⚠ THE PERSON, AT THE FOOT OF THE RAIL, BELOW THE WORKSPACE'S USAGE.
+           * It used to share the top row with the organization switcher, which
+           * gave a control somebody touches monthly the same prominence as the
+           * one that changes which workspace's data is on every page. The
+           * reading order now matches the questions: which workspace (top),
+           * where to go (middle), what it is costing and who I am (bottom).
+           */}
+          {clerkEnabled && <AccountBar />}
         </div>
       </aside>
 
@@ -130,7 +150,14 @@ export default async function AppLayout({
           plan={me.data.billing.plan}
           clerkEnabled={clerkEnabled}
         />
-        {children}
+        {/*
+         * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,
+         * the workspace bar and the mobile header stay perfectly still while the
+         * content changes. A transition that moved the chrome as well would be a
+         * page load with extra steps — the whole value of an app shell is that
+         * most of the screen does not go anywhere.
+         */}
+        <PageFrame>{children}</PageFrame>
       </div>
 
       {/*

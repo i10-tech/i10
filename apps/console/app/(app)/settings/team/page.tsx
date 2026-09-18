@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { OrganizationProfile } from "@clerk/nextjs"
+import { TeamPanel } from "@/components/team-panel"
 import {
   Section,
   SectionContent,
@@ -24,6 +24,11 @@ export const metadata: Metadata = { title: "Team" }
  * renders nothing at all if the catch-all route is missing — a blank page with
  * no error. Hash routing keeps its internal navigation in the fragment, so this
  * page is a single route.
+ *
+ * ⚠ THE PANEL IS A CLIENT COMPONENT BECAUSE IT HAS TO ASK WHETHER AN
+ * ORGANIZATION IS ACTIVE. Clerk's component renders NOTHING for a personal
+ * account, which left this page as a heading over empty space — see
+ * components/team-panel.tsx.
  */
 export default function TeamSettingsPage() {
   /*
@@ -56,23 +61,7 @@ export default function TeamSettingsPage() {
           its bill. Invitations are sent by email.
         </SectionDescription>
         <SectionContent>
-          <OrganizationProfile
-            routing="hash"
-            appearance={{
-              elements: {
-                // ⚠ CLERK'S CARD CHROME IS REMOVED, NOT RESTYLED. Its default
-                // is a bordered, shadowed card — on a settings page that is
-                // already a list of sections, that renders as a box inside a
-                // box, and the shadow is the only one in the whole console.
-                rootBox: "w-full",
-                cardBox: "w-full max-w-none shadow-none border-0",
-                card: "w-full max-w-none shadow-none border-0 bg-transparent p-0",
-                navbar: "hidden",
-                navbarMobileMenuRow: "hidden",
-                pageScrollBox: "p-0",
-              },
-            }}
-          />
+          <TeamPanel />
         </SectionContent>
       </Section>
     </div>
