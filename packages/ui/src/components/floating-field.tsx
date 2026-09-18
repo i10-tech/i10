@@ -56,15 +56,43 @@ export type FieldState = "idle" | "pending" | "invalid" | "valid"
  * invisible to it and the variant was never generated. The repetition is not
  * stylistic — it is the only form the compiler can see.
  */
+/*
+ * ⚠ THE HORIZONTAL GEOMETRY IS ARITHMETIC, NOT TASTE, AND GETTING IT WRONG EATS
+ * THE CORNER OF THE BORDER. Four numbers have to agree:
+ *
+ *     control radius        28px   `rounded-pill` on `h-14` is height / 2
+ *     legend box starts at  28px   fieldset border (1) + legend `ms-[27px]`
+ *     label box starts at   28px   `start-7`
+ *     glyphs start at       32px   both carry `px-1`, so the gap is 4px
+ *                                  wider than the word on EACH side
+ *     value inset           32px   `px-8`, BOTH sides
+ *
+ * The first line is the constraint. A stadium's top border is only horizontal
+ * from x = radius onward — before that it is the corner arc — so a notch that
+ * opens at 16px, which is where this started, deletes the arc instead of
+ * interrupting a straight line. On screen that is a field whose top-left corner
+ * is simply missing, with the label hanging off the end of it.
+ *
+ * ⚠ AND THE LABEL AND THE LEGEND USED TO BE 4px OUT OF STEP, which is the other
+ * half of the same screenshot. The label sat at `start-3` (12) and the legend at
+ * `ms-2` (16), so the gap opened four pixels to the RIGHT of the word: no
+ * clearance before the first letter, double after the last. They are written as
+ * one sum now so the next person changing either has to change both.
+ *
+ * ⚠ SO THE VALUE IS PADDED TO 32px TOO, which is what keeps the resting label
+ * sitting exactly where the text it names will appear. That is the whole
+ * illusion — the label does not move sideways when it rises, it only goes up
+ * and gets smaller.
+ */
 const LABEL = cn(
-  "pointer-events-none absolute start-3 z-10 truncate px-1",
+  "pointer-events-none absolute start-7 z-10 truncate px-1",
   // ⚠ 14px FLOATED AGAINST A 16px VALUE, AND `leading-none` IS THE HALF THAT
   // FIXES THE ALIGNMENT. Tailwind pairs `text-sm` with a 20px line height, so
   // the label's BOX is 20px tall while the gap in the border is 14 — centre the
   // box on the border and six pixels of it stick out above the notch, which is
   // exactly the "too much on the top" the field was showing. `leading-none`
   // collapses the box onto the glyphs so the thing being centred is the text.
-  "max-w-[calc(100%-1.5rem)] text-sm leading-none font-medium",
+  "max-w-[calc(100%-3.5rem)] text-sm leading-none font-medium",
   // ⚠ ONLY `top` AND `font-size` MOVE. The label keeps `-translate-y-1/2` in
   // both states, so the animation is a single property travelling from the
   // middle of the box to its top edge — no transform to interpolate, and
@@ -110,9 +138,13 @@ const RESTS_AT_TOP = cn("top-0", "peer-[:placeholder-shown:not(:focus)]:top-7")
  * relationship that actually exists.
  */
 const FRAME = cn(
-  "pointer-events-none absolute inset-0 -top-[7px] px-2",
+  // ⚠ NO HORIZONTAL PADDING. The fieldset's only child is the legend, so its
+  // padding does nothing except push the notch sideways — and it was doing
+  // exactly that, by 8px, which is half of why the gap and the label were out
+  // of step. The legend's own margin is now the single number that places it.
+  "pointer-events-none absolute inset-0 -top-[7px]",
   "rounded-[inherit] border text-start",
-  "transition-[color,border-color,box-shadow] duration-(--duration-instant) ease-(--ease-linear)",
+  "transition-[color,border-color] duration-(--duration-instant) ease-(--ease-linear)",
   "peer-[:placeholder-shown:not(:focus)]:[&>legend]:max-w-[0.01px]",
 )
 
@@ -134,7 +166,11 @@ const LEGEND = cn(
   // border clips the last character, if it is larger there is a visible slot of
   // missing border after it, and if it is SHORTER than the label's line box the
   // label rides up out of the gap.
-  "invisible ms-2 block h-[14px] w-auto max-w-full overflow-hidden p-0",
+  // ⚠ `ms-[27px]` IS THE LABEL'S 28px LESS THE FIELDSET'S OWN 1px BORDER, which
+  // a legend is laid out INSIDE. Measured, not derived: with `ms-5` the gap
+  // opened at 29px against a label at 28, and the border clipped the first
+  // letter by a pixel on every field in the product.
+  "invisible ms-[27px] block h-[14px] w-auto max-w-full overflow-hidden p-0",
   "text-sm leading-none font-medium whitespace-nowrap",
   "transition-[max-width] duration-(--duration-instant) ease-(--ease-quint-out)",
 )
@@ -147,24 +183,37 @@ const LEGEND = cn(
  * they are the only colour in a deliberately monochrome console, so spending
  * them here has to be for the same meaning.
  */
+/**
+ * ⚠ FOCUS IS THE BORDER GOING FULL STRENGTH, AND NOTHING ELSE IS PAINTED. Each
+ * tone is the same colour twice: muted at rest, solid on focus. `--ring` is now
+ * `--foreground`, so an idle field goes from grey hairline to white line in dark
+ * mode and grey to near-black in light — see the `--ring` note in
+ * styles/tokens.css for why the 3px translucent halo shadcn ships was the wrong
+ * signal on this surface.
+ *
+ * ⚠ AND THE STATE TONES DO NOT REVERT TO `--ring` ON FOCUS. A field that is
+ * showing an error has to keep showing it while somebody types the correction
+ * into it — a red border that turns white the moment the caret lands removes
+ * the message exactly when it is being acted on.
+ */
 const TONES: Record<FieldState, { frame: string; label: string; hint: string }> = {
   idle: {
-    frame: "border-input peer-focus:border-ring peer-focus:ring-ring/45",
+    frame: "border-input peer-focus:border-ring",
     label: "text-muted-foreground peer-focus:text-foreground",
     hint: "text-muted-foreground",
   },
   pending: {
-    frame: "border-warning/60 peer-focus:border-warning peer-focus:ring-warning/25",
+    frame: "border-warning/60 peer-focus:border-warning",
     label: "text-warning",
     hint: "text-warning",
   },
   invalid: {
-    frame: "border-danger/70 peer-focus:border-danger peer-focus:ring-danger/25",
+    frame: "border-danger/70 peer-focus:border-danger",
     label: "text-danger",
     hint: "text-danger",
   },
   valid: {
-    frame: "border-success/60 peer-focus:border-success peer-focus:ring-success/25",
+    frame: "border-success/60 peer-focus:border-success",
     label: "text-success",
     hint: "text-muted-foreground",
   },
@@ -184,7 +233,17 @@ const CONTROL_INPUT = cn(
    * every sign-in. The console's 14px base is a density decision for tables;
    * a field somebody types their password into is not a table.
    */
-  "peer h-full w-full min-w-0 bg-transparent px-4 text-base outline-none",
+  // ⚠ `px-8` IS 32px, WHICH IS WHERE THE RESTING LABEL'S GLYPHS ARE. See the
+  // sum in LABEL — if the LEADING value disagrees, the label jumps sideways as
+  // it rises.
+  //
+  // ⚠ AND THE TRAILING VALUE MATCHES IT RATHER THAN STAYING AT THE 16px A
+  // SQUARE INPUT WOULD USE. The leading inset is not a taste decision here — it
+  // is forced to 32px by the corner arc the notch has to clear — so leaving the
+  // other side at 16 makes a long value sit visibly off-centre in its own box,
+  // closer to the right edge than the left. Whatever the notch costs on one
+  // side, the other side pays too.
+  "peer h-full w-full min-w-0 bg-transparent px-8 text-base outline-none",
   "selection:bg-primary selection:text-primary-foreground",
   "disabled:cursor-not-allowed",
   // ⚠ CHROME PAINTS AUTOFILLED FIELDS WITH ITS OWN YELLOW AND IGNORES
@@ -224,7 +283,9 @@ function Frame({
       {children}
       <div
         className={cn(
-          "min-h-4 px-4 pt-1.5 text-2xs leading-4",
+          // ⚠ `px-8` MATCHES THE VALUE'S OWN INSET, so a validation message
+          // starts under the first character of what it is about.
+          "min-h-4 px-8 pt-1.5 text-2xs leading-4",
           "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
           TONES[state].hint,
         )}
@@ -306,7 +367,7 @@ export function FloatingInput({
           placeholder=" "
           aria-invalid={state === "invalid" || undefined}
           aria-describedby={hint ? `${id}-hint` : undefined}
-          className={cn(CONTROL_INPUT, adornment && "pe-11", className)}
+          className={cn(CONTROL_INPUT, adornment && "pe-14", className)}
           {...props}
         />
         <label htmlFor={id} className={cn(LABEL, RESTS_CENTRED, tone.label)}>
@@ -319,12 +380,12 @@ export function FloatingInput({
          * leave the border with no focus state and the gap permanently shut, and
          * nothing would report it.
          */}
-        <Notch
-          label={label}
-          className={cn(FRAME, "peer-focus:ring-[3px]", tone.frame)}
-        />
+        <Notch label={label} className={cn(FRAME, tone.frame)} />
         {adornment && (
-          <div className="absolute end-3 z-10 flex items-center text-muted-foreground">
+          // ⚠ `end-8` IS THE SAME 32px THE VALUE IS INSET BY, so the reveal
+          // icon lines up with the right-hand edge of the text rather than
+          // hanging out over the corner arc. `pe-14` below clears its width.
+          <div className="absolute end-8 z-10 flex items-center text-muted-foreground">
             {adornment}
           </div>
         )}
@@ -382,10 +443,7 @@ export function FloatingTextarea({
         <label htmlFor={id} className={cn(LABEL, RESTS_AT_TOP, tone.label)}>
           {label}
         </label>
-        <Notch
-          label={label}
-          className={cn(FRAME, "peer-focus:ring-[3px]", tone.frame)}
-        />
+        <Notch label={label} className={cn(FRAME, tone.frame)} />
       </div>
     </Frame>
   )

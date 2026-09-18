@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
-    "dev:preview": "CONSOLE_PREVIEW=1 next dev --turbopack --port 3000"
+    "dev:preview": "CONSOLE_PREVIEW=1 NEXT_DIST_DIR=.next-preview next dev --turbopack --port 3010"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.1",

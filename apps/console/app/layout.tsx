@@ -108,6 +108,20 @@ export default function RootLayout({
     >
       <body className="min-h-dvh antialiased">
         {/*
+         * ⚠ `preconnect` FOR THE FONT ORIGIN, AND `crossOrigin` IS NOT OPTIONAL
+         * ON IT. Fonts are fetched in CORS mode whatever the stylesheet says, so
+         * a preconnect without the attribute opens a SECOND, non-CORS connection
+         * that the font request cannot reuse — it costs an extra DNS lookup and
+         * TLS handshake rather than saving one, which is the exact opposite of
+         * the point and is invisible in every tool except a waterfall.
+         *
+         * ⚠ AND IT IS `preconnect`, NOT `preload`. Preloading a font the page
+         * may not use — this one is only on headings and the wordmark — makes it
+         * a render-blocking download on every route. Warming the connection is
+         * the half that is free.
+         */}
+        <link rel="preconnect" href="https://cdn.i10.tech" crossOrigin="anonymous" />
+        {/*
          * ⚠ THE CONSOLE HAD NO THEME PROVIDER AT ALL, WHICH IS WHY IT WAS WHITE.
          * See @repo/ui/components/theme: the dark palette is a `.dark` class in
          * the token sheet and nothing was applying it.

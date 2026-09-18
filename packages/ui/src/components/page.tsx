@@ -61,7 +61,14 @@ export function PageTitle({ className, ...props }: React.ComponentProps<"h1">) {
   return (
     <h1
       data-slot="page-title"
-      className={cn("text-xl font-semibold tracking-tight", className)}
+      /*
+       * ⚠ `font-display` IS THE DISPLAY FACE, AND IT IS SAFE TO APPLY BEFORE THE
+       * FILE EXISTS. `--font-display` falls back to Geist's own stack (see
+       * styles/tokens.css), so until something is published to cdn.i10.tech this
+       * renders exactly as it did — and the day it is published, every page
+       * title in the console changes with it and nothing else does.
+       */
+      className={cn("font-display text-xl font-semibold tracking-tight", className)}
       {...props}
     />
   )

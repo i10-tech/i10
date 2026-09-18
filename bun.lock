@@ -273,6 +273,7 @@
         "radix-ui": "^1.6.7",
         "recharts": "3.8.0",
         "sonner": "^2.0.8",
+        "uqr": "0.1.3",
       },
       "devDependencies": {
         "@repo/eslint-config": "workspace:*",
@@ -2869,6 +2870,8 @@
     "unstorage": ["unstorage@1.17.5", "", { "dependencies": { "anymatch": "3.1.3", "chokidar": "5.0.0", "destr": "2.0.5", "h3": "1.15.11", "lru-cache": "11.5.2", "node-fetch-native": "1.6.7", "ofetch": "1.5.1", "ufo": "1.6.4" } }, "sha512-0i3iqvRfx29hkNntHyQvJTpf5W9dQ9ZadSoRU8+xVlhVtT7jAX57fazYO9EHvcRCfBCyi5YRya7XCDOsbTgkPg=="],
 
     "update-browserslist-db": ["update-browserslist-db@1.3.2", "", { "dependencies": { "escalade": "3.2.0", "picocolors": "1.1.1" }, "peerDependencies": { "browserslist": "4.28.8" }, "bin": { "update-browserslist-db": "cli.js" } }, "sha512-UQ+MSxlhRm1bzjhU+DcuXfjFO1FzNtqhK5+9Yvlp90ItDLk5vT932A0rFu619nf7RVS+Y/VeaUW1jaRDqZ8VJw=="],
+
+    "uqr": ["uqr@0.1.3", "", {}, "sha512-0rjE8iEJe4YmT9TOhwsZtqCMRLc5DXZUI2UEYUUg63ikBkqqE5EYWaI0etFe/5KUcmcYwLih2RND1kq+hrUJXA=="],
 
     "uri-js": ["uri-js@4.4.1", "", { "dependencies": { "punycode": "2.3.1" } }, "sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg=="],
 

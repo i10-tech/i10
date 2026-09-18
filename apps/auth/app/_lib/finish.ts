@@ -76,20 +76,51 @@ export async function finalizeAndLeave<R extends { error: unknown }>(
   finalize: (params: { navigate: Navigate }) => Promise<R>,
   afterAuthUrl: string,
 ): Promise<R> {
+  const { result, leave } = await finalizeWithoutLeaving(finalize, afterAuthUrl)
+  if (result.error) return result
+
+  leave()
+  return result
+}
+
+/**
+ * Create the session, but stay on the page.
+ *
+ * ⚠ THIS EXISTS FOR THE STEPPED SIGN-UP, WHERE THREE STEPS COME *AFTER* THE
+ * ACCOUNT IS REAL. Adding a passkey, enrolling an authenticator app and linking
+ * a Google account are all things `UserResource` does, and `UserResource` does
+ * not exist until a session does — which is what `finalize` creates. So the
+ * flow has to finalize in the middle rather than at the end, and then leave
+ * under its own steam once the person is done being offered things.
+ *
+ * ⚠ THE DECORATED URL IS CAPTURED NOW AND USED A MINUTE LATER, WHICH IS SAFE
+ * AND WORTH SAYING WHY. `decorateUrl` is only offered inside this callback, so
+ * there is no second chance to ask for it — `clerk.buildUrlWithAuth()` is NOT
+ * an equivalent, its own type says "for development instances" and it does not
+ * produce the production ITP hop. What it hands back is either a
+ * `__clerk_db_jwt` query parameter (development, and that token long outlives a
+ * sign-up) or a `/v1/client/touch?redirect_url=…` endpoint (production Safari),
+ * and the touch endpoint acts on whatever cookies exist AT THE MOMENT IT IS
+ * HIT. Neither is a short-lived credential, so holding it across the optional
+ * steps costs nothing.
+ *
+ * ⚠ AND THE ORDERING RULE FROM `finalizeAndLeave` STILL APPLIES: nothing
+ * navigates from inside the callback. See the note above it for the phone-shaped
+ * bug that caused.
+ */
+export async function finalizeWithoutLeaving<R extends { error: unknown }>(
+  finalize: (params: { navigate: Navigate }) => Promise<R>,
+  afterAuthUrl: string,
+): Promise<{ result: R; leave: () => void }> {
   let target: string | null = null
 
   const result = await finalize({
     navigate: ({ decorateUrl }) => {
-      // ⚠ CAPTURE ONLY. Navigating here is the bug described above.
       target = decorateUrl(afterAuthUrl)
     },
   })
 
-  if (result.error) return result
-
-  leaveFor(target ?? afterAuthUrl)
-
-  return result
+  return { result, leave: () => leaveFor(target ?? afterAuthUrl) }
 }
 
 /**

@@ -9,6 +9,15 @@ const config: NextConfig = {
   // The trace root is the REPO, not the app. Left to default, Next traces from
   // the app directory and silently omits the workspace packages it imports.
   outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
+  /*
+   * ⚠ THE BUILD DIRECTORY IS OVERRIDABLE SO THE PREVIEW CAN RUN ALONGSIDE THE
+   * REAL CONSOLE. Next takes a lock on `.next`, so a second `next dev` in this
+   * directory refuses to start — which made `dev:preview` mutually exclusive
+   * with `dev`, and reviewing the interface meant stopping the stack you were
+   * reviewing it against. One variable, defaulting to the normal path, so
+   * nothing about a real build changes.
+   */
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   transpilePackages: ["@repo/ui"],
   reactStrictMode: true,
   poweredByHeader: false,

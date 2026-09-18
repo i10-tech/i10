@@ -1,6 +1,7 @@
 import "server-only"
 import type { SsoStrategy } from "./clerk-types"
 import { isAppleUserAgent } from "./apple"
+import { clerkEnvironment } from "./environment"
 
 /**
  * Which SSO buttons to draw — asked of Clerk, not hard-coded here.
@@ -28,13 +29,6 @@ export interface SsoProvider {
   /** Clerk's own display name, which becomes the button's label — "GitHub". */
   name: string
 }
-
-/**
- * ⚠ CACHED, BECAUSE THIS IS ON THE PATH OF EVERY SIGN-IN PAGE RENDER. Five
- * minutes is long enough that Clerk is not asked once per visitor and short
- * enough that adding a provider shows up without a deploy.
- */
-const ENVIRONMENT_TTL_SECONDS = 300
 
 /**
  * ⚠ APPLE IS GATED TWICE, AND BOTH GATES ARE NEEDED. Clerk has to have the
@@ -72,51 +66,37 @@ interface SocialEntry {
 }
 
 async function configuredProviders(): Promise<SsoProvider[]> {
-  const host = frontendApiHost()
-  if (!host) return []
+  /*
+   * ⚠ THE DOCUMENT IS FETCHED BY `_lib/environment.ts` NOW, NOT HERE, because
+   * the sign-up flow needs the SAME document to know whether passkeys and
+   * two-factor are enabled. Two copies of this fetch would be two caches, two
+   * TTLs and two different answers on the render where one of them expired.
+   */
+  const environment = await clerkEnvironment()
+  if (!environment) return []
 
-  try {
-    const response = await fetch(`https://${host}/v1/environment`, {
-      next: { revalidate: ENVIRONMENT_TTL_SECONDS },
-    })
-    if (!response.ok) return []
+  const social = Object.values(environment.user_settings?.social ?? {})
 
-    const body = (await response.json()) as {
-      user_settings?: { social?: Record<string, SocialEntry> }
-    }
-
-    const social = Object.values(body.user_settings?.social ?? {})
-
-    return social
-      .filter(
-        (entry): entry is SocialEntry & { strategy: string; name: string } =>
-          // ⚠ ALL FOUR FLAGS, NOT JUST `enabled`. Clerk keeps an entry for a
-          // provider that is configured but cannot be used to sign in
-          // (`authenticatable: false`), one it is retiring (`deprecated`), and
-          // one it does not want offered as a button (`not_selectable`).
-          // Rendering any of those is a button that fails when pressed.
-          Boolean(entry.enabled) &&
-          entry.authenticatable !== false &&
-          entry.not_selectable !== true &&
-          entry.deprecated !== true &&
-          typeof entry.strategy === "string" &&
-          typeof entry.name === "string",
-      )
-      .map((entry) => ({
-        strategy: entry.strategy as SsoStrategy,
-        name: entry.name,
-      }))
-      .sort(byPreferredOrder)
-  } catch {
-    /*
-     * ⚠ NO BUTTONS RATHER THAN GUESSED BUTTONS, AND THAT IS THE DELIBERATE
-     * TRADE. If Clerk's environment cannot be read we do not know what is
-     * configured, and inventing a list is how the Apple button existed in the
-     * first place. The password form still carries the page, and an instance
-     * we cannot reach is one whose SSO would not have completed anyway.
-     */
-    return []
-  }
+  return social
+    .filter(
+      (entry): entry is SocialEntry & { strategy: string; name: string } =>
+        // ⚠ ALL FOUR FLAGS, NOT JUST `enabled`. Clerk keeps an entry for a
+        // provider that is configured but cannot be used to sign in
+        // (`authenticatable: false`), one it is retiring (`deprecated`), and
+        // one it does not want offered as a button (`not_selectable`).
+        // Rendering any of those is a button that fails when pressed.
+        Boolean(entry.enabled) &&
+        entry.authenticatable !== false &&
+        entry.not_selectable !== true &&
+        entry.deprecated !== true &&
+        typeof entry.strategy === "string" &&
+        typeof entry.name === "string",
+    )
+    .map((entry) => ({
+      strategy: entry.strategy as SsoStrategy,
+      name: entry.name,
+    }))
+    .sort(byPreferredOrder)
 }
 
 function byPreferredOrder(a: SsoProvider, b: SsoProvider): number {
@@ -126,28 +106,4 @@ function byPreferredOrder(a: SsoProvider, b: SsoProvider): number {
   if (ai !== -1) return -1
   if (bi !== -1) return 1
   return a.name.localeCompare(b.name)
-}
-
-/**
- * The instance's Frontend API host, read out of the publishable key.
- *
- * ⚠ THE KEY ENCODES IT, SO THERE IS NOTHING NEW TO CONFIGURE. A publishable key
- * is `pk_live_` (or `pk_test_`) followed by base64 of the FAPI host with a `$`
- * terminator — `pk_live_Y2xlcmsuaTEwLnRlY2gk` decodes to `clerk.i10.tech$`.
- * Deriving it means this cannot drift from the key the rest of the app uses,
- * which a second `AUTH_CLERK_FAPI_URL` variable certainly would.
- */
-function frontendApiHost(): string | null {
-  const key = process.env.CLERK_PUBLISHABLE_KEY
-  if (!key) return null
-
-  const encoded = key.replace(/^pk_(?:live|test)_/, "")
-  if (encoded === key) return null
-
-  try {
-    const decoded = Buffer.from(encoded, "base64").toString("utf8")
-    return decoded.endsWith("$") ? decoded.slice(0, -1) : null
-  } catch {
-    return null
-  }
 }

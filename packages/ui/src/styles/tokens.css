@@ -25,6 +25,16 @@
 @import "tailwindcss";
 
 /*
+ * ⚠ AFTER TAILWIND, SO THE `@font-face` RULES LAND UNLAYERED AND OUTRANK
+ * NOTHING. A font-face declaration is not a style rule — it registers a family
+ * name — so layer position is irrelevant to it, but the import ORDER is not:
+ * `@import` must precede any rule that is not another `@import`, and putting it
+ * above `@import "tailwindcss"` would put a second stylesheet ahead of
+ * Tailwind's own preflight.
+ */
+@import "./fonts.css";
+
+/*
  * ⚠ THE SCAN PATH LIVES HERE, IN THE PACKAGE, AND NOT IN THE APPS.
  *
  * Tailwind v4 scans the project that imports it. A workspace package reached
@@ -111,7 +121,34 @@
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+
+  /*
+   * ⚠ FOCUS IS THE BORDER GOING FULL-CONTRAST, NOT A HALO DRAWN AROUND IT, AND
+   * THIS TOKEN IS WHERE THAT DECISION LIVES. shadcn ships `--ring` as a mid
+   * grey and then paints it as a 3px translucent glow — `focus-visible:ring-[3px]
+   * ring-ring/50` — on every control it generates. Two things are wrong with
+   * that here. It is a soft blurred shape on a surface whose entire depth model
+   * is "borders and hairlines, never shadows" (see the dark-canvas note below),
+   * so it reads as the one component with a drop shadow. And a 50%-opacity grey
+   * halo is a WEAKER signal than the border it sits outside, which is the
+   * wrong way round for the one state that has to be unmistakable.
+   *
+   * So `--ring` is now simply `--foreground`, and focus is expressed by moving
+   * the 1px border from `--input` to `--ring`. Nothing new is painted, nothing
+   * changes size, and the contrast step is large — grey to near-black here,
+   * grey to white in dark mode.
+   *
+   * ⚠ IT IS DEFINED AS THE SAME VALUE RATHER THAN AS `var(--foreground)`,
+   * because Clerk reads this token through `colorRing` in ../clerk.ts and its
+   * theme resolver takes a colour, not an arbitrary expression.
+   *
+   * ⚠ AND IT IS STILL CALLED `--ring`. Twenty-odd generated components
+   * reference `border-ring` and `outline-ring` directly, and `shadcn add` will
+   * write more. Renaming it would mean every future component arrives with a
+   * focus colour that resolves to nothing — silently, because an undefined
+   * custom property is not an error.
+   */
+  --ring: oklch(0.145 0 0);
 
   /*
    * ⚠ shadcn's OWN BASE CORNER, AND THE REST OF THE SCALE IS DERIVED FROM IT.
@@ -146,6 +183,30 @@
   --pill: 9999px;
 
   /*
+   * Elevation.
+   *
+   * ⚠ THE WHOLE SCALE IS DELIBERATELY WEAKER THAN ANY FRAMEWORK DEFAULT, AND
+   * THE BRIEF IS THE REASON: borders and extremely subtle shadows, never giant
+   * ones. Tailwind's own `shadow-md` is `0 4px 6px -1px rgb(0 0 0 / 0.1)`, which
+   * on a white page reads as a card lying on top of a photograph. These top out
+   * at 10% on the largest step and are built from TWO layers — a tight contact
+   * shadow and a wide ambient one — because a single blur reads as a sticker and
+   * two read as an object resting on a surface.
+   *
+   * ⚠ AND THEY REPLACE TAILWIND'S `--shadow-*` KEYS RATHER THAN ADDING NEW
+   * ONES, which is what makes this a sweep instead of a migration. Every
+   * `shadow-xs` already written across twenty shadcn components picks these up;
+   * nothing had to be found and edited, and a component added by `shadcn add`
+   * tomorrow inherits the system instead of arriving with stock shadows.
+   */
+  --elevate-1:
+    0 1px 1px oklch(0 0 0 / 4%), 0 1px 2px -1px oklch(0 0 0 / 6%);
+  --elevate-2:
+    0 1px 2px oklch(0 0 0 / 4%), 0 4px 12px -4px oklch(0 0 0 / 7%);
+  --elevate-3:
+    0 1px 2px oklch(0 0 0 / 5%), 0 16px 40px -12px oklch(0 0 0 / 10%);
+
+  /*
    * The sidebar surface.
    *
    * ⚠ REWRITTEN FROM WHAT `shadcn add sidebar` GENERATED, AND THE REASON IS THE
@@ -168,7 +229,7 @@
   --sidebar-accent: oklch(0.955 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: oklch(0.145 0 0);
 
   /*
    * State colour, and the ONLY colour in the system.
@@ -235,7 +296,28 @@
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* The border going to white on focus — see the light value for why. */
+  --ring: oklch(0.985 0 0);
+
+  /*
+   * ⚠ ON A TRUE-BLACK CANVAS A DROP SHADOW IS INVISIBLE, SO THE FIRST LAYER OF
+   * EVERY STEP IS AN INSET HIGHLIGHT INSTEAD. There is nothing darker than the
+   * page to cast onto; what actually reads as "this is raised" against black is
+   * a one-pixel lighter line along the TOP edge, which is how a real surface
+   * catches light from above. That is the same reasoning as the dark-mode note
+   * below — elevation here is a hairline, not a halo.
+   *
+   * ⚠ THE AMBIENT SHADOW IS KEPT ANYWAY ON THE UPPER STEPS, AND IT IS NOT
+   * WASTED. A popover or a dialog floats over CARDS, not over the page, and
+   * `--card` is `oklch(0.12)` — light enough for a heavy, tightly-negative
+   * spread to darken. It does nothing over the black canvas and everything over
+   * a table, which is exactly where the two are used.
+   */
+  --elevate-1: inset 0 1px 0 oklch(1 0 0 / 4%);
+  --elevate-2:
+    inset 0 1px 0 oklch(1 0 0 / 5%), 0 8px 24px -12px oklch(0 0 0 / 80%);
+  --elevate-3:
+    inset 0 1px 0 oklch(1 0 0 / 6%), 0 16px 48px -16px oklch(0 0 0 / 90%);
 
   /*
    * ⚠ IN DARK MODE THE SIDEBAR IS THE SAME TRUE BLACK AS THE PAGE, AND ONLY THE
@@ -255,7 +337,7 @@
   --sidebar-accent: oklch(0.2 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.985 0 0);
 
   /*
    * ⚠ LIGHTER AND LESS SATURATED THAN THE LIGHT VALUES, NOT THE SAME HEX.
@@ -359,6 +441,17 @@
    * `rounded-pill` in the product silently becomes a square corner. */
   --radius-pill: var(--pill);
 
+  /* See the `--elevate-*` note in `:root`: these OVERRIDE Tailwind's defaults,
+   * so every `shadow-xs` and `shadow-sm` already in the component library moves
+   * onto this scale with no edit. `2xl` is left at Tailwind's default because
+   * nothing in this product is allowed to be that raised. */
+  --shadow-2xs: var(--elevate-1);
+  --shadow-xs: var(--elevate-1);
+  --shadow-sm: var(--elevate-1);
+  --shadow-md: var(--elevate-2);
+  --shadow-lg: var(--elevate-3);
+  --shadow-xl: var(--elevate-3);
+
   /*
    * Typography.
    *
@@ -379,6 +472,17 @@
   --font-mono:
     var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo,
     monospace;
+
+  /*
+   * ⚠ THE DISPLAY FACE FALLS BACK TO `--font-sans`'s OWN STACK, NOT TO
+   * `sans-serif`. If the CDN file is missing the heading should render in Geist
+   * like everything around it, not in whatever the browser calls a sans — which
+   * on Windows is Arial and turns one line of a page into a different product.
+   * See styles/fonts.css for why this face is allowed to be absent at all.
+   */
+  --font-display:
+    "i10 Display", var(--font-geist-sans), ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", sans-serif;
 
   /*
    * The ramp: a major second (1.125) from a 14px base, with line height

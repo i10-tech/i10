@@ -43,7 +43,12 @@ export const config = [
     plugins: { onlyWarn },
   },
   {
-    ignores: ["dist/**", ".next/**", ".astro/**", "node_modules/**"],
+    // ⚠ `.next*` RATHER THAN `.next`, because the console's preview server
+    // builds into `.next-preview` so it can run beside a live `next dev` — see
+    // apps/console/next.config.ts. Linting a Next build output is thousands of
+    // warnings about `require()` in generated chunks, and it takes the gate red
+    // for a directory nobody wrote.
+    ignores: ["dist/**", ".next*/**", ".astro/**", "node_modules/**"],
   },
 ]
 

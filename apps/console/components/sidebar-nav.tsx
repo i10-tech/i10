@@ -21,8 +21,33 @@ import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/na
  * row carries a transparent one, which is the kind of detail that gets lost in
  * a refactor and produces a nav that twitches as you move through it. A
  * background fill changes nothing about layout.
+ *
+ * ⚠ AND THAT FILL IS ONE ELEMENT THAT MOVES, NOT A CLASS THAT SWITCHES ROWS.
+ * It is the cheapest shared-element transition in the product: `layoutId` makes
+ * Motion treat the highlight on the old row and the highlight on the new one as
+ * the same object, so it travels between them instead of blinking out here and
+ * in there. It is also the only thing on screen that reliably survives a
+ * navigation, which makes it the one place the eye can hold onto while the page
+ * underneath is replaced.
  */
-export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
+export function SidebarNav({
+  groups,
+  /**
+   * What makes this rail's highlight its own.
+   *
+   * ⚠ TWO RAILS EXIST AT ONCE — THE DESKTOP ONE AND THE MOBILE DRAWER — AND A
+   * SHARED `layoutId` WOULD MAKE THEM FIGHT. Motion matches the id globally, so
+   * two mounted highlights claiming the same one means it tries to morph a
+   * 240px rail's pill into a drawer's and back on every render. The scope is a
+   * prop rather than a `useId` because it has to be STABLE across navigations:
+   * a generated id changes when the tree remounts, and a highlight whose
+   * identity changed is a highlight that fades instead of travelling.
+   */
+  scope = "rail",
+}: {
+  groups?: NavGroup[]
+  scope?: string
+}) {
   const pathname = usePathname()
 
   /*
@@ -104,17 +129,30 @@ export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
                   whileHover="hover"
                   whileTap="tap"
                   className={cn(
-                    "group flex h-8 items-center gap-2.5 rounded-md px-2 text-sm transition-colors",
+                    // ⚠ `isolate` IS WHAT KEEPS THE TRAVELLING FILL BEHIND THE
+                    // LABEL AND IN FRONT OF THE RAIL. It gives the row its own
+                    // stacking context, so the highlight's `-z-10` puts it
+                    // under this row's text rather than under the sidebar
+                    // itself, where it would simply be invisible.
+                    "group relative isolate flex h-8 items-center gap-2.5 rounded-md px-2 text-sm",
                     // ⚠ COLOUR ONLY, SO `--ease-linear` IS CORRECT HERE. The
                     // motion rules reserve eased curves for things that MOVE;
                     // a linear ramp on a background is exactly what Base's
                     // fifth timing row is for.
-                    "duration-(--duration-instant) ease-(--ease-linear)",
+                    "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
                     active
-                      ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                      ? "font-medium text-sidebar-accent-foreground"
                       : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
                   )}
                 >
+                  {active && (
+                    <motion.span
+                      layoutId={`${scope}-active`}
+                      aria-hidden
+                      className="absolute inset-0 -z-10 rounded-md bg-sidebar-accent"
+                      transition={ACTIVE_SPRING}
+                    />
+                  )}
                   <NavIcon icon={Icon} active={active} />
                   <span className="truncate">{item.label}</span>
                 </MotionLink>
@@ -143,6 +181,17 @@ const MotionLink = motion.create(Link)
  * as a physical nudge rather than a state flip.
  */
 const ICON_SPRING: Transition = { type: "spring", stiffness: 500, damping: 30 }
+
+/**
+ * ⚠ SOFTER AND SLOWER THAN THE ICON'S, BECAUSE THIS ONE TRAVELS A REAL DISTANCE.
+ * The icon nudges by a pixel; the highlight crosses up to four hundred of them
+ * between "Overview" and "Settings", and a 500-stiffness spring over that
+ * distance is a streak rather than a movement. `damping: 34` against
+ * `stiffness: 380` lands it in about 300ms with no visible bounce at the end —
+ * long enough to follow with the eye, short enough that it has finished before
+ * the new page's content arrives.
+ */
+const ACTIVE_SPRING: Transition = { type: "spring", stiffness: 380, damping: 34 }
 
 /**
  * ⚠ SCALE AND A SINGLE PIXEL OF LIFT — NO ROTATION, AND THAT IS DELIBERATE.

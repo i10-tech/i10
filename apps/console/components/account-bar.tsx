@@ -58,7 +58,7 @@ export function AccountBar() {
         className={cn(
           "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5",
           "text-left transition-colors duration-(--duration-instant) ease-(--ease-linear)",
-          "hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+          "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar focus-visible:outline-none",
           "data-[state=open]:bg-sidebar-accent",
         )}
         aria-label="Account menu"

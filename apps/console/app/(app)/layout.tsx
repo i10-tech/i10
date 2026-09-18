@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
+import { PageFrame } from "@/components/page-frame"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { CommandMenu } from "@/components/command-menu"
 import { MobileNav } from "@/components/mobile-nav"
@@ -96,7 +97,7 @@ export default async function AppLayout({
         <div className="flex h-14 items-center px-4">
           <Link
             href="/"
-            className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Wordmark />
           </Link>
@@ -149,7 +150,14 @@ export default async function AppLayout({
           plan={me.data.billing.plan}
           clerkEnabled={clerkEnabled}
         />
-        {children}
+        {/*
+         * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,
+         * the workspace bar and the mobile header stay perfectly still while the
+         * content changes. A transition that moved the chrome as well would be a
+         * page load with extra steps — the whole value of an app shell is that
+         * most of the screen does not go anywhere.
+         */}
+        <PageFrame>{children}</PageFrame>
       </div>
 
       {/*

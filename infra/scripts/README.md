@@ -148,3 +148,92 @@ That is a deliberate choice rather than a missing feature: an automatic revert
 would be a second process racing the first, pushing to `main` on a judgement
 call ("is a single unready pod a failed deploy?") that is frequently wrong
 during a slow image pull.
+
+---
+
+# Putting the display face on cdn.i10.tech
+
+`publish-fonts.sh` uploads two `.woff2` files to `s3://i10/fonts/`, which is what
+`packages/ui/src/styles/fonts.css` asks for. Everything else about the interface
+already works without them; see that file for why the product is correct when
+the font is absent.
+
+## Before the first run: the licence
+
+**Check the grant before checking the pipeline.** Serving a font from a public
+CDN is redistribution in the plain sense — anyone can fetch the file. Most
+_webfont_ licences permit exactly that from a domain you own, usually capped by
+pageviews. Most _desktop_ licences do not permit it at all, and the difference is
+not visible from the file on disk.
+
+Amazon Ember specifically is Amazon's corporate typeface, offered through the
+Amazon developer portal for building and marketing **on Amazon's platforms**.
+Hosting it as i10's brand face is outside that. If it is the look that is wanted
+rather than the name, the closest freely-licensable faces are Ember's own
+relatives — it was drawn by Dalton Maag, whose Aktiv Grotesk is commercially
+licensable, and Inter, Public Sans or Geist itself sit in the same humanist-grotesk
+territory at no cost and no risk.
+
+## One-time: pointing the name at the bucket
+
+`cdn.i10.tech` is not in the Tofu DNS stack, on purpose — that stack owns the
+mail half of the zone and nothing else (see `infra/tofu/stacks/dns/main.tf`). The
+web surface is hand-managed, and this is part of it.
+
+1. Cloudflare → R2 → the `i10` bucket → **Settings** → **Public access** →
+   **Custom domains** → connect `cdn.i10.tech`.
+2. Cloudflare writes the CNAME itself. It **beats the proxied `*.i10.tech`
+   wildcard**, because a specific record always wins over a wildcard — that is
+   what stops `cdn` resolving to the cluster ingress like every other name.
+3. Leave the bucket's `r2.dev` URL disabled. It is rate-limited, uncacheable and
+   permanently public regardless of what the custom domain does later.
+
+## Publishing
+
+```bash
+doppler run -- infra/scripts/publish-fonts.sh ~/fonts/i10-display --dry-run
+doppler run -- infra/scripts/publish-fonts.sh ~/fonts/i10-display
+```
+
+The dry run checks the four things that go wrong: the secrets are absent, the
+filenames do not match what the stylesheet asks for, the file is a renamed
+`.ttf` rather than a real woff2, and the sizes are not what was expected.
+
+Then:
+
+```bash
+curl -sI https://cdn.i10.tech/fonts/i10-display-400.woff2
+```
+
+Expect `200`, `content-type: font/woff2` and a year-long `immutable`
+`cache-control`. **That cache header means a replacement at the same path will
+not reach anybody who has already loaded it** — to change the cut, publish a new
+filename and change the `src` in `fonts.css` with it.
+
+## The follow-up worth doing: metric overrides
+
+`font-display: swap` paints headings in Geist and then swaps. Without metric
+overrides that swap **moves the text**, because the two faces have different cap
+heights and advance widths — a visible reflow on every cold load.
+
+Once the real file exists, measure it and add the overrides to the `@font-face`
+blocks:
+
+```bash
+bunx fontkit-metrics i10-display-400.woff2   # or read head/hhea/OS2 directly
+```
+
+```css
+@font-face {
+  font-family: "i10 Display Fallback";
+  src: local("Geist"), local("Helvetica Neue"), local("Arial");
+  ascent-override: <A/upem>%;
+  descent-override: <D/upem>%;
+  line-gap-override: 0%;
+  size-adjust: <capHeightRatio>%;
+}
+```
+
+and put that family between `"i10 Display"` and Geist in `--font-display`. This
+cannot be written in advance: every number in it comes from the font file, and
+guessed values make the shift worse rather than better.

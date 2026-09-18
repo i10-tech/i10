@@ -2,6 +2,9 @@ node_modules/
 
 # Build output
 .next/
+# `dev:preview` builds here so it can run beside a live `next dev`, which holds
+# a lock on `.next` — see apps/console/next.config.ts.
+.next-preview/
 out/
 dist/
 build/

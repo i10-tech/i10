@@ -88,7 +88,13 @@ export function MobileNav({
            * bottom of the drawer rather than scrolling inside it.
            */}
           <div className="min-h-0 flex-1 overflow-y-auto py-2">
-            <SidebarNav />
+            {/*
+             * ⚠ ITS OWN `scope`, SO THE DRAWER'S ACTIVE HIGHLIGHT AND THE
+             * DESKTOP RAIL'S ARE DIFFERENT OBJECTS. Both are mounted while the
+             * drawer is open; sharing a `layoutId` would have Motion morph one
+             * into the other across the screen every time either re-rendered.
+             */}
+            <SidebarNav scope="drawer" />
           </div>
 
           {/* The same reading order as the desktop rail: workspace, then where
