@@ -106,3 +106,43 @@ now shows a diagnosis from `/console/domains/:id/delegation`, and
   `apps/api` as rows, in the same transaction as the domain they belong to;
   a second write path through PowerDNS's REST API would be a second source of
   truth for the same zone.
+
+## The node must not resolve through `127.0.0.53`
+
+`hostPort: 53` is not just a port reservation. The CNI portmap plugin installs
+
+```
+-A OUTPUT -m addrtype --dst-type LOCAL -j CNI-HOSTPORT-DNAT
+-A CNI-DN-… -p udp -m udp --dport 53 -j DNAT --to-destination <pod-ip>:53
+```
+
+and that last rule carries **no source restriction**. `127.0.0.53` is a LOCAL
+address, so every DNS query the NODE makes through systemd-resolved's stub is
+redirected into this pod.
+
+That is fatal twice over:
+
+1. **While the pod is down, the node has no DNS at all.** The DNAT target is
+   dead, so `127.0.0.53:53` answers `connection refused`. Everything using
+   `/etc/resolv.conf` breaks — including containerd, which then cannot pull the
+   PowerDNS image. It is a deadlock: no DNS → no image → no pod → no DNS.
+   Observed on 2026-09-18, one minute after this deployment first rolled out.
+2. **While the pod is UP it is worse in a quieter way.** PowerDNS is
+   authoritative, not recursive. The node's queries for `ghcr.io` would reach a
+   server that has no answer and no upstream, so they fail rather than resolve.
+
+So the node must resolve through the real upstreams, not the stub:
+
+```bash
+sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+```
+
+`/run/systemd/resolve/resolv.conf` lists the uplink nameservers directly; only
+`stub-resolv.conf` points at `127.0.0.53`. The symlink is on disk, so it
+survives a reboot — but it is NOT in any manifest, and a rebuilt node would
+deadlock on first sync. **Anything that provisions this host has to set it.**
+
+`resolvectl` keeps working either way: it queries resolved over D-Bus and never
+touches port 53, which is why `resolvectl query ghcr.io` succeeds on a node
+where `getent hosts ghcr.io` fails. That asymmetry is the fastest way to
+recognise this failure.
