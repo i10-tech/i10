@@ -378,3 +378,49 @@ export interface DelegationReport {
   zones: ZoneFinding[]
   error?: string
 }
+
+/**
+ * A DNS provider we can actually write to.
+ *
+ * ⚠ THE API DECIDES THIS, NOT THE CONSOLE. Whether a provider is connectable
+ * depends on an adapter existing and, for the one-click path, on an OAuth app
+ * being registered — one is a deploy and the other is configuration. Deciding it
+ * from `@repo/dns-providers` here would render a live Connect button for the
+ * twenty-nine providers we cannot write to.
+ */
+export interface ConnectableProvider {
+  slug: string
+  name: string
+  /** A registered OAuth app exists, so the browser can be sent to authorise. */
+  oauth: boolean
+  /** A token can be pasted. True wherever an adapter exists. */
+  token: boolean
+  scope: string | null
+  docs: string | null
+  zoneScoped: boolean
+}
+
+/** A stored connection, as the console is allowed to see it. Never a credential. */
+export interface DnsConnection {
+  id: string
+  provider: string
+  label: string | null
+  zones: string[]
+  lastUsedAt: string | null
+  lastError: string | null
+  createdAt: string
+}
+
+export interface ConflictingRecord {
+  name: string
+  type: string
+  value: string
+  reason: string
+}
+
+export interface PublishOutcome {
+  status: "published"
+  created: { name: string; type: string; value: string }[]
+  unchanged: { name: string; type: string; value: string }[]
+  removed: ConflictingRecord[]
+}

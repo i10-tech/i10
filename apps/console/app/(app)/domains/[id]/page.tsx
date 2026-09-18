@@ -19,10 +19,17 @@ import { Status } from "@/components/status"
 import { DnsRecords } from "@/components/dns-records"
 import { DomainActions } from "@/components/domain-actions"
 import { DelegationNote } from "@/components/delegation-note"
+import { PublishRecords } from "@/components/publish-records"
 import { VerifyButton } from "@/components/verify-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
-import type { DelegationReport, Domain } from "@/lib/types"
+import type {
+  ConnectableProvider,
+  DelegationReport,
+  DnsConnection,
+  DnsInspection,
+  Domain,
+} from "@/lib/types"
 
 export async function generateMetadata({
   params,
@@ -72,6 +79,32 @@ export default async function DomainDetailPage({
         )
       : null
 
+  /*
+   * ⚠ THREE READS, AND ALL THREE ARE NEEDED TO ANSWER ONE QUESTION: can we
+   * publish these records for them. Who hosts the domain's DNS (the lookup),
+   * whether we have an adapter and an app for that host (the providers list),
+   * and whether this workspace has already authorised us (the connections).
+   * Any two of the three would render a button that fails when pressed.
+   *
+   * ⚠ AND A FAILURE IN ANY OF THEM HIDES THE BUTTON RATHER THAN THE PAGE. This
+   * is an accelerator; the records table below is the thing somebody came for.
+   */
+  const [inspection, providers, connections] = await Promise.all([
+    tryApi<DnsInspection>("/console/dns/lookup", { query: { domain: domain.name } }),
+    tryApi<{ data: ConnectableProvider[] }>("/console/dns/providers"),
+    tryApi<{ data: DnsConnection[] }>("/console/dns/connections"),
+  ])
+
+  const hostedBy = inspection.ok ? inspection.data.provider?.slug : undefined
+  const connectable =
+    hostedBy && providers.ok
+      ? (providers.data.data.find((p) => p.slug === hostedBy) ?? null)
+      : null
+  const connection =
+    connectable && connections.ok
+      ? (connections.data.data.find((c) => c.provider === connectable.slug) ?? null)
+      : null
+
   return (
     <Page>
       <PageHeader>
@@ -86,6 +119,20 @@ export default async function DomainDetailPage({
             <Status status={domain.status} variant="pill" />
           </div>
           <PageActions>
+            {/*
+             * ⚠ ONLY WHERE WE CAN ACTUALLY DO IT. The button appears when the
+             * domain's DNS is hosted somewhere we have an adapter for; anywhere
+             * else the records table is still the answer, and offering a
+             * shortcut that cannot work is worse than not offering one.
+             */}
+            {connectable && domain.status !== "verified" && (
+              <PublishRecords
+                domainId={domain.id}
+                connection={connection}
+                providerSlug={connectable.slug}
+                providerName={connectable.name}
+              />
+            )}
             <VerifyButton id={domain.id} status={domain.status} />
             <DomainActions id={domain.id} name={domain.name} />
           </PageActions>

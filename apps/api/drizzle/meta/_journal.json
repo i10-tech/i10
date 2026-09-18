@@ -281,6 +281,13 @@
       "when": 1789617349617,
       "tag": "0039_domain_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789617350617,
+      "tag": "0040_pdns_role_grants",
+      "breakpoints": true
     }
   ]
 }

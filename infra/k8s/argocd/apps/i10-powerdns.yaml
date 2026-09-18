@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: i10-powerdns
+  namespace: i10-prod
+spec:
+  project: i10
+  source:
+    repoURL: git@github.com:i10-tech/i10.git
+    targetRevision: main
+    path: infra/k8s/i10/powerdns
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: i10-prod
+  syncPolicy:
+    # ⚠ AUTOMATED, MATCHING EVERY OTHER APP HERE. The image is pinned by digest
+    # and nothing in this path is written by CI, so a sync only ever applies
+    # what is in the commit.
+    #
+    # ⚠ selfHeal IS THE HALF WORTH KNOWING BEFORE DEBUGGING ON THE BOX: a
+    # hand-applied change to anything under this path is reverted within about
+    # 35 seconds. To test a fix live, remove `automated` first — and put it back.
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

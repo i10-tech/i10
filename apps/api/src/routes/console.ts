@@ -8,6 +8,7 @@ import { mountAccount } from "./console/account.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountCredentials } from "./console/credentials.js"
+import { mountDns } from "./console/dns.js"
 import { mountDomains } from "./console/domains.js"
 import { mountSending } from "./console/sending.js"
 
@@ -153,6 +154,7 @@ export function createConsole(deps?: ConsoleDeps) {
   mountCredentials(app, d)
   mountAudience(app, d)
   mountCampaigns(app, d)
+  mountDns(app, d)
 
   return app
 }

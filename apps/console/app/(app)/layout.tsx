@@ -8,6 +8,7 @@ import { CommandMenu } from "@/components/command-menu"
 import { MobileNav } from "@/components/mobile-nav"
 import { UsageRail } from "@/components/usage-rail"
 import { WorkspaceBar } from "@/components/workspace-bar"
+import { AccountBar } from "@/components/account-bar"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
@@ -125,10 +126,20 @@ export default async function AppLayout({
          * ⚠ IN ITS OWN SUSPENSE BOUNDARY so a slow meter read cannot hold up
          * the navigation. The rail renders, the number arrives.
          */}
-        <div className="mt-auto border-t p-2">
+        <div className="mt-auto space-y-1 border-t p-2">
           <Suspense fallback={<Skeleton className="h-16 w-full rounded-md" />}>
             <UsageRail />
           </Suspense>
+
+          {/*
+           * ⚠ THE PERSON, AT THE FOOT OF THE RAIL, BELOW THE WORKSPACE'S USAGE.
+           * It used to share the top row with the organization switcher, which
+           * gave a control somebody touches monthly the same prominence as the
+           * one that changes which workspace's data is on every page. The
+           * reading order now matches the questions: which workspace (top),
+           * where to go (middle), what it is costing and who I am (bottom).
+           */}
+          {clerkEnabled && <AccountBar />}
         </div>
       </aside>
 

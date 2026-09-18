@@ -96,14 +96,25 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
                   </div>
                 </Td>
                 <Td>
-                  <div className="flex items-center gap-1">
+                  {/*
+                   * ⚠ `justify-start`, AND THE VALUE DOES NOT GROW. It used to
+                   * carry `flex-1`, which made the span eat the whole column and
+                   * stranded the copy button against the TTL header — a hand's
+                   * width away from `ns1.i10.tech`, and nowhere near the row it
+                   * belonged to. The Name column beside it has always put its
+                   * button directly after the text; the two columns disagreed on
+                   * screen. Sizing to content puts the button back beside the
+                   * value and lets a long DKIM key still push it to the edge,
+                   * which is the one case where the old layout looked right.
+                   */}
+                  <div className="flex items-center justify-start gap-1">
                     {/*
                      * ⚠ `overflow-x-auto` ON THE VALUE, NOT `truncate`. An
                      * ellipsis in a DKIM key is invisible to somebody
                      * triple-clicking to select it, and they paste 60
                      * characters of a 220-character key.
                      */}
-                    <span className="min-w-0 flex-1 overflow-x-auto font-mono text-xs whitespace-nowrap select-all">
+                    <span className="min-w-0 overflow-x-auto font-mono text-xs whitespace-nowrap select-all">
                       {record.priority !== undefined && (
                         <span className="text-muted-foreground">
                           {record.priority}{" "}
@@ -115,6 +126,7 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
                       value={record.value}
                       size="icon-xs"
                       label="Copy value"
+                      className="shrink-0"
                     />
                   </div>
                 </Td>

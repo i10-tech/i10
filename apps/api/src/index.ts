@@ -1,4 +1,5 @@
 import { createClerkClient } from "@clerk/backend"
+import { createHmac } from "node:crypto"
 import pino from "pino"
 import { createApp } from "./app.js"
 import { subscriptionOps } from "./billing/db.js"
@@ -25,6 +26,9 @@ import { clerkActiveOrg, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
+import { dnsConnectionStore } from "./dns/connections.js"
+import { dnsOAuth } from "./dns/oauth.js"
+import { dnsPublisher } from "./dns/publish.js"
 import { marketingStore } from "./console/marketing.js"
 import { onboardingStore } from "./console/onboarding.js"
 import { tenantProfileStore } from "./console/tenant.js"
@@ -582,6 +586,37 @@ const app = createApp({
      * as pointed elsewhere.
      */
     delegation: delegationChecker({ nameservers: env.MAIL_NAMESERVERS }),
+    /*
+     * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
+     * why all three arrive together or not at all. A credential that can rewrite
+     * a customer's MX records must not be stored in the clear, so without a box
+     * to seal it in the routes answer 501 — the same rule `domains` above
+     * follows for a DKIM private key.
+     */
+    ...(secrets
+      ? {
+          dnsConnections: dnsConnectionStore(db, secrets),
+          dnsOAuth: dnsOAuth({
+            apps: env.DNS_OAUTH_APPS,
+            redirectBase: env.DNS_OAUTH_REDIRECT_BASE,
+            /*
+             * ⚠ DERIVED FROM THE SEALING KEY RATHER THAN BEING ITS OWN
+             * VARIABLE, and domain-separated so it is not the same value. It
+             * signs the OAuth `state`, which is what stops somebody attaching
+             * their DNS credential to another workspace — a real key, but not
+             * one an operator should have to remember to set separately from
+             * the key this feature already cannot run without.
+             */
+            stateSecret: createHmac("sha256", env.WEBHOOK_SECRET_KEY ?? "")
+              .update("dns-oauth-state")
+              .digest("hex"),
+          }),
+          dnsPublisher: dnsPublisher({
+            connections: dnsConnectionStore(db, secrets),
+            log,
+          }),
+        }
+      : {}),
     ...(secrets
       ? {
           domains: domainStore({

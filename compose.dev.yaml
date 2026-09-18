@@ -1,0 +1,120 @@
+# The dependencies `bun dev` needs, and a proxy that gives them real names.
+#
+# ⚠ THIS IS NOT PRODUCTION AND IS NOT TRYING TO BE. Production is k3s, CNPG,
+# Traefik and Doppler; none of that is worth reproducing on a laptop to answer
+# the question this file exists for, which is "does signing in at one hostname
+# and landing on another actually work". What IS reproduced is the part that
+# breaks when you fake it: separate origins, real TLS, and cookies that behave
+# the way they will in production.
+#
+# ⚠ THE APPS THEMSELVES ARE NOT IN HERE, DELIBERATELY. They run on the host under
+# `bun dev`, where hot reload works, the debugger attaches and a stack trace
+# points at a file you can open. Containerising them buys parity with a
+# production image that is built by CI anyway, and costs every inner-loop
+# second.
+#
+#   bun run dev:up      start these
+#   bun run dev:trust   trust the local CA, once per machine
+#   bun run dev:hosts   add the hostnames to /etc/hosts, once per machine
+#   bun run dev         start the apps
+services:
+  postgres:
+    # ⚠ THE SAME MAJOR AS THE CNPG CLUSTER. A migration that works on 16 and
+    # fails on 18 is a thing that exists, and the only place to find out is
+    # here — after CI has merged it is a PreSync hook failure that blocks every
+    # later migration.
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: i10
+      POSTGRES_PASSWORD: i10
+      POSTGRES_DB: i10
+    ports:
+      # ⚠ 5433, NOT 5432. A Homebrew `postgresql@18` is already installed on at
+      # least one machine here and binds 5432 on boot; colliding with it
+      # produces a container that fails to start with an error about the port
+      # while `psql` connects perfectly well to the wrong database.
+      - "5433:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      # ⚠ RUNS ONCE, ON AN EMPTY DATA DIRECTORY. Changing it later does nothing
+      # until the volume is removed — `bun run dev:reset`.
+      - ./dev/postgres/init.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U i10 -d i10"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    # Matching infra/k8s/i10/redis/redis.yaml.
+    image: redis:8.10-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  caddy:
+    # ⚠ CADDY RATHER THAN TRAEFIK, AND THE REASON IS ONE DIRECTIVE. `tls
+    # internal` runs a local certificate authority and issues a certificate per
+    # hostname with no further configuration. Traefik has no equivalent: for
+    # names that cannot pass an ACME challenge — and `.localhost` cannot — it
+    # needs certificates generated outside it (mkcert) and referenced from a
+    # file-provider config, which is the same work plus a second tool.
+    #
+    # ⚠ AND THE PRODUCTION-PARITY ARGUMENT FOR TRAEFIK DOES NOT APPLY HERE.
+    # Production routes with Traefik IngressRoute CRDs against pods; locally
+    # there are no pods and no CRDs, so a local Traefik would be a file-provider
+    # config that shares nothing with production except the binary's name.
+    image: caddy:2-alpine
+    depends_on: [postgres]
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./dev/Caddyfile:/etc/caddy/Caddyfile:ro
+      # ⚠ THE CA LIVES IN A NAMED VOLUME SO IT SURVIVES `dev:down`. Regenerating
+      # it every restart would mean re-trusting it every restart, and the second
+      # time somebody does that they stop reading what they are trusting.
+      - caddy-data:/data
+      - caddy-config:/config
+    extra_hosts:
+      # ⚠ HOW THE PROXY REACHES APPS RUNNING ON THE HOST. Docker Desktop
+      # provides `host.docker.internal`; this line makes it work on the Linux
+      # daemons that do not.
+      - "host.docker.internal:host-gateway"
+
+  # ⚠ THE AUTHORITATIVE NAMESERVER, SO DELEGATION CAN BE EXERCISED LOCALLY. It
+  # reads the same `pdns` schema the API writes, which is the whole design —
+  # see infra/k8s/i10/powerdns. Bound to 5353 rather than 53 because macOS keeps
+  # mDNSResponder on 53 and binding it needs root.
+  #
+  #   dig @127.0.0.1 -p 5353 SOA mail.example.com
+  powerdns:
+    image: powerdns/pdns-auth-49:4.9.9
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "--launch=gpgsql"
+      - "--gpgsql-host=postgres"
+      - "--gpgsql-port=5432"
+      - "--gpgsql-dbname=i10"
+      - "--gpgsql-user=pdns"
+      - "--gpgsql-password=pdns"
+      - "--gpgsql-extra-connection-parameters=options=-csearch_path=pdns"
+      - "--dnssec=no"
+      - "--disable-axfr=yes"
+      - "--local-address=0.0.0.0"
+      - "--local-port=53"
+      - "--loglevel=4"
+    ports:
+      - "5353:53/udp"
+      - "5353:53/tcp"
+
+volumes:
+  postgres:
+  caddy-data:
+  caddy-config:

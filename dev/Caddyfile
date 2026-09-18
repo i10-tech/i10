@@ -1,0 +1,70 @@
+# Real hostnames and real TLS for the apps running under `bun dev`.
+#
+# ⚠ THE HOSTNAMES ARE WHY THIS EXISTS. Signing in on one origin and landing on
+# another is the flow this product is built around, and `localhost:3000` versus
+# `localhost:3004` is not that flow — it is one origin with two ports, where
+# cookies, `SameSite`, `authorizedParties` and Clerk's satellite handling all
+# behave differently from production. Every bug in that area is invisible until
+# there are two names.
+#
+# ⚠ `.localhost`, NOT `.local`. `.local` is reserved for multicast DNS (RFC
+# 6762); on macOS it is answered by Bonjour, which does not consult
+# `/etc/hosts` predictably and adds seconds of delay when it fails. `.localhost`
+# is reserved by RFC 6761 for exactly this, and every major browser resolves it
+# to the loopback address with no configuration at all. `bun run dev:hosts` adds
+# the entries anyway so that curl and server-side fetches agree with the
+# browser.
+#
+# ⚠ `tls internal` ISSUES FROM CADDY'S OWN CA, WHICH THE MACHINE MUST TRUST
+# ONCE. `bun run dev:trust` exports the root and adds it to the login keychain.
+# Without it every request is a certificate warning, and a browser that has been
+# click-throughed once will happily do it again on a page that matters.
+
+{
+	# Quiet: one line per request is noise next to the app's own logs.
+	log {
+		output stderr
+		level ERROR
+	}
+	# ⚠ NO EMAIL AND NO PUBLIC ACME. Everything here is issued by the internal
+	# CA; an accidental public issuance attempt for `.localhost` would fail and
+	# rate-limit the account it was attempted with.
+	auto_https disable_redirects
+}
+
+# The console.
+dash.i10.localhost {
+	tls internal
+	reverse_proxy host.docker.internal:3000
+}
+
+# The auth app — sign-in, sign-up, the flows Clerk renders.
+auth.i10.localhost {
+	tls internal
+	reverse_proxy host.docker.internal:3004
+}
+
+# The API.
+api.i10.localhost {
+	tls internal
+	# ⚠ A LONGER TIMEOUT THAN THE DEFAULT, because a request that hits a
+	# `bun --watch` restart otherwise reports 502 — which reads as a crash in
+	# the handler rather than as the file you just saved.
+	reverse_proxy host.docker.internal:3001 {
+		transport http {
+			dial_timeout 30s
+		}
+	}
+}
+
+# The marketing site.
+i10.localhost, www.i10.localhost {
+	tls internal
+	reverse_proxy host.docker.internal:3002
+}
+
+# The docs.
+docs.i10.localhost {
+	tls internal
+	reverse_proxy host.docker.internal:3003
+}

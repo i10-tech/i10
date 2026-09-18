@@ -1,6 +1,7 @@
 "use client"
 
 import type { SignInFlow } from "./clerk-types"
+import { confirmSignIn } from "./last-used"
 
 /**
  * Leaving this app once a flow is done.
@@ -16,6 +17,16 @@ import type { SignInFlow } from "./clerk-types"
  * Replacing leaves nothing to go back to.
  */
 export function leaveFor(url: string) {
+  /*
+   * ⚠ THE "LAST USED" MARKER IS PROMOTED HERE, BECAUSE THIS IS THE ONE PLACE
+   * EVERY SUCCESSFUL FLOW PASSES THROUGH. Password, SSO callback, passkey, MFA
+   * and an already-signed-in session all leave through this function — so
+   * recording it here cannot be forgotten by the sixth flow somebody adds
+   * later, and the failure of forgetting is silent: a missing badge looks
+   * exactly like a first visit. See _lib/last-used.ts for why it is promoted on
+   * success rather than written on click.
+   */
+  confirmSignIn()
   window.location.replace(url)
 }
 

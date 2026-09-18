@@ -1,3 +1,20 @@
+/*
+ * ⚠ THE LAYER ORDER IS DECLARED BEFORE THE IMPORT, AND `clerk` HAS TO SIT
+ * BEFORE `utilities`. CSS ranks an UNLAYERED rule above every layered one, so
+ * Clerk's runtime-injected stylesheet otherwise outranks every Tailwind utility
+ * we hand it through `appearance.elements` — and whether an override took
+ * effect came down to selector specificity, which is why some of them worked
+ * and some silently did not. Naming the layer (see `CLERK_CSS_LAYER` in
+ * ../clerk.ts) and ordering it here makes our overrides win by construction.
+ *
+ * ⚠ IT MUST COME FIRST. A layer's position is fixed by where its name is FIRST
+ * seen, so this statement has to precede `@import "tailwindcss"` — which
+ * declares `theme, base, components, utilities` itself. Declaring `clerk`
+ * afterwards would append it after `utilities`, which is the opposite of what
+ * is wanted and looks identical until an override fails.
+ */
+@layer theme, base, clerk, components, utilities;
+
 @import "tailwindcss";
 
 /*
@@ -416,6 +433,41 @@
      */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /*
+   * ⚠ TAILWIND 4'S PREFLIGHT GIVES BUTTONS `cursor: default`, AND THAT IS WHY
+   * NOTHING IN THIS PRODUCT FELT CLICKABLE. Tailwind 3 left the browser default
+   * in place; v4 normalises every `button` to the arrow cursor on the reasoning
+   * that a pointer should mean "link". The result across a console built almost
+   * entirely from `<button>` is that no control — not Verify, not Upgrade, not a
+   * dropdown, not a tab — changes the cursor on hover, so the only way to learn
+   * what is interactive is to click and find out.
+   *
+   * ⚠ IT IS A BASE RULE RATHER THAN `cursor-pointer` ON EVERY COMPONENT, for two
+   * reasons. Fifteen shadcn primitives would each need the class, and every one
+   * of them is a file `shadcn add` will overwrite — so the fix would quietly
+   * come undone one component at a time. And the rule belongs to the whole
+   * surface: a `role="button"` div or a `<summary>` is as clickable as a
+   * `<button>` and had the same problem.
+   *
+   * ⚠ DISABLED CONTROLS ARE EXCLUDED, because a pointer over something that
+   * cannot be pressed is a promise the interface does not keep. `aria-disabled`
+   * is listed alongside `:disabled` since Radix marks some of its items that way
+   * rather than with the attribute.
+   */
+  button:not(:disabled):not([aria-disabled="true"]),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]),
+  summary,
+  label[for],
+  select:not(:disabled) {
+    cursor: pointer;
   }
 
   /*

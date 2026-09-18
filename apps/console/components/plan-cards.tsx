@@ -9,6 +9,7 @@ import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { changePlan, startCheckout } from "@/lib/actions"
+import { openPolarCheckout } from "@/lib/polar-embed"
 import { formatBytes, formatNumber } from "@/lib/format"
 import type { PlanSummary } from "@/lib/types"
 
@@ -171,40 +172,28 @@ export function PlanCards({
      * than a broken one.
      */
     try {
-      const { PolarEmbedCheckout } = await import("@polar-sh/checkout/embed")
-      const checkout = await PolarEmbedCheckout.create(result.data.url, {
+      /*
+       * ⚠ THE OPEN GOES THROUGH `openPolarCheckout` RATHER THAN THE SDK
+       * DIRECTLY, AND THE REASON IS THAT POLAR'S ✕ DOES NOT WORK. Their hosted
+       * checkout renders a close button that posts nothing to the parent —
+       * verified against a real sandbox checkout in a real iframe — so the
+       * modal could not be dismissed at all. That module draws a working one
+       * and handles the success teardown. See lib/polar-embed.ts.
+       */
+      await openPolarCheckout(result.data.url, {
         theme: resolvedTheme === "light" ? "light" : "dark",
+        onSuccess: () => {
+          toast.success("Payment received", {
+            description: "Your new allowances appear as soon as it clears.",
+          })
+          // ⚠ A BEST EFFORT. The plan moves when Polar's webhook lands, a
+          // second or two later, so the wording above is written for somebody
+          // whose allowance has not updated yet.
+          router.refresh()
+        },
       })
 
       setPending(null)
-
-      /*
-       * ⚠ THE OVERLAY IS CLOSED EXPLICITLY, AND NOT CLOSING IT WAS THE BUG.
-       * Polar locks the embed closed on its `confirmed` event — deliberately,
-       * so nobody navigates away mid-charge — and only re-opens it on
-       * `success`. This listener refreshed the page BEHIND the iframe and
-       * returned, so the customer was left looking at Polar's post-payment
-       * frame with no way out of it: payment taken, console updated underneath,
-       * and a modal on top saying it was waiting for confirmation. Reloading
-       * by hand was the only escape, and it showed the plan already granted.
-       *
-       * ⚠ `close()` RATHER THAN LEAVING IT TO THE DEFAULT HANDLER. The default
-       * only re-enables closing and redirects when Polar asks for a redirect —
-       * which it does not when the checkout has no success URL configured. That
-       * makes whether the modal ever goes away depend on an environment
-       * variable, which is not a thing the customer should be able to feel.
-       */
-      checkout.addEventListener("success", () => {
-        checkout.close()
-        toast.success("Payment received", {
-          description: "Your new allowances appear as soon as it clears.",
-        })
-        // ⚠ AND THE PAGE IS REFRESHED AFTER THE CLOSE, NOT INSTEAD OF IT. The
-        // plan moves when Polar's webhook lands, a second or two later, so this
-        // is a best effort — the wording above is written for somebody whose
-        // allowance has not moved yet.
-        router.refresh()
-      })
       return
     } catch {
       // Fall through to the redirect.

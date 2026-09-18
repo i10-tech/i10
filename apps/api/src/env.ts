@@ -639,6 +639,78 @@ const schema = z.object({
       }
     }),
 
+  // ── customers' own DNS providers ──────────────────────────────────────────
+
+  /**
+   * The OAuth applications we have registered with DNS providers.
+   *
+   * ⚠ ONE JSON OBJECT RATHER THAN TWO ENVIRONMENT VARIABLES PER PROVIDER. Eight
+   * providers is sixteen variables, each of which has to be declared here,
+   * plumbed through and remembered — and the failure when one is missed is a
+   * Connect button that does nothing for one provider while working for seven.
+   * The same shape `POLAR_PRODUCTS` uses, for the same reason.
+   *
+   * ⚠ ITS ABSENCE DISABLES THE ONE-CLICK PATH AND NOTHING ELSE. A provider with
+   * no app here simply has no OAuth option; the pasted-token path still works,
+   * which is the only path several providers have at all. The console asks the
+   * API what is connectable rather than assuming, so an unregistered app
+   * presents as "paste a token" and not as a broken button.
+   *
+   * ⚠ AND THE SECRETS ARE REAL SECRETS. A client secret for a DNS provider's
+   * OAuth app, combined with a stolen authorisation code, is a route to writing
+   * in a customer's zone. Doppler, never the manifest.
+   *
+   *   {"cloudflare":{"clientId":"…","clientSecret":"…"}}
+   */
+  DNS_OAUTH_APPS: z
+    .string()
+    .default("{}")
+    .transform((raw, ctx) => {
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          throw new TypeError("not an object")
+        }
+        const out: Record<string, { clientId: string; clientSecret: string }> = {}
+        for (const [slug, app] of Object.entries(parsed)) {
+          const value = app as { clientId?: unknown; clientSecret?: unknown }
+          if (
+            typeof value?.clientId !== "string" ||
+            typeof value?.clientSecret !== "string" ||
+            value.clientId.length === 0 ||
+            value.clientSecret.length === 0
+          ) {
+            throw new TypeError(`"${slug}" needs a clientId and a clientSecret`)
+          }
+          out[slug] = { clientId: value.clientId, clientSecret: value.clientSecret }
+        }
+        return out
+      } catch (error) {
+        ctx.addIssue({
+          code: "custom",
+          message: `must be a JSON object of provider slug to { clientId, clientSecret } (${
+            error instanceof Error ? error.message : String(error)
+          })`,
+        })
+        return z.NEVER
+      }
+    }),
+
+  /**
+   * Where a DNS provider sends the browser back after authorisation.
+   *
+   * ⚠ ONE URL FOR EVERY PROVIDER, WITH THE SLUG APPENDED AS A PATH SEGMENT.
+   * Providers compare the redirect URI against a registered value EXACTLY, so
+   * building it from a request header would produce a URI that works on one
+   * hostname and is rejected on another — which, in a product with a console on
+   * `dash.` and local development on `localhost`, means it is rejected in
+   * exactly one of the two and nobody can tell which is wrong.
+   *
+   * ⚠ IT MUST MATCH WHAT IS REGISTERED WITH EACH PROVIDER, CHARACTER FOR
+   * CHARACTER, INCLUDING THE ABSENCE OF A TRAILING SLASH.
+   */
+  DNS_OAUTH_REDIRECT_BASE: z.url().default("https://dash.i10.tech/dns/callback"),
+
   /**
    * Where Polar returns the browser after payment.
    *

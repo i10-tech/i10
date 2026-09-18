@@ -19,6 +19,8 @@ import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave } from "../_lib/finish"
+import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
+import { LastUsedBadge } from "../_components/last-used-badge"
 import type { SsoProvider } from "../_lib/providers"
 
 /*
@@ -60,6 +62,14 @@ export function SignInForm({
   const router = useRouter()
   const { signIn } = useSignIn()
   const [busy, setBusy] = useState<string | null>(null)
+
+  /*
+   * ⚠ READ IN AN EFFECT, NOT DURING RENDER. It comes from `localStorage`, which
+   * the server does not have — reading it inline renders one thing on the
+   * server and another in the browser, which React reports as a hydration
+   * mismatch and resolves by discarding the markup.
+   */
+  const lastUsed = useLastSignInMethod()
 
   /**
    * Offer a saved passkey without anybody asking.
@@ -116,6 +126,10 @@ export function SignInForm({
 
     const form = new FormData(event.currentTarget)
     setBusy("password")
+
+    // ⚠ AN ATTEMPT, NOT A RESULT — promoted only once a session exists. A wrong
+    // password must not teach the badge that a password is what works here.
+    markSignInAttempt("password")
 
     try {
       const { error } = await signIn.password({
@@ -265,7 +279,10 @@ export function SignInForm({
                 Signing in…
               </>
             ) : (
-              "Login"
+              <>
+                Login
+                {lastUsed === "password" && <LastUsedBadge />}
+              </>
             )}
           </Button>
         </Field>

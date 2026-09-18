@@ -7,16 +7,24 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "dev:down": "docker compose -f compose.dev.yaml down",
+    "dev:hosts": "bash dev/hosts.sh add",
+    "dev:logs": "docker compose -f compose.dev.yaml logs -f",
+    "dev:migrate": "bun --filter @i10/api db:migrate",
+    "dev:reset": "docker compose -f compose.dev.yaml down -v",
+    "dev:trust": "bash dev/trust-ca.sh",
+    "dev:unhosts": "bash dev/hosts.sh remove",
+    "dev:up": "docker compose -f compose.dev.yaml up -d --wait",
+    "build": "turbo run build",
+    "check-images": "bun .github/scripts/check-dockerfile-workspaces.mjs",
     "check-types": "turbo run check-types",
-    "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,mjs,md,json,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,mjs,md,json,yaml,yml}\"",
-    "version:next": "bun .github/scripts/next-version.mjs",
-    "check-images": "bun .github/scripts/check-dockerfile-workspaces.mjs",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "lint": "turbo run lint",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "test": "turbo run test",
+    "version:next": "bun .github/scripts/next-version.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.2",

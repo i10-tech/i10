@@ -1,11 +1,18 @@
 "use client"
 
-import { OrganizationSwitcher, UserButton } from "@clerk/nextjs"
+import { OrganizationSwitcher } from "@clerk/nextjs"
 import { Badge } from "@repo/ui/components/badge"
 import type { PlanSummary, TenantProfile } from "@/lib/types"
 
 /**
- * Which workspace you are in, and who you are.
+ * Which workspace you are in.
+ *
+ * ⚠ IT NO LONGER CARRIES THE USER BUTTON, AND THE SPLIT IS THE POINT. This row
+ * says whose data is on screen — switching it changes every number on every
+ * page — and the person signed in is a different question, asked far less
+ * often. They shared a row, and sharing it gave a monthly control the same
+ * prominence as the one that reframes the entire console while squeezing both
+ * into half the width. See `AccountBar`, at the foot of the rail.
  *
  * ⚠ THE SWITCHER IS CLERK'S, NOT OURS, AND THAT IS THE POINT. Membership,
  * roles, invitations and who may switch to what are Clerk's to answer;
@@ -98,18 +105,6 @@ export function WorkspaceBar({
           {plan.id}
         </Badge>
       )}
-
-      <UserButton
-        appearance={{ elements: { userButtonAvatarBox: "size-6" } }}
-        userProfileMode="navigation"
-        /*
-         * ⚠ PROFILE GOES TO OUR PAGE, NOT CLERK'S MODAL. `/account` wraps
-         * Clerk's `<UserProfile />` inside the console's own chrome, so somebody
-         * editing their password does not lose the sidebar and reappear on a
-         * page that looks like a different product.
-         */
-        userProfileUrl="/account"
-      />
     </div>
   )
 }

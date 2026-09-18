@@ -152,6 +152,95 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
     }
   })
 
+  /**
+   * Publishes this domain's records into the customer's own DNS, for them.
+   *
+   * ⚠ THE ANSWER TO "WHY AM I STILL TYPING SIX RECORDS". Where we hold a
+   * credential for the provider that hosts the domain, nothing needs typing at
+   * all — the same records the table below shows are written directly.
+   *
+   * ⚠ IT REFUSES BEFORE IT DESTROYS, AND THE FIRST CALL IS ALWAYS A DRY RUN
+   * WHERE ANYTHING WOULD BE REMOVED. A domain that already has DMARC configured
+   * has a TXT record at precisely the name delegation takes over; deleting it is
+   * usually right and never ours to decide silently. 409 with the list, the
+   * console asks, and the second call carries `replace_conflicts`.
+   */
+  app.post("/domains/:id/publish", async (c) => {
+    if (!d.domains) return c.json(notWired("Domains"), 501)
+    if (!d.dnsPublisher) return c.json(notWired("DNS publishing"), 501)
+
+    const { tenantId } = c.get("auth")
+    const domain = await d.domains.get(tenantId, c.req.param("id"))
+    if (!domain) return c.json(notFound("No domain with that id."), 404)
+
+    const body = await readJson(c)
+    const provider = typeof body?.provider === "string" ? body.provider : ""
+    if (!provider) return c.json(validation("`provider` is required."), 422)
+
+    const result = await d.dnsPublisher.publish({
+      tenantId,
+      provider,
+      domain,
+      replaceConflicts: body?.replace_conflicts === true,
+    })
+
+    switch (result.status) {
+      case "published":
+        return c.json({ status: "published", ...result.outcome })
+
+      case "needs_confirmation":
+        // ⚠ 409, AND NOTHING HAS BEEN WRITTEN. The zone is exactly as it was.
+        return c.json(
+          {
+            statusCode: 409,
+            name: "validation_error" as const,
+            message:
+              "Publishing these records means removing records that already " +
+              "exist at the same names. Confirm to continue.",
+            conflicts: result.conflicts,
+          },
+          409,
+        )
+
+      case "not_connected":
+        return c.json(validation(`This workspace has no ${provider} connection.`), 422)
+
+      case "zone_not_found":
+        return c.json(
+          validation(
+            `That connection cannot see a zone for ${domain.name}. ` +
+              `It reaches: ${result.zones.join(", ") || "no zones"}.`,
+          ),
+          422,
+        )
+
+      case "unsupported":
+        return c.json(validation(`We cannot publish records at ${provider} yet.`), 422)
+
+      default:
+        /*
+         * ⚠ `unauthorized` IS A 409, NOT A 502, BECAUSE THE REMEDY IS THEIRS.
+         * A revoked or expired grant will fail identically for ever; telling
+         * somebody the provider is having trouble sends them to wait instead of
+         * to reconnect.
+         */
+        return c.json(
+          {
+            statusCode: result.kind === "unauthorized" ? 409 : 502,
+            name:
+              result.kind === "unauthorized"
+                ? ("invalid_access" as const)
+                : ("internal_server_error" as const),
+            message:
+              result.kind === "unauthorized"
+                ? `Your ${provider} connection is no longer valid. Reconnect it and try again.`
+                : `${provider} refused the change: ${result.reason}`,
+          },
+          result.kind === "unauthorized" ? 409 : 502,
+        )
+    }
+  })
+
   app.delete("/domains/:id", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
