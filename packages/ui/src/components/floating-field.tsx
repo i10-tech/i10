@@ -4,21 +4,31 @@ import * as React from "react"
 import { cn } from "cn"
 
 /**
- * An input whose label starts inside it and rises out of the way when you type.
+ * An input whose label rises out of the field and sits in a notch cut into its
+ * own border.
  *
- * The pattern is the one on auth.openai.com's sign-in field: at rest the label
- * sits where the value will be, at the value's size, so the field reads as a
- * single object rather than a caption stacked on a box. On focus — or as soon as
- * there is anything to show — it shrinks and moves to the top, and the value
- * takes the space it left.
+ * At rest the label sits where the value will be, at the value's size, so the
+ * field reads as a single object rather than a caption stacked on a box. On
+ * focus — or as soon as there is anything to show — it shrinks and moves onto
+ * the top border, which opens a gap around it.
+ *
+ * ⚠ THE NOTCH IS A REAL `<fieldset>`/`<legend>`, NOT A LABEL WITH A BACKGROUND
+ * BEHIND IT, AND THE ALTERNATIVE IS WHY. The obvious trick is to paint a strip
+ * of the page colour behind the label so it appears to interrupt the border —
+ * and it works right up until the field is inside something that is not the
+ * page. This console puts inputs on `--background`, on `--card` and on
+ * `--popover`, which are three different colours in dark mode, so the chip
+ * would be visibly wrong in a dialog and in every card. A legend removes the
+ * border rather than covering it, so it is correct on any surface, including
+ * ones added later.
  *
  * ⚠ THE WHOLE THING IS CSS. There is no `useState`, no `onFocus`, and no
- * `onChange` handler, which matters for more than tidiness: a React-driven float
- * cannot see the browser autofilling a password manager's saved email, so the
- * label would sit ON TOP of text the person can already read. `:placeholder-shown`
- * is evaluated by the browser against the live value and gets autofill right for
- * free. It also means this component works uncontrolled, inside a plain `<form>`,
- * with no re-render per keystroke.
+ * `onChange` handler, which matters for more than tidiness: a React-driven
+ * float cannot see the browser autofilling a password manager's saved email, so
+ * the label would sit ON TOP of text the person can already read.
+ * `:placeholder-shown` is evaluated by the browser against the live value and
+ * gets autofill right for free. It also means this works uncontrolled, inside a
+ * plain `<form>`, with no re-render per keystroke.
  *
  * ⚠ AND THAT IS WHY `placeholder=" "` IS FORCED AND NOT A PROP. The selector
  * below keys off `:placeholder-shown`, which is true only while the field is
@@ -36,46 +46,97 @@ export type FieldState = "idle" | "pending" | "invalid" | "valid"
  * REAL BUG. The obvious spelling is `peer-placeholder-shown:` for the resting
  * position and `peer-focus:` to override it — but those generate two rules of
  * IDENTICAL specificity, so which one wins is decided by the order Tailwind
- * happens to emit them in. It currently emits focus last and it currently works;
- * a Tailwind upgrade that reorders variants would drop the label back over the
- * caret with nothing in any build log. `:placeholder-shown:not(:focus)` is a
- * single selector that is simply true or false, and cannot be reordered.
+ * happens to emit them in. `:placeholder-shown:not(:focus)` is a single
+ * selector that is simply true or false, and cannot be reordered.
  *
- * ⚠ AND THE VARIANT IS REPEATED IN FULL ON EVERY LINE RATHER THAN FACTORED INTO
- * A CONSTANT. It was written as `` `${RESTING}top-1/2` `` first, and every label
- * in both apps rendered stuck in the floated position over an empty box.
- * Tailwind finds classes by scanning source text for complete literals; a
- * template string is not one, so the scanner saw `top-1/2` and never generated
- * the variant that actually positions the label. The repetition is not
+ * ⚠ AND IT IS REPEATED IN FULL ON EVERY LINE RATHER THAN BUILT FROM A CONSTANT.
+ * It was written as `` `${RESTING}top-1/2` `` first, and every label in both
+ * apps rendered stuck in the floated position over an empty box: Tailwind finds
+ * classes by scanning source text for complete literals, so a template string is
+ * invisible to it and the variant was never generated. The repetition is not
  * stylistic — it is the only form the compiler can see.
  */
-const FLOAT_LABEL = cn(
-  "pointer-events-none absolute start-4 z-10 origin-[0_0] truncate",
-  "max-w-[calc(100%-2rem)] text-2xs font-medium",
-  // ⚠ NOT `transition-all`. A label that animates its COLOUR on the same curve
-  // as its position reads as laggy on hover; position and size get the eased
-  // curve, colour gets the linear instant one. Both are Base's values.
-  "transition-[top,font-size,color] duration-(--duration-instant) ease-(--ease-quint-out)",
-  "peer-[:placeholder-shown:not(:focus)]:text-sm",
+const LABEL = cn(
+  "pointer-events-none absolute start-3 z-10 truncate px-1",
+  // ⚠ 14px FLOATED AGAINST A 16px VALUE, AND `leading-none` IS THE HALF THAT
+  // FIXES THE ALIGNMENT. Tailwind pairs `text-sm` with a 20px line height, so
+  // the label's BOX is 20px tall while the gap in the border is 14 — centre the
+  // box on the border and six pixels of it stick out above the notch, which is
+  // exactly the "too much on the top" the field was showing. `leading-none`
+  // collapses the box onto the glyphs so the thing being centred is the text.
+  "max-w-[calc(100%-1.5rem)] text-sm leading-none font-medium",
+  // ⚠ ONLY `top` AND `font-size` MOVE. The label keeps `-translate-y-1/2` in
+  // both states, so the animation is a single property travelling from the
+  // middle of the box to its top edge — no transform to interpolate, and
+  // nothing to land half a pixel off at the end.
+  "-translate-y-1/2 transition-[top,font-size,color]",
+  "duration-(--duration-instant) ease-(--ease-quint-out)",
+  "peer-[:placeholder-shown:not(:focus)]:text-base",
   "peer-[:placeholder-shown:not(:focus)]:font-normal",
 )
 
 /**
  * ⚠ THE RESTING POSITION DIFFERS BY CONTROL AND CANNOT BE SHARED. On the input
  * the label rests where the value will be, which is the vertical centre of a
- * fixed 56px box. On a textarea the value starts at the TOP of a box four rows
+ * fixed box. On a textarea the value starts at the TOP of a box several rows
  * tall, so centring the label would park it in the middle of the writing area —
  * the caret would be two lines above the thing naming the field.
  */
-const RESTS_CENTRED = cn(
-  "top-2",
-  "peer-[:placeholder-shown:not(:focus)]:top-1/2",
-  "peer-[:placeholder-shown:not(:focus)]:-translate-y-1/2",
+const RESTS_CENTRED = cn("top-0", "peer-[:placeholder-shown:not(:focus)]:top-1/2")
+const RESTS_AT_TOP = cn("top-0", "peer-[:placeholder-shown:not(:focus)]:top-7")
+
+/**
+ * The bordered box, drawn as a fieldset so the legend can cut the notch.
+ *
+ * ⚠ `-top-[7px]` IS HALF THE LEGEND'S HEIGHT, AND IT IS NOT OPTIONAL. A
+ * fieldset does not paint its block-start border at its border-box edge: the
+ * legend is laid out THROUGH that border, and the browser drops the border line
+ * to the legend's vertical middle. So a fieldset at `inset-0` reports
+ * `getBoundingClientRect().top === 0` while its visible line is drawn seven
+ * pixels lower — and the label, centred on the box's real top edge, floats
+ * clearly above the border instead of sitting in it.
+ *
+ * This was removed once on the reasoning that Material's own -5px was a magic
+ * number. It is not magic; it is `legend height / 2`, and Material's legend is
+ * 11px where ours is 14. Pulling the frame up by that much puts the painted
+ * line back on the control's top edge, which is where the label already is.
+ *
+ * ⚠ THE NOTCH RULE LIVES HERE, ON THE FIELDSET, AND NOT ON THE LEGEND. Tailwind
+ * compiles `peer-*` to a FOLLOWING-SIBLING combinator, `.peer ~ &`. The legend
+ * is a CHILD of this element, not a sibling of the input, so the same variant
+ * written on the legend matched nothing at all and the gap stayed open on every
+ * empty, unfocused field — visible as a break in the border with no label in
+ * it. Written here it compiles to `.peer… ~ fieldset > legend`, which is the
+ * relationship that actually exists.
+ */
+const FRAME = cn(
+  "pointer-events-none absolute inset-0 -top-[7px] px-2",
+  "rounded-[inherit] border text-start",
+  "transition-[color,border-color,box-shadow] duration-(--duration-instant) ease-(--ease-linear)",
+  "peer-[:placeholder-shown:not(:focus)]:[&>legend]:max-w-[0.01px]",
 )
 
-const RESTS_AT_TOP = cn(
-  "top-2.5",
-  "peer-[:placeholder-shown:not(:focus)]:top-[1.125rem]",
+/**
+ * ⚠ `max-width`, NOT `width`, IS WHAT ANIMATES — and the closed value is
+ * `0.01px` rather than `0`. A legend of zero width is dropped from layout by
+ * some engines, which snaps the notch shut with no transition at all; a
+ * hundredth of a pixel is indistinguishable and keeps the box alive.
+ *
+ * ⚠ `invisible` RATHER THAN `sr-only` OR `hidden`. The legend has to OCCUPY its
+ * width — that width is the notch — while painting nothing, which is precisely
+ * what `visibility: hidden` does. It also keeps the duplicated label text out of
+ * the accessibility tree, so a screen reader does not read the field's name
+ * twice.
+ */
+const LEGEND = cn(
+  // ⚠ THE SIZE AND HEIGHT TRACK `LABEL` ABOVE AND CANNOT DRIFT FROM IT. This
+  // measures the gap; if it is a point smaller than the word going into it the
+  // border clips the last character, if it is larger there is a visible slot of
+  // missing border after it, and if it is SHORTER than the label's line box the
+  // label rides up out of the gap.
+  "invisible ms-2 block h-[14px] w-auto max-w-full overflow-hidden p-0",
+  "text-sm leading-none font-medium whitespace-nowrap",
+  "transition-[max-width] duration-(--duration-instant) ease-(--ease-quint-out)",
 )
 
 /**
@@ -86,41 +147,44 @@ const RESTS_AT_TOP = cn(
  * they are the only colour in a deliberately monochrome console, so spending
  * them here has to be for the same meaning.
  */
-const TONES: Record<FieldState, { control: string; label: string; hint: string }> = {
+const TONES: Record<FieldState, { frame: string; label: string; hint: string }> = {
   idle: {
-    control: "border-input focus-within:border-ring focus-within:ring-ring/45",
+    frame: "border-input peer-focus:border-ring peer-focus:ring-ring/45",
     label: "text-muted-foreground peer-focus:text-foreground",
     hint: "text-muted-foreground",
   },
   pending: {
-    control:
-      "border-warning/60 focus-within:border-warning focus-within:ring-warning/25",
+    frame: "border-warning/60 peer-focus:border-warning peer-focus:ring-warning/25",
     label: "text-warning",
     hint: "text-warning",
   },
   invalid: {
-    control: "border-danger/70 focus-within:border-danger focus-within:ring-danger/25",
+    frame: "border-danger/70 peer-focus:border-danger peer-focus:ring-danger/25",
     label: "text-danger",
     hint: "text-danger",
   },
   valid: {
-    control:
-      "border-success/60 focus-within:border-success focus-within:ring-success/25",
+    frame: "border-success/60 peer-focus:border-success peer-focus:ring-success/25",
     label: "text-success",
     hint: "text-muted-foreground",
   },
 }
 
 const CONTROL = cn(
-  "relative flex w-full items-center border bg-transparent",
-  "transition-[color,border-color,box-shadow] duration-(--duration-instant) ease-(--ease-linear)",
-  "focus-within:ring-[3px]",
+  "relative flex w-full items-center bg-transparent",
   "has-[input:disabled]:opacity-55 has-[textarea:disabled]:opacity-55",
   "dark:bg-input/25",
 )
 
 const CONTROL_INPUT = cn(
-  "peer h-full w-full min-w-0 bg-transparent px-4 pt-6 pb-2.5 text-sm outline-none",
+  /*
+   * ⚠ 16px, WHICH IS ALSO THE ONLY SIZE iOS WILL NOT ZOOM INTO. Safari on
+   * iPhone magnifies the whole page when a focused input's text is under 16px
+   * and does not zoom back out afterwards, so a 14px field costs a pinch on
+   * every sign-in. The console's 14px base is a density decision for tables;
+   * a field somebody types their password into is not a table.
+   */
+  "peer h-full w-full min-w-0 bg-transparent px-4 text-base outline-none",
   "selection:bg-primary selection:text-primary-foreground",
   "disabled:cursor-not-allowed",
   // ⚠ CHROME PAINTS AUTOFILLED FIELDS WITH ITS OWN YELLOW AND IGNORES
@@ -133,7 +197,7 @@ const CONTROL_INPUT = cn(
 )
 
 /**
- * The shared frame: label, control, and a hint line that is always there.
+ * The shared frame: control, and a hint line that is always there.
  *
  * ⚠ THE HINT ROW RESERVES ITS HEIGHT WHETHER OR NOT THERE IS A HINT, AND THAT
  * IS THE WHOLE POINT OF IT BEING A ROW. A validation message that appears on
@@ -155,16 +219,14 @@ function Frame({
   className?: string
   children: React.ReactNode
 }) {
-  const tone = TONES[state]
-
   return (
     <div className={cn("w-full", className)} data-slot="floating-field">
       {children}
       <div
         className={cn(
-          "min-h-4 px-4 pt-1 text-2xs leading-4",
+          "min-h-4 px-4 pt-1.5 text-2xs leading-4",
           "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
-          tone.hint,
+          TONES[state].hint,
         )}
         // ⚠ `polite`, AND ON THE ALWAYS-PRESENT ROW RATHER THAN ON THE MESSAGE.
         // A live region has to exist before the text arrives for a screen reader
@@ -177,6 +239,23 @@ function Frame({
         {hint}
       </div>
     </div>
+  )
+}
+
+/**
+ * ⚠ THE NOTCH TEXT IS THE LABEL AGAIN, AND THE DUPLICATION IS LOAD-BEARING. The
+ * legend is what reserves the gap, and a gap has to be exactly as wide as the
+ * word sitting in it — so it has to contain the same string at the same size. It
+ * is `invisible`, so nothing is painted twice and nothing is announced twice;
+ * only the measurement is shared.
+ */
+function Notch({ label, className }: { label: string; className: string }) {
+  return (
+    <fieldset aria-hidden className={className}>
+      <legend className={LEGEND}>
+        <span className="inline-block px-1">{label}</span>
+      </legend>
+    </fieldset>
   )
 }
 
@@ -200,13 +279,13 @@ export function FloatingInput({
    * ⚠ `className` TARGETS THE INPUT RATHER THAN THE WRAPPER, WHICH IS THE
    * OPPOSITE OF WHAT THE MARKUP SUGGESTS AND THE RIGHT CHOICE ANYWAY. This
    * component replaced bare `<Input className="font-mono text-xs" />` call
-   * sites, and every one of them means "set the type of the value". Routing
-   * them to the bordered box instead loses `text-xs` silently — the input's own
+   * sites, and every one of them means "set the type of the value". Routing them
+   * to the bordered box instead loses `text-xs` silently — the input's own
    * `text-sm` wins over an inherited size — so an API key would render in the
    * proportional face with nothing to explain it.
    */
   className?: string
-  /** Classes for the bordered box: height, radius, borders. */
+  /** Classes for the bordered box: height, radius. */
   controlClassName?: string
   /** Classes for the whole field, including the hint row. */
   containerClassName?: string
@@ -219,7 +298,7 @@ export function FloatingInput({
 
   return (
     <Frame id={id} hint={hint} state={state} className={containerClassName}>
-      <div className={cn(CONTROL, "h-14 rounded-pill", tone.control, controlClassName)}>
+      <div className={cn(CONTROL, "h-14 rounded-pill", controlClassName)}>
         <input
           id={id}
           data-slot="floating-input"
@@ -230,11 +309,22 @@ export function FloatingInput({
           className={cn(CONTROL_INPUT, adornment && "pe-11", className)}
           {...props}
         />
-        <label htmlFor={id} className={cn(FLOAT_LABEL, RESTS_CENTRED, tone.label)}>
+        <label htmlFor={id} className={cn(LABEL, RESTS_CENTRED, tone.label)}>
           {label}
         </label>
+        {/*
+         * ⚠ AFTER THE INPUT IN THE DOM, WHICH IS NOT COSMETIC. Every `peer-*`
+         * rule on the frame and the legend compiles to `.peer … ~ &` — a
+         * FOLLOWING-sibling combinator. Moving the notch above the input would
+         * leave the border with no focus state and the gap permanently shut, and
+         * nothing would report it.
+         */}
+        <Notch
+          label={label}
+          className={cn(FRAME, "peer-focus:ring-[3px]", tone.frame)}
+        />
         {adornment && (
-          <div className="absolute end-3 flex items-center text-muted-foreground">
+          <div className="absolute end-3 z-10 flex items-center text-muted-foreground">
             {adornment}
           </div>
         )}
@@ -270,12 +360,12 @@ export function FloatingTextarea({
   return (
     <Frame id={id} hint={hint} state={state} className={containerClassName}>
       {/*
-       * ⚠ `rounded-xl` RATHER THAN THE PILL THE INPUT USES, AND THE REASON IS
-       * IN the pill token's own note: a stadium corner is height over two, so on
-       * a box that grows with its content the corners swell as you type. The
+       * ⚠ `rounded-xl` RATHER THAN THE PILL THE INPUT USES, and the reason is in
+       * the pill token's own note: a stadium corner is height over two, so on a
+       * box that grows with its content the corners swell as you type. The
        * textarea takes the largest corner on the fixed scale instead.
        */}
-      <div className={cn(CONTROL, "rounded-xl", tone.control, controlClassName)}>
+      <div className={cn(CONTROL, "rounded-xl", controlClassName)}>
         <textarea
           id={id}
           rows={rows}
@@ -284,15 +374,18 @@ export function FloatingTextarea({
           aria-describedby={hint ? `${id}-hint` : undefined}
           // ⚠ `field-sizing-content` IS NOT SET HERE. It would make the box grow
           // as you type, which is pleasant — and it also makes the label's
-          // resting position, which is vertically centred, drift down the box as
-          // it grows. The label is only centred for the INPUT; here it rests one
-          // line down from the top, so the height must not move under it.
-          className={cn(CONTROL_INPUT, "h-auto resize-y py-2 pt-7", className)}
+          // resting position drift down the box as it grows. The label rests one
+          // line from the top, so the height must not move under it.
+          className={cn(CONTROL_INPUT, "h-auto resize-y py-4", className)}
           {...props}
         />
-        <label htmlFor={id} className={cn(FLOAT_LABEL, RESTS_AT_TOP, tone.label)}>
+        <label htmlFor={id} className={cn(LABEL, RESTS_AT_TOP, tone.label)}>
           {label}
         </label>
+        <Notch
+          label={label}
+          className={cn(FRAME, "peer-focus:ring-[3px]", tone.frame)}
+        />
       </div>
     </Frame>
   )

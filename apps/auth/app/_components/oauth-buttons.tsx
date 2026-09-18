@@ -280,6 +280,7 @@ export function OAuthButtons({
           <Button
             key={strategy}
             variant="outline"
+            size="xl"
             type="button"
             // ⚠ DISABLED UNTIL CLERK HAS LOADED. `signIn` is null until then,
             // and a click before that point is a dead button rather than a slow

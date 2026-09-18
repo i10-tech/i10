@@ -229,7 +229,11 @@ export function SignUpForm({
             autoFocus
           />
           <Field>
-            <Button type="submit" disabled={locked || code.length < OTP_LENGTH}>
+            <Button
+              type="submit"
+              size="xl"
+              disabled={locked || code.length < OTP_LENGTH}
+            >
               {busy === "verify" ? (
                 <>
                   <Spinner aria-hidden="true" aria-label={undefined} />
@@ -347,7 +351,7 @@ export function SignUpForm({
          */}
         <div id="clerk-captcha" />
         <Field>
-          <Button type="submit" disabled={!signUp || locked}>
+          <Button type="submit" size="xl" disabled={!signUp || locked}>
             {busy === "details" ? (
               <>
                 <Spinner aria-hidden="true" aria-label={undefined} />

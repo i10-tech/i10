@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
 import { clerkAppearance } from "@repo/ui/clerk"
 import { Toaster } from "@repo/ui/components/sonner"
+import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
 import "./globals.css"
 
@@ -72,7 +73,7 @@ export default function RootLayout({
       <html lang="en" suppressHydrationWarning>
         <body>
           <Theme>
-            {children}
+            <MotionProvider>{children}</MotionProvider>
             {/*
              * ⚠ ONE TOASTER FOR THE WHOLE APP, MOUNTED HERE. `toast()` is a
              * module-level call that pushes onto whichever Toaster is mounted;

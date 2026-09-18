@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs"
 import { GeistMono } from "geist/font/mono"
 import { GeistSans } from "geist/font/sans"
 import { clerkAppearance } from "@repo/ui/clerk"
+import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
 import { Toaster } from "@repo/ui/components/sonner"
 import { TooltipProvider } from "@repo/ui/components/tooltip"
@@ -119,9 +120,11 @@ export default function RootLayout({
            * in its own provider gives every one of them the full delay, which in
            * a table of copy buttons feels broken.
            */}
-          <TooltipProvider delayDuration={300} skipDelayDuration={500}>
-            <Providers>{children}</Providers>
-          </TooltipProvider>
+          <MotionProvider>
+            <TooltipProvider delayDuration={300} skipDelayDuration={500}>
+              <Providers>{children}</Providers>
+            </TooltipProvider>
+          </MotionProvider>
           <Toaster />
         </Theme>
       </body>

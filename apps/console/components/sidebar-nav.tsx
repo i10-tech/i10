@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, type LucideIcon } from "lucide-react"
+import { motion, type Transition, type Variants } from "motion/react"
 import { cn } from "cn"
 import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
@@ -82,7 +83,7 @@ export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
               const Icon = item.icon
 
               return (
-                <Link
+                <MotionLink
                   key={item.href}
                   href={item.href}
                   // ⚠ `aria-current="page"` IS THE ACCESSIBLE HALF OF THE
@@ -90,6 +91,18 @@ export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
                   // they are; without this a screen reader reads twelve
                   // identical links.
                   aria-current={active ? "page" : undefined}
+                  /*
+                   * ⚠ THE GESTURE STATE LIVES ON THE ROW, NOT ON THE ICON, AND
+                   * THAT IS WHAT MAKES THE WHOLE ROW THE TARGET. Motion
+                   * propagates a variant name down to any child that declares
+                   * the same variant, so hovering anywhere on the link — the
+                   * label, the padding, the far right edge — runs the icon's
+                   * animation. Putting `whileHover` on the icon itself would
+                   * mean it only fired on a 16px square.
+                   */
+                  initial={false}
+                  whileHover="hover"
+                  whileTap="tap"
                   className={cn(
                     "group flex h-8 items-center gap-2.5 rounded-md px-2 text-sm transition-colors",
                     // ⚠ COLOUR ONLY, SO `--ease-linear` IS CORRECT HERE. The
@@ -102,18 +115,58 @@ export function SidebarNav({ groups }: { groups?: NavGroup[] }) {
                       : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
                   )}
                 >
-                  <Icon
-                    className={cn(
-                      "size-4 shrink-0",
-                      active ? "text-foreground" : "text-muted-foreground",
-                    )}
-                  />
+                  <NavIcon icon={Icon} active={active} />
                   <span className="truncate">{item.label}</span>
-                </Link>
+                </MotionLink>
               )
             })}
         </div>
       ))}
     </nav>
+  )
+}
+
+/**
+ * ⚠ `motion.create(Link)` RATHER THAN A `motion.div` WRAPPED AROUND ONE. An
+ * extra element between the list and the anchor would either break the flex
+ * column's spacing or need its own display rules to not; forwarding the props
+ * onto Next's own component keeps the DOM exactly as it was and keeps
+ * prefetching, `aria-current` and the router intact.
+ */
+const MotionLink = motion.create(Link)
+
+/**
+ * ⚠ STIFF AND HEAVILY DAMPED, WHICH IS WHAT MAKES IT UNNOTICEABLE. The brief
+ * for these is that somebody feels the interface respond without registering an
+ * animation; at `stiffness: 500` the icon has finished before a deliberate
+ * glance reaches it, and `damping: 30` leaves a trace of overshoot so it reads
+ * as a physical nudge rather than a state flip.
+ */
+const ICON_SPRING: Transition = { type: "spring", stiffness: 500, damping: 30 }
+
+/**
+ * ⚠ SCALE AND A SINGLE PIXEL OF LIFT — NO ROTATION, AND THAT IS DELIBERATE.
+ * A rotate reads beautifully on a gear and absurdly on an envelope, and this
+ * list has eighteen different glyphs. The only transform that is flattering to
+ * all of them is the one that does not imply a direction.
+ */
+const ICON_VARIANTS: Variants = {
+  hover: { scale: 1.12, y: -1 },
+  tap: { scale: 0.92, y: 0 },
+}
+
+function NavIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
+  return (
+    <motion.span
+      variants={ICON_VARIANTS}
+      transition={ICON_SPRING}
+      // ⚠ `inline-flex` AND NOT A BARE SPAN. A transform on an inline element
+      // is ignored, so without this the whole thing silently does nothing.
+      className="inline-flex shrink-0"
+    >
+      <Icon
+        className={cn("size-4", active ? "text-foreground" : "text-muted-foreground")}
+      />
+    </motion.span>
   )
 }

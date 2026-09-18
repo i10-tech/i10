@@ -22,6 +22,18 @@ const buttonVariants = cva(
         xs: "h-6 gap-1 rounded-pill px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-8 gap-1.5 rounded-pill px-3 has-[>svg]:px-2.5",
         lg: "h-10 rounded-pill px-6 has-[>svg]:px-4",
+        /*
+         * ⚠ 56px, WHICH IS `FloatingInput`'s HEIGHT AND NOT A ROUND NUMBER.
+         * This size exists so a submit button can sit directly under a field
+         * and read as the same object continuing — at `lg` the button was
+         * 40px against the field's 56 and the pair looked like a control and
+         * its afterthought. If the field height ever changes, this changes
+         * with it.
+         */
+        // ⚠ `text-base` RATHER THAN INHERITING THE 14px BASE. At this height the
+        // label is the only thing in a 56px box, and 14px text in it reads as a
+        // small word floating in a large button rather than as a large button.
+        xl: "h-14 rounded-pill px-6 text-base has-[>svg]:px-5",
         icon: "size-9",
         "icon-xs": "size-6 rounded-pill [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
