@@ -22,16 +22,25 @@ import { cookies } from "next/headers"
  * redirect is that an account with no verified domain cannot send, and quietly
  * forgetting to mention that for ever is not a kindness. A week is long enough
  * that the skip is not nagging and short enough that it is not a dead end.
+ *
+ * ⚠ THE VALUE IS THE TENANT ID, NOT `"1"`, AND THAT IS A FIX RATHER THAN A
+ * REFINEMENT. A bare flag is a claim about the BROWSER, but the question being
+ * asked is about a WORKSPACE — so one skip suppressed the flow for every
+ * workspace that browser went on to see, for a week. The reproduction is
+ * ordinary: skip once, sign up again with a different account, and the new
+ * workspace lands on an empty dashboard having never been offered the flow that
+ * exists to tell it that a tenant with no verified domain cannot send anything.
+ * A brand new workspace must always be asked, whatever the last one chose.
  */
 const COOKIE = "i10_onboarding_skipped"
 const A_WEEK = 60 * 60 * 24 * 7
 
-export async function hasSkippedOnboarding(): Promise<boolean> {
-  return (await cookies()).get(COOKIE)?.value === "1"
+export async function hasSkippedOnboarding(tenantId: string): Promise<boolean> {
+  return (await cookies()).get(COOKIE)?.value === tenantId
 }
 
-export async function rememberOnboardingSkip(): Promise<void> {
-  ;(await cookies()).set(COOKIE, "1", {
+export async function rememberOnboardingSkip(tenantId: string): Promise<void> {
+  ;(await cookies()).set(COOKIE, tenantId, {
     maxAge: A_WEEK,
     path: "/",
     httpOnly: true,

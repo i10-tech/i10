@@ -187,6 +187,53 @@ web surface is hand-managed, and this is part of it.
    what stops `cdn` resolving to the cluster ingress like every other name.
 3. Leave the bucket's `r2.dev` URL disabled. It is rate-limited, uncacheable and
    permanently public regardless of what the custom domain does later.
+4. **Add a CORS policy to the bucket**, or the font 404s turn into CORS errors
+   the moment step 1 works. A browser fetches every font in CORS mode whatever
+   the stylesheet says, so R2 must answer with `Access-Control-Allow-Origin`:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": [
+         "https://i10.tech",
+         "https://dash.i10.tech",
+         "https://auth.i10.tech",
+         "https://docs.i10.tech"
+       ],
+       "AllowedMethods": ["GET", "HEAD"],
+       "AllowedHeaders": ["*"],
+       "MaxAgeSeconds": 86400
+     }
+   ]
+   ```
+
+   ⚠ **The origins are listed rather than `*`, and the reason is the licence
+   rather than security.** The file is public either way — anyone can fetch it
+   with curl, and an origin allow-list stops none of that. What it does stop is
+   another site embedding our licensed face from our CDN and billing its
+   pageviews to our licence. Add a name here when a new surface starts using
+   `--font-display`; forgetting shows up as text stuck in the fallback.
+
+## Until both of those are done, the browser lies about which is wrong
+
+A cross-origin **404** with no `Access-Control-Allow-Origin` header is reported
+by Chrome as
+
+```
+Access to font at 'https://cdn.i10.tech/fonts/…' from origin 'https://dash.i10.tech'
+has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present
+```
+
+…which reads as a CORS misconfiguration and is actually "that file is not
+there". Observed on 2026-09-18: `cdn.i10.tech` resolved to the same two
+addresses as `dash.i10.tech` — the proxied `*.i10.tech` wildcard — so the
+request reached the cluster ingress, which has no route for it, and Traefik
+answered `404 page not found`. **Check the status code with curl before
+believing the console.**
+
+```bash
+curl -sI https://cdn.i10.tech/fonts/i10-display-400.woff2 | head -1
+```
 
 ## Publishing
 

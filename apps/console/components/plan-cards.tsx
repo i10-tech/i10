@@ -182,6 +182,9 @@ export function PlanCards({
        */
       await openPolarCheckout(result.data.url, {
         theme: resolvedTheme === "light" ? "light" : "dark",
+        // ⚠ WHAT LETS THE MODAL CLOSE WHEN POLAR'S EVENT NEVER ARRIVES. See
+        // lib/polar-embed.ts for the checkout that succeeded in silence.
+        checkoutId: result.data.id,
         onSuccess: () => {
           toast.success("Payment received", {
             description: "Your new allowances appear as soon as it clears.",

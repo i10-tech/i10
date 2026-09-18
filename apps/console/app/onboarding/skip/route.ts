@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation"
 import { rememberOnboardingSkip } from "@/lib/onboarding-skip"
+import { tryApi } from "@/lib/api"
+import type { Me } from "@/lib/types"
 
 /**
  * Where "Skip to the console" actually goes.
@@ -17,6 +19,18 @@ import { rememberOnboardingSkip } from "@/lib/onboarding-skip"
  * would cost a form and a client component for a link in a header.
  */
 export async function GET() {
-  await rememberOnboardingSkip()
+  /*
+   * ⚠ THE WORKSPACE IS READ HERE RATHER THAN ASSUMED, because the cookie is
+   * keyed to it — see lib/onboarding-skip.ts for the bug that keying fixes. It
+   * costs one call on a click somebody makes at most once per workspace.
+   *
+   * ⚠ AND A FAILURE STILL LETS THEM THROUGH. If `/console/me` is unreachable,
+   * refusing to skip would trap somebody in a flow they asked to leave because
+   * of an error that has nothing to do with them. They land on the console and
+   * the layout decides again with fresh information.
+   */
+  const me = await tryApi<Me>("/console/me")
+  if (me.ok && me.data.tenant) await rememberOnboardingSkip(me.data.tenant.id)
+
   redirect("/")
 }

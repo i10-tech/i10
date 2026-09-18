@@ -36,13 +36,42 @@ export interface CheckoutHandle {
 
 export interface OpenCheckoutOptions {
   theme: "light" | "dark"
-  /** Fired once Polar reports the payment succeeded. */
+  /** Fired once the payment is known to have succeeded, however we learn it. */
   onSuccess(): void
+  /**
+   * Polar's checkout id, for the status poll that backstops their event.
+   *
+   * ⚠ OPTIONAL SO AN OLDER API BUILD STILL WORKS. Without it the modal depends
+   * entirely on Polar posting `success`, which is the behaviour that failed.
+   */
+  checkoutId?: string | null
 }
+
+/**
+ * ⚠ THE POLL EXISTS BECAUSE POLAR'S `success` EVENT DOES NOT ALWAYS ARRIVE,
+ * AND THAT IS MEASURED RATHER THAN DEFENSIVE. On 2026-09-18 a real checkout on
+ * dash.i10.tech completed — Polar's own API reported `status: "succeeded"` with
+ * a customer attached, and the plan was granted — while the browser recorded
+ * ZERO messages from any polar.sh origin. Their page had answered
+ * `PATCH /v1/checkouts/client/… 403` after Stripe confirmed, and its state
+ * machine stopped at "waiting for confirmation" without ever posting to us.
+ *
+ * The customer is left looking at a payment form for a payment that already
+ * went through, and the only way out is a reload. So the event is now the FAST
+ * path rather than the only one: `/api/checkout-status/{id}` reads the row our
+ * own webhook writes, and whichever answers first closes the modal.
+ *
+ * ⚠ AND IT IS BOUNDED. A checkout somebody abandons would otherwise poll for
+ * as long as the tab is open; five minutes is longer than any card takes and
+ * short enough that a forgotten tab is not making a request every two seconds
+ * until it is closed.
+ */
+const POLL_EVERY_MS = 2_000
+const POLL_FOR_MS = 5 * 60_000
 
 export async function openPolarCheckout(
   url: string,
-  { theme, onSuccess }: OpenCheckoutOptions,
+  { theme, onSuccess, checkoutId }: OpenCheckoutOptions,
 ): Promise<CheckoutHandle> {
   const { PolarEmbedCheckout } = await import("@polar-sh/checkout/embed")
   const checkout = await PolarEmbedCheckout.create(url, { theme })
@@ -57,12 +86,30 @@ export async function openPolarCheckout(
    */
   let dismissable = true
   let done = false
+  let poll: ReturnType<typeof setInterval> | undefined
 
   const teardown = () => {
     if (done) return
     done = true
+    if (poll) clearInterval(poll)
     document.removeEventListener("keydown", onKey)
     button.remove()
+  }
+
+  /**
+   * One way out, whether Polar told us or we found out ourselves.
+   *
+   * ⚠ IDEMPOTENT, BECAUSE BOTH PATHS CAN FIRE. If the event arrives and the
+   * poll also comes back `paid`, `onSuccess` would otherwise run twice — two
+   * toasts and two router refreshes for one payment. `teardown` already guards
+   * on `done`; this reads the same flag before doing anything else.
+   */
+  const succeed = () => {
+    if (done) return
+    dismissable = true
+    teardown()
+    checkout.close()
+    onSuccess()
   }
 
   const dismiss = () => {
@@ -109,19 +156,14 @@ export async function openPolarCheckout(
     button.style.display = "none"
   })
 
-  checkout.addEventListener("success", () => {
-    dismissable = true
-    /*
-     * ⚠ THE OVERLAY IS CLOSED HERE RATHER THAN LEFT FOR THE CUSTOMER TO
-     * DISMISS. Polar's default `success` handler only re-enables closing and
-     * redirects when the checkout carries a success URL, so without this the
-     * modal sits over an already-upgraded console saying it is waiting for
-     * confirmation — which is exactly what it did.
-     */
-    teardown()
-    checkout.close()
-    onSuccess()
-  })
+  /*
+   * ⚠ THE OVERLAY IS CLOSED HERE RATHER THAN LEFT FOR THE CUSTOMER TO DISMISS.
+   * Polar's default `success` handler only re-enables closing and redirects
+   * when the checkout carries a success URL, so without this the modal sits
+   * over an already-upgraded console saying it is waiting for confirmation —
+   * which is exactly what it did.
+   */
+  checkout.addEventListener("success", succeed)
 
   // ⚠ POLAR'S OWN `close` STILL RUNS IF IT EVER STARTS WORKING. Ours would then
   // be a stray button over a removed iframe, so it cleans up on their event too.
@@ -129,6 +171,33 @@ export async function openPolarCheckout(
 
   document.addEventListener("keydown", onKey)
   document.body.appendChild(button)
+
+  if (checkoutId) {
+    const startedAt = Date.now()
+
+    poll = setInterval(() => {
+      if (Date.now() - startedAt > POLL_FOR_MS) {
+        if (poll) clearInterval(poll)
+        return
+      }
+
+      void fetch(`/api/checkout-status/${encodeURIComponent(checkoutId)}`, {
+        cache: "no-store",
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { status?: string } | null) => {
+          // ⚠ BOTH WORDS MEAN THE MONEY LANDED. `paid` is the checkout having
+          // succeeded; `granted` is that plus the entitlement being live. The
+          // modal has no business staying open for either — the difference
+          // belongs to the page underneath, which says "allowances appear as
+          // soon as it clears".
+          if (body?.status === "paid" || body?.status === "granted") succeed()
+        })
+        // ⚠ A FAILED POLL IS NOT A FAILED PAYMENT. The API being briefly
+        // unreachable says nothing; keep asking until the window closes.
+        .catch(() => {})
+    }, POLL_EVERY_MS)
+  }
 
   return {
     close() {
