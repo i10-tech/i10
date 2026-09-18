@@ -44,13 +44,27 @@ spec:
       labels:
         app.kubernetes.io/name: i10-powerdns
     spec:
-      # ⚠ THE POD MUST NOT USE THE CLUSTER'S DNS FOR ITS OWN LOOKUPS. CoreDNS
-      # forwards what it cannot answer, and a nameserver that resolves through
-      # the thing that may end up forwarding to it is a loop waiting for the
-      # first misconfiguration. It only ever needs to reach Postgres, which it
-      # does by ClusterIP through the env below — so `Default` (the node's
-      # resolver) is both sufficient and safer.
-      dnsPolicy: Default
+      # ⚠ `ClusterFirst`, AND THE `Default` THAT WAS HERE CRASHLOOPED THE POD.
+      # The comment that used to sit here argued the pod must not resolve
+      # through CoreDNS, on the reasoning that a nameserver resolving through
+      # something that may forward BACK to it is a loop — and that it only ever
+      # needs Postgres, "which it does by ClusterIP through the env below".
+      #
+      # That last clause was simply untrue. `PDNS_GPGSQL_HOST` below is the
+      # service NAME `i10-platform-pooler`, not an address, so with the node's
+      # resolver the pod got:
+      #
+      #   could not translate host name "i10-platform-pooler" to address:
+      #   Name or service not known
+      #
+      # …and died before serving a single query. It could never have worked.
+      #
+      # ⚠ AND THE LOOP IT WORRIED ABOUT CANNOT HAPPEN FOR THIS LOOKUP. CoreDNS
+      # answers `*.svc.cluster.local` from its own zone and forwards only what
+      # it cannot answer; a cluster service name is answered locally and never
+      # leaves the node. The loop would need PowerDNS to resolve a PUBLIC name,
+      # which it has no reason to do — it is authoritative, not recursive.
+      dnsPolicy: ClusterFirst
       securityContext:
         runAsNonRoot: true
         runAsUser: 953
