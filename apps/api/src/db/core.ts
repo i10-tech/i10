@@ -379,6 +379,28 @@ export const domains = core.table(
     dkimPrivateKeySealed: text("dkim_private_key_sealed"),
 
     /**
+     * Proves WHICH workspace published a delegation.
+     *
+     * ⚠ THE DELEGATION RECORDS CANNOT DO IT, WHICH IS WHY THIS EXISTS. Every
+     * delegating customer is told to publish the same two nameservers, so what
+     * lands in DNS is identical whoever produced it — and the zone claim fell
+     * to arrival order, which is not evidence. A stranger could add a domain,
+     * publish nothing, and have the real owner's NS records resolve to the
+     * stranger's zone and verify them. See migration 0042 and ownership.ts.
+     *
+     * ⚠ AND THE CHALLENGE IT BACKS SITS OUTSIDE THE DELEGATED SUBTREES, at
+     * `_i10-challenge.<domain>`. Anything under `mail.`, `_domainkey.` or
+     * `_dmarc.` is served by us once the delegation exists, so a token there
+     * would be one we wrote ourselves.
+     *
+     * ⚠ DEFAULTED IN THE DATABASE so a row cannot exist without one, including
+     * rows written by anything that is not this application.
+     */
+    delegationToken: text("delegation_token")
+      .notNull()
+      .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+
+    /**
      * ⚠ SES'S ANSWER, COPIED — NOT DERIVED FROM `verified_at`. A domain can be
      * `failed` or `temporary_failure` while `verified_at` is null, and those
      * three states are what a customer needs told apart: one means wait, one

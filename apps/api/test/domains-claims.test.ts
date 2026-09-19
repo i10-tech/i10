@@ -63,9 +63,11 @@ function fakeDb(handlers: {
   claim?: () => unknown[]
   update?: () => unknown[]
   del?: () => void
+  /** `core.domain_verified_elsewhere`, which is reached through raw SQL. */
+  taken?: boolean
 }) {
   const tx = {
-    execute: async () => [],
+    execute: async () => [{ taken: handlers.taken ?? false }],
     insert: () => ({
       values: () => ({ returning: async () => handlers.insert?.() ?? [] }),
     }),
@@ -282,5 +284,65 @@ describe("deleting a domain whose cleanup fails", () => {
       }),
     })
     expect(await store.remove(TENANT, ID)).toBe(true)
+  })
+})
+
+describe("refusing a duplicate without touching SES", () => {
+  /**
+   * ⚠ THE REFUSAL USED TO COST THE OTHER TENANT THEIR DKIM KEY, which is a far
+   * worse bug than the orphaned identity it looked like. SES keys identities on
+   * the domain name inside one AWS account, so `CreateEmailIdentity` for a name
+   * somebody else holds raises `AlreadyExistsException` — and the adapter's
+   * recovery is `PutEmailIdentityDkimSigningAttributes`, which REPLACES their
+   * signing key with ours. The verified tenant then signs with a key their DNS
+   * does not publish and their working domain breaks, because a stranger typed
+   * its name into a form and was told no.
+   *
+   * ⚠ SO THE ASSERTION IS THAT AWS IS NEVER REACHED, not that we tidied up
+   * afterwards. There is nothing to tidy: the identity is not an orphan, it is
+   * somebody else's, and deleting it would be the same bug pointing the other
+   * way.
+   */
+  it("does not call SES when this workspace already has the name", async () => {
+    const create = mock(async () => ({
+      dkimTokens: ["aaa"],
+      status: "pending" as const,
+    }))
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [row()] }),
+      identity: identity({ create }),
+    })
+
+    const out = await store.create(TENANT, { name: "example.com" })
+
+    expect(out.status).toBe("conflict")
+    expect(out.status === "conflict" && out.reason).toBe(
+      "You have already added example.com.",
+    )
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it("does not call SES when another workspace has verified the name", async () => {
+    const create = mock(async () => ({
+      dkimTokens: ["aaa"],
+      status: "pending" as const,
+    }))
+    const store = domainStore({
+      ...base,
+      // No row of our own, but `core.domain_verified_elsewhere` says yes.
+      db: fakeDb({ select: () => [], taken: true }),
+      identity: identity({ create }),
+    })
+
+    const out = await store.create(TENANT, { name: "example.com" })
+
+    expect(out.status).toBe("conflict")
+    expect(create).not.toHaveBeenCalled()
+    // ⚠ STILL DOES NOT NAME THE HOLDER. The function it asked returns a boolean
+    // precisely so that this message cannot start naming customers.
+    expect(out.status === "conflict" && out.reason).not.toMatch(
+      /tenant|customer|workspace ".*"/i,
+    )
   })
 })

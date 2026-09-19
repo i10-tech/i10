@@ -3,6 +3,11 @@ import { domainStore } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
 import type { Zone } from "../src/domains/zone.js"
+import {
+  challengeName,
+  challengeValue,
+  type TxtLookup,
+} from "../src/domains/ownership.js"
 
 /**
  * Who is allowed to write the DNS we serve for a delegated domain.
@@ -15,15 +20,18 @@ import type { Zone } from "../src/domains/zone.js"
  * can write the zone can verify, and whoever can verify can sign mail as that
  * domain.
  *
- * ⚠ AND BOTH HALVES WERE OPEN. `create` published the zone unverified with
- * `on conflict (name) do update`, so the second tenant to add an
- * already-delegated name silently replaced the first tenant's DKIM selector
- * underneath NS records the real owner had published. `remove` dropped the
- * zones by name with no ownership test, so any tenant holding a pending row for
- * the name could delete the DNS of whoever was actually being served.
+ * ⚠ ARRIVAL ORDER IS NOT EVIDENCE, AND FOR ONE TURN IT WAS STANDING IN FOR IT.
+ * Every delegating customer publishes the same two nameservers, so nothing that
+ * reaches DNS says which workspace produced it. That left the scenario below
+ * wide open, and it is the one this file is really about:
  *
- * ⚠ `pslhq.app` IS HELD BY THREE TENANTS IN PRODUCTION TODAY, two of them
- * delegated, sharing one set of zones. Neither of these was hypothetical.
+ *   1. a stranger adds `example.com`, picks delegation, publishes nothing;
+ *   2. the real owner adds `example.com` and publishes the NS records;
+ *   3. the owner's delegation resolves to the STRANGER'S zone, carrying the
+ *      stranger's DKIM selector, and SES verifies the stranger.
+ *
+ * The owner did everything correctly and handed over their domain by doing it.
+ * The challenge record is what makes step 3 impossible.
  */
 
 const OWNER = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
@@ -31,6 +39,9 @@ const STRANGER = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6072"
 const ID = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb"
 const OTHER_ID = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60cc"
 const NOW = new Date("2026-09-19T12:00:00.000Z")
+
+const OWNER_TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+const STRANGER_TOKEN = "ffffffffffffffffffffffffffffffff"
 
 const row = (over: Record<string, unknown> = {}) => ({
   id: ID,
@@ -42,6 +53,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   dkimPublicKey: "MIIBIjANBgkq",
   status: "pending",
   createdAt: NOW,
+  delegationToken: OWNER_TOKEN,
   ...over,
 })
 
@@ -51,44 +63,25 @@ const violation = (constraint: string) =>
     { code: "23505", constraint },
   )
 
-interface Inserted {
-  /** Every row handed to `tx.insert(...).values()`, in order. */
-  values: Record<string, unknown>[]
-}
-
 /**
- * ⚠ THE TWO INSERTS ARE TOLD APART BY HOW THEY ARE CONSUMED, which is how the
- * store itself distinguishes them: the domain row is read back with
- * `.returning(COLUMNS)` and the claim is simply awaited. The claim insert is a
- * thenable so that `await tx.insert(delegations).values(...)` works without a
- * `.returning()` the production code does not call.
- *
- * ⚠ AND THE ROLLBACK IS POSTGRES'S JOB, NOT THIS FAKE'S. When the claim throws,
- * a real transaction discards the domain row with it — that is the whole point
- * of putting them in one transaction, and it is pinned by the migration rather
- * than here. What this file asserts is the outcome the store returns and, above
- * all, that no zone is written on the way out.
+ * ⚠ THE CLAIM READ IS TOLD APART BY ITS PROJECTION, not by call order, so it
+ * stays correct if `verify` ever reorders its two reads. Everything else here
+ * is the smallest shape the store actually touches.
  */
 function fakeDb(handlers: {
   select?: () => unknown[]
   claim?: () => unknown[]
-  onClaimInsert?: (values: Record<string, unknown>) => void
+  onClaimInsert?: () => void
   del?: () => void
-}, inserted: Inserted) {
+}) {
   const tx = {
     execute: async () => [],
     insert: () => ({
       values: (values: Record<string, unknown>) => ({
-        returning: async () => {
-          inserted.values.push(values)
-          return [row({ delegated: values.delegated ?? true })]
-        },
+        returning: async () => [row(values)],
         then: (ok: (v: unknown) => void, no: (e: unknown) => void) =>
           Promise.resolve()
-            .then(() => {
-              inserted.values.push(values)
-              handlers.onClaimInsert?.(values)
-            })
+            .then(() => handlers.onClaimInsert?.())
             .then(ok, no),
       }),
     }),
@@ -104,7 +97,9 @@ function fakeDb(handlers: {
       }),
     }),
     update: () => ({
-      set: () => ({ where: () => ({ returning: async () => [] }) }),
+      set: () => ({
+        where: () => ({ returning: async () => handlers.select?.() ?? [] }),
+      }),
     }),
     delete: () => ({
       where: async () => {
@@ -140,130 +135,225 @@ const spyZones = () => ({
   remove: mock<(zoneName: string) => Promise<void>>(async () => {}),
 })
 
-describe("claiming the zones when a delegated domain is added", () => {
-  it("records the claim against the domain row and the tenant", async () => {
-    const inserted: Inserted = { values: [] }
+/** A resolver that answers the challenge name with whatever tokens are given. */
+const publishing = (...tokens: string[]): TxtLookup =>
+  mock(async (name: string) =>
+    name === challengeName("example.com") ? tokens.map(challengeValue) : [],
+  )
+
+describe("adding a delegated domain", () => {
+  /**
+   * ⚠ ADDING A DOMAIN ASSERTS NOTHING, SO IT MAY NOT PUBLISH DNS. This is the
+   * half of the takeover that `create` was responsible for: the zone went out
+   * with `on conflict (name) do update`, so the second workspace to type an
+   * already-delegated name silently replaced the first one's DKIM selector.
+   */
+  it("publishes no zone, because nothing has been proved yet", async () => {
+    const zones = spyZones()
     const store = domainStore({
       ...base,
-      db: fakeDb({}, inserted),
+      db: fakeDb({}),
       identity: identity(),
-      zones: spyZones(),
+      zones,
+      txt: publishing(),
     })
 
     const out = await store.create(OWNER, { name: "example.com", delegated: true })
     expect(out.status).toBe("created")
-
-    const claim = inserted.values.find((v) => "domainId" in v)
-    expect(claim).toEqual({ name: "example.com", domainId: ID, tenantId: OWNER })
-  })
-
-  /**
-   * ⚠ A MANUAL DOMAIN MUST NOT CLAIM THE NAME, and this is the guard against
-   * re-creating the squat migration 0039 removed. It publishes no zone, so
-   * there is nothing for two tenants to contend over — and a claim taken here
-   * would let anybody lock a name out of delegation by typing it.
-   */
-  it("claims nothing for a domain that publishes its own records", async () => {
-    const inserted: Inserted = { values: [] }
-    const store = domainStore({
-      ...base,
-      db: fakeDb({}, inserted),
-      identity: identity(),
-      zones: spyZones(),
-    })
-
-    await store.create(OWNER, { name: "example.com", delegated: false })
-    expect(inserted.values.some((v) => "domainId" in v)).toBe(false)
-  })
-})
-
-describe("a second workspace adding a domain somebody already delegates", () => {
-  /**
-   * ⚠ THE TAKEOVER THIS WHOLE FILE EXISTS FOR. Before the claim, this create
-   * succeeded and `zones.put` overwrote the holder's zone with THIS tenant's
-   * DKIM selector — under NS records the real owner had published. The
-   * stranger's selector then resolved, SES verified them, and they could sign
-   * mail as a domain they do not own, while the owner's signing broke with
-   * correct records and no error anywhere.
-   */
-  it("is refused, and writes no zone at all", async () => {
-    const inserted: Inserted = { values: [] }
-    const zones = spyZones()
-    const store = domainStore({
-      ...base,
-      db: fakeDb(
-        {
-          onClaimInsert: () => {
-            throw violation("delegations_name_unique")
-          },
-        },
-        inserted,
-      ),
-      identity: identity(),
-      zones,
-    })
-
-    const out = await store.create(STRANGER, { name: "example.com", delegated: true })
-
-    expect(out.status).toBe("conflict")
-    // ⚠ THE ASSERTION THAT MATTERS. A refusal that still wrote the zone would
-    // hand over the domain while apologising for it.
     expect(zones.put).not.toHaveBeenCalled()
   })
 
   /**
-   * ⚠ AND IT SAYS "DELEGATED", NOT "VERIFIED". The holder may have proved
-   * nothing — first-come is the whole point of that claim — so borrowing the
-   * verified wording would send somebody to support with a question support
-   * cannot answer from the row. It also has to offer the way forward that
-   * actually exists: the manual path needs nothing from the holder.
+   * ⚠ AND IT NO LONGER REFUSES A NAME SOMEBODY ELSE TYPED FIRST, which is
+   * migration 0039's rule restored. Exclusivity on arrival meant a free signup
+   * could lock any domain in the world out of delegation; exclusivity on proof
+   * cannot be mounted by anyone who does not hold the DNS.
    */
-  it("explains what is in the way without naming who holds it", async () => {
-    const inserted: Inserted = { values: [] }
+  it("lets a second workspace add the same name", async () => {
     const store = domainStore({
       ...base,
-      db: fakeDb(
-        {
-          onClaimInsert: () => {
-            throw violation("delegations_name_unique")
-          },
-        },
-        inserted,
-      ),
+      db: fakeDb({}),
       identity: identity(),
       zones: spyZones(),
+      txt: publishing(),
     })
 
     const out = await store.create(STRANGER, { name: "example.com", delegated: true })
-    const reason = out.status === "conflict" ? out.reason : ""
-
-    expect(reason).toContain("already delegated to another workspace")
-    expect(reason).toContain("without delegation")
-    expect(reason).not.toContain("verified")
-    // The holder is never identified — that would turn this into a lookup for
-    // which domains are customers of ours.
-    expect(reason).not.toContain(OWNER)
+    expect(out.status).toBe("created")
   })
 
-  /** This tenant's own duplicate still gets the plainer message, not this one. */
-  it("does not shadow the tenant's own duplicate", async () => {
-    const inserted: Inserted = { values: [] }
+  it("asks the customer for a challenge record carrying this row's token", async () => {
     const store = domainStore({
       ...base,
-      db: fakeDb(
-        {
-          onClaimInsert: () => {
-            throw violation("domains_tenant_name_unique")
-          },
-        },
-        inserted,
-      ),
+      db: fakeDb({}),
       identity: identity(),
       zones: spyZones(),
+      txt: publishing(),
     })
 
     const out = await store.create(OWNER, { name: "example.com", delegated: true })
-    expect(out.status === "conflict" && out.reason).toBe("You have already added example.com.")
+    const records = out.status === "created" ? out.domain.records : []
+    const challenge = records.find((r) => r.type === "TXT")
+
+    expect(challenge).toMatchObject({
+      name: "_i10-challenge.example.com",
+      value: `i10-domain-verification=${OWNER_TOKEN}`,
+    })
+    // ⚠ OUTSIDE THE THREE DELEGATED SUBTREES, which is the only thing that
+    // makes it proof. Anything under them is served by us.
+    expect(challenge!.name).not.toContain("mail.")
+    expect(challenge!.name).not.toContain("_domainkey.")
+    expect(challenge!.name).not.toContain("_dmarc.")
+  })
+})
+
+describe("the squatter, verifying a domain they do not own", () => {
+  /**
+   * ⚠ THE WHOLE POINT. The stranger holds a row for `example.com` and the REAL
+   * OWNER has published a challenge — theirs, carrying the owner's token. The
+   * stranger's verify finds a challenge record at the right name and must still
+   * refuse it, because the token is not the one issued to their row.
+   */
+  it("is refused even though a challenge record exists, because the token is not theirs", async () => {
+    const zones = spyZones()
+    let claimed = false
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row({ delegationToken: STRANGER_TOKEN })],
+        claim: () => [],
+        onClaimInsert: () => {
+          claimed = true
+        },
+      }),
+      identity: identity(),
+      zones,
+      // the owner's record, published by the owner, in the owner's zone
+      txt: publishing(OWNER_TOKEN),
+    })
+
+    const out = await store.verify(STRANGER, ID)
+
+    expect(out.status).toBe("unproven")
+    expect(out.status === "unproven" && out.reason).toBe("absent")
+    expect(claimed).toBe(false)
+    // ⚠ AND NOTHING WAS SERVED. A refusal that still published the zone would
+    // hand over the domain while apologising for it.
+    expect(zones.put).not.toHaveBeenCalled()
+  })
+
+  it("is refused when nothing is published at all", async () => {
+    const zones = spyZones()
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row({ delegationToken: STRANGER_TOKEN })],
+        claim: () => [],
+      }),
+      identity: identity(),
+      zones,
+      txt: publishing(),
+    })
+
+    expect((await store.verify(STRANGER, ID)).status).toBe("unproven")
+    expect(zones.put).not.toHaveBeenCalled()
+  })
+})
+
+describe("the owner, verifying a domain they do own", () => {
+  it("claims the name and publishes all three zones", async () => {
+    const zones = spyZones()
+    let claimed = false
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        onClaimInsert: () => {
+          claimed = true
+        },
+      }),
+      identity: identity(),
+      zones,
+      txt: publishing(OWNER_TOKEN),
+    })
+
+    const out = await store.verify(OWNER, ID)
+
+    expect(claimed).toBe(true)
+    expect(out.status).toBe("ok")
+    expect(zones.put.mock.calls.map(([z]) => z.name).sort()).toEqual([
+      "_dmarc.example.com",
+      "_domainkey.example.com",
+      "mail.example.com",
+    ])
+  })
+
+  /**
+   * ⚠ TWO WORKSPACES OF THE SAME COMPANY BOTH PROVE IT, AND BOTH ARE HONEST.
+   * A domain can carry several TXT records at one name, so the owner can
+   * publish a challenge for each — and only one of them can be the zone we
+   * serve. The constraint decides; nothing is granted on a tie.
+   */
+  it("reports a conflict when somebody else proved it first", async () => {
+    const zones = spyZones()
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        onClaimInsert: () => {
+          throw violation("delegations_name_unique")
+        },
+      }),
+      identity: identity(),
+      zones,
+      txt: publishing(OWNER_TOKEN, STRANGER_TOKEN),
+    })
+
+    expect((await store.verify(OWNER, ID)).status).toBe("claimed")
+    expect(zones.put).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⚠ THE REPAIR PATH, AND IT COSTS THE CUSTOMER A BUTTON THEY WERE PRESSING
+   * ANYWAY. A zone lost to a failed write or an operator is republished on the
+   * next verify without re-proving, because the claim is already ours.
+   */
+  it("republishes without re-proving when the claim is already ours", async () => {
+    const zones = spyZones()
+    const txt = publishing()
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [row()], claim: () => [{ domainId: ID }] }),
+      identity: identity(),
+      zones,
+      txt,
+    })
+
+    expect((await store.verify(OWNER, ID)).status).toBe("ok")
+    expect(zones.put).toHaveBeenCalledTimes(3)
+    expect(txt).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⚠ A RESOLVER THAT TIMED OUT IS NOT A CUSTOMER WHO PUBLISHED NOTHING. Same
+   * distinction SES draws between TEMPORARY_FAILURE and FAILED, and flattening
+   * it sends somebody to re-check records that are already correct.
+   */
+  it("separates an unreachable nameserver from an absent record", async () => {
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [row()], claim: () => [] }),
+      identity: identity(),
+      zones: spyZones(),
+      txt: async () => {
+        throw Object.assign(new Error("query timed out"), { code: "ETIMEOUT" })
+      },
+    })
+
+    const out = await store.verify(OWNER, ID)
+    expect(out.status === "unproven" && out.reason).toBe("unreachable")
   })
 })
 
@@ -272,12 +362,10 @@ describe("deleting a delegated domain", () => {
     const zones = spyZones()
     const store = domainStore({
       ...base,
-      db: fakeDb(
-        { select: () => [row()], claim: () => [{ domainId: ID }] },
-        { values: [] },
-      ),
+      db: fakeDb({ select: () => [row()], claim: () => [{ domainId: ID }] }),
       identity: identity(),
       zones,
+      txt: publishing(),
     })
 
     expect(await store.remove(OWNER, ID)).toBe(true)
@@ -289,63 +377,36 @@ describe("deleting a delegated domain", () => {
   })
 
   /**
-   * ⚠ THE CROSS-TENANT DELETE. A tenant holding a pending row for a name
+   * ⚠ THE CROSS-TENANT DELETE. A tenant holding an unproven row for a name
    * somebody else is actually serving used to remove that name's zones on the
    * way out: their own delete succeeded, and a different customer's mail
-   * stopped resolving with nothing in either account to explain it. The row is
-   * still deleted — it is theirs — but the DNS is not theirs to take.
+   * stopped resolving with nothing in either account to explain it.
    */
   it("removes no zone when a different row holds the claim", async () => {
-    let deleted = false
     const zones = spyZones()
     const store = domainStore({
       ...base,
-      db: fakeDb(
-        {
-          select: () => [row()],
-          claim: () => [{ domainId: OTHER_ID }],
-          del: () => {
-            deleted = true
-          },
-        },
-        { values: [] },
-      ),
+      db: fakeDb({ select: () => [row()], claim: () => [{ domainId: OTHER_ID }] }),
       identity: identity(),
       zones,
+      txt: publishing(),
     })
 
     expect(await store.remove(STRANGER, ID)).toBe(true)
-    expect(deleted).toBe(true)
     expect(zones.remove).not.toHaveBeenCalled()
   })
 
-  /** A claim that is simply absent is not a licence to delete either. */
   it("removes no zone when there is no claim to read", async () => {
     const zones = spyZones()
     const store = domainStore({
       ...base,
-      db: fakeDb({ select: () => [row()], claim: () => [] }, { values: [] }),
+      db: fakeDb({ select: () => [row()], claim: () => [] }),
       identity: identity(),
       zones,
+      txt: publishing(),
     })
 
     expect(await store.remove(STRANGER, ID)).toBe(true)
-    expect(zones.remove).not.toHaveBeenCalled()
-  })
-
-  /** A manual domain never asks, because it never had zones. */
-  it("does not look for a claim for a domain that was never delegated", async () => {
-    const claim = mock(() => [])
-    const zones = spyZones()
-    const store = domainStore({
-      ...base,
-      db: fakeDb({ select: () => [row({ delegated: false })], claim }, { values: [] }),
-      identity: identity(),
-      zones,
-    })
-
-    expect(await store.remove(OWNER, ID)).toBe(true)
-    expect(claim).not.toHaveBeenCalled()
     expect(zones.remove).not.toHaveBeenCalled()
   })
 })

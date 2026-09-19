@@ -193,6 +193,13 @@ describe("creating", () => {
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
+          // ⚠ `create` READS BEFORE IT WRITES NOW. It refuses a duplicate —
+          // this tenant's own, or a name verified elsewhere — before calling
+          // SES, because that call would overwrite the holder's DKIM key. An
+          // empty answer here is "the name is free".
+          select: () => ({
+            from: () => ({ where: () => ({ limit: async () => [] }) }),
+          }),
           insert: () => ({
             values: (v: Record<string, unknown>) => {
               written = v

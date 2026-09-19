@@ -1,5 +1,6 @@
 import type { DnsRecord, DomainStatus } from "@repo/contracts"
 import { dkimRecordValue } from "./dkim.js"
+import { challengeName, challengeValue } from "./ownership.js"
 
 /**
  * Delegated subdomains: the customer points three names at us and we serve
@@ -192,16 +193,39 @@ export function delegationRecordsFor(
   domain: string,
   nameservers: readonly string[],
   status: DomainStatus,
+  token: string,
 ): DnsRecord[] {
   const names = delegatedZoneNames(domain)
-  return Object.values(names).flatMap((zone) =>
-    nameservers.map((ns): DnsRecord => ({
-      record: "NS",
-      name: zone,
-      type: "NS",
+  return [
+    /*
+     * ⚠ FIRST, BECAUSE NOTHING ELSE COUNTS UNTIL IT IS PUBLISHED. The six NS
+     * records below are identical for every customer in the world, so they
+     * establish that SOMEBODY delegated the name and nothing about who. This
+     * one carries a token belonging to this domain row, and `verify` will not
+     * serve a zone for the name until it resolves.
+     *
+     * ⚠ AND IT IS DELIBERATELY NOT UNDER `mail.`, `_domainkey.` OR `_dmarc.`.
+     * Those three are ours the moment the delegation exists, so a challenge
+     * inside them would be a value we wrote ourselves. This one stays in the
+     * customer's own zone, where only the customer can put it.
+     */
+    {
+      record: "Ownership",
+      name: challengeName(domain),
+      type: "TXT",
       ttl: "Auto",
       status,
-      value: ns,
-    })),
-  )
+      value: challengeValue(token),
+    },
+    ...Object.values(names).flatMap((zone) =>
+      nameservers.map((ns): DnsRecord => ({
+        record: "NS",
+        name: zone,
+        type: "NS",
+        ttl: "Auto",
+        status,
+        value: ns,
+      })),
+    ),
+  ]
 }

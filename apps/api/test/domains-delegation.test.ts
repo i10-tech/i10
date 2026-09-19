@@ -12,6 +12,7 @@ import {
 } from "../src/domains/powerdns.js"
 
 const NS = ["ns1.i10.tech", "ns2.i10.tech"]
+const TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 const dialect = new PgDialect()
 
 const zones = (dkim: [string, string] | null = ["i10abc", "PUBLICKEY"]) =>
@@ -45,10 +46,33 @@ describe("what the customer delegates", () => {
   })
 
   it("asks for one NS record set per zone", () => {
-    const records = delegationRecordsFor("example.com", NS, "pending")
-    expect(records).toHaveLength(6)
-    expect(records.every((r) => r.type === "NS")).toBe(true)
-    expect(new Set(records.map((r) => r.name)).size).toBe(3)
+    const ns = delegationRecordsFor("example.com", NS, "pending", TOKEN).filter(
+      (r) => r.type === "NS",
+    )
+    expect(ns).toHaveLength(6)
+    expect(new Set(ns.map((r) => r.name)).size).toBe(3)
+  })
+
+  /**
+   * ⚠ AND ONE MORE RECORD, WHICH IS THE ONLY ONE THAT IDENTIFIES THE ACCOUNT.
+   * The six NS records above are byte-identical for every delegating customer
+   * in the world, so they establish that somebody delegated the name and
+   * nothing about who — which let a stranger's zone answer for a domain the
+   * real owner had just delegated. See ownership.ts.
+   */
+  it("asks for a challenge record outside the delegated subtrees", () => {
+    const records = delegationRecordsFor("example.com", NS, "pending", TOKEN)
+    expect(records).toHaveLength(7)
+
+    const challenge = records.find((r) => r.type === "TXT")!
+    expect(challenge.name).toBe("_i10-challenge.example.com")
+    expect(challenge.value).toBe(`i10-domain-verification=${TOKEN}`)
+
+    // ⚠ IT MUST NOT SIT UNDER ANY ZONE WE SERVE, or it is a value we wrote
+    // ourselves and proves only that our own nameserver answers.
+    for (const zone of Object.values(delegatedZoneNames("example.com"))) {
+      expect(challenge.name.endsWith(zone)).toBe(false)
+    }
   })
 })
 
