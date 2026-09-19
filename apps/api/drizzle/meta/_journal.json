@@ -288,6 +288,13 @@
       "when": 1789617350617,
       "tag": "0040_pdns_role_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789617351617,
+      "tag": "0041_delegation_claims",
+      "breakpoints": true
     }
   ]
 }

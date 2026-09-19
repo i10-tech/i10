@@ -1,7 +1,7 @@
 import { eq, and, desc } from "drizzle-orm"
 import type { CreateDomain, Domain, DomainStatus, DomainSummary } from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
-import { domains } from "../db/core.js"
+import { delegations, domains } from "../db/core.js"
 import { dnsRecordsFor } from "./records.js"
 import { generateDkimKeypair } from "./dkim.js"
 import { delegatedZoneNames, delegatedZones, delegationRecordsFor } from "./zone.js"
@@ -275,8 +275,8 @@ export function domainStore({
       })
 
       try {
-        const [row] = await withTenant(db, tenantId, async (tx) =>
-          tx
+        const [row] = await withTenant(db, tenantId, async (tx) => {
+          const inserted = await tx
             .insert(domains)
             .values({
               tenantId,
@@ -294,8 +294,32 @@ export function domainStore({
               // sending domain into Stalwart's recipient table.
               hostsMailboxes: false,
             })
-            .returning(COLUMNS),
-        )
+            .returning(COLUMNS)
+
+          /*
+           * ⚠ THE ZONES ARE CLAIMED IN THE SAME TRANSACTION AS THE ROW, AND
+           * THAT IS WHAT MAKES THE RACE SAFE RATHER THAN MERELY UNLIKELY. Two
+           * tenants adding the same delegated name concurrently both pass any
+           * check we could do beforehand; only a constraint decides. The insert
+           * below is the decision, and the loser's whole transaction — row
+           * included — rolls back, so there is no half-created domain whose
+           * zone belongs to somebody else.
+           *
+           * ⚠ AND IT IS THE `delegated` ONES ONLY. A manual domain publishes no
+           * zone, so there is nothing for two tenants to contend over; making
+           * them claim the name too would resurrect exactly the squat that
+           * migration 0039 was written to remove.
+           */
+          if (delegated) {
+            await tx.insert(delegations).values({
+              name,
+              domainId: (inserted[0] as Row).id,
+              tenantId,
+            })
+          }
+
+          return inserted
+        })
 
         // ⚠ AFTER THE ROW, AND OUTSIDE ITS TRANSACTION ON PURPOSE. A zone
         // published for a domain that failed to insert is a delegation
@@ -325,17 +349,42 @@ export function domainStore({
       } catch (error) {
         if (isUniqueViolation(error)) {
           /*
-           * ⚠ TWO CONSTRAINTS REACH HERE AND THEY MEAN OPPOSITE THINGS, so the
-           * message is chosen by which one fired rather than by one sentence
-           * covering both. `domains_tenant_name_unique` is this tenant's own
-           * duplicate — say so plainly, they can see the other row.
-           * `domains_verified_name_unique` is somebody else having PROVED
-           * ownership, which is the only case worth refusing at all.
+           * ⚠ THREE CONSTRAINTS REACH HERE AND THEY MEAN DIFFERENT THINGS, so
+           * the message is chosen by which one fired rather than by one
+           * sentence covering all of them. `domains_tenant_name_unique` is this
+           * tenant's own duplicate — say so plainly, they can see the other
+           * row. `delegations_name_unique` is somebody else already serving the
+           * zones. `domains_verified_name_unique` is somebody else having
+           * PROVED ownership.
            */
           if (isViolationOf(error, "domains_tenant_name_unique")) {
             return {
               status: "conflict",
               reason: `You have already added ${name}.`,
+            }
+          }
+
+          /*
+           * ⚠ REFUSED WITHOUT THE DOMAIN BEING CREATED AT ALL, WHICH IS THE
+           * ONLY HONEST ANSWER HERE. Falling back to a manual domain would
+           * silently give them something other than what they asked for, and
+           * creating a delegated row we will never publish a zone for is a
+           * domain that can never verify with nothing on screen saying why.
+           *
+           * ⚠ AND IT IS PHRASED AS "DELEGATED", NOT "VERIFIED", because the
+           * holder may well have proved nothing — first-come is the whole point
+           * of that claim. Telling somebody their domain is "already verified
+           * by another workspace" when it is not would send them to support
+           * with a question support cannot answer from the row.
+           */
+          if (isViolationOf(error, "delegations_name_unique")) {
+            return {
+              status: "conflict",
+              reason:
+                `${name} is already delegated to another workspace. If that is ` +
+                `yours, remove it there first — or add ${name} without ` +
+                `delegation and publish the records yourself. If you believe ` +
+                `neither, contact support@i10.tech and we will check ownership.`,
             }
           }
 
@@ -384,6 +433,35 @@ export function domainStore({
       const existing = await this.get(tenantId, id)
       if (!existing) return false
 
+      /*
+       * ⚠ READ BEFORE THE ROW GOES, BECAUSE THE CLAIM CASCADES WITH IT. After
+       * the delete below there is nothing left to ask, and the question has to
+       * be answered from somewhere — the old code answered it from
+       * `existing.delegated`, which says only that THIS tenant asked for
+       * delegation, not that this tenant is the one being served.
+       *
+       * ⚠ AND THAT IS WHAT MADE THE DELETE CROSS-TENANT. Any tenant holding a
+       * pending row for a name could remove the zones of whoever actually held
+       * it: their own delete succeeded, and somebody else's mail stopped
+       * resolving. `pslhq.app` is currently held by three tenants in
+       * production, so this was one delete away from happening.
+       */
+      const holdsZones =
+        existing.delegated &&
+        (await withTenant(db, tenantId, async (tx) => {
+          const [claim] = await tx
+            .select({ domainId: delegations.domainId })
+            .from(delegations)
+            .where(
+              and(
+                eq(delegations.tenantId, tenantId),
+                eq(delegations.name, existing.name),
+              ),
+            )
+            .limit(1)
+          return claim?.domainId === id
+        }))
+
       // ⚠ THE ROW GOES FIRST, AND THE ORDER IS THE OPPOSITE OF `create`'s ON
       // PURPOSE. Both orders leak something if the second step fails; this one
       // leaks an unused SES identity, which is inert. The other leaves a row
@@ -415,7 +493,11 @@ export function domainStore({
       // ⚠ THE ZONES GO TOO, OR THE DELEGATION OUTLIVES THE DOMAIN. The customer's
       // NS records still point here after a delete, so a zone left behind keeps
       // answering — with a DKIM key and a return path for a domain nobody owns.
-      if (existing.delegated && zones) {
+      //
+      // ⚠ BUT ONLY THE ZONES THIS ROW ACTUALLY HELD. A tenant whose pending row
+      // never won the claim has no zones to take away, and taking them anyway
+      // is deleting somebody else's DNS.
+      if (holdsZones && zones) {
         for (const zone of Object.values(delegatedZoneNames(existing.name))) {
           await tidy("delegated zone", () => zones.remove(zone))
         }

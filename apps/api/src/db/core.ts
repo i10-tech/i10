@@ -416,6 +416,68 @@ export const domains = core.table(
 )
 
 /**
+ * Which domain row holds the DNS zones for a delegated name.
+ *
+ * ⚠ THIS IS THE HALF OF `domains_verified_name_unique` THAT INDEX CANNOT COVER,
+ * AND THE REASON IS CIRCULAR. A delegated domain is verified when SES resolves
+ * `<selector>._domainkey.<domain>`, and that lookup follows the customer's NS
+ * records into a zone we serve — so publishing the zone is not a record of a
+ * claim, it is the act that MANUFACTURES the proof the claim is granted on.
+ * Exclusivity therefore cannot wait for `status = 'verified'`: nothing can
+ * verify until its zone already answers.
+ *
+ * ⚠ WITHOUT IT, `create` PUBLISHED THE ZONE UNVERIFIED AND KEYED ON THE NAME
+ * ALONE. `upsertZoneStatement` is `on conflict (name) do update`, so a second
+ * tenant adding an already-delegated domain replaced the first tenant's zone
+ * with their own DKIM selector, underneath NS records the real owner had
+ * published — and then verified against it. `remove` was the mirror: it dropped
+ * the zones by name with no ownership test at all.
+ *
+ * ⚠ SO IT IS FIRST-COME, WHICH IS A DELIBERATE AND BOUNDED STEP BACK TOWARDS
+ * WHAT 0039 REMOVED. A stranger can hold the DELEGATED mode for a name they do
+ * not own. They cannot verify it — SES reads the real owner's DNS, which does
+ * not point here — cannot send from it, and cannot stop the owner using the
+ * MANUAL record path, which is the default and needs nothing from us. A name
+ * that cannot be delegated is an inconvenience; a name somebody else can sign
+ * as is a takeover. Only one of those is worth accepting.
+ */
+export const delegations = core.table(
+  "delegations",
+  {
+    /**
+     * The customer's domain, e.g. `example.com` — NOT the three zone names
+     * under it. Those are derived by `delegatedZoneNames` and always move
+     * together, so one row arbitrates all three and they cannot be split.
+     */
+    name: text("name").notNull(),
+
+    domainId: uuid("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /**
+     * ⚠ NAMED RATHER THAN LEFT TO POSTGRES, because `domainStore.create` chooses
+     * what to tell the customer by reading which constraint fired. The default
+     * would be `delegations_pkey`, which is a name an later `ALTER` could move
+     * out from under that branch without anything failing.
+     */
+    primaryKey({ name: "delegations_name_unique", columns: [t.name] }),
+
+    /** One claim per domain row, so a retry cannot claim the same name twice. */
+    unique("delegations_domain_unique").on(t.domainId),
+
+    index("delegations_tenant_idx").on(t.tenantId),
+  ],
+)
+
+/**
  * Every API key i10 has issued. This table IS the credential store.
  *
  * ⚠ IT USED TO BE A THIN INDEX OF KEYS CLERK HELD, AND THE COMMENT HERE ARGUED

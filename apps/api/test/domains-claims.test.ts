@@ -47,9 +47,20 @@ const violation = (constraint: string) =>
     },
   )
 
+/**
+ * ⚠ `claim` IS A SEPARATE HANDLER BECAUSE `remove` NOW ASKS TWO QUESTIONS. It
+ * reads the domain row, and then reads `core.delegations` to find out whether
+ * this row is the one actually being served — answering both from one handler
+ * fed the claim lookup a domain row, whose `domainId` is undefined, so every
+ * delegated delete looked like a tenant that held nothing.
+ *
+ * Dispatching on the PROJECTION rather than on call order keeps it honest if
+ * the two reads are ever reordered.
+ */
 function fakeDb(handlers: {
   insert?: () => unknown[]
   select?: () => unknown[]
+  claim?: () => unknown[]
   update?: () => unknown[]
   del?: () => void
 }) {
@@ -58,10 +69,13 @@ function fakeDb(handlers: {
     insert: () => ({
       values: () => ({ returning: async () => handlers.insert?.() ?? [] }),
     }),
-    select: () => ({
+    select: (projection?: Record<string, unknown>) => ({
       from: () => ({
         where: () => ({
-          limit: async () => handlers.select?.() ?? [],
+          limit: async () =>
+            projection && "domainId" in projection
+              ? (handlers.claim?.() ?? [])
+              : (handlers.select?.() ?? []),
           orderBy: async () => handlers.select?.() ?? [],
         }),
       }),
@@ -235,7 +249,12 @@ describe("deleting a domain whose cleanup fails", () => {
     const warn = mock(() => {})
     const store = domainStore({
       ...base,
-      db: fakeDb({ select: () => [row({ delegated: true })] }),
+      // ⚠ AND THIS TENANT HOLDS THE CLAIM, which is now what decides whether
+      // the zones are theirs to remove at all — see `delegations_name_unique`.
+      db: fakeDb({
+        select: () => [row({ delegated: true })],
+        claim: () => [{ domainId: ID }],
+      }),
       identity: identity(),
       zones: {
         put: async () => {},
