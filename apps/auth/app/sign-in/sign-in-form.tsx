@@ -6,11 +6,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
-import {
-  Field,
-  FieldGroup,
-  FieldSeparator,
-} from "@repo/ui/components/field"
+import { Field, FieldGroup, FieldSeparator } from "@repo/ui/components/field"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepStage } from "@repo/ui/components/step-stage"
