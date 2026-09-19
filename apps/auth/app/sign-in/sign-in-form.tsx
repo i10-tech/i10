@@ -17,7 +17,7 @@ import { Spinner } from "@repo/ui/components/spinner"
 import { StepStage } from "@repo/ui/components/step-stage"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
-import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave } from "../_lib/finish"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { emailVerdict, isEmailUsable } from "../_lib/validate"
@@ -53,6 +53,7 @@ export function SignInForm({
   mfaHref,
   redirectRaw,
   providers,
+  onUnknownIdentifier,
 }: {
   afterAuthUrl: string
   signUpHref: string
@@ -60,6 +61,19 @@ export function SignInForm({
   mfaHref: string
   redirectRaw?: string
   providers: SsoProvider[]
+  /**
+   * The address has no account, so this is a sign-up.
+   *
+   * ⚠ REPORTED UPWARDS RATHER THAN HANDLED HERE, so this form never has to know
+   * the sign-up flow exists. The wrapper above owns the branch; without that
+   * seam the two 600-line forms would import each other to render each other,
+   * for a decision neither of them makes.
+   *
+   * ⚠ AND ITS ABSENCE LEAVES THE OLD BEHAVIOUR INTACT. Without a handler an
+   * unknown address is still a toast, which is what `/sign-in` did before there
+   * was one box for both doors.
+   */
+  onUnknownIdentifier?: (identifier: string) => void
 }) {
   const router = useRouter()
   const { signIn } = useSignIn()
@@ -189,6 +203,18 @@ export function SignInForm({
     try {
       const { error } = await signIn.create({ identifier: value })
       if (error) {
+        /*
+         * ⚠ "NO SUCH ACCOUNT" IS THE OTHER ANSWER, NOT AN ERROR. On a page with
+         * one box serving both doors, an unknown address is how somebody says
+         * they are new — and a red toast telling them so, on a form that then
+         * sits there unchanged, is the interface refusing to do the obvious
+         * next thing.
+         */
+        if (onUnknownIdentifier && isUnknownIdentifier(error)) {
+          onUnknownIdentifier(value)
+          setBusy(null)
+          return
+        }
         toast.error(messageFor(error))
         setBusy(null)
         return
@@ -374,10 +400,25 @@ export function SignInForm({
         {stage === "identifier" ? (
           <form className="flex flex-col gap-6" onSubmit={onIdentifier} noValidate>
             <FieldGroup>
+              {/*
+               * ⚠ THE COPY FOLLOWS WHETHER THIS PAGE IS BOTH DOORS. With a
+               * handler for an unknown address the box serves people who have
+               * no account yet, and "Login to your account" tells half of them
+               * they are in the wrong place — which, on a page that was about
+               * to sign them up, is the one sentence that sends them away.
+               *
+               * ⚠ AND IT PROMISES ONLY WHAT THE LOOKUP DELIVERS. Not "sign in",
+               * not "sign up": the address decides, and saying so is both
+               * accurate and the reason there is only one field.
+               */}
               <div className="flex flex-col items-center gap-1 text-center">
-                <h1 className="text-2xl font-bold">Login to your account</h1>
+                <h1 className="text-2xl font-bold">
+                  {onUnknownIdentifier ? "Continue to i10" : "Login to your account"}
+                </h1>
                 <p className="text-sm text-balance text-muted-foreground">
-                  Enter your email to continue
+                  {onUnknownIdentifier
+                    ? "Enter your email. We will sign you in, or start a new account."
+                    : "Enter your email to continue"}
                 </p>
               </div>
 

@@ -113,6 +113,7 @@ export function SignUpForm({
   abilities,
   password: passwordPolicy,
   startAt,
+  initialEmail,
   alreadySignedIn,
 }: {
   afterAuthUrl: string
@@ -142,6 +143,16 @@ export function SignUpForm({
    * already completed. The server knows before it sends any markup.
    */
   startAt?: Stage
+  /**
+   * The address the identifier step already collected.
+   *
+   * ⚠ THE SIGN-UP FLOW IS ENTERED FROM ONE SHARED BOX NOW, so by the time this
+   * form renders the person has already typed their email once. Asking for it
+   * again at the credentials step would be the single most obvious thing wrong
+   * with a merged page — it is still editable there, because arriving in
+   * sign-up is itself a decent hint that the address might have a typo in it.
+   */
+  initialEmail?: string
   /** There is already a session, and no step to resume onto. */
   alreadySignedIn: boolean
 }) {
@@ -154,7 +165,7 @@ export function SignUpForm({
 
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(initialEmail ?? "")
   const [code, setCode] = useState("")
 
   /*

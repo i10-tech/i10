@@ -1,8 +1,9 @@
 import type { Metadata } from "next"
 import { headers } from "next/headers"
 import { ssoProviders } from "../_lib/providers"
+import { passwordRules, signUpAbilities } from "../_lib/environment"
 import { afterAuthUrl } from "../_lib/redirect"
-import { SignInForm } from "./sign-in-form"
+import { AuthFlow } from "../_components/auth-flow"
 
 export const metadata: Metadata = { title: "Sign in · i10" }
 
@@ -26,27 +27,40 @@ export default async function Page({
   // not read.
   const after = afterAuthUrl(raw)
 
-  // The other two doors, keeping the destination the person arrived with — so
-  // signing up, or resetting a password, still lands them where they were
-  // originally going rather than on a default dashboard.
+  // Password reset keeps the destination the person arrived with, so it still
+  // lands them where they were originally going rather than on a dashboard.
+  // Signing up no longer needs a door: an unknown address opens it in place.
   const carry =
     typeof raw === "string" ? `?redirect_url=${encodeURIComponent(raw)}` : ""
 
   // ⚠ WHICH SSO BUTTONS EXIST IS CLERK'S ANSWER, NOT OURS, and it is
   // resolved here so the first paint is already correct. See
   // _lib/providers.ts — it also applies the Apple-hardware rule.
-  const providers = await ssoProviders((await headers()).get("user-agent"))
+  /*
+   * ⚠ THE SIGN-UP INSTANCE FACTS ARE FETCHED HERE TOO, BECAUSE THIS PAGE IS
+   * BOTH DOORS NOW. An unknown address turns into a sign-up without a
+   * navigation, so what the instance can finish and what it accepts as a
+   * password have to be in hand before the first paint — resolving them after
+   * the branch would mean a form that renders and then corrects its own
+   * password hint, which is the exact bug `passwordRules` was added to fix.
+   */
+  const [providers, abilities, password] = await Promise.all([
+    ssoProviders((await headers()).get("user-agent")),
+    signUpAbilities(),
+    passwordRules(),
+  ])
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
-        <SignInForm
+        <AuthFlow
           afterAuthUrl={after}
-          signUpHref={`/sign-up${carry}`}
           resetHref={`/reset-password${carry}`}
           mfaHref={`/mfa${carry}`}
           redirectRaw={typeof raw === "string" ? raw : undefined}
           providers={providers}
+          abilities={abilities}
+          password={password}
         />
       </div>
     </main>

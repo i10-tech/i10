@@ -321,7 +321,14 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
               <ProviderMark
                 slug={provider.slug}
                 name={provider.name}
-                className="mt-0.5 size-4"
+                /*
+                 * ⚠ SIZED FOR A WIDE MARK, NOT A SQUARE ONE. An official asset
+                 * keeps its own proportions and letterboxes inside this box —
+                 * Cloudflare's is roughly 1.7:1, so a `size-4` slot rendered it
+                 * nine pixels tall beside fourteen-pixel text and read as a
+                 * smudge. The box is square; what you see is the height.
+                 */
+                className="-mt-0.5 size-7"
               />
             ) : (
               <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />

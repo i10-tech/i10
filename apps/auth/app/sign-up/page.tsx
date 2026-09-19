@@ -5,6 +5,7 @@ import { ssoProviders } from "../_lib/providers"
 import { passwordRules, signUpAbilities } from "../_lib/environment"
 import { afterAuthUrl } from "../_lib/redirect"
 import { SignUpForm } from "./sign-up-form"
+import { AuthFlow } from "../_components/auth-flow"
 
 export const metadata: Metadata = { title: "Create your account · i10" }
 
@@ -83,6 +84,37 @@ export default async function Page({
     (wanted === "connect" && providers.length > 0)
       ? wanted
       : undefined
+
+  /*
+   * ⚠ WITHOUT A STEP TO RESUME, THIS IS THE SAME PAGE AS `/sign-in`. There is
+   * one box and it decides: a known address goes to a password, an unknown one
+   * starts here. Keeping a second URL that asks the question from the other
+   * side would put the dead end back — a returning customer arriving on
+   * `/sign-up` being told their address is taken — for a distinction the
+   * lookup already makes better than they can.
+   *
+   * ⚠ BUT THE RESUME PATH IS NOT THAT PAGE, AND MUST NOT BECOME IT. Coming
+   * back from a provider with `?step=connect` means the account already exists
+   * and there is a half-finished flow to re-enter; asking such a person for an
+   * email address would be asking them to sign up twice.
+   */
+  if (!startAt) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center px-6 py-12">
+        <div className="w-full max-w-sm">
+          <AuthFlow
+            afterAuthUrl={after}
+            resetHref={`/reset-password${carry}`}
+            mfaHref={`/mfa${carry}`}
+            redirectRaw={typeof raw === "string" ? raw : undefined}
+            providers={providers}
+            abilities={abilities}
+            password={password}
+          />
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
