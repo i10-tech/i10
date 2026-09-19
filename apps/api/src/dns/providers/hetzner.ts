@@ -8,6 +8,7 @@ import {
   type RemoteZone,
   type ZoneWriter,
 } from "../port.js"
+import { DNS_USER_AGENT } from "../user-agent.js"
 
 /**
  * Hetzner DNS.
@@ -62,6 +63,8 @@ async function call<T>(
         // 401, which reads as a bad token rather than a wrong header.
         "Auth-API-Token": apiToken,
         "Content-Type": "application/json",
+        // See dns/user-agent.ts: the default user agent is a bot signature.
+        "User-Agent": DNS_USER_AGENT,
         ...(init.headers ?? {}),
       },
       signal: AbortSignal.timeout(10_000),
