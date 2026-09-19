@@ -1,10 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Plug } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
+import { cn } from "cn"
+import { ProviderMark } from "@/components/provider-mark"
 import { startDnsConnect } from "@/lib/actions"
 
 /**
@@ -16,11 +17,17 @@ import { startDnsConnect } from "@/lib/actions"
  * flow every OAuth integration used before anybody tried to be clever, and the
  * callback page brings them back.
  *
- * ⚠ IT LIVES IN ITS OWN FILE BECAUSE TWO SURFACES NEED IT. The domain page
+ * ⚠ IT LIVES IN ITS OWN FILE BECAUSE THREE SURFACES NEED IT. The domain page
  * offers it beside "publish these for me"; the add-domain form offers it while
- * somebody is still choosing how to set the domain up, which is the moment they
- * are actually deciding. One copy, so the two cannot drift into saying different
+ * somebody is still choosing how to set the domain up; onboarding offers it as
+ * the whole of a step. One copy, so they cannot drift into saying different
  * things about the same capability.
+ *
+ * ⚠ AND IT IS THE SAME SHAPE AS THE SIGN-IN PAGE'S PROVIDER BUTTONS — a pill,
+ * the provider's mark on the left, "Continue with…" wording. Somebody who
+ * signed in with Google pressed this exact control twenty minutes ago, and the
+ * step that asks them to authorise something is the wrong place to be
+ * inventive.
  */
 export function ConnectProviderButton({
   slug,
@@ -28,11 +35,16 @@ export function ConnectProviderButton({
   label,
   variant = "outline",
   size = "sm",
+  block,
+  className,
 }: {
   slug: string
   providerName: string
-  /** Overrides the default "Connect X" wording. */
+  /** Overrides the default "Connect to X" wording. */
   label?: string
+  /** Full width, for a step whose whole content is this one action. */
+  block?: boolean
+  className?: string
   variant?: React.ComponentProps<typeof Button>["variant"]
   size?: React.ComponentProps<typeof Button>["size"]
 }) {
@@ -65,9 +77,10 @@ export function ConnectProviderButton({
       size={size}
       onClick={connect}
       disabled={pending}
+      className={cn(block && "w-full", className)}
     >
-      {pending ? <Spinner /> : <Plug />}
-      {label ?? `Connect ${providerName}`}
+      {pending ? <Spinner /> : <ProviderMark slug={slug} name={providerName} />}
+      {label ?? `Connect to ${providerName}`}
     </Button>
   )
 }

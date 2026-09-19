@@ -11,7 +11,14 @@ import { cn } from "cn"
  * mark does the only job the logo has here (you spot your provider in half a
  * second) while staying ours to change.
  *
- * ⚠ AND EVERY ONE OF THEM USES `currentColor`. On a true-black canvas a
+ * ⚠ AND EVERY ONE OF THEM USES `currentColor`, WHICH IS ALSO THE ANSWER TO
+ * "DOES IT WORK IN DARK AND LIGHT MODE". A mark that inherits the text colour
+ * works in both by construction — there is no second asset, no pair to keep in
+ * step, and no provider that needs one. Real brand assets would need exactly
+ * that: two files each, forty-five times, every one of them reviewed again
+ * whenever a vendor refreshes their brand.
+ *
+ * ⚠ THE COLOUR ARGUMENT IS THE OTHER HALF. On a true-black canvas a
  * brand-coloured logo is the only saturated thing on the page and drags the eye
  * straight to it; worse, several of these brands are blue, which would be the
  * accent this design system deliberately does not have. Following the text
@@ -44,6 +51,23 @@ const PATHS: Record<string, string> = {
   /* Namecheap — the chevron pair. */
   namecheap:
     "M3 6.5c0-.6.6-1 1.1-.7l6.4 3.8c.3.2.5.5.5.9v6.1c0 .6-.6 1-1.1.7L3.5 13.5a1 1 0 0 1-.5-.9zm11 4c0-.4.2-.7.5-.9l6.4-3.8c.5-.3 1.1.1 1.1.7v6.1c0 .4-.2.7-.5.9l-6.4 3.8c-.5.3-1.1-.1-1.1-.7z",
+  /* Azure — the two chevrons of the A. */
+  "azure-dns":
+    "M9.6 3.4h5.2l-5.4 16 -6.4 0 6.6-16zm1.6 4.6 4 11.4H5.5l6-2.5.6-.2-3.4-4 2.5-4.7z",
+  /* Linode — the angular L. */
+  linode:
+    "M11 2.3 5.5 5.6v6.2l2.6 1.5V7.1L11 5.4zm0 7.4-2.9 1.7v6.2L11 19.3v-6.2l2.9-1.7V5.2L11 6.9zm3.1 1.8v6.2l-2.6 1.5v-6.2z",
+  /* Hetzner — the rungs of the H. */
+  hetzner: "M4 4h3.4v6.2h9.2V4H20v16h-3.4v-6.4H7.4V20H4z",
+  /* DNSimple — a simple monolith with a notch. */
+  dnsimple:
+    "M12 2 3 6.6v10.8L12 22l9-4.6V6.6zm0 3 6 3v8l-6 3-6-3V8zm-2 3.6v6.8l4-2v-2.8l-2 1V9.6z",
+  /* Squarespace — the interlocking frames. */
+  squarespace:
+    "M6.6 8.4a3.4 3.4 0 0 1 4.8 0l5 5-1.7 1.7-5-5a1 1 0 0 0-1.4 0l-3.9 3.9a1 1 0 0 0 0 1.4l1.6 1.7-1.7 1.7-1.7-1.7a3.4 3.4 0 0 1 0-4.8zm10.8 7.2a3.4 3.4 0 0 1-4.8 0l-5-5 1.7-1.7 5 5a1 1 0 0 0 1.4 0l3.9-3.9a1 1 0 0 0 0-1.4l-1.6-1.7 1.7-1.7 1.7 1.7a3.4 3.4 0 0 1 0 4.8z",
+  /* Shopify — the bag. */
+  shopify:
+    "M14.6 4.6c-.2-.5-.7-.8-1.2-.8-1.7 0-3.1 1.5-3.7 3.6l-2 .6c-.6.2-.6.2-.7.8L5.4 20.2l8.5 1.6 4-1V5.2c0-.3-.2-.5-.5-.5zm-2.8 2.1-1.8.5c.4-1.3 1.2-2.2 2-2.4-.1.5-.2 1.2-.2 1.9zm.6 3.9c-.5-.2-1-.3-1.4-.3-1.3 0-1.3.8-1.3 1 0 1.1 2.9 1.6 2.9 4.2 0 2.1-1.3 3.4-3.1 3.4-2.1 0-3.2-1.3-3.2-1.3l.6-1.9s1.1 1 2 1c.6 0 .9-.5.9-.9 0-1.5-2.4-1.5-2.4-3.9 0-2 1.5-4 4.4-4 1.1 0 1.7.3 1.7.3z",
   /* Google Cloud DNS — the four-part mark, simplified. */
   "google-cloud-dns":
     "M12 2.2 4.2 6.7v9l7.8 4.5 7.8-4.5v-9zm0 2.3 5.8 3.4L12 11.2 6.2 7.9zM5.9 9.8 11 12.8v6L5.9 15.8zm7.1 3 5.1-3v6l-5.1 3z",
