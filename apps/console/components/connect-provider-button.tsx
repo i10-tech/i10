@@ -36,14 +36,29 @@ export function ConnectProviderButton({
   variant = "outline",
   size = "sm",
   block,
+  brand,
   className,
 }: {
   slug: string
   providerName: string
-  /** Overrides the default "Connect to X" wording. */
+  /** Overrides the default "Connect X" wording. */
   label?: string
   /** Full width, for a step whose whole content is this one action. */
   block?: boolean
+  /**
+   * The provider-button look: a white pill carrying their mark in their colour.
+   *
+   * ⚠ THE SAME SHAPE EVERY "SIGN IN WITH…" BUTTON ON THE WEB USES, and that is
+   * the entire argument for it. This is the one control in the product that
+   * sends somebody to a third party and asks them to trust us there; making it
+   * look like the control they have pressed on twenty other sites is worth more
+   * than making it match the surrounding monochrome.
+   *
+   * ⚠ WHITE IN BOTH THEMES, WITH A BORDER SO IT SURVIVES THE LIGHT ONE. A
+   * background that followed the theme would put a dark mark on a dark pill for
+   * half our users, and brand marks are drawn for light backgrounds.
+   */
+  brand?: boolean
   className?: string
   variant?: React.ComponentProps<typeof Button>["variant"]
   size?: React.ComponentProps<typeof Button>["size"]
@@ -77,10 +92,26 @@ export function ConnectProviderButton({
       size={size}
       onClick={connect}
       disabled={pending}
-      className={cn(block && "w-full", className)}
+      className={cn(
+        block && "w-full",
+        brand && [
+          /*
+           * ⚠ THE `dark:` COUNTERPARTS ARE NOT OPTIONAL HERE, AND LEAVING THEM
+           * OFF PRODUCED A BUTTON WITH NO VISIBLE LABEL. The `outline` variant
+           * carries `dark:bg-input/30`, and tailwind-merge treats a prefixed
+           * utility as a DIFFERENT key from its unprefixed form — so `bg-white`
+           * did not replace it, the pill stayed dark, and `text-neutral-950`
+           * applied on top of it.
+           */
+          "border-neutral-200 bg-white text-neutral-950",
+          "hover:bg-neutral-100 hover:text-neutral-950",
+          "dark:border-neutral-200 dark:bg-white dark:hover:bg-neutral-100",
+        ],
+        className,
+      )}
     >
       {pending ? <Spinner /> : <ProviderMark slug={slug} name={providerName} />}
-      {label ?? `Connect to ${providerName}`}
+      {label ?? `Connect ${providerName}`}
     </Button>
   )
 }

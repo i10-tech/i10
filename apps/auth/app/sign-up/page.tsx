@@ -1,103 +1,48 @@
-import type { Metadata } from "next"
-import { headers } from "next/headers"
-import { auth } from "@clerk/nextjs/server"
-import { ssoProviders } from "../_lib/providers"
-import { passwordRules, signUpAbilities } from "../_lib/environment"
-import { afterAuthUrl } from "../_lib/redirect"
-import { SignUpForm } from "./sign-up-form"
-
-export const metadata: Metadata = { title: "Create your account · i10" }
-
-/** Same reason as the sign-in page: the destination comes from the query. */
-export const dynamic = "force-dynamic"
+import { permanentRedirect } from "next/navigation"
 
 /**
- * The optional steps somebody can be sent BACK to, spelled out.
+ * There is no sign-up page. This is the redirect that says so.
  *
- * ⚠ IT IS AN ALLOW-LIST BECAUSE `?step=` ARRIVES IN A URL. Anyone can type one,
- * and the value picks which branch of the flow renders — so it is checked
- * against the three steps that are legitimately resumable rather than cast. The
- * account-building steps are deliberately absent: resuming onto "verify" with a
- * session but no sign-up attempt would render a code box with nothing to check
- * the code against.
+ * ⚠ THE PAGE IT REPLACED WAS HALF OF A DECISION NOBODY SHOULD HAVE BEEN ASKED
+ * TO MAKE. "Do you already have an account" is a lookup, and putting it to
+ * somebody who has half-forgotten produced a dead end in either direction: a
+ * returning customer here was told their address was taken, and a new one on
+ * `/sign-in` was told there was no such account. Both were reached by answering
+ * honestly. One box on one page answers it for them.
+ *
+ * ⚠ THE URL SURVIVES BECAUSE THINGS POINT AT IT. Clerk's `display_config`
+ * carries `sign_up_url` for this instance, marketing links exist, and people
+ * bookmark. A 404 for any of them would be a worse answer than a redirect.
+ *
+ * ⚠ EVERY QUERY PARAMETER IS CARRIED, WHICH IS NOT COSMETIC. `redirect_url` is
+ * how somebody lands back where they were going, and `step` is how a browser
+ * returning from a provider re-enters a half-finished flow — dropping either
+ * turns a resumable journey into a restart. The parameters are forwarded
+ * verbatim and validated by the page that receives them, which is the only
+ * place that has the allowlist.
+ *
+ * ⚠ `permanentRedirect`, NOT `redirect`. A 308 lets browsers and crawlers stop
+ * asking, which is true: this is not coming back. It also preserves the method,
+ * though nothing here posts.
  */
-const RESUMABLE = ["passkey", "totp-offer", "connect"] as const
-type Resumable = (typeof RESUMABLE)[number]
-
-function resumable(value: string | string[] | undefined): Resumable | undefined {
-  return RESUMABLE.find((step) => step === value)
-}
+export const dynamic = "force-dynamic"
 
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect_url?: string | string[]; step?: string | string[] }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const { redirect_url: raw, step } = await searchParams
-  const after = afterAuthUrl(raw)
-  const carry =
-    typeof raw === "string" ? `?redirect_url=${encodeURIComponent(raw)}` : ""
+  const params = await searchParams
 
-  /*
-   * ⚠ ASKED HERE SO THE FIRST PAINT IS THE RIGHT STEP. The connect step sends
-   * the browser out to Google and it comes back as a full page load with every
-   * piece of React state gone. Deciding in the browser means rendering "What is
-   * your name?" and correcting it a frame later, to somebody who finished
-   * signing up a minute ago.
-   */
-  const { userId } = await auth()
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string") query.set(key, value)
+    // ⚠ A REPEATED PARAMETER KEEPS ONLY ITS FIRST VALUE, matching how the
+    // receiving page reads it — it takes `typeof raw === "string"` and ignores
+    // an array, so forwarding every copy would carry values it will discard.
+    else if (Array.isArray(value) && value[0] !== undefined) query.set(key, value[0])
+  }
 
-  /*
-   * ⚠ BOTH OF THESE READ THE SAME CLERK ENVIRONMENT DOCUMENT AND COST ONE
-   * REQUEST. Next dedupes identical `fetch`es within a render pass — see
-   * _lib/environment.ts, which owns the fetch and its cache.
-   *
-   * ⚠ AND THEY ARE ASKED SERVER SIDE SO THE STEP COUNT IS RIGHT ON THE FIRST
-   * PAINT. Deciding in the browser would draw a progress bar with seven
-   * segments and then re-segment it to five, under somebody who has already
-   * started counting.
-   */
-  const [providers, abilities, password] = await Promise.all([
-    ssoProviders((await headers()).get("user-agent")),
-    signUpAbilities(),
-    /*
-     * ⚠ THE THIRD READ OF THE SAME DOCUMENT, AND STILL ONE REQUEST. What this
-     * instance will accept as a password is a property of the instance, so the
-     * hint under the box and the rule the submit button enforces both come from
-     * Clerk rather than from a constant that was wrong — it said eight
-     * characters against an instance requiring fifteen.
-     */
-    passwordRules(),
-  ])
-
-  /*
-   * ⚠ A STEP IS ONLY HONOURED WITH A SESSION AND WITH THE ABILITY BEHIND IT.
-   * `?step=totp-offer` from an instance with two-factor switched off would open
-   * a screen whose button Clerk refuses — so the allow-list above is checked
-   * against what this instance can actually do, not just against the spelling.
-   */
-  const wanted = userId ? resumable(step) : undefined
-  const startAt =
-    (wanted === "passkey" && abilities.passkey) ||
-    (wanted === "totp-offer" && abilities.totp) ||
-    (wanted === "connect" && providers.length > 0)
-      ? wanted
-      : undefined
-
-  return (
-    <main className="flex min-h-dvh items-center justify-center px-6 py-12">
-      <div className="w-full max-w-sm">
-        <SignUpForm
-          afterAuthUrl={after}
-          signInHref={`/sign-in${carry}`}
-          redirectRaw={typeof raw === "string" ? raw : undefined}
-          providers={providers}
-          abilities={abilities}
-          password={password}
-          startAt={startAt}
-          alreadySignedIn={Boolean(userId) && startAt === undefined}
-        />
-      </div>
-    </main>
-  )
+  const suffix = query.size > 0 ? `?${query.toString()}` : ""
+  permanentRedirect(`/sign-in${suffix}`)
 }

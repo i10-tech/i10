@@ -31,6 +31,7 @@ export const metadata: Metadata = { title: "Templates" }
  */
 export default async function TemplatesPage() {
   const result = await tryApi<{ data: TemplateSummary[] }>("/console/templates")
+  const hasRows = result.ok && result.data.data.length > 0
 
   // ⚠ GROUPED IN THE RENDER RATHER THAN BY THE API. Folders are a display
   // concept — the column is a flat string — so the grouping belongs where the
@@ -51,9 +52,19 @@ export default async function TemplatesPage() {
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Templates</PageTitle>
-          <PageActions>
-            <NewTemplateButton />
-          </PageActions>
+          {/*
+           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
+           * CARRIES THIS ACTION. Two buttons for one action, eight inches
+           * apart, reads as two different things — and the one in the header is
+           * the smaller and less explained of the two, so it wins attention it
+           * has not earned. The empty state's version says what will happen;
+           * this one just says a noun.
+           */}
+          {hasRows && (
+            <PageActions>
+              <NewTemplateButton />
+            </PageActions>
+          )}
         </PageHeaderRow>
         <PageDescription>
           Write once, send by id. Editing a template does not change what is going out
@@ -64,7 +75,7 @@ export default async function TemplatesPage() {
       <PageBody>
         {!result.ok ? (
           <PanelError title="Could not load templates" message={result.error.message} />
-        ) : result.data.data.length === 0 ? (
+        ) : !hasRows ? (
           <EmptyState
             title="No templates yet"
             description="Create one and reference it from your send call, so changing the copy does not mean a deploy."

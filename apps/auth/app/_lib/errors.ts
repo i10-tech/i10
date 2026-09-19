@@ -23,6 +23,24 @@ export function messageFor(error: FlowError): string {
 }
 
 /**
+ * Clerk saying "there is no account with that identifier".
+ *
+ * ⚠ THIS IS NOT A FAILURE ON AN IDENTIFIER-FIRST PAGE, IT IS THE OTHER ANSWER.
+ * One box asks for an email and the reply decides which flow the person is in:
+ * a known address goes on to a password, an unknown one starts a sign-up. Only
+ * `code` is safe to branch on — `message` is developer-facing and Clerk
+ * documents it as unstable.
+ *
+ * ⚠ AND IT DOES NOT MAKE ACCOUNT ENUMERATION POSSIBLE WHERE IT WAS NOT. Two
+ * separate pages already answered the same question from either side: sign-up
+ * refused a taken address and sign-in refused an unknown one. Identifier-first
+ * asks it once and out loud rather than twice by implication.
+ */
+export function isUnknownIdentifier(error: FlowError): boolean {
+  return error?.code === "form_identifier_not_found"
+}
+
+/**
  * For the `catch` arm: a transport failure, not a verdict from Clerk.
  *
  * ⚠ IT MUST NOT MENTION CREDENTIALS. A dropped connection reported as

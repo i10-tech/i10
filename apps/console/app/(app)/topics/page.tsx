@@ -36,15 +36,26 @@ export const metadata: Metadata = { title: "Topics" }
  */
 export default async function TopicsPage() {
   const result = await tryApi<{ data: TopicRow[] }>("/console/topics")
+  const hasRows = result.ok && result.data.data.length > 0
 
   return (
     <Page>
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Topics</PageTitle>
-          <PageActions>
-            <NewTopicButton />
-          </PageActions>
+          {/*
+           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
+           * CARRIES THIS ACTION. Two buttons for one action, eight inches
+           * apart, reads as two different things — and the one in the header is
+           * the smaller and less explained of the two, so it wins attention it
+           * has not earned. The empty state's version says what will happen;
+           * this one just says a noun.
+           */}
+          {hasRows && (
+            <PageActions>
+              <NewTopicButton />
+            </PageActions>
+          )}
         </PageHeaderRow>
         <PageDescription>
           The choices a recipient gets on their preference page. Their answer here is
@@ -55,7 +66,7 @@ export default async function TopicsPage() {
       <PageBody>
         {!result.ok ? (
           <PanelError title="Could not load topics" message={result.error.message} />
-        ) : result.data.data.length === 0 ? (
+        ) : !hasRows ? (
           <EmptyState
             title="No topics yet"
             description="Without topics, unsubscribing is all-or-nothing. A couple of topics lets somebody keep the receipts and drop the newsletter."

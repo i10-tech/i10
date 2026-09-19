@@ -544,6 +544,9 @@ const app = createApp({
             : offlineIdentity(),
           capacity: postgresMeter(db),
           region: env.AWS_REGION,
+          // ⚠ OUR OWN SENDING DOMAINS, so nobody can add one. See the note on
+          // `ownDomains`: the delegated path would hand them our return path.
+          ownDomains: env.MAIL_DOMAINS,
           dns: {
             spfInclude: env.MAIL_SPF_INCLUDE,
             bounceHost: env.MAIL_BOUNCE_HOST,
@@ -672,6 +675,7 @@ const app = createApp({
               : offlineIdentity(),
             capacity: postgresMeter(db),
             region: env.AWS_REGION,
+            ownDomains: env.MAIL_DOMAINS,
             dns: {
               spfInclude: env.MAIL_SPF_INCLUDE,
               bounceHost: env.MAIL_BOUNCE_HOST,

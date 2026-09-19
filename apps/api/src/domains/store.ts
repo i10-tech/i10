@@ -91,6 +91,17 @@ export interface DomainStoreDeps {
   capacity: Capacity
   /** Reported on every domain. One region, so it is configuration, not a column. */
   region: string
+  /**
+   * The domains i10 itself sends from. `MAIL_DOMAINS`.
+   *
+   * ⚠ REFUSED RATHER THAN ALLOWED-AND-BROKEN, because every path after this
+   * assumes the customer controls the name. Adding `i10.tech` would create a
+   * DKIM keypair for a domain whose DNS we already serve, register a second SES
+   * identity against our own sending domain, and — on the delegated path — hand
+   * a customer's claim the zone that carries OUR SPF and return paths. The
+   * first thing to break would be our own mail.
+   */
+  ownDomains: readonly string[]
   dns: DnsSettings
   /**
    * ⚠ OPTIONAL, AND ITS ABSENCE MAKES DELEGATION IMPOSSIBLE RATHER THAN
@@ -254,6 +265,7 @@ export function domainStore({
   identity,
   capacity,
   region,
+  ownDomains,
   dns,
   secrets,
   zones,
@@ -496,6 +508,26 @@ export function domainStore({
       // ON THE SEND PATH. It means the tenant holds no plan or the plan grants
       // no domains — our misconfiguration, not their fault — and the policy
       // this codebase has already chosen for that is to allow and log.
+
+      /*
+       * ⚠ OURS, AND A SUBDOMAIN OF OURS. `mail.i10.tech` is a zone this server
+       * is authoritative for; letting somebody claim it would delegate our own
+       * return path to their tenant.
+       */
+      if (ownDomains.some((own) => name === own || name.endsWith(`.${own}`))) {
+        return {
+          status: "rejected",
+          /*
+           * ⚠ FUNNY, THEN USEFUL, IN THAT ORDER AND BOTH IN ONE SENTENCE. A
+           * joke that does not also say what to do next is a dead end with a
+           * smile on it — and this is somebody's first minute in the product,
+           * where the thing they need is the next step rather than a laugh.
+           */
+          reason:
+            `${name} is ours — we are flattered, genuinely, but we are already ` +
+            `using it. Add the domain your own mail comes from.`,
+        }
+      }
 
       const delegated = input.delegated ?? false
       if (delegated && !zones) {

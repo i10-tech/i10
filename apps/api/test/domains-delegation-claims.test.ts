@@ -140,6 +140,12 @@ const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
 
 const base = {
   region: "eu-central-1",
+  /**
+   * ⚠ OUR OWN SENDING DOMAINS, WHICH THE STORE REFUSES. Not decoration: the
+   * guard runs on every create, so a fixture without it would be testing a
+   * store configured differently from the one that ships.
+   */
+  ownDomains: ["i10.tech"],
   dns: {
     spfInclude: "_spf.i10.tech",
     bounceHost: "mx.i10.tech",

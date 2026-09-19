@@ -3,7 +3,11 @@
 import { useState } from "react"
 import { ShieldCheckIcon } from "lucide-react"
 import { toast } from "sonner"
-import { useUser } from "@clerk/nextjs"
+import { useReverification, useUser } from "@clerk/nextjs"
+import {
+  isClerkAPIResponseError,
+  isReverificationCancelledError,
+} from "@clerk/nextjs/errors"
 import { Button } from "@repo/ui/components/button"
 import { CopyButton } from "@repo/ui/components/copy"
 import { Field, FieldGroup } from "@repo/ui/components/field"
@@ -69,12 +73,29 @@ interface StepProps {
 export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepProps) {
   const { user } = useUser()
 
+  /*
+   * ⚠ WRAPPED, BECAUSE THIS INSTANCE HAS REVERIFICATION ON AND THIS IS ONE OF
+   * THE OPERATIONS IT GUARDS. `auth_config.reverification` is `true` on the
+   * production instance, so Clerk refuses `createPasskey` on a session it does
+   * not consider recently verified and answers with a hint rather than a
+   * result. Unwrapped, that hint fell into the catch below and was reported as
+   * "we could not add a passkey on this device" — which blamed the device for a
+   * policy decision, and left the person with no way to satisfy it.
+   *
+   * ⚠ THE HOOK IS THE WHOLE FIX: it shows the reverification prompt and REPLAYS
+   * the original call once it is satisfied. Doing it by hand would mean
+   * detecting the hint, driving the prompt and remembering what to retry — in
+   * three places, because `createExternalAccount` below needs exactly the same
+   * treatment.
+   */
+  const addPasskey = useReverification(() => user?.createPasskey())
+
   async function add() {
     if (!user || locked) return
     onBusy("passkey")
 
     try {
-      await user.createPasskey()
+      await addPasskey()
       toast.success("Passkey added. You can use it to sign in from now on.")
       onBusy(null)
       onNext()
@@ -87,7 +108,10 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
        * went wrong" to somebody who deliberately pressed Cancel is the interface
        * arguing with them, so the two are told apart and only one is mentioned.
        */
-      if (isUserCancellation(error)) {
+      // ⚠ CANCELLING THE REVERIFICATION PROMPT IS THE SAME KIND OF ANSWER AS
+      // dismissing the platform's own sheet: the person said no, and saying
+      // anything back is the interface arguing with them.
+      if (isUserCancellation(error) || isReverificationCancelledError(error)) {
         onBusy(null)
         return
       }
@@ -396,12 +420,24 @@ export function ConnectStep({
       .map((account) => `oauth_${account.provider}`),
   )
 
+  /*
+   * ⚠ THE SAME GUARD AS THE PASSKEY STEP, FOR THE SAME REASON. Connecting an
+   * external account is a protected operation on an instance with
+   * reverification enabled, and without this Clerk's hint arrived here as an
+   * ordinary rejection — reported as "we could not start that connection",
+   * which is both untrue and unactionable.
+   */
+  const startConnection = useReverification(
+    (params: Parameters<NonNullable<typeof user>["createExternalAccount"]>[0]) =>
+      user?.createExternalAccount(params),
+  )
+
   async function connect(strategy: string) {
     if (!user || locked) return
     onBusy(strategy)
 
     try {
-      const account = await user.createExternalAccount({
+      const account = await startConnection({
         strategy: strategy as Parameters<
           typeof user.createExternalAccount
         >[0]["strategy"],
@@ -421,7 +457,10 @@ export function ConnectStep({
         redirectUrl: returnUrl(redirectRaw),
       })
 
-      const target = account.verification?.externalVerificationRedirectURL
+      // ⚠ OPTIONAL BECAUSE THE WRAPPED CALL CAN RESOLVE TO NOTHING. The
+      // reverification fetcher returns `undefined` when there is no user to act
+      // on, and the guard below already says the right thing for that.
+      const target = account?.verification?.externalVerificationRedirectURL
       if (!target) {
         toast.error("We could not start that connection. Try again.")
         onBusy(null)
@@ -441,8 +480,20 @@ export function ConnectStep({
        * redirect on top of the first.
        */
       window.location.assign(target.toString())
-    } catch {
-      toast.error(TRANSPORT_FAILURE)
+    } catch (error) {
+      /*
+       * ⚠ THE ERROR USED TO BE DISCARDED ENTIRELY — `catch {}` with no binding
+       * — and every failure here became "check your connection". That is the
+       * wrong story for all of the likely ones: a session Clerk refuses on
+       * policy grounds, a redirect origin the instance does not allow, a
+       * provider that is enabled for sign-in but not for linking. None of them
+       * are the network, and none of them improve by trying again.
+       */
+      if (isReverificationCancelledError(error)) {
+        onBusy(null)
+        return
+      }
+      toast.error(clerkReason(error) ?? TRANSPORT_FAILURE)
       onBusy(null)
     }
   }
@@ -512,7 +563,13 @@ function SkipButton({
 
 /** Back to the connect step, carrying the destination the person arrived with. */
 function returnUrl(redirectRaw: string | undefined): string {
-  const url = new URL("/sign-up", window.location.origin)
+  /*
+   * ⚠ `/sign-in`, WHICH IS THE ONLY PAGE NOW. `/sign-up` still resolves — it
+   * redirects here carrying every parameter — but pointing a provider's return
+   * URL at a redirect costs an extra round trip on the one journey that has
+   * already been out to a third party and back.
+   */
+  const url = new URL("/sign-in", window.location.origin)
   url.searchParams.set("step", "connect")
   if (redirectRaw) url.searchParams.set("redirect_url", redirectRaw)
   return url.toString()
@@ -543,5 +600,24 @@ function passkeyMessage(error: unknown): string {
   if (error instanceof Error && error.name === "InvalidStateError") {
     return "This device already has a passkey for your account."
   }
+
+  /*
+   * ⚠ CLERK'S OWN SENTENCE, WHERE THERE IS ONE, AND THE ABSENCE OF IT COST
+   * REAL TIME. Everything that was not a cancellation used to collapse into the
+   * line below — so a session Clerk refused on POLICY grounds, a misconfigured
+   * instance and a browser with no authenticator were one message blaming the
+   * device, and neither the person reading it nor we could tell them apart.
+   * `longMessage` is written for an end user; `message` is the short form.
+   */
+  const reason = clerkReason(error)
+  if (reason) return reason
+
   return "We could not add a passkey on this device. You can add one later from settings."
+}
+
+/** Clerk's own explanation of a failure, if this is a Clerk API error. */
+function clerkReason(error: unknown): string | null {
+  if (!isClerkAPIResponseError(error)) return null
+  const first = error.errors[0]
+  return first?.longMessage ?? first?.message ?? null
 }
