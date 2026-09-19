@@ -1,22 +1,37 @@
 /**
  * Who we say we are when we call somebody else's DNS API.
  *
- * ⚠ THE DEFAULT IS `Bun/1.4.2`, AND THAT IS A BOT SIGNATURE. Bun sends its own
- * name and version when `fetch` is given no `User-Agent` — verified against
- * `cloudflare.com/cdn-cgi/trace`, which echoed `uag=Bun/1.4.2`. A generic
- * runtime string arriving from a hosting-provider IP range is the exact shape
- * bot management is built to stop, and Cloudflare's token endpoint at
- * `dash.cloudflare.com` is behind it: the same endpoint answers `python-urllib`
- * with error 1010 (`browser_signature_banned`) while answering curl normally.
+ * ⚠ IT IS NOT `Bun/1.4.2`, WHICH IS WHAT BUN SENDS WHEN `fetch` IS GIVEN NO
+ * `User-Agent` — verified against `cloudflare.com/cdn-cgi/trace`, which echoed
+ * `uag=Bun/1.4.2`. A bare runtime name carries nothing an operator can act on,
+ * and every operator of a public API asks automated clients to identify
+ * themselves.
  *
- * ⚠ AND IT IS A CONTACTABLE NAME, NOT A DISGUISE. Every operator of a public
- * API asks automated clients to identify themselves and give a way to be
- * reached, and pretending to be a browser is both a lie and the thing bot
- * management is actually looking for. If we are ever rate-limited or blocked,
- * this string is what makes the conversation possible.
+ * ⚠ AND IT NO LONGER CARRIES `(+https://i10.tech)`, WHICH WAS THE OPPOSITE OF
+ * POLITE ON A HOST BEHIND BOT MANAGEMENT. The `name/version (+url)` form is not
+ * a general convention for contact details — it is specifically how a CRAWLER
+ * declares itself: `Googlebot/2.1 (+http://www.google.com/bot.html)`,
+ * `bingbot/2.0 (+http://www.bing.com/bingbot.htm)`,
+ * `AhrefsBot/7.0 (+http://ahrefs.com/robot/)`. Cloudflare parses user agents
+ * and keeps a list of VERIFIED bots; a self-declared one that is not on it is
+ * scored worse than an unremarkable client, and `dash.cloudflare.com` — where
+ * the OAuth token exchange happens — is a dashboard host with that scoring
+ * switched on. We were volunteering the one signal most likely to be held
+ * against us.
  *
- * ⚠ IT IS NOT A FIX FOR AN IP-BASED BLOCK, and it is worth being honest about
- * that: a datacentre address is judged on more than its user agent. It removes
- * one reason to be refused, which is the only one that is ours to remove.
+ * ⚠ WRANGLER, WHICH TALKS TO THAT EXACT ENDPOINT, SENDS `node`. Its
+ * `fetchAuthToken` sets only `Content-Type` and lets undici fill in the
+ * default, so Cloudflare's own client identifies itself to its own OAuth
+ * endpoint with a plain, boring token. `i10/1.0` is the same shape: a name and
+ * a version, nothing claiming to be a robot and nothing pretending to be a
+ * browser.
+ *
+ * ⚠ IT IS NOT A FIX FOR AN IP-BASED BLOCK, and that is worth being honest
+ * about twice: a datacentre address is judged on its ASN, its reputation and
+ * its TLS fingerprint as well. Measured 2026-09-20 from a residential
+ * connection, the token endpoint answers ordinary OAuth JSON for every one of
+ * `curl`, `Bun/1.4.2`, this string, the old one, and no user agent at all — so
+ * the user agent is not sufficient to cause a challenge on its own. It is one
+ * reason to be refused, and the only one that is ours to remove.
  */
-export const DNS_USER_AGENT = "i10/1.0 (+https://i10.tech)"
+export const DNS_USER_AGENT = "i10/1.0"

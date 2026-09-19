@@ -392,11 +392,82 @@ describe("exchanging the code", () => {
       .then(() => null)
       .catch((error: { detail?: string }) => error.detail ?? null)
 
-    expect(detail).toContain("bot challenge")
+    expect(detail).toContain("challenged the request")
     expect(detail).toContain("cf-ray 9a1b2c3d4e5f6789-LHR")
     // ⚠ AND IT SAYS WHOSE PROBLEM IT IS, because the customer authorised
     // correctly and the sentence they used to get blamed them for it.
-    expect(detail).toContain("egress")
+    expect(detail).toContain("not about your authorisation")
+  })
+
+  /**
+   * ⚠ A FIREWALL RULE IS NOT A BOT SCORE, AND CALLING IT ONE SENDS SOMEBODY TO
+   * ARGUE THE WRONG CASE. `error code: 1020` is a WAF rule that matched; a
+   * challenge is bot management scoring the caller. They are cleared by
+   * different people in different places, and the old classifier reported both
+   * with the same sentence because `Attention Required` — the title of the
+   * BLOCK page — was one of its challenge markers.
+   */
+  it("calls a firewall block a firewall block, not a challenge", async () => {
+    captureText(
+      "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title>" +
+        "</head><body>Sorry, you have been blocked. error code: 1020</body></html>",
+      403,
+      { "cf-ray": "9a1b2c3d4e5f6789-CDG" },
+    )
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+
+    const detail = await o
+      .exchange({ slug: "cloudflare", code: "c", verifier })
+      .then(() => null)
+      .catch((error: { detail?: string }) => error.detail ?? null)
+
+    expect(detail).toContain("error 1020")
+    expect(detail).not.toContain("challenged the request")
+    expect(detail).toContain("cf-ray 9a1b2c3d4e5f6789-CDG")
+  })
+
+  /**
+   * ⚠ THE CLASSIFIER WAS EATING THE ONLY EVIDENCE THERE IS. `detail` quotes
+   * the body only when it does NOT recognise it, so in the one case worth
+   * diagnosing the page was read, matched against three substrings, reduced to
+   * a sentence and dropped — and two rounds were then spent reasoning about a
+   * response nobody had seen. `evidence` is the page, for the log only.
+   */
+  it("keeps the page Cloudflare actually served, with the headers that classify it", async () => {
+    captureText("<!DOCTYPE html><html><body>Just a moment…</body></html>", 403, {
+      "cf-ray": "9a1b2c3d4e5f6789-CDG",
+      "cf-mitigated": "challenge",
+    })
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+
+    const evidence = await o
+      .exchange({ slug: "cloudflare", code: "c", verifier })
+      .then(() => null)
+      .catch((error: { evidence?: string }) => error.evidence ?? null)
+
+    expect(evidence).toContain("cf-mitigated: challenge")
+    expect(evidence).toContain("cf-ray: 9a1b2c3d4e5f6789-CDG")
+    expect(evidence).toContain("Just a moment")
+  })
+
+  /*
+   * ⚠ AND NEVER FOR A BODY THAT PARSED, WHICH IS WHAT KEEPS IT SAFE TO LOG. A
+   * token endpoint's JSON is the one thing in this exchange that can carry a
+   * credential; an HTML page from a proxy cannot.
+   */
+  it("keeps no evidence when the provider answered in JSON", async () => {
+    capture({ error: "invalid_grant", error_description: "code already used" }, 400)
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+
+    const error = await o
+      .exchange({ slug: "cloudflare", code: "c", verifier })
+      .then(() => null)
+      .catch((e: { evidence?: string }) => e)
+
+    expect(error?.evidence).toBeUndefined()
   })
 
   /**
@@ -412,7 +483,9 @@ describe("exchanging the code", () => {
     const { verifier } = o.verifyState(start(o).state)
     await expect(
       o.exchange({ slug: "cloudflare", code: "c", verifier }),
-    ).rejects.toMatchObject({ detail: expect.stringContaining("bot challenge") })
+    ).rejects.toMatchObject({
+      detail: expect.stringContaining("challenged the request"),
+    })
   })
 
   /**
@@ -435,6 +508,11 @@ describe("exchanging the code", () => {
    * ⚠ A GENERIC RUNTIME USER AGENT FROM A DATACENTRE IP IS WHAT BOT MANAGEMENT
    * IS LOOKING FOR. Bun sends `Bun/1.4.2` when none is given — measured
    * against `cloudflare.com/cdn-cgi/trace`. See dns/user-agent.ts.
+   *
+   * ⚠ AND IT MUST NOT LOOK LIKE A CRAWLER EITHER, which is the assertion on
+   * the second line. `name/version (+url)` is how Googlebot and every other
+   * crawler declares itself; volunteering that to a host that scores user
+   * agents was worse than saying nothing. See dns/user-agent.ts.
    */
   it("identifies itself rather than sending the runtime's default", async () => {
     const seen: (string | null)[] = []
@@ -450,7 +528,8 @@ describe("exchanging the code", () => {
     const { verifier } = o.verifyState(start(o).state)
     await o.exchange({ slug: "cloudflare", code: "c", verifier })
 
-    expect(seen).toEqual(["i10/1.0 (+https://i10.tech)"])
+    expect(seen).toEqual(["i10/1.0"])
+    expect(seen[0]).not.toContain("(+")
   })
 
   /** ⚠ A 200 WITH NO `access_token` IS STILL A FAILURE, and providers send them. */

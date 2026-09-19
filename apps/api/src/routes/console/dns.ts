@@ -211,10 +211,19 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
        * it means replaying an authorization code by hand.
        */
       const detail = error instanceof OAuthError ? error.detail : undefined
+      /*
+       * ⚠ LOGGED, NEVER RETURNED. `detail` is a sentence for the administrator
+       * standing in front of the failure; this is the page the provider
+       * actually served, and it is the thing that ends an argument about what
+       * happened rather than starting one. It exists only when the body was not
+       * JSON — see `transcript` in dns/oauth.ts for why that makes it safe.
+       */
+      const evidence = error instanceof OAuthError ? error.evidence : undefined
       d.log.warn(
         {
           err: String(error),
           ...(detail ? { detail } : {}),
+          ...(evidence ? { evidence } : {}),
           kind: error instanceof OAuthError ? error.kind : "unknown",
           tenantId,
           provider: slug,
