@@ -46,6 +46,16 @@ declare module "hono" {
     user: import("./session.js").SessionContext
     /** Verifies Clerk sessions, injected like `apiKeyAuth` and for the same reason. */
     sessionAuth?: import("./session.js").SessionVerifier
+    /**
+     * Whether the session was proved RECENTLY, for the routes that delete
+     * things. Injected by the console router — see middleware/session.ts.
+     *
+     * ⚠ OPTIONAL IN THE TYPE AND FAIL-CLOSED IN THE MIDDLEWARE. Every other
+     * optional dependency here degrades by hiding a feature; this one would
+     * degrade by removing a check, so `requireFreshAuth` refuses rather than
+     * waving requests through when it is absent.
+     */
+    freshAuth?: import("./session.js").FreshAuthReader
     /** Human mailboxes, and the rules for who may have one. */
     mailboxes?: import("../mailboxes/provision.js").MailboxProvisioning
   }

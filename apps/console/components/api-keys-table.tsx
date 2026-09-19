@@ -30,6 +30,7 @@ import {
   TableRow,
 } from "@repo/ui/components/table"
 import { ApiKeyScopeDialog, type ScopeDomain } from "@/components/api-key-scope"
+import { useStepUp } from "@/lib/step-up"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import { revokeApiKey, rotateApiKey } from "@/lib/actions"
@@ -56,6 +57,7 @@ export function ApiKeysTable({
   domains?: ScopeDomain[]
 }) {
   const [scoping, setScoping] = React.useState<ApiKeyRow | null>(null)
+  const stepUp = useStepUp()
   const router = useRouter()
   const [revoking, setRevoking] = React.useState<ApiKeyRow | null>(null)
   const [rotating, setRotating] = React.useState<ApiKeyRow | null>(null)
@@ -200,6 +202,15 @@ export function ApiKeysTable({
         confirmLabel="Revoke key"
         onConfirm={async () => {
           if (!revoking) return false
+          /*
+           * ⚠ PROVED BEFORE THE KEY DIES, NOT AFTER. Revoking the key
+           * production sends with is an outage nobody can undo from this
+           * dialog, and a session cookie is a credential that outlives the
+           * person sitting at the machine. The API refuses this on its own —
+           * see `requireFreshAuth` — so this is the prompt, not the guard.
+           */
+          if (!(await stepUp())) return false
+
           const result = await revokeApiKey(revoking.id)
           if (!result.ok) {
             toast.error("Could not revoke the key", { description: result.error })

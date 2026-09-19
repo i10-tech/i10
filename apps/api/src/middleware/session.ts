@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono"
 import type { ClerkClient } from "@clerk/backend"
+import { reverificationError } from "@clerk/backend/internal"
 
 /**
  * Signed-in-person authentication, alongside the API key.
@@ -227,4 +228,161 @@ export function clerkActiveOrg(
       return { status: "unknown" }
     }
   }
+}
+
+/**
+ * Whether the person proved who they were RECENTLY, not merely at some point.
+ *
+ * ⚠ A SESSION COOKIE IS A BEARER TOKEN THAT LIVES FOR DAYS, AND THAT IS FINE
+ * FOR READING A DASHBOARD AND WRONG FOR DELETING A DOMAIN. An unlocked laptop,
+ * a borrowed browser, a token lifted from a machine somebody already owns —
+ * none of those are things a long-lived session can tell apart from the
+ * customer. Asking for a factor again, immediately before the irreversible
+ * thing, is the only check that distinguishes them.
+ *
+ * ⚠ AND IT IS ENFORCED HERE RATHER THAN IN THE CONSOLE, WHICH IS THE WHOLE
+ * POINT. A dialog in the browser asking for a passkey is theatre: the request
+ * it guards is an ordinary HTTP call that anybody holding the cookie can make
+ * with curl. The prompt belongs in the interface; the REFUSAL has to live on
+ * this side of the wire.
+ *
+ * ⚠ `strict` IS CLERK'S OWN PRESET FOR THIS — second factor within ten
+ * minutes — AND IT DEGRADES CORRECTLY FOR PEOPLE WITHOUT ONE. Read
+ * `checkReverificationAuthorization` in @clerk/shared: when the second factor
+ * age is `-1`, meaning the account has none, it falls back to the FIRST factor.
+ * So somebody with TOTP re-does TOTP, somebody with only a passkey re-does the
+ * passkey, and nobody is locked out of their own workspace for not having
+ * enrolled a second factor. A `multi_factor` level would have done exactly
+ * that.
+ *
+ * ⚠ TEN MINUTES, NOT ZERO. Prompting on every destructive click sounds
+ * stricter and is worse: somebody tidying up four stale domains would answer
+ * four prompts, and the fourth is answered without reading. The window is what
+ * keeps the first one meaningful.
+ */
+const FRESHNESS = "strict" as const
+
+export type FreshAuthOutcome =
+  /** Proved recently enough. Let it through. */
+  | { status: "fresh" }
+  /** Signed in, but not recently enough for this. Ask again. */
+  | { status: "stale" }
+  /** Clerk did not answer. Do NOT guess — see the 503 below. */
+  | { status: "unknown" }
+
+export type FreshAuthReader = (request: Request) => Promise<FreshAuthOutcome>
+
+/**
+ * ⚠ A SEPARATE READER RATHER THAN A WIDER `SessionOutcome`, for the reason
+ * `clerkActiveOrg` gives at length: a field on that interface is a field every
+ * existing caller can suddenly authorise against. `/mailboxes` has no business
+ * knowing about factor ages, and this way it cannot.
+ */
+export function clerkFreshAuth(
+  clerk: ClerkClient,
+  options: ClerkSessionOptions = {},
+): FreshAuthReader {
+  const authorizedParties = options.authorizedParties?.length
+    ? [...options.authorizedParties]
+    : undefined
+
+  return async (request) => {
+    try {
+      const state = await clerk.authenticateRequest(request, { authorizedParties })
+      /*
+       * ⚠ NOT-AUTHENTICATED HERE IS A CONTRADICTION, NOT A SIGN-OUT — the same
+       * request was verified moments ago by `requireTenant`. If the second
+       * check disagrees, something is wrong with Clerk rather than with the
+       * caller, and `unknown` makes the request fail loudly instead of
+       * refusing a customer who did nothing wrong.
+       */
+      if (!state.isAuthenticated) return { status: "unknown" }
+
+      /*
+       * ⚠ CLERK'S OWN `has()` RATHER THAN READING `fva` BY HAND. The claim is
+       * a two-element array of MINUTES where `-1` means "never", the fallback
+       * rules between first and second factor are not obvious, and getting any
+       * of it subtly wrong fails OPEN. Their function is the same one their
+       * client uses to decide whether to show the prompt, so the two sides
+       * cannot disagree about what "fresh" means.
+       */
+      return state.toAuth().has({ reverification: FRESHNESS })
+        ? { status: "fresh" }
+        : { status: "stale" }
+    } catch (error) {
+      options.log?.error(
+        { err: String(error) },
+        "clerk could not read the session's factor ages",
+      )
+      return { status: "unknown" }
+    }
+  }
+}
+
+/**
+ * Refuse an irreversible action on a session nobody has proved recently.
+ *
+ * ⚠ THE REFUSAL IS CLERK'S OWN HINT, NOT OUR ERROR SHAPE, AND THAT IS WHAT
+ * MAKES THE PROMPT APPEAR. `useReverification` in the browser inspects the
+ * value it gets back for `clerk_error.reason === "reverification-error"`; when
+ * it finds one it opens the verification dialog, waits, and REPLAYS the
+ * original call. Inventing our own 403 body would mean building that dialog —
+ * passkey, then TOTP, then an emailed code, each with its own failure states —
+ * by hand, against Clerk's API, in our own app.
+ *
+ * ⚠ OUR FIELDS RIDE ALONGSIDE IT RATHER THAN INSTEAD OF IT. Everything in the
+ * console renders `{ statusCode, name, message }`, and a body carrying only
+ * `clerk_error` would surface as an empty toast anywhere the hint was not
+ * handled — which is every call site that has not been converted yet.
+ */
+export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
+  const reader = c.get("freshAuth")
+  /*
+   * ⚠ NOT WIRED MEANS REFUSE, NOT ALLOW. Every other optional dependency in
+   * this API degrades by hiding a feature; this one degrades by removing a
+   * check, so the safe direction is the opposite of the usual one. A
+   * deployment that forgot to wire it stops deletions rather than silently
+   * accepting them from anybody holding a cookie.
+   */
+  if (!reader) {
+    return c.json(
+      {
+        statusCode: 501,
+        name: "internal_server_error",
+        message: "Step-up verification is not wired up, so this is refused.",
+      },
+      501,
+    )
+  }
+
+  const outcome = await reader(c.req.raw)
+
+  if (outcome.status === "fresh") {
+    await next()
+    return
+  }
+
+  if (outcome.status === "unknown") {
+    // ⚠ 503, THE SAME RULE `requireUser` FOLLOWS. Never answer "prove yourself
+    // again" when the truthful answer is "we could not tell".
+    c.header("Retry-After", "5")
+    return c.json(
+      {
+        statusCode: 503,
+        name: "service_unavailable",
+        message: "Could not check your session right now. Retry shortly.",
+      },
+      503,
+    )
+  }
+
+  return c.json(
+    {
+      ...reverificationError(FRESHNESS),
+      statusCode: 403,
+      name: "invalid_access",
+      message: "Confirm it is you before doing this.",
+    },
+    403,
+  )
 }

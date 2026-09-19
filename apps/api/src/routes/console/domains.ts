@@ -1,4 +1,5 @@
 import type { Hono } from "hono"
+import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
 
@@ -249,7 +250,13 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
     }
   })
 
-  app.delete("/domains/:id", async (c) => {
+  /*
+   * ⚠ STEP-UP. A deleted domain stops every message the workspace sends from
+   * it, and re-adding one means re-proving ownership and re-publishing DNS —
+   * so this is the most expensive thing a stolen session could do here. See
+   * `requireFreshAuth`.
+   */
+  app.delete("/domains/:id", requireFreshAuth, async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
     const removed = await d.domains.remove(tenantId, c.req.param("id"))

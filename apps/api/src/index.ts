@@ -22,7 +22,7 @@ import { domainStore } from "./domains/store.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
 import { clerkIdentity } from "./mailboxes/clerk.js"
-import { clerkActiveOrg, clerkSessions } from "./middleware/session.js"
+import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
@@ -410,6 +410,16 @@ const activeOrg = clerkActiveOrg(clerk, {
   authorizedParties: env.CONSOLE_ORIGINS,
   log,
 })
+/**
+ * ⚠ THE SAME CLERK CLIENT AND THE SAME ALLOWLIST, DELIBERATELY. This reads the
+ * factor ages off the very token `requireTenant` just verified; pointing it at
+ * a differently-configured client would let a token be good enough to act and
+ * not good enough to check, or the reverse.
+ */
+const freshAuth = clerkFreshAuth(clerk, {
+  authorizedParties: env.CONSOLE_ORIGINS,
+  log,
+})
 
 const app = createApp({
   apiKeyAuth: {
@@ -612,6 +622,7 @@ const app = createApp({
     sessions,
     tenants: tenantResolver(db),
     activeOrg,
+    freshAuth,
     queries: consoleQueries(db),
     usage: usageStore({ db, meter: postgresMeter(db), log }),
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),

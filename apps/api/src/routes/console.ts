@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import type { Context } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { requireTenant } from "../middleware/tenant.js"
+import { requireFreshAuth } from "../middleware/session.js"
 import type { ConsoleDeps } from "./console/deps.js"
 import { notWired } from "./console/http.js"
 import { mountAccount } from "./console/account.js"
@@ -72,9 +73,31 @@ export function createConsole(deps?: ConsoleDeps) {
       tenants: d.tenants,
       ...(d.activeOrg ? { activeOrg: d.activeOrg } : {}),
     })
+    // ⚠ SET FOR EVERY ROUTE, READ BY ALMOST NONE. `requireFreshAuth` is applied
+    // per route rather than here: a step-up prompt in front of "list my
+    // domains" would train people to answer prompts without reading them,
+    // which is precisely what breaks the ones in front of a delete.
+    if (d.freshAuth) c.set("freshAuth", d.freshAuth)
     await next()
   })
   app.use("*", requireTenant)
+
+  /**
+   * "Prove it is you", asked before a destructive flow rather than during it.
+   *
+   * ⚠ IT EXISTS BECAUSE SOME OF THOSE FLOWS ARE MORE THAN ONE REQUEST. Deleting
+   * a domain can revoke its keys first, and `useReverification` in the browser
+   * works by REPLAYING the call that was refused — replay a half-finished
+   * sequence and the second attempt re-revokes keys that are already revoked,
+   * which answers 404 and reports a failure for work that succeeded. Asking
+   * once, up front, against a route that does nothing is always safe to retry.
+   *
+   * ⚠ AND IT IS NOT THE SECURITY BOUNDARY. `requireFreshAuth` still guards the
+   * routes that actually delete; this only moves the PROMPT to a moment where
+   * replaying it costs nothing. Someone who skips this endpoint entirely gets
+   * refused by the next one.
+   */
+  app.get("/step-up", requireFreshAuth, (c) => c.body(null, 204))
 
   /*
    * ⚠ EVERY MUTATION HERE IS CAPPED, INCLUDING THE ONES THAT LOOK HARMLESS.

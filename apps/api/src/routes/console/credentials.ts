@@ -1,6 +1,7 @@
 import type { Hono } from "hono"
 import { cacheKeyFor } from "../../auth/api-key.js"
 import { domainScope, scopedDomains } from "../../auth/scope.js"
+import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
 
@@ -223,7 +224,14 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     })
   })
 
-  app.delete("/api-keys/:id", async (c) => {
+  /*
+   * ⚠ STEP-UP, BECAUSE A REVOKED KEY CANNOT BE UN-REVOKED. Everything an
+   * attacker holding a stolen session cookie could do to this workspace is
+   * recoverable except the deletions — and revoking the key a customer's
+   * production systems send with is an outage they cannot undo from this
+   * dialog. See `requireFreshAuth`.
+   */
+  app.delete("/api-keys/:id", requireFreshAuth, async (c) => {
     if (!d.keys) return c.json(notWired("API keys"), 501)
     const { tenantId } = c.get("auth")
 

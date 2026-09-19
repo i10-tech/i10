@@ -535,6 +535,15 @@ const ROUTES: [
     },
   ],
 
+  /*
+   * ⚠ ALWAYS FRESH IN PREVIEW, BECAUSE THERE IS NO CLERK TO ASK. The step-up
+   * prompt is Clerk's own dialog and preview mode has no session at all — so
+   * the honest fixture is "already proved", which lets the delete dialogs it
+   * guards stay reviewable. The refusal it exists for is enforced on the API
+   * and cannot be reviewed here either way.
+   */
+  [/^\/console\/step-up$/, () => null],
+
   [
     /^\/console\/api-keys$/,
     () => ({

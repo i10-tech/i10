@@ -14,6 +14,7 @@ import {
 } from "@repo/ui/components/dropdown-menu"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { deleteDomain, revokeApiKey } from "@/lib/actions"
+import { useStepUp } from "@/lib/step-up"
 
 /**
  * ⚠ DELETING A DOMAIN STOPS ITS MAIL, SO IT ASKS FOR THE NAME. This is not
@@ -33,6 +34,13 @@ import { deleteDomain, revokeApiKey } from "@/lib/actions"
  * for every other domain, so offering to revoke it would be offering to break
  * something unrelated — and a prompt that appears whether or not it is relevant
  * is a prompt people stop reading.
+ *
+ * ⚠ AND IT ASKS THE PERSON TO PROVE THEMSELVES FIRST. Typing the name proves
+ * they read which row they are on; it does not prove they are the customer.
+ * A session cookie lives for days, so the two questions are different and this
+ * is the one worth asking of a borrowed laptop. See lib/step-up.ts — and note
+ * the API refuses the delete on its own, so this is the prompt rather than the
+ * protection.
  */
 export function DomainActions({
   id,
@@ -51,6 +59,7 @@ export function DomainActions({
   scopedKeys?: { id: string; name: string }[]
 }) {
   const router = useRouter()
+  const stepUp = useStepUp()
   const [confirming, setConfirming] = React.useState(false)
   /*
    * ⚠ IT DEFAULTS TO REVOKING THEM, WHICH IS THE OPPOSITE OF THE USUAL RULE
@@ -85,6 +94,19 @@ export function DomainActions({
         confirmLabel="Delete domain"
         confirmWord={name}
         onConfirm={async () => {
+          /*
+           * ⚠ PROVED ONCE, BEFORE ANY OF IT, RATHER THAN PER CALL. The prompt
+           * works by replaying the request it refused, and this flow is up to
+           * three requests — replaying it half-done would try to revoke keys
+           * that are already revoked and report a failure for work that
+           * succeeded. `stepUp` asks against a route that does nothing, so
+           * retrying it costs nothing. See lib/step-up.ts.
+           *
+           * ⚠ AND `false` LEAVES THE DIALOG OPEN WITH NOTHING DESTROYED, which
+           * is the right answer to somebody closing the verification prompt.
+           */
+          if (!(await stepUp())) return false
+
           /*
            * ⚠ THE KEYS GO FIRST, AND THE ORDER IS THE SAFE ONE RATHER THAN THE
            * TIDY ONE. If the domain delete fails after the keys are revoked,
