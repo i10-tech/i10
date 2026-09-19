@@ -4,8 +4,12 @@
     {
       "name": "console-preview",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["--filter", "@i10/console", "dev:preview"],
-      "port": 3000
+      "runtimeArgs": [
+        "--filter",
+        "@i10/console",
+        "dev:preview"
+      ],
+      "port": 3010
     }
   ]
 }

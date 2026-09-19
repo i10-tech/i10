@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Plug, Wand2 } from "lucide-react"
+import { Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
@@ -14,7 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
-import { publishDnsRecords, startDnsConnect } from "@/lib/actions"
+import { ConnectProviderButton } from "@/components/connect-provider-button"
+import { publishDnsRecords } from "@/lib/actions"
 import type { ConflictingRecord, DnsConnection } from "@/lib/types"
 
 /**
@@ -99,7 +100,7 @@ export function PublishRecords({
   }
 
   if (!connection) {
-    return <ConnectButton slug={providerSlug} providerName={providerName} />
+    return <ConnectProviderButton slug={providerSlug} providerName={providerName} />
   }
 
   return (
@@ -158,36 +159,5 @@ export function PublishRecords({
         </DialogContent>
       </Dialog>
     </>
-  )
-}
-
-/**
- * ⚠ IT NAVIGATES RATHER THAN OPENING A POPUP. Several providers refuse to render
- * their authorisation screen inside a frame, and a popup is blocked by default
- * on a click that has been through an async round trip. A full navigation is the
- * flow every OAuth integration used before anybody tried to be clever, and the
- * callback page brings them back.
- */
-function ConnectButton({ slug, providerName }: { slug: string; providerName: string }) {
-  const [pending, setPending] = React.useState(false)
-
-  async function connect() {
-    setPending(true)
-    const result = await startDnsConnect(slug)
-    setPending(false)
-
-    if (!result.ok) {
-      toast.error(`Could not connect ${providerName}`, { description: result.error })
-      return
-    }
-
-    window.location.assign(result.data.url)
-  }
-
-  return (
-    <Button variant="outline" size="sm" onClick={connect} disabled={pending}>
-      {pending ? <Spinner /> : <Plug />}
-      Connect {providerName}
-    </Button>
   )
 }
