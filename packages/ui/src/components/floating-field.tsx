@@ -307,6 +307,19 @@ const TONES: Record<FieldState, { frame: string; label: string; hint: string }> 
   },
 }
 
+/**
+ * The colour a validation message takes for a given state.
+ *
+ * ⚠ EXPORTED SO THE CODE FIELD DOES NOT PICK ITS OWN RED. `input-otp` draws
+ * nothing like this component — no peer, no floating label, no frame — but the
+ * sentence under it means exactly what the sentence under an email box means,
+ * and two files each choosing `text-danger` is how the two drift apart the
+ * first time one of them is adjusted. Only the hint half is shared: the frame
+ * classes are written against a `peer-focus` relationship that exists in this
+ * markup and nowhere else.
+ */
+export const fieldHintTone = (state: FieldState): string => TONES[state].hint
+
 const CONTROL = cn(
   "relative flex w-full items-center bg-transparent",
   "has-[input:disabled]:opacity-55 has-[textarea:disabled]:opacity-55",

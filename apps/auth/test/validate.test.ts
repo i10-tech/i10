@@ -72,7 +72,7 @@ const withSymbol = withDigit + "!"
  *
  * ⚠ `fixing` IS THE ONE THAT EARNS GREEN: it has been shown wrong at some point
  * and the caret is back in it. Nothing else does — see `recovering` in
- * _lib/field-state.ts for why a correct value on its own is not news.
+ * @repo/ui/hooks/field-focus for why a correct value on its own is not news.
  */
 const typing = { blurred: false, submitted: false, recovering: false }
 const left = { blurred: true, submitted: false, recovering: false }

@@ -5,6 +5,14 @@ import { useState } from "react"
 /**
  * When a field has earned the right to turn red, and when it has earned green.
  *
+ * ⚠ IT MOVED OUT OF THE AUTH APP BECAUSE THE RULES ARE ABOUT FIELDS, NOT ABOUT
+ * SIGNING IN. Nothing below knows what an email is; it knows when a judgement
+ * about a value has been earned, which is the same question on a domain box in
+ * the console, an API key name, or anything else somebody can get wrong. The
+ * alternative was a second copy, and a second copy of THIS is how one screen
+ * ends up reddening a field somebody is still typing into while another does
+ * not.
+ *
  * ⚠ THE RULE FOR RED IS "WRONG **AND** NOT FOCUSED", NOT "WRONG AND ONCE
  * BLURRED". Marking a field touched on blur and leaving it touched means the
  * border is red for the entire time somebody is FIXING it: they tab away from

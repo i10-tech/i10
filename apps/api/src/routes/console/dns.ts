@@ -198,8 +198,27 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
 
       return c.json(saved, 201)
     } catch (error) {
+      /*
+       * ⚠ `detail` IS THE ONLY FIELD THAT SAYS WHAT ACTUALLY HAPPENED, AND IT
+       * WAS BEING THROWN AWAY. `String(error)` renders an `OAuthError` as its
+       * `message`, which is the sentence written for the customer — "Cloudflare
+       * did not complete the authorisation." — and is identical for an expired
+       * code, a rejected client secret, a PKCE mismatch and a WAF page. The
+       * provider's own `error` / `error_description`, which distinguishes all
+       * four, is carried on `detail` and appeared nowhere: not in the log, not
+       * in the response. A failure that reproduces only from inside the cluster
+       * is exactly the failure this field exists for, and debugging one without
+       * it means replaying an authorization code by hand.
+       */
+      const detail = error instanceof OAuthError ? error.detail : undefined
       d.log.warn(
-        { err: String(error), tenantId, provider: slug },
+        {
+          err: String(error),
+          ...(detail ? { detail } : {}),
+          kind: error instanceof OAuthError ? error.kind : "unknown",
+          tenantId,
+          provider: slug,
+        },
         "dns oauth callback failed",
       )
       return c.json(
@@ -210,6 +229,16 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
             error instanceof OAuthError || error instanceof Error
               ? error.message
               : "Could not complete the connection.",
+          /*
+           * ⚠ RETURNED, BECAUSE THE PERSON LOOKING AT IT IS THE ONE WHO CAN ACT
+           * ON IT. This is a workspace administrator who just authorised their
+           * own DNS account thirty seconds ago; "invalid_grant" or "the redirect
+           * URI does not match" tells them whether to press the button again or
+           * to tell us. It carries no credential — it is the provider's own
+           * error string — and the alternative is a support conversation that
+           * starts with no information at all.
+           */
+          ...(detail ? { detail } : {}),
         },
         502,
       )

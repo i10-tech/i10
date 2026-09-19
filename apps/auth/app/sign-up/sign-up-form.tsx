@@ -17,7 +17,7 @@ import { PasswordInput } from "../_components/password-input"
 import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeWithoutLeaving, leaveFor } from "../_lib/finish"
-import { releaseFocus, useFieldFocus } from "../_lib/field-state"
+import { releaseFocus, useFieldFocus } from "@repo/ui/hooks/field-focus"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
 import {
   describeRules,
@@ -167,6 +167,8 @@ export function SignUpForm({
   const [lastName, setLastName] = useState("")
   const [email, setEmail] = useState(initialEmail ?? "")
   const [code, setCode] = useState("")
+  /** Why the last code was refused, shown under the boxes until it is retyped. */
+  const [rejected, setRejected] = useState<string | null>(null)
 
   /*
    * ⚠ THE PASSWORD IS CONTROLLED NOW, WHICH IT DELIBERATELY WAS NOT BEFORE. The
@@ -187,7 +189,7 @@ export function SignUpForm({
    * than "has it been blurred once". Red has to mean "you stopped, and it is
    * still wrong" — a field that stays red through the keystrokes of its own
    * correction is reporting on a value that no longer exists. See
-   * _lib/field-state.ts, which owns the two booleans and why there are two.
+   * @repo/ui/hooks/field-focus, which owns the two booleans and why there are two.
    *
    * ⚠ GREEN DOES NOT WAIT FOR ANY OF IT, WHICH IS THE ASYMMETRY THE WHOLE THING
    * TURNS ON. There is no moment at which "this is fine" is premature. See
@@ -345,7 +347,7 @@ export function SignUpForm({
       // ⚠ THE BLUR COMES FIRST, AND IT IS NOT TIDYING UP. Submitting with Enter
       // from inside a box leaves that box focused, and a focused field is never
       // painted red — so without this, pressing Enter on a bad address is a form
-      // that refuses silently. See `releaseFocus` in _lib/field-state.ts.
+      // that refuses silently. See `releaseFocus` in @repo/ui/hooks/field-focus.
       releaseFocus()
       // ⚠ EACH FIELD IS TOLD WHETHER IT IS THE PROBLEM. Revealing a field that
       // was already valid would record it as having been shown wrong, and it
@@ -409,7 +411,13 @@ export function SignUpForm({
       const { error } = await signUp.verifications.verifyEmailCode({ code })
 
       if (error) {
-        toast.error(messageFor(error))
+        /*
+         * ⚠ UNDER THE BOXES RATHER THAN IN A TOAST. See mfa-form: a toast slides
+         * away and leaves the field looking exactly as it did before the code
+         * was judged, which is the state somebody is in when they retype the
+         * same wrong code.
+         */
+        setRejected(messageFor(error))
         // A rejected six-digit code is never salvaged by editing one box.
         setCode("")
         setBusy(null)
@@ -619,7 +627,7 @@ export function SignUpForm({
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 // ⚠ THE BORDER TURNS RED ONLY ONCE THE CARET HAS LEFT, AND GOES
-                // BACK TO GREY WHEN IT RETURNS. See _lib/field-state.ts.
+                // BACK TO GREY WHEN IT RETURNS. See @repo/ui/hooks/field-focus.
                 {...emailField.props}
                 state={emailState.state}
                 hint={emailState.hint}
@@ -707,11 +715,19 @@ export function SignUpForm({
 
               <OtpField
                 value={code}
-                onChange={setCode}
+                // ⚠ THE VERDICT GOES ON THE FIRST KEYSTROKE OF THE NEXT
+                // ATTEMPT: a red border outliving the digits it was about is
+                // marking the wrong code.
+                onChange={(next) => {
+                  setRejected(null)
+                  setCode(next)
+                }}
                 // The code is the whole form here, so filling it is the decision.
                 onComplete={() => {
                   if (!locked) formRef.current?.requestSubmit()
                 }}
+                state={rejected ? "invalid" : "idle"}
+                hint={rejected}
                 autoFocus
               />
               <Button
