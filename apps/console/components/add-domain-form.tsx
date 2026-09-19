@@ -191,6 +191,14 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const connected =
     provider !== null && connections.some((c) => c.provider === provider.slug)
 
+  /*
+   * ⚠ ONLY ONCE THE LOOKUP HAS ANSWERED. `canAutomate` comes from the detected
+   * provider, so before it lands this is false and the button says "Add
+   * domain" — which is correct rather than merely safe: a domain whose DNS we
+   * cannot write to never shows a connect button at all.
+   */
+  const needsConnection = canAutomate && !connected && delivery === "automatic"
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (submitting) return
@@ -401,18 +409,20 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
                * rather than inside the form's own flow. Somebody who connects
                * first comes back to an empty form and a working connection.
                */}
+              {/*
+               * ⚠ A STATUS, NEVER A SECOND BUTTON. Connecting used to be
+               * offered here AND as the form's submit, eight inches apart —
+               * two controls for one action, and the one up here had less
+               * explanation and more prominence than it had earned. The panel
+               * reports what we know about the provider; the single control at
+               * the bottom is what you press.
+               */}
               {connected ? (
                 <span className="flex items-center gap-1.5 text-xs text-success">
                   <Check className="size-3.5" />
                   Connected
                 </span>
-              ) : (
-                <ConnectProviderButton
-                  slug={provider.slug}
-                  providerName={provider.name}
-                  brand
-                />
-              )}
+              ) : null}
             </div>
           )}
         </div>
@@ -522,13 +532,42 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
          * refuses to create a second later. The wait is bounded: a failed lookup
          * still answers, so this cannot latch.
          */}
-        <Button
-          type="submit"
-          disabled={submitting || looking || name.trim().length === 0}
-        >
-          {submitting && <Spinner />}
-          Add domain
-        </Button>
+        {/*
+         * ⚠ ONE CONTROL THAT CHANGES, NOT TWO THAT COMPETE. Until the lookup
+         * lands we cannot know whether connecting is even possible, so the
+         * button says the thing that is always true — add the domain. Once the
+         * provider is known to be one we can write to, connecting IS the next
+         * step, and offering it beside "Add domain" would ask somebody to
+         * choose between two halves of the same job.
+         *
+         * ⚠ AND IT REVERTS ONCE CONNECTED. Coming back from the provider, the
+         * remaining step is the one it always was.
+         *
+         * ⚠ WHAT WAS TYPED IS NOT CARRIED ACROSS THE CONNECT, DELIBERATELY. It
+         * could be — session storage survives the round trip — but restoring it
+         * means writing React state from an effect on mount, which is a
+         * cascading render the compiler is right to refuse, and the alternative
+         * of a lazy initialiser reading storage produces a hydration mismatch
+         * on a controlled input. The prize is not retyping one domain name ONCE
+         * EVER: a connection is per workspace, so every domain after the first
+         * sees "Add domain" here and never leaves the page at all.
+         */}
+        {needsConnection && provider ? (
+          <ConnectProviderButton
+            slug={provider.slug}
+            providerName={provider.name}
+            size="default"
+            brand
+          />
+        ) : (
+          <Button
+            type="submit"
+            disabled={submitting || looking || name.trim().length === 0}
+          >
+            {submitting && <Spinner />}
+            Add domain
+          </Button>
+        )}
         <Button type="button" variant="ghost" onClick={() => router.back()}>
           Cancel
         </Button>
