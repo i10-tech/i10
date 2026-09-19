@@ -135,74 +135,124 @@ describe("the submission port", () => {
 /**
  * The DNS provider OAuth apps.
  *
- * ⚠ THIS IS PARSED FROM ONE JSON STRING IN DOPPLER, so every mistake in it is a
- * mistake somebody makes at 2am in a web form with no validation. The parser
- * has to refuse the wrong shapes loudly at boot rather than produce an app that
- * half-works — an OAuth client with an empty secret is not a public client, it
- * is a confidential client that will be answered `invalid_client` for ever.
+ * ⚠ THESE WERE ONE JSON OBJECT AND THE BLAST RADIUS WAS THE WHOLE API. `loadEnv`
+ * throws on an invalid value and the process exits, so a trailing comma typed
+ * into Doppler while adding the second provider stopped SENDING — the API, the
+ * console's backend, the cron jobs mounting the same secret — for a convenience
+ * feature nobody had finished configuring.
+ *
+ * ⚠ SO THEY ARE DISCOVERED PER PROVIDER NOW, and the tests that matter are the
+ * ones about what happens when somebody gets one wrong.
  */
-describe("reading the DNS OAuth apps", () => {
-  const withApps = (raw: string) => loadEnv({ ...base, DNS_OAUTH_APPS: raw })
+describe("collecting the DNS OAuth apps", () => {
+  const withEnv = (extra: NodeJS.ProcessEnv) => loadEnv({ ...base, ...extra })
 
   it("defaults to none, which disables connecting rather than failing", () => {
     expect(loadEnv(base).DNS_OAUTH_APPS).toEqual({})
+    expect(loadEnv(base).DNS_OAUTH_IGNORED).toEqual([])
   })
 
   it("reads a confidential client", () => {
     expect(
-      withApps('{"cloudflare":{"clientId":"cid","clientSecret":"sec"}}').DNS_OAUTH_APPS,
+      withEnv({
+        DNS_OAUTH_CLOUDFLARE_CLIENT_ID: "cid",
+        DNS_OAUTH_CLOUDFLARE_CLIENT_SECRET: "sec",
+      }).DNS_OAUTH_APPS,
     ).toEqual({ cloudflare: { clientId: "cid", clientSecret: "sec" } })
   })
 
-  /** ⚠ A PUBLIC CLIENT HAS NO SECRET, and that is a shape, not a missing value. */
+  /** ⚠ A PUBLIC CLIENT HAS NO SECRET, and absent is a shape rather than a gap. */
   it("reads a public client with no secret at all", () => {
-    expect(withApps('{"cloudflare":{"clientId":"cid"}}').DNS_OAUTH_APPS).toEqual({
+    expect(withEnv({ DNS_OAUTH_CLOUDFLARE_CLIENT_ID: "cid" }).DNS_OAUTH_APPS).toEqual({
       cloudflare: { clientId: "cid" },
     })
   })
 
   /**
-   * ⚠ AND AN EMPTY SECRET IS NOT THE SAME THING. It would be forwarded as a
-   * supplied-and-wrong secret and answered `invalid_client`, which reads in a
-   * log exactly like a real secret that has been rotated.
+   * ⚠ THE SLUGS ARE KEBAB-CASE AND AN ENV VAR NAME CANNOT BE. Getting this
+   * mapping wrong produces an app filed under a provider that does not exist,
+   * which presents as a Connect button that is simply never offered.
    */
-  it("refuses an empty secret rather than treating it as absent", () => {
-    expect(() =>
-      withApps('{"cloudflare":{"clientId":"cid","clientSecret":""}}'),
-    ).toThrow()
+  it("maps a multi-word provider back to its registry slug", () => {
+    expect(
+      withEnv({ DNS_OAUTH_GOOGLE_CLOUD_DNS_CLIENT_ID: "cid" }).DNS_OAUTH_APPS,
+    ).toHaveProperty("google-cloud-dns")
   })
 
-  it("refuses an app with no client id", () => {
-    expect(() => withApps('{"cloudflare":{"clientSecret":"sec"}}')).toThrow()
-    expect(() => withApps('{"cloudflare":{"clientId":""}}')).toThrow()
+  it("reads scopes separated by spaces or commas", () => {
+    for (const raw of [
+      "dns.write zone.read",
+      "dns.write,zone.read",
+      "dns.write, zone.read",
+    ]) {
+      expect(
+        withEnv({
+          DNS_OAUTH_CLOUDFLARE_CLIENT_ID: "cid",
+          DNS_OAUTH_CLOUDFLARE_SCOPES: raw,
+        }).DNS_OAUTH_APPS.cloudflare?.scopes,
+      ).toEqual(["dns.write", "zone.read"])
+    }
   })
 
   /**
-   * ⚠ SCOPES ARE OVERRIDABLE BECAUSE THEY ARE A FACT ABOUT SOMEBODY ELSE'S
-   * PRODUCT. The registry's list is our reading of a provider's docs at the
-   * time it was written, and the strings an authorize endpoint actually accepts
-   * can differ. Correcting one has to be a Doppler edit, not a release.
+   * ⚠ THE WHOLE POINT OF THE SPLIT. One provider configured wrong must not
+   * disturb another, and must not stop the API. Before this, both of them and
+   * the rest of the process went down together.
    */
-  it("reads a scope override", () => {
+  it("skips a half-configured provider without touching the others", () => {
+    const env = withEnv({
+      DNS_OAUTH_CLOUDFLARE_CLIENT_ID: "cid",
+      DNS_OAUTH_CLOUDFLARE_CLIENT_SECRET: "sec",
+      // somebody pasted the secret and went to find the id
+      DNS_OAUTH_VERCEL_CLIENT_SECRET: "half",
+    })
+
+    expect(env.DNS_OAUTH_APPS).toEqual({
+      cloudflare: { clientId: "cid", clientSecret: "sec" },
+    })
+    expect(env.DNS_OAUTH_IGNORED).toEqual(["vercel"])
+  })
+
+  /**
+   * ⚠ AN EMPTY SECRET IS NOT AN ABSENT ONE. Absent means a public client using
+   * PKCE alone; empty means a value somebody meant to fill in, and forwarding
+   * it produces `invalid_client` — which reads in a log exactly like a real
+   * secret that has been rotated.
+   */
+  it("skips a provider whose secret is present but empty", () => {
+    const env = withEnv({
+      DNS_OAUTH_CLOUDFLARE_CLIENT_ID: "cid",
+      DNS_OAUTH_CLOUDFLARE_CLIENT_SECRET: "",
+    })
+    expect(env.DNS_OAUTH_APPS).toEqual({})
+    expect(env.DNS_OAUTH_IGNORED).toEqual(["cloudflare"])
+  })
+
+  it("skips a provider whose scopes are present but empty", () => {
     expect(
-      withApps('{"cloudflare":{"clientId":"cid","scopes":["dns.write","zone.read"]}}')
+      withEnv({
+        DNS_OAUTH_CLOUDFLARE_CLIENT_ID: "cid",
+        DNS_OAUTH_CLOUDFLARE_SCOPES: "",
+      }).DNS_OAUTH_IGNORED,
+    ).toEqual(["cloudflare"])
+  })
+
+  /** ⚠ AND NONE OF IT EVER REFUSES TO BOOT. That is the regression. */
+  it("boots whatever is thrown at it", () => {
+    expect(() =>
+      withEnv({
+        DNS_OAUTH_CLOUDFLARE_CLIENT_ID: "",
+        DNS_OAUTH_VERCEL_CLIENT_SECRET: "orphan",
+        DNS_OAUTH_NETLIFY_SCOPES: "  ",
+      }),
+    ).not.toThrow()
+  })
+
+  /** The redirect base is unrelated and must not be swept up by the prefix. */
+  it("does not mistake the redirect base for a provider", () => {
+    expect(
+      withEnv({ DNS_OAUTH_REDIRECT_BASE: "https://dash.i10.tech/dns/callback" })
         .DNS_OAUTH_APPS,
-    ).toEqual({ cloudflare: { clientId: "cid", scopes: ["dns.write", "zone.read"] } })
-  })
-
-  it("refuses a scope list that would silently send nothing", () => {
-    expect(() => withApps('{"cloudflare":{"clientId":"cid","scopes":[]}}')).toThrow()
-    expect(() =>
-      withApps('{"cloudflare":{"clientId":"cid","scopes":["ok",""]}}'),
-    ).toThrow()
-    expect(() =>
-      withApps('{"cloudflare":{"clientId":"cid","scopes":"dns.write"}}'),
-    ).toThrow()
-  })
-
-  it("refuses anything that is not a JSON object of apps", () => {
-    for (const bad of ["[]", '"cloudflare"', "not json", "null"]) {
-      expect(() => withApps(bad)).toThrow()
-    }
+    ).toEqual({})
   })
 })

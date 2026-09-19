@@ -178,6 +178,20 @@ const metering = resilient(
 )
 log.info({ feature: env.METERING_FEATURE_ID }, "metering via postgres")
 
+/*
+ * ⚠ SKIPPED IS NOT SILENT. A client id with no secret beside it, or a secret
+ * with no id, is somebody half-way through configuring a provider — and the
+ * only symptom is one Connect button that quietly does nothing, which nobody
+ * discovers until a customer presses it. It is not worth refusing to boot over,
+ * which is exactly why it has to be said out loud here instead.
+ */
+if (env.DNS_OAUTH_IGNORED.length > 0) {
+  log.warn(
+    { providers: env.DNS_OAUTH_IGNORED },
+    "DNS OAuth apps ignored: a client id, secret or scope list is missing or empty",
+  )
+}
+
 /**
  * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
  * `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a customer's signing

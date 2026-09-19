@@ -644,11 +644,33 @@ const schema = z.object({
   /**
    * The OAuth applications we have registered with DNS providers.
    *
-   * ⚠ ONE JSON OBJECT RATHER THAN TWO ENVIRONMENT VARIABLES PER PROVIDER. Eight
-   * providers is sixteen variables, each of which has to be declared here,
-   * plumbed through and remembered — and the failure when one is missed is a
-   * Connect button that does nothing for one provider while working for seven.
-   * The same shape `POLAR_PRODUCTS` uses, for the same reason.
+   * ⚠ ONE VARIABLE PER FIELD, DISCOVERED BY PREFIX RATHER THAN DECLARED. This
+   * was a single JSON object, and the argument for that was sound as far as it
+   * went: eight providers is sixteen variables, and declaring each one here to
+   * be plumbed through and remembered is sixteen chances to miss one.
+   * DISCOVERY removes that objection entirely — nothing is declared, so nothing
+   * can be forgotten — and leaves only the reason the JSON had to go.
+   *
+   * ⚠ WHICH IS THAT A MALFORMED BLOB REFUSED TO BOOT THE API. `loadEnv` throws
+   * on an invalid value and the process exits, so one trailing comma typed into
+   * Doppler while adding the second provider stopped SENDING — the API, the
+   * console's entire backend, the cron jobs that mount the same secret — for a
+   * convenience feature nobody had finished configuring. Measured rather than
+   * theorised: a stray `,` produces `Invalid environment` and a crashloop.
+   *
+   * ⚠ SO THE BLAST RADIUS IS NOW ONE PROVIDER. A key missing its pair is that
+   * provider skipped and named in the boot log; every other provider, and the
+   * rest of the API, is untouched. That is precisely the failure the old
+   * comment described — "a Connect button that does nothing for one provider
+   * while working for seven" — and accepted as the cost of the JSON, when it
+   * was in fact the better outcome of the two.
+   *
+   *   DNS_OAUTH_CLOUDFLARE_CLIENT_ID      = …
+   *   DNS_OAUTH_CLOUDFLARE_CLIENT_SECRET  = …  (omit for a PKCE-only client)
+   *   DNS_OAUTH_CLOUDFLARE_SCOPES         = …  (optional; overrides the registry)
+   *
+   * The provider is the registry slug upper-cased with `-` as `_`, so
+   * `google-cloud-dns` is `DNS_OAUTH_GOOGLE_CLOUD_DNS_CLIENT_ID`.
    *
    * ⚠ ITS ABSENCE DISABLES THE ONE-CLICK PATH AND NOTHING ELSE. A provider with
    * no app here simply has no OAuth option; the pasted-token path still works,
@@ -659,97 +681,27 @@ const schema = z.object({
    * ⚠ AND THE SECRETS ARE REAL SECRETS. A client secret for a DNS provider's
    * OAuth app, combined with a stolen authorisation code, is a route to writing
    * in a customer's zone. Doppler, never the manifest.
-   *
-   *   {"cloudflare":{"clientId":"…","clientSecret":"…"}}
-   *
-   * `clientSecret` is omitted for a public (PKCE-only) client, and `scopes`
-   * overrides the registry's list for that provider:
-   *
-   *   {"cloudflare":{"clientId":"…","clientSecret":"…",
-   *                  "scopes":["dns.write","zone.read"]}}
    */
   DNS_OAUTH_APPS: z
-    .string()
-    .default("{}")
-    .transform((raw, ctx) => {
-      try {
-        const parsed: unknown = JSON.parse(raw)
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-          throw new TypeError("not an object")
-        }
-        const out: Record<
-          string,
-          { clientId: string; clientSecret?: string; scopes?: string[] }
-        > = {}
-        for (const [slug, app] of Object.entries(parsed)) {
-          const value = app as { clientId?: unknown; clientSecret?: unknown }
-          if (typeof value?.clientId !== "string" || value.clientId.length === 0) {
-            throw new TypeError(`"${slug}" needs a clientId`)
-          }
-          /*
-           * ⚠ THE SECRET IS OPTIONAL, BECAUSE A PUBLIC CLIENT HAS NONE. Every
-           * provider here documents a confidential app, but Cloudflare's OAuth
-           * lists `none` among its supported token-endpoint auth methods — that
-           * is the mode `wrangler` uses, and the one they are most likely to
-           * issue. Such an app is protected by PKCE alone, which dns/oauth.ts
-           * now sends for every provider.
-           *
-           * ⚠ AN EMPTY STRING IS STILL REJECTED, and is not the same as absent.
-           * It would be forwarded as a supplied-and-wrong secret and answered
-           * with `invalid_client`, which reads in the log exactly like a real
-           * secret that has been rotated.
-           */
-          if (value.clientSecret !== undefined) {
-            if (
-              typeof value.clientSecret !== "string" ||
-              value.clientSecret.length === 0
-            ) {
-              throw new TypeError(
-                `"${slug}" has an empty clientSecret; omit it instead`,
-              )
-            }
-          }
-          /*
-           * ⚠ SCOPES ARE OVERRIDABLE HERE BECAUSE THEY ARE A FACT ABOUT
-           * SOMEBODY ELSE'S PRODUCT. The registry's list is our reading of each
-           * provider's docs at the time it was written, and providers rename
-           * scopes and publish names that differ from the strings their
-           * authorize endpoint accepts — Cloudflare's real values come from an
-           * endpoint that needs credentials to read. Correcting one should be a
-           * Doppler edit, not a release.
-           */
-          const scopes = (value as { scopes?: unknown }).scopes
-          if (scopes !== undefined) {
-            if (
-              !Array.isArray(scopes) ||
-              scopes.length === 0 ||
-              scopes.some((s) => typeof s !== "string" || s.length === 0)
-            ) {
-              throw new TypeError(
-                `"${slug}" scopes must be a non-empty array of non-empty strings`,
-              )
-            }
-          }
+    .record(
+      z.string(),
+      z.object({
+        clientId: z.string().min(1),
+        clientSecret: z.string().min(1).optional(),
+        scopes: z.array(z.string().min(1)).min(1).optional(),
+      }),
+    )
+    .default({}),
 
-          out[slug] = {
-            clientId: value.clientId,
-            ...(typeof value.clientSecret === "string"
-              ? { clientSecret: value.clientSecret }
-              : {}),
-            ...(Array.isArray(scopes) ? { scopes: scopes as string[] } : {}),
-          }
-        }
-        return out
-      } catch (error) {
-        ctx.addIssue({
-          code: "custom",
-          message: `must be a JSON object of provider slug to { clientId, clientSecret } (${
-            error instanceof Error ? error.message : String(error)
-          })`,
-        })
-        return z.NEVER
-      }
-    }),
+  /**
+   * Providers whose variables were present but unusable, for the boot log.
+   *
+   * ⚠ SKIPPED IS NOT SILENT. A client id with no secret beside it is somebody
+   * half-way through configuring a provider, and the symptom — one Connect
+   * button that quietly does nothing — is invisible until a customer presses
+   * it. Not worth refusing to boot over; absolutely worth a line at startup.
+   */
+  DNS_OAUTH_IGNORED: z.array(z.string()).default([]),
 
   /**
    * Where a DNS provider sends the browser back after authorisation.
@@ -914,8 +866,96 @@ const validated = schema.superRefine((env, ctx) => {
 
 export type Env = z.infer<typeof schema>
 
+/** One provider's OAuth application, as configured. */
+export interface OAuthAppConfig {
+  clientId: string
+  clientSecret?: string
+  scopes?: string[]
+}
+
+/**
+ * Gathers the DNS provider OAuth apps out of `DNS_OAUTH_<PROVIDER>_*`.
+ *
+ * ⚠ IT DISCOVERS RATHER THAN DECLARES, which is the whole reason per-provider
+ * variables are workable at all. Declaring sixteen fields would be sixteen
+ * chances to add a provider's variables and forget to read one; nothing here
+ * knows which providers exist, so adding the eighth needs no code at all.
+ *
+ * ⚠ AND A HALF-CONFIGURED PROVIDER IS SKIPPED, NOT FATAL. Somebody pasting a
+ * client id and going to find the secret has a partial configuration for a
+ * minute or an hour, and refusing to boot over it would stop mail for a feature
+ * that is not yet switched on. The provider is named in `ignored` so the
+ * absence is reported rather than merely tolerated.
+ */
+export function collectOAuthApps(source: NodeJS.ProcessEnv): {
+  apps: Record<string, OAuthAppConfig>
+  ignored: string[]
+} {
+  const parts = new Map<string, { id?: string; secret?: string; scopes?: string }>()
+
+  for (const [key, raw] of Object.entries(source)) {
+    const match = /^DNS_OAUTH_(.+)_(CLIENT_ID|CLIENT_SECRET|SCOPES)$/.exec(key)
+    if (!match) continue
+
+    const group = parts.get(match[1]!) ?? {}
+    const value = (raw ?? "").trim()
+    if (match[2] === "CLIENT_ID") group.id = value
+    else if (match[2] === "CLIENT_SECRET") group.secret = value
+    else group.scopes = value
+    parts.set(match[1]!, group)
+  }
+
+  const apps: Record<string, OAuthAppConfig> = {}
+  const ignored: string[] = []
+
+  for (const [suffix, held] of parts) {
+    // ⚠ THE REGISTRY'S SLUGS ARE KEBAB-CASE and an env var name cannot be, so
+    // `google-cloud-dns` arrives as `GOOGLE_CLOUD_DNS` and converts back here.
+    const slug = suffix.toLowerCase().replace(/_/g, "-")
+
+    /*
+     * ⚠ AN EMPTY SECRET IS NOT AN ABSENT ONE. Absent means a public client
+     * authenticating with PKCE alone; empty means a value somebody meant to
+     * fill in, and forwarding it produces `invalid_client` — which reads in a
+     * log exactly like a real secret that has been rotated.
+     */
+    const usable =
+      held.id !== undefined &&
+      held.id.length > 0 &&
+      held.secret !== "" &&
+      held.scopes !== ""
+
+    if (!usable) {
+      ignored.push(slug)
+      continue
+    }
+
+    const scopes = held.scopes ? held.scopes.split(/[\s,]+/).filter(Boolean) : []
+
+    apps[slug] = {
+      clientId: held.id!,
+      ...(held.secret ? { clientSecret: held.secret } : {}),
+      ...(scopes.length > 0 ? { scopes } : {}),
+    }
+  }
+
+  return { apps, ignored: ignored.sort() }
+}
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const parsed = validated.safeParse(source)
+  const { apps, ignored } = collectOAuthApps(source)
+
+  /*
+   * ⚠ MERGED INTO THE SOURCE BEFORE VALIDATION, not patched onto the result, so
+   * the schema still gets to refuse a shape this collector should never have
+   * produced. It is the one field assembled from several variables rather than
+   * read from one, and that is not a reason to let it skip the check.
+   */
+  const parsed = validated.safeParse({
+    ...source,
+    DNS_OAUTH_APPS: apps,
+    DNS_OAUTH_IGNORED: ignored,
+  })
   if (!parsed.success) {
     const detail = parsed.error.issues
       .map((i) => `  ${i.path.join(".")}: ${i.message}`)
