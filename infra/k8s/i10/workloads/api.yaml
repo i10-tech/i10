@@ -55,7 +55,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          image: ghcr.io/i10-tech/i10-api:prod-0ea4e78922369ebb7a9f5f970b143ff30a176d05@sha256:de8978987b88534192d65f8995a1151a0aa968bb0afd8dae68f5cb09cf898262
+          image: ghcr.io/i10-tech/i10-api:prod-5c0d15e39d8da853d0b7b08d0e75cbee6ec30f49@sha256:fa60c3da8057f0f7dd40a9b582b997ed0091d7b9a2537b4962a5887787541d9f
           # ⚠ ALWAYS, BECAUSE THE TAG FLOATS. `prod-latest` is not the
           # literal `:latest`, so Kubernetes defaults it to IfNotPresent: a node
           # that has pulled the tag once keeps serving that layer forever while
@@ -124,7 +124,7 @@ spec:
           # app still reading `prod-latest` long after its first build means
           # either it has never changed since this line was written, or its
           # path filter in build.yml does not match where its sources live.
-          image: ghcr.io/i10-tech/i10-api:prod-0ea4e78922369ebb7a9f5f970b143ff30a176d05@sha256:de8978987b88534192d65f8995a1151a0aa968bb0afd8dae68f5cb09cf898262
+          image: ghcr.io/i10-tech/i10-api:prod-5c0d15e39d8da853d0b7b08d0e75cbee6ec30f49@sha256:fa60c3da8057f0f7dd40a9b582b997ed0091d7b9a2537b4962a5887787541d9f
           # ⚠ ALWAYS, BECAUSE THE TAG FLOATS. `prod-latest` is not the
           # literal `:latest`, so Kubernetes defaults it to IfNotPresent: a node
           # that has pulled the tag once keeps serving that layer forever while
