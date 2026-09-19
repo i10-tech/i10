@@ -29,6 +29,7 @@ import { delegationChecker } from "./console/delegation.js"
 import { dnsConnectionStore } from "./dns/connections.js"
 import { dnsOAuth } from "./dns/oauth.js"
 import { dnsPublisher } from "./dns/publish.js"
+import { credentialRenewal } from "./dns/renew.js"
 import { marketingStore } from "./console/marketing.js"
 import { onboardingStore } from "./console/onboarding.js"
 import { tenantProfileStore } from "./console/tenant.js"
@@ -176,6 +177,20 @@ const metering = resilient(
   log,
 )
 log.info({ feature: env.METERING_FEATURE_ID }, "metering via postgres")
+
+/*
+ * ⚠ SKIPPED IS NOT SILENT. A client id with no secret beside it, or a secret
+ * with no id, is somebody half-way through configuring a provider — and the
+ * only symptom is one Connect button that quietly does nothing, which nobody
+ * discovers until a customer presses it. It is not worth refusing to boot over,
+ * which is exactly why it has to be said out loud here instead.
+ */
+if (env.DNS_OAUTH_IGNORED.length > 0) {
+  log.warn(
+    { providers: env.DNS_OAUTH_IGNORED },
+    "DNS OAuth apps ignored: a client id, secret or scope list is missing or empty",
+  )
+}
 
 /**
  * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
@@ -597,15 +612,21 @@ const app = createApp({
     delegation: delegationChecker({ nameservers: env.MAIL_NAMESERVERS }),
     /*
      * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
-     * why all three arrive together or not at all. A credential that can rewrite
-     * a customer's MX records must not be stored in the clear, so without a box
-     * to seal it in the routes answer 501 — the same rule `domains` above
-     * follows for a DKIM private key.
+     * why all of it arrives together or not at all. A credential that can
+     * rewrite a customer's MX records must not be stored in the clear, so
+     * without a box to seal it in the routes answer 501 — the same rule
+     * `domains` below follows for a DKIM private key.
+     *
+     * ⚠ AND THE THREE ARE BUILT ONCE, IN ONE SCOPE, BECAUSE THEY REFER TO EACH
+     * OTHER. The publisher renews an expiring OAuth credential through the same
+     * `dnsOAuth` the callback used and writes it back through the same store
+     * the routes read — so a second `dnsConnectionStore(db, secrets)` here, as
+     * there used to be, is a second object claiming to be the same thing.
      */
     ...(secrets
-      ? {
-          dnsConnections: dnsConnectionStore(db, secrets),
-          dnsOAuth: dnsOAuth({
+      ? (() => {
+          const connections = dnsConnectionStore(db, secrets)
+          const oauth = dnsOAuth({
             apps: env.DNS_OAUTH_APPS,
             redirectBase: env.DNS_OAUTH_REDIRECT_BASE,
             /*
@@ -619,12 +640,26 @@ const app = createApp({
             stateSecret: createHmac("sha256", env.WEBHOOK_SECRET_KEY ?? "")
               .update("dns-oauth-state")
               .digest("hex"),
-          }),
-          dnsPublisher: dnsPublisher({
-            connections: dnsConnectionStore(db, secrets),
-            log,
-          }),
-        }
+          })
+
+          return {
+            dnsConnections: connections,
+            dnsOAuth: oauth,
+            dnsPublisher: dnsPublisher({
+              connections,
+              log,
+              /*
+               * ⚠ WITHOUT THIS A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND
+               * THEN DEAD. The grant was stored when somebody authorised us and
+               * never read again, so the first publish after it expired failed
+               * `unauthorized` — and the console told the customer to reconnect,
+               * asking them to redo an authorisation that had not lapsed, while
+               * the refresh token sat unused in the row.
+               */
+              renew: credentialRenewal({ oauth, connections, log }),
+            }),
+          }
+        })()
       : {}),
     ...(secrets
       ? {

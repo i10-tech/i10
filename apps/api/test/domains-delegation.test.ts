@@ -12,6 +12,7 @@ import {
 } from "../src/domains/powerdns.js"
 
 const NS = ["ns1.i10.tech", "ns2.i10.tech"]
+const TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 const dialect = new PgDialect()
 
 const zones = (dkim: [string, string] | null = ["i10abc", "PUBLICKEY"]) =>
@@ -25,6 +26,7 @@ const zones = (dkim: [string, string] | null = ["i10abc", "PUBLICKEY"]) =>
     dkimPublicKey: dkim?.[1] ?? null,
     spfInclude: "_spf.i10.tech",
     nameservers: NS,
+    claim: TOKEN,
   })
 
 const zone = (name: string) => zones().find((z) => z.name === name)
@@ -44,11 +46,57 @@ describe("what the customer delegates", () => {
     expect(zones().map((z) => z.name)).not.toContain("example.com")
   })
 
-  it("asks for one NS record set per zone", () => {
-    const records = delegationRecordsFor("example.com", NS, "pending")
+  it("asks for one NS record set per zone and nothing else", () => {
+    const records = delegationRecordsFor("example.com", NS, "pending", TOKEN)
     expect(records).toHaveLength(6)
     expect(records.every((r) => r.type === "NS")).toBe(true)
     expect(new Set(records.map((r) => r.name)).size).toBe(3)
+  })
+
+  /**
+   * ⚠ THE NAMESERVER NAMES CARRY THE CLAIM, AND THAT IS WHAT RETIRED THE
+   * SEVENTH RECORD. Every delegating customer used to publish the same
+   * `ns1.i10.tech`, so the delegation established that SOMEBODY had delegated
+   * the name and nothing about who — a stranger could add a domain, publish
+   * nothing, and have the real owner's records resolve to the stranger's zone.
+   * A challenge TXT record had to carry the identity the delegation could not.
+   *
+   * ⚠ NOW THE DELEGATION PROVES ITSELF. Only the holder of `example.com`'s DNS
+   * can publish `<claim>.ns1.i10.tech`, and the label says whose claim it is —
+   * the same property a manual domain's per-row DKIM selector always had, which
+   * is why a manual domain never needed a challenge record either.
+   */
+  it("puts the claim in the nameserver names", () => {
+    const records = delegationRecordsFor("example.com", NS, "pending", TOKEN)
+    expect(records.map((r) => r.value)).toEqual([
+      `${TOKEN}.ns1.i10.tech`,
+      `${TOKEN}.ns2.i10.tech`,
+      `${TOKEN}.ns1.i10.tech`,
+      `${TOKEN}.ns2.i10.tech`,
+      `${TOKEN}.ns1.i10.tech`,
+      `${TOKEN}.ns2.i10.tech`,
+    ])
+
+    // ⚠ AND A BARE NAMESERVER NAME IS NEVER ASKED FOR. It would prove only that
+    // somebody delegated to i10, which is the hole this closes.
+    expect(records.some((r) => r.value === "ns1.i10.tech")).toBe(false)
+  })
+
+  /**
+   * ⚠ THE ZONE'S OWN NS RECORDS MUST MATCH WHAT THE PARENT IS ASKED TO PUBLISH.
+   * A child zone naming different nameservers than its parent is a lame
+   * delegation: resolvers mostly tolerate it, some caches do not, and the
+   * failure is intermittent and unattributable.
+   */
+  it("serves the same nameserver names it asks the customer to publish", () => {
+    const asked = new Set(
+      delegationRecordsFor("example.com", NS, "pending", TOKEN).map((r) => r.value),
+    )
+    for (const z of zones()) {
+      const served = z.records.filter((r) => r.type === "NS").map((r) => r.content)
+      expect(served.length).toBeGreaterThan(0)
+      for (const ns of served) expect(asked.has(ns)).toBe(true)
+    }
   })
 })
 
@@ -114,6 +162,7 @@ describe("the zones we then serve", () => {
       dkimPublicKey: null,
       spfInclude: "_spf.i10.tech",
       nameservers: NS,
+      claim: TOKEN,
     }).find((z) => z.name === "_domainkey.example.com")!
 
     expect(dkim.records.every((r) => r.type !== "TXT")).toBe(true)

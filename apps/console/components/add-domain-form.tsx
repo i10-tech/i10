@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Check, ChevronDown, Info, Plug, Wand2 } from "lucide-react"
+import { AlertTriangle, Check, ChevronDown, Info, Pencil, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -13,10 +13,16 @@ import {
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
+import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { ProviderMark } from "@/components/provider-mark"
-import { createDomain, lookupDns } from "@/lib/actions"
+import {
+  createDomain,
+  dnsConnections,
+  lookupDns,
+  publishDnsRecords,
+} from "@/lib/actions"
 import { toastFailure } from "@/lib/toast"
-import type { DnsInspection } from "@/lib/types"
+import type { DnsConnection, DnsInspection } from "@/lib/types"
 
 /**
  * Adding a domain.
@@ -37,15 +43,36 @@ import type { DnsInspection } from "@/lib/types"
  * Switching a live domain between delegated and manual changes which records
  * must exist, so doing it silently would stop mail. The API's `delegated` flag
  * is deliberately create-only for the same reason.
+ *
+ * ⚠ THERE ARE TWO QUESTIONS HERE, NOT ONE, AND CONFLATING THEM IS WHAT THIS
+ * FORM USED TO DO. "Delegate, or keep your own records" is about WHICH records
+ * exist and who maintains them; "we add them, or you add them" is about HOW they
+ * reach the zone. They are independent — a delegating customer can still paste
+ * six NS records by hand, and a customer keeping their own records can still
+ * have us write them — so offering "delegate" against "publish the records
+ * myself" made one of the four combinations unreachable and implied the other
+ * three were one decision.
  */
 
 type Mode = "delegate" | "manual"
+
+/** How the records reach the customer's zone. Independent of `Mode`. */
+type Delivery = "automatic" | "manual"
 
 export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void }) {
   const router = useRouter()
 
   const [name, setName] = React.useState("")
   const [chosenMode, setChosenMode] = React.useState<Mode>("delegate")
+  const [chosenDelivery, setChosenDelivery] = React.useState<Delivery>("automatic")
+  /*
+   * ⚠ FETCHED ONCE AND ALLOWED TO FAIL. Whether this workspace has already
+   * connected the provider changes only what the automatic option SAYS, never
+   * whether it is offered — so a failed request leaves somebody able to pick it
+   * and connect on the next screen, rather than blocking the form on a fact it
+   * does not need.
+   */
+  const [connections, setConnections] = React.useState<DnsConnection[]>([])
   const [returnPath, setReturnPath] = React.useState("")
   /*
    * ⚠ THE ANSWER IS STORED WITH THE QUESTION IT ANSWERS, AND THAT IS THE WHOLE
@@ -86,6 +113,16 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * for a domain that was never submitted. The counter is compared on arrival
    * and a stale response is dropped.
    */
+  React.useEffect(() => {
+    let alive = true
+    void dnsConnections().then((result) => {
+      if (alive && result.ok) setConnections(result.data.data)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const request = React.useRef(0)
 
   React.useEffect(() => {
@@ -141,6 +178,19 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    */
   const mode: Mode = delegationBlocked ? "manual" : chosenMode
 
+  /*
+   * ⚠ AUTOMATIC IS ONLY REAL WHERE WE HOLD AN ADAPTER FOR THE PROVIDER.
+   * Twenty-two of the forty providers in the registry have no usable
+   * per-customer API, so for most domains this axis has one answer — and
+   * resolving it here rather than correcting the stored choice means somebody
+   * who types a Cloudflare domain, then a Namecheap one, then goes back still
+   * has the preference they picked.
+   */
+  const canAutomate = provider?.canConnect === true
+  const delivery: Delivery = canAutomate ? chosenDelivery : "manual"
+  const connected =
+    provider !== null && connections.some((c) => c.provider === provider.slug)
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (submitting) return
@@ -176,15 +226,59 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
       return
     }
 
-    toast.success(`${result.data.name} added`, {
+    const created = result.data
+
+    /*
+     * ⚠ THE AUTOMATIC CHOICE HAS TO ACTUALLY DO SOMETHING HERE, OR IT IS A
+     * PREFERENCE NOBODY ACTED ON. Publishing on the next screen instead would
+     * make this a question whose answer changes only the wording, which is the
+     * worst kind of setting.
+     *
+     * ⚠ AND THE CONFLICT CASE IS HANDED ON RATHER THAN DUPLICATED. A zone with
+     * an existing DMARC record answers 409 with what stands in the way, and the
+     * dialog that explains and confirms that already exists on the domain page.
+     * Rebuilding it here would be two copies of the one flow that deletes a
+     * customer's records.
+     */
+    if (delivery === "automatic" && connected && provider) {
+      const published = await publishDnsRecords({
+        domainId: created.id,
+        provider: provider.slug,
+      })
+
+      if (published.ok) {
+        toast.success(`${created.name} added and published`, {
+          description:
+            published.data.created.length === 0
+              ? "Every record was already in place. Verification usually follows within minutes."
+              : `${published.data.created.length} records written to ${provider.name}. Verification usually follows within minutes.`,
+        })
+      } else if (published.status === 409) {
+        toast.warning(`${created.name} added`, {
+          description: "Some existing records are in the way. Review them to finish.",
+        })
+      } else {
+        toast.warning(`${created.name} added`, {
+          description: `We could not publish the records: ${published.error}`,
+        })
+      }
+
+      if (onCreated) onCreated(created.id)
+      else router.push(`/domains/${created.id}`)
+      return
+    }
+
+    toast.success(`${created.name} added`, {
       description:
-        mode === "delegate"
-          ? "Publish the NS records to finish."
-          : "Publish the records to finish.",
+        delivery === "automatic"
+          ? `Connect ${provider?.name ?? "your DNS provider"} to finish.`
+          : mode === "delegate"
+            ? "Publish the NS records to finish."
+            : "Publish the records to finish.",
     })
 
-    if (onCreated) onCreated(result.data.id)
-    else router.push(`/domains/${result.data.id}`)
+    if (onCreated) onCreated(created.id)
+    else router.push(`/domains/${created.id}`)
   }
 
   return (
@@ -288,28 +382,38 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           {provider?.canConnect && (
             <div className="flex items-center justify-between gap-3 border-t px-4 py-2.5">
               <p className="text-xs text-muted-foreground">
-                We can publish the records for you.
+                {connected
+                  ? `${provider.name} is connected. We can publish the records for you.`
+                  : "We can publish the records for you."}
               </p>
               {/*
-               * ⚠ DISABLED AND LABELLED, NOT HIDDEN. The provider adapters —
-               * OAuth for Cloudflare, DigitalOcean, DNSimple, Linode, Netlify
-               * and Vercel; a pasted token for the rest — are the next piece of
-               * work, and the registry already carries everything they need.
-               * Hiding the button would make the capability invisible; showing
-               * it live would be a lie. See docs/decisions/console.md §7.
+               * ⚠ LIVE NOW, AND IT LEAVES THE PAGE. Connecting is a full
+               * navigation to the provider's authorisation screen and back
+               * through the callback — so anything typed above is lost, which
+               * is exactly why the button sits beside the detection panel
+               * rather than inside the form's own flow. Somebody who connects
+               * first comes back to an empty form and a working connection.
                */}
-              <Button type="button" variant="outline" size="sm" disabled>
-                <Plug />
-                Connect {provider.name}
-                <span className="text-muted-foreground">· soon</span>
-              </Button>
+              {connected ? (
+                <span className="flex items-center gap-1.5 text-xs text-success">
+                  <Check className="size-3.5" />
+                  Connected
+                </span>
+              ) : (
+                <ConnectProviderButton
+                  slug={provider.slug}
+                  providerName={provider.name}
+                />
+              )}
             </div>
           )}
         </div>
       )}
 
       <fieldset className="space-y-2">
-        <legend className="mb-2 text-sm font-medium">How should we set this up?</legend>
+        <legend className="mb-2 text-sm font-medium">
+          Which records should exist?
+        </legend>
 
         <ModeCard
           selected={mode === "delegate"}
@@ -329,14 +433,51 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           selected={mode === "manual"}
           onSelect={() => setChosenMode("manual")}
           icon={<Check className="size-4" />}
-          title="Publish the records myself"
-          description={
-            provider?.manualPath
-              ? `Six records to add at ${provider.name} — ${provider.manualPath}.`
-              : "Six records to add at your DNS provider. We check them for you and tell you which are still missing."
-          }
+          title="Keep the records in my zone"
+          description="Six ordinary records — SPF, DKIM, DMARC and the two return paths. Nothing is delegated, and they stay yours to maintain."
         />
       </fieldset>
+
+      {/*
+       * ⚠ THE SECOND QUESTION, AND ONLY WHERE IT HAS TWO ANSWERS. For the
+       * twenty-two providers with no usable per-customer API there is nothing
+       * to choose between, and a fieldset with one selectable option is a
+       * question that reads as a decision somebody has to make.
+       */}
+      {canAutomate && provider && (
+        <fieldset className="space-y-2">
+          <legend className="mb-2 text-sm font-medium">
+            How should they get there?
+          </legend>
+
+          <ModeCard
+            selected={delivery === "automatic"}
+            onSelect={() => setChosenDelivery("automatic")}
+            icon={<Wand2 className="size-4" />}
+            title={`Add them for me at ${provider.name}`}
+            recommended
+            description={
+              connected
+                ? mode === "delegate"
+                  ? `We write the six NS records into ${provider.name} as soon as the domain is added. We only ever touch the three delegated names.`
+                  : `We write all six records into ${provider.name} as soon as the domain is added.`
+                : `You will be asked to authorise ${provider.name} first. We only request permission to read your zones and edit DNS records.`
+            }
+          />
+
+          <ModeCard
+            selected={delivery === "manual"}
+            onSelect={() => setChosenDelivery("manual")}
+            icon={<Pencil className="size-4" />}
+            title="I'll add them myself"
+            description={
+              provider.manualPath
+                ? `We show you the records and check them as they appear — ${provider.manualPath}.`
+                : "We show you the records and check them as they appear, telling you which are still missing."
+            }
+          />
+        </fieldset>
+      )}
 
       <Collapsible>
         <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground">

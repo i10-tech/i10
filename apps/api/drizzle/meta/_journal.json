@@ -288,6 +288,34 @@
       "when": 1789617350617,
       "tag": "0040_pdns_role_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789617351617,
+      "tag": "0041_delegation_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1789617352617,
+      "tag": "0042_delegation_challenge",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1789617353617,
+      "tag": "0043_domain_taken_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789617354617,
+      "tag": "0044_domain_contest",
+      "breakpoints": true
     }
   ]
 }

@@ -4,17 +4,25 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
 import { Status } from "@/components/status"
-import { AddDomainForm } from "@/components/add-domain-form"
+import { DomainSetup } from "@/components/onboarding/domain-setup"
 import { Button } from "@repo/ui/components/button"
 import type { DomainSummary } from "@/lib/types"
 
 /**
- * ⚠ IT REUSES THE REAL ADD-DOMAIN FORM RATHER THAN A SIMPLIFIED COPY. A
- * "wizard version" would be a second implementation of live DNS detection, the
- * delegate-or-manual decision and the plan-limit handling — and the two would
- * drift, with the onboarding one always being the stale half. The form takes an
- * `onCreated` callback precisely so the flow can stay on this page instead of
- * navigating away.
+ * ⚠ THIS USED TO MOUNT THE FULL ADD-DOMAIN FORM, and the comment here defended
+ * that on drift grounds: a wizard version would be a second implementation of
+ * detection, the delegate-or-manual decision and the plan limit. The argument
+ * was right about the risk and wrong about the cost — what it bought was
+ * somebody's first five minutes spent on a page carrying a name field, a
+ * detection panel, two fieldsets and an advanced section, which is four
+ * decisions presented as one wall.
+ *
+ * ⚠ SO `DomainSetup` ASKS THEM ONE AT A TIME AND SHARES THE PARTS THAT COULD
+ * ACTUALLY DRIFT. Detection, creation, publishing and the plan limit are the
+ * same server actions the form calls; what differs is only how many questions
+ * are on screen at once, and whether the automatic path is offered or simply
+ * attempted. `/domains/new` keeps the full form, which is the right shape for
+ * somebody adding their fourth domain.
  */
 export function StepDomain({
   domains,
@@ -28,14 +36,6 @@ export function StepDomain({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Add your domain</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Mail leaves from a domain you control. We will detect who hosts its DNS and
-          show you the shortest path from here.
-        </p>
-      </div>
-
       {domains.length > 0 && (
         <ul className="divide-y overflow-hidden rounded-lg border">
           {domains.map((domain) => (
@@ -51,8 +51,8 @@ export function StepDomain({
       )}
 
       {adding ? (
-        <AddDomainForm
-          onCreated={() => {
+        <DomainSetup
+          onDone={() => {
             setAdding(false)
             // ⚠ REFRESHED SO THE LIST ABOVE INCLUDES THE NEW DOMAIN BEFORE THE
             // VERIFY STEP READS IT. Without this, "Next" lands on a verify step

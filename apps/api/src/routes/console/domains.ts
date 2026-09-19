@@ -79,7 +79,15 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
     const outcome = await d.domains.verify(tenantId, c.req.param("id"))
 
     switch (outcome.status) {
+      /*
+       * ⚠ 200, NOT AN ERROR. The challenge record simply is not published yet,
+       * which is the ordinary state of every delegated domain between being added
+       * and being set up — the same state a manual domain is in before its six
+       * records resolve, which also answers 200. The domain comes back carrying
+       * its record list, where the outstanding `Ownership` row is the signal.
+       */
       case "ok":
+      case "unproven":
         return c.json(outcome.domain)
       case "missing":
         return c.json(notFound("No domain with that id."), 404)

@@ -1,0 +1,101 @@
+# Re-checks whether verified domains are still their holders', on a schedule.
+#
+# ⚠ THE SAME IMAGE AND A FIFTH COMMAND, like the worker, the sweep, the
+# reconciler and the migration Job. `bun dist/recheck.js` runs one pass and exits.
+#
+# ⚠ WHY THIS EXISTS. Verification was one-shot. A workspace that proved
+# `example.com` once kept the verified badge for ever — through the registration
+# lapsing, through somebody else buying the domain, through every record being
+# deleted — because nothing ever asked again. "Verified" therefore meant "was
+# true once", which is not what the send path reads it as. The visible shape of
+# that bug is the new owner of a domain being told it belongs to another
+# workspace while the previous owner still holds a sending identity for it.
+#
+# ⚠ AND IT IS THE CAUTIOUS HALF OF A PAIR. `domainStore.verify` stands a holder
+# down the moment a challenger PROVES the name, because that is positive
+# evidence the domain has moved. This pass has no challenger and no evidence
+# except an absence — which has a dozen innocent causes, from a zone being
+# migrated to a record mid-edit — so it only starts a clock, in
+# `core.domains.proof_missing_since`, and a domain has to fail EVERY check for a
+# week before anything happens to it. A single bad reading must never cost a
+# paying customer their ability to send.
+#
+# ⚠ AND A RESOLVER FAILURE IS NEVER TREATED AS AN ANSWER. `unreachable` writes
+# nothing at all: not the check timestamp, not the clock. Without that rule one
+# bad afternoon at a large DNS provider would quietly begin un-verifying a large
+# fraction of our customers at once, and every one of those clocks would look
+# like a genuine failure a week later, long after the outage was forgotten.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-domain-recheck
+  namespace: i10-prod
+spec:
+  # Once a day, off-peak, and deliberately not on the hour — a nameserver that
+  # rate-limits sees this as ordinary traffic rather than as a burst.
+  #
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/recheck.ts, AND THEY MUST AGREE.
+  # Sentry decides a run is MISSING by comparing the clock against the schedule
+  # the job declares in its check-in, so changing it here alone leaves the job
+  # working and the alerting wrong.
+  schedule: "17 3 * * *"
+  # ⚠ NEVER TWO AT ONCE. Two passes would make the same DNS queries about the
+  # same customers, and both would write `proof_missing_since` — harmless, since
+  # `coalesce` keeps the first, but it is twice the queries to reach the same
+  # place and twice the load on somebody else's nameservers.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Failed runs kept longer than successful ones: the check-in says a run
+  # failed, the pod is where the reason is.
+  failedJobsHistoryLimit: 5
+  # A pass that could not be placed within ten minutes should be abandoned
+  # rather than run late; the next slot is a day away and nothing here is urgent.
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      # ⚠ ONE ATTEMPT PER SLOT, AND RETRYING WOULD BE ACTIVELY WRONG. A pass that
+      # failed because DNS was unreachable would retry into the same outage, and
+      # the only thing a retry can change is how many lookups we make during it.
+      backoffLimit: 0
+      # ⚠ GENEROUS, BECAUSE THIS IS BOUND BY SOMEBODY ELSE'S NAMESERVERS. A batch
+      # of 200 domains against slow resolvers is minutes of wall clock that is
+      # almost entirely waiting. Still far under the daily interval, so a hung
+      # pass cannot turn `Forbid` into a job that never runs again.
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: recheck
+              image: ghcr.io/i10-tech/i10-api:prod-87d88470fe251a00131225b2ee5da011a28fbdde@sha256:a740bda04a9122d54529c73bfb347a9dc5f9850269845f9ba43d8747e84fb3d5
+              imagePullPolicy: Always
+              command: ["bun", "dist/recheck.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # This pass reaches across every tenant, and it does it through
+                # narrow SECURITY DEFINER functions (`core.domains_due_recheck`,
+                # `core.note_domain_proof`, `core.displace_domain`) rather than
+                # by holding a role that can see everything.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                # Almost entirely waiting on DNS, so the CPU request is small and
+                # the memory ceiling only has to hold one batch of rows.
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

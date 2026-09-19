@@ -1,4 +1,6 @@
 import { describe, expect, it, mock } from "bun:test"
+import { PgDialect } from "drizzle-orm/pg-core"
+import type { SQL } from "drizzle-orm"
 import { domainStore } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
@@ -37,6 +39,18 @@ const row = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+const dialect = new PgDialect()
+
+/**
+ * ⚠ THE RAW-SQL CALLS ARE TOLD APART BY THEIR TEXT, because `store.ts` reaches
+ * two different SECURITY DEFINER functions through `db.execute` and they mean
+ * opposite things. `domain_verified_elsewhere` answers "may this workspace even
+ * try"; `delegation_holder` / `verified_holder` answer "who is in the way, so we
+ * can re-check whether they still own it". One handler for both would make a
+ * test that means to describe an incumbent silently answer the other question.
+ */
+const queryText = (q: unknown) => dialect.sqlToQuery(q as SQL).sql
+
 /** A Postgres unique violation, as the driver reports one. */
 const violation = (constraint: string) =>
   Object.assign(
@@ -47,21 +61,42 @@ const violation = (constraint: string) =>
     },
   )
 
+/**
+ * ⚠ `claim` IS A SEPARATE HANDLER BECAUSE `remove` NOW ASKS TWO QUESTIONS. It
+ * reads the domain row, and then reads `core.delegations` to find out whether
+ * this row is the one actually being served — answering both from one handler
+ * fed the claim lookup a domain row, whose `domainId` is undefined, so every
+ * delegated delete looked like a tenant that held nothing.
+ *
+ * Dispatching on the PROJECTION rather than on call order keeps it honest if
+ * the two reads are ever reordered.
+ */
 function fakeDb(handlers: {
   insert?: () => unknown[]
   select?: () => unknown[]
+  claim?: () => unknown[]
   update?: () => unknown[]
   del?: () => void
+  /** `core.domain_verified_elsewhere`, which is reached through raw SQL. */
+  taken?: boolean
+  /** `core.verified_holder` — the workspace a challenger has to displace. */
+  holder?: () => unknown[]
 }) {
   const tx = {
-    execute: async () => [],
+    execute: async (q: unknown) =>
+      queryText(q).includes("_holder")
+        ? (handlers.holder?.() ?? [])
+        : [{ taken: handlers.taken ?? false }],
     insert: () => ({
       values: () => ({ returning: async () => handlers.insert?.() ?? [] }),
     }),
-    select: () => ({
+    select: (projection?: Record<string, unknown>) => ({
       from: () => ({
         where: () => ({
-          limit: async () => handlers.select?.() ?? [],
+          limit: async () =>
+            projection && "domainId" in projection
+              ? (handlers.claim?.() ?? [])
+              : (handlers.select?.() ?? []),
           orderBy: async () => handlers.select?.() ?? [],
         }),
       }),
@@ -78,6 +113,7 @@ function fakeDb(handlers: {
     }),
   }
   return {
+    execute: tx.execute,
     transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   } as unknown as Database
 }
@@ -98,6 +134,14 @@ const base = {
   },
   secrets: { seal: (v: string) => `sealed:${v}`, open: (v: string) => v },
   capacity: { check: async () => ({ status: "ok" }) },
+  /**
+   * ⚠ WITHOUT THIS THESE TESTS RESOLVE `example.com` ON THE REAL INTERNET.
+   * `verify` proves ownership before it registers an SES identity, and the
+   * store's default lookup is a live resolver — so the result would depend on
+   * the test runner's network. It answers with the fixture's own DKIM key,
+   * which is exactly what a manual domain proves ownership with.
+   */
+  txt: async () => ["v=DKIM1; k=rsa; p=MIIBIjANBgkq"],
 }
 
 describe("claiming a name somebody else has not proved", () => {
@@ -163,6 +207,22 @@ describe("losing the race to verify", () => {
       ...base,
       db: fakeDb({
         select: () => [row({ status: "pending" })],
+        /*
+         * ⚠ AND THE HOLDER STILL PROVES IT, which is what makes this a genuine
+         * tie rather than a domain that has changed hands. A challenger who has
+         * proved the name now causes the incumbent to be re-checked; with no
+         * incumbent described here the retry would simply succeed, and the test
+         * would be asserting the opposite of its own name.
+         */
+        holder: () => [
+          {
+            domain_id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60cc",
+            delegation_token: "not-this-tenants-token",
+            dkim_selector: "i10abc123",
+            dkim_public_key: "MIIBIjANBgkq",
+            delegated: false,
+          },
+        ],
         update: () => {
           attempt += 1
           // The first write tries `verified` and is refused; the second writes
@@ -235,7 +295,12 @@ describe("deleting a domain whose cleanup fails", () => {
     const warn = mock(() => {})
     const store = domainStore({
       ...base,
-      db: fakeDb({ select: () => [row({ delegated: true })] }),
+      // ⚠ AND THIS TENANT HOLDS THE CLAIM, which is now what decides whether
+      // the zones are theirs to remove at all — see `delegations_name_unique`.
+      db: fakeDb({
+        select: () => [row({ delegated: true })],
+        claim: () => [{ domainId: ID }],
+      }),
       identity: identity(),
       zones: {
         put: async () => {},
@@ -263,5 +328,65 @@ describe("deleting a domain whose cleanup fails", () => {
       }),
     })
     expect(await store.remove(TENANT, ID)).toBe(true)
+  })
+})
+
+describe("refusing a duplicate without touching SES", () => {
+  /**
+   * ⚠ THE REFUSAL USED TO COST THE OTHER TENANT THEIR DKIM KEY, which is a far
+   * worse bug than the orphaned identity it looked like. SES keys identities on
+   * the domain name inside one AWS account, so `CreateEmailIdentity` for a name
+   * somebody else holds raises `AlreadyExistsException` — and the adapter's
+   * recovery is `PutEmailIdentityDkimSigningAttributes`, which REPLACES their
+   * signing key with ours. The verified tenant then signs with a key their DNS
+   * does not publish and their working domain breaks, because a stranger typed
+   * its name into a form and was told no.
+   *
+   * ⚠ SO THE ASSERTION IS THAT AWS IS NEVER REACHED, not that we tidied up
+   * afterwards. There is nothing to tidy: the identity is not an orphan, it is
+   * somebody else's, and deleting it would be the same bug pointing the other
+   * way.
+   */
+  it("does not call SES when this workspace already has the name", async () => {
+    const create = mock(async () => ({
+      dkimTokens: ["aaa"],
+      status: "pending" as const,
+    }))
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [row()] }),
+      identity: identity({ create }),
+    })
+
+    const out = await store.create(TENANT, { name: "example.com" })
+
+    expect(out.status).toBe("conflict")
+    expect(out.status === "conflict" && out.reason).toBe(
+      "You have already added example.com.",
+    )
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it("does not call SES when another workspace has verified the name", async () => {
+    const create = mock(async () => ({
+      dkimTokens: ["aaa"],
+      status: "pending" as const,
+    }))
+    const store = domainStore({
+      ...base,
+      // No row of our own, but `core.domain_verified_elsewhere` says yes.
+      db: fakeDb({ select: () => [], taken: true }),
+      identity: identity({ create }),
+    })
+
+    const out = await store.create(TENANT, { name: "example.com" })
+
+    expect(out.status).toBe("conflict")
+    expect(create).not.toHaveBeenCalled()
+    // ⚠ STILL DOES NOT NAME THE HOLDER. The function it asked returns a boolean
+    // precisely so that this message cannot start naming customers.
+    expect(out.status === "conflict" && out.reason).not.toMatch(
+      /tenant|customer|workspace ".*"/i,
+    )
   })
 })

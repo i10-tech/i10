@@ -355,7 +355,10 @@ export const PREVIEW_NOT_FOUND = Symbol("preview:not-found")
  */
 export const PREVIEW_UNAVAILABLE = Symbol("preview:unavailable")
 
-const ROUTES: [RegExp, (match: RegExpMatchArray, query: Query) => unknown][] = [
+const ROUTES: [
+  RegExp,
+  (match: RegExpMatchArray, query: Query, method: string) => unknown,
+][] = [
   /*
    * ⚠ BILLING IS THE ONE PLACE A PREVIEW MUST NOT PRETEND TO SUCCEED. Every
    * other mutation here is a no-op that reports success, because the point of
@@ -493,7 +496,27 @@ const ROUTES: [RegExp, (match: RegExpMatchArray, query: Query) => unknown][] = [
     },
   ],
 
-  [/^\/console\/domains$/, () => ({ data: DOMAINS })],
+  /*
+   * ⚠ ONE PATH, TWO ANSWERS, WHICH IS WHY THE METHOD REACHES THIS FILE AT ALL.
+   * A mutation in preview is still a no-op that reports success — nothing
+   * persists — but "success" for a POST here is a DOMAIN, and returning the
+   * LIST envelope made the caller read `records` off an object that has none.
+   * The onboarding flow crashed at the step after the one being reviewed, which
+   * is the failure this mode exists to prevent rather than cause.
+   */
+  [
+    /^\/console\/domains$/,
+    (_m, _q, method) =>
+      method === "POST"
+        ? {
+            ...DOMAINS[0]!,
+            id: "prv_new",
+            name: "acme.com",
+            status: "pending",
+            records: recordsFor(DOMAINS[0]!),
+          }
+        : { data: DOMAINS },
+  ],
 
   /*
    * ⚠ THE LOOKUP FIXTURE VARIES BY DOMAIN, WHICH IS THE ONLY WAY THE FEATURE IS
@@ -922,10 +945,10 @@ const ROUTES: [RegExp, (match: RegExpMatchArray, query: Query) => unknown][] = [
  * everywhere looks like a styling bug; a thrown error names the path that needs
  * a fixture, which is the actual problem.
  */
-export function previewFor(path: string, query?: Query): unknown {
+export function previewFor(path: string, query?: Query, method = "GET"): unknown {
   for (const [pattern, build] of ROUTES) {
     const match = path.match(pattern)
-    if (match) return build(match, query)
+    if (match) return build(match, query, method)
   }
   return undefined
 }

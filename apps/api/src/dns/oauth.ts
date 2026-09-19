@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { providerBySlug } from "@repo/dns-providers"
 
 /**
@@ -28,7 +28,33 @@ import { providerBySlug } from "@repo/dns-providers"
 
 export interface OAuthApp {
   clientId: string
-  clientSecret: string
+  /**
+   * ⚠ OPTIONAL, BECAUSE NOT EVERY PROVIDER ISSUES ONE. Cloudflare's OAuth has
+   * `none` among its `token_endpoint_auth_methods_supported`, which is how
+   * `wrangler` authenticates — a PUBLIC client, with no secret to keep, whose
+   * entire protection against a stolen authorization code is PKCE. Requiring a
+   * secret here would make such an app impossible to configure; sending an
+   * empty one would be rejected by the token endpoint.
+   */
+  clientSecret?: string
+  /**
+   * Overrides the registry's scopes for this provider.
+   *
+   * ⚠ IT EXISTS BECAUSE A SCOPE NAME IS A FACT ABOUT SOMEBODY ELSE'S PRODUCT,
+   * NOT ABOUT OURS. The registry's list is our best reading of each provider's
+   * documentation at the time it was written, and providers rename scopes,
+   * split them, and publish names in docs that differ from the strings their
+   * authorize endpoint actually accepts. Cloudflare's are a live example: the
+   * registry carries API-token syntax, and the real values come from an
+   * endpoint that needs credentials to read.
+   *
+   * ⚠ SO GETTING ONE WRONG IS A DOPPLER EDIT RATHER THAN A DEPLOY. The failure
+   * it fixes — a consent screen that refuses, or grants a token that cannot do
+   * the one thing we need — is discovered during setup by whoever is holding
+   * the dashboard, and making them wait for a release to try the next string is
+   * the difference between ten minutes and an afternoon.
+   */
+  scopes?: readonly string[]
 }
 
 export interface OAuthConfig {
@@ -79,9 +105,29 @@ export interface DnsOAuth {
   /** `null` when no app is configured for that provider. */
   isConfigured(slug: string): boolean
   start(input: { slug: string; tenantId: string }): AuthorizationStart
-  /** Verifies `state` and returns who it belongs to. Throws on tampering. */
-  verifyState(state: string): { slug: string; tenantId: string }
-  exchange(input: { slug: string; code: string }): Promise<TokenGrant>
+  /**
+   * Verifies `state` and returns who it belongs to. Throws on tampering.
+   *
+   * ⚠ IT ALSO RETURNS THE PKCE VERIFIER, RECOMPUTED RATHER THAN REMEMBERED.
+   * See `pkceVerifier` below for why that is not a shortcut.
+   */
+  verifyState(state: string): { slug: string; tenantId: string; verifier: string }
+  exchange(input: {
+    slug: string
+    code: string
+    /** From `verifyState`. The token endpoint rejects the exchange without it. */
+    verifier: string
+  }): Promise<TokenGrant>
+  /**
+   * Trades a refresh token for a new access token.
+   *
+   * ⚠ WITHOUT THIS A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND THEN DEAD. The
+   * grant was stored from the moment somebody authorised us and never looked at
+   * again, so the first publish after the token expired failed `unauthorized`
+   * — which the console correctly reports as "reconnect", asking a customer to
+   * redo an authorisation that never actually lapsed.
+   */
+  refresh(input: { slug: string; refreshToken: string }): Promise<TokenGrant>
 }
 
 export function dnsOAuth(config: OAuthConfig): DnsOAuth {
@@ -91,6 +137,35 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
 
   const sign = (payload: string) =>
     createHmac("sha256", config.stateSecret).update(payload).digest("base64url")
+
+  /**
+   * The PKCE code verifier for a given authorisation, derived rather than
+   * stored.
+   *
+   * ⚠ PKCE EXISTS BECAUSE THE AUTHORIZATION CODE TRAVELS THROUGH A BROWSER WE
+   * DO NOT CONTROL. Anything that can read the redirect — a malicious
+   * extension, a proxy, a referrer log, shoulder-surfing a URL bar — holds a
+   * code that can be exchanged for a credential that writes DNS in a customer's
+   * zone. The challenge binds that code to a secret only this server knows.
+   *
+   * ⚠ WHICH IS EXACTLY WHY THE VERIFIER MUST NOT TRAVEL IN `state`. It is the
+   * obvious place to put it — `state` already round-trips and is already
+   * signed — but signed is not secret: the payload is base64url, readable by
+   * anyone holding the URL. A verifier sitting beside the code it protects
+   * protects nothing at all.
+   *
+   * ⚠ SO IT IS AN HMAC OF THE NONCE UNDER THE STATE SECRET. The nonce is public
+   * and already in `state`; the secret is not, so the verifier can be
+   * recomputed at callback time and never has to be written down, stored, or
+   * sent anywhere. That keeps the "no server-side store" property this module
+   * was built around.
+   */
+  const pkceVerifier = (nonce: string) =>
+    createHmac("sha256", config.stateSecret).update(`pkce|${nonce}`).digest("base64url")
+
+  /** RFC 7636 S256: BASE64URL(SHA256(ASCII(verifier))). */
+  const pkceChallenge = (verifier: string) =>
+    createHash("sha256").update(verifier).digest("base64url")
 
   return {
     isConfigured(slug) {
@@ -123,12 +198,12 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
 
       // ⚠ THE NONCE MAKES TWO STARTS IN THE SAME MILLISECOND DIFFERENT, so a
       // state cannot be replayed from a browser history entry of another tab.
-      const payload = [
-        tenantId,
-        slug,
-        randomBytes(9).toString("base64url"),
-        String(now() + STATE_TTL_MS),
-      ].join("|")
+      //
+      // ⚠ AND IT IS NOW ALSO THE SEED FOR THE PKCE VERIFIER, which is why it is
+      // 18 bytes rather than 9: it is the only unpredictable input standing
+      // between somebody holding a stolen code and a working credential.
+      const nonce = randomBytes(18).toString("base64url")
+      const payload = [tenantId, slug, nonce, String(now() + STATE_TTL_MS)].join("|")
       const state = `${Buffer.from(payload).toString("base64url")}.${sign(payload)}`
 
       const url = new URL(oauth.authorizeUrl)
@@ -136,9 +211,24 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       url.searchParams.set("client_id", app.clientId)
       url.searchParams.set("redirect_uri", redirectFor(slug))
       url.searchParams.set("state", state)
-      if (oauth.scopes.length > 0) {
-        url.searchParams.set("scope", oauth.scopes.join(" "))
+      // ⚠ THE CONFIGURED LIST WINS WHOLESALE, NOT MERGED. A merge would mean a
+      // deployment could only ever ADD to whatever the registry happens to
+      // say — so a registry entry that is simply wrong could not be corrected,
+      // which is the entire case for this override existing.
+      const scopes = app.scopes ?? oauth.scopes
+      if (scopes.length > 0) {
+        url.searchParams.set("scope", scopes.join(" "))
       }
+
+      /*
+       * ⚠ SENT FOR EVERY PROVIDER, NOT ONLY THE ONES THAT DEMAND IT. PKCE is
+       * additive: a server that does not implement it ignores both parameters,
+       * and one that does binds the code to us. Making it conditional would mean
+       * a per-provider flag nobody updates, and the provider that quietly starts
+       * requiring it would break on a Tuesday with no clue in the error.
+       */
+      url.searchParams.set("code_challenge", pkceChallenge(pkceVerifier(nonce)))
+      url.searchParams.set("code_challenge_method", "S256")
 
       return { url: url.toString(), state }
     },
@@ -164,8 +254,8 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         throw new OAuthError("bad_state", "That authorisation could not be verified.")
       }
 
-      const [tenantId, slug, , expiry] = payload.split("|")
-      if (!tenantId || !slug || !expiry) {
+      const [tenantId, slug, nonce, expiry] = payload.split("|")
+      if (!tenantId || !slug || !nonce || !expiry) {
         throw new OAuthError("bad_state", "That authorisation link is malformed.")
       }
       if (Number(expiry) < now()) {
@@ -175,72 +265,106 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         )
       }
 
-      return { slug, tenantId }
+      return { slug, tenantId, verifier: pkceVerifier(nonce) }
     },
 
-    async exchange({ slug, code }) {
-      const provider = providerBySlug(slug)
-      const oauth = provider?.api?.oauth
-      const app = config.apps[slug]
-      if (!oauth || !app) {
-        throw new OAuthError("unconfigured", `${slug} is not configured for OAuth.`)
-      }
-
-      let response: Response
-      try {
-        response = await fetch(oauth.tokenUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-          },
-          /*
-           * ⚠ THE SECRET GOES IN THE BODY, NOT IN A BASIC HEADER. Both are
-           * permitted by RFC 6749 and providers differ on which they accept;
-           * the body form is the one every provider in this registry documents.
-           */
-          body: new URLSearchParams({
-            grant_type: "authorization_code",
-            code,
-            client_id: app.clientId,
-            client_secret: app.clientSecret,
-            redirect_uri: redirectFor(slug),
-          }),
-          signal: AbortSignal.timeout(10_000),
-        })
-      } catch (error) {
-        throw new OAuthError(
-          "exchange_failed",
-          `Could not reach ${provider.name}.`,
-          String(error),
-        )
-      }
-
-      const body = (await response.json().catch(() => null)) as {
-        access_token?: string
-        refresh_token?: string
-        expires_in?: number
-        scope?: string
-        error?: string
-        error_description?: string
-      } | null
-
-      if (!response.ok || !body?.access_token) {
-        throw new OAuthError(
-          "exchange_failed",
-          `${provider.name} did not complete the authorisation.`,
-          body?.error_description ?? body?.error ?? `HTTP ${response.status}`,
-        )
-      }
-
-      return {
-        accessToken: body.access_token,
-        ...(body.refresh_token ? { refreshToken: body.refresh_token } : {}),
-        ...(typeof body.expires_in === "number"
-          ? { expiresAt: now() + body.expires_in * 1000 }
-          : {}),
-        ...(body.scope ? { scopes: body.scope } : {}),
-      }
+    async exchange({ slug, code, verifier }) {
+      return token(slug, (app) => ({
+        grant_type: "authorization_code",
+        code,
+        client_id: app.clientId,
+        // ⚠ OMITTED ENTIRELY FOR A PUBLIC CLIENT, not sent empty. An empty
+        // `client_secret` is a supplied-and-wrong secret to a token
+        // endpoint, which answers `invalid_client` — indistinguishable in
+        // the log from a real secret that has been rotated.
+        ...(app.clientSecret ? { client_secret: app.clientSecret } : {}),
+        code_verifier: verifier,
+        redirect_uri: redirectFor(slug),
+      }))
     },
+
+    async refresh({ slug, refreshToken }) {
+      return token(slug, (app) => ({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: app.clientId,
+        ...(app.clientSecret ? { client_secret: app.clientSecret } : {}),
+        // ⚠ NO `code_verifier` AND NO `redirect_uri`. PKCE binds the
+        // AUTHORIZATION CODE to this server; a refresh carries no code, and
+        // sending either parameter is rejected by strict implementations.
+      }))
+    },
+  }
+
+  /**
+   * One POST to a provider's token endpoint, whatever is being traded.
+   *
+   * ⚠ SHARED SO THE TWO GRANTS CANNOT DRIFT. An authorization-code exchange and
+   * a refresh differ only in the body; everything around them — the form
+   * encoding, the timeout, which failures are `exchange_failed`, how an expiry
+   * becomes an absolute timestamp — is identical, and the half that is easy to
+   * forget in a second copy is the one that only matters an hour after somebody
+   * connected.
+   */
+  async function token(
+    slug: string,
+    form: (app: OAuthApp) => Record<string, string>,
+  ): Promise<TokenGrant> {
+    const provider = providerBySlug(slug)
+    const oauth = provider?.api?.oauth
+    const app = config.apps[slug]
+    if (!oauth || !app) {
+      throw new OAuthError("unconfigured", `${slug} is not configured for OAuth.`)
+    }
+
+    let response: Response
+    try {
+      response = await fetch(oauth.tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        /*
+         * ⚠ THE SECRET GOES IN THE BODY, NOT IN A BASIC HEADER. Both are
+         * permitted by RFC 6749 and providers differ on which they accept;
+         * the body form is the one every provider in this registry documents.
+         */
+        body: new URLSearchParams(form(app)),
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch (error) {
+      throw new OAuthError(
+        "exchange_failed",
+        `Could not reach ${provider.name}.`,
+        String(error),
+      )
+    }
+
+    const body = (await response.json().catch(() => null)) as {
+      access_token?: string
+      refresh_token?: string
+      expires_in?: number
+      scope?: string
+      error?: string
+      error_description?: string
+    } | null
+
+    if (!response.ok || !body?.access_token) {
+      throw new OAuthError(
+        "exchange_failed",
+        `${provider.name} did not complete the authorisation.`,
+        body?.error_description ?? body?.error ?? `HTTP ${response.status}`,
+      )
+    }
+
+    return {
+      accessToken: body.access_token,
+      ...(body.refresh_token ? { refreshToken: body.refresh_token } : {}),
+      ...(typeof body.expires_in === "number"
+        ? { expiresAt: now() + body.expires_in * 1000 }
+        : {}),
+      ...(body.scope ? { scopes: body.scope } : {}),
+    }
   }
 }

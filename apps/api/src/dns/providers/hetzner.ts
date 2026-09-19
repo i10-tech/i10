@@ -40,6 +40,18 @@ async function call<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  /*
+   * ⚠ READ BEFORE THE `try`, AND THAT IS NOT A STYLE CHOICE. `tokenOf` throws
+   * `unauthorized` for a credential that has lost its token, and inside the
+   * block below that throw is caught by the network handler and re-wrapped as
+   * `unavailable` — so a connection that can only be fixed by reconnecting
+   * reports itself as a Hetzner outage, the console says "try again", and
+   * trying again produces the identical failure for ever. The port's own note
+   * on `DnsWriteFailure` is about exactly this collapse, in the other
+   * direction.
+   */
+  const apiToken = tokenOf(credential)
+
   let response: Response
   try {
     response = await fetch(`${API}${path}`, {
@@ -48,7 +60,7 @@ async function call<T>(
         // ⚠ THEIR OWN HEADER, NOT `Authorization`. Hetzner DNS reads
         // `Auth-API-Token`; a bearer header is ignored and every call answers
         // 401, which reads as a bad token rather than a wrong header.
-        "Auth-API-Token": tokenOf(credential),
+        "Auth-API-Token": apiToken,
         "Content-Type": "application/json",
         ...(init.headers ?? {}),
       },

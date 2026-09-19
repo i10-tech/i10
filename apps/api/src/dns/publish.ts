@@ -5,7 +5,9 @@ import {
   zoneFor,
   type ConflictingRecord,
   type DesiredRecord,
+  type Credential,
   type PublishOutcome,
+  type ZoneWriter,
 } from "./port.js"
 import { writerFor } from "./writers.js"
 
@@ -55,12 +57,44 @@ export interface DnsPublisher {
 export interface PublisherDeps {
   connections: DnsConnectionStore
   log: { warn: (o: object, m: string) => void }
+  /**
+   * ⚠ INJECTED FOR THE SAME REASON `connections` IS, AND IT WAS THE ONE SEAM
+   * THIS MODULE DID NOT HAVE. Every decision here — which zone, whether a
+   * blocked publish is a refusal or a success, what gets written onto the
+   * connection — is worth testing, and none of it could be reached while the
+   * adapter arrived through a direct import. Production passes nothing and gets
+   * the real registry.
+   */
+  writers?: (slug: string) => ZoneWriter | null
+  /**
+   * Renews an OAuth credential that is at or near its expiry.
+   *
+   * ⚠ WITHOUT IT A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND THEN DEAD. The
+   * grant was stored the moment somebody authorised us and never looked at
+   * again, so the first publish after the token expired failed `unauthorized`
+   * — and the console correctly told the customer to reconnect, asking them to
+   * redo an authorisation that had not actually lapsed.
+   *
+   * ⚠ IT DEFAULTS TO A NO-OP, WHICH IS THE RIGHT BEHAVIOUR FOR A PASTED API
+   * TOKEN. Those do not expire and have nothing to refresh, and most providers
+   * in the registry are reachable only that way.
+   */
+  renew?: (input: {
+    tenantId: string
+    provider: string
+    credential: Credential
+  }) => Promise<Credential>
 }
 
-export function dnsPublisher({ connections, log }: PublisherDeps): DnsPublisher {
+export function dnsPublisher({
+  connections,
+  log,
+  writers = writerFor,
+  renew = async ({ credential }) => credential,
+}: PublisherDeps): DnsPublisher {
   return {
     async publish({ tenantId, provider, domain, replaceConflicts }) {
-      const writer = writerFor(provider)
+      const writer = writers(provider)
       if (!writer) return { status: "unsupported" }
 
       const connection = await connections.get(tenantId, provider)
@@ -75,7 +109,20 @@ export function dnsPublisher({ connections, log }: PublisherDeps): DnsPublisher 
          * the credential still works, which is the other thing worth knowing
          * before reporting success.
          */
-        const zones = await writer.zones(connection.credential)
+        /*
+         * ⚠ RENEWED BEFORE THE FIRST CALL, NOT AFTER THE FIRST 401. Catching the
+         * failure and retrying would work, but it makes every expired
+         * connection cost a wasted round trip AND has to be repeated at every
+         * call site that touches a credential. Renewing once, here, is the only
+         * place either of them happens.
+         */
+        const credential = await renew({
+          tenantId,
+          provider,
+          credential: connection.credential,
+        })
+
+        const zones = await writer.zones(credential)
         const zone = zoneFor(zones, domain.name)
 
         if (!zone) {
@@ -83,12 +130,9 @@ export function dnsPublisher({ connections, log }: PublisherDeps): DnsPublisher 
           return { status: "zone_not_found", zones: zones.map((z) => z.name) }
         }
 
-        const outcome = await writer.publish(
-          connection.credential,
-          zone,
-          desiredFor(domain),
-          { replaceConflicts: replaceConflicts === true },
-        )
+        const outcome = await writer.publish(credential, zone, desiredFor(domain), {
+          replaceConflicts: replaceConflicts === true,
+        })
 
         /*
          * ⚠ "NOTHING CREATED AND SOMETHING REMOVED" IS THE REFUSAL, NOT A
