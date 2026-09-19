@@ -661,6 +661,8 @@ const schema = z.object({
    * in a customer's zone. Doppler, never the manifest.
    *
    *   {"cloudflare":{"clientId":"…","clientSecret":"…"}}
+   *
+   * `clientSecret` is omitted for a public (PKCE-only) client.
    */
   DNS_OAUTH_APPS: z
     .string()
@@ -671,18 +673,41 @@ const schema = z.object({
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
           throw new TypeError("not an object")
         }
-        const out: Record<string, { clientId: string; clientSecret: string }> = {}
+        const out: Record<string, { clientId: string; clientSecret?: string }> = {}
         for (const [slug, app] of Object.entries(parsed)) {
           const value = app as { clientId?: unknown; clientSecret?: unknown }
-          if (
-            typeof value?.clientId !== "string" ||
-            typeof value?.clientSecret !== "string" ||
-            value.clientId.length === 0 ||
-            value.clientSecret.length === 0
-          ) {
-            throw new TypeError(`"${slug}" needs a clientId and a clientSecret`)
+          if (typeof value?.clientId !== "string" || value.clientId.length === 0) {
+            throw new TypeError(`"${slug}" needs a clientId`)
           }
-          out[slug] = { clientId: value.clientId, clientSecret: value.clientSecret }
+          /*
+           * ⚠ THE SECRET IS OPTIONAL, BECAUSE A PUBLIC CLIENT HAS NONE. Every
+           * provider here documents a confidential app, but Cloudflare's OAuth
+           * lists `none` among its supported token-endpoint auth methods — that
+           * is the mode `wrangler` uses, and the one they are most likely to
+           * issue. Such an app is protected by PKCE alone, which dns/oauth.ts
+           * now sends for every provider.
+           *
+           * ⚠ AN EMPTY STRING IS STILL REJECTED, and is not the same as absent.
+           * It would be forwarded as a supplied-and-wrong secret and answered
+           * with `invalid_client`, which reads in the log exactly like a real
+           * secret that has been rotated.
+           */
+          if (value.clientSecret !== undefined) {
+            if (
+              typeof value.clientSecret !== "string" ||
+              value.clientSecret.length === 0
+            ) {
+              throw new TypeError(
+                `"${slug}" has an empty clientSecret; omit it instead`,
+              )
+            }
+          }
+          out[slug] = {
+            clientId: value.clientId,
+            ...(typeof value.clientSecret === "string"
+              ? { clientSecret: value.clientSecret }
+              : {}),
+          }
         }
         return out
       } catch (error) {

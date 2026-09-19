@@ -140,7 +140,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
     if (!code || !state)
       return c.json(validation("`code` and `state` are required."), 422)
 
-    let claimed: { slug: string; tenantId: string }
+    let claimed: { slug: string; tenantId: string; verifier: string }
     try {
       claimed = d.dnsOAuth.verifyState(state)
     } catch (error) {
@@ -167,7 +167,11 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
     if (!writer) return c.json(validation(`We cannot publish records at ${slug}.`), 422)
 
     try {
-      const grant = await d.dnsOAuth.exchange({ slug, code })
+      const grant = await d.dnsOAuth.exchange({
+        slug,
+        code,
+        verifier: claimed.verifier,
+      })
 
       /*
        * ⚠ THE ZONES ARE READ BEFORE THE CONNECTION IS SAVED, so a credential

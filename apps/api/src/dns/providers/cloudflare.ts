@@ -49,12 +49,24 @@ async function call<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  /*
+   * ⚠ READ BEFORE THE `try`, AND THAT IS NOT A STYLE CHOICE. `tokenOf` throws
+   * `unauthorized` for a credential that has lost its token, and inside the
+   * block below that throw is caught by the network handler and re-wrapped as
+   * `unavailable` — so a connection that can only be fixed by reconnecting
+   * reports itself as a Cloudflare outage, the console says "try again", and
+   * trying again produces the identical failure for ever. The port's own note
+   * on `DnsWriteFailure` is about exactly this collapse, in the other
+   * direction.
+   */
+  const bearer = tokenOf(credential)
+
   let response: Response
   try {
     response = await fetch(`${API}${path}`, {
       ...init,
       headers: {
-        Authorization: `Bearer ${tokenOf(credential)}`,
+        Authorization: `Bearer ${bearer}`,
         "Content-Type": "application/json",
         ...(init.headers ?? {}),
       },

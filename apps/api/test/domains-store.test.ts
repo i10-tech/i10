@@ -73,6 +73,19 @@ const deps = {
     nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
   },
   secrets,
+  /**
+   * ⚠ NO TEST MAY TOUCH REAL DNS, AND WITHOUT THIS EVERY ONE OF THEM WOULD.
+   * `verify` proves ownership before it registers an SES identity, and the
+   * store's default lookup is a real resolver — so a store built without a
+   * `txt` resolves `example.com` against whatever network the test runner
+   * happens to be on. That is slow, non-deterministic, and passes or fails on
+   * somebody else's DNS.
+   *
+   * ⚠ IT ANSWERS WITH THE FIXTURE'S OWN DKIM KEY, which is what a manual domain
+   * proves ownership with: the selector is per row, so the record is already an
+   * account-specific fact only the domain's controller can publish.
+   */
+  txt: async () => ["v=DKIM1; k=rsa; p=MIIBIjANBgkq"],
 }
 
 describe("what counts as a domain name", () => {

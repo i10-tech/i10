@@ -6,6 +6,7 @@ import {
   type ConflictingRecord,
   type DesiredRecord,
   type PublishOutcome,
+  type ZoneWriter,
 } from "./port.js"
 import { writerFor } from "./writers.js"
 
@@ -55,12 +56,25 @@ export interface DnsPublisher {
 export interface PublisherDeps {
   connections: DnsConnectionStore
   log: { warn: (o: object, m: string) => void }
+  /**
+   * ⚠ INJECTED FOR THE SAME REASON `connections` IS, AND IT WAS THE ONE SEAM
+   * THIS MODULE DID NOT HAVE. Every decision here — which zone, whether a
+   * blocked publish is a refusal or a success, what gets written onto the
+   * connection — is worth testing, and none of it could be reached while the
+   * adapter arrived through a direct import. Production passes nothing and gets
+   * the real registry.
+   */
+  writers?: (slug: string) => ZoneWriter | null
 }
 
-export function dnsPublisher({ connections, log }: PublisherDeps): DnsPublisher {
+export function dnsPublisher({
+  connections,
+  log,
+  writers = writerFor,
+}: PublisherDeps): DnsPublisher {
   return {
     async publish({ tenantId, provider, domain, replaceConflicts }) {
-      const writer = writerFor(provider)
+      const writer = writers(provider)
       if (!writer) return { status: "unsupported" }
 
       const connection = await connections.get(tenantId, provider)

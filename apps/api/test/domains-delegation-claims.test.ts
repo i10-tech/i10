@@ -1,4 +1,6 @@
 import { describe, expect, it, mock } from "bun:test"
+import { PgDialect } from "drizzle-orm/pg-core"
+import type { SQL } from "drizzle-orm"
 import { domainStore } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
@@ -57,6 +59,18 @@ const row = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+const dialect = new PgDialect()
+
+/**
+ * ⚠ THE RAW-SQL CALLS ARE TOLD APART BY THEIR TEXT, because `store.ts` reaches
+ * two different SECURITY DEFINER functions through `db.execute` and they mean
+ * opposite things. `domain_verified_elsewhere` answers "may this workspace even
+ * try"; `delegation_holder` / `verified_holder` answer "who is in the way, so we
+ * can re-check whether they still own it". One handler for both would make a
+ * test that means to describe an incumbent silently answer the other question.
+ */
+const queryText = (q: unknown) => dialect.sqlToQuery(q as SQL).sql
+
 const violation = (constraint: string) =>
   Object.assign(
     new Error(`duplicate key value violates unique constraint "${constraint}"`),
@@ -73,9 +87,17 @@ function fakeDb(handlers: {
   claim?: () => unknown[]
   onClaimInsert?: () => void
   del?: () => void
+  /** `core.delegation_holder` — who a challenger must displace, if anybody. */
+  holder?: () => unknown[]
+  /** Every raw statement the store issued, so displacement can be observed. */
+  onExecute?: (text: string) => void
 }) {
   const tx = {
-    execute: async () => [],
+    execute: async (q: unknown) => {
+      const text = queryText(q)
+      handlers.onExecute?.(text)
+      return text.includes("_holder") ? (handlers.holder?.() ?? []) : [{ taken: false }]
+    },
     insert: () => ({
       values: (values: Record<string, unknown>) => ({
         returning: async () => [row(values)],
@@ -108,6 +130,7 @@ function fakeDb(handlers: {
     }),
   }
   return {
+    execute: tx.execute,
     transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   } as unknown as Database
 }
@@ -408,5 +431,182 @@ describe("deleting a delegated domain", () => {
 
     expect(await store.remove(STRANGER, ID)).toBe(true)
     expect(zones.remove).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A domain changing hands.
+ *
+ * ⚠ PROOF WAS ONE-SHOT, AND THAT IS NOT HOW DOMAINS WORK. A workspace that
+ * proved `example.com` once keeps the claim and the verified badge for ever.
+ * The registration lapses, somebody else buys it, and the new owner publishes
+ * every record correctly and is told the name belongs to another workspace —
+ * while the previous owner keeps a verified sending identity for a domain that
+ * is no longer theirs, which is the half that actually matters.
+ */
+const incumbent = (over: Record<string, unknown> = {}) => [
+  {
+    domain_id: OTHER_ID,
+    delegation_token: STRANGER_TOKEN,
+    dkim_selector: "i10old000",
+    dkim_public_key: "OLDKEY",
+    delegated: true,
+    ...over,
+  },
+]
+
+describe("a domain that has changed hands", () => {
+  it("moves to the workspace that can prove it when the holder no longer can", async () => {
+    const statements: string[] = []
+    const zones = spyZones()
+    let claims = 0
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        holder: () => incumbent(),
+        onExecute: (text) => statements.push(text),
+        onClaimInsert: () => {
+          claims += 1
+          // ⚠ ONLY THE FIRST ATTEMPT COLLIDES. Once the previous owner has been
+          // stood down, their claim is gone and the retry succeeds — which is
+          // the transfer.
+          if (claims === 1) throw violation("delegations_name_unique")
+        },
+      }),
+      identity: identity(),
+      zones,
+      // The new owner's token resolves. The old owner's does not: their records
+      // are gone, because the domain is not theirs any more.
+      txt: publishing(OWNER_TOKEN),
+    })
+
+    const out = await store.verify(OWNER, ID)
+
+    expect(out.status).toBe("ok")
+    expect(claims).toBe(2)
+    expect(statements.some((s) => s.includes("displace_domain"))).toBe(true)
+    expect(zones.put).toHaveBeenCalledTimes(3)
+  })
+
+  /**
+   * ⚠ A TIE GRANTS NOTHING, and this is the case that stops the contest being a
+   * way to steal a domain. Two workspaces of one company can both hold the DNS
+   * and both publish a challenge; the incumbent re-proves it, and the
+   * challenger is told the name is taken exactly as before.
+   */
+  it("leaves it alone when the holder still proves it", async () => {
+    const statements: string[] = []
+    const zones = spyZones()
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        holder: () => incumbent(),
+        onExecute: (text) => statements.push(text),
+        onClaimInsert: () => {
+          throw violation("delegations_name_unique")
+        },
+      }),
+      identity: identity(),
+      zones,
+      // Both are published: the challenger owns it too, or thinks they do.
+      txt: publishing(OWNER_TOKEN, STRANGER_TOKEN),
+    })
+
+    const out = await store.verify(OWNER, ID)
+
+    expect(out.status).toBe("claimed")
+    expect(statements.some((s) => s.includes("displace_domain"))).toBe(false)
+    expect(zones.put).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⚠ THE MOST DANGEROUS THING IN THIS FILE, AND THE REASON `unreachable` IS A
+   * SEPARATE ANSWER FROM `absent`. A nameserver that times out is not a
+   * customer who has lost their domain. If a failure to ASK counted as an
+   * answer, a bad afternoon at one DNS provider would transfer live domains
+   * between customers wholesale — and every transfer would look deliberate.
+   */
+  it("never displaces anybody on a DNS failure", async () => {
+    const statements: string[] = []
+    let asked = 0
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        holder: () => incumbent(),
+        onExecute: (text) => statements.push(text),
+        onClaimInsert: () => {
+          throw violation("delegations_name_unique")
+        },
+      }),
+      identity: identity(),
+      zones: spyZones(),
+      txt: async () => {
+        asked += 1
+        // The challenger's own proof resolves; the incumbent's check times out.
+        if (asked === 1) return [challengeValue(OWNER_TOKEN)]
+        throw Object.assign(new Error("query timed out"), { code: "ETIMEOUT" })
+      },
+    })
+
+    const out = await store.verify(OWNER, ID)
+
+    expect(out.status).toBe("claimed")
+    expect(statements.some((s) => s.includes("displace_domain"))).toBe(false)
+  })
+
+  /**
+   * ⚠ THE INCUMBENT IS RE-PROVED BY THEIR OWN ROUTE, NOT THE CHALLENGER'S. A
+   * manual holder proves ownership with their DKIM record and a delegated one
+   * with a challenge record; checking the wrong one would report `absent` for a
+   * domain that is perfectly well proved, and hand somebody else's live domain
+   * away on a category error.
+   */
+  it("re-proves a manual holder with their DKIM record, not a challenge", async () => {
+    const asked: string[] = []
+    const statements: string[] = []
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        holder: () =>
+          incumbent({
+            delegated: false,
+            dkim_selector: "i10old000",
+            dkim_public_key: "OLDKEY",
+          }),
+        onExecute: (text) => statements.push(text),
+        onClaimInsert: () => {
+          throw violation("delegations_name_unique")
+        },
+      }),
+      identity: identity(),
+      zones: spyZones(),
+      txt: async (name: string) => {
+        asked.push(name)
+        if (name === challengeName("example.com")) return [challengeValue(OWNER_TOKEN)]
+        // Their DKIM record is still published, so they still own it.
+        if (name === "i10old000._domainkey.example.com") {
+          return ["v=DKIM1; k=rsa; p=OLDKEY"]
+        }
+        return []
+      },
+    })
+
+    const out = await store.verify(OWNER, ID)
+
+    expect(asked).toContain("i10old000._domainkey.example.com")
+    expect(out.status).toBe("claimed")
+    expect(statements.some((s) => s.includes("displace_domain"))).toBe(false)
   })
 })

@@ -6,7 +6,12 @@ import { dnsRecordsFor } from "./records.js"
 import { generateDkimKeypair } from "./dkim.js"
 import { delegatedZoneNames, delegatedZones, delegationRecordsFor } from "./zone.js"
 import type { DnsZones } from "./zone.js"
-import { nodeTxtLookup, proveOwnership, type TxtLookup } from "./ownership.js"
+import {
+  nodeTxtLookup,
+  proveDomain,
+  type Provable,
+  type TxtLookup,
+} from "./ownership.js"
 import type { DomainIdentity } from "./identity.js"
 import type { SecretBox } from "../webhooks/signing.js"
 
@@ -161,6 +166,23 @@ const COLUMNS = {
   delegationToken: domains.delegationToken,
 }
 
+/**
+ * The MAIL FROM name SES must be told about.
+ *
+ * ⚠ THE RETURN PATH MOVES UNDER `mail.` WHEN DELEGATED, and SES has to be told
+ * the name it will actually see. Registering `send.example.com` while the zone
+ * serves `send.mail.example.com` is a MAIL FROM that never verifies — with
+ * records that look correct, because they are, under a different name.
+ */
+const mailFromFor = (row: {
+  name: string
+  mailFromSubdomain: string
+  delegated: boolean
+}): string =>
+  row.delegated
+    ? `${row.mailFromSubdomain}.${delegatedZoneNames(row.name).mail}`
+    : `${row.mailFromSubdomain}.${row.name}`
+
 const summarise = (row: Row, region: string): DomainSummary => ({
   object: "domain",
   id: row.id,
@@ -230,6 +252,109 @@ export function domainStore({
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
   /**
+   * Whether the workspace standing in this one's way can still prove the name.
+   *
+   * ⚠ PROOF WAS ONE-SHOT, AND DOMAINS CHANGE HANDS. A workspace that proved
+   * `example.com` in March keeps the claim and the verified badge for ever; the
+   * registration lapses, somebody else buys it, and nothing ever asks again.
+   * The new owner publishes everything correctly and is told the name belongs
+   * to another workspace — while the previous owner keeps a verified sending
+   * identity for a domain that is not theirs, which is the half that matters.
+   *
+   * ⚠ SO A CHALLENGER WHO HAS ALREADY PROVED IT CAUSES THE INCUMBENT TO BE
+   * RE-CHECKED, against the same public DNS, using the incumbent's OWN proof —
+   * their challenge token if they delegate, their DKIM selector if they do not.
+   * Ownership is decided by what DNS says today rather than by who got here
+   * first.
+   *
+   * ⚠ AND ONLY AN ABSENT PROOF DISPLACES ANYBODY. `unreachable` means we could
+   * not ask — a nameserver timed out, a resolver is having a bad afternoon —
+   * and treating that as "they no longer own it" would transfer live domains
+   * between customers during a DNS outage, which is the most damaging thing
+   * this file could possibly do. A failure to ask is never an answer.
+   */
+  async function incumbentStillProvesIt(
+    name: string,
+    holder: "delegation" | "verified",
+  ): Promise<"displaced" | "held"> {
+    const rows = (await db.execute(
+      holder === "delegation"
+        ? sql`select * from core.delegation_holder(${name})`
+        : sql`select * from core.verified_holder(${name})`,
+    )) as unknown as {
+      domain_id: string
+      delegation_token: string
+      dkim_selector: string | null
+      dkim_public_key: string | null
+      delegated: boolean
+    }[]
+
+    const incumbent = rows[0]
+    // ⚠ NOBODY HOLDS IT ANY MORE — they deleted it between our write failing and
+    // this read. The blocker is gone, so the challenger may simply try again.
+    if (!incumbent) return "displaced"
+
+    const proof = await proveDomain(txt, {
+      name,
+      delegated: incumbent.delegated,
+      delegationToken: incumbent.delegation_token,
+      dkimSelector: incumbent.dkim_selector,
+      dkimPublicKey: incumbent.dkim_public_key,
+    } satisfies Provable)
+
+    if (proof.proven || proof.reason === "unreachable") return "held"
+
+    await db.execute(sql`select core.displace_domain(${incumbent.domain_id}::uuid)`)
+    log?.warn(
+      { domain: name, displaced: incumbent.domain_id },
+      "domain moved: the holder no longer proves ownership and a challenger does",
+    )
+    return "displaced"
+  }
+
+  /**
+   * Tell SES about a domain whose ownership has just been proved.
+   *
+   * ⚠ CALLED FROM `verify` AND NEVER FROM `create`, which is the whole point.
+   * SES keys identities on the domain name inside one AWS account, so this call
+   * is not inert for a name another workspace holds — `AlreadyExistsException`
+   * sends the adapter into `PutEmailIdentityDkimSigningAttributes`, replacing
+   * their signing key with ours. Only a proved owner may reach it.
+   *
+   * ⚠ AND RE-ASSERTING IS CORRECT RATHER THAN MERELY HARMLESS. After a domain
+   * changes hands the new owner's verify runs this, which moves the shared SES
+   * identity onto their key — exactly what a transfer has to do.
+   *
+   * ⚠ THE PRIVATE KEY IS READ IN ITS OWN QUERY, NOT ADDED TO `COLUMNS`. The
+   * only secret in this feature has no business travelling inside the row shape
+   * that `present()` turns into an API response.
+   */
+  async function registerIdentity(
+    tenantId: string,
+    id: string,
+    row: Row,
+  ): Promise<void> {
+    if (!row.dkimSelector) return
+
+    const sealed = await withTenant(db, tenantId, async (tx) => {
+      const [key] = await tx
+        .select({ sealed: domains.dkimPrivateKeySealed })
+        .from(domains)
+        .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
+        .limit(1)
+      return key?.sealed ?? null
+    })
+    if (!sealed) return
+
+    await identity.create({
+      domain: row.name,
+      mailFrom: mailFromFor(row),
+      selector: row.dkimSelector,
+      privateKey: secrets.open(sealed),
+    })
+  }
+
+  /**
    * Get this tenant to the point where we are serving their delegated zones,
    * or say exactly what is in the way.
    *
@@ -259,23 +384,39 @@ export function domainStore({
     if (!alreadyOurs) {
       // ⚠ BEFORE THE CLAIM, NOT AFTER. A claim taken on arrival and checked
       // later is a claim that was granted on nothing.
-      const proof = await proveOwnership(txt, row.name, row.delegationToken)
+      const proof = await proveDomain(txt, row)
       if (!proof.proven) return proof.reason
 
-      try {
-        await withTenant(db, tenantId, async (tx) =>
+      const claim = () =>
+        withTenant(db, tenantId, async (tx) =>
           tx.insert(delegations).values({ name: row.name, domainId: row.id, tenantId }),
         )
+
+      try {
+        await claim()
       } catch (error) {
         /*
-         * ⚠ SOMEBODY ELSE PROVED IT FIRST, WHICH IS A REAL AND LEGITIMATE
-         * OUTCOME RATHER THAN AN ERROR. Two workspaces belonging to the same
-         * company can both publish a challenge for a domain they both control;
-         * only one of them can be served, and the constraint decides. Nothing
-         * is granted on a tie.
+         * ⚠ SOMEBODY ELSE HOLDS IT, WHICH IS NOT YET AN ANSWER. This tenant has
+         * just PROVED the name, so the only question left is whether the
+         * incumbent can still prove it too. If they can, it is a tie between
+         * two workspaces that both hold the DNS — the same company twice over —
+         * and a tie grants nothing. If they cannot, the domain has changed
+         * hands and the claim moves with it.
          */
         if (!isUniqueViolation(error)) throw error
-        return "taken"
+        if ((await incumbentStillProvesIt(row.name, "delegation")) === "held") {
+          return "taken"
+        }
+
+        try {
+          await claim()
+        } catch (again) {
+          // ⚠ A THIRD PARTY GOT IN BETWEEN. One retry, then report the
+          // conflict — looping here would be a race against every other
+          // claimant at once.
+          if (!isUniqueViolation(again)) throw again
+          return "taken"
+        }
       }
     }
 
@@ -354,15 +495,6 @@ export function domainStore({
       // or through our own MTA.
       const keypair = generateDkimKeypair()
 
-      // ⚠ THE RETURN PATH MOVES UNDER `mail.` WHEN DELEGATED, and SES has to be
-      // told the name it will actually see. Registering `send.example.com`
-      // while the zone serves `send.mail.example.com` is a MAIL FROM that never
-      // verifies — with records that look correct because they are, under a
-      // different name.
-      const mailFrom = delegated
-        ? `${mailFromSubdomain}.${delegatedZoneNames(name).mail}`
-        : `${mailFromSubdomain}.${name}`
-
       /*
        * ⚠ BOTH REFUSALS ARE DECIDED BEFORE SES IS TOUCHED, AND THAT ORDERING IS
        * THE WHOLE POINT OF THIS BLOCK. The identity call below is not inert on
@@ -407,13 +539,27 @@ export function domainStore({
 
       if (refusal) return { status: "conflict", reason: refusal }
 
-      const created = await identity.create({
-        domain: name,
-        mailFrom,
-        selector: keypair.selector,
-        privateKey: keypair.privateKey,
-      })
-
+      /*
+       * ⚠ SES IS NOT TOLD ABOUT THIS DOMAIN YET, AND THAT IS THE FIX FOR THE
+       * WORST OF THE CROSS-TENANT BUGS. SES keys identities on the domain name
+       * within ONE AWS ACCOUNT, so `CreateEmailIdentity` for a name another
+       * workspace already holds raises `AlreadyExistsException` and our adapter
+       * recovers by REPLACING their DKIM signing key with ours. Two workspaces
+       * may hold the same name as pending — migration 0039 exists to allow
+       * exactly that — so the second one to add it used to silently break the
+       * first one's signing, on the MANUAL path, with no delegation involved
+       * and nothing on either screen to explain it.
+       *
+       * ⚠ SO THE IDENTITY IS `verify`'s TO CREATE, ONCE OWNERSHIP IS PROVED.
+       * Only one workspace can prove a name, so only one ever writes it — the
+       * same rule the zone already follows, applied to the other shared
+       * resource. `mailFrom` is derived there from the row rather than carried,
+       * because by then it is a fact about the domain rather than an argument.
+       *
+       * ⚠ AND THE ROW STARTS `not_started`, WHICH IS WHAT SES WOULD HAVE SAID.
+       * It is the honest description of a domain that no provider has been
+       * asked about yet, and the console already renders it.
+       */
       try {
         const [row] = await withTenant(db, tenantId, async (tx) => {
           const inserted = await tx
@@ -426,7 +572,7 @@ export function domainStore({
               dkimSelector: keypair.selector,
               dkimPublicKey: keypair.publicKey,
               dkimPrivateKeySealed: secrets.seal(keypair.privateKey),
-              status: created.status,
+              status: "not_started",
               sends: true,
               // ⚠ NOT A MAILBOX DOMAIN. This API is Resend's, and Resend has no
               // concept of hosting mail. Turning that on is a separate decision
@@ -638,7 +784,33 @@ export function domainStore({
             ? { status: "claimed", domain }
             : { status: "unproven", domain, reason: settled }
         }
+      } else {
+        /*
+         * ⚠ A MANUAL DOMAIN IS PROVED TOO, AND IT NEEDS NO EXTRA RECORD TO DO
+         * IT. Its DKIM selector is generated per domain ROW, so
+         * `<selector>._domainkey.<domain>` carrying our public key is already
+         * an account-specific fact that only somebody holding the domain's DNS
+         * can publish — the same proof the challenge record gives a delegated
+         * domain, which a delegated domain cannot use because that name lives
+         * in a zone we serve.
+         *
+         * ⚠ AND CHECKING IT OURSELVES, RATHER THAN LETTING SES BE THE FIRST TO
+         * LOOK, IS WHAT KEEPS THE IDENTITY SAFE. Asking SES first means calling
+         * `CreateEmailIdentity` for an unproved name, which is exactly how one
+         * workspace used to overwrite another's signing key.
+         */
+        const proof = await proveDomain(txt, existing)
+        if (!proof.proven) {
+          return {
+            status: "unproven",
+            domain: present(existing, region, dns),
+            reason: proof.reason,
+          }
+        }
       }
+
+      // ⚠ ONLY NOW. Ownership has been proved by one route or the other.
+      await registerIdentity(tenantId, id, existing)
 
       const seen = await identity.status(existing.name)
 
@@ -682,6 +854,25 @@ export function domainStore({
          * honest state, and `claimed` is how the route says why.
          */
         if (!isUniqueViolation(error)) throw error
+
+        /*
+         * ⚠ BUT THIS TENANT HAS JUST PROVED THE NAME, so "somebody else got
+         * there first" is only half an answer. The domain may simply have
+         * changed hands — a registration lapsed, somebody else bought it — and
+         * the incumbent's records may no longer exist at all. Asking them to
+         * prove it again is the only way that resolves, and it resolves in the
+         * direction DNS actually points.
+         */
+        if ((await incumbentStillProvesIt(existing.name, "verified")) === "displaced") {
+          try {
+            const [moved] = await write(seen.status, verifiedAt ?? now())
+            if (moved)
+              return { status: "ok", domain: present(moved as Row, region, dns) }
+          } catch (again) {
+            // Somebody else verified in the gap. Fall through and report it.
+            if (!isUniqueViolation(again)) throw again
+          }
+        }
 
         const [row] = await write(existing.status)
         return row

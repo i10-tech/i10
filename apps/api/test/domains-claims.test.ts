@@ -1,4 +1,6 @@
 import { describe, expect, it, mock } from "bun:test"
+import { PgDialect } from "drizzle-orm/pg-core"
+import type { SQL } from "drizzle-orm"
 import { domainStore } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
@@ -37,6 +39,18 @@ const row = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+const dialect = new PgDialect()
+
+/**
+ * ⚠ THE RAW-SQL CALLS ARE TOLD APART BY THEIR TEXT, because `store.ts` reaches
+ * two different SECURITY DEFINER functions through `db.execute` and they mean
+ * opposite things. `domain_verified_elsewhere` answers "may this workspace even
+ * try"; `delegation_holder` / `verified_holder` answer "who is in the way, so we
+ * can re-check whether they still own it". One handler for both would make a
+ * test that means to describe an incumbent silently answer the other question.
+ */
+const queryText = (q: unknown) => dialect.sqlToQuery(q as SQL).sql
+
 /** A Postgres unique violation, as the driver reports one. */
 const violation = (constraint: string) =>
   Object.assign(
@@ -65,9 +79,14 @@ function fakeDb(handlers: {
   del?: () => void
   /** `core.domain_verified_elsewhere`, which is reached through raw SQL. */
   taken?: boolean
+  /** `core.verified_holder` — the workspace a challenger has to displace. */
+  holder?: () => unknown[]
 }) {
   const tx = {
-    execute: async () => [{ taken: handlers.taken ?? false }],
+    execute: async (q: unknown) =>
+      queryText(q).includes("_holder")
+        ? (handlers.holder?.() ?? [])
+        : [{ taken: handlers.taken ?? false }],
     insert: () => ({
       values: () => ({ returning: async () => handlers.insert?.() ?? [] }),
     }),
@@ -94,6 +113,7 @@ function fakeDb(handlers: {
     }),
   }
   return {
+    execute: tx.execute,
     transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   } as unknown as Database
 }
@@ -114,6 +134,14 @@ const base = {
   },
   secrets: { seal: (v: string) => `sealed:${v}`, open: (v: string) => v },
   capacity: { check: async () => ({ status: "ok" }) },
+  /**
+   * ⚠ WITHOUT THIS THESE TESTS RESOLVE `example.com` ON THE REAL INTERNET.
+   * `verify` proves ownership before it registers an SES identity, and the
+   * store's default lookup is a live resolver — so the result would depend on
+   * the test runner's network. It answers with the fixture's own DKIM key,
+   * which is exactly what a manual domain proves ownership with.
+   */
+  txt: async () => ["v=DKIM1; k=rsa; p=MIIBIjANBgkq"],
 }
 
 describe("claiming a name somebody else has not proved", () => {
@@ -179,6 +207,22 @@ describe("losing the race to verify", () => {
       ...base,
       db: fakeDb({
         select: () => [row({ status: "pending" })],
+        /*
+         * ⚠ AND THE HOLDER STILL PROVES IT, which is what makes this a genuine
+         * tie rather than a domain that has changed hands. A challenger who has
+         * proved the name now causes the incumbent to be re-checked; with no
+         * incumbent described here the retry would simply succeed, and the test
+         * would be asserting the opposite of its own name.
+         */
+        holder: () => [
+          {
+            domain_id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60cc",
+            delegation_token: "not-this-tenants-token",
+            dkim_selector: "i10abc123",
+            dkim_public_key: "MIIBIjANBgkq",
+            delegated: false,
+          },
+        ],
         update: () => {
           attempt += 1
           // The first write tries `verified` and is refused; the second writes

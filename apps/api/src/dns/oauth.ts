@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { providerBySlug } from "@repo/dns-providers"
 
 /**
@@ -28,7 +28,15 @@ import { providerBySlug } from "@repo/dns-providers"
 
 export interface OAuthApp {
   clientId: string
-  clientSecret: string
+  /**
+   * ⚠ OPTIONAL, BECAUSE NOT EVERY PROVIDER ISSUES ONE. Cloudflare's OAuth has
+   * `none` among its `token_endpoint_auth_methods_supported`, which is how
+   * `wrangler` authenticates — a PUBLIC client, with no secret to keep, whose
+   * entire protection against a stolen authorization code is PKCE. Requiring a
+   * secret here would make such an app impossible to configure; sending an
+   * empty one would be rejected by the token endpoint.
+   */
+  clientSecret?: string
 }
 
 export interface OAuthConfig {
@@ -79,9 +87,19 @@ export interface DnsOAuth {
   /** `null` when no app is configured for that provider. */
   isConfigured(slug: string): boolean
   start(input: { slug: string; tenantId: string }): AuthorizationStart
-  /** Verifies `state` and returns who it belongs to. Throws on tampering. */
-  verifyState(state: string): { slug: string; tenantId: string }
-  exchange(input: { slug: string; code: string }): Promise<TokenGrant>
+  /**
+   * Verifies `state` and returns who it belongs to. Throws on tampering.
+   *
+   * ⚠ IT ALSO RETURNS THE PKCE VERIFIER, RECOMPUTED RATHER THAN REMEMBERED.
+   * See `pkceVerifier` below for why that is not a shortcut.
+   */
+  verifyState(state: string): { slug: string; tenantId: string; verifier: string }
+  exchange(input: {
+    slug: string
+    code: string
+    /** From `verifyState`. The token endpoint rejects the exchange without it. */
+    verifier: string
+  }): Promise<TokenGrant>
 }
 
 export function dnsOAuth(config: OAuthConfig): DnsOAuth {
@@ -91,6 +109,35 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
 
   const sign = (payload: string) =>
     createHmac("sha256", config.stateSecret).update(payload).digest("base64url")
+
+  /**
+   * The PKCE code verifier for a given authorisation, derived rather than
+   * stored.
+   *
+   * ⚠ PKCE EXISTS BECAUSE THE AUTHORIZATION CODE TRAVELS THROUGH A BROWSER WE
+   * DO NOT CONTROL. Anything that can read the redirect — a malicious
+   * extension, a proxy, a referrer log, shoulder-surfing a URL bar — holds a
+   * code that can be exchanged for a credential that writes DNS in a customer's
+   * zone. The challenge binds that code to a secret only this server knows.
+   *
+   * ⚠ WHICH IS EXACTLY WHY THE VERIFIER MUST NOT TRAVEL IN `state`. It is the
+   * obvious place to put it — `state` already round-trips and is already
+   * signed — but signed is not secret: the payload is base64url, readable by
+   * anyone holding the URL. A verifier sitting beside the code it protects
+   * protects nothing at all.
+   *
+   * ⚠ SO IT IS AN HMAC OF THE NONCE UNDER THE STATE SECRET. The nonce is public
+   * and already in `state`; the secret is not, so the verifier can be
+   * recomputed at callback time and never has to be written down, stored, or
+   * sent anywhere. That keeps the "no server-side store" property this module
+   * was built around.
+   */
+  const pkceVerifier = (nonce: string) =>
+    createHmac("sha256", config.stateSecret).update(`pkce|${nonce}`).digest("base64url")
+
+  /** RFC 7636 S256: BASE64URL(SHA256(ASCII(verifier))). */
+  const pkceChallenge = (verifier: string) =>
+    createHash("sha256").update(verifier).digest("base64url")
 
   return {
     isConfigured(slug) {
@@ -123,12 +170,12 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
 
       // ⚠ THE NONCE MAKES TWO STARTS IN THE SAME MILLISECOND DIFFERENT, so a
       // state cannot be replayed from a browser history entry of another tab.
-      const payload = [
-        tenantId,
-        slug,
-        randomBytes(9).toString("base64url"),
-        String(now() + STATE_TTL_MS),
-      ].join("|")
+      //
+      // ⚠ AND IT IS NOW ALSO THE SEED FOR THE PKCE VERIFIER, which is why it is
+      // 18 bytes rather than 9: it is the only unpredictable input standing
+      // between somebody holding a stolen code and a working credential.
+      const nonce = randomBytes(18).toString("base64url")
+      const payload = [tenantId, slug, nonce, String(now() + STATE_TTL_MS)].join("|")
       const state = `${Buffer.from(payload).toString("base64url")}.${sign(payload)}`
 
       const url = new URL(oauth.authorizeUrl)
@@ -139,6 +186,16 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       if (oauth.scopes.length > 0) {
         url.searchParams.set("scope", oauth.scopes.join(" "))
       }
+
+      /*
+       * ⚠ SENT FOR EVERY PROVIDER, NOT ONLY THE ONES THAT DEMAND IT. PKCE is
+       * additive: a server that does not implement it ignores both parameters,
+       * and one that does binds the code to us. Making it conditional would mean
+       * a per-provider flag nobody updates, and the provider that quietly starts
+       * requiring it would break on a Tuesday with no clue in the error.
+       */
+      url.searchParams.set("code_challenge", pkceChallenge(pkceVerifier(nonce)))
+      url.searchParams.set("code_challenge_method", "S256")
 
       return { url: url.toString(), state }
     },
@@ -164,8 +221,8 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         throw new OAuthError("bad_state", "That authorisation could not be verified.")
       }
 
-      const [tenantId, slug, , expiry] = payload.split("|")
-      if (!tenantId || !slug || !expiry) {
+      const [tenantId, slug, nonce, expiry] = payload.split("|")
+      if (!tenantId || !slug || !nonce || !expiry) {
         throw new OAuthError("bad_state", "That authorisation link is malformed.")
       }
       if (Number(expiry) < now()) {
@@ -175,10 +232,10 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         )
       }
 
-      return { slug, tenantId }
+      return { slug, tenantId, verifier: pkceVerifier(nonce) }
     },
 
-    async exchange({ slug, code }) {
+    async exchange({ slug, code, verifier }) {
       const provider = providerBySlug(slug)
       const oauth = provider?.api?.oauth
       const app = config.apps[slug]
@@ -203,7 +260,12 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
             grant_type: "authorization_code",
             code,
             client_id: app.clientId,
-            client_secret: app.clientSecret,
+            // ⚠ OMITTED ENTIRELY FOR A PUBLIC CLIENT, not sent empty. An empty
+            // `client_secret` is a supplied-and-wrong secret to a token
+            // endpoint, which answers `invalid_client` — indistinguishable in
+            // the log from a real secret that has been rotated.
+            ...(app.clientSecret ? { client_secret: app.clientSecret } : {}),
+            code_verifier: verifier,
             redirect_uri: redirectFor(slug),
           }),
           signal: AbortSignal.timeout(10_000),
