@@ -40,20 +40,31 @@ export const metadata: Metadata = { title: "Domains" }
  */
 export default async function DomainsPage() {
   const result = await tryApi<{ data: DomainSummary[] }>("/console/domains")
+  const hasRows = result.ok && result.data.data.length > 0
 
   return (
     <Page>
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Domains</PageTitle>
-          <PageActions>
-            <Button size="sm" asChild>
-              <Link href="/domains/new">
-                <Plus />
-                Add domain
-              </Link>
-            </Button>
-          </PageActions>
+          {/*
+           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
+           * CARRIES THIS ACTION. Two buttons for one action, eight inches
+           * apart, reads as two different things — and the one in the header is
+           * the smaller and less explained of the two, so it wins attention it
+           * has not earned. The empty state's version says what will happen;
+           * this one just says a noun.
+           */}
+          {hasRows && (
+            <PageActions>
+              <Button size="sm" asChild>
+                <Link href="/domains/new">
+                  <Plus />
+                  Add domain
+                </Link>
+              </Button>
+            </PageActions>
+          )}
         </PageHeaderRow>
         <PageDescription>
           Mail leaves from a domain you control. Publish the records we issue, or
@@ -67,7 +78,7 @@ export default async function DomainsPage() {
             title="Could not load your domains"
             message={result.error.message}
           />
-        ) : result.data.data.length === 0 ? (
+        ) : !hasRows ? (
           <EmptyState
             title="No domains yet"
             description="Add the domain you send from. We will detect who hosts its DNS and tell you exactly what to publish — or do it for you."

@@ -31,15 +31,26 @@ export const metadata: Metadata = { title: "Broadcasts" }
  */
 export default async function BroadcastsPage() {
   const result = await tryApi<{ data: BroadcastSummary[] }>("/console/broadcasts")
+  const hasRows = result.ok && result.data.data.length > 0
 
   return (
     <Page>
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Broadcasts</PageTitle>
-          <PageActions>
-            <NewBroadcastButton />
-          </PageActions>
+          {/*
+           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
+           * CARRIES THIS ACTION. Two buttons for one action, eight inches
+           * apart, reads as two different things — and the one in the header is
+           * the smaller and less explained of the two, so it wins attention it
+           * has not earned. The empty state's version says what will happen;
+           * this one just says a noun.
+           */}
+          {hasRows && (
+            <PageActions>
+              <NewBroadcastButton />
+            </PageActions>
+          )}
         </PageHeaderRow>
         <PageDescription>
           One email to a segment. Delivery, bounces and complaints are reported the same
@@ -53,7 +64,7 @@ export default async function BroadcastsPage() {
             title="Could not load broadcasts"
             message={result.error.message}
           />
-        ) : result.data.data.length === 0 ? (
+        ) : !hasRows ? (
           <EmptyState
             title="No broadcasts yet"
             description="Write one, point it at a segment, and send it. Drafts are safe to leave lying around."

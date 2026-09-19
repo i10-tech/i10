@@ -37,15 +37,26 @@ export const metadata: Metadata = { title: "Segments" }
  */
 export default async function SegmentsPage() {
   const result = await tryApi<{ data: SegmentRow[] }>("/console/segments")
+  const hasRows = result.ok && result.data.data.length > 0
 
   return (
     <Page>
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Segments</PageTitle>
-          <PageActions>
-            <NewSegmentButton />
-          </PageActions>
+          {/*
+           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
+           * CARRIES THIS ACTION. Two buttons for one action, eight inches
+           * apart, reads as two different things — and the one in the header is
+           * the smaller and less explained of the two, so it wins attention it
+           * has not earned. The empty state's version says what will happen;
+           * this one just says a noun.
+           */}
+          {hasRows && (
+            <PageActions>
+              <NewSegmentButton />
+            </PageActions>
+          )}
         </PageHeaderRow>
         <PageDescription>
           Groups you target a broadcast at. Recipients never see them — that is what
@@ -56,7 +67,7 @@ export default async function SegmentsPage() {
       <PageBody>
         {!result.ok ? (
           <PanelError title="Could not load segments" message={result.error.message} />
-        ) : result.data.data.length === 0 ? (
+        ) : !hasRows ? (
           <EmptyState
             title="No segments yet"
             description="Create one, add contacts to it, and point a broadcast at it."

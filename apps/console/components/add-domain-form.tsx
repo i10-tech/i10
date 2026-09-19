@@ -403,6 +403,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
                 <ConnectProviderButton
                   slug={provider.slug}
                   providerName={provider.name}
+                  brand
                 />
               )}
             </div>

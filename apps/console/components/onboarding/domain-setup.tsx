@@ -250,6 +250,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           providerName={provider.name}
           size="xl"
           block
+          brand
         />
         {/*
          * ⚠ A LINK, NOT A SECOND BUTTON. Somebody who does not want to authorise
