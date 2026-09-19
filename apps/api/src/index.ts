@@ -134,6 +134,23 @@ if (!env.CLERK_PUBLISHABLE_KEY) {
   )
 }
 
+if (env.POLAR_ACCESS_TOKEN && !env.POLAR_SUCCESS_URL) {
+  /*
+   * ⚠ IT BREAKS TWO THINGS AT ONCE AND LOOKS LIKE NEITHER. `POLAR_SUCCESS_URL`
+   * is where the browser lands after paying, AND — because `embed_origin` is
+   * derived from its origin — it is the only thing that lets Polar's embedded
+   * checkout speak to the page it is embedded in. Without it the modal takes
+   * the money and then sits there for ever, having sent no `success` event and
+   * offering no working way out. See `withCheckoutId` in billing/polar.ts.
+   */
+  log.error(
+    {},
+    "POLAR_SUCCESS_URL is not set — the embedded checkout cannot message the " +
+      "console, so a completed payment leaves the customer looking at a modal " +
+      "that never closes.",
+  )
+}
+
 if (env.CONSOLE_ORIGINS.length === 0) {
   // ⚠ THIS ONE FAILS OPEN, WHICH IS WHY IT HAS TO BE SAID OUT LOUD. `azp` is
   // what stops a session token minted for another application on the same Clerk

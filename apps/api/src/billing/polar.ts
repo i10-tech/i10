@@ -186,6 +186,28 @@ export function polarClient(opts: PolarOptions): PolarClient {
     })
   }
 
+  /**
+   * The return URL, guaranteed to carry the checkout id.
+   *
+   * ⚠ THE LANDING PAGE IS INERT WITHOUT IT, AND NOTHING ENFORCED IT. Polar
+   * substitutes the literal `{CHECKOUT_ID}` into `success_url` before
+   * redirecting, and `/billing` reads `?checkout_id=` to know what to poll for.
+   * `POLAR_SUCCESS_URL` is a free-text environment variable: set to
+   * `https://dash.i10.tech/billing` — which is the obvious thing to type — the
+   * customer lands on a page that immediately answers "we could not find that
+   * checkout" for a payment that went through. An operator should not be able
+   * to break the confirmation page by leaving a placeholder off a URL.
+   *
+   * ⚠ APPENDED AS TEXT RATHER THAN THROUGH `URLSearchParams`, which would
+   * percent-encode the braces into `%7BCHECKOUT_ID%7D` and leave Polar nothing
+   * to substitute — a URL that looks right in the dashboard and interpolates
+   * nothing.
+   */
+  function withCheckoutId(successUrl: string): string {
+    if (successUrl.includes("{CHECKOUT_ID}")) return successUrl
+    return `${successUrl}${successUrl.includes("?") ? "&" : "?"}checkout_id={CHECKOUT_ID}`
+  }
+
   return {
     async createCheckout(input) {
       const response = await call("/v1/checkouts/", {
@@ -194,7 +216,45 @@ export function polarClient(opts: PolarOptions): PolarClient {
           products: [input.productId],
           external_customer_id: input.tenantId,
           ...(input.email ? { customer_email: input.email } : {}),
-          ...(input.successUrl ? { success_url: input.successUrl } : {}),
+          ...(input.successUrl
+            ? {
+                success_url: withCheckoutId(input.successUrl),
+                /*
+                 * ⚠ THE FIELD THE EMBEDDED CHECKOUT CANNOT WORK WITHOUT, AND
+                 * WE WERE DELIBERATELY NOT SENDING IT. Read Polar's own
+                 * checkout page: every message it posts to the parent window
+                 * is gated on this value.
+                 *
+                 *   // CheckoutEmbedClose.tsx
+                 *   if (!checkout.embed_origin) { return }
+                 *   PolarEmbedCheckout.postMessage({ event: 'close' }, …)
+                 *
+                 * `loaded`, `confirmed` and `success` carry the identical
+                 * guard. Unset, the iframe still renders and still takes the
+                 * money — and says nothing to the page it is sitting on, for
+                 * ever. That is the whole of the bug we spent two rounds
+                 * working around: their ✕ "not working" is their ✕ returning
+                 * early, and the `success` event that "never arrived" was
+                 * never sent.
+                 *
+                 * ⚠ AN EARLIER PROBE CONCLUDED THIS FIELD WAS UNNECESSARY, AND
+                 * IT MEASURED THE WRONG THING. It checked whether the checkout
+                 * would FRAME without it — it does, `frame-ancestors` is
+                 * governed separately by the organisation's embedding host
+                 * list — and generalised that to messaging. Two mechanisms,
+                 * one of them load-bearing.
+                 *
+                 * ⚠ IT IS THE ORIGIN OF `success_url` RATHER THAN A SETTING OF
+                 * ITS OWN. Both name the console, and a second environment
+                 * variable is a second thing that can disagree with the first
+                 * — silently, because the only symptom is a modal that stops
+                 * talking. Polar does not validate it against anything at
+                 * creation time, so a wrong value fails exactly as an absent
+                 * one does, which is the argument for deriving it.
+                 */
+                embed_origin: new URL(input.successUrl).origin,
+              }
+            : {}),
           // ⚠ THE TENANT IS SENT TWICE ON PURPOSE. `external_customer_id` is
           // what Polar promotes onto the customer and echoes on subscription
           // events; `metadata` is what survives on the checkout object itself
