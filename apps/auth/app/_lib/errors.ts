@@ -17,9 +17,64 @@ import type { FlowError } from "./clerk-types"
  */
 const FALLBACK = "Something went wrong. Try again."
 
+/**
+ * The per-field failures Clerk actually reported, when there are any.
+ *
+ * ⚠ THE TOP-LEVEL `code` ON AN API FAILURE IS ALWAYS THE LITERAL STRING
+ * `"api_response_error"`, AND READING IT IS THE BUG THIS FUNCTION EXISTS TO
+ * FIX. `ClerkAPIResponseError` extends `ClerkError` and hard-codes that code in
+ * its constructor; every real code — `form_identifier_not_found`,
+ * `form_password_incorrect`, `session_exists` — lives in the `errors` array it
+ * builds beside it. So a branch on `error.code` does not merely fail to match,
+ * it CANNOT match, on any failure that came back from Clerk's API.
+ *
+ * ⚠ IT COST US THE ENTIRE IDENTIFIER-FIRST FLOW. An unknown address is how
+ * somebody tells us they are new, and the branch that starts their sign-up was
+ * gated on a comparison that was always false — so the one page that exists to
+ * send them onward showed Clerk's "Couldn't find your account." in a red toast
+ * and sat there.
+ *
+ * ⚠ AND IT IS READ DEFENSIVELY, because `FlowError` is the union of everything
+ * the flow methods can hand back. A runtime error, an offline error and a
+ * plain `Error` all reach here with no `errors` at all.
+ */
+interface FieldFailure {
+  code: string
+  message: string
+  longMessage?: string
+}
+
+function fieldFailures(error: FlowError): FieldFailure[] {
+  const errors = (error as { errors?: unknown } | null)?.errors
+  if (!Array.isArray(errors)) return []
+  return errors.filter(
+    (entry): entry is FieldFailure => typeof (entry as FieldFailure)?.code === "string",
+  )
+}
+
+/**
+ * Whether Clerk reported a particular failure, wherever it put it.
+ *
+ * ⚠ BOTH PLACES ARE CHECKED. A `ClerkRuntimeError` carries its code at the top
+ * level and has no `errors`; an API failure is the other way round. One helper
+ * so no caller has to remember which kind it is holding.
+ */
+function hasCode(error: FlowError, code: string): boolean {
+  if (!error) return false
+  if (error.code === code) return true
+  return fieldFailures(error).some((entry) => entry.code === code)
+}
+
 export function messageFor(error: FlowError): string {
   if (!error) return FALLBACK
-  return error.longMessage ?? error.message ?? FALLBACK
+  const [first] = fieldFailures(error)
+  return (
+    first?.longMessage ??
+    first?.message ??
+    error.longMessage ??
+    error.message ??
+    FALLBACK
+  )
 }
 
 /**
@@ -37,7 +92,7 @@ export function messageFor(error: FlowError): string {
  * asks it once and out loud rather than twice by implication.
  */
 export function isUnknownIdentifier(error: FlowError): boolean {
-  return error?.code === "form_identifier_not_found"
+  return hasCode(error, "form_identifier_not_found")
 }
 
 /**

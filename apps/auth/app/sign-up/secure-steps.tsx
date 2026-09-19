@@ -238,6 +238,8 @@ export function TwoFactorScanStep({
 }) {
   const { user } = useUser()
   const [code, setCode] = useState("")
+  /** Why the last code was refused, shown under the boxes until it is retyped. */
+  const [rejected, setRejected] = useState<string | null>(null)
 
   async function verify(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -268,7 +270,11 @@ export function TwoFactorScanStep({
       // ⚠ THE BOXES ARE CLEARED, because a rejected six-digit code is never
       // salvaged by editing one of them — and a TOTP code that was right
       // thirty seconds ago is now wrong for a reason nobody can see.
-      toast.error("That code was not accepted. Try the current one.")
+      //
+      // ⚠ AND THE REASON STAYS ON SCREEN. See mfa-form: this one especially,
+      // because "try the current one" is advice about a code that changes every
+      // thirty seconds and a toast is gone before the next one appears.
+      setRejected("That code was not accepted. Try the current one.")
       setCode("")
       onBusy(null)
     }
@@ -301,8 +307,13 @@ export function TwoFactorScanStep({
 
         <OtpField
           value={code}
-          onChange={setCode}
+          onChange={(next) => {
+            setRejected(null)
+            setCode(next)
+          }}
           label="Code from your app"
+          state={rejected ? "invalid" : "idle"}
+          hint={rejected}
           autoFocus
         />
 

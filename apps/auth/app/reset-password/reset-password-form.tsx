@@ -43,6 +43,8 @@ export function ResetPasswordForm({
   const { signIn } = useSignIn()
   const [stage, setStage] = useState<"email" | "reset">("email")
   const [code, setCode] = useState("")
+  /** Why the last code was refused, shown under the boxes until it is retyped. */
+  const [rejected, setRejected] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
   async function onEmail(event: React.FormEvent<HTMLFormElement>) {
@@ -99,7 +101,13 @@ export function ResetPasswordForm({
       const verified = await signIn.resetPasswordEmailCode.verifyCode({ code })
 
       if (verified.error) {
-        toast.error(messageFor(verified.error))
+        /*
+         * ⚠ UNDER THE BOXES RATHER THAN IN A TOAST. See mfa-form: a toast slides
+         * away and leaves the field looking exactly as it did before the code
+         * was judged, which is the state somebody is in when they retype the
+         * same wrong code.
+         */
+        setRejected(messageFor(verified.error))
         setCode("")
         return
       }
@@ -158,7 +166,16 @@ export function ResetPasswordForm({
            * above two password fields, so auto-submitting the instant the sixth
            * digit lands would send an empty password and burn the code.
            */}
-          <OtpField value={code} onChange={setCode} autoFocus />
+          <OtpField
+            value={code}
+            onChange={(next) => {
+              setRejected(null)
+              setCode(next)
+            }}
+            state={rejected ? "invalid" : "idle"}
+            hint={rejected}
+            autoFocus
+          />
           <PasswordInput
             id="password"
             name="password"

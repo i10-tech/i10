@@ -56,6 +56,8 @@ export function MfaForm({
   const formRef = useRef<HTMLFormElement>(null)
   const [method, setMethod] = useState<Method | null>(null)
   const [code, setCode] = useState("")
+  /** Clerk's own sentence about the last code, shown under the boxes. */
+  const [rejected, setRejected] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   /**
    * Which strategies have already had a code dispatched.
@@ -138,7 +140,15 @@ export function MfaForm({
               : await signIn.mfa.verifyEmailCode({ code })
 
       if (error) {
-        toast.error(messageFor(error))
+        /*
+         * ⚠ UNDER THE BOXES, NOT IN A TOAST. A rejected code is the single most
+         * common failure on this screen, and a toast that slides away after
+         * four seconds leaves six boxes looking exactly as they did when the
+         * code was still unjudged — so somebody who looked away comes back to a
+         * screen that has forgotten it said no. The field now holds the verdict
+         * until it is acted on, which is what the red border is for.
+         */
+        setRejected(messageFor(error))
         // ⚠ CLEARED ON FAILURE, for the code strategies only. A wrong six-digit
         // code is never salvaged by editing one box, and leaving it filled
         // means the next attempt starts by deleting six characters. A backup
@@ -215,10 +225,20 @@ export function MfaForm({
         ) : (
           <OtpField
             value={code}
-            onChange={setCode}
+            /*
+             * ⚠ THE VERDICT IS DROPPED ON THE FIRST KEYSTROKE OF THE NEXT
+             * ATTEMPT. A red border that survives into the code being typed to
+             * replace it is marking the wrong six digits.
+             */
+            onChange={(next) => {
+              setRejected(null)
+              setCode(next)
+            }}
             onComplete={() => {
               if (!pending) formRef.current?.requestSubmit()
             }}
+            state={rejected ? "invalid" : "idle"}
+            hint={rejected}
             autoFocus
           />
         )}

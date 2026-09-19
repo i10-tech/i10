@@ -1,6 +1,6 @@
 import type { FieldState } from "@repo/ui/components/floating-field"
 import type { PasswordRules } from "./environment"
-import type { FieldFocus } from "./field-state"
+import type { FieldFocus } from "@repo/ui/hooks/field-focus"
 
 /**
  * Telling somebody their address is wrong before we spend a round trip finding
@@ -43,7 +43,7 @@ const EMAIL = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[a-z]{2,}$/i
 
 /**
  * ⚠ THREE SIGNALS, NOT ONE, BECAUSE EMPTY, WRONG AND FIXED ARE THREE DIFFERENT
- * THINGS. See `useFieldFocus` in field-state.ts: `blurred` is "you stopped
+ * THINGS. See `useFieldFocus` in field-focus.ts: `blurred` is "you stopped
  * typing and what is there is malformed", `submitted` is "you pressed the button
  * and this is still empty", `recovering` is "this was shown wrong and you are
  * still in it". One boolean governed the first two once, and the result was a
@@ -71,7 +71,7 @@ export function emailVerdict(value: string, reveal: Reveal): Verdict {
    * ⚠ CORRECT IS NOT THE SAME AS GREEN. A valid address is the ordinary case and
    * saying so is not news; green is spent only on an address that was SHOWN
    * wrong and has since been fixed, and only while the caret is still in it. See
-   * `recovering` in field-state.ts for why both halves are required.
+   * `recovering` in field-focus.ts for why both halves are required.
    */
   if (EMAIL.test(trimmed)) {
     return reveal.recovering ? { state: "valid" } : { state: "idle" }

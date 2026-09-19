@@ -16,7 +16,7 @@ import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/erro
 import { finalizeAndLeave } from "../_lib/finish"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { emailVerdict, isEmailUsable } from "../_lib/validate"
-import { releaseFocus, useFieldFocus } from "../_lib/field-state"
+import { releaseFocus, useFieldFocus } from "@repo/ui/hooks/field-focus"
 import { LastUsedBadge } from "../_components/last-used-badge"
 import { PasskeyCue } from "../_components/passkey-cue"
 import { PasskeyIcon } from "../_components/provider-icons"
@@ -101,7 +101,7 @@ export function SignInForm({
    * to go or learn about it — see _lib/environment.ts.
    *
    * ⚠ AND IT ONLY GOES RED WHILE THE CARET IS ELSEWHERE. See
-   * _lib/field-state.ts: red means "you stopped and it is still wrong", not
+   * @repo/ui/hooks/field-focus: red means "you stopped and it is still wrong", not
    * "you are part-way through typing it".
    */
   const identifierField = useFieldFocus(
@@ -400,19 +400,23 @@ export function SignInForm({
                * they are in the wrong place — which, on a page that was about
                * to sign them up, is the one sentence that sends them away.
                *
-               * ⚠ AND IT PROMISES ONLY WHAT THE LOOKUP DELIVERS. Not "sign in",
-               * not "sign up": the address decides, and saying so is both
-               * accurate and the reason there is only one field.
+               * ⚠ AND THE BOTH-DOORS HEADING CARRIES NO SUBTITLE, BECAUSE THE
+               * SUBTITLE WAS EXPLAINING THE MECHANISM. "We will sign you in, or
+               * start a new account" describes what WE do with the address; the
+               * person already knows what an email box is for, and a field
+               * labelled "Email address" under "Continue to i10" leaves nothing
+               * ambiguous. It also meant the two halves of this page were
+               * different heights, so the header moved when the lookup did.
                */}
               <div className="flex flex-col items-center gap-1 text-center">
                 <h1 className="text-2xl font-bold">
                   {onUnknownIdentifier ? "Continue to i10" : "Login to your account"}
                 </h1>
-                <p className="text-sm text-balance text-muted-foreground">
-                  {onUnknownIdentifier
-                    ? "Enter your email. We will sign you in, or start a new account."
-                    : "Enter your email to continue"}
-                </p>
+                {!onUnknownIdentifier && (
+                  <p className="text-sm text-balance text-muted-foreground">
+                    Enter your email to continue
+                  </p>
+                )}
               </div>
 
               {/*

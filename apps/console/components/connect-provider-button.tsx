@@ -68,9 +68,18 @@ export function ConnectProviderButton({
   async function connect() {
     setPending(true)
     const result = await startDnsConnect(slug)
-    setPending(false)
 
     if (!result.ok) {
+      /*
+       * ⚠ PENDING IS CLEARED ONLY HERE, ON THE PATH THAT STAYS ON THIS PAGE.
+       * It used to be cleared the moment the action returned, which meant the
+       * button went back to being pressable a beat BEFORE the browser started
+       * leaving — so the last thing somebody saw was a live button that had
+       * apparently done nothing, and the honest response to that is to press it
+       * again. The navigation below is not instant: it is a full document load
+       * of somebody else's domain, and the spinner has to cover all of it.
+       */
+      setPending(false)
       /*
        * ⚠ THE DEPLOYMENT'S OWN MISCONFIGURATION READS DIFFERENTLY FROM A
        * FAILURE. An OAuth app that has not been registered answers "not

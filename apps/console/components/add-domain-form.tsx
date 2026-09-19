@@ -2,25 +2,24 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Check, ChevronDown, Info, Pencil, Wand2 } from "lucide-react"
+import { Check, ChevronDown, Pencil, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@repo/ui/components/collapsible"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { Reveal } from "@repo/ui/components/reveal"
+import { releaseFocus, useFieldFocus } from "@repo/ui/hooks/field-focus"
 import { Spinner } from "@repo/ui/components/spinner"
+import { StepStage } from "@repo/ui/components/step-stage"
 import { cn } from "cn"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
-import { ProviderMark } from "@/components/provider-mark"
+import { DetectionPanel } from "@/components/detection-panel"
 import {
   createDomain,
   dnsConnections,
   lookupDns,
   publishDnsRecords,
 } from "@/lib/actions"
+import { domainVerdict, isDomainMalformed } from "@/lib/domain-verdict"
 import { toastFailure } from "@/lib/toast"
 import type { DnsConnection, DnsInspection } from "@/lib/types"
 
@@ -89,9 +88,30 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     inspection: DnsInspection | null
   } | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
+  const [advanced, setAdvanced] = React.useState(false)
+
+  /*
+   * ⚠ THE SAME RULES THE SIGN-IN PAGE'S EMAIL BOX FOLLOWS, FROM THE SAME HOOK.
+   * Red only once somebody has stopped typing, green only where a value was
+   * shown wrong and has since been fixed. The alternative was a second set of
+   * rules on the one field in the console people get wrong most often — and a
+   * form that reddens `acme.` on the third keystroke of `acme.com` is a form
+   * whose red means nothing by the time it is right.
+   */
+  const domainField = useFieldFocus(isDomainMalformed)
 
   const candidate = name.trim().toLowerCase()
-  const plausible = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(candidate)
+
+  /*
+   * ⚠ THE LOOKUP GATE AND THE BORDER COLOUR ASK THE SAME FUNCTION, AND THEY
+   * USED NOT TO. This line was its own regex, and it was looser than the
+   * verdict in ways that showed: `acme.c` passed it, so the form spent a
+   * nameserver lookup on a name the field was about to call malformed, and then
+   * reported what it found — "DNS hosted by Cloudflare" under a domain that
+   * does not exist. Two definitions of "is this a domain" in one component is
+   * one more than there can be.
+   */
+  const plausible = candidate !== "" && !isDomainMalformed(candidate)
 
   /*
    * ⚠ DERIVED, NOT STATE. "Are we looking one up" is entirely a function of what
@@ -104,6 +124,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * which is what this is asking.
    */
   const looking = plausible && answered?.domain !== candidate
+
+  const verdict = domainVerdict(name, domainField)
 
   /*
    * ⚠ THE LOOKUP IS DEBOUNCED AND GUARDED BY A REQUEST TOKEN. Typing
@@ -155,13 +177,26 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const provider = current?.provider ?? null
 
   /*
-   * ⚠ A RESOLVER IS NOT A HOST, AND THIS IS THE ONE CASE THE UI MUST EXPLAIN
-   * RATHER THAN SOLVE. It cannot actually be reached by detection — 8.8.8.8
-   * never appears in an NS record set — but the registry carries the two
-   * resolvers so that any surface offering a provider list can say so. Kept
-   * here because the same component will grow a manual picker.
+   * ⚠ WHAT THE PANEL DRAWS WHILE IT IS COLLAPSING, WHICH IS NOT WHAT THE FORM
+   * ACTS ON. `current` goes null the instant a character is typed, and a block
+   * that is animating its height to zero still has to render every frame of
+   * that — so binding the panel's CONTENT to `current` would blank it before it
+   * finished leaving. The last answer we received is the right thing to show on
+   * the way out, and `show` above stays bound to `current` so it is on the way
+   * out at all.
    */
-  const resolverConfusion = provider?.kind === "resolver"
+  const panel = current ?? answered?.inspection ?? null
+
+  /**
+   * The provider the delivery question is ABOUT, which outlives the answer for
+   * the same reason the panel's does.
+   *
+   * ⚠ IT MUST NOT BE USED FOR ANY DECISION. `provider` is what the form acts
+   * on — which options exist, what gets submitted — and it is null the moment
+   * the typed name stops matching what we looked up. This one exists only so
+   * the fieldset has a name to print while it collapses.
+   */
+  const leavingProvider = provider ?? panel?.provider ?? null
 
   // ⚠ DELEGATION IS DISABLED, NOT HIDDEN, WHERE THE PROVIDER'S EDITOR HAS NO NS
   // ROW. Hiding it would leave somebody wondering why the recommended option
@@ -202,6 +237,29 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (submitting) return
+
+    /*
+     * ⚠ AN EMPTY BOX IS NEVER REDDENED, WHICH IS WHY IT RETURNS BEFORE THE
+     * REVEAL RATHER THAN THROUGH IT. The button is disabled while the field is
+     * empty, so the only way here is Enter from inside it — and the sign-in
+     * page answers that by doing nothing at all. Not filling something in yet
+     * is not a mistake, and this is the one form where "the domain" is the only
+     * field, so an empty box is simply somebody who has not started.
+     *
+     * ⚠ MALFORMED IS DIFFERENT, AND IT DOES GET THE RED. `acme` is an answer
+     * rather than an absence, and it is wrong.
+     *
+     * ⚠ AND FOCUS IS RELEASED FIRST. Pressing Enter inside the box submits
+     * without blurring it, so the field is still focused when the guard refuses
+     * — and red waits for the caret to leave. See `releaseFocus`.
+     */
+    const typed = name.trim()
+    if (typed === "") return
+    if (isDomainMalformed(typed)) {
+      releaseFocus()
+      domainField.reveal(true)
+      return
+    }
 
     setSubmitting(true)
 
@@ -290,7 +348,15 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   }
 
   return (
-    <form onSubmit={submit} className="space-y-6">
+    /*
+     * ⚠ `noValidate`, BECAUSE THE BROWSER'S OWN BUBBLE IS NOT OUR INTERFACE.
+     * The field is still `required` — that is what it is, and screen readers
+     * read it — but without this the empty submit raised a native "Please fill
+     * out this field." tooltip in the operating system's styling, positioned by
+     * the browser, which then swallowed the message this form writes itself.
+     * The same reason every form in the auth app carries it.
+     */
+    <form onSubmit={submit} className="space-y-6" noValidate>
       {/*
        * ⚠ THE FIELD GOES AMBER WHILE THE NAMESERVER LOOKUP IS IN FLIGHT, which
        * is the same fact the disabled submit button below is already acting on
@@ -311,122 +377,49 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         inputMode="url"
         className="font-mono"
         required
-        state={looking ? "pending" : "idle"}
+        {...domainField.props}
+        /*
+         * ⚠ THE LOOKUP OUTRANKS THE VERDICT, AND THEY CANNOT BOTH BE TRUE. A
+         * name is only looked up once it is well formed, so `looking` implies
+         * the verdict is `idle` — the order here is what it reads like, not a
+         * tie being broken.
+         */
+        state={looking ? "pending" : verdict.state}
         adornment={looking ? <Spinner className="size-3.5" /> : undefined}
+        /*
+         * ⚠ THE COMPLAINT REPLACES THE EXPLANATION RATHER THAN JOINING IT. Both
+         * at once is two sentences in two colours under one box, and the one
+         * that matters is the one about what is wrong right now — the guidance
+         * comes back the moment the value does.
+         */
         hint={
-          <>
-            The apex, or a subdomain you send from — a subdomain like{" "}
-            <code className="font-mono">mail.example.com</code> keeps your sending
-            reputation separate.
-          </>
+          verdict.hint ?? (
+            <>
+              The apex, or a subdomain you send from — a subdomain like{" "}
+              <code className="font-mono">mail.example.com</code> keeps your sending
+              reputation separate.
+            </>
+          )
         }
       />
 
-      {current && (
-        <div className="rounded-lg border">
-          <div className="flex items-start gap-3 px-4 py-3">
-            {provider ? (
-              <ProviderMark
-                slug={provider.slug}
-                name={provider.name}
-                /*
-                 * ⚠ SIZED FOR A WIDE MARK, NOT A SQUARE ONE. An official asset
-                 * keeps its own proportions and letterboxes inside this box —
-                 * Cloudflare's is roughly 1.7:1, so a `size-4` slot rendered it
-                 * nine pixels tall beside fourteen-pixel text and read as a
-                 * smudge. The box is square; what you see is the height.
-                 */
-                className="-mt-0.5 size-7"
-              />
-            ) : (
-              <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            )}
-            <div className="min-w-0 flex-1 space-y-1">
-              {provider ? (
-                <>
-                  <p className="text-sm">
-                    DNS hosted by{" "}
-                    <strong className="font-medium">{provider.name}</strong>
-                    {current.confidence === "partial" && (
-                      <span className="text-muted-foreground">
-                        {" "}
-                        — though not all of your nameservers point there
-                      </span>
-                    )}
-                  </p>
-                  {current.confidence === "partial" && (
-                    /*
-                     * ⚠ A GENUINE AND COMMON STATE, NOT A ROUNDING ERROR. A
-                     * domain part-way through a migration answers with two
-                     * providers' nameservers at once, and records published at
-                     * one of them resolve unpredictably. Saying so now saves an
-                     * afternoon of "I added the record and it does not verify".
-                     */
-                    <p className="flex items-start gap-1.5 text-xs text-warning">
-                      <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-                      Your nameservers are split between providers. Records added at one
-                      of them may not resolve until the migration finishes.
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p className="text-sm">
-                  {current.nameservers.length > 0
-                    ? "We could not match your nameservers to a provider we know."
-                    : "No nameservers found for that domain yet."}
-                </p>
-              )}
-
-              {current.nameservers.length > 0 && (
-                <p className="font-mono text-2xs break-all text-muted-foreground">
-                  {current.nameservers.join("  ·  ")}
-                </p>
-              )}
-
-              {resolverConfusion && (
-                <p className="text-xs text-muted-foreground">
-                  {provider?.name} is a public <em>resolver</em> — it answers DNS
-                  questions but does not host anyone&rsquo;s records. Your DNS host is
-                  whoever your domain&rsquo;s nameservers point to, usually your
-                  registrar.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {provider?.canConnect && (
-            <div className="flex items-center justify-between gap-3 border-t px-4 py-2.5">
-              <p className="text-xs text-muted-foreground">
-                {connected
-                  ? `${provider.name} is connected. We can publish the records for you.`
-                  : "We can publish the records for you."}
-              </p>
-              {/*
-               * ⚠ LIVE NOW, AND IT LEAVES THE PAGE. Connecting is a full
-               * navigation to the provider's authorisation screen and back
-               * through the callback — so anything typed above is lost, which
-               * is exactly why the button sits beside the detection panel
-               * rather than inside the form's own flow. Somebody who connects
-               * first comes back to an empty form and a working connection.
-               */}
-              {/*
-               * ⚠ A STATUS, NEVER A SECOND BUTTON. Connecting used to be
-               * offered here AND as the form's submit, eight inches apart —
-               * two controls for one action, and the one up here had less
-               * explanation and more prominence than it had earned. The panel
-               * reports what we know about the provider; the single control at
-               * the bottom is what you press.
-               */}
-              {connected ? (
-                <span className="flex items-center gap-1.5 text-xs text-success">
-                  <Check className="size-3.5" />
-                  Connected
-                </span>
-              ) : null}
-            </div>
-          )}
-        </div>
-      )}
+      {/*
+       * ⚠ IT GROWS IN RATHER THAN APPEARING. This panel is the form answering a
+       * question somebody asked by typing, and when it mounted outright it put
+       * ninety pixels on screen in one frame and pushed the two fieldsets and
+       * both buttons down by ninety pixels in the same frame. The content was
+       * right and the delivery read as the page reloading.
+       *
+       * ⚠ IT IS STILL BOUND TO THE ANSWER FOR WHAT IS CURRENTLY TYPED, NOT TO
+       * THE LAST ANSWER WE GOT. Holding the previous inspection open while a
+       * new lookup is in flight would keep the panel from collapsing when
+       * somebody edits a finished domain — smoother, and it would be showing
+       * one domain's nameservers under another domain's name. The collapse is
+       * the truthful thing to do, and now it is a movement rather than a cut.
+       */}
+      <Reveal show={current !== null}>
+        {panel && <DetectionPanel inspection={panel} connected={connected} />}
+      </Reveal>
 
       <fieldset className="space-y-2">
         <legend className="mb-2 text-sm font-medium">
@@ -462,47 +455,73 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        * to choose between, and a fieldset with one selectable option is a
        * question that reads as a decision somebody has to make.
        */}
-      {canAutomate && provider && (
-        <fieldset className="space-y-2">
-          <legend className="mb-2 text-sm font-medium">
-            How should they get there?
-          </legend>
+      <Reveal show={canAutomate && provider !== null}>
+        {leavingProvider && (
+          <fieldset className="space-y-2">
+            <legend className="mb-2 text-sm font-medium">
+              How should they get there?
+            </legend>
 
-          <ModeCard
-            selected={delivery === "automatic"}
-            onSelect={() => setChosenDelivery("automatic")}
-            icon={<Wand2 className="size-4" />}
-            title={`Add them for me at ${provider.name}`}
-            recommended
-            description={
-              connected
-                ? mode === "delegate"
-                  ? `We write the six NS records into ${provider.name} as soon as the domain is added. We only ever touch the three delegated names.`
-                  : `We write all six records into ${provider.name} as soon as the domain is added.`
-                : `You will be asked to authorise ${provider.name} first. We only request permission to read your zones and edit DNS records.`
-            }
+            <ModeCard
+              selected={delivery === "automatic"}
+              onSelect={() => setChosenDelivery("automatic")}
+              icon={<Wand2 className="size-4" />}
+              title={`Add them for me at ${leavingProvider.name}`}
+              recommended
+              description={
+                connected
+                  ? mode === "delegate"
+                    ? `We write the six NS records into ${leavingProvider.name} as soon as the domain is added. We only ever touch the three delegated names.`
+                    : `We write all six records into ${leavingProvider.name} as soon as the domain is added.`
+                  : `You will be asked to authorise ${leavingProvider.name} first. We only request permission to read your zones and edit DNS records.`
+              }
+            />
+
+            <ModeCard
+              selected={delivery === "manual"}
+              onSelect={() => setChosenDelivery("manual")}
+              icon={<Pencil className="size-4" />}
+              title="I'll add them myself"
+              description={
+                leavingProvider.manualPath
+                  ? `We show you the records and check them as they appear — ${leavingProvider.manualPath}.`
+                  : "We show you the records and check them as they appear, telling you which are still missing."
+              }
+            />
+          </fieldset>
+        )}
+      </Reveal>
+
+      {/*
+       * ⚠ A BUTTON AND A `Reveal`, NOT `Collapsible`. Radix's collapsible is
+       * correct and does nothing at all on its own: it toggles `data-state` and
+       * expects a stylesheet to carry the height, and ours never did — so this
+       * disclosure snapped open on a screen where the panel above it springs.
+       * Wiring CSS keyframes to it would have fixed the snap and left this one
+       * element moving to a different curve from everything around it.
+       *
+       * ⚠ AND THE CHEVRON TURNS ON THE SAME SPRING TOKEN THE REST OF THE FORM
+       * USES, rather than the bare `transition-transform` it had, which took
+       * the browser's default 150ms ease while the block under it took 420ms.
+       * Two halves of one control disagreeing about how long the gesture lasts
+       * is exactly the thing that reads as unfinished.
+       */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setAdvanced((open) => !open)}
+          aria-expanded={advanced}
+          className="group flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ChevronDown
+            className={cn(
+              "size-3 transition-transform duration-(--duration-spring) ease-(--ease-spring)",
+              advanced && "rotate-180",
+            )}
           />
-
-          <ModeCard
-            selected={delivery === "manual"}
-            onSelect={() => setChosenDelivery("manual")}
-            icon={<Pencil className="size-4" />}
-            title="I'll add them myself"
-            description={
-              provider.manualPath
-                ? `We show you the records and check them as they appear — ${provider.manualPath}.`
-                : "We show you the records and check them as they appear, telling you which are still missing."
-            }
-          />
-        </fieldset>
-      )}
-
-      <Collapsible>
-        <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ChevronDown className="size-3 transition-transform group-data-[state=open]:rotate-180" />
           Advanced
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-3">
+        </button>
+        <Reveal show={advanced} spacing="pt-3">
           <FloatingInput
             id="return-path"
             label="Return-Path subdomain"
@@ -519,8 +538,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
               </>
             }
           />
-        </CollapsibleContent>
-      </Collapsible>
+        </Reveal>
+      </div>
 
       <div className="flex items-center gap-2">
         {/*
@@ -552,22 +571,39 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
          * EVER: a connection is per workspace, so every domain after the first
          * sees "Add domain" here and never leaves the page at all.
          */}
-        {needsConnection && provider ? (
-          <ConnectProviderButton
-            slug={provider.slug}
-            providerName={provider.name}
-            size="default"
-            brand
-          />
-        ) : (
-          <Button
-            type="submit"
-            disabled={submitting || looking || name.trim().length === 0}
-          >
-            {submitting && <Spinner />}
-            Add domain
-          </Button>
-        )}
+        {/*
+         * ⚠ THE SWAP IS ANIMATED FOR THE SAME REASON THE PANEL ABOVE IT IS. One
+         * control changing its mind is the entire idea here, and a control that
+         * changes by being replaced between two frames does not read as one
+         * control — it reads as the first button vanishing and a different one
+         * taking its place, which is the thing this design exists to avoid.
+         */}
+        <StepStage step={needsConnection ? "connect" : "add"} className="w-auto">
+          {needsConnection && leavingProvider ? (
+            <ConnectProviderButton
+              slug={leavingProvider.slug}
+              providerName={leavingProvider.name}
+              size="default"
+              brand
+            />
+          ) : (
+            <Button
+              type="submit"
+              /*
+               * ⚠ DISABLED WHILE EMPTY, THE SAME AS THE SIGN-IN PAGE'S
+               * CONTINUE. It is the half of "empty is not a mistake" that the
+               * verdict alone cannot express: a button somebody can press with
+               * nothing typed has to say SOMETHING when they do, and the only
+               * honest thing to say is a complaint about a box they had not got
+               * to yet.
+               */
+              disabled={submitting || looking || name.trim().length === 0}
+            >
+              {submitting && <Spinner />}
+              Add domain
+            </Button>
+          )}
+        </StepStage>
         <Button type="button" variant="ghost" onClick={() => router.back()}>
           Cancel
         </Button>

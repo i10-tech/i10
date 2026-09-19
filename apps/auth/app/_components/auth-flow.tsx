@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { StepStage } from "@repo/ui/components/step-stage"
 import type { SsoProvider } from "../_lib/providers"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
 import { SignInForm } from "../sign-in/sign-in-form"
@@ -56,35 +57,49 @@ export function AuthFlow({
    */
   const [newAccount, setNewAccount] = useState<string | null>(null)
 
-  if (newAccount !== null) {
-    return (
-      <SignUpForm
-        afterAuthUrl={afterAuthUrl}
-        /*
-         * ⚠ STILL A WAY BACK, EVEN THOUGH THE PERSON DID NOT CHOOSE THIS DOOR.
-         * The lookup decided for them, and a lookup can be wrong about what
-         * somebody meant — a typo in the address lands here looking exactly
-         * like a new customer.
-         */
-        signInHref="/sign-in"
-        redirectRaw={redirectRaw}
-        providers={providers}
-        abilities={abilities}
-        password={password}
-        initialEmail={newAccount}
-        alreadySignedIn={false}
-      />
-    )
-  }
-
+  /*
+   * ⚠ THE SAME MOVEMENT THE STEPS INSIDE EACH FORM ALREADY USE. Both forms
+   * carry their own `StepStage`, so every step within them slides 12px and the
+   * card springs to its new height — and then the one transition BETWEEN them,
+   * which is the biggest change of content on the page, was a hard swap. The
+   * effect was that the most ordinary path in the product was the only one that
+   * flickered, and a taller sign-up form snapping into place read as a page
+   * load rather than as the same card answering the question it just asked.
+   *
+   * ⚠ NESTING TWO OF THEM IS FINE AND IS THE POINT. The outer one owns which
+   * FORM is showing; the inner one owns which STEP of that form is. They
+   * animate the same spring, so a swap that happens to be both reads as one
+   * movement instead of two competing ones.
+   */
   return (
-    <SignInForm
-      afterAuthUrl={afterAuthUrl}
-      resetHref={resetHref}
-      mfaHref={mfaHref}
-      redirectRaw={redirectRaw}
-      providers={providers}
-      onUnknownIdentifier={setNewAccount}
-    />
+    <StepStage step={newAccount === null ? "sign-in" : "sign-up"}>
+      {newAccount !== null ? (
+        <SignUpForm
+          afterAuthUrl={afterAuthUrl}
+          /*
+           * ⚠ STILL A WAY BACK, EVEN THOUGH THE PERSON DID NOT CHOOSE THIS
+           * DOOR. The lookup decided for them, and a lookup can be wrong about
+           * what somebody meant — a typo in the address lands here looking
+           * exactly like a new customer.
+           */
+          signInHref="/sign-in"
+          redirectRaw={redirectRaw}
+          providers={providers}
+          abilities={abilities}
+          password={password}
+          initialEmail={newAccount}
+          alreadySignedIn={false}
+        />
+      ) : (
+        <SignInForm
+          afterAuthUrl={afterAuthUrl}
+          resetHref={resetHref}
+          mfaHref={mfaHref}
+          redirectRaw={redirectRaw}
+          providers={providers}
+          onUnknownIdentifier={setNewAccount}
+        />
+      )}
+    </StepStage>
   )
 }

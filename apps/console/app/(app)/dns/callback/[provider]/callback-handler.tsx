@@ -47,7 +47,18 @@ export function CallbackHandler({
       const result = await finishDnsConnect({ provider, code, state })
       if (!result.ok) {
         setStatus("failed")
-        setMessage(result.error)
+        /*
+         * ⚠ THE PROVIDER'S OWN WORDS, WHERE THE API SENT THEM. Every token
+         * exchange that fails reads "X did not complete the authorisation",
+         * which is true of an expired code, a rejected secret, a PKCE mismatch
+         * and a bot-protection page alike — four failures with four different
+         * next steps and one sentence between them. `detail` is the provider's
+         * `error_description`, and the person reading it is the administrator
+         * who authorised the account a moment ago.
+         */
+        const detail =
+          typeof result.body?.detail === "string" ? result.body.detail : null
+        setMessage(detail ? `${result.error} (${detail})` : result.error)
         return
       }
       setStatus("done")
