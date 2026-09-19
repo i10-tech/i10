@@ -29,7 +29,7 @@ export const metadata: Metadata = {
  * we are trying to perform: its RSC fetch is cut off by the navigation in
  * flight, Next answers "Failed to fetch RSC payload, falling back to browser
  * navigation", and the fallback reloads the page we were leaving. The pending
- * redirect is cancelled and the person lands back on /sign-up, /mfa or /passkey
+ * redirect is cancelled and the person lands back on /sign-in, /sign-up or /mfa
  * — signed in, and apparently ignored. On a laptop the redirect commits first
  * and `setActive` returns before ever calling it, which is the whole of why
  * this looked like a phone-only bug.

@@ -6,7 +6,12 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
-import { FieldDescription, FieldGroup, FieldSeparator } from "@repo/ui/components/field"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldSeparator,
+} from "@repo/ui/components/field"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepStage } from "@repo/ui/components/step-stage"
@@ -18,6 +23,8 @@ import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { emailVerdict, isEmailUsable } from "../_lib/validate"
 import { releaseFocus, useFieldFocus } from "../_lib/field-state"
 import { LastUsedBadge } from "../_components/last-used-badge"
+import { PasskeyCue } from "../_components/passkey-cue"
+import { PasskeyIcon } from "../_components/provider-icons"
 import type { SsoProvider } from "../_lib/providers"
 
 /*
@@ -44,7 +51,6 @@ export function SignInForm({
   signUpHref,
   resetHref,
   mfaHref,
-  passkeyHref,
   redirectRaw,
   providers,
 }: {
@@ -52,7 +58,6 @@ export function SignInForm({
   signUpHref: string
   resetHref: string
   mfaHref: string
-  passkeyHref: string
   redirectRaw?: string
   providers: SsoProvider[]
 }) {
@@ -92,7 +97,9 @@ export function SignInForm({
    * _lib/field-state.ts: red means "you stopped and it is still wrong", not
    * "you are part-way through typing it".
    */
-  const identifierField = useFieldFocus()
+  const identifierField = useFieldFocus(
+    (value) => value.trim() !== "" && !isEmailUsable(value),
+  )
   const [direction, setDirection] = useState<"forward" | "back">("forward")
 
   /*
@@ -107,7 +114,7 @@ export function SignInForm({
   /**
    * Offer a saved passkey without anybody asking.
    *
-   * ⚠ `autofill`, NOT `discoverable` — the opposite of what /passkey does. This
+   * ⚠ `autofill`, NOT `discoverable` — the opposite of `provePasskey` below. This
    * is WebAuthn conditional mediation: the browser quietly checks whether it
    * holds a passkey for this site and, if it does, offers it inside the email
    * field's own autofill menu. It must be armed BEFORE the person touches
@@ -174,7 +181,7 @@ export function SignInForm({
       // See the sign-up form: Enter from inside the box leaves it focused, and
       // a focused field is never painted red.
       releaseFocus()
-      identifierField.reveal()
+      identifierField.reveal(true)
       return
     }
 
@@ -191,6 +198,66 @@ export function SignInForm({
       setStage("password")
       setBusy(null)
     } catch {
+      toast.error(TRANSPORT_FAILURE)
+      setBusy(null)
+    }
+  }
+
+  /**
+   * The passkey button, which used to be a page.
+   *
+   * ⚠ `/passkey` WAS A WHOLE SCREEN WHOSE ONLY CONTENT WAS A BUTTON THAT CALLED
+   * THIS. A navigation, a render and a second decision in front of something
+   * that is one tap — and the heading it showed ("Your device will ask for your
+   * fingerprint") was describing a dialog the person could not see yet, because
+   * it does not open until they press the thing on the next screen down. The
+   * button belongs where the choice is made.
+   *
+   * ⚠ `discoverable`, NOT `autofill`. Autofill is the other flow — the browser
+   * quietly offering a passkey inside the email box the moment the page loads,
+   * which is armed in the effect above and needs an input to attach to. This one
+   * opens on demand because somebody pressed a button, and the two must not be
+   * confused: `autofill` from a click does nothing at all.
+   */
+  async function provePasskey() {
+    if (!signIn || busy) return
+    setBusy("passkey")
+
+    try {
+      const { error } = await signIn.passkey({ flow: "discoverable" })
+
+      if (error) {
+        toast.error(messageFor(error))
+        setBusy(null)
+        return
+      }
+
+      if (signIn.status === "complete") {
+        // ⚠ THE LOCK IS NOT RELEASED ON SUCCESS. The page is navigating to
+        // another origin; re-enabling the buttons for the second that takes is
+        // an invitation to start a second sign-in on top of the first.
+        markSignInAttempt("passkey")
+        const result = await finalizeAndLeave(
+          (params) => signIn.finalize(params),
+          afterAuthUrl,
+        )
+        if (result.error) {
+          toast.error(messageFor(result.error))
+          setBusy(null)
+        }
+        return
+      }
+
+      toast.error("That passkey worked, but the sign-in needs another step.")
+      setBusy(null)
+    } catch {
+      /*
+       * ⚠ THE CATCH IS LOAD-BEARING HERE, UNLIKE ON THE PASSWORD FORM. A passkey
+       * prompt is WebAuthn: dismissing the sheet, or a browser with no
+       * authenticator at all, rejects at the platform level rather than coming
+       * back as a Clerk error — and an unhandled rejection would leave this
+       * stuck on "Waiting for your device…" for the rest of the session.
+       */
       toast.error(TRANSPORT_FAILURE)
       setBusy(null)
     }
@@ -296,6 +363,13 @@ export function SignInForm({
        * partially failing to update. The whole panel is one object changing
        * state — see @repo/ui/components/step-stage.
        */}
+      {/*
+       * ⚠ OUTSIDE THE STAGE, so the step swap cannot unmount it mid-prompt. It
+       * covers the page while the operating system's own dialog is open — see
+       * _components/passkey-cue.tsx, which came off the deleted `/passkey` page.
+       */}
+      {busy === "passkey" ? <PasskeyCue /> : null}
+
       <StepStage step={stage} direction={direction}>
         {stage === "identifier" ? (
           <form className="flex flex-col gap-6" onSubmit={onIdentifier} noValidate>
@@ -363,27 +437,67 @@ export function SignInForm({
               </Button>
 
               <FieldSeparator>Or continue with</FieldSeparator>
-              <OAuthButtons
-                afterAuthUrl={afterAuthUrl}
-                redirectRaw={redirectRaw}
-                intent="sign-in"
-                providers={providers}
-                busy={busy}
-                onBusyChange={setBusy}
-              />
+              {/*
+               * ⚠ ONE `Field` AROUND ALL OF THEM, so the passkey button is the
+               * same 12px from "Continue with Google" as the providers are from
+               * each other. It was in a Field of its own and sat 28px away,
+               * which read as a separate section rather than one more way in.
+               */}
+              <Field>
+                <OAuthButtons
+                  afterAuthUrl={afterAuthUrl}
+                  redirectRaw={redirectRaw}
+                  intent="sign-in"
+                  providers={providers}
+                  busy={busy}
+                  onBusyChange={setBusy}
+                />
 
-              <FieldDescription className="text-center">
-                <Link
-                  href={passkeyHref}
-                  aria-disabled={locked}
-                  tabIndex={locked ? -1 : undefined}
-                  className={`underline underline-offset-4 ${
-                    locked ? "pointer-events-none opacity-50" : ""
-                  }`}
+                {/*
+                 * ⚠ IT SITS WITH THE PROVIDER BUTTONS RATHER THAN UNDER THEM AS A
+                 * LINK, BECAUSE IT IS THE SAME KIND OF THING. "Continue with
+                 * Google" and "Continue with Passkey" are both "sign in without
+                 * typing a password"; one of them being a sentence in small grey
+                 * text made it look like a footnote about the other three.
+                 *
+                 * ⚠ AND IT IS LAST ON PURPOSE. A passkey only works for somebody
+                 * who has already set one up on this device, so it is the one
+                 * button on the page that does nothing for a first-time visitor.
+                 */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xl"
+                  // The positioning context for the chip below — see
+                  // oauth-buttons, which carries the same class for the same
+                  // reason.
+                  className="relative"
+                  onClick={provePasskey}
+                  disabled={!signIn || locked}
                 >
-                  Use a passkey instead
-                </Link>
-              </FieldDescription>
+                  {busy === "passkey" ? (
+                    <>
+                      <Spinner aria-hidden="true" aria-label={undefined} />
+                      Waiting for your device…
+                    </>
+                  ) : (
+                    <>
+                      <PasskeyIcon aria-hidden="true" />
+                      Continue with Passkey
+                      {/*
+                       * ⚠ THE PASSKEY PATH RECORDS ITSELF NOW, so it can carry
+                       * the badge like every other method. `provePasskey` calls
+                       * `markSignInAttempt("passkey")` on success — without
+                       * that this button was the one way in that never became
+                       * "last used", which is the worst one to forget: somebody
+                       * who signs in with a passkey has no password to fall
+                       * back on and most needs reminding which button it was.
+                       */}
+                      {lastUsed === "passkey" && <LastUsedBadge />}
+                    </>
+                  )}
+                </Button>
+              </Field>
               <FieldDescription className="text-center">
                 Don&apos;t have an account?{" "}
                 <Link

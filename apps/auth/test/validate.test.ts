@@ -11,13 +11,16 @@ import {
 /**
  * The rules the sign-up and sign-in forms colour their borders by.
  *
- * ⚠ THIS FILE EXISTS BECAUSE THE SAME LOGIC HAS BEEN WRONG TWICE, IN OPPOSITE
- * DIRECTIONS, AND BOTH TIMES IT WAS REPORTED BY SOMEBODY USING THE PRODUCT
- * RATHER THAN CAUGHT HERE. First it went red on every keystroke, so a field was
- * red for the whole time anybody was filling it in; then it went red on blur,
- * so tabbing past a box nobody had answered yet told them off for looking. The
- * rules are three lines of `if` and they are still easy to get wrong, because
- * what makes them right is WHEN they fire rather than what they return.
+ * ⚠ THIS FILE EXISTS BECAUSE THE SAME LOGIC HAS BEEN WRONG THREE TIMES AND
+ * EVERY ONE OF THEM WAS REPORTED BY SOMEBODY USING THE PRODUCT RATHER THAN
+ * CAUGHT HERE. It went red on every keystroke, so a field was red for the whole
+ * time anybody was filling it in. Then it went red on blur, so tabbing past a
+ * box nobody had answered yet told them off for looking. Then it went green on
+ * everything correct, which is most of a form, so the colour meant nothing.
+ *
+ * None of those are bugs in what the functions RETURN — every one of them is a
+ * bug in WHEN. That is what this file pins down, and it is why the fixtures
+ * below are named for moments rather than for values.
  *
  * ⚠ AND IT IS THE FIRST TEST IN THIS APP, WHICH IS WHY `test` AND `types` HAD TO
  * BE ADDED TO ITS package.json AND tsconfig. Everything else here is a React
@@ -35,10 +38,17 @@ const rules: PasswordRules = {
   requireLowercase: false,
 }
 
-/** Untouched, mid-typing, left alone, and submitted-against. */
-const typing = { blurred: false, submitted: false }
-const left = { blurred: true, submitted: false }
-const refused = { blurred: true, submitted: true }
+/**
+ * The four states a field can be judged in.
+ *
+ * ⚠ `fixing` IS THE ONE THAT EARNS GREEN: it has been shown wrong at some point
+ * and the caret is back in it. Nothing else does — see `recovering` in
+ * _lib/field-state.ts for why a correct value on its own is not news.
+ */
+const typing = { blurred: false, submitted: false, recovering: false }
+const left = { blurred: true, submitted: false, recovering: false }
+const refused = { blurred: true, submitted: true, recovering: false }
+const fixing = { blurred: false, submitted: false, recovering: true }
 
 describe("an email address", () => {
   /*
@@ -69,10 +79,29 @@ describe("an email address", () => {
     expect(emailVerdict("mido@", left)).toMatchObject({ state: "invalid" })
   })
 
-  // ⚠ GREEN IS NOT GATED THE SAME WAY, AND THE ASYMMETRY IS DELIBERATE. There is
-  // no state in which "this is fine" is premature.
-  it("confirms a valid address immediately, without waiting to be left", () => {
-    expect(emailVerdict("mohamed@i10.tech", typing)).toEqual({ state: "valid" })
+  /*
+   * ⚠ THE GREEN RULES ARE THE SUBTLE ONES AND THEY ARE WHY THIS BLOCK EXISTS.
+   * Green is spent on a recovery — this was shown wrong, and is not any more —
+   * rather than issued as a receipt for typing correctly first time.
+   */
+  it("does not go green for an address that was right first time", () => {
+    expect(emailVerdict("mohamed@i10.tech", typing)).toEqual({ state: "idle" })
+    expect(emailVerdict("mohamed@i10.tech", left)).toEqual({ state: "idle" })
+  })
+
+  it("goes green once a rejected address has been corrected", () => {
+    expect(emailVerdict("mohamed@i10.tech", fixing)).toEqual({ state: "valid" })
+  })
+
+  // ⚠ AND IT RETIRES WHEN THEY MOVE ON. `recovering` carries the focus
+  // requirement, so this is what a corrected field looks like once left: plain.
+  it("stops being green once the caret has moved on", () => {
+    const moved = { ...fixing, recovering: false, blurred: true }
+    expect(emailVerdict("mohamed@i10.tech", moved)).toEqual({ state: "idle" })
+  })
+
+  it("is still not green while the correction is itself malformed", () => {
+    expect(emailVerdict("mido@", fixing)).toEqual({ state: "idle" })
   })
 
   it("requires a dot in the domain, which `type=email` does not", () => {
@@ -92,7 +121,8 @@ describe("an email address", () => {
   })
 
   it("trims before judging, so a pasted address with a trailing space passes", () => {
-    expect(emailVerdict("  mohamed@i10.tech  ", typing)).toEqual({ state: "valid" })
+    expect(emailVerdict("  mohamed@i10.tech  ", fixing)).toEqual({ state: "valid" })
+    expect(emailVerdict("  mohamed@i10.tech  ", left)).toEqual({ state: "idle" })
   })
 })
 
@@ -124,8 +154,12 @@ describe("a password", () => {
     })
   })
 
-  it("accepts anything meeting the instance's own minimum", () => {
-    expect(passwordVerdict("abcdefgh", rules, left)).toEqual({ state: "valid" })
+  it("accepts anything meeting the instance's own minimum, without going green", () => {
+    expect(passwordVerdict("abcdefgh", rules, left)).toEqual({ state: "idle" })
+  })
+
+  it("goes green once a rejected password has been made long enough", () => {
+    expect(passwordVerdict("abcdefgh", rules, fixing)).toEqual({ state: "valid" })
   })
 
   /*
@@ -135,7 +169,11 @@ describe("a password", () => {
    * `passwordRules()` reads the environment document instead of a constant.
    */
   it("names one unmet requirement at a time, in order", () => {
-    const strict: PasswordRules = { ...rules, requireNumbers: true, requireSpecial: true }
+    const strict: PasswordRules = {
+      ...rules,
+      requireNumbers: true,
+      requireSpecial: true,
+    }
     expect(passwordVerdict("abcdefgh", strict, left)).toMatchObject({
       hint: "Add a number.",
     })

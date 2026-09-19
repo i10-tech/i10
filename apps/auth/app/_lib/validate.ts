@@ -42,13 +42,15 @@ export interface Verdict {
 const EMAIL = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[a-z]{2,}$/i
 
 /**
- * ⚠ TWO SIGNALS, NOT ONE, BECAUSE EMPTY AND WRONG ARE NOT THE SAME FAULT. See
- * `useFieldFocus` in field-state.ts: `blurred` is "you stopped typing and what
- * is there is malformed", `submitted` is "you pressed the button and this is
- * still empty". One boolean governed both once, and the result was a field that
- * turned red because somebody tabbed past a box they had not answered yet.
+ * ⚠ THREE SIGNALS, NOT ONE, BECAUSE EMPTY, WRONG AND FIXED ARE THREE DIFFERENT
+ * THINGS. See `useFieldFocus` in field-state.ts: `blurred` is "you stopped
+ * typing and what is there is malformed", `submitted` is "you pressed the button
+ * and this is still empty", `recovering` is "this was shown wrong and you are
+ * still in it". One boolean governed the first two once, and the result was a
+ * field that turned red because somebody tabbed past a box they had not answered
+ * yet.
  */
-type Reveal = Pick<FieldFocus, "blurred" | "submitted">
+type Reveal = Pick<FieldFocus, "blurred" | "submitted" | "recovering">
 
 export function emailVerdict(value: string, reveal: Reveal): Verdict {
   const trimmed = value.trim()
@@ -65,13 +67,20 @@ export function emailVerdict(value: string, reveal: Reveal): Verdict {
       : { state: "idle" }
   }
 
-  // ⚠ GREEN IS IMMEDIATE AND RED WAITS, AND THE ASYMMETRY IS THE WHOLE DESIGN.
-  // Every address is invalid while it is being typed — `m`, `mi`, `mid` — so a
-  // field that goes red on the first keystroke is a field that is red for the
-  // entire time anybody is using it, and the colour stops meaning anything.
-  // Confirming correctness the moment it is correct has no such problem: there
-  // is no state where "this is fine" is premature.
-  if (EMAIL.test(trimmed)) return { state: "valid" }
+  /*
+   * ⚠ CORRECT IS NOT THE SAME AS GREEN. A valid address is the ordinary case and
+   * saying so is not news; green is spent only on an address that was SHOWN
+   * wrong and has since been fixed, and only while the caret is still in it. See
+   * `recovering` in field-state.ts for why both halves are required.
+   */
+  if (EMAIL.test(trimmed)) {
+    return reveal.recovering ? { state: "valid" } : { state: "idle" }
+  }
+
+  // ⚠ AND RED WAITS, WHICH IS THE OTHER HALF OF THE SAME IDEA. Every address is
+  // invalid while it is being typed — `m`, `mi`, `mid` — so a field that goes
+  // red on the first keystroke is red for the entire time anybody is using it,
+  // and the colour stops meaning anything.
 
   return reveal.blurred
     ? { state: "invalid", hint: "That does not look like an email address." }
@@ -104,7 +113,8 @@ export function passwordVerdict(
   }
 
   const unmet = firstUnmet(value, rules)
-  if (!unmet) return { state: "valid" }
+  // ⚠ SAME RULE AS THE ADDRESS ABOVE: green is a recovery, not a receipt.
+  if (!unmet) return reveal.recovering ? { state: "valid" } : { state: "idle" }
 
   /*
    * ⚠ LENGTH IS REPORTED WHILE TYPING, THE OTHER RULES ARE NOT. "6 of 8

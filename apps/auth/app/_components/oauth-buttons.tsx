@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react"
 import { toast } from "sonner"
 import { useClerk } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
-import { Field } from "@repo/ui/components/field"
+
 import { Spinner } from "@repo/ui/components/spinner"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoStrategy } from "../_lib/clerk-types"
@@ -270,8 +270,21 @@ export function OAuthButtons({
 
   if (providers.length === 0) return null
 
+  /*
+   * ⚠ A FRAGMENT RATHER THAN A `<Field>`, AND THE CALLER OWNS THE GROUP NOW.
+   * This used to wrap itself, which meant the passkey button added beside it had
+   * to sit in a SECOND Field — 28px of `FieldGroup` gap between two stacks of
+   * identical-looking buttons, where the buttons within each stack are 12px
+   * apart. They are all "continue without typing a password" and they should
+   * read as one list.
+   *
+   * ⚠ IT ALSO FIXES A LATENT EMPTY SEPARATOR. With no providers configured this
+   * returns null, and the "Or continue with" rule above it used to be left
+   * pointing at nothing. The caller's Field still holds the passkey button, so
+   * there is always something under the rule.
+   */
   return (
-    <Field>
+    <>
       {providers.map(({ strategy, name }) => {
         const loading = busy === strategy
         const Icon = LOCAL_ICONS[strategy]
@@ -319,7 +332,7 @@ export function OAuthButtons({
           </Button>
         )
       })}
-    </Field>
+    </>
   )
 }
 

@@ -182,8 +182,14 @@ export function SignUpForm({
    * TURNS ON. There is no moment at which "this is fine" is premature. See
    * _lib/validate.ts.
    */
-  const emailField = useFieldFocus()
-  const secretField = useFieldFocus()
+  const emailField = useFieldFocus(
+    // ⚠ EMPTY IS NOT MALFORMED. Blurring an unanswered box must not arm green
+    // for later, any more than it turns the border red now.
+    (value) => value.trim() !== "" && !isEmailUsable(value),
+  )
+  const secretField = useFieldFocus(
+    (value) => value !== "" && !isPasswordUsable(value, passwordPolicy),
+  )
   const [totp, setTotp] = useState<TotpEnrolment | null>(null)
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
@@ -321,14 +327,20 @@ export function SignUpForm({
      * touched: the borders go red, the hints name what is missing, and the
      * answer arrives in the same frame as the click.
      */
-    if (!isEmailUsable(email) || !isPasswordUsable(secret, passwordPolicy)) {
+    const emailOk = isEmailUsable(email)
+    const secretOk = isPasswordUsable(secret, passwordPolicy)
+
+    if (!emailOk || !secretOk) {
       // ⚠ THE BLUR COMES FIRST, AND IT IS NOT TIDYING UP. Submitting with Enter
       // from inside a box leaves that box focused, and a focused field is never
       // painted red — so without this, pressing Enter on a bad address is a form
       // that refuses silently. See `releaseFocus` in _lib/field-state.ts.
       releaseFocus()
-      emailField.reveal()
-      secretField.reveal()
+      // ⚠ EACH FIELD IS TOLD WHETHER IT IS THE PROBLEM. Revealing a field that
+      // was already valid would record it as having been shown wrong, and it
+      // would then go green the next time somebody clicked into it, for nothing.
+      emailField.reveal(!emailOk)
+      secretField.reveal(!secretOk)
       return
     }
 

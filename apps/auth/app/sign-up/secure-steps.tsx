@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { KeyRoundIcon, ShieldCheckIcon } from "lucide-react"
+import { ShieldCheckIcon } from "lucide-react"
 import { toast } from "sonner"
 import { useUser } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
@@ -13,7 +13,12 @@ import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { StepHeading } from "../_components/step-heading"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoProvider } from "../_lib/providers"
-import { AppleIcon, GitHubIcon, GoogleIcon } from "../_components/provider-icons"
+import {
+  AppleIcon,
+  GitHubIcon,
+  GoogleIcon,
+  PasskeyIcon,
+} from "../_components/provider-icons"
 
 /*
  * The three steps that come AFTER the account exists.
@@ -107,7 +112,9 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
             </>
           ) : (
             <>
-              <KeyRoundIcon aria-hidden="true" />
+              {/* ⚠ THE SAME MARK THE SIGN-IN BUTTON USES. One glyph for one
+                  concept: see PasskeyIcon on why it is not a plain key. */}
+              <PasskeyIcon aria-hidden="true" />
               Add a passkey
             </>
           )}
