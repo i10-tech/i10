@@ -32,7 +32,7 @@
     "@repo/contracts": "workspace:*",
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
-    "eslint": "^9.39.5",
+    "eslint": "^10.10.0",
     "tsup": "^8.5.1",
     "typescript": "6.0.3"
   },
