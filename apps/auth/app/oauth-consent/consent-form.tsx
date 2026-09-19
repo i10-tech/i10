@@ -194,10 +194,17 @@ export function ConsentForm({
         </FieldDescription>
 
         <div className="grid grid-cols-2 gap-3">
-          <Button type="submit" name="consented" value="false" variant="outline">
+          {/* ⚠ `xl` FOR BOTH, like every other decision in this app. */}
+          <Button
+            type="submit"
+            name="consented"
+            value="false"
+            variant="outline"
+            size="xl"
+          >
             Deny
           </Button>
-          <Button type="submit" name="consented" value="true">
+          <Button type="submit" name="consented" value="true" size="xl">
             Allow
           </Button>
         </div>

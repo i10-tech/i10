@@ -3,7 +3,8 @@
 import * as React from "react"
 import { ArrowLeft, Check, Pencil, Wand2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { domainProblem } from "@/lib/domain-check"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
@@ -159,7 +160,13 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
         title="What domain will you send from?"
         blurb="Mail leaves from a domain you control. We will look up who hosts its DNS and take the shortest path from there."
       >
-        <FloatingInput
+        {/*
+         * ⚠ THE SAME RULE AS /domains/new, WHICH IT DID NOT HAVE. This is the
+         * first domain anybody types into the product and it accepted
+         * `https://acme.com` — creating a domain that can never verify — while
+         * the other box in the product refused it by name.
+         */}
+        <ValidatedInput
           id="onboarding-domain"
           label="Domain"
           value={name}
@@ -171,7 +178,9 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           // whole URLs, and `https://acme.com` can never verify.
           inputMode="url"
           className="font-mono"
-          state={looking ? "pending" : "idle"}
+          check={domainProblem}
+          required="Enter the domain you send from."
+          busy={looking}
           adornment={looking ? <Spinner className="size-3.5" /> : undefined}
           hint="The apex, like acme.com — not a URL and not an address."
         />

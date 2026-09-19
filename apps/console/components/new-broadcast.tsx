@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createBroadcast } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -43,13 +43,13 @@ export function NewBroadcastButton() {
       onSubmit={() => createBroadcast({ name: name.trim() })}
       onSuccess={(broadcast) => router.push(`/broadcasts/${broadcast.id}`)}
     >
-      <FloatingInput
+      <ValidatedInput
         label="Name"
         id="broadcast-name"
         value={name}
         onChange={(event) => setName(event.target.value)}
         autoComplete="off"
-        required
+        required="Name this broadcast."
         autoFocus
         hint="e.g. March product update"
       />

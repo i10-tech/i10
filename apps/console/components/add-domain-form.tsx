@@ -6,8 +6,8 @@ import { Check, ChevronDown, Pencil, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { Reveal } from "@repo/ui/components/reveal"
-import { releaseFocus, useFieldFocus } from "@repo/ui/hooks/field-focus"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepStage } from "@repo/ui/components/step-stage"
 import { cn } from "cn"
@@ -19,7 +19,7 @@ import {
   lookupDns,
   publishDnsRecords,
 } from "@/lib/actions"
-import { domainVerdict, isDomainMalformed } from "@/lib/domain-verdict"
+import { domainProblem, isDomainMalformed } from "@/lib/domain-check"
 import { toastFailure } from "@/lib/toast"
 import type { DnsConnection, DnsInspection } from "@/lib/types"
 
@@ -98,7 +98,6 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * form that reddens `acme.` on the third keystroke of `acme.com` is a form
    * whose red means nothing by the time it is right.
    */
-  const domainField = useFieldFocus(isDomainMalformed)
 
   const candidate = name.trim().toLowerCase()
 
@@ -124,8 +123,6 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * which is what this is asking.
    */
   const looking = plausible && answered?.domain !== candidate
-
-  const verdict = domainVerdict(name, domainField)
 
   /*
    * ⚠ THE LOOKUP IS DEBOUNCED AND GUARDED BY A REQUEST TOKEN. Typing
@@ -239,28 +236,14 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     if (submitting) return
 
     /*
-     * ⚠ AN EMPTY BOX IS NEVER REDDENED, WHICH IS WHY IT RETURNS BEFORE THE
-     * REVEAL RATHER THAN THROUGH IT. The button is disabled while the field is
-     * empty, so the only way here is Enter from inside it — and the sign-in
-     * page answers that by doing nothing at all. Not filling something in yet
-     * is not a mistake, and this is the one form where "the domain" is the only
-     * field, so an empty box is simply somebody who has not started.
-     *
-     * ⚠ MALFORMED IS DIFFERENT, AND IT DOES GET THE RED. `acme` is an answer
-     * rather than an absence, and it is wrong.
-     *
-     * ⚠ AND FOCUS IS RELEASED FIRST. Pressing Enter inside the box submits
-     * without blurring it, so the field is still focused when the guard refuses
-     * — and red waits for the caret to leave. See `releaseFocus`.
+     * ⚠ NOTHING GUARDS THE SHAPE HERE ANY MORE. The field refuses its own
+     * form's submit before this is reached — reddening itself, releasing the
+     * caret so the red can be seen, and leaving an empty box alone because
+     * emptiness is not a mistake until somebody says they are finished. That
+     * was twenty lines in this file and four more in the sign-in form, both
+     * hand-written from the same rules. See
+     * @repo/ui/components/validated-field.
      */
-    const typed = name.trim()
-    if (typed === "") return
-    if (isDomainMalformed(typed)) {
-      releaseFocus()
-      domainField.reveal(true)
-      return
-    }
-
     setSubmitting(true)
 
     const result = await createDomain({
@@ -363,7 +346,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        * — it just was not visible anywhere. `looking` is derived from what has
        * been typed against what has been answered, so it cannot latch on.
        */}
-      <FloatingInput
+      <ValidatedInput
         id="domain"
         label="Domain"
         value={name}
@@ -376,30 +359,29 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         // creates a domain that can never verify.
         inputMode="url"
         className="font-mono"
-        required
-        {...domainField.props}
+        check={domainProblem}
+        required="Enter the domain you send from."
         /*
          * ⚠ THE LOOKUP OUTRANKS THE VERDICT, AND THEY CANNOT BOTH BE TRUE. A
-         * name is only looked up once it is well formed, so `looking` implies
-         * the verdict is `idle` — the order here is what it reads like, not a
-         * tie being broken.
+         * name is only looked up once it is well formed, so `busy` implies the
+         * verdict is `idle` — the order is what it reads like, not a tie being
+         * broken.
          */
-        state={looking ? "pending" : verdict.state}
+        busy={looking}
         adornment={looking ? <Spinner className="size-3.5" /> : undefined}
         /*
          * ⚠ THE COMPLAINT REPLACES THE EXPLANATION RATHER THAN JOINING IT. Both
          * at once is two sentences in two colours under one box, and the one
          * that matters is the one about what is wrong right now — the guidance
-         * comes back the moment the value does.
+         * comes back the moment the value does. The field does that swap
+         * itself now.
          */
         hint={
-          verdict.hint ?? (
-            <>
-              The apex, or a subdomain you send from — a subdomain like{" "}
-              <code className="font-mono">mail.example.com</code> keeps your sending
-              reputation separate.
-            </>
-          )
+          <>
+            The apex, or a subdomain you send from — a subdomain like{" "}
+            <code className="font-mono">mail.example.com</code> keeps your sending
+            reputation separate.
+          </>
         }
       />
 

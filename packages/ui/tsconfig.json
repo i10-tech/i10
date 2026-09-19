@@ -1,5 +1,10 @@
 {
   "extends": "@repo/typescript-config/react-library.json",
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "compilerOptions": {
+    // ⚠ `bun` IS HERE FOR test/, WHICH IMPORTS `bun:test`. Without it
+    // `check-types` fails on the import rather than on anything real.
+    "types": ["bun"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

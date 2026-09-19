@@ -17,7 +17,7 @@ import {
 import { Label } from "@repo/ui/components/label"
 import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
 import { Spinner } from "@repo/ui/components/spinner"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { createApiKey } from "@/lib/actions"
 import type { CreatedApiKey } from "@/lib/types"
 
@@ -138,14 +138,14 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
               </DialogHeader>
 
               <div className="space-y-4 py-4">
-                <FloatingInput
+                <ValidatedInput
                   label="Name"
                   id="key-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   autoComplete="off"
                   maxLength={50}
-                  required
+                  required="Name this key so you can recognise it later."
                   autoFocus
                   hint="e.g. production-api"
                 />

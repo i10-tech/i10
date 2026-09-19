@@ -414,15 +414,22 @@ export function SsoCallback({
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
+              {/* ⚠ `xl` FOR BOTH, like every other decision in this app. */}
               <Button
                 type="button"
                 variant="outline"
+                size="xl"
                 onClick={decline}
                 disabled={pending}
               >
                 Not now
               </Button>
-              <Button type="button" onClick={createAccount} disabled={pending}>
+              <Button
+                type="button"
+                size="xl"
+                onClick={createAccount}
+                disabled={pending}
+              >
                 {pending ? (
                   <>
                     <Spinner aria-hidden="true" aria-label={undefined} />

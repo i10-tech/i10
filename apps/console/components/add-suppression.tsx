@@ -13,7 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { emailProblem } from "@repo/ui/checks"
 import { Spinner } from "@repo/ui/components/spinner"
 import { addSuppression } from "@/lib/actions"
 
@@ -70,7 +71,7 @@ export function AddSuppressionButton() {
             </DialogHeader>
 
             <div className="py-4">
-              <FloatingInput
+              <ValidatedInput
                 id="suppress-address"
                 label="Email address"
                 type="email"
@@ -80,7 +81,8 @@ export function AddSuppressionButton() {
                 autoCapitalize="none"
                 spellCheck={false}
                 className="font-mono text-xs"
-                required
+                check={emailProblem}
+                required="Enter the address to suppress."
                 autoFocus
                 hint="e.g. bounced@example.com"
               />

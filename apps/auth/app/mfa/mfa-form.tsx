@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { OtpField } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
@@ -212,7 +212,7 @@ export function MfaForm({
         </div>
 
         {active === "backup_code" ? (
-          <FloatingInput
+          <ValidatedInput
             id="code"
             name="code"
             label="Backup code"
@@ -220,7 +220,12 @@ export function MfaForm({
             onChange={(e) => setCode(e.target.value)}
             autoComplete="one-time-code"
             autoFocus
-            required
+            /*
+             * ⚠ NO `check`, BECAUSE ONLY CLERK KNOWS. A backup code has no
+             * shape worth asserting — they are issued, not composed — so the
+             * only thing this field can say for itself is that it is empty.
+             */
+            required="Enter one of your backup codes."
           />
         ) : (
           <OtpField
@@ -244,7 +249,14 @@ export function MfaForm({
         )}
 
         <Field>
-          <Button type="submit" disabled={pending || code.length === 0}>
+          {/*
+           * ⚠ `xl` LIKE EVERY OTHER PRIMARY ACTION IN THIS APP. See the size in
+           * @repo/ui/components/button: 56px is the field height, so a button
+           * under a field reads as the same object continuing. At the default
+           * 36px this page showed a visibly smaller button than the sign-in
+           * page it arrives from, one click apart.
+           */}
+          <Button type="submit" size="xl" disabled={pending || code.length === 0}>
             {pending ? "Verifying…" : "Verify"}
           </Button>
         </Field>

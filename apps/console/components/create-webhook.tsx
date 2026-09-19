@@ -17,6 +17,8 @@ import {
 } from "@repo/ui/components/dialog"
 import { Spinner } from "@repo/ui/components/spinner"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { httpsUrlProblem } from "@repo/ui/checks"
 import { createWebhook } from "@/lib/actions"
 import { WEBHOOK_EVENTS } from "@/components/webhook-events"
 import type { WebhookEndpoint } from "@/lib/types"
@@ -144,7 +146,7 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
               </DialogHeader>
 
               <div className="space-y-4 py-4">
-                <FloatingInput
+                <ValidatedInput
                   label="Endpoint URL"
                   id="webhook-url"
                   value={url}
@@ -153,7 +155,8 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
                   autoComplete="off"
                   spellCheck={false}
                   className="font-mono text-xs"
-                  required
+                  check={httpsUrlProblem}
+                  required="Enter the URL to post to."
                   autoFocus
                   hint="Must be HTTPS and publicly reachable. Localhost will not work — use a tunnel while developing."
                 />

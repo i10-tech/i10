@@ -4,7 +4,8 @@ import * as React from "react"
 import { Info, Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
-import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
+import { FloatingTextarea } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createTopic } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -60,13 +61,13 @@ export function NewTopicButton() {
         })
       }
     >
-      <FloatingInput
+      <ValidatedInput
         label="Name"
         id="topic-name"
         value={name}
         onChange={(event) => setName(event.target.value)}
         autoComplete="off"
-        required
+        required="Name this topic."
         autoFocus
         hint="Recipients see this. Write it the way you would say it to them."
       />

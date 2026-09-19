@@ -4,6 +4,8 @@ import * as React from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { emailProblem, isEmailUsable } from "@repo/ui/checks"
 import { FormDialog } from "@/components/form-dialog"
 import { createContact } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -44,7 +46,14 @@ export function NewContactButton() {
       title="Add a contact"
       description="One row per person. If this address already exists, we update the name and leave their subscription choice alone."
       submitLabel="Add contact"
-      canSubmit={email.includes("@")}
+      /*
+       * ⚠ THE BUTTON AND THE FIELD ASK THE SAME QUESTION NOW. This was
+       * `email.includes("@")`, which let `mido@` through to the API — and the
+       * box beside it, once it learned the rule, would have refused the same
+       * value. Two answers to one question is how a form ends up with a live
+       * button that does nothing.
+       */
+      canSubmit={isEmailUsable(email)}
       successMessage="Contact added"
       onSubmit={() =>
         createContact({
@@ -54,7 +63,7 @@ export function NewContactButton() {
         })
       }
     >
-      <FloatingInput
+      <ValidatedInput
         label="Email address"
         id="contact-email"
         type="email"
@@ -64,7 +73,8 @@ export function NewContactButton() {
         autoCapitalize="none"
         spellCheck={false}
         className="font-mono text-xs"
-        required
+        check={emailProblem}
+        required="Enter their email address."
         autoFocus
         hint="e.g. person@example.com"
       />
