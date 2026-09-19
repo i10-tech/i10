@@ -6,11 +6,14 @@ import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { emailProblem } from "@repo/ui/checks"
 import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { describeRules, passwordProblem } from "../_lib/validate"
+import type { PasswordRules } from "../_lib/environment"
 import { finalizeAndLeave } from "../_lib/finish"
 
 /*
@@ -36,13 +39,26 @@ import { finalizeAndLeave } from "../_lib/finish"
 export function ResetPasswordForm({
   afterAuthUrl,
   signInHref,
+  passwordPolicy,
 }: {
   afterAuthUrl: string
   signInHref: string
+  /** Read from the Clerk instance by the page. See _lib/environment.ts. */
+  passwordPolicy: PasswordRules
 }) {
   const { signIn } = useSignIn()
   const [stage, setStage] = useState<"email" | "reset">("email")
   const [code, setCode] = useState("")
+  /*
+   * ⚠ CONTROLLED NOW, BECAUSE A FIELD CANNOT JUDGE A VALUE IT CANNOT SEE. This
+   * form read everything out of `FormData` at submit time, which is why it was
+   * the one auth form with no validation at all: nothing on screen knew what
+   * had been typed until the button was pressed.
+   */
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmation, setConfirmation] = useState("")
+  const secretProblem = passwordProblem(passwordPolicy)
   /** Why the last code was refused, shown under the boxes until it is retyped. */
   const [rejected, setRejected] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -51,7 +67,6 @@ export function ResetPasswordForm({
     event.preventDefault()
     if (!signIn || pending) return
 
-    const form = new FormData(event.currentTarget)
     setPending(true)
 
     try {
@@ -59,9 +74,7 @@ export function ResetPasswordForm({
       // strategy is chosen by which namespace sends the code below. Passing
       // `reset_password_email_code` to `create` does not type-check, and the
       // classic flow that did is a different API.
-      const created = await signIn.create({
-        identifier: String(form.get("email") ?? ""),
-      })
+      const created = await signIn.create({ identifier: email.trim() })
 
       if (created.error) {
         toast.error(messageFor(created.error))
@@ -87,14 +100,13 @@ export function ResetPasswordForm({
     event.preventDefault()
     if (!signIn || pending) return
 
-    const form = new FormData(event.currentTarget)
-    const password = String(form.get("password") ?? "")
-
-    if (password !== String(form.get("confirm-password") ?? "")) {
-      toast.error("Those passwords do not match.")
-      return
-    }
-
+    /*
+     * ⚠ THE MISMATCH IS THE CONFIRMATION FIELD'S OWN BUSINESS NOW. It used to
+     * be a toast fired after the button was pressed — a message that slides
+     * away, about two boxes it does not point at, for a mistake you can only
+     * see by comparing two rows of dots. The field says it under itself, in
+     * red, the moment the caret leaves.
+     */
     setPending(true)
 
     try {
@@ -180,19 +192,40 @@ export function ResetPasswordForm({
             id="password"
             name="password"
             label="New password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            check={secretProblem}
+            required="Choose a password."
+            // ⚠ THE INSTANCE'S OWN RULE. This said "At least 8 characters."
+            // while Clerk required fifteen. See the page, which reads it.
+            hint={describeRules(passwordPolicy)}
             autoComplete="new-password"
-            required
-            hint="At least 8 characters."
           />
           <PasswordInput
             id="confirm-password"
             name="confirm-password"
             label="Confirm new password"
+            value={confirmation}
+            onChange={(event) => setConfirmation(event.target.value)}
+            /*
+             * ⚠ THE RULE IS ABOUT ANOTHER FIELD, AND THAT IS FINE — a `Check`
+             * is an ordinary closure, so "matches the box above" is expressed
+             * the same way "is an email address" is. It does not repeat the
+             * policy: a confirmation that does not match is the only thing
+             * this box can be wrong about.
+             */
+            check={(value) =>
+              value === password ? null : "Those passwords do not match."
+            }
+            required="Type the password again."
             autoComplete="new-password"
-            required
           />
           <Field>
-            <Button type="submit" disabled={pending || code.length < OTP_LENGTH}>
+            <Button
+              type="submit"
+              size="xl"
+              disabled={pending || code.length < OTP_LENGTH}
+            >
               {pending ? "Saving…" : "Set new password"}
             </Button>
           </Field>
@@ -220,16 +253,25 @@ export function ResetPasswordForm({
             Enter your email and we&apos;ll send you a code.
           </p>
         </div>
-        <FloatingInput
+        <ValidatedInput
           id="email"
           name="email"
           type="email"
           label="Email address"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          check={emailProblem}
+          required="Enter your email address."
           autoComplete="email"
-          required
         />
         <Field>
-          <Button type="submit" disabled={!signIn || pending}>
+          {/*
+           * ⚠ `xl`, THE SAME AS THE "Continue" IT SITS ONE CLICK FROM. See the
+           * size in @repo/ui/components/button: 56px is the field height, so
+           * the button under a field reads as the same object continuing. This
+           * page was the default 36px, which is a different product.
+           */}
+          <Button type="submit" size="xl" disabled={!signIn || pending}>
             {pending ? "Sending…" : "Send code"}
           </Button>
         </Field>

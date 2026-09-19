@@ -5,6 +5,7 @@ import { api, ApiRequestError } from "@/lib/api"
 import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import type {
+  ApiKeyRow,
   ContactRow,
   CreatedApiKey,
   Domain,
@@ -261,9 +262,34 @@ export async function publishDnsRecords(input: {
   )
 }
 
+// ── Proving it is you ───────────────────────────────────────────────────────
+
+/**
+ * Ask the API whether this session has been proved recently enough to delete
+ * something.
+ *
+ * ⚠ IT DOES NOTHING, AND THAT IS ITS ENTIRE VALUE. The step-up prompt works by
+ * REPLAYING the call that was refused — so a flow that is more than one
+ * request, like deleting a domain and revoking its keys, cannot be the thing
+ * that triggers it: the replay would re-run the half that already succeeded.
+ * Asking a route with no side effects is always safe to retry.
+ *
+ * ⚠ AND IT IS NOT THE GUARD. `requireFreshAuth` on the API still refuses the
+ * routes that actually delete, so skipping this changes when somebody is asked
+ * and not whether they are refused. See apps/api/src/middleware/session.ts.
+ */
+export async function stepUp() {
+  return run(() => api<undefined>("/console/step-up"))
+}
+
 // ── API keys ────────────────────────────────────────────────────────────────
 
-export async function createApiKey(input: { name: string; mode: "live" | "test" }) {
+export async function createApiKey(input: {
+  name: string
+  mode: "live" | "test"
+  /** A domain name to restrict it to, or `null` for every domain. */
+  domain: string | null
+}) {
   /*
    * ⚠ THE SECRET IS IN THIS RETURN VALUE AND NOWHERE ELSE, EVER. Nothing stores
    * it — see apps/api/src/auth/store.ts — so the component that receives it is
@@ -273,6 +299,25 @@ export async function createApiKey(input: { name: string; mode: "live" | "test" 
    */
   return run(
     () => api<CreatedApiKey>("/console/api-keys", { method: "POST", body: input }),
+    ["/api-keys"],
+  )
+}
+
+/**
+ * Narrowing or widening a key that already exists.
+ *
+ * ⚠ IT EXISTS SO THE SCOPE IS NOT A DECISION MADE ONCE, IN A DIALOG, FOREVER.
+ * The only other way to restrict a key minted unrestricted is to revoke it and
+ * redeploy the secret everywhere it lives — enough friction that nobody does
+ * it, which leaves every key unrestricted and the feature decorative.
+ */
+export async function updateApiKeyScope(id: string, domain: string | null) {
+  return run(
+    () =>
+      api<ApiKeyRow>(`/console/api-keys/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: { domain },
+      }),
     ["/api-keys"],
   )
 }

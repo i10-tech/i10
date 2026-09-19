@@ -104,17 +104,20 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       })
 
       /*
-       * ⚠ NOTHING HERE DECLARES AN EMBED ORIGIN, AND THAT WAS MEASURED RATHER
-       * THAN ASSUMED. Polar's checkout API accepts an `embed_origin` field, and
-       * an earlier draft of this route set it and returned an `embeddable` flag
-       * so the console could decide between a modal and a redirect. Probing the
-       * sandbox showed the premise was wrong: the checkout page answers
-       * `frame-ancestors *` with or without the field, and a checkout created
-       * WITHOUT it renders correctly under `?embed=true&embed_origin=…`, which
-       * is how `@polar-sh/checkout` loads it — the SDK appends the origin
-       * itself at frame time. The flag was a permission check for a permission
-       * Polar does not appear to enforce, plus an environment variable an
-       * operator had to set for the upgrade button to use the better flow.
+       * ⚠ THE EMBED ORIGIN IS SENT, AND THE NOTE THAT USED TO SIT HERE SAYING
+       * IT WAS UNNECESSARY WAS WRONG IN A WAY WORTH RECORDING. It reported a
+       * real measurement — the checkout page answers `frame-ancestors *` with
+       * or without the field, and renders fine under `?embed=true&
+       * embed_origin=…` because the SDK appends that query parameter itself —
+       * and then drew a conclusion the measurement did not support. Framing is
+       * governed by the organisation's embedding host list; MESSAGING is
+       * governed by `embed_origin` on the checkout object, and Polar's page
+       * returns early from every `postMessage` without it. The field renders
+       * nothing and is the only reason the modal can ever close.
+       *
+       * ⚠ IT IS SET IN `billing/polar.ts`, DERIVED FROM `success_url`, rather
+       * than passed from here. Both values name the console, and two settings
+       * that must agree are one setting and one bug.
        */
       /*
        * ⚠ THE ID IS RETURNED SO THE CONSOLE CAN ASK US WHETHER THE MONEY

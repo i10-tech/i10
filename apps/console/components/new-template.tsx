@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createTemplate } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -49,14 +50,14 @@ export function NewTemplateButton() {
       }
       onSuccess={(template) => router.push(`/templates/${template.id}`)}
     >
-      <FloatingInput
+      <ValidatedInput
         label="Name"
         id="template-name"
         value={name}
         onChange={(event) => setName(event.target.value)}
         autoComplete="off"
         className="font-mono text-xs"
-        required
+        required="Name this template."
         autoFocus
         hint="e.g. password-reset"
       />

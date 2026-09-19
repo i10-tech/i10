@@ -256,6 +256,27 @@ describe("exchanging the code", () => {
     return sent
   }
 
+  /**
+   * ⚠ WHAT A BOT FILTER ANSWERS WITH, AND THE CASE THE OLD `detail` COULD NOT
+   * DESCRIBE. `dash.cloudflare.com` is a dashboard host behind Cloudflare's own
+   * bot management, so a refused token exchange comes back as an HTML
+   * challenge page rather than an OAuth error — and the body was being parsed
+   * as JSON, discarded on failure, and reported as the bare status. "HTTP 403"
+   * reads identically whether the client secret is wrong or the cluster's
+   * egress is being challenged, and those have nothing in common.
+   */
+  const captureText = (
+    text: string,
+    status: number,
+    headers: Record<string, string> = {},
+  ) => {
+    globalThis.fetch = (async () =>
+      new Response(text, {
+        status,
+        headers: { "content-type": "text/html", ...headers },
+      })) as unknown as typeof fetch
+  }
+
   it("sends the verifier, without which the exchange is refused", async () => {
     const sent = capture({ access_token: "at", expires_in: 3600, scope: "zone:read" })
     const o = oauth()
@@ -308,13 +329,128 @@ describe("exchanging the code", () => {
     expect(grant.refreshToken).toBe("rt")
   })
 
+  /*
+   * ⚠ THE STATUS LEADS, AND IT IS NOT DECORATION. `invalid_grant` alone does
+   * not say whether the provider answered at all — a 400 they sent on purpose
+   * and a 502 from something standing in front of them are different problems
+   * with the same word attached.
+   */
   it("carries the provider's own reason when it refuses", async () => {
     capture({ error: "invalid_grant", error_description: "code already used" }, 400)
     const o = oauth()
     const { verifier } = o.verifyState(start(o).state)
     await expect(
       o.exchange({ slug: "cloudflare", code: "c", verifier }),
-    ).rejects.toMatchObject({ kind: "exchange_failed", detail: "code already used" })
+    ).rejects.toMatchObject({
+      kind: "exchange_failed",
+      detail: "HTTP 400 · code already used",
+    })
+  })
+
+  it("quotes a body that is not JSON at all", async () => {
+    captureText(
+      "<html><head><title>Attention Required</title></head><body>" +
+        "<h1>Sorry, you have been blocked</h1>error code: 1010</body></html>",
+      403,
+    )
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+
+    /*
+     * ⚠ THE TAGS COME OUT AND THE SENTENCE STAYS. An administrator reading
+     * "error code: 1010" can look it up; one reading "HTTP 403" cannot, and
+     * that is the difference between a Doppler edit and a week.
+     */
+    await expect(
+      o.exchange({ slug: "cloudflare", code: "c", verifier }),
+    ).rejects.toMatchObject({
+      detail:
+        "HTTP 403 · Attention Required Sorry, you have been blocked error code: 1010",
+    })
+  })
+
+  /**
+   * ⚠ THE FAILURE THIS WHOLE BLOCK EXISTS FOR, AND CLOUDFLARE'S OWN CLIENT
+   * CHECKS FOR THE SAME THING. `wrangler` matches `<!DOCTYPE html>` and then
+   * `challenge-platform` on this exact endpoint and tells you to quote the ray
+   * id to support. It is not a credential problem, it is not the customer's
+   * problem, and pressing the button again will not clear it — three things
+   * "Cloudflare did not complete the authorisation" says none of.
+   */
+  it("names a bot challenge as a bot challenge", async () => {
+    captureText(
+      '<!DOCTYPE html><html><head><script src="/cdn-cgi/challenge-platform/h/b/orchestrate">' +
+        "</script></head><body>Just a moment…</body></html>",
+      403,
+      { "cf-ray": "9a1b2c3d4e5f6789-LHR" },
+    )
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+
+    const detail = await o
+      .exchange({ slug: "cloudflare", code: "c", verifier })
+      .then(() => null)
+      .catch((error: { detail?: string }) => error.detail ?? null)
+
+    expect(detail).toContain("bot challenge")
+    expect(detail).toContain("cf-ray 9a1b2c3d4e5f6789-LHR")
+    // ⚠ AND IT SAYS WHOSE PROBLEM IT IS, because the customer authorised
+    // correctly and the sentence they used to get blamed them for it.
+    expect(detail).toContain("egress")
+  })
+
+  /**
+   * ⚠ A CHALLENGE WITHOUT THE TELL-TALE BODY IS STILL A CHALLENGE. Cloudflare
+   * sets `cf-mitigated` on a challenged response, and it is the unambiguous
+   * signal where the markup is not.
+   */
+  it("trusts cf-mitigated over the markup", async () => {
+    captureText("<!DOCTYPE html><html><body>Sorry.</body></html>", 403, {
+      "cf-mitigated": "challenge",
+    })
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+    await expect(
+      o.exchange({ slug: "cloudflare", code: "c", verifier }),
+    ).rejects.toMatchObject({ detail: expect.stringContaining("bot challenge") })
+  })
+
+  /**
+   * ⚠ THE RAY ID IS THE ONLY THING CLOUDFLARE SUPPORT WILL ASK FOR. It names
+   * the exact request in their logs, including the rule that stopped it —
+   * which is the one fact nobody on this side of the connection can discover.
+   */
+  it("keeps the Cloudflare ray id when there is one", async () => {
+    captureText("blocked", 403, { "cf-ray": "9a1b2c3d4e5f6789-LHR" })
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+    await expect(
+      o.exchange({ slug: "cloudflare", code: "c", verifier }),
+    ).rejects.toMatchObject({
+      detail: "HTTP 403 · blocked · cf-ray 9a1b2c3d4e5f6789-LHR",
+    })
+  })
+
+  /**
+   * ⚠ A GENERIC RUNTIME USER AGENT FROM A DATACENTRE IP IS WHAT BOT MANAGEMENT
+   * IS LOOKING FOR. Bun sends `Bun/1.4.2` when none is given — measured
+   * against `cloudflare.com/cdn-cgi/trace`. See dns/user-agent.ts.
+   */
+  it("identifies itself rather than sending the runtime's default", async () => {
+    const seen: (string | null)[] = []
+    globalThis.fetch = (async (_url: string | URL, init: RequestInit = {}) => {
+      seen.push(new Headers(init.headers).get("user-agent"))
+      return new Response(JSON.stringify({ access_token: "at" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as unknown as typeof fetch
+
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+    await o.exchange({ slug: "cloudflare", code: "c", verifier })
+
+    expect(seen).toEqual(["i10/1.0 (+https://i10.tech)"])
   })
 
   /** ⚠ A 200 WITH NO `access_token` IS STILL A FAILURE, and providers send them. */

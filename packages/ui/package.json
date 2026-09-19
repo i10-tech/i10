@@ -7,10 +7,12 @@
     "./styles/tokens.css": "./src/styles/tokens.css",
     "./hooks/*": "./src/hooks/*.ts",
     "./components/*": "./src/components/*.tsx",
+    "./checks": "./src/checks.ts",
     "./clerk": "./src/clerk.ts"
   },
   "scripts": {
     "lint": "eslint . --max-warnings 0",
+    "test": "bun test",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {

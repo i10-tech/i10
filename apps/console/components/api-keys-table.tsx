@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { MoreHorizontal, RefreshCw, Trash2 } from "lucide-react"
+import { Globe, MoreHorizontal, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
@@ -29,6 +29,8 @@ import {
   TableHeader,
   TableRow,
 } from "@repo/ui/components/table"
+import { ApiKeyScopeDialog, type ScopeDomain } from "@/components/api-key-scope"
+import { useStepUp } from "@/lib/step-up"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import { revokeApiKey, rotateApiKey } from "@/lib/actions"
@@ -47,7 +49,15 @@ import { Time } from "@/components/time"
  * touched in months is either dead weight or a credential somebody forgot they
  * issued; both are worth deleting, and neither is visible without this column.
  */
-export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
+export function ApiKeysTable({
+  keys,
+  domains = [],
+}: {
+  keys: ApiKeyRow[]
+  domains?: ScopeDomain[]
+}) {
+  const [scoping, setScoping] = React.useState<ApiKeyRow | null>(null)
+  const stepUp = useStepUp()
   const router = useRouter()
   const [revoking, setRevoking] = React.useState<ApiKeyRow | null>(null)
   const [rotating, setRotating] = React.useState<ApiKeyRow | null>(null)
@@ -71,6 +81,15 @@ export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
               <TableHead>Name</TableHead>
               <TableHead className="w-[10rem]">Key</TableHead>
               <TableHead className="w-[6rem]">Mode</TableHead>
+              {/*
+               * ⚠ IT EARNS A COLUMN RATHER THAN A BADGE BESIDE THE NAME. "Which
+               * of my keys can reach production" is the question somebody asks
+               * this table during an incident, and a value that is only visible
+               * on the row you happen to be reading does not answer it.
+               */}
+              <TableHead className="hidden w-[12rem] sm:table-cell">
+                Sends from
+              </TableHead>
               <TableHead className="hidden w-[10rem] md:table-cell">
                 Last used
               </TableHead>
@@ -107,6 +126,16 @@ export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
                       {key.mode}
                     </Badge>
                   </TableCell>
+                  <TableCell className="hidden sm:table-cell">
+                    {key.domain ? (
+                      <span className="font-mono text-xs">{key.domain}</span>
+                    ) : (
+                      // ⚠ "Any domain" RATHER THAN A DASH. A dash reads as
+                      // "not set", and the most important thing this column can
+                      // say is that a key is unrestricted.
+                      <span className="text-xs text-muted-foreground">Any domain</span>
+                    )}
+                  </TableCell>
                   <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
                     {key.last_used_at ? (
                       <Time iso={key.last_used_at} />
@@ -133,6 +162,10 @@ export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => setScoping(key)}>
+                            <Globe />
+                            Change scope
+                          </DropdownMenuItem>
                           <DropdownMenuItem onSelect={() => setRotating(key)}>
                             <RefreshCw />
                             Rotate
@@ -155,6 +188,12 @@ export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
         </Table>
       </div>
 
+      <ApiKeyScopeDialog
+        apiKey={scoping}
+        domains={domains}
+        onOpenChange={(open) => !open && setScoping(null)}
+      />
+
       <ConfirmDialog
         open={revoking !== null}
         onOpenChange={(open) => !open && setRevoking(null)}
@@ -163,6 +202,15 @@ export function ApiKeysTable({ keys }: { keys: ApiKeyRow[] }) {
         confirmLabel="Revoke key"
         onConfirm={async () => {
           if (!revoking) return false
+          /*
+           * ⚠ PROVED BEFORE THE KEY DIES, NOT AFTER. Revoking the key
+           * production sends with is an outage nobody can undo from this
+           * dialog, and a session cookie is a credential that outlives the
+           * person sitting at the machine. The API refuses this on its own —
+           * see `requireFreshAuth` — so this is the prompt, not the guard.
+           */
+          if (!(await stepUp())) return false
+
           const result = await revokeApiKey(revoking.id)
           if (!result.ok) {
             toast.error("Could not revoke the key", { description: result.error })

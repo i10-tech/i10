@@ -52,6 +52,22 @@ const GetEmailResponse = getEmailResponseSchema.openapi("Email")
  * will never succeed unchanged.
  */
 function acceptError(outcome: AcceptOutcome) {
+  /*
+   * ⚠ 403, NOT 401, AND THE DIFFERENCE IS ACTIONABLE. 401 tells a caller their
+   * key is wrong and their next move is to rotate one that was fine. This key
+   * IS valid and was refused on what it asked to do — the fix is a different
+   * `from` address, or a wider scope, and the message names which.
+   */
+  if (outcome.status === "forbidden") {
+    return {
+      body: {
+        statusCode: 403,
+        name: "restricted_api_key" as const,
+        message: outcome.message,
+      },
+      status: 403 as const,
+    }
+  }
   if (outcome.status === "quota_exceeded") {
     return {
       body: {
@@ -107,6 +123,9 @@ const send = createRoute({
       content: { "application/json": { schema: SendEmailResponse } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: errorResponse(
+      "This key is restricted to other domains than the `from` address.",
+    ),
     422: errorResponse("The request body failed validation."),
     409: errorResponse(
       "This Idempotency-Key was already used with a different request body.",
@@ -127,6 +146,10 @@ emails.openapi(
       {
         tenantId: auth.tenantId,
         apiKeyId: auth.apiKeyId,
+        // ⚠ THE KEY'S OWN RESTRICTION, CARRIED FROM THE ROW IT MATCHED. See
+        // auth/scope.ts — the column has existed since 0031 and this is the
+        // first thing that has ever read it.
+        scopes: auth.scopes,
         payloads: [c.req.valid("json")],
         endpoint: "single",
         // ⚠ THE HEADER IS THE CUSTOMER'S, NOT OURS TO INVENT. Absent, every
@@ -185,6 +208,9 @@ const sendBatch = createRoute({
       content: { "application/json": { schema: BatchSendResponse } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: errorResponse(
+      "This key is restricted to other domains than the `from` address.",
+    ),
     422: errorResponse("The request body failed validation."),
     409: errorResponse(
       "This Idempotency-Key was already used with a different request body.",
@@ -205,6 +231,7 @@ emails.openapi(
       {
         tenantId: auth.tenantId,
         apiKeyId: auth.apiKeyId,
+        scopes: auth.scopes,
         payloads: c.req.valid("json"),
         // ⚠ `bulk`, WHICH IS A DIFFERENT QUEUE FROM /emails. A batch is by
         // definition not the message somebody is watching a spinner for, and

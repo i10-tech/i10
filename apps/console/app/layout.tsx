@@ -8,6 +8,7 @@ import { Theme } from "@repo/ui/components/theme"
 import { Toaster } from "@repo/ui/components/sonner"
 import { TooltipProvider } from "@repo/ui/components/tooltip"
 import { ActivateWorkspace } from "@/components/activate-workspace"
+import { StepUpProvider } from "@/lib/step-up"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -78,7 +79,14 @@ function Providers({ children }: { children: React.ReactNode }) {
        * key, has no session for it to act on.
        */}
       <ActivateWorkspace />
-      {children}
+      {/*
+       * ⚠ INSIDE THE PROVIDER, BECAUSE IT USES A CLERK HOOK THAT THROWS
+       * OUTSIDE ONE. It renders nothing; it supplies the "prove it is you"
+       * prompt that guards the deletions — see lib/step-up. The branch above
+       * with no Clerk key gets a fallback that cannot prompt and therefore
+       * cannot delete anything the API would have refused.
+       */}
+      <StepUpProvider>{children}</StepUpProvider>
     </ClerkProvider>
   )
 }

@@ -22,7 +22,7 @@ import { domainStore } from "./domains/store.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
 import { clerkIdentity } from "./mailboxes/clerk.js"
-import { clerkActiveOrg, clerkSessions } from "./middleware/session.js"
+import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
@@ -131,6 +131,23 @@ if (!env.CLERK_PUBLISHABLE_KEY) {
     {},
     "CLERK_PUBLISHABLE_KEY is not set — every session-authenticated route " +
       "(/console/*, /mailboxes) will answer 503. Sending is unaffected.",
+  )
+}
+
+if (env.POLAR_ACCESS_TOKEN && !env.POLAR_SUCCESS_URL) {
+  /*
+   * ⚠ IT BREAKS TWO THINGS AT ONCE AND LOOKS LIKE NEITHER. `POLAR_SUCCESS_URL`
+   * is where the browser lands after paying, AND — because `embed_origin` is
+   * derived from its origin — it is the only thing that lets Polar's embedded
+   * checkout speak to the page it is embedded in. Without it the modal takes
+   * the money and then sits there for ever, having sent no `success` event and
+   * offering no working way out. See `withCheckoutId` in billing/polar.ts.
+   */
+  log.error(
+    {},
+    "POLAR_SUCCESS_URL is not set — the embedded checkout cannot message the " +
+      "console, so a completed payment leaves the customer looking at a modal " +
+      "that never closes.",
   )
 }
 
@@ -393,6 +410,16 @@ const activeOrg = clerkActiveOrg(clerk, {
   authorizedParties: env.CONSOLE_ORIGINS,
   log,
 })
+/**
+ * ⚠ THE SAME CLERK CLIENT AND THE SAME ALLOWLIST, DELIBERATELY. This reads the
+ * factor ages off the very token `requireTenant` just verified; pointing it at
+ * a differently-configured client would let a token be good enough to act and
+ * not good enough to check, or the reverse.
+ */
+const freshAuth = clerkFreshAuth(clerk, {
+  authorizedParties: env.CONSOLE_ORIGINS,
+  log,
+})
 
 const app = createApp({
   apiKeyAuth: {
@@ -595,6 +622,7 @@ const app = createApp({
     sessions,
     tenants: tenantResolver(db),
     activeOrg,
+    freshAuth,
     queries: consoleQueries(db),
     usage: usageStore({ db, meter: postgresMeter(db), log }),
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),

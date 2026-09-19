@@ -189,6 +189,16 @@ export interface ApiKeyRow {
   prefix: string
   mode: string
   scopes: string[]
+  /**
+   * The one domain this key may send from, or `null` for every domain.
+   *
+   * ⚠ DERIVED BY THE API FROM `scopes`, AND THE CONSOLE DELIBERATELY DOES NOT
+   * PARSE THAT ARRAY. The storage format is `domain:acme.com` and it is the
+   * API's business — see apps/api/src/auth/scope.ts. A console that knew the
+   * prefix would be a second place to spell it, and the one that is wrong is
+   * always the one nobody tested.
+   */
+  domain: string | null
   created_at: string
   last_used_at: string | null
   expires_at: string | null

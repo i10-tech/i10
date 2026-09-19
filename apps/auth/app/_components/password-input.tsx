@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { EyeIcon, EyeOffIcon } from "lucide-react"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 
 /**
  * A password field that can be read back.
@@ -22,16 +22,22 @@ import { FloatingInput } from "@repo/ui/components/floating-field"
  * owns the association, so the caller passes `label` instead of pairing an
  * `<Input>` with its own `<FieldLabel htmlFor>` — which is one fewer place for
  * an id to be spelled two different ways.
+ *
+ * ⚠ AND IT WRAPS `ValidatedInput` RATHER THAN THE PLAIN FIELD, so a password
+ * box takes a `check` like everything else. The sign-up form used to compute
+ * the verdict itself and hand it down as `state` and `hint`; the reset form,
+ * which asks for the same password under the same policy, computed nothing at
+ * all and let the server say no.
  */
 export function PasswordInput({
   label = "Password",
   ...props
-}: Omit<React.ComponentProps<typeof FloatingInput>, "adornment" | "type">) {
+}: Omit<React.ComponentProps<typeof ValidatedInput>, "adornment" | "type">) {
   const [shown, setShown] = useState(false)
   const Icon = shown ? EyeOffIcon : EyeIcon
 
   return (
-    <FloatingInput
+    <ValidatedInput
       {...props}
       label={label}
       type={shown ? "text" : "password"}

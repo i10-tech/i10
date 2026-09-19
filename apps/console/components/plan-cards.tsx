@@ -174,11 +174,14 @@ export function PlanCards({
     try {
       /*
        * ⚠ THE OPEN GOES THROUGH `openPolarCheckout` RATHER THAN THE SDK
-       * DIRECTLY, AND THE REASON IS THAT POLAR'S ✕ DOES NOT WORK. Their hosted
-       * checkout renders a close button that posts nothing to the parent —
-       * verified against a real sandbox checkout in a real iframe — so the
-       * modal could not be dismissed at all. That module draws a working one
-       * and handles the success teardown. See lib/polar-embed.ts.
+       * DIRECTLY, SO THE WAY OUT EXISTS BEFORE THE IFRAME DOES. The SDK's
+       * `create()` resolves only when Polar's page posts `loaded`, and every
+       * message that page sends is gated on the `embed_origin` we failed to
+       * set — so it resolved never, and a full-viewport payment form had
+       * nothing behind it. The API sends the field now; that module stops the
+       * whole class by binding Escape, drawing a close button and starting the
+       * status poll without waiting to be told the frame is ready. See
+       * lib/polar-embed.ts.
        */
       await openPolarCheckout(result.data.url, {
         theme: resolvedTheme === "light" ? "light" : "dark",

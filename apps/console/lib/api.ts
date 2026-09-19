@@ -1,3 +1,4 @@
+import { normaliseError, type ApiError } from "./api-error"
 import "server-only"
 import { auth } from "@clerk/nextjs/server"
 import { safeFailure } from "@/lib/failure"
@@ -73,11 +74,10 @@ function baseUrl(): string {
   return "http://localhost:3001"
 }
 
-export interface ApiError {
-  statusCode: number
-  name: string
-  message: string
-}
+// ⚠ RE-EXPORTED SO NOTHING ELSE MOVES. It is defined next to the normaliser
+// that guarantees its shape — see ./api-error — and a dozen files import it
+// from here.
+export type { ApiError }
 
 export class ApiRequestError extends Error {
   constructor(
@@ -272,14 +272,10 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
 
     let parsed: ApiError = fallback
     try {
-      const json = (await response.json()) as Partial<ApiError>
-      if (json && typeof json.message === "string") {
-        parsed = {
-          statusCode: json.statusCode ?? response.status,
-          name: json.name ?? fallback.name,
-          message: json.message,
-        }
-      }
+      parsed = normaliseError(
+        (await response.json()) as Record<string, unknown>,
+        response.status,
+      )
     } catch {
       // A non-JSON error body — an ingress 502 page, usually. The fallback
       // already says something true.

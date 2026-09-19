@@ -1,5 +1,4 @@
-import type { FieldState } from "@repo/ui/components/floating-field"
-import type { FieldFocus } from "@repo/ui/hooks/field-focus"
+import type { Check } from "@repo/ui/checks"
 
 /**
  * Telling somebody the domain they typed is not a domain, before we ask DNS.
@@ -17,19 +16,16 @@ import type { FieldFocus } from "@repo/ui/hooks/field-focus"
  * and each has a different correction. "That does not look like a domain" is
  * true of all four and useful for none.
  *
- * ⚠ THE RULES ARE THE SAME ONES `useFieldFocus` ENFORCES EVERYWHERE ELSE: red
- * only once somebody has stopped typing, green only where a value was shown
- * wrong and has since been fixed. See @repo/ui/hooks/field-focus — the whole
- * reason that hook moved into the package was so this screen could not
- * accidentally invent a gentler or harsher version of them.
+ * ⚠ IT IS A `Check` AND NOTHING MORE: a value in, the correction out, `null`
+ * when there is nothing to say. WHEN that sentence is shown — red only once
+ * somebody has stopped typing, green only where a value was shown wrong and
+ * has since been fixed — belongs to the field rather than to the rule, and
+ * this file used to own a copy of it. See @repo/ui/components/validated-field.
+ *
+ * ⚠ AND IT STAYS IN THE CONSOLE RATHER THAN MOVING TO THE PACKAGE, because a
+ * sending domain is a fact about this product. `emailProblem` moved because
+ * two apps ask for addresses; nothing outside the console asks for a domain.
  */
-
-export interface Verdict {
-  state: FieldState
-  hint?: string
-}
-
-type Reveal = Pick<FieldFocus, "blurred" | "submitted" | "recovering">
 
 /**
  * ⚠ ONE LABEL AT A TIME, AND EVERY LABEL HAS TO BE NON-EMPTY. The obvious
@@ -97,43 +93,17 @@ function malformed(value: string): string | null {
   return null
 }
 
-/** Whether what is in the box is wrong — as opposed to merely unfinished. */
+export const domainProblem: Check = (value) => malformed(value.trim())
+
+/**
+ * Whether what is in the box is wrong — as opposed to merely unfinished.
+ *
+ * ⚠ IT IS STILL HERE BECAUSE THE DNS LOOKUP NEEDS IT, NOT THE BORDER. The form
+ * only asks a nameserver about a name that could exist, and that gate has to
+ * agree with the field exactly — it did not once, and `acme.c` produced "DNS
+ * hosted by Cloudflare" under a name the box was about to call malformed.
+ */
 export const isDomainMalformed = (value: string): boolean => {
   const trimmed = value.trim()
   return trimmed !== "" && malformed(trimmed) !== null
-}
-
-export function domainVerdict(value: string, reveal: Reveal): Verdict {
-  const trimmed = value.trim()
-
-  /*
-   * ⚠ EMPTY IS NOT WRONG UNTIL THE BUTTON IS PRESSED. Tabbing through a box you
-   * have not answered yet is how people read a form; reddening it for that is
-   * the interface telling somebody off for looking.
-   */
-  if (trimmed === "") {
-    return reveal.submitted
-      ? { state: "invalid", hint: "Enter the domain you send from." }
-      : { state: "idle" }
-  }
-
-  const problem = malformed(trimmed)
-
-  /*
-   * ⚠ CORRECT IS NOT THE SAME AS GREEN. Most domains are typed correctly first
-   * time and saying so is not news — green is spent only on a value that was
-   * SHOWN wrong and has since been fixed, and only while the caret is still in
-   * the box asking the question green answers.
-   */
-  if (!problem) {
-    return reveal.recovering ? { state: "valid" } : { state: "idle" }
-  }
-
-  /*
-   * ⚠ AND RED WAITS. Every domain is malformed while it is being typed — `a`,
-   * `ac`, `acme`, `acme.` — so a field that reddens on the first keystroke is
-   * red for the whole time anybody is using it, and the colour stops meaning
-   * anything at all.
-   */
-  return reveal.blurred ? { state: "invalid", hint: problem } : { state: "idle" }
 }

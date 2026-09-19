@@ -8,6 +8,8 @@ import { useClerk, useSignUp } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { FieldDescription, FieldGroup } from "@repo/ui/components/field"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { emailProblem } from "@repo/ui/checks"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepProgress } from "@repo/ui/components/step-progress"
 import { StepStage } from "@repo/ui/components/step-stage"
@@ -17,15 +19,8 @@ import { PasswordInput } from "../_components/password-input"
 import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeWithoutLeaving, leaveFor } from "../_lib/finish"
-import { releaseFocus, useFieldFocus } from "@repo/ui/hooks/field-focus"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
-import {
-  describeRules,
-  emailVerdict,
-  isEmailUsable,
-  isPasswordUsable,
-  passwordVerdict,
-} from "../_lib/validate"
+import { describeRules, passwordProblem } from "../_lib/validate"
 import type { SsoProvider } from "../_lib/providers"
 import {
   BackupCodesStep,
@@ -195,14 +190,12 @@ export function SignUpForm({
    * TURNS ON. There is no moment at which "this is fine" is premature. See
    * _lib/validate.ts.
    */
-  const emailField = useFieldFocus(
-    // ⚠ EMPTY IS NOT MALFORMED. Blurring an unanswered box must not arm green
-    // for later, any more than it turns the border red now.
-    (value) => value.trim() !== "" && !isEmailUsable(value),
-  )
-  const secretField = useFieldFocus(
-    (value) => value !== "" && !isPasswordUsable(value, passwordPolicy),
-  )
+  /*
+   * ⚠ THE POLICY IS CLOSED OVER ONCE, NOT READ AT EVERY CALL SITE. It comes
+   * from the Clerk instance at runtime, so the field, its hint and the guard
+   * below all have to be looking at the same numbers — see `passwordProblem`.
+   */
+  const secretProblem = passwordProblem(passwordPolicy)
   const [totp, setTotp] = useState<TotpEnrolment | null>(null)
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
@@ -229,15 +222,6 @@ export function SignUpForm({
   const order: Stage[] = [...ACCOUNT_STAGES, ...optional]
   const segment = SEGMENT[stage]
   const isLastStep = order.indexOf(segment) === order.length - 1
-
-  /*
-   * ⚠ DERIVED IN RENDER RATHER THAN HELD IN STATE. A verdict is a pure function
-   * of the value, the instance's rules and whether the field has been left — so
-   * storing it would mean three more `setState` calls per keystroke and a state
-   * that can disagree with the input it describes.
-   */
-  const emailState = emailVerdict(email, emailField)
-  const secretState = passwordVerdict(secret, passwordPolicy, secretField)
 
   /**
    * Somebody who is already signed in, with no step to resume onto.
@@ -340,23 +324,14 @@ export function SignUpForm({
      * touched: the borders go red, the hints name what is missing, and the
      * answer arrives in the same frame as the click.
      */
-    const emailOk = isEmailUsable(email)
-    const secretOk = isPasswordUsable(secret, passwordPolicy)
-
-    if (!emailOk || !secretOk) {
-      // ⚠ THE BLUR COMES FIRST, AND IT IS NOT TIDYING UP. Submitting with Enter
-      // from inside a box leaves that box focused, and a focused field is never
-      // painted red — so without this, pressing Enter on a bad address is a form
-      // that refuses silently. See `releaseFocus` in @repo/ui/hooks/field-focus.
-      releaseFocus()
-      // ⚠ EACH FIELD IS TOLD WHETHER IT IS THE PROBLEM. Revealing a field that
-      // was already valid would record it as having been shown wrong, and it
-      // would then go green the next time somebody clicked into it, for nothing.
-      emailField.reveal(!emailOk)
-      secretField.reveal(!secretOk)
-      return
-    }
-
+    /*
+     * ⚠ THE TWO FIELDS REFUSE THIS SUBMIT THEMSELVES, so there is nothing to
+     * check here. Each one blurs the caret so its red can be seen, reddens
+     * only if it is the field actually at fault — revealing a valid field
+     * would arm green on it for nothing — and blocks the submit before this
+     * handler is reached. Both were written out by hand in this file; see
+     * @repo/ui/components/validated-field.
+     */
     const password = secret
 
     setBusy("credentials")
@@ -613,7 +588,7 @@ export function SignUpForm({
               <StepHeading title="Your sign-in details">
                 The address is where account and delivery notices go.
               </StepHeading>
-              <FloatingInput
+              <ValidatedInput
                 id="email"
                 name="email"
                 /*
@@ -626,11 +601,8 @@ export function SignUpForm({
                 label="Email address"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                // ⚠ THE BORDER TURNS RED ONLY ONCE THE CARET HAS LEFT, AND GOES
-                // BACK TO GREY WHEN IT RETURNS. See @repo/ui/hooks/field-focus.
-                {...emailField.props}
-                state={emailState.state}
-                hint={emailState.hint}
+                check={emailProblem}
+                required="Enter your email address."
                 // ⚠ NO RESERVED ROW: this hint is a validation message rather than a
                 // description, so it is drawn into the gap FieldGroup already
                 // leaves rather than making every field permanently taller.
@@ -638,7 +610,6 @@ export function SignUpForm({
                 autoComplete="email"
                 disabled={locked}
                 autoFocus
-                required
               />
               {/*
                * ⚠ ONE PASSWORD BOX, NOT TWO, AND THE REVEAL IS WHY. The form
@@ -654,8 +625,8 @@ export function SignUpForm({
                 label="Password"
                 value={secret}
                 onChange={(event) => setSecret(event.target.value)}
-                {...secretField.props}
-                state={secretState.state}
+                check={secretProblem}
+                required="Choose a password."
                 /*
                  * ⚠ THE HINT IS THE INSTANCE'S OWN RULE, AND THAT REPLACED A
                  * SENTENCE THAT WAS SIMPLY UNTRUE. It said "At least 8
@@ -665,11 +636,10 @@ export function SignUpForm({
                  * count ticks up as you type and the border only turns red
                  * once you have left the box.
                  */
-                hint={secretState.hint ?? describeRules(passwordPolicy)}
+                hint={describeRules(passwordPolicy)}
                 reserveHint={false}
                 autoComplete="new-password"
                 disabled={locked}
-                required
               />
               <Button type="submit" size="xl" disabled={!signUp || locked}>
                 {busy === "credentials" ? (

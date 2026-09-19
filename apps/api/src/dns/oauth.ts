@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { providerBySlug } from "@repo/dns-providers"
+import { DNS_USER_AGENT } from "./user-agent.js"
 
 /**
  * The authorization-code flow, driven by the registry rather than per provider.
@@ -81,6 +82,99 @@ export interface AuthorizationStart {
 }
 
 const STATE_TTL_MS = 10 * 60 * 1000
+
+/** RFC 6749's token response, and RFC 6749's error response. */
+interface TokenResponse {
+  access_token?: string
+  refresh_token?: string
+  expires_in?: number
+  scope?: string
+  error?: string
+  error_description?: string
+}
+
+/**
+ * What actually happened, in one line an administrator can act on.
+ *
+ * ⚠ IT ALWAYS LEADS WITH THE STATUS. `invalid_grant` alone does not say
+ * whether the provider answered at all, and a 502 from something in front of
+ * them is a different problem from a 400 they sent deliberately.
+ *
+ * ⚠ AND THE RAW BODY IS ONLY SHOWN WHEN IT DID NOT PARSE AS JSON. A parsed
+ * error response is already summarised by its own fields; an unparsed one is
+ * an HTML page from a WAF, a proxy or a load balancer, and its first line is
+ * the only thing that names which. Restricting the snippet to that case is
+ * also what keeps a successful-looking body with an unexpected shape from
+ * having its contents copied into a log.
+ */
+function describeFailure(
+  response: Response,
+  body: TokenResponse | null,
+  raw: string,
+): string {
+  const parts = [`HTTP ${response.status}`]
+
+  const named = body?.error_description ?? body?.error
+  if (named) parts.push(named)
+  else if (isBotChallenge(response, raw)) parts.push(BOT_CHALLENGE)
+  else if (raw.trim()) parts.push(snippet(raw))
+
+  /*
+   * ⚠ THE RAY ID IS THE ONLY THING CLOUDFLARE SUPPORT WILL ASK FOR. It
+   * identifies the exact request in their own logs, including the rule that
+   * stopped it — which is the one fact nobody on this side of the connection
+   * can otherwise discover. `wrangler` prints it for the same reason and in
+   * the same situation; see `isBotChallenge`.
+   */
+  const ray = response.headers.get("cf-ray")
+  if (ray) parts.push(`cf-ray ${ray}`)
+
+  return parts.join(" · ")
+}
+
+const BOT_CHALLENGE =
+  "Cloudflare served a bot challenge instead of a token — our egress is being " +
+  "filtered, not your authorisation. Quote the ray id to Cloudflare support."
+
+/**
+ * Whether the token endpoint answered with a challenge rather than OAuth.
+ *
+ * ⚠ THIS IS NOT A GUESS ABOUT SOMEBODY ELSE'S SYSTEM — CLOUDFLARE'S OWN CLIENT
+ * CHECKS FOR IT ON THIS EXACT ENDPOINT. `wrangler`'s `getJSONFromResponse`
+ * matches `<!DOCTYPE html>` and then `challenge-platform` in the body, and
+ * prints: "It looks like you might have hit a bot challenge page… please
+ * provide your Ray ID". `dash.cloudflare.com` is a dashboard host sitting
+ * behind Cloudflare's own bot management, and an OAuth token exchange from a
+ * datacentre IP is exactly the traffic it is built to stop.
+ *
+ * ⚠ AND IT CHANGES WHOSE PROBLEM IT IS. Every other exchange failure is a
+ * credential, a code or a redirect URI — ours to fix, in Doppler or in the
+ * provider's dashboard. This one is our egress being filtered on the way out,
+ * which no amount of pressing the button again will clear, and the customer
+ * reading the message did nothing wrong.
+ *
+ * ⚠ `cf-mitigated` IS CHECKED FIRST BECAUSE IT IS THE UNAMBIGUOUS ONE.
+ * Cloudflare sets it on a challenged response; the body markers are the
+ * fallback for a page served without it.
+ */
+function isBotChallenge(response: Response, raw: string): boolean {
+  if (response.headers.get("cf-mitigated")) return true
+  if (!/<!DOCTYPE html>/i.test(raw)) return false
+  return (
+    raw.includes("challenge-platform") ||
+    raw.includes("Attention Required") ||
+    /error code: 10\d\d/.test(raw)
+  )
+}
+
+/** The first readable line of an HTML or plain-text body. */
+function snippet(raw: string): string {
+  const text = raw
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text
+}
 
 export class OAuthError extends Error {
   constructor(
@@ -324,6 +418,16 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           Accept: "application/json",
+          /*
+           * ⚠ CLOUDFLARE'S TOKEN ENDPOINT IS BEHIND THEIR OWN BOT MANAGEMENT,
+           * WHICH MAKES THIS MORE THAN POLITENESS. `dash.cloudflare.com` is a
+           * dashboard host, not an API host, and it refuses clients it does
+           * not like with an HTML challenge rather than an OAuth error —
+           * measured: `python-urllib` gets error 1010, curl gets JSON. Bun's
+           * default `User-Agent` is the literal string `Bun/1.4.2`. See
+           * ./user-agent.ts.
+           */
+          "User-Agent": DNS_USER_AGENT,
         },
         /*
          * ⚠ THE SECRET GOES IN THE BODY, NOT IN A BASIC HEADER. Both are
@@ -341,20 +445,31 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       )
     }
 
-    const body = (await response.json().catch(() => null)) as {
-      access_token?: string
-      refresh_token?: string
-      expires_in?: number
-      scope?: string
-      error?: string
-      error_description?: string
-    } | null
+    /*
+     * ⚠ READ AS TEXT FIRST, BECAUSE THE FAILURE WE CANNOT DIAGNOSE IS THE ONE
+     * THAT IS NOT JSON. `response.json().catch(() => null)` threw away the
+     * whole body, so a Cloudflare challenge page — the single most likely
+     * reason a token exchange fails from inside a datacentre — arrived here as
+     * `null` and was reported as the bare status. "HTTP 403" and "the client
+     * secret is wrong" were indistinguishable, and the difference is the whole
+     * question: one is our egress being challenged, the other is a Doppler
+     * edit. The text is read once and parsed from memory, which costs nothing
+     * and keeps the evidence.
+     */
+    const raw = await response.text().catch(() => "")
+
+    let body: TokenResponse | null = null
+    try {
+      body = raw ? (JSON.parse(raw) as TokenResponse) : null
+    } catch {
+      body = null
+    }
 
     if (!response.ok || !body?.access_token) {
       throw new OAuthError(
         "exchange_failed",
         `${provider.name} did not complete the authorisation.`,
-        body?.error_description ?? body?.error ?? `HTTP ${response.status}`,
+        describeFailure(response, body, raw),
       )
     }
 

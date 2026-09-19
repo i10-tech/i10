@@ -12,7 +12,7 @@ import { ApiKeysTable } from "@/components/api-keys-table"
 import { CreateApiKeyButton } from "@/components/create-api-key"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
-import type { ApiKeyRow } from "@/lib/types"
+import type { ApiKeyRow, DomainSummary } from "@/lib/types"
 
 export const metadata: Metadata = { title: "API keys" }
 
@@ -37,7 +37,22 @@ export default async function ApiKeysPage({
   searchParams: Promise<{ new?: string }>
 }) {
   const params = await searchParams
-  const result = await tryApi<{ data: ApiKeyRow[] }>("/console/api-keys")
+  /*
+   * ⚠ THE DOMAINS COME WITH THE PAGE SO THE SCOPE CONTROLS HAVE SOMETHING TO
+   * OFFER. Both the create dialog and the scope editor need the list, and
+   * fetching it inside each of them would put a spinner inside a dialog
+   * somebody has already opened — for a list that is usually three rows long.
+   *
+   * ⚠ AND ITS FAILURE IS NOT THE PAGE'S FAILURE. If domains cannot be read the
+   * keys still list, create and revoke; the scope control simply has nothing to
+   * choose from and says so. Losing the whole page because a second, optional
+   * request failed would be the worse trade.
+   */
+  const [result, domains] = await Promise.all([
+    tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
+    tryApi<{ data: DomainSummary[] }>("/console/domains"),
+  ])
+  const scopeDomains = domains.ok ? domains.data.data : []
 
   return (
     <Page>
@@ -52,7 +67,7 @@ export default async function ApiKeysPage({
              * three of which want to say "create a key" and land somebody in
              * the form rather than next to it.
              */}
-            <CreateApiKeyButton autoOpen={params.new === "1"} />
+            <CreateApiKeyButton autoOpen={params.new === "1"} domains={scopeDomains} />
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
@@ -65,7 +80,7 @@ export default async function ApiKeysPage({
         {!result.ok ? (
           <PanelError title="Could not load your keys" message={result.error.message} />
         ) : (
-          <ApiKeysTable keys={result.data.data} />
+          <ApiKeysTable keys={result.data.data} domains={scopeDomains} />
         )}
       </PageBody>
     </Page>

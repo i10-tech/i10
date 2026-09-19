@@ -1,4 +1,5 @@
 import type { TenantAuthDeps } from "../../middleware/tenant.js"
+import type { FreshAuthReader } from "../../middleware/session.js"
 import type { ConsoleQueries } from "../../console/queries.js"
 import type { MarketingStore } from "../../console/marketing.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
@@ -17,6 +18,14 @@ import type { PolarClient } from "../../billing/polar.js"
 import type { PlanChange } from "../../billing/plan-change.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
+  /**
+   * Reads how recently the session's factors were verified.
+   *
+   * ⚠ ITS ABSENCE REFUSES THE DESTRUCTIVE ROUTES RATHER THAN OPENING THEM. See
+   * `requireFreshAuth`: a deployment that forgot to wire this stops deletions,
+   * which is the failure anybody would rather have.
+   */
+  freshAuth?: FreshAuthReader
   queries: ConsoleQueries
   usage: UsageStore
   onboarding: OnboardingStore

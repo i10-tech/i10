@@ -52,6 +52,7 @@ function harness(
       store: {
         create: async () => created(),
         list: async () => [summary()],
+        setScopes: async () => ({ key: summary(), secretHash: "OLDHASH" }),
         revoke: async () => ({ secretHash: "OLDHASH" }),
         rotate: async () => ({ created: created(), revokedHash: "OLDHASH" }),
         ...store,
@@ -233,6 +234,76 @@ describe("rotating", () => {
   it("answers 404 for a key that cannot be rotated", async () => {
     const { call } = harness({ rotate: async () => null })
     expect((await call("/key-2/rotate", { method: "POST" })).status).toBe(404)
+  })
+})
+
+/**
+ * ⚠ THE HOLE A SCOPE WOULD HAVE WITHOUT THIS. These routes authenticate with
+ * any valid key and take whatever `scopes` they are given — so a key limited
+ * to staging could mint itself one limited to nothing, and every restriction
+ * in the product would be exactly one request wide. It could also revoke the
+ * keys that had NOT leaked.
+ */
+describe("a key that is restricted to a domain", () => {
+  const scopedHarness = () => {
+    const app = createApp({
+      apiKeyAuth: {
+        ...apiKeyAuth,
+        lookup: {
+          byHash: async () => ({
+            id: "key-1",
+            tenantId: TENANT,
+            scopes: ["domain:staging.acme.com"],
+            mode: "live",
+            revokedAt: null,
+            expiresAt: null,
+          }),
+        },
+      },
+      apiKeys: {
+        store: {
+          create: async () => created(),
+          list: async () => [summary()],
+          setScopes: async () => ({ key: summary(), secretHash: "OLDHASH" }),
+          revoke: async () => ({ secretHash: "OLDHASH" }),
+          rotate: async () => ({ created: created(), revokedHash: "OLDHASH" }),
+        },
+        cache: { get: async () => null, set: async () => {}, del: async () => {} },
+        log: { error: mock() },
+      },
+    })
+    return (path: string, init: RequestInit = {}) =>
+      app.request(`/api-keys${path}`, {
+        ...init,
+        headers: { Authorization: `Bearer ${KEY}`, ...(init.headers ?? {}) },
+      })
+  }
+
+  it.each([
+    ["POST", "", '{"name":"escalation"}'],
+    ["DELETE", "/key-2", undefined],
+    ["POST", "/key-2/rotate", undefined],
+  ])("refuses to %s %s", async (method, path, body) => {
+    const call = scopedHarness()
+    const res = await call(path, {
+      method,
+      ...(body ? { body, headers: { "content-type": "application/json" } } : {}),
+    })
+
+    expect(res.status).toBe(403)
+    // ⚠ 403 AND NOT 401. The key is real; telling somebody it is invalid sends
+    // them to rotate a credential that is fine.
+    expect(await res.json()).toMatchObject({ name: "restricted_api_key" })
+  })
+
+  /*
+   * ⚠ READING IS STILL ALLOWED, DELIBERATELY. A list of prefixes tells a
+   * restricted key nothing it does not already hold, and it is what makes a
+   * key usable for its own diagnostics.
+   */
+  it("still lets it read the list", async () => {
+    const call = scopedHarness()
+    expect((await call("")).status).toBe(200)
   })
 })
 

@@ -1,33 +1,44 @@
 /**
  * Opening Polar's embedded checkout so that it can also be closed again.
  *
- * ⚠ POLAR'S OWN ✕ DOES NOT WORK, AND THAT IS MEASURED RATHER THAN ASSUMED.
- * Their hosted checkout renders a close button at `top-2 right-2` when loaded
- * with `embed=true`, and clicking it posts NOTHING to the parent window. Probed
- * against a real sandbox checkout inside a real cross-origin iframe with a
- * correct `embed_origin`: a `message` listener on the parent recorded zero
- * events, and the iframe stayed where it was. `@polar-sh/checkout` is listening
- * — `handleWindowMessage` switches on a `close` event and calls `close()` — but
- * that event never arrives. So the modal is, from the customer's side, a trap:
- * a payment form covering the whole viewport with no way out but a reload.
+ * ⚠ EVERY MESSAGE THEIR CHECKOUT SENDS IS GATED ON `embed_origin`, AND WE WERE
+ * NOT SETTING IT. That one missing field on the Checkout Session is the whole
+ * of what looked like three separate bugs in somebody else's product. From
+ * their own page's source:
  *
- * ⚠ SO WE DRAW OUR OWN, ON TOP OF THEIRS. The alternative is waiting for a fix
- * in somebody else's product while our upgrade flow is a dead end. It is
- * positioned to cover Polar's dead button rather than to sit beside it, because
- * two ✕ marks eight pixels apart — one working, one not — is worse than either
- * one alone.
+ *   // CheckoutEmbedClose.tsx        // CheckoutEmbedLoaded.tsx
+ *   if (!checkout.embed_origin) {    if (!embedOrigin) {
+ *     return                           return
+ *   }                                }
+ *
+ * `confirmed` and `success` carry the identical guard. So their ✕ was not
+ * broken, it was returning early; the `success` event did not go missing, it
+ * was never sent; and `PolarEmbedCheckout.create()` — which resolves only when
+ * the `loaded` message arrives — never resolved at all. That last one is why
+ * the modal was a trap rather than merely a nuisance: everything this module
+ * does ran AFTER that `await`, so the close button was never drawn, Escape was
+ * never bound, and the status poll never started. A payment form covering the
+ * whole viewport with nothing listening behind it. The field is now sent — see
+ * `embed_origin` in apps/api/src/billing/polar.ts.
+ *
+ * ⚠ AND NOTHING HERE WAITS FOR THEM ANY MORE, WHICH IS THE PART THAT SURVIVES
+ * THE NEXT REGRESSION. The way out is built before the iframe is asked to
+ * announce itself, so a checkout that never says `loaded` — a future change on
+ * their side, an origin that stops matching, a blocked third-party frame — is
+ * a modal somebody can still close and a payment we still notice. Correct
+ * configuration should not be what stands between a customer and the Escape
+ * key.
  *
  * ⚠ IT SHARES THE IFRAME'S z-index RATHER THAN EXCEEDING IT. The SDK uses
  * 2147483647, which is the largest value CSS accepts; nothing can be layered
  * above it by number. Equal z-index resolves in DOM order, so appending after
- * the iframe is the only thing that puts this in front — and it is why the
- * element is created after `create()` resolves.
+ * the iframe is the only thing that puts our button in front.
  *
  * ⚠ AND IT REFUSES TO CLOSE WHILE A CHARGE IS IN FLIGHT, which is the one part
- * of Polar's behaviour that is right. They lock the modal on `confirmed` and
- * unlock on `success`; tearing the iframe out between those two would abandon a
- * payment that has already been submitted. Escape is bound for the same reason
- * and under the same rule.
+ * of Polar's behaviour that was always right. They lock the modal on
+ * `confirmed` and unlock on `success`; tearing the iframe out between those two
+ * would abandon a payment that has already been submitted. Escape is bound for
+ * the same reason and under the same rule.
  */
 
 export interface CheckoutHandle {
@@ -48,18 +59,14 @@ export interface OpenCheckoutOptions {
 }
 
 /**
- * ⚠ THE POLL EXISTS BECAUSE POLAR'S `success` EVENT DOES NOT ALWAYS ARRIVE,
- * AND THAT IS MEASURED RATHER THAN DEFENSIVE. On 2026-09-18 a real checkout on
- * dash.i10.tech completed — Polar's own API reported `status: "succeeded"` with
- * a customer attached, and the plan was granted — while the browser recorded
- * ZERO messages from any polar.sh origin. Their page had answered
- * `PATCH /v1/checkouts/client/… 403` after Stripe confirmed, and its state
- * machine stopped at "waiting for confirmation" without ever posting to us.
- *
- * The customer is left looking at a payment form for a payment that already
- * went through, and the only way out is a reload. So the event is now the FAST
- * path rather than the only one: `/api/checkout-status/{id}` reads the row our
- * own webhook writes, and whichever answers first closes the modal.
+ * ⚠ THE POLL IS NO LONGER THE ONLY THING STANDING BETWEEN A CUSTOMER AND A
+ * DEAD MODAL, BUT IT IS STILL WORTH KEEPING. Polar's page waits for actual
+ * fulfilment before posting `success` — `listenFulfillment` in their
+ * `useCheckoutConfirmedRedirect` — and on timeout it deliberately posts
+ * NOTHING and navigates its own iframe to a confirmation page instead. That is
+ * a correct decision on their side and an invisible one on ours, so
+ * `/api/checkout-status/{id}` reads the row our own webhook writes and
+ * whichever answers first closes the modal.
  *
  * ⚠ AND IT IS BOUNDED. A checkout somebody abandons would otherwise poll for
  * as long as the tab is open; five minutes is longer than any card takes and
@@ -74,7 +81,14 @@ export async function openPolarCheckout(
   { theme, onSuccess, checkoutId }: OpenCheckoutOptions,
 ): Promise<CheckoutHandle> {
   const { PolarEmbedCheckout } = await import("@polar-sh/checkout/embed")
-  const checkout = await PolarEmbedCheckout.create(url, { theme })
+
+  /*
+   * ⚠ STARTED, NOT AWAITED. `create()` appends the iframe synchronously and
+   * returns a promise that settles on their `loaded` message — so the frame is
+   * on screen either way, and awaiting it here is what used to make every
+   * escape route conditional on their page being correctly configured.
+   */
+  const opening = PolarEmbedCheckout.create(url, { theme })
 
   /*
    * ⚠ EVERY TEARDOWN PATH GOES THROUGH ONE FUNCTION, AND IT IS IDEMPOTENT.
@@ -84,6 +98,7 @@ export async function openPolarCheckout(
    * the rest of the session, listening for Escape over a page that no longer
    * has a modal on it.
    */
+  let checkout: Awaited<typeof opening> | null = null
   let dismissable = true
   let done = false
   let poll: ReturnType<typeof setInterval> | undefined
@@ -94,6 +109,31 @@ export async function openPolarCheckout(
     if (poll) clearInterval(poll)
     document.removeEventListener("keydown", onKey)
     button.remove()
+  }
+
+  /**
+   * Take the frame off the screen, with or without their instance.
+   *
+   * ⚠ THE FALLBACK REACHES INTO THEIR DOM, AND IT IS THE POINT OF THIS MODULE.
+   * `close()` lives on the instance we only get once `loaded` arrives; if that
+   * message never comes, the alternative to removing the iframe by hand is
+   * telling somebody to reload the page mid-checkout. It matches on the
+   * checkout's own origin rather than on a class, because the SDK gives the
+   * iframe no class and the origin is a fact we already hold.
+   */
+  const remove = () => {
+    if (checkout) {
+      checkout.close()
+      return
+    }
+
+    const origin = new URL(url).origin
+    for (const frame of document.querySelectorAll("iframe")) {
+      if (frame.src.startsWith(origin)) frame.remove()
+    }
+    // Their loader is an unclassed wrapper around a classed spinner.
+    document.querySelector(".polar-loader-spinner")?.parentElement?.remove()
+    document.body.classList.remove("polar-no-scroll")
   }
 
   /**
@@ -108,14 +148,14 @@ export async function openPolarCheckout(
     if (done) return
     dismissable = true
     teardown()
-    checkout.close()
+    remove()
     onSuccess()
   }
 
   const dismiss = () => {
     if (!dismissable) return
     teardown()
-    checkout.close()
+    remove()
   }
 
   const onKey = (event: KeyboardEvent) => {
@@ -151,26 +191,53 @@ export async function openPolarCheckout(
   button.textContent = "✕"
   button.addEventListener("click", dismiss)
 
-  checkout.addEventListener("confirmed", () => {
-    dismissable = false
-    button.style.display = "none"
-  })
-
-  /*
-   * ⚠ THE OVERLAY IS CLOSED HERE RATHER THAN LEFT FOR THE CUSTOMER TO DISMISS.
-   * Polar's default `success` handler only re-enables closing and redirects
-   * when the checkout carries a success URL, so without this the modal sits
-   * over an already-upgraded console saying it is waiting for confirmation —
-   * which is exactly what it did.
-   */
-  checkout.addEventListener("success", succeed)
-
-  // ⚠ POLAR'S OWN `close` STILL RUNS IF IT EVER STARTS WORKING. Ours would then
-  // be a stray button over a removed iframe, so it cleans up on their event too.
-  checkout.addEventListener("close", teardown)
-
   document.addEventListener("keydown", onKey)
   document.body.appendChild(button)
+
+  /*
+   * ⚠ THEIR EVENTS ARE WIRED WHEN THE INSTANCE ARRIVES, AND EVERYTHING ABOVE
+   * WORKS WITHOUT IT. `loaded` always precedes `confirmed` and `success`, so
+   * nothing can be missed by attaching here — and if it never arrives, the
+   * button, the key handler and the poll are already live.
+   *
+   * ⚠ AND THE REJECTION IS SWALLOWED DELIBERATELY. `create()` does not reject
+   * today; an unhandled one from a future version would surface in the console
+   * as a page error over a working checkout.
+   */
+  void opening
+    .then((instance) => {
+      checkout = instance
+      if (done) {
+        // Closed before it finished loading. Their `close()` also removes the
+        // window message listener, which our by-hand teardown cannot.
+        instance.close()
+        return
+      }
+
+      instance.addEventListener("confirmed", () => {
+        dismissable = false
+        button.style.display = "none"
+      })
+
+      /*
+       * ⚠ THE OVERLAY IS CLOSED HERE RATHER THAN LEFT FOR THE CUSTOMER TO
+       * DISMISS. Polar's default `success` handler only re-enables closing and
+       * redirects when the checkout carries an EXTERNAL success URL, so
+       * without this the modal sits over an already-upgraded console.
+       *
+       * ⚠ OURS IS EXTERNAL, SO THEIR DEFAULT ALSO NAVIGATES THE PARENT to
+       * `/billing?checkout_id=…` — the confirmation page, which polls the same
+       * row with a ceiling and names the plan. We do not `preventDefault()`
+       * that: landing there is the better ending, and `onSuccess` covers the
+       * case where the poll got there first and the navigation never happens.
+       */
+      instance.addEventListener("success", succeed)
+
+      // Their own `close` is real again now that `embed_origin` is sent, so
+      // ours would otherwise be a stray button over a removed iframe.
+      instance.addEventListener("close", teardown)
+    })
+    .catch(() => {})
 
   if (checkoutId) {
     const startedAt = Date.now()
@@ -202,7 +269,7 @@ export async function openPolarCheckout(
   return {
     close() {
       teardown()
-      checkout.close()
+      remove()
     },
   }
 }

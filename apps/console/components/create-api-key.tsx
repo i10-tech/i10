@@ -17,7 +17,8 @@ import {
 import { Label } from "@repo/ui/components/label"
 import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
 import { Spinner } from "@repo/ui/components/spinner"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { ApiKeyScopeField, type ScopeDomain } from "@/components/api-key-scope"
 import { createApiKey } from "@/lib/actions"
 import type { CreatedApiKey } from "@/lib/types"
 
@@ -35,17 +36,37 @@ import type { CreatedApiKey } from "@/lib/types"
  * A toast is dismissible, survives navigation in some implementations, and is
  * exactly the kind of thing that ends up in a screen recording.
  */
-export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean }) {
+export function CreateApiKeyButton({
+  autoOpen = false,
+  domains = [],
+}: {
+  autoOpen?: boolean
+  /**
+   * ⚠ PASSED IN RATHER THAN FETCHED HERE. The page is a server component that
+   * is already talking to the API; a client fetch would put a second spinner
+   * inside a dialog somebody has already opened, for a list that is usually
+   * three rows long.
+   */
+  domains?: ScopeDomain[]
+}) {
   const router = useRouter()
   const [open, setOpen] = React.useState(autoOpen)
   const [name, setName] = React.useState("")
   const [mode, setMode] = React.useState<"live" | "test">("live")
+  /*
+   * ⚠ `null` — EVERY DOMAIN — IS THE DEFAULT, AND CHANGING THAT WOULD BE A
+   * BREAKING CHANGE DISGUISED AS A SAFER ONE. Defaulting to the first domain
+   * would silently mint restricted keys for people who never read this field,
+   * and they would find out when a send failed in production.
+   */
+  const [domain, setDomain] = React.useState<string | null>(null)
   const [pending, setPending] = React.useState(false)
   const [created, setCreated] = React.useState<CreatedApiKey | null>(null)
 
   function reset() {
     setName("")
     setMode("live")
+    setDomain(null)
     setCreated(null)
   }
 
@@ -54,7 +75,7 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
     if (pending || !name.trim()) return
 
     setPending(true)
-    const result = await createApiKey({ name: name.trim(), mode })
+    const result = await createApiKey({ name: name.trim(), mode, domain })
     setPending(false)
 
     if (!result.ok) {
@@ -138,14 +159,14 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
               </DialogHeader>
 
               <div className="space-y-4 py-4">
-                <FloatingInput
+                <ValidatedInput
                   label="Name"
                   id="key-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   autoComplete="off"
                   maxLength={50}
-                  required
+                  required="Name this key so you can recognise it later."
                   autoFocus
                   hint="e.g. production-api"
                 />
@@ -179,6 +200,14 @@ export function CreateApiKeyButton({ autoOpen = false }: { autoOpen?: boolean })
                     </label>
                   </RadioGroup>
                 </div>
+
+                <ApiKeyScopeField
+                  id="key-domain"
+                  value={domain}
+                  onChange={setDomain}
+                  domains={domains}
+                  disabled={pending}
+                />
               </div>
 
               <DialogFooter>

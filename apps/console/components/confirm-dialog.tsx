@@ -32,6 +32,13 @@ import { useResetOnOpen } from "@/lib/react"
  * must leave the dialog open with the error visible — closing it and firing a
  * toast means the person believes the thing is gone when it is not, and the
  * list they return to still shows it.
+ *
+ * ⚠ `children` IS FOR A SECOND QUESTION THE FIRST ONE RAISES, NOT FOR DECORATION.
+ * Deleting a domain is the case it exists for: any key restricted to that
+ * domain is about to become a credential that can send from nothing, and the
+ * moment to ask about it is while somebody is already deciding. A separate
+ * dialog afterwards would be a second interruption about a consequence of the
+ * first, and one nobody would connect to it.
  */
 export function ConfirmDialog({
   open,
@@ -42,6 +49,7 @@ export function ConfirmDialog({
   confirmWord,
   destructive = true,
   onConfirm,
+  children,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -52,6 +60,8 @@ export function ConfirmDialog({
   confirmWord?: string
   destructive?: boolean
   onConfirm: () => Promise<boolean>
+  /** A second question, asked above the confirmation. See the note above. */
+  children?: React.ReactNode
 }) {
   const [typed, setTyped] = React.useState("")
   const [pending, setPending] = React.useState(false)
@@ -78,6 +88,14 @@ export function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+
+        {/*
+         * ⚠ ABOVE THE TYPE-THE-NAME FIELD, WHICH IS THE ONLY ORDER THAT WORKS.
+         * The field is the last thing before the button and the thing that arms
+         * it; a question underneath it would be answered after somebody has
+         * already committed to the action.
+         */}
+        {children}
 
         {confirmWord !== undefined && (
           <div>

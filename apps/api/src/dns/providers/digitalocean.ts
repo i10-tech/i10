@@ -8,6 +8,7 @@ import {
   type RemoteZone,
   type ZoneWriter,
 } from "../port.js"
+import { DNS_USER_AGENT } from "../user-agent.js"
 
 /**
  * DigitalOcean.
@@ -61,6 +62,8 @@ async function call<T>(
       headers: {
         Authorization: `Bearer ${bearer}`,
         "Content-Type": "application/json",
+        // See dns/user-agent.ts: the default user agent is a bot signature.
+        "User-Agent": DNS_USER_AGENT,
         ...(init.headers ?? {}),
       },
       signal: AbortSignal.timeout(10_000),

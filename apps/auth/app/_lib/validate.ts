@@ -1,91 +1,27 @@
-import type { FieldState } from "@repo/ui/components/floating-field"
+import type { Check } from "@repo/ui/checks"
 import type { PasswordRules } from "./environment"
-import type { FieldFocus } from "@repo/ui/hooks/field-focus"
 
 /**
- * Telling somebody their address is wrong before we spend a round trip finding
- * out.
+ * Telling somebody their password will be refused before we spend a round trip
+ * finding out.
  *
  * ⚠ THIS EXISTS BECAUSE THE FORM WAS ASKING CLERK QUESTIONS IT COULD ANSWER
- * ITSELF. Typing `mido@` and pressing Create account produced a spinner, a
- * network round trip, and a toast two seconds later saying the address was
- * invalid — for a string that could not possibly have been valid, decided by a
- * server on another continent. Worse, pressing the button with BOTH boxes empty
- * did the same thing. The check belongs where the answer already is.
+ * ITSELF. Typing a five-character password and pressing Create account produced
+ * a spinner, a network round trip, and a toast two seconds later — for a value
+ * that could not possibly have been accepted, decided by a server on another
+ * continent. The check belongs where the answer already is.
  *
  * ⚠ AND IT IS NOT A SUBSTITUTE FOR THE SERVER'S ANSWER, WHICH IS WHY NOTHING
- * HERE IS CLEVER. Clerk still decides whether an address is deliverable, already
- * taken, or on a blocklist, and it is still the only thing that can. The job
- * here is narrower and completely reliable: refuse the strings that are wrong on
- * their face, so the round trip is spent on the questions only a server can
- * answer.
- */
-
-export interface Verdict {
-  state: FieldState
-  hint?: string
-}
-
-/**
- * ⚠ A DOT IN THE DOMAIN IS REQUIRED, WHICH THE HTML5 SPEC'S OWN PATTERN DOES
- * NOT REQUIRE. `type="email"` deliberately accepts `mido@localhost`, because the
- * spec is written for intranets as well as the internet. This is a product whose
- * entire function is delivering mail to the address, so an address with no
- * public domain is one we would accept and then fail to reach.
+ * HERE IS CLEVER. Clerk still decides whether a password has been breached or
+ * is too common, and it is still the only thing that can. The job here is
+ * narrower and completely reliable: refuse what is wrong on its face, so the
+ * round trip is spent on the questions only a server can answer.
  *
- * ⚠ AND IT IS DELIBERATELY LOOSE EVERYWHERE ELSE. Every regex that tries to
- * fully implement RFC 5322 rejects addresses that work — plus-tagging, apostrophes,
- * long TLDs, new gTLDs — and the cost of a false rejection here is somebody who
- * cannot sign up at all and has no way to argue. The rule is "has a local part,
- * one @, a domain with a dot, and a plausible TLD", and nothing beyond it.
+ * ⚠ THE EMAIL RULE USED TO LIVE HERE AND HAS MOVED TO @repo/ui/checks, because
+ * the console asks for addresses too and was not checking them at all. This
+ * one stays: a password policy is a property of the Clerk INSTANCE, read at
+ * runtime from `environment.ts`, and nothing outside this app has one.
  */
-const EMAIL = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[a-z]{2,}$/i
-
-/**
- * ⚠ THREE SIGNALS, NOT ONE, BECAUSE EMPTY, WRONG AND FIXED ARE THREE DIFFERENT
- * THINGS. See `useFieldFocus` in field-focus.ts: `blurred` is "you stopped
- * typing and what is there is malformed", `submitted` is "you pressed the button
- * and this is still empty", `recovering` is "this was shown wrong and you are
- * still in it". One boolean governed the first two once, and the result was a
- * field that turned red because somebody tabbed past a box they had not answered
- * yet.
- */
-type Reveal = Pick<FieldFocus, "blurred" | "submitted" | "recovering">
-
-export function emailVerdict(value: string, reveal: Reveal): Verdict {
-  const trimmed = value.trim()
-
-  /*
-   * ⚠ EMPTY IS NEVER MALFORMED. An unanswered field is a field somebody has not
-   * got to yet, right up until they say the form is finished — so the blur that
-   * reddens `mido@` leaves an empty box alone, and only `submitted` speaks for
-   * it.
-   */
-  if (trimmed === "") {
-    return reveal.submitted
-      ? { state: "invalid", hint: "Enter your email address." }
-      : { state: "idle" }
-  }
-
-  /*
-   * ⚠ CORRECT IS NOT THE SAME AS GREEN. A valid address is the ordinary case and
-   * saying so is not news; green is spent only on an address that was SHOWN
-   * wrong and has since been fixed, and only while the caret is still in it. See
-   * `recovering` in field-focus.ts for why both halves are required.
-   */
-  if (EMAIL.test(trimmed)) {
-    return reveal.recovering ? { state: "valid" } : { state: "idle" }
-  }
-
-  // ⚠ AND RED WAITS, WHICH IS THE OTHER HALF OF THE SAME IDEA. Every address is
-  // invalid while it is being typed — `m`, `mi`, `mid` — so a field that goes
-  // red on the first keystroke is red for the entire time anybody is using it,
-  // and the colour stops meaning anything.
-
-  return reveal.blurred
-    ? { state: "invalid", hint: "That does not look like an email address." }
-    : { state: "idle" }
-}
 
 /**
  * The password rules this instance actually enforces, checked here first.
@@ -99,37 +35,27 @@ export function emailVerdict(value: string, reveal: Reveal): Verdict {
  * requirements under an empty box is a wall somebody reads once and then ignores;
  * naming the single thing standing between them and a valid password is
  * something they can act on without reading.
+ *
+ * ⚠ AND IT IS A FACTORY BECAUSE THE RULES COME FROM THE INSTANCE, not from this
+ * file. `Check` takes a value and nothing else, so the policy is closed over
+ * once per render rather than threaded through every caller — which is also
+ * what lets the field, the hint and the submit guard read the same numbers.
  */
-export function passwordVerdict(
-  value: string,
-  rules: PasswordRules,
-  reveal: Reveal,
-): Verdict {
-  // ⚠ SAME RULE AS THE ADDRESS ABOVE: an empty box is unanswered, not wrong.
-  if (value === "") {
-    return reveal.submitted
-      ? { state: "invalid", hint: "Choose a password." }
-      : { state: "idle" }
+export const passwordProblem =
+  (rules: PasswordRules): Check =>
+  (value) => {
+    const unmet = firstUnmet(value, rules)
+    if (!unmet) return null
+
+    /*
+     * ⚠ LENGTH IS REPORTED WHILE TYPING, THE OTHER RULES ARE NOT. "6 of 8
+     * characters" is a progress indicator and is useful on every keystroke;
+     * "needs a number" on the second character is a complaint about a password
+     * nobody has finished writing. `early` is exactly that distinction — see
+     * `Problem` in @repo/ui/checks.
+     */
+    return unmet.kind === "length" ? { message: unmet.hint, early: true } : unmet.hint
   }
-
-  const unmet = firstUnmet(value, rules)
-  // ⚠ SAME RULE AS THE ADDRESS ABOVE: green is a recovery, not a receipt.
-  if (!unmet) return reveal.recovering ? { state: "valid" } : { state: "idle" }
-
-  /*
-   * ⚠ LENGTH IS REPORTED WHILE TYPING, THE OTHER RULES ARE NOT. "6 of 8
-   * characters" is a progress indicator and is useful on every keystroke;
-   * "needs a number" on the second character is a complaint about a password
-   * nobody has finished writing. So the count shows as a neutral GREY hint from
-   * the start — it is information, not a refusal — and only the red border
-   * waits.
-   */
-  if (unmet.kind === "length" && !reveal.blurred) {
-    return { state: "idle", hint: unmet.hint }
-  }
-
-  return reveal.blurred ? { state: "invalid", hint: unmet.hint } : { state: "idle" }
-}
 
 type Unmet = { kind: "length" | "class"; hint: string }
 
@@ -183,7 +109,5 @@ export function describeRules(rules: PasswordRules): string {
 }
 
 /** Whether the field would be accepted, ignoring whether it is showing an error. */
-export const isEmailUsable = (value: string) => EMAIL.test(value.trim())
-
 export const isPasswordUsable = (value: string, rules: PasswordRules) =>
   value !== "" && firstUnmet(value, rules) === null

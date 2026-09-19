@@ -3,7 +3,8 @@
 import * as React from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
+import { FloatingTextarea } from "@repo/ui/components/floating-field"
+import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createSegment } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -40,13 +41,13 @@ export function NewSegmentButton() {
         createSegment({ name: name.trim(), description: description.trim() })
       }
     >
-      <FloatingInput
+      <ValidatedInput
         label="Name"
         id="segment-name"
         value={name}
         onChange={(event) => setName(event.target.value)}
         autoComplete="off"
-        required
+        required="Name this segment."
         autoFocus
         hint="e.g. Paying customers"
       />
