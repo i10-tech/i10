@@ -662,7 +662,11 @@ const schema = z.object({
    *
    *   {"cloudflare":{"clientId":"…","clientSecret":"…"}}
    *
-   * `clientSecret` is omitted for a public (PKCE-only) client.
+   * `clientSecret` is omitted for a public (PKCE-only) client, and `scopes`
+   * overrides the registry's list for that provider:
+   *
+   *   {"cloudflare":{"clientId":"…","clientSecret":"…",
+   *                  "scopes":["dns.write","zone.read"]}}
    */
   DNS_OAUTH_APPS: z
     .string()
@@ -673,7 +677,10 @@ const schema = z.object({
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
           throw new TypeError("not an object")
         }
-        const out: Record<string, { clientId: string; clientSecret?: string }> = {}
+        const out: Record<
+          string,
+          { clientId: string; clientSecret?: string; scopes?: string[] }
+        > = {}
         for (const [slug, app] of Object.entries(parsed)) {
           const value = app as { clientId?: unknown; clientSecret?: unknown }
           if (typeof value?.clientId !== "string" || value.clientId.length === 0) {
@@ -702,11 +709,34 @@ const schema = z.object({
               )
             }
           }
+          /*
+           * ⚠ SCOPES ARE OVERRIDABLE HERE BECAUSE THEY ARE A FACT ABOUT
+           * SOMEBODY ELSE'S PRODUCT. The registry's list is our reading of each
+           * provider's docs at the time it was written, and providers rename
+           * scopes and publish names that differ from the strings their
+           * authorize endpoint accepts — Cloudflare's real values come from an
+           * endpoint that needs credentials to read. Correcting one should be a
+           * Doppler edit, not a release.
+           */
+          const scopes = (value as { scopes?: unknown }).scopes
+          if (scopes !== undefined) {
+            if (
+              !Array.isArray(scopes) ||
+              scopes.length === 0 ||
+              scopes.some((s) => typeof s !== "string" || s.length === 0)
+            ) {
+              throw new TypeError(
+                `"${slug}" scopes must be a non-empty array of non-empty strings`,
+              )
+            }
+          }
+
           out[slug] = {
             clientId: value.clientId,
             ...(typeof value.clientSecret === "string"
               ? { clientSecret: value.clientSecret }
               : {}),
+            ...(Array.isArray(scopes) ? { scopes: scopes as string[] } : {}),
           }
         }
         return out

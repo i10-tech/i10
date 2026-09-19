@@ -37,6 +37,24 @@ export interface OAuthApp {
    * empty one would be rejected by the token endpoint.
    */
   clientSecret?: string
+  /**
+   * Overrides the registry's scopes for this provider.
+   *
+   * ⚠ IT EXISTS BECAUSE A SCOPE NAME IS A FACT ABOUT SOMEBODY ELSE'S PRODUCT,
+   * NOT ABOUT OURS. The registry's list is our best reading of each provider's
+   * documentation at the time it was written, and providers rename scopes,
+   * split them, and publish names in docs that differ from the strings their
+   * authorize endpoint actually accepts. Cloudflare's are a live example: the
+   * registry carries API-token syntax, and the real values come from an
+   * endpoint that needs credentials to read.
+   *
+   * ⚠ SO GETTING ONE WRONG IS A DOPPLER EDIT RATHER THAN A DEPLOY. The failure
+   * it fixes — a consent screen that refuses, or grants a token that cannot do
+   * the one thing we need — is discovered during setup by whoever is holding
+   * the dashboard, and making them wait for a release to try the next string is
+   * the difference between ten minutes and an afternoon.
+   */
+  scopes?: readonly string[]
 }
 
 export interface OAuthConfig {
@@ -183,8 +201,13 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       url.searchParams.set("client_id", app.clientId)
       url.searchParams.set("redirect_uri", redirectFor(slug))
       url.searchParams.set("state", state)
-      if (oauth.scopes.length > 0) {
-        url.searchParams.set("scope", oauth.scopes.join(" "))
+      // ⚠ THE CONFIGURED LIST WINS WHOLESALE, NOT MERGED. A merge would mean a
+      // deployment could only ever ADD to whatever the registry happens to
+      // say — so a registry entry that is simply wrong could not be corrected,
+      // which is the entire case for this override existing.
+      const scopes = app.scopes ?? oauth.scopes
+      if (scopes.length > 0) {
+        url.searchParams.set("scope", scopes.join(" "))
       }
 
       /*

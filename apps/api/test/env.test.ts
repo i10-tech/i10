@@ -131,3 +131,78 @@ describe("the submission port", () => {
     ).toBe(2525)
   })
 })
+
+/**
+ * The DNS provider OAuth apps.
+ *
+ * ⚠ THIS IS PARSED FROM ONE JSON STRING IN DOPPLER, so every mistake in it is a
+ * mistake somebody makes at 2am in a web form with no validation. The parser
+ * has to refuse the wrong shapes loudly at boot rather than produce an app that
+ * half-works — an OAuth client with an empty secret is not a public client, it
+ * is a confidential client that will be answered `invalid_client` for ever.
+ */
+describe("reading the DNS OAuth apps", () => {
+  const withApps = (raw: string) => loadEnv({ ...base, DNS_OAUTH_APPS: raw })
+
+  it("defaults to none, which disables connecting rather than failing", () => {
+    expect(loadEnv(base).DNS_OAUTH_APPS).toEqual({})
+  })
+
+  it("reads a confidential client", () => {
+    expect(
+      withApps('{"cloudflare":{"clientId":"cid","clientSecret":"sec"}}').DNS_OAUTH_APPS,
+    ).toEqual({ cloudflare: { clientId: "cid", clientSecret: "sec" } })
+  })
+
+  /** ⚠ A PUBLIC CLIENT HAS NO SECRET, and that is a shape, not a missing value. */
+  it("reads a public client with no secret at all", () => {
+    expect(withApps('{"cloudflare":{"clientId":"cid"}}').DNS_OAUTH_APPS).toEqual({
+      cloudflare: { clientId: "cid" },
+    })
+  })
+
+  /**
+   * ⚠ AND AN EMPTY SECRET IS NOT THE SAME THING. It would be forwarded as a
+   * supplied-and-wrong secret and answered `invalid_client`, which reads in a
+   * log exactly like a real secret that has been rotated.
+   */
+  it("refuses an empty secret rather than treating it as absent", () => {
+    expect(() =>
+      withApps('{"cloudflare":{"clientId":"cid","clientSecret":""}}'),
+    ).toThrow()
+  })
+
+  it("refuses an app with no client id", () => {
+    expect(() => withApps('{"cloudflare":{"clientSecret":"sec"}}')).toThrow()
+    expect(() => withApps('{"cloudflare":{"clientId":""}}')).toThrow()
+  })
+
+  /**
+   * ⚠ SCOPES ARE OVERRIDABLE BECAUSE THEY ARE A FACT ABOUT SOMEBODY ELSE'S
+   * PRODUCT. The registry's list is our reading of a provider's docs at the
+   * time it was written, and the strings an authorize endpoint actually accepts
+   * can differ. Correcting one has to be a Doppler edit, not a release.
+   */
+  it("reads a scope override", () => {
+    expect(
+      withApps('{"cloudflare":{"clientId":"cid","scopes":["dns.write","zone.read"]}}')
+        .DNS_OAUTH_APPS,
+    ).toEqual({ cloudflare: { clientId: "cid", scopes: ["dns.write", "zone.read"] } })
+  })
+
+  it("refuses a scope list that would silently send nothing", () => {
+    expect(() => withApps('{"cloudflare":{"clientId":"cid","scopes":[]}}')).toThrow()
+    expect(() =>
+      withApps('{"cloudflare":{"clientId":"cid","scopes":["ok",""]}}'),
+    ).toThrow()
+    expect(() =>
+      withApps('{"cloudflare":{"clientId":"cid","scopes":"dns.write"}}'),
+    ).toThrow()
+  })
+
+  it("refuses anything that is not a JSON object of apps", () => {
+    for (const bad of ["[]", '"cloudflare"', "not json", "null"]) {
+      expect(() => withApps(bad)).toThrow()
+    }
+  })
+})

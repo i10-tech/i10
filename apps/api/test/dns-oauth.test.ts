@@ -82,6 +82,48 @@ describe("starting an authorisation", () => {
     expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/)
   })
 
+  /**
+   * ⚠ A SCOPE NAME IS A FACT ABOUT SOMEBODY ELSE'S PRODUCT, AND OURS CAN BE
+   * WRONG. The registry's list is our reading of each provider's docs at the
+   * time it was written; providers rename scopes and publish names that differ
+   * from the strings their authorize endpoint accepts. Correcting one is a
+   * Doppler edit, which is only true if the configured list actually wins.
+   */
+  it("prefers the configured scopes over the registry's", () => {
+    const o = oauth({
+      apps: {
+        cloudflare: {
+          clientId: "cid-123",
+          clientSecret: "csec-456",
+          scopes: ["dns.write", "zone.read"],
+        },
+      },
+    })
+
+    expect(new URL(start(o).url).searchParams.get("scope")).toBe("dns.write zone.read")
+  })
+
+  /**
+   * ⚠ WHOLESALE, NOT MERGED. A merge would mean a deployment could only ever
+   * ADD to whatever the registry says — so a registry entry that is simply
+   * wrong could never be corrected, which is the whole case for the override.
+   */
+  it("does not merge the configured scopes with the registry's", () => {
+    const o = oauth({
+      apps: { cloudflare: { clientId: "cid-123", scopes: ["dns.write"] } },
+    })
+    const scope = new URL(start(o).url).searchParams.get("scope")
+
+    expect(scope).toBe("dns.write")
+    expect(scope).not.toContain("zone:read")
+  })
+
+  it("falls back to the registry when none are configured", () => {
+    expect(new URL(start().url).searchParams.get("scope")).toBe(
+      "dns_records:edit zone:read",
+    )
+  })
+
   it("gives two authorisations different states and different challenges", () => {
     const a = start()
     const b = start()
