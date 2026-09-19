@@ -66,6 +66,18 @@ export interface ReconcileReport {
   orphaned: string[]
   /** Tenants this run could not repair. Each is a reason the job exits non-zero. */
   failed: { tenantId: string; error: string }[]
+  /**
+   * Polar subscriptions this run could not attribute to any tenant.
+   *
+   * ⚠ THIS USED TO BE A BARE `continue`, WHICH MADE THE BACKSTOP SILENT ABOUT
+   * THE ONE THING IT CANNOT BACK UP. The reconciler exists because a webhook
+   * can be lost — but it attributes subscriptions by `customer.external_id`
+   * exactly as the webhook does, so a subscription without one is invisible to
+   * both, and skipping it quietly meant a run could report perfect agreement
+   * while a paying customer sat on the free plan. It is not `orphaned`: that is
+   * a row of OURS with no Polar subscription, and this is the mirror image.
+   */
+  stranded: { subscriptionId: string; reason: string }[]
 }
 
 export async function reconcileSubscriptions(
@@ -82,6 +94,7 @@ export async function reconcileSubscriptions(
     agreed: 0,
     orphaned: [],
     failed: [],
+    stranded: [],
   }
 
   const byTenant = new Map(ours.map((row) => [row.tenantId, row]))
@@ -106,7 +119,15 @@ export async function reconcileSubscriptions(
 
   for (const sub of polarSubs) {
     const decided = toState(sub as PolarSubscription, deps.options)
-    if (decided.kind === "ignore") continue
+    if (decided.kind === "ignore") {
+      if (decided.stranded) {
+        report.stranded.push({
+          subscriptionId: (sub as PolarSubscription).id,
+          reason: decided.reason,
+        })
+      }
+      continue
+    }
 
     const state = decided.state
     seen.add(state.polarSubscriptionId)
@@ -175,6 +196,14 @@ export async function reconcileSubscriptions(
     deps.log.error(
       { tenants: report.orphaned, polarSubscriptions: polarSubs.length },
       "subscription rows with no matching Polar subscription — NOT downgraded",
+    )
+  }
+
+  if (report.stranded.length > 0) {
+    deps.log.error(
+      { subscriptions: report.stranded },
+      "Polar subscriptions that cannot be attributed to a tenant — nothing " +
+        "will ever grant these; set each customer's external_id",
     )
   }
 

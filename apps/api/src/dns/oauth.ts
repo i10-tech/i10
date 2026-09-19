@@ -116,8 +116,13 @@ function describeFailure(
 
   const named = body?.error_description ?? body?.error
   if (named) parts.push(named)
-  else if (isBotChallenge(response, raw)) parts.push(BOT_CHALLENGE)
-  else if (raw.trim()) parts.push(snippet(raw))
+  else {
+    const stopped = interference(response, raw)
+    if (stopped.kind === "challenged") parts.push(CHALLENGED)
+    else if (stopped.kind === "blocked") parts.push(blockedBy(stopped.code))
+    else if (raw.trim()) parts.push(snippet(raw))
+    else parts.push("the endpoint answered with an empty body")
+  }
 
   /*
    * ⚠ THE RAY ID IS THE ONLY THING CLOUDFLARE SUPPORT WILL ASK FOR. It
@@ -132,39 +137,96 @@ function describeFailure(
   return parts.join(" · ")
 }
 
-const BOT_CHALLENGE =
-  "Cloudflare served a bot challenge instead of a token — our egress is being " +
-  "filtered, not your authorisation. Quote the ray id to Cloudflare support."
+const CHALLENGED =
+  "Cloudflare challenged the request instead of answering it — a bot-management " +
+  "decision about where we called from, not about your authorisation. Quote the " +
+  "ray id to Cloudflare support."
+
+const blockedBy = (code: string) =>
+  `Cloudflare refused the request itself with error ${code}, before the OAuth ` +
+  "endpoint saw it. Quote the ray id to Cloudflare support."
 
 /**
- * Whether the token endpoint answered with a challenge rather than OAuth.
+ * What stopped this, when it was not the OAuth endpoint.
  *
- * ⚠ THIS IS NOT A GUESS ABOUT SOMEBODY ELSE'S SYSTEM — CLOUDFLARE'S OWN CLIENT
- * CHECKS FOR IT ON THIS EXACT ENDPOINT. `wrangler`'s `getJSONFromResponse`
- * matches `<!DOCTYPE html>` and then `challenge-platform` in the body, and
- * prints: "It looks like you might have hit a bot challenge page… please
- * provide your Ray ID". `dash.cloudflare.com` is a dashboard host sitting
- * behind Cloudflare's own bot management, and an OAuth token exchange from a
- * datacentre IP is exactly the traffic it is built to stop.
+ * ⚠ THESE WERE ONE BRANCH AND THEY ARE TWO DIFFERENT PROBLEMS WITH TWO
+ * DIFFERENT FIXES. A CHALLENGE is bot management scoring the caller — the
+ * address, the ASN, the TLS fingerprint, the user agent — and it clears by
+ * changing one of those or by being allowlisted. A BLOCK (`error code: 1010`,
+ * `1020`, and friends) is a firewall rule that matched, which is a different
+ * conversation with support and often a different team. Reporting both as "a
+ * bot challenge" was us asserting a cause we had not established, on a page
+ * that then tells the customer it is nobody's fault — and being wrong about
+ * that sends whoever reads it to argue the wrong case.
  *
- * ⚠ AND IT CHANGES WHOSE PROBLEM IT IS. Every other exchange failure is a
- * credential, a code or a redirect URI — ours to fix, in Doppler or in the
- * provider's dashboard. This one is our egress being filtered on the way out,
- * which no amount of pressing the button again will clear, and the customer
- * reading the message did nothing wrong.
+ * ⚠ `Attention Required` HAS BEEN DROPPED AS A CHALLENGE MARKER, because it is
+ * the TITLE OF THE BLOCK PAGE. It was the loosest of the three and the one
+ * most likely to make a firewall rule look like a bot score. A block page with
+ * no error code in it now falls through to `snippet`, which quotes the page
+ * itself — less of a claim, and more information.
  *
- * ⚠ `cf-mitigated` IS CHECKED FIRST BECAUSE IT IS THE UNAMBIGUOUS ONE.
- * Cloudflare sets it on a challenged response; the body markers are the
- * fallback for a page served without it.
+ * ⚠ `cf-mitigated` IS STILL FIRST BECAUSE IT IS THE ONLY UNAMBIGUOUS SIGNAL.
+ * Cloudflare sets it on a challenged response and on nothing else.
+ *
+ * ⚠ AND `challenge-platform` IS NOT A GUESS ABOUT SOMEBODY ELSE'S SYSTEM —
+ * CLOUDFLARE'S OWN CLIENT MATCHES IT ON THIS EXACT ENDPOINT. `wrangler`'s
+ * `getJSONFromResponse` tests `<!DOCTYPE html>` and then `challenge-platform`,
+ * and prints "It looks like you might have hit a bot challenge page… please
+ * provide your Ray ID".
  */
-function isBotChallenge(response: Response, raw: string): boolean {
-  if (response.headers.get("cf-mitigated")) return true
-  if (!/<!DOCTYPE html>/i.test(raw)) return false
-  return (
-    raw.includes("challenge-platform") ||
-    raw.includes("Attention Required") ||
-    /error code: 10\d\d/.test(raw)
+type Interference =
+  { kind: "challenged" } | { kind: "blocked"; code: string } | { kind: "none" }
+
+function interference(response: Response, raw: string): Interference {
+  if (response.headers.get("cf-mitigated")) return { kind: "challenged" }
+  if (!/<!DOCTYPE html>/i.test(raw)) return { kind: "none" }
+  if (raw.includes("challenge-platform")) return { kind: "challenged" }
+
+  const blocked = /error code: (10\d\d)/.exec(raw)
+  if (blocked?.[1]) return { kind: "blocked", code: blocked[1] }
+
+  return { kind: "none" }
+}
+
+/**
+ * The page itself, for the log.
+ *
+ * ⚠ THE DETECTOR ABOVE WAS EATING THE ONLY EVIDENCE THERE IS, AND THAT IS WHY
+ * THIS FAILURE HAS BEEN ARGUED ABOUT INSTEAD OF SETTLED. `describeFailure`
+ * quotes the body only when it does NOT classify it — so in the one case where
+ * we most need to know what Cloudflare actually served, the body was read,
+ * matched against three substrings, reduced to a sentence, and dropped. Two
+ * rounds of this were spent reasoning about a response nobody had ever seen.
+ *
+ * ⚠ IT CARRIES THE HEADERS THAT DECIDE THE CLASSIFICATION, not just the text.
+ * `cf-mitigated` present or absent is the difference between a challenge and a
+ * firewall rule, and it is invisible in the body.
+ *
+ * ⚠ IT IS BUILT ONLY WHEN THE BODY DID NOT PARSE AS JSON, which is what keeps
+ * it safe to log. A token endpoint's JSON is the one thing here that can carry
+ * a credential; an HTML page from a proxy cannot, and neither can an empty
+ * body. The REQUEST holds our secret and is never included.
+ *
+ * ⚠ AND IT IS BOUNDED. A challenge page is a few kilobytes of inlined script;
+ * the first 2000 characters carry the doctype, the title, the error code and
+ * the ray, which is all of what identifies it.
+ */
+const EVIDENCE_HEADERS = [
+  "cf-ray",
+  "cf-mitigated",
+  "content-type",
+  "server",
+  "retry-after",
+] as const
+
+function transcript(response: Response, raw: string): string {
+  const headers = EVIDENCE_HEADERS.map(
+    (name) => [name, response.headers.get(name)] as const,
   )
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}: ${value}`)
+
+  return [...headers, "", raw.slice(0, 2000)].join("\n")
 }
 
 /** The first readable line of an HTML or plain-text body. */
@@ -181,6 +243,15 @@ export class OAuthError extends Error {
     readonly kind: "unconfigured" | "bad_state" | "exchange_failed",
     message: string,
     readonly detail?: string,
+    /**
+     * The unparsed response, for the log and never for the browser.
+     *
+     * ⚠ `detail` IS A SENTENCE FOR A CUSTOMER AND THIS IS THE PROOF BEHIND IT.
+     * They are separate because they go to different places: `detail` is
+     * returned by the callback route, this is only ever logged. See
+     * `transcript`.
+     */
+    readonly evidence?: string,
   ) {
     super(message)
     this.name = "OAuthError"
@@ -470,6 +541,9 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         "exchange_failed",
         `${provider.name} did not complete the authorisation.`,
         describeFailure(response, body, raw),
+        // See `transcript`: only when the body was not JSON, so it cannot hold
+        // a token, and it is the answer to "what did they actually send".
+        body === null ? transcript(response, raw) : undefined,
       )
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { passkeyFailure } from "../app/_lib/passkey"
+import { passkeyFailure, passkeyReference } from "../app/_lib/passkey"
 
 /**
  * What a passkey prompt is allowed to say when it does not end in a passkey.
@@ -101,6 +101,15 @@ describe("anything else", () => {
 
   it("sends a failed retrieval to another way in", () => {
     const error = clerkError("passkey_retrieval_failed", "Clerk: browser failed")
+    expect(passkeyFailure(error, "use")).toContain("another way in")
+  })
+
+  // ⚠ THE FALLBACK IS FOR CODES WE HAVE NEVER SEEN, and Clerk's passkey
+  // endpoint answers with API codes as well as WebAuthn ones. This is the
+  // branch that was reaching customers with nothing in it to report back.
+  it("falls back for a code that is not in the vocabulary at all", () => {
+    const error = clerkError("form_param_nil", "Clerk: nope")
+    expect(passkeyFailure(error, "add")).toContain("later from settings")
     expect(passkeyFailure(error, "use")).toBe(
       "That passkey did not work. Try another way in.",
     )
@@ -120,5 +129,42 @@ describe("anything else", () => {
       "That passkey did not work. Try another way in.",
     )
     expect(passkeyFailure("nope", "add")).toContain("later from settings")
+  })
+})
+
+/**
+ * The code that goes under the sentence.
+ *
+ * ⚠ THE POINT IS THE UNRECOGNISED CASE. Every fixture above that lands on a
+ * named reason is already answerable; the report that arrives as "it still does
+ * not work" is one of these, and without the code there is nothing to look up.
+ */
+describe("the reference somebody can quote back", () => {
+  it("carries the code for a failure we could not name", () => {
+    expect(passkeyReference(clerkError("form_param_nil", "Clerk: nope"))).toBe(
+      "form_param_nil",
+    )
+  })
+
+  it("prefers the passkey code when Clerk sends several", () => {
+    const error = Object.assign(new Error("Clerk: nope"), {
+      errors: [{ code: "form_param_nil" }, { code: "passkey_registration_failed" }],
+    })
+    expect(passkeyReference(error)).toBe("passkey_registration_failed")
+  })
+
+  // ⚠ NOTHING TO QUOTE FOR SOMEBODY WHO PRESSED CANCEL, because nothing is
+  // shown to them at all. A reference under a message that does not exist is a
+  // code floating on its own in a toast.
+  it("has nothing to say about a cancellation", () => {
+    const error = clerkError(
+      "passkey_retrieval_failed",
+      'Clerk: not allowed (code="passkey_retrieval_cancelled")',
+    )
+    expect(passkeyReference(error)).toBeUndefined()
+  })
+
+  it("copes with something that is not an error at all", () => {
+    expect(passkeyReference(null)).toBeUndefined()
   })
 })

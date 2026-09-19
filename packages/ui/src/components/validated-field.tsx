@@ -210,6 +210,61 @@ function useSubmitGuard(
   }, [ref])
 }
 
+/**
+ * What is actually in the box, whether or not React is holding it.
+ *
+ * ⚠ THIS FIELD USED TO ASSUME IT WAS CONTROLLED, AND THE ONE INPUT IN THE
+ * PRODUCT THAT IS NOT WAS THE SIGN-IN PASSWORD. Reading `value` off the props
+ * of an uncontrolled input gives `undefined` on every render, which became the
+ * empty string, which `required` reads as "they left it blank" — so typing a
+ * perfectly good password and pressing Login painted the field red and said
+ * "Enter your password" over a box with a password in it, and the submit guard
+ * refused the form on top of that. It was not a sign-in bug; it was this
+ * component being silently wrong about an entirely ordinary way to use an
+ * input.
+ *
+ * ⚠ AND UNCONTROLLED IS THE RIGHT CHOICE THERE, WHICH IS WHY THIS TRACKS THE
+ * DOM RATHER THAN THE CALL SITE BEING CORRECTED. A password field that
+ * re-renders its parent on every keystroke is a password in React state for no
+ * reason; `FloatingInput` is already CSS-only for exactly this, and the form
+ * reads the value from `FormData` at submit time. The fix belongs where the
+ * assumption was.
+ *
+ * ⚠ IT LISTENS FOR `input` **AND** `change`, because a password manager is not
+ * a keyboard. 1Password and the browser's own autofill set `.value` and
+ * dispatch one or the other depending on the browser — missing that would put
+ * us straight back to "there is text on screen and this component thinks the
+ * box is empty", which is the bug.
+ *
+ * ⚠ AND IT READS ONCE ON MOUNT, for `defaultValue` and for a browser restoring
+ * a form on a back navigation. Neither fires an event.
+ */
+function useLiveValue(
+  ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
+  value: unknown,
+): string {
+  const controlled = value !== undefined
+  const [mirror, setMirror] = React.useState("")
+
+  React.useEffect(() => {
+    if (controlled) return
+    const control = ref.current
+    if (!control) return
+
+    const read = () => setMirror(control.value)
+    read()
+
+    control.addEventListener("input", read)
+    control.addEventListener("change", read)
+    return () => {
+      control.removeEventListener("input", read)
+      control.removeEventListener("change", read)
+    }
+  }, [controlled, ref])
+
+  return controlled ? String(value ?? "") : mirror
+}
+
 type InputProps = Omit<
   React.ComponentProps<typeof FloatingInput>,
   "state" | "required" | "reserveHint"
@@ -224,13 +279,16 @@ export function ValidatedInput({
   reserveHint,
   value,
   ref,
+  spellCheck,
   ...props
 }: InputProps) {
   const own = React.useRef<HTMLInputElement>(null)
-  const text = typeof value === "string" ? value : String(value ?? "")
+  const text = useLiveValue(own, value)
 
   const focus = useFieldFocus((v) => v.trim() !== "" && (check?.(v) ?? null) !== null)
-  useSubmitGuard(own, focus.reveal, () => fieldBlocks(text, { check, required }))
+  useSubmitGuard(own, focus.reveal, () =>
+    fieldBlocks(own.current?.value ?? text, { check, required }),
+  )
 
   const verdict = fieldVerdict(text, focus, { check, required })
 
@@ -238,6 +296,23 @@ export function ValidatedInput({
     <FloatingInput
       {...props}
       value={value}
+      /*
+       * ⚠ OFF BY DEFAULT, BECAUSE THE BROWSER'S RED IS OUR RED. A spell-checker
+       * draws a red wavy line under `i10.tech`, `acme-corp`, `prod-api-key` and
+       * most surnames — a claim about correctness, in the one colour this
+       * component spends its whole existence making mean something, about words
+       * it has no opinion worth having on. Two different systems marking the
+       * same field wrong for different reasons is worse than either alone.
+       *
+       * ⚠ A SINGLE-LINE FIELD IS NOT PROSE, WHICH IS WHAT MAKES THIS SAFE AS A
+       * DEFAULT RATHER THAN A DECISION PER CALL SITE. It holds a name, an
+       * address, a domain, a key — identifiers, where a dictionary is wrong by
+       * construction. `ValidatedTextarea` deliberately does NOT do this: that
+       * one holds sentences somebody wrote, and a spell-checker is earning its
+       * keep there. Anything single-line that really is prose — a subject line
+       * — passes `spellCheck` back on.
+       */
+      spellCheck={spellCheck ?? false}
       ref={mergeRefs(own, ref)}
       {...focus.props}
       state={busy ? "pending" : verdict.state}
@@ -272,10 +347,12 @@ export function ValidatedTextarea({
   ...props
 }: TextareaProps) {
   const own = React.useRef<HTMLTextAreaElement>(null)
-  const text = typeof value === "string" ? value : String(value ?? "")
+  const text = useLiveValue(own, value)
 
   const focus = useFieldFocus((v) => v.trim() !== "" && (check?.(v) ?? null) !== null)
-  useSubmitGuard(own, focus.reveal, () => fieldBlocks(text, { check, required }))
+  useSubmitGuard(own, focus.reveal, () =>
+    fieldBlocks(own.current?.value ?? text, { check, required }),
+  )
 
   const verdict = fieldVerdict(text, focus, { check, required })
 

@@ -45,6 +45,57 @@ export interface CheckoutStatusDeps {
  */
 export type CheckoutStatus = "granted" | "paid" | "unpaid" | "unknown"
 
+/**
+ * Whether Polar's copy of this customer carries the tenant id its events need.
+ *
+ * ⚠ THIS IS THE ONE FAILURE THE HALF-HOURLY RECONCILER CANNOT REPAIR, WHICH IS
+ * WHY IT IS WORTH A ROUND TRIP TO NAME. Every subscription event is attributed
+ * by `customer.external_id`; `toState` drops the ones without it, and the
+ * reconciler drops them by the identical rule — so a customer record missing
+ * ours means the payment has gone through, the subscription is active in
+ * Polar, and nothing on this side will EVER notice, in either direction. The
+ * page otherwise tells that customer we check for stragglers every half hour,
+ * which is true of every other way this can be pending and false of this one.
+ *
+ * ⚠ AND IT IS ASKED ONLY ON THE PENDING PATH, so it costs one extra call
+ * during the second between Polar taking the money and our webhook landing,
+ * and nothing at all once the grant exists.
+ *
+ * ⚠ A FAILED LOOKUP IS NOT A VERDICT. Polar being unreachable for this one
+ * question says nothing, and answering "unattributed" on it would tell
+ * somebody their payment is stuck when it is arriving normally.
+ */
+async function attributionGap(
+  deps: CheckoutStatusDeps,
+  checkout: { id: string; tenantId: string; customerId: string | null },
+): Promise<boolean> {
+  if (!checkout.customerId) return false
+
+  try {
+    const customer = await deps.polar.getCustomer(checkout.customerId)
+    if (!customer || customer.externalId === checkout.tenantId) return false
+
+    deps.log.error(
+      {
+        checkoutId: checkout.id,
+        tenantId: checkout.tenantId,
+        polarCustomerId: checkout.customerId,
+        externalId: customer.externalId,
+      },
+      "a paid checkout resolved to a Polar customer that does not carry our " +
+        "tenant id — its subscription events cannot be attributed and neither " +
+        "the webhook nor the reconciler will ever grant this plan",
+    )
+    return true
+  } catch (err) {
+    deps.log.warn(
+      { checkoutId: checkout.id, err: String(err) },
+      "could not check a checkout's customer attribution",
+    )
+    return false
+  }
+}
+
 export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
   const app = new Hono()
 
@@ -106,12 +157,25 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
     // Polar said. Reading `plan_id` instead would show "Pro" the instant the
     // row was written and before the entitlement existed, which is exactly the
     // lie this page is built to avoid.
+    if (current.plan) {
+      return c.json(
+        { status: "granted" satisfies CheckoutStatus, plan: current.plan },
+        200,
+      )
+    }
+
+    const stranded = await attributionGap(deps, {
+      id: checkoutId,
+      tenantId: checkout.tenantId,
+      customerId: checkout.customerId,
+    })
+
     return c.json(
       {
-        status: (current.plan
-          ? "granted"
-          : "paid") satisfies CheckoutStatus as CheckoutStatus,
-        plan: current.plan,
+        status: "paid" satisfies CheckoutStatus,
+        plan: null,
+        // The page reads this to choose between "a moment" and "write to us".
+        ...(stranded ? { detail: "unattributed" } : {}),
       },
       200,
     )

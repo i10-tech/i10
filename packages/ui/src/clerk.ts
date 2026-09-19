@@ -77,15 +77,33 @@ const variables = {
   colorBackground: "var(--popover)",
 
   /*
-   * ⚠ `--background`, NOT `--input`. Our `--input` token is the input's BORDER
-   * colour, not its fill — shadcn's convention, and the reason `border-input`
-   * appears all over the component library. Passing it here would give Clerk's
-   * fields a flat grey fill in light mode, where every one of ours is
-   * transparent over the page.
+   * ⚠ NOT `--input`. Our `--input` token is the input's BORDER colour, not its
+   * fill — shadcn's convention, and the reason `border-input` appears all over
+   * the component library. Passing it here would give Clerk's fields a flat
+   * grey fill in light mode, where every one of ours is transparent over the
+   * page.
+   *
+   * ⚠ AND NOT `--background` EITHER, WHICH IS WHAT IT WAS AND WHAT MADE THE
+   * VERIFICATION DIALOG UNUSABLE IN DARK MODE. Clerk wants a literal fill where
+   * ours are `bg-transparent`, so the nearest honest value is the colour of the
+   * surface the field is sitting on — and every Clerk surface that floats is
+   * `--popover`, which is what `colorBackground` above is set to. `--background`
+   * is PURE BLACK in this palette while `--popover` is 0.14: an input filled
+   * with one on a card painted the other is a black rectangle inside a grey
+   * one. In light mode both are white, so it looked correct for as long as
+   * nobody opened a dialog in the dark.
    */
-  colorInput: "var(--background)",
+  colorInput: "var(--popover)",
   colorInputForeground: "var(--foreground)",
 
+  /*
+   * ⚠ `--border` IS THE DIVIDER COLOUR, AND CLERK USES THIS FOR FIELDS TOO.
+   * Ours are drawn with `--input` (15% in dark mode) and everything else with
+   * `--border` (12%); Clerk has one variable for both, so its inputs came out a
+   * shade fainter than every input in the product. The `elements` override
+   * below puts the right one back on the fields; this stays the divider colour,
+   * which is what the rest of Clerk's chrome is.
+   */
   colorBorder: "var(--border)",
   colorRing: "var(--ring)",
 
@@ -130,6 +148,38 @@ export const CLERK_PANEL = {
 } as const
 
 /**
+ * Clerk's form fields, wearing our input.
+ *
+ * ⚠ THE VARIABLES ALONE CANNOT DO THIS, WHICH IS WHY IT IS THE ONE `elements`
+ * ENTRY ON THE PROVIDER. Clerk has a single `colorBorder` for dividers and
+ * fields; our design system deliberately has two (`--border` and `--input`),
+ * and the field one is the brighter of them because a field has to announce
+ * where it is. There is no variable to say that, so it is said here.
+ *
+ * ⚠ IT IS ON THE PROVIDER RATHER THAN A COMPONENT BECAUSE THE SURFACE THAT
+ * NEEDED IT IS NOT A COMPONENT WE RENDER. The reverification dialog — the one
+ * that appears before connecting an account on an instance with two-factor on —
+ * is opened by clerk-js itself. There is nothing to pass an appearance to; it
+ * inherits this or it inherits nothing, and inheriting nothing was a dialog
+ * asking for a code with no visible box to type it in.
+ *
+ * ⚠ AND `focus-visible:border-ring` IS HOW FOCUS IS SPELLED IN THIS PALETTE.
+ * See the note on `--ring` in styles/tokens.css: nothing new is painted, the
+ * existing 1px border simply moves from `--input` to `--ring`. A field that
+ * borrowed Clerk's own focus treatment would be the only one in either app
+ * that grew a halo.
+ *
+ * ⚠ `bg-transparent` RATHER THAN A COLOUR, so a field is correct on Clerk's
+ * floating surfaces AND inside the panels `CLERK_PANEL` strips — which sit on
+ * `--card` and `--background`. That is three different colours in dark mode and
+ * exactly the reason our own `FloatingInput` paints no fill either.
+ */
+const CLERK_FIELDS = {
+  formFieldInput: "border border-input bg-transparent focus-visible:border-ring",
+  otpCodeFieldInput: "border border-input bg-transparent focus-visible:border-ring",
+} as const
+
+/**
  * What every app passes to `<ClerkProvider appearance={…}>`.
  *
  * ⚠ SET ON THE PROVIDER, NOT PER COMPONENT, so a Clerk surface added tomorrow
@@ -147,4 +197,5 @@ export const clerkAppearance = {
   theme: "simple",
   cssLayerName: CLERK_CSS_LAYER,
   variables,
+  elements: CLERK_FIELDS,
 } as const

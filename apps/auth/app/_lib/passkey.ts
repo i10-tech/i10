@@ -47,6 +47,17 @@ const CANCELLED = new Set([
 const REASONS: Record<string, string> = {
   passkey_already_exists: "This device already has a passkey for your account.",
   /*
+   * ⚠ THE GENERIC PAIR IS NAMED RATHER THAN LEFT TO THE FALLBACK, because
+   * they mean something the fallback does not: the prompt RAN and the browser
+   * came back with nothing. `webAuthnCreateCredential` raises the first when
+   * `navigator.credentials.create()` resolves empty. "Try again" is honest
+   * advice for that and is not honest advice for an unrecognised code.
+   */
+  passkey_registration_failed:
+    "Your device did not finish creating the passkey. Try again, or add one later from settings.",
+  passkey_retrieval_failed:
+    "Your device did not hand over the passkey. Try again, or use another way in.",
+  /*
    * ⚠ OUR MISCONFIGURATION, AND IT SAYS SO RATHER THAN BLAMING THE DEVICE. A
    * relying-party id that does not match the page's domain is a setting on the
    * Clerk instance; no amount of trying again from the customer's side will
@@ -107,6 +118,46 @@ const FROM_DOM: Record<string, string> = {
   NotSupportedError: "passkey_not_supported",
 }
 
+/** Everything this error calls itself, from every place Clerk might have put it. */
+function allCodes(error: unknown): string[] {
+  const codes = codesIn(error)
+  const domName = error instanceof Error ? FROM_DOM[error.name] : undefined
+  if (domName) codes.push(domName)
+  return codes
+}
+
+/**
+ * The short string to put under a message somebody is going to report to us.
+ *
+ * ⚠ IT EXISTS BECAUSE THE SENTENCE ALONE MADE THE NEXT BUG REPORT UNANSWERABLE.
+ * "We could not add a passkey on this device" is the right thing to SAY and
+ * carries nothing at all to act on: Clerk has nine of these codes, they arrive
+ * through three different fields, and some of them are not WebAuthn codes but
+ * API ones from `POST /v1/me/passkeys`. Reading it back was a round trip
+ * through a person, a browser and a device we do not have.
+ *
+ * ⚠ IT IS THE SAME TRADE AS THE CLOUDFLARE RAY ID, and the same shape: when a
+ * failure is somebody else's to diagnose, the one useful thing an interface can
+ * do is carry the identifier they will ask for. It is a code, not a stack trace
+ * and not Clerk's developer sentence — `passkey_registration_failed` is a fact,
+ * `Clerk: The operation either timed out or was not allowed. See:
+ * https://www.w3.org/TR/webauthn-2/…` is somebody else's debugging output
+ * printed at a customer.
+ *
+ * ⚠ AND A CANCELLATION HAS NO REFERENCE, because a cancellation has no message
+ * to attach one to. `passkeyFailure` returns `null` there and nothing is shown.
+ */
+export function passkeyReference(error: unknown): string | undefined {
+  const codes = allCodes(error)
+  if (codes.some((code) => CANCELLED.has(code))) return undefined
+
+  // ⚠ A `passkey_*` CODE WINS OVER WHATEVER ELSE IS IN THE LIST. Clerk's API
+  // errors arrive alongside generic form codes, and `form_param_unknown` next
+  // to `passkey_registration_failed` is the less specific of the two.
+  const specific = codes.find((code) => code.startsWith("passkey_"))
+  return specific ?? codes[0]
+}
+
 /**
  * What to show somebody, or `null` if the honest answer is nothing.
  *
@@ -115,10 +166,7 @@ const FROM_DOM: Record<string, string> = {
  *   send people to different places.
  */
 export function passkeyFailure(error: unknown, intent: "add" | "use"): string | null {
-  const codes = codesIn(error)
-
-  const domName = error instanceof Error ? FROM_DOM[error.name] : undefined
-  if (domName) codes.push(domName)
+  const codes = allCodes(error)
 
   // ⚠ CANCELLATION WINS OVER EVERYTHING ELSE IN THE LIST, because the list is
   // frequently `["passkey_retrieval_failed", "passkey_retrieval_cancelled"]` —

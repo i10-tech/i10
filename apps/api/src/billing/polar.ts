@@ -73,6 +73,28 @@ export interface CheckoutState {
   status: string
   /** From `metadata.tenant_id`, or null on a checkout we did not create. */
   tenantId: string | null
+  /**
+   * The Polar customer this checkout resolved to, once it has one.
+   *
+   * ⚠ IT IS HERE SO SOMEBODY CAN ASK WHETHER THAT CUSTOMER CARRIES OUR TENANT
+   * ID, WHICH IS THE ONE THING THAT DECIDES WHETHER A PAYMENT EVER REACHES US.
+   * See `getCustomer` and routes/checkout-status.ts.
+   */
+  customerId: string | null
+}
+
+/** Just enough of a Polar customer to answer "will its events reach us". */
+export interface CustomerState {
+  id: string
+  /**
+   * ⚠ OURS TO SET AND POLAR'S TO KEEP, AND IT IS NULLABLE FOR A REASON THAT
+   * COSTS MONEY. `external_customer_id` on a checkout sets this only when Polar
+   * CREATES the customer; their own field documentation says so — "a new
+   * customer will be created with this external ID set". A checkout that
+   * resolves to a customer Polar already had leaves whatever that record
+   * already carried, which for a customer created any other way is nothing.
+   */
+  externalId: string | null
 }
 
 export interface PolarClient {
@@ -82,6 +104,17 @@ export interface PolarClient {
    * answer for a made-up id, and must not be confused with "not paid".
    */
   getCheckout(checkoutId: string): Promise<CheckoutState | null>
+  /**
+   * One customer, by Polar's id. `null` when Polar does not know it.
+   *
+   * ⚠ IT EXISTS FOR EXACTLY ONE QUESTION: does this customer carry our tenant
+   * id. Every subscription event is attributed by `customer.external_id` and
+   * nothing else, so a customer without one is a paying customer whose events
+   * are discarded by `toState` — silently, in the webhook AND in the
+   * reconciler, for ever. This is how that becomes something we can say out
+   * loud rather than something nobody can see.
+   */
+  getCustomer(customerId: string): Promise<CustomerState | null>
   /** Every subscription Polar holds for this organisation. The reconciler's view. */
   listSubscriptions(): Promise<PolarSubscription[]>
   /**
@@ -300,6 +333,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
       const body = (await response.json()) as {
         id: string
         status: string
+        customer_id?: string | null
         metadata?: Record<string, unknown> | null
       }
       const tenantId = body.metadata?.tenant_id
@@ -308,7 +342,26 @@ export function polarClient(opts: PolarOptions): PolarClient {
         id: body.id,
         status: body.status,
         tenantId: typeof tenantId === "string" && tenantId ? tenantId : null,
+        customerId: body.customer_id ?? null,
       }
+    },
+
+    async getCustomer(customerId) {
+      const response = await call(`/v1/customers/${encodeURIComponent(customerId)}`)
+
+      // Same rule as `getCheckout`: both statuses mean "no such customer", and
+      // neither is a failure worth failing a page over.
+      if (response.status === 404 || response.status === 422) return null
+      if (!response.ok) {
+        throw new Error(`polar customers.get failed with ${response.status}`)
+      }
+
+      const body = (await response.json()) as {
+        id: string
+        external_id?: string | null
+      }
+
+      return { id: body.id, externalId: body.external_id ?? null }
     },
 
     async ingestEvents(events) {
