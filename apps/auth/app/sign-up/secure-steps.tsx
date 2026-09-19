@@ -16,7 +16,7 @@ import { Spinner } from "@repo/ui/components/spinner"
 import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { StepHeading } from "../_components/step-heading"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
-import { passkeyFailure } from "../_lib/passkey"
+import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import type { SsoProvider } from "../_lib/providers"
 import {
   AppleIcon,
@@ -124,7 +124,17 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
       }
 
       const reason = passkeyFailure(error, "add")
-      if (reason) toast.error(reason)
+      if (reason) {
+        /*
+         * ⚠ THE CODE GOES UNDER THE SENTENCE, because "we could not add a
+         * passkey on this device" is answerable by nobody. Clerk has nine
+         * passkey codes and answers with API codes besides, and a report that
+         * arrives without one costs a round trip through a person, a browser
+         * and a device we do not have. See _lib/passkey.ts — the same trade
+         * as printing Cloudflare's ray id.
+         */
+        toast.error(reason, { description: passkeyReference(error) })
+      }
       onBusy(null)
     }
   }

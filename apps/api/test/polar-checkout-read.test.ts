@@ -42,6 +42,7 @@ describe("reading a Polar checkout by id", () => {
       id: "21ae5db2-5eec-465e-95e7-59ecd3155c72",
       status: "succeeded",
       tenantId: "ten-1",
+      customerId: null,
     })
   })
 
@@ -76,6 +77,45 @@ describe("reading a Polar checkout by id", () => {
       expect(
         client(status).getCheckout("21ae5db2-5eec-465e-95e7-59ecd3155c72"),
       ).rejects.toThrow(`polar checkouts.get failed with ${status}`)
+    },
+  )
+})
+
+/**
+ * Reading the customer a checkout resolved to.
+ *
+ * ⚠ ONE FIELD DECIDES WHETHER A PAYMENT EVER REACHES US. Every subscription
+ * event is attributed by `customer.external_id`; Polar sets it only on a
+ * customer it CREATES from a checkout's `external_customer_id`, and leaves it
+ * alone on one that already existed. So this is the difference between "the
+ * webhook is a second behind" and "nothing will ever grant this plan".
+ */
+describe("reading a Polar customer by id", () => {
+  it("lifts out the external id Polar holds for them", async () => {
+    expect(
+      await client(200, { id: "cus_1", external_id: "ten-1" }).getCustomer("cus_1"),
+    ).toEqual({ id: "cus_1", externalId: "ten-1" })
+  })
+
+  // ⚠ ABSENT AND NULL ARE THE SAME ANSWER, and it is the answer that matters:
+  // a customer carrying no external id is one whose events are discarded.
+  it("reports a customer with no external id as null rather than undefined", async () => {
+    expect(await client(200, { id: "cus_1" }).getCustomer("cus_1")).toEqual({
+      id: "cus_1",
+      externalId: null,
+    })
+  })
+
+  it.each([404, 422])("answers null for an id Polar refuses (%i)", async (status) => {
+    expect(await client(status).getCustomer("cus_1")).toBe(null)
+  })
+
+  it.each([401, 403, 500])(
+    "throws on %i rather than inventing an answer",
+    async (status) => {
+      expect(client(status).getCustomer("cus_1")).rejects.toThrow(
+        `polar customers.get failed with ${status}`,
+      )
     },
   )
 })

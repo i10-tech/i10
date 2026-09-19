@@ -14,7 +14,7 @@ import { StepStage } from "@repo/ui/components/step-stage"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
-import { passkeyFailure } from "../_lib/passkey"
+import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { LastUsedBadge } from "../_components/last-used-badge"
@@ -243,7 +243,9 @@ export function SignInForm({
          * has nothing to add to it.
          */
         const reason = passkeyFailure(error, "use")
-        if (reason) toast.error(reason)
+        // The code, for the report that would otherwise arrive as "it did not
+        // work". See _lib/passkey.ts.
+        if (reason) toast.error(reason, { description: passkeyReference(error) })
         setBusy(null)
         return
       }
@@ -279,7 +281,7 @@ export function SignInForm({
        * never is: the rejection happened in the browser, before any request.
        */
       const reason = passkeyFailure(error, "use")
-      if (reason) toast.error(reason)
+      if (reason) toast.error(reason, { description: passkeyReference(error) })
       setBusy(null)
     }
   }

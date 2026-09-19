@@ -99,10 +99,26 @@ export function createPolarWebhooks(deps?: PolarWebhookDeps) {
 
     const decided = decide(event, deps.options)
     if (decided.kind === "ignore") {
-      deps.log.info(
-        { webhookId: verified.id, type: event.type, reason: decided.reason },
-        "ignored a Polar event",
-      )
+      /*
+       * ⚠ STILL 202, BECAUSE A RETRY CANNOT HELP EITHER WAY — BUT NOT STILL
+       * `info`. A stranded subscription is a customer who has paid, whom Polar
+       * shows as active, and whom nothing on this side will ever grant: the
+       * reconciler discards it by the same rule this line just applied. That is
+       * the loudest thing this endpoint can discover, and it used to read
+       * exactly like an order event for somebody else's product.
+       */
+      if (decided.stranded) {
+        deps.log.error(
+          { webhookId: verified.id, type: event.type, reason: decided.reason },
+          "a paid subscription could not be attributed to a tenant and was " +
+            "DISCARDED — set the Polar customer's external_id to the tenant id",
+        )
+      } else {
+        deps.log.info(
+          { webhookId: verified.id, type: event.type, reason: decided.reason },
+          "ignored a Polar event",
+        )
+      }
       return c.json({ ok: true, outcome: "ignored" }, 202)
     }
 

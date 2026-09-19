@@ -175,6 +175,67 @@ const row = (over: Record<string, unknown> = {}) => ({
 })
 
 describe("reconciling against Polar", () => {
+  /*
+   * ⚠ THE ONE THING THE BACKSTOP CANNOT BACK UP, AND IT USED TO SKIP IT
+   * SILENTLY. The reconciler attributes subscriptions by
+   * `customer.external_id`, exactly as the webhook does — so a subscription
+   * without one is invisible to both, and a bare `continue` meant a run could
+   * report perfect agreement while somebody who had paid sat on the free plan
+   * for ever.
+   */
+  it("reports a subscription it cannot attribute rather than skipping it", async () => {
+    const apply = mock()
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        listSubscriptions: async () => [polarSub({ customer: { external_id: null } })],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({ snapshot: async () => [] }),
+      grants: { apply },
+      options,
+      log,
+    })
+
+    expect(report.stranded).toEqual([
+      {
+        subscriptionId: "sub_1",
+        reason: "subscription sub_1 has no external customer id (customer cus_1)",
+      },
+    ])
+    expect(report.checked).toBe(0)
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  // ⚠ AND SOMEBODY ELSE'S PRODUCT IS NOT STRANDED. A Polar organisation can
+  // sell things that are not i10 plans; reporting those would make the alert
+  // fire on healthy state, which is how an alert stops being read.
+  it("does not report a subscription for a product that is not ours", async () => {
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        listSubscriptions: async () => [polarSub({ product_id: "prod_someone_else" })],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({ snapshot: async () => [] }),
+      grants: { apply: mock() },
+      options,
+      log,
+    })
+
+    expect(report.stranded).toEqual([])
+  })
+
   it("leaves a tenant alone when our record already agrees", async () => {
     const apply = mock()
     const report = await reconcileSubscriptions({
@@ -184,6 +245,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [polarSub()],
         createCheckout: mock(),
       },
@@ -210,6 +272,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [
           polarSub({
             id: "sub_old",
@@ -245,6 +308,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [
           polarSub({ id: "sub_live", modified_at: "2026-09-03T12:00:00Z" }),
           polarSub({
@@ -276,6 +340,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [polarSub()],
         createCheckout: mock(),
       },
@@ -300,6 +365,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [polarSub()],
         createCheckout: mock(),
       },
@@ -321,6 +387,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [
           polarSub({ status: "canceled", modified_at: "2026-09-04T12:00:00Z" }),
         ],
@@ -349,6 +416,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [polarSub({ id: "sub_other" })],
         createCheckout: mock(),
       },
@@ -372,6 +440,7 @@ describe("reconciling against Polar", () => {
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        getCustomer: async () => null,
         listSubscriptions: async () => [
           polarSub({ id: "sub_1", customer: { external_id: "ten-1" } }),
           polarSub({ id: "sub_2", customer: { external_id: "ten-2" } }),
@@ -430,6 +499,7 @@ describe("POST /billing/checkout", () => {
           updateSubscription: mock(),
           cancelSubscription: mock(),
           createCustomerSession: mock(),
+          getCustomer: mock(),
         },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
@@ -467,6 +537,7 @@ describe("POST /billing/checkout", () => {
           updateSubscription: mock(),
           cancelSubscription: mock(),
           createCustomerSession: mock(),
+          getCustomer: mock(),
         },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
@@ -495,6 +566,7 @@ describe("POST /billing/checkout", () => {
           updateSubscription: async () => {},
           cancelSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
+          getCustomer: async () => null,
           listSubscriptions: mock(),
         },
         subscriptions: ops(),
@@ -528,6 +600,7 @@ describe("GET /billing/plan", () => {
           updateSubscription: async () => {},
           cancelSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
+          getCustomer: async () => null,
           listSubscriptions: mock(),
         },
         subscriptions: ops({
@@ -574,6 +647,7 @@ describe("GET /billing/plan", () => {
           updateSubscription: async () => {},
           cancelSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
+          getCustomer: async () => null,
           listSubscriptions: mock(),
         },
         subscriptions: ops({

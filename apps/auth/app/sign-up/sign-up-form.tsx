@@ -19,6 +19,7 @@ import { PasswordInput } from "../_components/password-input"
 import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeWithoutLeaving, leaveFor } from "../_lib/finish"
+import { markSignInAttempt } from "../_lib/last-used"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
 import { describeRules, passwordProblem } from "../_lib/validate"
 import type { SsoProvider } from "../_lib/providers"
@@ -435,6 +436,21 @@ export function SignUpForm({
       setBusy(null)
       return
     }
+
+    /*
+     * ⚠ SIGNING UP IS EVIDENCE OF HOW SOMEBODY WILL SIGN IN, AND ONLY THE SSO
+     * BUTTONS WERE RECORDING IT. `OAuthButtons` marks the attempt on both pages,
+     * so a Google sign-up already earned its badge; an email-and-password
+     * sign-up recorded nothing, so the very first time that person came back
+     * — the moment the badge exists for — there was nothing to show them. They
+     * had used exactly one method in their life and we knew which.
+     *
+     * ⚠ IT IS THE PENDING MARKER RATHER THAN THE CONFIRMED ONE, on the same
+     * rule as everywhere else: `leaveFor` promotes it once a session actually
+     * exists. The account is real by this line, but the person is about to be
+     * offered a passkey and two-factor and may still close the tab.
+     */
+    markSignInAttempt("password")
 
     leaveRef.current = leave
     setBusy(null)

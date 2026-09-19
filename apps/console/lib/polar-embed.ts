@@ -22,12 +22,19 @@
  * `embed_origin` in apps/api/src/billing/polar.ts.
  *
  * ⚠ AND NOTHING HERE WAITS FOR THEM ANY MORE, WHICH IS THE PART THAT SURVIVES
- * THE NEXT REGRESSION. The way out is built before the iframe is asked to
- * announce itself, so a checkout that never says `loaded` — a future change on
- * their side, an origin that stops matching, a blocked third-party frame — is
- * a modal somebody can still close and a payment we still notice. Correct
- * configuration should not be what stands between a customer and the Escape
- * key.
+ * THE NEXT REGRESSION. Escape and the status poll are live before the iframe is
+ * asked to announce itself, so a checkout that never says `loaded` — a future
+ * change on their side, an origin that stops matching, a blocked third-party
+ * frame — is a modal somebody can still close and a payment we still notice.
+ * Correct configuration should not be what stands between a customer and the
+ * Escape key.
+ *
+ * ⚠ THE ✕ IS THE HALF THAT HAD TO BECOME CONDITIONAL, BECAUSE THE FIX WORKED.
+ * With `embed_origin` sent, Polar's page renders its own close button and
+ * announces itself — so an unconditional one of ours is simply a second ✕ in
+ * the same corner of somebody's payment form. It is now built up front and
+ * shown only if `loaded` has not arrived; see `THEIRS_SHOULD_HAVE_LOADED_MS`.
+ * The recovery is kept, the duplicate is not.
  *
  * ⚠ IT SHARES THE IFRAME'S z-index RATHER THAN EXCEEDING IT. The SDK uses
  * 2147483647, which is the largest value CSS accepts; nothing can be layered
@@ -76,6 +83,9 @@ export interface OpenCheckoutOptions {
 const POLL_EVERY_MS = 2_000
 const POLL_FOR_MS = 5 * 60_000
 
+/** How long to let Polar's own close button turn up before drawing one. */
+const THEIRS_SHOULD_HAVE_LOADED_MS = 6_000
+
 export async function openPolarCheckout(
   url: string,
   { theme, onSuccess, checkoutId }: OpenCheckoutOptions,
@@ -102,11 +112,27 @@ export async function openPolarCheckout(
   let dismissable = true
   let done = false
   let poll: ReturnType<typeof setInterval> | undefined
+  let reveal: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * Stop waiting to find out whether Polar drew its own close button.
+   *
+   * ⚠ IT FORGETS THE HANDLE AS WELL AS CLEARING IT, because both ways out of
+   * the wait can happen and either can happen first: `loaded` arrives, or the
+   * modal is closed before it does. A cleared-but-remembered timer is a handle
+   * that reads as live.
+   */
+  const stopWaiting = () => {
+    if (!reveal) return
+    clearTimeout(reveal)
+    reveal = undefined
+  }
 
   const teardown = () => {
     if (done) return
     done = true
     if (poll) clearInterval(poll)
+    stopWaiting()
     document.removeEventListener("keydown", onKey)
     button.remove()
   }
@@ -192,7 +218,32 @@ export async function openPolarCheckout(
   button.addEventListener("click", dismiss)
 
   document.addEventListener("keydown", onKey)
-  document.body.appendChild(button)
+
+  /*
+   * ⚠ IT IS BUILT NOW AND SHOWN ONLY IF THEIRS NEVER ARRIVES, WHICH IS THE
+   * WHOLE OF THE DIFFERENCE BETWEEN THIS AND TWO CLOSE BUTTONS. Polar draws its
+   * own ✕ inside the checkout page, so it exists from the moment that page
+   * renders — and `loaded` is the page announcing exactly that. Ours was
+   * appended unconditionally while `embed_origin` was missing and `loaded`
+   * therefore never came; now that the field is sent, both appear and the
+   * modal has two identical buttons in the same corner.
+   *
+   * ⚠ SO THE ESCAPE HATCH STAYS, AND ONLY THE DUPLICATE GOES. A checkout
+   * that never says `loaded` — a blocked third-party frame, an origin that
+   * stops matching, the next regression on their side — is still a payment form
+   * covering the viewport, and the reason this module exists is that there was
+   * no way out of one. Deleting the button because it is currently redundant
+   * would delete the recovery along with it.
+   *
+   * ⚠ THE DELAY IS A CEILING ON A LOAD, NOT A GUESS AT ONE. Before the page
+   * renders there is nothing to duplicate — their ✕ is not there either — so
+   * showing ours early on a slow connection costs nothing and is removed the
+   * moment `loaded` lands. Escape is bound throughout and never duplicates
+   * anything.
+   */
+  reveal = setTimeout(() => {
+    if (!done && !checkout) document.body.appendChild(button)
+  }, THEIRS_SHOULD_HAVE_LOADED_MS)
 
   /*
    * ⚠ THEIR EVENTS ARE WIRED WHEN THE INSTANCE ARRIVES, AND EVERYTHING ABOVE
@@ -207,6 +258,12 @@ export async function openPolarCheckout(
   void opening
     .then((instance) => {
       checkout = instance
+
+      // Their page has rendered, so their own ✕ is on screen. See the note on
+      // `reveal` above: ours exists for the case where this never happens.
+      stopWaiting()
+      button.remove()
+
       if (done) {
         // Closed before it finished loading. Their `close()` also removes the
         // window message listener, which our by-hand teardown cannot.

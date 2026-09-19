@@ -82,8 +82,17 @@ export function CheckoutResult({ checkoutId }: { checkoutId: string | null }) {
           ...(body.detail ? { detail: body.detail } : {}),
         })
 
-        // Only `paid` is worth waiting on: it is the second between Polar
-        // taking the money and our webhook landing. Everything else is settled.
+        /*
+         * Only `paid` is worth waiting on: it is the second between Polar
+         * taking the money and our webhook landing. Everything else is settled.
+         *
+         * ⚠ EXCEPT THE ONE `paid` THAT IS ALSO SETTLED. `unattributed` means
+         * the API has already established that nothing will ever grant this —
+         * Polar's customer record does not carry our tenant id, so the webhook
+         * and the reconciler both discard its events by the same rule. Polling
+         * on is a spinner in front of somebody whose answer has arrived.
+         */
+        if (body.detail === "unattributed") return
         if (body.status !== "paid" && body.status !== "unavailable") return
       } catch {
         if (!live) return
@@ -207,6 +216,24 @@ function present(result: Result | null, timedOut: boolean): View {
 
     case "paid":
     case "unavailable":
+      /*
+       * ⚠ THE ONE CASE WHERE "we check every half hour" WOULD BE A LIE, AND
+       * IT IS THE CASE WHERE THE MONEY HAS ALREADY GONE. The reconciler repairs
+       * a lost webhook by re-reading Polar — but it attributes subscriptions by
+       * `customer.external_id` exactly as the webhook does, so a customer
+       * record without ours is invisible to both, permanently. Telling somebody
+       * to wait is telling them to wait for something that is not coming.
+       */
+      if (result.detail === "unattributed") {
+        return {
+          glyph: "cross",
+          circle: RED,
+          halo: halo(RED),
+          title: "We could not match this payment",
+          body: "Your payment went through and you have not lost it — we just cannot tie it to this workspace automatically. Email support@i10.tech and we will put your plan on straight away.",
+        }
+      }
+
       return timedOut
         ? {
             glyph: "clock",

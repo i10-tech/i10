@@ -86,7 +86,24 @@ export interface SubscriptionState {
 }
 
 export type Decision =
-  { kind: "apply"; state: SubscriptionState } | { kind: "ignore"; reason: string }
+  | { kind: "apply"; state: SubscriptionState }
+  | {
+      kind: "ignore"
+      reason: string
+      /**
+       * A real subscription we could not attribute to anybody.
+       *
+       * ⚠ IT SEPARATES THE ONE IGNORE THAT COSTS MONEY FROM THE THREE THAT DO
+       * NOT, AND WITHOUT IT ALL FOUR WERE ONE `info` LINE. An order event, a
+       * benefit, a product somebody else sells in the same Polar organisation
+       * — those are genuinely not ours and logging them loudly would train
+       * everybody to ignore the log. A subscription whose customer carries no
+       * `external_id` is the opposite: somebody has paid, Polar shows them as
+       * active, and this is the exact moment we decide to do nothing about it
+       * — permanently, because the reconciler drops it by the identical rule.
+       */
+      stranded?: boolean
+    }
 
 export interface DecideOptions {
   /** Polar product id → our plan id. From POLAR_PRODUCTS. */
@@ -140,9 +157,18 @@ export function toState(
   // on it would attach a plan to whoever else happens to own the address.
   const tenantId = sub.customer?.external_id ?? undefined
   if (!tenantId) {
+    /*
+     * ⚠ THIS IS NOT A MALFORMED PAYLOAD, AND TREATING IT AS ONE IS WHY IT WENT
+     * UNNOTICED. Polar sets `external_id` on a customer it CREATES from a
+     * checkout's `external_customer_id` — their field documentation says so in
+     * as many words — and leaves it alone on a customer that already existed.
+     * So a tenant whose Polar customer was made any other way pays, subscribes,
+     * and is dropped here on every event for ever.
+     */
     return {
       kind: "ignore",
-      reason: `subscription ${sub.id} has no external customer id`,
+      reason: `subscription ${sub.id} has no external customer id (customer ${sub.customer_id})`,
+      stranded: true,
     }
   }
 

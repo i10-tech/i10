@@ -418,6 +418,27 @@ await withMonitor(
           { failed: report.failed, orphaned: report.orphaned },
         )
       }
+
+      /*
+       * ⚠ ITS OWN ALERT, BECAUSE IT IS ITS OWN PROBLEM AND IT IS THE ONE THIS
+       * JOB CANNOT FIX. Everything else above is a repair that either worked or
+       * will be retried in half an hour; a subscription with no
+       * `customer.external_id` is money taken from somebody this pipeline
+       * cannot identify, and every run from now until a human edits that
+       * customer in Polar will discard it again. It has to be findable from
+       * outside the pod logs, and it has to name the subscription so the fix is
+       * a two-field edit rather than a search.
+       */
+      if (report.stranded.length > 0) {
+        process.exitCode = 1
+        captureError(
+          new Error(
+            `${report.stranded.length} Polar subscription(s) cannot be ` +
+              "attributed to a tenant; nobody will ever be granted these plans",
+          ),
+          { stranded: report.stranded.slice(0, 20) },
+        )
+      }
     } catch (error) {
       log.error({ err: error }, "subscription reconciliation failed")
       captureError(error)
