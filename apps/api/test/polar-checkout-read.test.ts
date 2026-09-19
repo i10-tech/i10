@@ -13,7 +13,15 @@ import { polarClient } from "../src/billing/polar.js"
  */
 const client = (status: number, body: unknown = {}) =>
   polarClient({
-    accessToken: "polar_at_test",
+    /*
+     * ⚠ NOT SHAPED LIKE A TOKEN AT ALL. `fetch` is stubbed two lines down, so
+     * this never leaves the process and its format is irrelevant to everything
+     * being tested. It read `polar_` + a short suffix first, which was worse
+     * than useless: that is not the prefix Polar actually issues (see
+     * POLAR_ACCESS_TOKEN in src/env.ts), so it taught a reader a wrong fact
+     * while looking enough like a credential to be worth a second glance.
+     */
+    accessToken: "stub-token-never-sent",
     server: "sandbox",
     fetch: (async () =>
       new Response(JSON.stringify(body), {

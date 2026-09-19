@@ -39,6 +39,35 @@ const rules: PasswordRules = {
 }
 
 /**
+ * ⚠ THE PASSWORDS ARE BUILT FROM THE RULES RATHER THAN WRITTEN OUT, AND THERE
+ * ARE TWO REASONS, ONE OF WHICH IS NOT ABOUT TASTE. GitGuardian failed the pull
+ * request on this file with eight "Generic Password" findings: its detector
+ * matches a string literal sitting directly beside an identifier containing the
+ * word "password", which every assertion below used to be. It is a fair catch —
+ * a scanner taught to excuse that shape is a scanner that would wave through a
+ * real credential written the same way — and nothing here needs the shape, so
+ * the shape goes rather than the check.
+ *
+ * ⚠ AND THE SHAPE IS NOT REPRODUCED IN THIS COMMENT EITHER. A note explaining
+ * the finding, quoting the flagged pattern in full, re-trips the detector on the
+ * very commit that fixes it.
+ *
+ * ⚠ AND IT MAKES THE TESTS SAY WHAT THEY MEAN. A literal eight-character string
+ * does not explain why it is eight characters; `"a".repeat(rules.minLength)`
+ * does, and follows the fixture if the minimum ever moves. The two numbers in
+ * "4 of 8 characters" were both hardcoded twice over — in the input and in the
+ * expectation — with nothing tying them together.
+ *
+ * ⚠ THE EXPECTED HINTS STAY LITERAL, because they are OUTPUT. Deriving those
+ * from the same rules the function reads would assert that the code agrees with
+ * itself, which is an assertion that cannot fail.
+ */
+const tooShort = "a".repeat(4)
+const longEnough = "a".repeat(rules.minLength)
+const withDigit = "a".repeat(rules.minLength - 1) + "1"
+const withSymbol = withDigit + "!"
+
+/**
  * The four states a field can be judged in.
  *
  * ⚠ `fixing` IS THE ONE THAT EARNS GREEN: it has been shown wrong at some point
@@ -141,25 +170,25 @@ describe("a password", () => {
    * keystroke; a red box around it is not.
    */
   it("counts up while typing without turning red", () => {
-    expect(passwordVerdict("abcd", rules, typing)).toEqual({
+    expect(passwordVerdict(tooShort, rules, typing)).toEqual({
       state: "idle",
       hint: "4 of 8 characters.",
     })
   })
 
   it("turns red on the same message once the caret has left", () => {
-    expect(passwordVerdict("abcd", rules, left)).toEqual({
+    expect(passwordVerdict(tooShort, rules, left)).toEqual({
       state: "invalid",
       hint: "4 of 8 characters.",
     })
   })
 
   it("accepts anything meeting the instance's own minimum, without going green", () => {
-    expect(passwordVerdict("abcdefgh", rules, left)).toEqual({ state: "idle" })
+    expect(passwordVerdict(longEnough, rules, left)).toEqual({ state: "idle" })
   })
 
   it("goes green once a rejected password has been made long enough", () => {
-    expect(passwordVerdict("abcdefgh", rules, fixing)).toEqual({ state: "valid" })
+    expect(passwordVerdict(longEnough, rules, fixing)).toEqual({ state: "valid" })
   })
 
   /*
@@ -174,13 +203,13 @@ describe("a password", () => {
       requireNumbers: true,
       requireSpecial: true,
     }
-    expect(passwordVerdict("abcdefgh", strict, left)).toMatchObject({
+    expect(passwordVerdict(longEnough, strict, left)).toMatchObject({
       hint: "Add a number.",
     })
-    expect(passwordVerdict("abcdefg1", strict, left)).toMatchObject({
+    expect(passwordVerdict(withDigit, strict, left)).toMatchObject({
       hint: "Add a symbol.",
     })
-    expect(isPasswordUsable("abcdefg1!", strict)).toBe(true)
+    expect(isPasswordUsable(withSymbol, strict)).toBe(true)
   })
 
   it("describes the instance's rules as one sentence", () => {
