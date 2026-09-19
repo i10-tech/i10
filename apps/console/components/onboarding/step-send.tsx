@@ -70,7 +70,17 @@ export function StepSend({
   async function mint() {
     if (pending) return
     setPending(true)
-    const result = await createApiKey({ name: "onboarding", mode: "live" })
+    /*
+     * ⚠ UNRESTRICTED, DELIBERATELY. This is the first key a workspace ever has
+     * and onboarding is not the moment to explain scopes — somebody is trying
+     * to send one email. The keys page is where a scope is chosen, and this key
+     * can be narrowed there without being replaced.
+     */
+    const result = await createApiKey({
+      name: "onboarding",
+      mode: "live",
+      domain: null,
+    })
     setPending(false)
 
     if (!result.ok) {

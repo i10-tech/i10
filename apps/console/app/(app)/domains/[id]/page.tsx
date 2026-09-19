@@ -24,6 +24,7 @@ import { VerifyButton } from "@/components/verify-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
 import type {
+  ApiKeyRow,
   ConnectableProvider,
   DelegationReport,
   DnsConnection,
@@ -89,11 +90,33 @@ export default async function DomainDetailPage({
    * ⚠ AND A FAILURE IN ANY OF THEM HIDES THE BUTTON RATHER THAN THE PAGE. This
    * is an accelerator; the records table below is the thing somebody came for.
    */
-  const [inspection, providers, connections] = await Promise.all([
+  const [inspection, providers, connections, keys] = await Promise.all([
     tryApi<DnsInspection>("/console/dns/lookup", { query: { domain: domain.name } }),
     tryApi<{ data: ConnectableProvider[] }>("/console/dns/providers"),
     tryApi<{ data: DnsConnection[] }>("/console/dns/connections"),
+    /*
+     * ⚠ READ HERE SO THE DELETE DIALOG CAN ASK ABOUT THEM WITHOUT A ROUND TRIP
+     * OF ITS OWN. A key restricted to this domain becomes a credential that can
+     * send from nothing the moment the domain goes, and the person deleting it
+     * is the only one who will ever connect the two — see DomainActions.
+     *
+     * ⚠ AND A FAILURE HERE HIDES THE QUESTION RATHER THAN THE PAGE, like the
+     * three above. The domain still deletes; what is lost is the offer to tidy
+     * up after it, which is worth less than the page.
+     */
+    tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
   ])
+
+  /*
+   * ⚠ ONLY THE LIVE ONES, AND ONLY THE ONES RESTRICTED TO **THIS** DOMAIN. An
+   * unrestricted key works perfectly well for every other domain, so offering
+   * to revoke it would be offering to break something unrelated; a revoked key
+   * is already dead and naming it would be noise in a dialog that has to be
+   * read.
+   */
+  const scopedKeys = (keys.ok ? keys.data.data : [])
+    .filter((key) => key.revoked_at === null && key.domain === domain.name)
+    .map((key) => ({ id: key.id, name: key.name }))
 
   const hostedBy = inspection.ok ? inspection.data.provider?.slug : undefined
   const connectable =
@@ -134,7 +157,7 @@ export default async function DomainDetailPage({
               />
             )}
             <VerifyButton id={domain.id} status={domain.status} />
-            <DomainActions id={domain.id} name={domain.name} />
+            <DomainActions id={domain.id} name={domain.name} scopedKeys={scopedKeys} />
           </PageActions>
         </PageHeaderRow>
       </PageHeader>

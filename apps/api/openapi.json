@@ -69,6 +69,7 @@
               "plan_limit_exceeded",
               "password_required",
               "mailbox_already_exists",
+              "restricted_api_key",
               "internal_server_error"
             ]
           },
@@ -1023,6 +1024,16 @@
               }
             }
           },
+          "403": {
+            "description": "This key is restricted to other domains than the `from` address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "409": {
             "description": "This Idempotency-Key was already used with a different request body.",
             "content": {
@@ -1101,6 +1112,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "This key is restricted to other domains than the `from` address.",
             "content": {
               "application/json": {
                 "schema": {

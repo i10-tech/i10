@@ -2,6 +2,8 @@ import { createHash } from "node:crypto"
 import type { SendEmail } from "@repo/contracts"
 import type { SendClass, SendJob } from "../queue/send-queue.js"
 import { shouldSend, type Metering } from "./metering.js"
+import { domainOf } from "./address.js"
+import { maySendFrom, scopedDomains } from "../auth/scope.js"
 
 /**
  * Accepting a send.
@@ -38,6 +40,17 @@ export type AcceptOutcome =
    */
   | { status: "conflict"; message: string }
   | { status: "quota_exceeded"; message: string }
+  /**
+   * The key is restricted to other domains than the one it tried to send from.
+   *
+   * ⚠ IT IS CHECKED HERE RATHER THAN IN THE ROUTES, THOUGH IT IS
+   * AUTHORIZATION. There are two send routes and there will be more — a
+   * scheduled resend, a broadcast — and a restriction that has to be
+   * remembered at each entry point is a restriction that will be missed at one
+   * of them. This function is the throat every send passes through, and it
+   * already refuses over-quota tenants for the same reason.
+   */
+  | { status: "forbidden"; message: string }
 
 /**
  * A stable fingerprint of the request body.
@@ -209,11 +222,39 @@ export interface Logger {
   error: (o: object, m: string) => void
 }
 
+/**
+ * The first `from` domain this key is not allowed to use, if there is one.
+ *
+ * ⚠ A MISSING OR UNPARSEABLE `from` IS REFUSED RATHER THAN WAVED THROUGH, but
+ * only for a key that is actually restricted. `maySendFrom` answers false for
+ * a null domain, which is the right answer: a restricted key that cannot be
+ * shown to be within its restriction is outside it.
+ */
+function refusedDomain(
+  scopes: readonly string[],
+  payloads: SendEmail[],
+): string | null {
+  for (const payload of payloads) {
+    const domain = domainOf(payload.from)
+    if (!maySendFrom(scopes, domain)) return domain ?? payload.from
+  }
+  return null
+}
+
 export async function acceptSend(
   input: {
     tenantId: string
     /** Null for i10's own mail — see `AcceptOps.persist`. */
     apiKeyId: string | null
+    /**
+     * What the presenting key is allowed to send from.
+     *
+     * ⚠ OPTIONAL, AND ABSENT MEANS UNRESTRICTED. i10's own mail has no key at
+     * all, and a caller that has not been taught about scopes must not be
+     * silently prevented from sending — the failure mode of getting this
+     * backwards is every message in the product refused at once.
+     */
+    scopes?: readonly string[]
     payloads: SendEmail[]
     endpoint: "single" | "batch"
     idempotencyKey?: string
@@ -221,6 +262,27 @@ export async function acceptSend(
   deps: AcceptOps & { metering: Metering; log: Logger },
 ): Promise<AcceptOutcome> {
   const queue = classFor(input.endpoint)
+
+  /*
+   * ⚠ BEFORE THE QUOTA CHECK AND BEFORE ANYTHING IS WRITTEN. A refusal that
+   * has already spent a quota unit, or already persisted a message, is a
+   * refusal that cost the customer something — and on a batch it would leave
+   * some elements written and some not.
+   *
+   * ⚠ AND EVERY PAYLOAD IS CHECKED, NOT THE FIRST. A batch is one request with
+   * many `from` addresses; a key scoped to acme.com sending forty-nine
+   * legitimate messages and one from the production domain is exactly the case
+   * this exists to stop, and it is the one a first-element check misses.
+   */
+  const refused = input.scopes ? refusedDomain(input.scopes, input.payloads) : null
+  if (refused) {
+    return {
+      status: "forbidden",
+      message:
+        `This key can only send from ${scopedDomains(input.scopes ?? []).join(", ")}. ` +
+        `It cannot send from ${refused}.`,
+    }
+  }
 
   // ⚠ FIRST, AND CHEAPLY. Rejecting an over-quota tenant before writing
   // anything is the difference between a 429 in milliseconds and a database

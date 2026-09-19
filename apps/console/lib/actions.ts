@@ -5,6 +5,7 @@ import { api, ApiRequestError } from "@/lib/api"
 import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import type {
+  ApiKeyRow,
   ContactRow,
   CreatedApiKey,
   Domain,
@@ -263,7 +264,12 @@ export async function publishDnsRecords(input: {
 
 // ── API keys ────────────────────────────────────────────────────────────────
 
-export async function createApiKey(input: { name: string; mode: "live" | "test" }) {
+export async function createApiKey(input: {
+  name: string
+  mode: "live" | "test"
+  /** A domain name to restrict it to, or `null` for every domain. */
+  domain: string | null
+}) {
   /*
    * ⚠ THE SECRET IS IN THIS RETURN VALUE AND NOWHERE ELSE, EVER. Nothing stores
    * it — see apps/api/src/auth/store.ts — so the component that receives it is
@@ -273,6 +279,25 @@ export async function createApiKey(input: { name: string; mode: "live" | "test" 
    */
   return run(
     () => api<CreatedApiKey>("/console/api-keys", { method: "POST", body: input }),
+    ["/api-keys"],
+  )
+}
+
+/**
+ * Narrowing or widening a key that already exists.
+ *
+ * ⚠ IT EXISTS SO THE SCOPE IS NOT A DECISION MADE ONCE, IN A DIALOG, FOREVER.
+ * The only other way to restrict a key minted unrestricted is to revoke it and
+ * redeploy the secret everywhere it lives — enough friction that nobody does
+ * it, which leaves every key unrestricted and the feature decorative.
+ */
+export async function updateApiKeyScope(id: string, domain: string | null) {
+  return run(
+    () =>
+      api<ApiKeyRow>(`/console/api-keys/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: { domain },
+      }),
     ["/api-keys"],
   )
 }

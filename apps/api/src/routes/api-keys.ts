@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { cacheKeyFor, type KeyCache, type Mode } from "../auth/api-key.js"
 import type { CreatedKey, KeySummary, KeyStore } from "../auth/store.js"
 import { requireApiKey } from "../middleware/auth.js"
+import { isRestricted } from "../auth/scope.js"
 
 /**
  * Managing the keys a tenant sends with.
@@ -12,6 +13,18 @@ import { requireApiKey } from "../middleware/auth.js"
  * with a Clerk SESSION rather than an API key, and no session middleware exists
  * in this API yet — so today the first key of a new tenant is an operator
  * action. Nothing here should be read as the bootstrap being solved.
+ *
+ * ⚠ A RESTRICTED KEY MAY READ THIS LIST AND CHANGE NOTHING, WHICH IS WHAT
+ * MAKES A SCOPE A BOUNDARY RATHER THAN A SUGGESTION. These routes authenticate
+ * with any valid key and take whatever `scopes` they are given — so without the
+ * guard below, a key limited to `staging.acme.com` could mint itself one
+ * limited to nothing, and every restriction in the product would be exactly one
+ * request wide. It could also revoke the keys that are not leaked.
+ *
+ * ⚠ THE CONSOLE IS NOT AFFECTED, AND THAT IS THE POINT OF THE SPLIT. Key
+ * management there is session-authenticated — a person who signed in and holds
+ * the workspace — rather than key-authenticated. Somebody with the dashboard
+ * can always widen a key; a credential sitting in a deploy environment cannot.
  *
  * ⚠ AND THE SECRET IS RETURNED EXACTLY ONCE, ON THE RESPONSE THAT CREATES IT.
  * There is deliberately no endpoint that reads one back: the plaintext is not
@@ -82,10 +95,38 @@ const readJson = async (req: {
 const modeOf = (v: unknown): Mode | null =>
   v === "live" || v === "test" ? v : v === undefined ? "live" : null
 
+/**
+ * ⚠ 403 AND NOT 401. The key is real; it is being used for something outside
+ * what it was issued for, and telling somebody their credential is invalid
+ * would send them to rotate one that is fine.
+ */
+const restricted = {
+  statusCode: 403,
+  name: "restricted_api_key" as const,
+  message:
+    "This key is restricted to a domain, so it cannot manage keys. " +
+    "Use the dashboard, or an unrestricted key.",
+}
+
 export function createApiKeyRoutes(deps?: ApiKeyRouteDeps) {
   const app = new Hono()
 
   app.use("*", requireApiKey)
+
+  /*
+   * ⚠ ON EVERY METHOD THAT IS NOT A READ, RATHER THAN ON EACH ROUTE. A guard
+   * repeated four times is a guard that will be missing from the fifth route
+   * somebody adds — and the fifth route is the one nobody thinks to test.
+   * `GET` is deliberately allowed: listing prefixes tells a restricted key
+   * nothing it does not already have, and it is what makes a key usable for
+   * its own diagnostics.
+   */
+  app.use("*", async (c, next) => {
+    if (c.req.method === "GET") return next()
+    const auth = c.get("auth")
+    if (auth && isRestricted(auth.scopes)) return c.json(restricted, 403)
+    return next()
+  })
 
   app.get("/", async (c) => {
     if (!deps) return c.json(notWired, 501)

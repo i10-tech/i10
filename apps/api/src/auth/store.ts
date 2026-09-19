@@ -101,6 +101,25 @@ export interface CreateInput {
 export interface KeyStore {
   create(input: CreateInput): Promise<CreatedKey>
   list(tenantId: string): Promise<KeySummary[]>
+  /**
+   * Change what a key is allowed to do, without changing the key.
+   *
+   * ⚠ IT EXISTS SO A SCOPE IS NOT A DECISION MADE ONCE, IN A DIALOG, FOREVER.
+   * Without it the only way to narrow a key that was minted unrestricted is to
+   * revoke it and deploy a new secret everywhere it is used — which is enough
+   * friction that nobody does it, so every key stays unrestricted and the
+   * feature is decorative.
+   *
+   * ⚠ THE SECRET IS UNTOUCHED, AND THE CACHE MUST STILL BE EVICTED. A verified
+   * key lives in Redis with its scopes baked in for the TTL, so a narrowed key
+   * keeps its old permissions for up to a minute otherwise — the same failure
+   * `revoke` documents, with a quieter symptom. The hash comes back for that.
+   */
+  setScopes(
+    tenantId: string,
+    id: string,
+    scopes: readonly string[],
+  ): Promise<{ key: KeySummary; secretHash: string } | null>
   /** The revoked key's `secret_hash`, so the caller can evict its cache entry. */
   revoke(tenantId: string, id: string): Promise<{ secretHash: string } | null>
   rotate(
@@ -161,6 +180,30 @@ export function keyStore(db: Database): KeyStore {
           .where(eq(apiKeys.tenantId, tenantId))
           .orderBy(desc(apiKeys.createdAt))
         return rows.map(summaryOf)
+      })
+    },
+
+    async setScopes(tenantId, id, scopes) {
+      return withTenant(db, tenantId, async (tx) => {
+        /*
+         * ⚠ A REVOKED KEY IS NOT EDITABLE, AND REFUSING IS THE POINT. Changing
+         * the scope of a withdrawn credential does nothing except make the list
+         * claim a dead key is restricted — and, if it were ever un-revoked,
+         * would silently change what it could do.
+         */
+        const [row] = await tx
+          .update(apiKeys)
+          .set({ scopes: [...scopes] })
+          .where(
+            and(
+              eq(apiKeys.id, id),
+              eq(apiKeys.tenantId, tenantId),
+              isNull(apiKeys.revokedAt),
+            ),
+          )
+          .returning()
+
+        return row ? { key: summaryOf(row), secretHash: row.secretHash } : null
       })
     },
 

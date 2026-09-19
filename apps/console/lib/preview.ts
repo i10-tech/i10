@@ -545,6 +545,11 @@ const ROUTES: [
           prefix: "i10_live_8fK2",
           mode: "live",
           scopes: [],
+          // ⚠ ONE UNRESTRICTED AND ONE SCOPED, so the "Sends from" column has
+          // both of its answers on screen and the domain-delete dialog has
+          // something to offer. A fixture where every row is the same is a
+          // fixture that cannot show a difference.
+          domain: null,
           created_at: ago(150),
           last_used_at: ago(0, 1),
           expires_at: null,
@@ -555,7 +560,8 @@ const ROUTES: [
           name: "staging",
           prefix: "i10_test_Qm9x",
           mode: "test",
-          scopes: [],
+          scopes: ["domain:mail.acme.dev"],
+          domain: "mail.acme.dev",
           created_at: ago(88),
           last_used_at: ago(46),
           expires_at: null,
@@ -567,6 +573,7 @@ const ROUTES: [
           prefix: "i10_live_Zz1p",
           mode: "live",
           scopes: [],
+          domain: null,
           created_at: ago(300),
           last_used_at: ago(250),
           expires_at: null,

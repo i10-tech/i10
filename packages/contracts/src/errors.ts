@@ -81,6 +81,21 @@ export const errorNames = [
    * endpoint into a way to test which addresses exist on a domain.
    */
   "mailbox_already_exists",
+  /**
+   * The key is real and was refused on what it asked to do.
+   *
+   * ⚠ RESEND'S OWN NAME, WHICH IS WHY IT IS NOT `forbidden`. A customer
+   * pointing an SDK at us is switching on these strings, and `restricted_api_key`
+   * is the one already in their error handling — see the note at the top of
+   * this file about the compatibility surface.
+   *
+   * ⚠ AND IT IS A 403, NOT A 401, WHICH IS THE DISTINCTION THAT MATTERS MORE
+   * THAN THE NAME. 401 tells somebody their key is wrong, and their next move
+   * is to rotate a credential that was fine. This key authenticated; it is
+   * scoped to other domains than the `from` address it was used with, and the
+   * fix is a different address or a wider scope.
+   */
+  "restricted_api_key",
   "internal_server_error",
 ] as const
 
