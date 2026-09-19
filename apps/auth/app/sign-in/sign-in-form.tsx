@@ -8,7 +8,6 @@ import { useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import {
   Field,
-  FieldDescription,
   FieldGroup,
   FieldSeparator,
 } from "@repo/ui/components/field"
@@ -48,7 +47,6 @@ import type { SsoProvider } from "../_lib/providers"
  */
 export function SignInForm({
   afterAuthUrl,
-  signUpHref,
   resetHref,
   mfaHref,
   redirectRaw,
@@ -56,7 +54,6 @@ export function SignInForm({
   onUnknownIdentifier,
 }: {
   afterAuthUrl: string
-  signUpHref: string
   resetHref: string
   mfaHref: string
   redirectRaw?: string
@@ -539,19 +536,14 @@ export function SignInForm({
                   )}
                 </Button>
               </Field>
-              <FieldDescription className="text-center">
-                Don&apos;t have an account?{" "}
-                <Link
-                  href={signUpHref}
-                  aria-disabled={locked}
-                  tabIndex={locked ? -1 : undefined}
-                  className={`underline underline-offset-4 ${
-                    locked ? "pointer-events-none opacity-50" : ""
-                  }`}
-                >
-                  Sign up
-                </Link>
-              </FieldDescription>
+              {/*
+               * ⚠ "DON'T HAVE AN ACCOUNT? SIGN UP" IS GONE, AND ITS ABSENCE IS
+               * THE POINT OF THE PAGE. It asked somebody to answer a question
+               * the box below is about to answer for them — and answering it
+               * wrong was the whole failure mode: a returning customer who
+               * clicked it got "that address is taken", a new one who did not
+               * got "no such account". Typing the address is the answer.
+               */}
             </FieldGroup>
           </form>
         ) : (

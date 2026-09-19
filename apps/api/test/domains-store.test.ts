@@ -67,6 +67,12 @@ const roomFor = (status: string) => ({ check: async () => ({ status }) })
 const secrets = { seal: (v: string) => `sealed:${v}`, open: (v: string) => v }
 const deps = {
   region: "eu-central-1",
+  /**
+   * ⚠ OUR OWN SENDING DOMAINS, WHICH THE STORE REFUSES. Not decoration: the
+   * guard runs on every create, so a fixture without it would be testing a
+   * store configured differently from the one that ships.
+   */
+  ownDomains: ["i10.tech"],
   dns: {
     spfInclude: "_spf.i10.tech",
     bounceHost: "mx.i10.tech",
@@ -306,5 +312,67 @@ describe("verifying", () => {
     }).verify(TENANT, row().id)
 
     expect(written).toMatchObject({ status: "verified", verifiedAt: NOW })
+  })
+})
+
+/**
+ * Somebody adding i10's own domain.
+ *
+ * ⚠ REFUSED RATHER THAN ALLOWED-AND-BROKEN, and the reason is not tidiness.
+ * Every path after `create` assumes the customer controls the name: it would
+ * generate a DKIM keypair for a zone this server is already authoritative for,
+ * register a second SES identity against our own sending domain, and — on the
+ * delegated path — hand a customer's claim the zone carrying OUR SPF and return
+ * paths. The first mail to break would be ours.
+ */
+describe("adding a domain that belongs to us", () => {
+  const store = () =>
+    domainStore({
+      // ⚠ AN INSERT HANDLER, BECAUSE THE PASSING CASES ACTUALLY CREATE. The
+      // refusals never reach the database, but the suffix test below exists to
+      // prove a near-miss name gets all the way through.
+      db: fakeDb({ insert: () => [row()] }),
+      identity: identity(),
+      capacity: roomFor("allowed"),
+      ...deps,
+      now: () => NOW,
+    })
+
+  it("refuses our own sending domain", async () => {
+    const outcome = await store().create(TENANT, { name: "i10.tech" })
+    expect(outcome.status).toBe("rejected")
+  })
+
+  /**
+   * ⚠ AND A SUBDOMAIN OF IT. `mail.i10.tech` is the zone our own return paths
+   * live in — delegating that to a tenant is the same failure with a longer
+   * name, and it is the one somebody would actually try.
+   */
+  it("refuses a subdomain of it too", async () => {
+    for (const name of ["mail.i10.tech", "_dmarc.i10.tech", "anything.i10.tech"]) {
+      expect((await store().create(TENANT, { name })).status).toBe("rejected")
+    }
+  })
+
+  /** ⚠ AND IT IS A SUFFIX ON A LABEL BOUNDARY, NOT A SUBSTRING. */
+  it("does not refuse a domain that merely ends with our name", async () => {
+    expect((await store().create(TENANT, { name: "noti10.tech" })).status).toBe(
+      "created",
+    )
+    expect(
+      (await store().create(TENANT, { name: "i10.tech.example.com" })).status,
+    ).toBe("created")
+  })
+
+  /**
+   * ⚠ THE JOKE HAS TO CARRY THE NEXT STEP. A refusal that is only funny is a
+   * dead end with a smile on it, and this lands in somebody's first minute.
+   */
+  it("says what to do instead, not just that it is ours", async () => {
+    const outcome = await store().create(TENANT, { name: "i10.tech" })
+    const reason = outcome.status === "rejected" ? outcome.reason : ""
+
+    expect(reason).toContain("flattered")
+    expect(reason).toContain("your own mail comes from")
   })
 })

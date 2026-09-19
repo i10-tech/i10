@@ -563,7 +563,13 @@ function SkipButton({
 
 /** Back to the connect step, carrying the destination the person arrived with. */
 function returnUrl(redirectRaw: string | undefined): string {
-  const url = new URL("/sign-up", window.location.origin)
+  /*
+   * ⚠ `/sign-in`, WHICH IS THE ONLY PAGE NOW. `/sign-up` still resolves — it
+   * redirects here carrying every parameter — but pointing a provider's return
+   * URL at a redirect costs an extra round trip on the one journey that has
+   * already been out to a third party and back.
+   */
+  const url = new URL("/sign-in", window.location.origin)
   url.searchParams.set("step", "connect")
   if (redirectRaw) url.searchParams.set("redirect_url", redirectRaw)
   return url.toString()

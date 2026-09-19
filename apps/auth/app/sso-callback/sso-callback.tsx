@@ -363,7 +363,14 @@ export function SsoCallback({
       // session exists anywhere, so it is honest rather than the mis-read it
       // used to be.
       toast.error("We need a little more before your account is ready.")
-      router.replace("/sign-up")
+      /*
+       * ⚠ THE ONE PAGE, WHICH ASKS FOR AN ADDRESS FIRST. That is one more field
+       * than the old sign-up page needed here, and it is the honest one: the
+       * provider did not give us what the instance requires, so there is
+       * nothing to resume from — the address they type is looked up, found to
+       * have no account, and starts the sign-up with it already filled in.
+       */
+      router.replace("/sign-in")
     } catch {
       toast.error(TRANSPORT_FAILURE)
       setPending(false)

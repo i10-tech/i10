@@ -80,13 +80,6 @@ export function AuthFlow({
   return (
     <SignInForm
       afterAuthUrl={afterAuthUrl}
-      /*
-       * ⚠ THE "CREATE ONE" LINK STILL POINTS SOMEWHERE REAL. It is no longer
-       * the way in — typing an unknown address is — but people arrive with the
-       * URL, and a sign-up page that exists is better than a 404 for anybody
-       * who has it bookmarked or was sent it.
-       */
-      signUpHref="/sign-up"
       resetHref={resetHref}
       mfaHref={mfaHref}
       redirectRaw={redirectRaw}
