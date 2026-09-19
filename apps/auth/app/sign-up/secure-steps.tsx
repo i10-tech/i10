@@ -16,6 +16,7 @@ import { Spinner } from "@repo/ui/components/spinner"
 import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { StepHeading } from "../_components/step-heading"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
+import { passkeyFailure } from "../_lib/passkey"
 import type { SsoProvider } from "../_lib/providers"
 import {
   AppleIcon,
@@ -104,18 +105,26 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
        * ⚠ THE CATCH IS LOAD-BEARING, AND DISMISSING THE SHEET IS NOT AN ERROR.
        * WebAuthn rejects at the PLATFORM level — a person who closes the Touch
        * ID dialog, a browser with no authenticator, a cross-origin iframe — and
-       * none of those come back as a Clerk error object. Reporting "something
-       * went wrong" to somebody who deliberately pressed Cancel is the interface
-       * arguing with them, so the two are told apart and only one is mentioned.
+       * "something went wrong" to somebody who deliberately pressed Cancel is
+       * the interface arguing with them.
+       *
+       * ⚠ IT USED TO CHECK `error.name`, WHICH COULD NOT WORK. Clerk maps the
+       * browser's `NotAllowedError` onto a `ClerkWebAuthnError` before we ever
+       * see it, so the name is always `"ClerkWebAuthnError"` and the branch
+       * below never ran — every cancelled sign-up prompt ended in "We could not
+       * add a passkey on this device", blaming the device for a decision the
+       * person had just made. See _lib/passkey.ts, which reads the code.
        */
       // ⚠ CANCELLING THE REVERIFICATION PROMPT IS THE SAME KIND OF ANSWER AS
       // dismissing the platform's own sheet: the person said no, and saying
       // anything back is the interface arguing with them.
-      if (isUserCancellation(error) || isReverificationCancelledError(error)) {
+      if (isReverificationCancelledError(error)) {
         onBusy(null)
         return
       }
-      toast.error(passkeyMessage(error))
+
+      const reason = passkeyFailure(error, "add")
+      if (reason) toast.error(reason)
       onBusy(null)
     }
   }
@@ -584,46 +593,6 @@ function returnUrl(redirectRaw: string | undefined): string {
   url.searchParams.set("step", "connect")
   if (redirectRaw) url.searchParams.set("redirect_url", redirectRaw)
   return url.toString()
-}
-
-/**
- * ⚠ CANCELLING A PASSKEY PROMPT IS `NotAllowedError`, AND SO IS A TIMEOUT. The
- * WebAuthn spec deliberately gives the same error for "the user said no" and
- * "the user did nothing", so that a site cannot tell which happened and
- * fingerprint people by it. That means silence is the only correct response to
- * both, which is also what somebody who pressed Cancel expects.
- */
-function isUserCancellation(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.name === "NotAllowedError" || error.name === "AbortError")
-  )
-}
-
-/**
- * ⚠ `InvalidStateError` MEANS "YOU ALREADY HAVE ONE", AND SAYING SO IS THE
- * WHOLE VALUE OF THIS FUNCTION. It is what the browser returns when the
- * authenticator already holds a credential for this account — common for
- * anybody who signs up twice or arrives back through the OAuth step — and the
- * generic message for it reads as a failure when it is the opposite.
- */
-function passkeyMessage(error: unknown): string {
-  if (error instanceof Error && error.name === "InvalidStateError") {
-    return "This device already has a passkey for your account."
-  }
-
-  /*
-   * ⚠ CLERK'S OWN SENTENCE, WHERE THERE IS ONE, AND THE ABSENCE OF IT COST
-   * REAL TIME. Everything that was not a cancellation used to collapse into the
-   * line below — so a session Clerk refused on POLICY grounds, a misconfigured
-   * instance and a browser with no authenticator were one message blaming the
-   * device, and neither the person reading it nor we could tell them apart.
-   * `longMessage` is written for an end user; `message` is the short form.
-   */
-  const reason = clerkReason(error)
-  if (reason) return reason
-
-  return "We could not add a passkey on this device. You can add one later from settings."
 }
 
 /** Clerk's own explanation of a failure, if this is a Clerk API error. */

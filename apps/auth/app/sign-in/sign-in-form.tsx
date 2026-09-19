@@ -13,6 +13,7 @@ import { StepStage } from "@repo/ui/components/step-stage"
 import { PasswordInput } from "../_components/password-input"
 import { OAuthButtons } from "../_components/oauth-buttons"
 import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { passkeyFailure } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { emailVerdict, isEmailUsable } from "../_lib/validate"
@@ -246,7 +247,20 @@ export function SignInForm({
       const { error } = await signIn.passkey({ flow: "discoverable" })
 
       if (error) {
-        toast.error(messageFor(error))
+        /*
+         * ⚠ NOT `messageFor`, WHICH SHOWED CLERK'S DEVELOPER STRING VERBATIM.
+         * A passkey failure is a `ClerkWebAuthnError`, so there is no `errors`
+         * array to read and `message` is what came back — including the
+         * `(code="…")` brackets `ClerkError` appends. Somebody who pressed
+         * Cancel on their own Touch ID sheet was shown a link to the WebAuthn
+         * spec and two error codes.
+         *
+         * ⚠ AND `null` IS THE ANSWER FOR "THEY SAID NO". See _lib/passkey.ts:
+         * dismissing the prompt is a decision, not a fault, and the interface
+         * has nothing to add to it.
+         */
+        const reason = passkeyFailure(error, "use")
+        if (reason) toast.error(reason)
         setBusy(null)
         return
       }
@@ -269,15 +283,20 @@ export function SignInForm({
 
       toast.error("That passkey worked, but the sign-in needs another step.")
       setBusy(null)
-    } catch {
+    } catch (error) {
       /*
        * ⚠ THE CATCH IS LOAD-BEARING HERE, UNLIKE ON THE PASSWORD FORM. A passkey
        * prompt is WebAuthn: dismissing the sheet, or a browser with no
        * authenticator at all, rejects at the platform level rather than coming
        * back as a Clerk error — and an unhandled rejection would leave this
        * stuck on "Waiting for your device…" for the rest of the session.
+       *
+       * ⚠ AND IT IS CLASSIFIED RATHER THAN CALLED A NETWORK PROBLEM. It used to
+       * say "We could not reach the server", which is the one thing this almost
+       * never is: the rejection happened in the browser, before any request.
        */
-      toast.error(TRANSPORT_FAILURE)
+      const reason = passkeyFailure(error, "use")
+      if (reason) toast.error(reason)
       setBusy(null)
     }
   }
