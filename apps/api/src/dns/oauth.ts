@@ -118,6 +118,16 @@ export interface DnsOAuth {
     /** From `verifyState`. The token endpoint rejects the exchange without it. */
     verifier: string
   }): Promise<TokenGrant>
+  /**
+   * Trades a refresh token for a new access token.
+   *
+   * ⚠ WITHOUT THIS A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND THEN DEAD. The
+   * grant was stored from the moment somebody authorised us and never looked at
+   * again, so the first publish after the token expired failed `unauthorized`
+   * — which the console correctly reports as "reconnect", asking a customer to
+   * redo an authorisation that never actually lapsed.
+   */
+  refresh(input: { slug: string; refreshToken: string }): Promise<TokenGrant>
 }
 
 export function dnsOAuth(config: OAuthConfig): DnsOAuth {
@@ -259,73 +269,102 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
     },
 
     async exchange({ slug, code, verifier }) {
-      const provider = providerBySlug(slug)
-      const oauth = provider?.api?.oauth
-      const app = config.apps[slug]
-      if (!oauth || !app) {
-        throw new OAuthError("unconfigured", `${slug} is not configured for OAuth.`)
-      }
-
-      let response: Response
-      try {
-        response = await fetch(oauth.tokenUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-          },
-          /*
-           * ⚠ THE SECRET GOES IN THE BODY, NOT IN A BASIC HEADER. Both are
-           * permitted by RFC 6749 and providers differ on which they accept;
-           * the body form is the one every provider in this registry documents.
-           */
-          body: new URLSearchParams({
-            grant_type: "authorization_code",
-            code,
-            client_id: app.clientId,
-            // ⚠ OMITTED ENTIRELY FOR A PUBLIC CLIENT, not sent empty. An empty
-            // `client_secret` is a supplied-and-wrong secret to a token
-            // endpoint, which answers `invalid_client` — indistinguishable in
-            // the log from a real secret that has been rotated.
-            ...(app.clientSecret ? { client_secret: app.clientSecret } : {}),
-            code_verifier: verifier,
-            redirect_uri: redirectFor(slug),
-          }),
-          signal: AbortSignal.timeout(10_000),
-        })
-      } catch (error) {
-        throw new OAuthError(
-          "exchange_failed",
-          `Could not reach ${provider.name}.`,
-          String(error),
-        )
-      }
-
-      const body = (await response.json().catch(() => null)) as {
-        access_token?: string
-        refresh_token?: string
-        expires_in?: number
-        scope?: string
-        error?: string
-        error_description?: string
-      } | null
-
-      if (!response.ok || !body?.access_token) {
-        throw new OAuthError(
-          "exchange_failed",
-          `${provider.name} did not complete the authorisation.`,
-          body?.error_description ?? body?.error ?? `HTTP ${response.status}`,
-        )
-      }
-
-      return {
-        accessToken: body.access_token,
-        ...(body.refresh_token ? { refreshToken: body.refresh_token } : {}),
-        ...(typeof body.expires_in === "number"
-          ? { expiresAt: now() + body.expires_in * 1000 }
-          : {}),
-        ...(body.scope ? { scopes: body.scope } : {}),
-      }
+      return token(slug, (app) => ({
+        grant_type: "authorization_code",
+        code,
+        client_id: app.clientId,
+        // ⚠ OMITTED ENTIRELY FOR A PUBLIC CLIENT, not sent empty. An empty
+        // `client_secret` is a supplied-and-wrong secret to a token
+        // endpoint, which answers `invalid_client` — indistinguishable in
+        // the log from a real secret that has been rotated.
+        ...(app.clientSecret ? { client_secret: app.clientSecret } : {}),
+        code_verifier: verifier,
+        redirect_uri: redirectFor(slug),
+      }))
     },
+
+    async refresh({ slug, refreshToken }) {
+      return token(slug, (app) => ({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: app.clientId,
+        ...(app.clientSecret ? { client_secret: app.clientSecret } : {}),
+        // ⚠ NO `code_verifier` AND NO `redirect_uri`. PKCE binds the
+        // AUTHORIZATION CODE to this server; a refresh carries no code, and
+        // sending either parameter is rejected by strict implementations.
+      }))
+    },
+  }
+
+  /**
+   * One POST to a provider's token endpoint, whatever is being traded.
+   *
+   * ⚠ SHARED SO THE TWO GRANTS CANNOT DRIFT. An authorization-code exchange and
+   * a refresh differ only in the body; everything around them — the form
+   * encoding, the timeout, which failures are `exchange_failed`, how an expiry
+   * becomes an absolute timestamp — is identical, and the half that is easy to
+   * forget in a second copy is the one that only matters an hour after somebody
+   * connected.
+   */
+  async function token(
+    slug: string,
+    form: (app: OAuthApp) => Record<string, string>,
+  ): Promise<TokenGrant> {
+    const provider = providerBySlug(slug)
+    const oauth = provider?.api?.oauth
+    const app = config.apps[slug]
+    if (!oauth || !app) {
+      throw new OAuthError("unconfigured", `${slug} is not configured for OAuth.`)
+    }
+
+    let response: Response
+    try {
+      response = await fetch(oauth.tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        /*
+         * ⚠ THE SECRET GOES IN THE BODY, NOT IN A BASIC HEADER. Both are
+         * permitted by RFC 6749 and providers differ on which they accept;
+         * the body form is the one every provider in this registry documents.
+         */
+        body: new URLSearchParams(form(app)),
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch (error) {
+      throw new OAuthError(
+        "exchange_failed",
+        `Could not reach ${provider.name}.`,
+        String(error),
+      )
+    }
+
+    const body = (await response.json().catch(() => null)) as {
+      access_token?: string
+      refresh_token?: string
+      expires_in?: number
+      scope?: string
+      error?: string
+      error_description?: string
+    } | null
+
+    if (!response.ok || !body?.access_token) {
+      throw new OAuthError(
+        "exchange_failed",
+        `${provider.name} did not complete the authorisation.`,
+        body?.error_description ?? body?.error ?? `HTTP ${response.status}`,
+      )
+    }
+
+    return {
+      accessToken: body.access_token,
+      ...(body.refresh_token ? { refreshToken: body.refresh_token } : {}),
+      ...(typeof body.expires_in === "number"
+        ? { expiresAt: now() + body.expires_in * 1000 }
+        : {}),
+      ...(body.scope ? { scopes: body.scope } : {}),
+    }
   }
 }

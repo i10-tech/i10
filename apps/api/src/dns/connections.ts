@@ -44,6 +44,21 @@ export interface DnsConnectionStore {
     credential: Credential
     zones: string[]
   }): Promise<ConnectionSummary>
+  /**
+   * Replaces the stored credential, leaving everything else alone.
+   *
+   * ⚠ SEPARATE FROM `save` BECAUSE A RENEWAL IS NOT A RECONNECTION. `save`
+   * takes the label and the zone list, which a refresh does not have and must
+   * not invent — re-listing zones on every token renewal would put a second
+   * round trip on the publish path, and passing an empty list would erase the
+   * zones the console renders.
+   */
+  updateCredential(input: {
+    tenantId: string
+    provider: string
+    credential: Credential
+  }): Promise<void>
+
   remove(tenantId: string, provider: string): Promise<boolean>
   /** Records the outcome of a publish, for the console to render. */
   noteUse(input: {
@@ -128,6 +143,21 @@ export function dnsConnectionStore(
 
         return { ...summarise(row), credential }
       })
+    },
+
+    async updateCredential({ tenantId, provider, credential }) {
+      const sealed = secrets.seal(JSON.stringify(credential))
+      await withTenant(db, tenantId, async (tx) =>
+        tx
+          .update(dnsConnections)
+          .set({ credentialSealed: sealed })
+          .where(
+            and(
+              eq(dnsConnections.tenantId, tenantId),
+              eq(dnsConnections.provider, provider),
+            ),
+          ),
+      )
     },
 
     async save({ tenantId, provider, label, credential, zones }) {

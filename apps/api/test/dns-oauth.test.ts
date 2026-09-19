@@ -67,7 +67,7 @@ describe("starting an authorisation", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(
       "https://dash.i10.tech/dns/callback/cloudflare",
     )
-    expect(url.searchParams.get("scope")).toBe("dns_records:edit zone:read")
+    expect(url.searchParams.get("scope")).toBe("dns.write zone.read offline_access")
   })
 
   /**
@@ -115,12 +115,19 @@ describe("starting an authorisation", () => {
     const scope = new URL(start(o).url).searchParams.get("scope")
 
     expect(scope).toBe("dns.write")
-    expect(scope).not.toContain("zone:read")
+    expect(scope).not.toContain("zone.read")
   })
 
+  /**
+   * ⚠ THE REGISTRY'S DEFAULTS ARE THE REAL CLOUDFLARE SCOPES, read off a live
+   * client's edit page rather than inferred from the docs — they were
+   * `dns_records:edit` and `zone:read`, which is API TOKEN syntax and is what
+   * every integration guide repeats. `offline_access` is what makes the
+   * connection outlive its first access token.
+   */
   it("falls back to the registry when none are configured", () => {
     expect(new URL(start().url).searchParams.get("scope")).toBe(
-      "dns_records:edit zone:read",
+      "dns.write zone.read offline_access",
     )
   })
 
@@ -318,6 +325,33 @@ describe("exchanging the code", () => {
     await expect(
       o.exchange({ slug: "cloudflare", code: "c", verifier }),
     ).rejects.toBeInstanceOf(OAuthError)
+  })
+
+  /**
+   * ⚠ A REFRESH CARRIES NO CODE, SO IT CARRIES NO VERIFIER. PKCE binds the
+   * AUTHORIZATION CODE to this server; sending `code_verifier` or `redirect_uri`
+   * on a refresh is rejected outright by strict implementations.
+   */
+  it("trades a refresh token without PKCE or a redirect", async () => {
+    const sent = capture({ access_token: "newer", expires_in: 3600 })
+    const o = oauth()
+
+    const grant = await o.refresh({ slug: "cloudflare", refreshToken: "rt-1" })
+
+    expect(sent[0]?.get("grant_type")).toBe("refresh_token")
+    expect(sent[0]?.get("refresh_token")).toBe("rt-1")
+    expect(sent[0]?.get("client_id")).toBe("cid-123")
+    expect(sent[0]?.get("client_secret")).toBe("csec-456")
+    expect(sent[0]?.has("code_verifier")).toBe(false)
+    expect(sent[0]?.has("redirect_uri")).toBe(false)
+    expect(grant.accessToken).toBe("newer")
+  })
+
+  it("omits the secret on a refresh for a public client too", async () => {
+    const sent = capture({ access_token: "newer" })
+    const o = oauth({ apps: { cloudflare: { clientId: "cid-123" } } })
+    await o.refresh({ slug: "cloudflare", refreshToken: "rt-1" })
+    expect(sent[0]?.has("client_secret")).toBe(false)
   })
 
   it("reports an unreachable token endpoint as such", async () => {

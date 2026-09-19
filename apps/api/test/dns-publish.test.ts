@@ -381,3 +381,67 @@ describe("when the provider refuses us", () => {
     })
   })
 })
+
+describe("renewing the credential before using it", () => {
+  /**
+   * ⚠ RENEWED BEFORE THE FIRST CALL, NOT AFTER THE FIRST 401. Catching the
+   * failure and retrying would work, but it makes every expired connection cost
+   * a wasted round trip AND has to be repeated at every call site that touches
+   * a credential. Doing it once, here, is the only place either happens.
+   */
+  it("hands the adapter the renewed credential, not the stored one", async () => {
+    const seen: unknown[] = []
+    const conn = connections()
+    const publisher = dnsPublisher({
+      connections: conn.store,
+      log,
+      writers: () =>
+        writer({
+          zones: async (credential) => {
+            seen.push(credential)
+            return [{ id: "z1", name: "example.com" }]
+          },
+          publish: async (credential, _z, records) => {
+            seen.push(credential)
+            return outcome({ created: [...records] })
+          },
+        }),
+      renew: async () => ({ accessToken: "renewed-token" }),
+    })
+
+    await publisher.publish({
+      tenantId: "t1",
+      provider: "cloudflare",
+      domain: domain(nsRecords),
+    })
+
+    expect(seen).toHaveLength(2)
+    expect(
+      seen.every((c) => (c as { accessToken: string }).accessToken === "renewed-token"),
+    ).toBe(true)
+  })
+
+  /** ⚠ A PASTED TOKEN HAS NOTHING TO RENEW, and the default must not disturb it. */
+  it("passes the stored credential straight through by default", async () => {
+    let seen: unknown = null
+    const publisher = dnsPublisher({
+      connections: connections().store,
+      log,
+      writers: () =>
+        writer({
+          zones: async (credential) => {
+            seen = credential
+            return [{ id: "z1", name: "example.com" }]
+          },
+        }),
+    })
+
+    await publisher.publish({
+      tenantId: "t1",
+      provider: "cloudflare",
+      domain: domain(nsRecords),
+    })
+
+    expect(seen).toEqual({ accessToken: "stub-not-a-real-token" })
+  })
+})

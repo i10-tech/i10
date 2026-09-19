@@ -150,7 +150,27 @@ export const PROVIDERS: DnsProvider[] = [
       oauth: {
         authorizeUrl: "https://dash.cloudflare.com/oauth2/auth",
         tokenUrl: "https://dash.cloudflare.com/oauth2/token",
-        scopes: ["dns_records:edit", "zone:read"],
+        /*
+         * ⚠ READ OFF A REAL CLIENT'S EDIT PAGE, NOT INFERRED FROM THE DOCS.
+         * These were `dns_records:edit` and `zone:read` — API TOKEN permission
+         * syntax, which is what the documentation shows and what every other
+         * integration guide repeats. Cloudflare's OAuth uses a different form,
+         * and the wrong string does not fail gracefully: the authorize endpoint
+         * either refuses outright or issues a token missing the one permission
+         * the integration needs, which surfaces much later as a 403 on a
+         * publish.
+         *
+         * ⚠ `offline_access` IS WHAT MAKES THE CONNECTION OUTLIVE ITS FIRST
+         * ACCESS TOKEN. Without it Cloudflare issues no refresh token, so the
+         * connection is dead as soon as the access token expires and the
+         * customer has to reconnect — with no warning, and no way for us to
+         * repair it on their behalf.
+         *
+         * The authoritative list is `GET /client/v4/oauth/scopes`, which needs
+         * credentials; a client's own edit page in the dashboard shows the
+         * identifiers beside each permission.
+         */
+        scopes: ["dns.write", "zone.read", "offline_access"],
       },
     },
     manualPath: "Cloudflare dashboard → your domain → DNS → Records → Add record",
