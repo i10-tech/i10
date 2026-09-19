@@ -3,7 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
 import { recheckDomains } from "../src/domains/recheck.js"
 import type { Database } from "../src/db/client.js"
-import { challengeName, challengeValue } from "../src/domains/ownership.js"
+import type { DelegationProbe, TxtLookup } from "../src/domains/ownership.js"
 
 /**
  * Re-asking whether a verified domain is still its holder's.
@@ -45,26 +45,41 @@ function fakeDb(rows: Record<string, unknown>[]) {
   return { db, statements }
 }
 
-const answering =
-  (...values: string[]) =>
-  async (name: string) =>
-    name === challengeName("example.com") ? values : []
+const NS = ["ns1.i10.tech", "ns2.i10.tech"]
+
+/** A parent that delegates to these claims' nameservers, or to nothing. */
+const delegating =
+  (...claims: string[]): DelegationProbe =>
+  async () =>
+    claims.length === 0
+      ? { kind: "undelegated" }
+      : { kind: "delegated", nameservers: claims.map((c) => `${c}.ns1.i10.tech`) }
+
+const nothing: TxtLookup = async () => []
 
 const run = (
   rows: Record<string, unknown>[],
-  txt: (name: string) => Promise<string[]>,
+  probes: { delegation?: DelegationProbe; txt?: TxtLookup },
   over: Partial<Parameters<typeof recheckDomains>[0]> = {},
 ) => {
   const { db, statements } = fakeDb(rows)
-  return recheckDomains({ db, txt, now: () => NOW, ...over }).then((summary) => ({
-    summary,
-    statements,
-  }))
+  return recheckDomains({
+    db,
+    probes: {
+      txt: probes.txt ?? nothing,
+      delegation: probes.delegation ?? delegating(),
+    },
+    nameservers: NS,
+    now: () => NOW,
+    ...over,
+  }).then((summary) => ({ summary, statements }))
 }
 
 describe("a domain that still proves itself", () => {
   it("is recorded as checked and nothing else", async () => {
-    const { summary, statements } = await run([due()], answering(challengeValue(TOKEN)))
+    const { summary, statements } = await run([due()], {
+      delegation: delegating(TOKEN),
+    })
 
     expect(summary).toMatchObject({ checked: 1, proven: 1, missing: 0, displaced: 0 })
     expect(statements.some((s) => s.includes("note_domain_proof"))).toBe(true)
@@ -74,11 +89,13 @@ describe("a domain that still proves itself", () => {
   /** ⚠ A MANUAL DOMAIN IS PROVED BY ITS OWN ROUTE — the DKIM record it publishes. */
   it("proves a manual domain with its DKIM record", async () => {
     const asked: string[] = []
-    const { summary } = await run([due({ delegated: false })], async (name) => {
-      asked.push(name)
-      return name === "i10abc123._domainkey.example.com"
-        ? ["v=DKIM1; k=rsa; p=MIIBIjANBgkq"]
-        : []
+    const { summary } = await run([due({ delegated: false })], {
+      txt: async (name) => {
+        asked.push(name)
+        return name === "i10abc123._domainkey.example.com"
+          ? ["v=DKIM1; k=rsa; p=MIIBIjANBgkq"]
+          : []
+      },
     })
 
     expect(asked).toEqual(["i10abc123._domainkey.example.com"])
@@ -93,7 +110,7 @@ describe("a domain whose proof has gone", () => {
    * mid-edit, and the punishment is that their mail stops.
    */
   it("is not stood down the first time it fails", async () => {
-    const { summary, statements } = await run([due()], answering())
+    const { summary, statements } = await run([due()], { delegation: delegating() })
 
     expect(summary).toMatchObject({ checked: 1, missing: 1, displaced: 0 })
     expect(statements.some((s) => s.includes("displace_domain"))).toBe(false)
@@ -103,7 +120,7 @@ describe("a domain whose proof has gone", () => {
     const twoDaysAgo = new Date(NOW.getTime() - 2 * DAY).toISOString()
     const { summary, statements } = await run(
       [due({ proof_missing_since: twoDaysAgo })],
-      answering(),
+      { delegation: delegating() },
     )
 
     expect(summary.displaced).toBe(0)
@@ -115,7 +132,7 @@ describe("a domain whose proof has gone", () => {
     const eightDaysAgo = new Date(NOW.getTime() - 8 * DAY).toISOString()
     const { summary, statements } = await run(
       [due({ proof_missing_since: eightDaysAgo })],
-      answering(),
+      { delegation: delegating() },
     )
 
     expect(summary).toMatchObject({ missing: 1, displaced: 1 })
@@ -126,7 +143,7 @@ describe("a domain whose proof has gone", () => {
     const anHourAgo = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString()
     const { summary } = await run(
       [due({ proof_missing_since: anHourAgo })],
-      answering(),
+      { delegation: delegating() },
       {
         graceMs: 30 * 60 * 1000,
       },
@@ -147,9 +164,7 @@ describe("a domain we could not ask about", () => {
     const eightDaysAgo = new Date(NOW.getTime() - 8 * DAY).toISOString()
     const { summary, statements } = await run(
       [due({ proof_missing_since: eightDaysAgo })],
-      async () => {
-        throw Object.assign(new Error("query timed out"), { code: "ETIMEOUT" })
-      },
+      { delegation: async () => ({ kind: "unreachable", detail: "timed out" }) },
     )
 
     expect(summary).toMatchObject({
@@ -167,9 +182,11 @@ describe("a domain we could not ask about", () => {
   it("does not stop the rest of the batch being checked", async () => {
     const { summary } = await run(
       [due({ domain_id: "a", name: "unreachable.test" }), due({ domain_id: "b" })],
-      async (name) => {
-        if (name.endsWith("unreachable.test")) throw new Error("ETIMEDOUT")
-        return [challengeValue(TOKEN)]
+      {
+        delegation: async (parent) =>
+          parent === "unreachable.test"
+            ? { kind: "unreachable", detail: "timed out" }
+            : { kind: "delegated", nameservers: [`${TOKEN}.ns1.i10.tech`] },
       },
     )
 
@@ -179,14 +196,14 @@ describe("a domain we could not ask about", () => {
 
 describe("choosing what to re-check", () => {
   it("asks only for domains whose last check is older than the interval", async () => {
-    const { statements } = await run([], answering())
+    const { statements } = await run([], { delegation: delegating() })
     const query = statements[0]!
 
     expect(query).toContain("domains_due_recheck")
   })
 
   it("does nothing at all when nothing is due", async () => {
-    const { summary, statements } = await run([], answering())
+    const { summary, statements } = await run([], { delegation: delegating() })
     expect(summary).toEqual({
       checked: 0,
       proven: 0,

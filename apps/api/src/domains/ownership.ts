@@ -1,4 +1,6 @@
 import { Resolver } from "node:dns/promises"
+import { delegatedNameservers, delegatedZoneNames } from "./zone.js"
+import type { ReferralResult } from "./referral.js"
 
 /**
  * Proving that the workspace publishing a delegation is the one that asked for
@@ -21,22 +23,15 @@ import { Resolver } from "node:dns/promises"
  * side, at `_i10-challenge.<domain>`, which is still served by the CUSTOMER'S
  * nameservers and which only somebody holding those nameservers can write.
  *
- * ⚠ WHICH IS ALSO WHY A PLAIN RECURSIVE LOOKUP IS ENOUGH. Reading the token out
- * of the NS records instead would mean reading the PARENT's referral — a
- * resolver asked for `mail.example.com NS` follows the delegation and hands
- * back OUR zone's NS records, not the ones the customer published — and that
- * needs an iterative query and a raw DNS client. A name outside the delegation
- * is answered by any resolver, so `resolveTxt` is the whole implementation.
+ * ⚠ AND THE DELEGATED HALF NO LONGER NEEDS AN EXTRA RECORD AT ALL. It used to:
+ * every customer published the same two nameservers, so the delegation said
+ * that SOMEBODY had delegated the name and nothing about who, and a challenge
+ * TXT record beside it carried the identity the delegation could not. Giving
+ * each claim its own nameserver hostnames — `<claim>.ns1.i10.tech` — collapses
+ * the two into one fact, because only the holder of the domain's DNS can
+ * publish it and the label says whose claim it is. Reading it back means
+ * reading the PARENT's referral, which is domains/referral.ts.
  */
-
-/** The label the challenge lives at, under the customer's own zone. */
-export const CHALLENGE_LABEL = "_i10-challenge"
-
-const CHALLENGE_PREFIX = "i10-domain-verification="
-
-export const challengeName = (domain: string) => `${CHALLENGE_LABEL}.${domain}`
-
-export const challengeValue = (token: string) => `${CHALLENGE_PREFIX}${token}`
 
 /**
  * ⚠ `unreachable` IS NOT `absent`, AND FLATTENING THEM REPEATS A MISTAKE THIS
@@ -56,16 +51,15 @@ export type TxtLookup = (name: string) => Promise<string[]>
  * format means. A TXT record longer than 255 bytes is carried as several
  * strings that a reader concatenates; `resolveTxt` hands them over unjoined,
  * and joining them with a space — the obvious guess — corrupts every long
- * record. Our tokens are short, but a customer may well have put the challenge
- * beside a long SPF or DKIM record at the same name.
+ * record. A 2048-bit DKIM key is always several chunks.
  */
 const NOT_PUBLISHED = new Set(["ENOTFOUND", "ENODATA", "NXDOMAIN"])
 
 /**
  * ⚠ THE SAME BOUND `console/delegation.ts` USES, AND FOR THE SAME REASON: this
- * now sits on the path of a button somebody presses repeatedly, and an
- * unbounded lookup against a slow nameserver holds a request open for the
- * resolver's own default.
+ * sits on the path of a button somebody presses repeatedly, and an unbounded
+ * lookup against a slow nameserver holds a request open for the resolver's own
+ * default.
  */
 const DEFAULT_TIMEOUT = 3000
 
@@ -95,34 +89,78 @@ export function nodeTxtLookup(timeoutMs: number = DEFAULT_TIMEOUT): TxtLookup {
 }
 
 /**
- * ⚠ COMPARED CASE-INSENSITIVELY AND WITH QUOTES STRIPPED, because the value
- * makes a round trip through somebody else's control panel. The token is hex,
- * so case carries no information to lose — and a provider that stores the value
- * with the quotes the customer pasted would otherwise fail a record that is, to
- * the eye and to every other resolver, correct.
+ * The question asked of a delegated domain.
+ *
+ * ⚠ IT IS THE `mail.` ZONE THAT IS CHECKED FIRST, because it is the one that
+ * carries the return paths and the one a half-finished setup is most likely to
+ * have. The other two are tried only when it is absent, so the ordinary success
+ * costs ONE query and only a failing domain pays for three — a customer who
+ * published two of the three records is told they are proved rather than being
+ * sent back to records that are already correct.
  */
-const normalise = (value: string) => value.trim().replace(/^"|"$/g, "").toLowerCase()
+export type DelegationProbe = (parent: string, child: string) => Promise<ReferralResult>
 
-export async function proveOwnership(
-  lookup: TxtLookup,
+export interface DnsProbes {
+  /** For a manual domain's DKIM record. */
+  txt: TxtLookup
+  /** For a delegated domain's NS records, read from the parent. */
+  delegation: DelegationProbe
+}
+
+/**
+ * Proving a DELEGATED domain, from the delegation itself.
+ *
+ * ⚠ THE COMPARISON IS AGAINST THIS CLAIM'S NAMESERVER NAMES, NOT AGAINST OURS
+ * IN GENERAL. `mail.example.com NS ns1.i10.tech` proves that somebody delegated
+ * the name to i10 and says nothing about which workspace — which is exactly the
+ * hole this design closes. Only `<claim>.ns1.i10.tech` identifies the account,
+ * so a bare nameserver name must NOT be accepted, however much it looks like
+ * ours.
+ *
+ * ⚠ AND ONE MATCHING RECORD IS ENOUGH. A zone may legitimately list several
+ * nameservers, including ones we did not ask for, and a customer mid-migration
+ * may briefly list both an old claim and a new one.
+ */
+export async function proveDelegation(
+  probe: DelegationProbe,
   domain: string,
-  token: string,
+  claim: string,
+  nameservers: readonly string[],
 ): Promise<Ownership> {
-  const wanted = normalise(challengeValue(token))
+  const wanted = new Set(
+    delegatedNameservers(nameservers, claim).map((n) => n.toLowerCase()),
+  )
+  const zones = Object.values(delegatedZoneNames(domain))
 
-  let published: string[]
-  try {
-    published = await lookup(challengeName(domain))
-  } catch {
-    return { proven: false, reason: "unreachable" }
+  let sawAnswer = false
+
+  for (const zone of zones) {
+    let result: ReferralResult
+    try {
+      result = await probe(domain, zone)
+    } catch {
+      return { proven: false, reason: "unreachable" }
+    }
+
+    if (result.kind === "unreachable") continue
+    sawAnswer = true
+
+    if (
+      result.kind === "delegated" &&
+      result.nameservers.some((ns) => wanted.has(ns.toLowerCase()))
+    ) {
+      return { proven: true }
+    }
   }
 
-  // ⚠ ANY record at the name may be the one, not the first. A customer with two
-  // workspaces publishes two challenges at the same name, and a domain already
-  // carrying an unrelated TXT record there is not a reason to refuse this one.
-  return published.some((value) => normalise(value) === wanted)
-    ? { proven: true }
-    : { proven: false, reason: "absent" }
+  /*
+   * ⚠ "WE COULD NOT ASK" IS NOT "THEY PUBLISHED NOTHING". If every zone came
+   * back unreachable we learned precisely nothing, and reporting that as an
+   * absent delegation is what turns a DNS outage into customers losing domains.
+   */
+  return sawAnswer
+    ? { proven: false, reason: "absent" }
+    : { proven: false, reason: "unreachable" }
 }
 
 /** Where a manual domain's DKIM record lives. */
@@ -197,10 +235,18 @@ export async function proveDkim(
  * is perfectly well proved — handing somebody else's live domain away.
  */
 export async function proveDomain(
-  lookup: TxtLookup,
+  probes: DnsProbes,
   row: Provable,
+  nameservers: readonly string[],
 ): Promise<Ownership> {
-  if (row.delegated) return proveOwnership(lookup, row.name, row.delegationToken)
+  if (row.delegated) {
+    return proveDelegation(
+      probes.delegation,
+      row.name,
+      row.delegationToken,
+      nameservers,
+    )
+  }
 
   /*
    * ⚠ A MANUAL DOMAIN WITH NO KEY YET CANNOT BE PROVED, AND MUST NOT BE TREATED
@@ -212,5 +258,5 @@ export async function proveDomain(
     return { proven: false, reason: "absent" }
   }
 
-  return proveDkim(lookup, row.name, row.dkimSelector, row.dkimPublicKey)
+  return proveDkim(probes.txt, row.name, row.dkimSelector, row.dkimPublicKey)
 }

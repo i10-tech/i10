@@ -5,11 +5,7 @@ import { domainStore } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
 import type { Zone } from "../src/domains/zone.js"
-import {
-  challengeName,
-  challengeValue,
-  type TxtLookup,
-} from "../src/domains/ownership.js"
+import type { DelegationProbe } from "../src/domains/ownership.js"
 
 /**
  * Who is allowed to write the DNS we serve for a delegated domain.
@@ -158,10 +154,26 @@ const spyZones = () => ({
   remove: mock<(zoneName: string) => Promise<void>>(async () => {}),
 })
 
-/** A resolver that answers the challenge name with whatever tokens are given. */
-const publishing = (...tokens: string[]): TxtLookup =>
-  mock(async (name: string) =>
-    name === challengeName("example.com") ? tokens.map(challengeValue) : [],
+/**
+ * A parent zone that delegates to the given claims' nameservers.
+ *
+ * ⚠ THE CLAIM IS IN THE NAMESERVER NAME, WHICH IS THE WHOLE DESIGN. There is no
+ * challenge record any more: `<claim>.ns1.i10.tech` can only be published by
+ * whoever holds the domain's DNS, and the label says whose claim it is. Passing
+ * several claims is a domain whose parent lists more than one — a customer
+ * mid-migration, or two workspaces that both hold the DNS.
+ */
+const delegating = (...claims: string[]): DelegationProbe =>
+  mock(async () =>
+    claims.length === 0
+      ? ({ kind: "undelegated" } as const)
+      : {
+          kind: "delegated" as const,
+          nameservers: claims.flatMap((c) => [
+            `${c}.ns1.i10.tech`,
+            `${c}.ns2.i10.tech`,
+          ]),
+        },
   )
 
 describe("adding a delegated domain", () => {
@@ -178,7 +190,7 @@ describe("adding a delegated domain", () => {
       db: fakeDb({}),
       identity: identity(),
       zones,
-      txt: publishing(),
+      delegation: delegating(),
     })
 
     const out = await store.create(OWNER, { name: "example.com", delegated: true })
@@ -198,35 +210,41 @@ describe("adding a delegated domain", () => {
       db: fakeDb({}),
       identity: identity(),
       zones: spyZones(),
-      txt: publishing(),
+      delegation: delegating(),
     })
 
     const out = await store.create(STRANGER, { name: "example.com", delegated: true })
     expect(out.status).toBe("created")
   })
 
-  it("asks the customer for a challenge record carrying this row's token", async () => {
+  /**
+   * ⚠ NO CHALLENGE RECORD, AND ITS ABSENCE IS THE FEATURE. One used to be
+   * necessary because every customer published the same two nameservers, so the
+   * delegation established that SOMEBODY had delegated the name and nothing
+   * about who. The claim now lives in the nameserver names themselves, which
+   * only the holder of the domain's DNS can publish — so the seventh record,
+   * and the explaining that went with it, are gone.
+   */
+  it("asks for six NS records carrying this row's claim, and nothing else", async () => {
     const store = domainStore({
       ...base,
       db: fakeDb({}),
       identity: identity(),
       zones: spyZones(),
-      txt: publishing(),
+      delegation: delegating(),
     })
 
     const out = await store.create(OWNER, { name: "example.com", delegated: true })
     const records = out.status === "created" ? out.domain.records : []
-    const challenge = records.find((r) => r.type === "TXT")
 
-    expect(challenge).toMatchObject({
-      name: "_i10-challenge.example.com",
-      value: `i10-domain-verification=${OWNER_TOKEN}`,
-    })
-    // ⚠ OUTSIDE THE THREE DELEGATED SUBTREES, which is the only thing that
-    // makes it proof. Anything under them is served by us.
-    expect(challenge!.name).not.toContain("mail.")
-    expect(challenge!.name).not.toContain("_domainkey.")
-    expect(challenge!.name).not.toContain("_dmarc.")
+    expect(records).toHaveLength(6)
+    expect(records.every((r) => r.type === "NS")).toBe(true)
+    expect(records.map((r) => r.value)).toContain(`${OWNER_TOKEN}.ns1.i10.tech`)
+
+    // ⚠ AND NEVER A BARE NAMESERVER NAME, which would prove only that somebody
+    // delegated to i10 — precisely the hole this design closes.
+    expect(records.some((r) => r.value === "ns1.i10.tech")).toBe(false)
+    expect(records.some((r) => r.type === "TXT")).toBe(false)
   })
 })
 
@@ -252,7 +270,7 @@ describe("the squatter, verifying a domain they do not own", () => {
       identity: identity(),
       zones,
       // the owner's record, published by the owner, in the owner's zone
-      txt: publishing(OWNER_TOKEN),
+      delegation: delegating(OWNER_TOKEN),
     })
 
     const out = await store.verify(STRANGER, ID)
@@ -275,7 +293,7 @@ describe("the squatter, verifying a domain they do not own", () => {
       }),
       identity: identity(),
       zones,
-      txt: publishing(),
+      delegation: delegating(),
     })
 
     expect((await store.verify(STRANGER, ID)).status).toBe("unproven")
@@ -298,7 +316,7 @@ describe("the owner, verifying a domain they do own", () => {
       }),
       identity: identity(),
       zones,
-      txt: publishing(OWNER_TOKEN),
+      delegation: delegating(OWNER_TOKEN),
     })
 
     const out = await store.verify(OWNER, ID)
@@ -331,7 +349,7 @@ describe("the owner, verifying a domain they do own", () => {
       }),
       identity: identity(),
       zones,
-      txt: publishing(OWNER_TOKEN, STRANGER_TOKEN),
+      delegation: delegating(OWNER_TOKEN, STRANGER_TOKEN),
     })
 
     expect((await store.verify(OWNER, ID)).status).toBe("claimed")
@@ -345,18 +363,18 @@ describe("the owner, verifying a domain they do own", () => {
    */
   it("republishes without re-proving when the claim is already ours", async () => {
     const zones = spyZones()
-    const txt = publishing()
+    const delegation = delegating()
     const store = domainStore({
       ...base,
       db: fakeDb({ select: () => [row()], claim: () => [{ domainId: ID }] }),
       identity: identity(),
       zones,
-      txt,
+      delegation,
     })
 
     expect((await store.verify(OWNER, ID)).status).toBe("ok")
     expect(zones.put).toHaveBeenCalledTimes(3)
-    expect(txt).not.toHaveBeenCalled()
+    expect(delegation).not.toHaveBeenCalled()
   })
 
   /**
@@ -370,9 +388,7 @@ describe("the owner, verifying a domain they do own", () => {
       db: fakeDb({ select: () => [row()], claim: () => [] }),
       identity: identity(),
       zones: spyZones(),
-      txt: async () => {
-        throw Object.assign(new Error("query timed out"), { code: "ETIMEOUT" })
-      },
+      delegation: async () => ({ kind: "unreachable", detail: "timed out" }),
     })
 
     const out = await store.verify(OWNER, ID)
@@ -388,7 +404,7 @@ describe("deleting a delegated domain", () => {
       db: fakeDb({ select: () => [row()], claim: () => [{ domainId: ID }] }),
       identity: identity(),
       zones,
-      txt: publishing(),
+      delegation: delegating(),
     })
 
     expect(await store.remove(OWNER, ID)).toBe(true)
@@ -412,7 +428,7 @@ describe("deleting a delegated domain", () => {
       db: fakeDb({ select: () => [row()], claim: () => [{ domainId: OTHER_ID }] }),
       identity: identity(),
       zones,
-      txt: publishing(),
+      delegation: delegating(),
     })
 
     expect(await store.remove(STRANGER, ID)).toBe(true)
@@ -426,7 +442,7 @@ describe("deleting a delegated domain", () => {
       db: fakeDb({ select: () => [row()], claim: () => [] }),
       identity: identity(),
       zones,
-      txt: publishing(),
+      delegation: delegating(),
     })
 
     expect(await store.remove(STRANGER, ID)).toBe(true)
@@ -480,7 +496,7 @@ describe("a domain that has changed hands", () => {
       zones,
       // The new owner's token resolves. The old owner's does not: their records
       // are gone, because the domain is not theirs any more.
-      txt: publishing(OWNER_TOKEN),
+      delegation: delegating(OWNER_TOKEN),
     })
 
     const out = await store.verify(OWNER, ID)
@@ -515,7 +531,7 @@ describe("a domain that has changed hands", () => {
       identity: identity(),
       zones,
       // Both are published: the challenger owns it too, or thinks they do.
-      txt: publishing(OWNER_TOKEN, STRANGER_TOKEN),
+      delegation: delegating(OWNER_TOKEN, STRANGER_TOKEN),
     })
 
     const out = await store.verify(OWNER, ID)
@@ -549,11 +565,14 @@ describe("a domain that has changed hands", () => {
       }),
       identity: identity(),
       zones: spyZones(),
-      txt: async () => {
+      delegation: async () => {
         asked += 1
-        // The challenger's own proof resolves; the incumbent's check times out.
-        if (asked === 1) return [challengeValue(OWNER_TOKEN)]
-        throw Object.assign(new Error("query timed out"), { code: "ETIMEOUT" })
+        // ⚠ THE CHALLENGER'S OWN DELEGATION RESOLVES; RE-CHECKING THE
+        // INCUMBENT'S TIMES OUT. A question we failed to ask is never an
+        // answer, so the incumbent must survive it.
+        return asked === 1
+          ? { kind: "delegated", nameservers: [`${OWNER_TOKEN}.ns1.i10.tech`] }
+          : { kind: "unreachable", detail: "timed out" }
       },
     })
 
@@ -592,14 +611,16 @@ describe("a domain that has changed hands", () => {
       }),
       identity: identity(),
       zones: spyZones(),
+      // ⚠ TWO DIFFERENT PROBES, WHICH IS THE POINT OF THE TEST. The challenger
+      // is delegated and proves itself through the parent's referral; the
+      // incumbent is manual and proves itself through its DKIM record.
+      delegation: delegating(OWNER_TOKEN),
       txt: async (name: string) => {
         asked.push(name)
-        if (name === challengeName("example.com")) return [challengeValue(OWNER_TOKEN)]
         // Their DKIM record is still published, so they still own it.
-        if (name === "i10old000._domainkey.example.com") {
-          return ["v=DKIM1; k=rsa; p=OLDKEY"]
-        }
-        return []
+        return name === "i10old000._domainkey.example.com"
+          ? ["v=DKIM1; k=rsa; p=OLDKEY"]
+          : []
       },
     })
 

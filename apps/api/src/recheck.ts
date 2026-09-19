@@ -28,6 +28,7 @@ import pino from "pino"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { recheckDomains } from "./domains/recheck.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
+import { readDelegation } from "./domains/referral.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 
@@ -73,7 +74,12 @@ await withMonitor(
     }
 
     try {
-      const summary = await recheckDomains({ db, txt: nodeTxtLookup(), log })
+      const summary = await recheckDomains({
+        db,
+        probes: { txt: nodeTxtLookup(), delegation: readDelegation },
+        nameservers: env.MAIL_NAMESERVERS,
+        log,
+      })
       log.info(summary, "domain re-check complete")
 
       /*

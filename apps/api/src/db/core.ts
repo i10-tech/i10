@@ -388,10 +388,17 @@ export const domains = core.table(
      * publish nothing, and have the real owner's NS records resolve to the
      * stranger's zone and verify them. See migration 0042 and ownership.ts.
      *
-     * ⚠ AND THE CHALLENGE IT BACKS SITS OUTSIDE THE DELEGATED SUBTREES, at
-     * `_i10-challenge.<domain>`. Anything under `mail.`, `_domainkey.` or
-     * `_dmarc.` is served by us once the delegation exists, so a token there
-     * would be one we wrote ourselves.
+     * ⚠ IT IS NOW THE LABEL ON THE NAMESERVER NAMES, NOT A SEPARATE CHALLENGE
+     * RECORD. It began as a token in a `_i10-challenge.<domain>` TXT record,
+     * published beside the delegation to carry the identity the delegation
+     * could not. Prefixing the nameservers with it instead —
+     * `<claim>.ns1.i10.tech` — collapses the two into one fact: only the holder
+     * of the domain's DNS can publish it, and the label says whose claim it is.
+     * The challenge record is gone; see domains/zone.ts and domains/referral.ts.
+     *
+     * ⚠ WHICH MEANS EACH NAMESERVER NAME NEEDS A WILDCARD A RECORD —
+     * `*.ns1.i10.tech`, pointed at the nameserver and NOT PROXIED. Without it
+     * every claim's delegation points at a name that resolves to nothing.
      *
      * ⚠ DEFAULTED IN THE DATABASE so a row cannot exist without one, including
      * rows written by anything that is not this application.

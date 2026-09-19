@@ -1,6 +1,5 @@
 import type { DnsRecord, DomainStatus } from "@repo/contracts"
 import { dkimRecordValue } from "./dkim.js"
-import { challengeName, challengeValue } from "./ownership.js"
 
 /**
  * Delegated subdomains: the customer points three names at us and we serve
@@ -58,8 +57,43 @@ export interface DelegationInput {
   spfInclude: string
   /** Our authoritative servers, in order. From `MAIL_NAMESERVERS`. */
   nameservers: readonly string[]
+  /**
+   * This domain row's claim, which prefixes every nameserver name.
+   *
+   * ⚠ THE ZONE'S OWN NS RECORDS MUST MATCH WHAT THE PARENT PUBLISHES. A
+   * delegation whose child zone names different nameservers than the parent is
+   * "lame" — resolvers accept it, most of the time, and some caches do not.
+   */
+  claim: string
   ttl?: number
 }
+
+/**
+ * The nameservers ONE claim delegates to.
+ *
+ * ⚠ PER CLAIM, NOT PER DEPLOYMENT, AND THAT IS WHAT MAKES THE DELEGATION PROVE
+ * ITSELF. Every delegating customer used to publish the same `ns1.i10.tech` and
+ * `ns2.i10.tech`, so nothing that reached DNS said which workspace had put it
+ * there — a stranger could add a domain, publish nothing, and have the real
+ * owner's NS records resolve to the stranger's zone. That is why there had to
+ * be a separate challenge TXT record beside the delegation, carrying a token,
+ * doing the identifying the delegation could not do.
+ *
+ * ⚠ GIVE THE CLAIM ITS OWN HOSTNAMES AND THE EXTRA RECORD DISAPPEARS. Only
+ * somebody holding `example.com`'s DNS can publish
+ * `mail.example.com NS <claim>.ns1.i10.tech`, and the label says whose claim it
+ * is — the same property the DKIM selector already gives a manual domain, which
+ * is why a manual domain never needed a challenge record either. One fact, read
+ * out of the parent's referral by domains/referral.ts.
+ *
+ * ⚠ IT NEEDS A WILDCARD A RECORD ON EACH NAMESERVER NAME — `*.ns1.i10.tech` and
+ * `*.ns2.i10.tech`, pointed at the nameserver's address and NOT PROXIED. Without
+ * it every delegated label resolves to nothing and no zone is served at all.
+ */
+export const delegatedNameservers = (
+  nameservers: readonly string[],
+  claim: string,
+): string[] => nameservers.map((ns) => `${claim}.${ns}`)
 
 /** The three names a delegating customer points at us. */
 export const delegatedZoneNames = (domain: string) => ({
@@ -108,14 +142,16 @@ export function delegatedZones({
   dkimPublicKey,
   spfInclude,
   nameservers,
+  claim,
   ttl = 300,
 }: DelegationInput): Zone[] {
   const names = delegatedZoneNames(domain)
-  const primary = nameservers[0] ?? "localhost"
+  const ours = delegatedNameservers(nameservers, claim)
+  const primary = ours[0] ?? "localhost"
 
   const apex = (zone: string): ZoneRecord[] => [
     soa(zone, primary, ttl),
-    ...nameservers.map((ns) => ({
+    ...ours.map((ns) => ({
       name: zone,
       type: "NS" as const,
       content: ns,
@@ -193,39 +229,31 @@ export function delegationRecordsFor(
   domain: string,
   nameservers: readonly string[],
   status: DomainStatus,
-  token: string,
+  claim: string,
 ): DnsRecord[] {
   const names = delegatedZoneNames(domain)
-  return [
-    /*
-     * ⚠ FIRST, BECAUSE NOTHING ELSE COUNTS UNTIL IT IS PUBLISHED. The six NS
-     * records below are identical for every customer in the world, so they
-     * establish that SOMEBODY delegated the name and nothing about who. This
-     * one carries a token belonging to this domain row, and `verify` will not
-     * serve a zone for the name until it resolves.
-     *
-     * ⚠ AND IT IS DELIBERATELY NOT UNDER `mail.`, `_domainkey.` OR `_dmarc.`.
-     * Those three are ours the moment the delegation exists, so a challenge
-     * inside them would be a value we wrote ourselves. This one stays in the
-     * customer's own zone, where only the customer can put it.
-     */
-    {
-      record: "Ownership",
-      name: challengeName(domain),
-      type: "TXT",
+  const ours = delegatedNameservers(nameservers, claim)
+  /*
+   * ⚠ SIX NS RECORDS AND NOTHING ELSE — THE CHALLENGE TXT RECORD IS GONE, and
+   * its disappearance is the point rather than a simplification. It existed
+   * only because every customer published the SAME two nameservers, so the
+   * delegation said that somebody had delegated the name and nothing about who;
+   * a seventh record had to carry the identity the first six could not.
+   *
+   * ⚠ NOW THE NAMESERVER NAMES CARRY IT. `<claim>.ns1.i10.tech` can only be
+   * published by whoever holds this domain's DNS, and the label says whose
+   * claim it is — so the delegation proves itself, exactly as a manual domain's
+   * DKIM record always did. One less record to publish, one less to get wrong,
+   * and one less thing to explain.
+   */
+  return Object.values(names).flatMap((zone) =>
+    ours.map((ns): DnsRecord => ({
+      record: "NS",
+      name: zone,
+      type: "NS",
       ttl: "Auto",
       status,
-      value: challengeValue(token),
-    },
-    ...Object.values(names).flatMap((zone) =>
-      nameservers.map((ns): DnsRecord => ({
-        record: "NS",
-        name: zone,
-        type: "NS",
-        ttl: "Auto",
-        status,
-        value: ns,
-      })),
-    ),
-  ]
+      value: ns,
+    })),
+  )
 }

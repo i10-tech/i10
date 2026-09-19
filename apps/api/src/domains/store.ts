@@ -9,9 +9,12 @@ import type { DnsZones } from "./zone.js"
 import {
   nodeTxtLookup,
   proveDomain,
+  type DelegationProbe,
+  type DnsProbes,
   type Provable,
   type TxtLookup,
 } from "./ownership.js"
+import { readDelegation } from "./referral.js"
 import type { DomainIdentity } from "./identity.js"
 import type { SecretBox } from "../webhooks/signing.js"
 
@@ -102,6 +105,13 @@ export interface DomainStoreDeps {
    * part of this store touches DNS.
    */
   txt?: TxtLookup
+  /**
+   * ⚠ READS THE PARENT'S REFERRAL, WHICH NO ORDINARY RESOLVER WILL DO. A
+   * delegated domain proves itself through the nameserver names it delegates
+   * to, and those can only be read from the zone ABOVE the delegation — see
+   * domains/referral.ts. Defaults to the real thing; tests supply their own.
+   */
+  delegation?: DelegationProbe
   /**
    * ⚠ SEALS THE DKIM PRIVATE KEY BEFORE IT REACHES A ROW. Anyone holding it can
    * sign mail as the customer's domain, so it never lands in the database in a
@@ -248,9 +258,12 @@ export function domainStore({
   secrets,
   zones,
   txt = nodeTxtLookup(),
+  delegation = readDelegation,
   log,
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
+  const probes: DnsProbes = { txt, delegation }
+
   /**
    * Whether the workspace standing in this one's way can still prove the name.
    *
@@ -294,13 +307,17 @@ export function domainStore({
     // this read. The blocker is gone, so the challenger may simply try again.
     if (!incumbent) return "displaced"
 
-    const proof = await proveDomain(txt, {
-      name,
-      delegated: incumbent.delegated,
-      delegationToken: incumbent.delegation_token,
-      dkimSelector: incumbent.dkim_selector,
-      dkimPublicKey: incumbent.dkim_public_key,
-    } satisfies Provable)
+    const proof = await proveDomain(
+      probes,
+      {
+        name,
+        delegated: incumbent.delegated,
+        delegationToken: incumbent.delegation_token,
+        dkimSelector: incumbent.dkim_selector,
+        dkimPublicKey: incumbent.dkim_public_key,
+      } satisfies Provable,
+      dns.nameservers,
+    )
 
     if (proof.proven || proof.reason === "unreachable") return "held"
 
@@ -384,7 +401,7 @@ export function domainStore({
     if (!alreadyOurs) {
       // ⚠ BEFORE THE CLAIM, NOT AFTER. A claim taken on arrival and checked
       // later is a claim that was granted on nothing.
-      const proof = await proveDomain(txt, row)
+      const proof = await proveDomain(probes, row, dns.nameservers)
       if (!proof.proven) return proof.reason
 
       const claim = () =>
@@ -436,6 +453,7 @@ export function domainStore({
       dkimPublicKey: row.dkimPublicKey,
       spfInclude: dns.spfInclude,
       nameservers: dns.nameservers,
+      claim: row.delegationToken,
     })) {
       await sink.put(zone)
     }
@@ -799,7 +817,7 @@ export function domainStore({
          * `CreateEmailIdentity` for an unproved name, which is exactly how one
          * workspace used to overwrite another's signing key.
          */
-        const proof = await proveDomain(txt, existing)
+        const proof = await proveDomain(probes, existing, dns.nameservers)
         if (!proof.proven) {
           return {
             status: "unproven",

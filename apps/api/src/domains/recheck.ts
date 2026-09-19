@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
-import { proveDomain, type TxtLookup } from "./ownership.js"
+import { proveDomain, type DnsProbes } from "./ownership.js"
 
 /**
  * Asking, periodically, whether the workspaces holding verified domains still
@@ -30,7 +30,9 @@ import { proveDomain, type TxtLookup } from "./ownership.js"
 
 export interface RecheckDeps {
   db: Database
-  txt: TxtLookup
+  probes: DnsProbes
+  /** Our nameserver names, so a delegation can be matched against this claim. */
+  nameservers: readonly string[]
   log?: { warn: (o: object, m: string) => void }
   now?: () => Date
   /**
@@ -70,7 +72,8 @@ interface DueRow {
 
 export async function recheckDomains({
   db,
-  txt,
+  probes,
+  nameservers,
   log,
   now = () => new Date(),
   graceMs = 7 * DAY,
@@ -91,13 +94,17 @@ export async function recheckDomains({
   )) as unknown as DueRow[]
 
   for (const row of due) {
-    const proof = await proveDomain(txt, {
-      name: row.name,
-      delegated: row.delegated,
-      delegationToken: row.delegation_token,
-      dkimSelector: row.dkim_selector,
-      dkimPublicKey: row.dkim_public_key,
-    })
+    const proof = await proveDomain(
+      probes,
+      {
+        name: row.name,
+        delegated: row.delegated,
+        delegationToken: row.delegation_token,
+        dkimSelector: row.dkim_selector,
+        dkimPublicKey: row.dkim_public_key,
+      },
+      nameservers,
+    )
 
     summary.checked += 1
 
