@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ArrowLeft, type LucideIcon } from "lucide-react"
-import { motion, type Transition } from "motion/react"
+import { motion, type Transition, type Variants } from "motion/react"
 import { cn } from "cn"
 import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
@@ -117,16 +117,17 @@ export function SidebarNav({
                   // identical links.
                   aria-current={active ? "page" : undefined}
                   /*
-                   * ⚠ THE ROW IS STILL WHAT TRIGGERS THE ICON, THROUGH `group`
-                   * BELOW RATHER THAN THROUGH MOTION VARIANTS. It used to be
-                   * `whileHover="hover"` here, propagated down to a variant the
-                   * icon declared; the icon's gesture is a stylesheet rule now,
-                   * and `.group:hover` reaches it from exactly the same place
-                   * for exactly the same reason — hovering the label or the far
-                   * right edge of the row has to count, not just the 16px
-                   * square.
+                   * ⚠ THE GESTURE STATE LIVES ON THE ROW, NOT ON THE ICON, AND
+                   * THAT IS WHAT MAKES THE WHOLE ROW THE TARGET. Motion
+                   * propagates a variant name down to any child that declares
+                   * the same variant, so hovering anywhere on the link — the
+                   * label, the padding, the far right edge — runs the icon's
+                   * animation. Putting `whileHover` on the icon itself would
+                   * mean it only fired on a 16px square.
                    */
                   initial={false}
+                  whileHover="hover"
+                  whileTap="tap"
                   className={cn(
                     // ⚠ `isolate` IS WHAT KEEPS THE TRAVELLING FILL BEHIND THE
                     // LABEL AND IN FRONT OF THE RAIL. It gives the row its own
@@ -173,6 +174,15 @@ export function SidebarNav({
 const MotionLink = motion.create(Link)
 
 /**
+ * ⚠ STIFF AND HEAVILY DAMPED, WHICH IS WHAT MAKES IT UNNOTICEABLE. The brief
+ * for these is that somebody feels the interface respond without registering an
+ * animation; at `stiffness: 500` the icon has finished before a deliberate
+ * glance reaches it, and `damping: 30` leaves a trace of overshoot so it reads
+ * as a physical nudge rather than a state flip.
+ */
+const ICON_SPRING: Transition = { type: "spring", stiffness: 500, damping: 30 }
+
+/**
  * ⚠ SOFTER AND SLOWER THAN THE ICON'S, BECAUSE THIS ONE TRAVELS A REAL DISTANCE.
  * The icon nudges by a pixel; the highlight crosses up to four hundred of them
  * between "Overview" and "Settings", and a 500-stiffness spring over that
@@ -184,41 +194,28 @@ const MotionLink = motion.create(Link)
 const ACTIVE_SPRING: Transition = { type: "spring", stiffness: 380, damping: 34 }
 
 /**
- * ⚠ THE ICON DRAWS ITSELF NOW, AND IT REPLACED A TRANSFORM RATHER THAN JOINING
- * ONE. What was here was `scale: 1.12` with a pixel of lift — the glyph treated
- * as a rigid object being nudged, which is perfectly pleasant and is not what
- * anybody means by an icon being alive. What reads that way is the STROKES
- * arriving in order, the way somebody would sketch the shape. See the
- * `[data-draw]` block in @repo/ui/styles/tokens.css for the mechanism.
- *
- * ⚠ AND IT IS CSS, WHICH IS WHY IT SURVIVES EIGHTEEN DIFFERENT GLYPHS WITH NO
- * PER-ICON WORK. Lucide is a stroke-only set drawn in one 24×24 box, so
- * `stroke-dasharray` plus an `nth-child` delay ladder sequences ANY of them.
- * A hand-choreographed version — the bell rocking, the envelope opening — is
- * eighteen bespoke animations and a nineteenth the next time a nav item is
- * added, and the one that gets forgotten is the one that looks broken.
- *
- * ⚠ THE TRIGGER IS THE ROW, NOT THE 16px SQUARE. The parent link carries
- * Tailwind's `group`, and the stylesheet's selector is
- * `.group:hover [data-draw] …` — so hovering the label, the padding, or the far
- * right edge of the row draws the icon. That was the point of the old
- * `whileHover` living on the link too.
- *
- * ⚠ `motion` IS GONE FROM THIS COMPONENT AND THE LINK STILL NEEDS IT. The
- * travelling active highlight above is a `layoutId`, which is Motion's and has
- * no CSS equivalent; only the ICON's gesture moved to the stylesheet.
+ * ⚠ SCALE AND A SINGLE PIXEL OF LIFT — NO ROTATION, AND THAT IS DELIBERATE.
+ * A rotate reads beautifully on a gear and absurdly on an envelope, and this
+ * list has eighteen different glyphs. The only transform that is flattering to
+ * all of them is the one that does not imply a direction.
  */
+const ICON_VARIANTS: Variants = {
+  hover: { scale: 1.12, y: -1 },
+  tap: { scale: 0.92, y: 0 },
+}
+
 function NavIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
   return (
-    <span
-      data-draw
-      // ⚠ `inline-flex` AND NOT A BARE SPAN. It keeps the glyph from picking up
-      // the row's line box, which is what made it sit a pixel low.
+    <motion.span
+      variants={ICON_VARIANTS}
+      transition={ICON_SPRING}
+      // ⚠ `inline-flex` AND NOT A BARE SPAN. A transform on an inline element
+      // is ignored, so without this the whole thing silently does nothing.
       className="inline-flex shrink-0"
     >
       <Icon
         className={cn("size-4", active ? "text-foreground" : "text-muted-foreground")}
       />
-    </span>
+    </motion.span>
   )
 }
