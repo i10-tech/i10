@@ -224,7 +224,15 @@ export function polarClient(opts: PolarOptions): PolarClient {
       // so "Polar has never heard of this" is the ordinary case for a typo or a
       // probe — and it is emphatically NOT "the payment failed". The caller
       // renders those two differently.
-      if (response.status === 404) return null
+      //
+      // ⚠ AND 422 IS THE SAME ANSWER, WHICH IT WAS NOT BEING TREATED AS. Polar
+      // validates the id before looking it up, so a well-formed UUID that is
+      // not one of theirs comes back 422 rather than 404 — measured against the
+      // sandbox with an all-zeros UUID. That fell through to the throw below and
+      // surfaced to the browser as 503 "Could not reach the payment provider",
+      // which says a payment system is down when in fact it answered
+      // immediately and correctly. Both mean "no such checkout".
+      if (response.status === 404 || response.status === 422) return null
       if (!response.ok) {
         throw new Error(`polar checkouts.get failed with ${response.status}`)
       }

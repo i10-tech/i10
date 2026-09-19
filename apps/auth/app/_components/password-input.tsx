@@ -51,7 +51,16 @@ export function PasswordInput({
           // rounded edge than the caret does from the other one.
           className="-me-1 grid size-9 place-items-center rounded-pill text-muted-foreground transition-colors duration-(--duration-instant) hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
-          <Icon className="size-4" aria-hidden="true" />
+          {/*
+           * ⚠ 18px, WHICH OVERRIDES `Button`'S 16px DEFAULT ON PURPOSE. An eye
+           * is a lot of detail in a small square — pupil, lid, and on the
+           * crossed-out variant a stroke through all of it — so at 16px it
+           * reads as a smudge where the other icons in the product read as
+           * shapes. It is the only control in the form somebody has to FIND
+           * rather than tab to, and it sits alone in a 36px tap target with
+           * room to spare.
+           */}
+          <Icon className="size-4.5" aria-hidden="true" />
         </button>
       }
     />

@@ -45,7 +45,6 @@ export default async function Page({
           signUpHref={`/sign-up${carry}`}
           resetHref={`/reset-password${carry}`}
           mfaHref={`/mfa${carry}`}
-          passkeyHref={`/passkey${carry}`}
           redirectRaw={typeof raw === "string" ? raw : undefined}
           providers={providers}
         />

@@ -17,7 +17,15 @@ import { PasswordInput } from "../_components/password-input"
 import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeWithoutLeaving, leaveFor } from "../_lib/finish"
-import type { SignUpAbilities } from "../_lib/environment"
+import { releaseFocus, useFieldFocus } from "../_lib/field-state"
+import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
+import {
+  describeRules,
+  emailVerdict,
+  isEmailUsable,
+  isPasswordUsable,
+  passwordVerdict,
+} from "../_lib/validate"
 import type { SsoProvider } from "../_lib/providers"
 import {
   BackupCodesStep,
@@ -103,6 +111,7 @@ export function SignUpForm({
   redirectRaw,
   providers,
   abilities,
+  password: passwordPolicy,
   startAt,
   alreadySignedIn,
 }: {
@@ -112,6 +121,16 @@ export function SignUpForm({
   providers: SsoProvider[]
   /** What this Clerk instance can actually finish. See _lib/environment.ts. */
   abilities: SignUpAbilities
+  /**
+   * What this instance will accept as a password.
+   *
+   * ⚠ A PROP RATHER THAN A CONSTANT, BECAUSE THE CONSTANT WAS WRONG. The hint
+   * under the box said "At least 8 characters" against an instance configured
+   * for fifteen, so the form stated a rule, accepted input that met it, spent a
+   * round trip, and returned a toast contradicting its own hint. See
+   * `passwordRules` in _lib/environment.ts.
+   */
+  password: PasswordRules
   /**
    * The step to open on, when the browser is coming back from a provider.
    *
@@ -137,6 +156,40 @@ export function SignUpForm({
   const [lastName, setLastName] = useState("")
   const [email, setEmail] = useState("")
   const [code, setCode] = useState("")
+
+  /*
+   * ⚠ THE PASSWORD IS CONTROLLED NOW, WHICH IT DELIBERATELY WAS NOT BEFORE. The
+   * old form read it out of `FormData` at submit time precisely so that React
+   * never held it — a reasonable instinct, and the wrong trade here. Nothing can
+   * tell somebody their password is eleven characters of a required fifteen
+   * without knowing what they have typed, and the alternative is what this
+   * replaced: a round trip to Clerk to be told.
+   *
+   * It lives in this component's state for the length of one step and is passed
+   * to `signUp.password`. It is never logged, never put in a ref that outlives
+   * the step, and the component unmounts on navigation like any other.
+   */
+  const [secret, setSecret] = useState("")
+
+  /*
+   * ⚠ "IS THIS FIELD WRONG **AND** NOT BEING EDITED", which is a stricter test
+   * than "has it been blurred once". Red has to mean "you stopped, and it is
+   * still wrong" — a field that stays red through the keystrokes of its own
+   * correction is reporting on a value that no longer exists. See
+   * _lib/field-state.ts, which owns the two booleans and why there are two.
+   *
+   * ⚠ GREEN DOES NOT WAIT FOR ANY OF IT, WHICH IS THE ASYMMETRY THE WHOLE THING
+   * TURNS ON. There is no moment at which "this is fine" is premature. See
+   * _lib/validate.ts.
+   */
+  const emailField = useFieldFocus(
+    // ⚠ EMPTY IS NOT MALFORMED. Blurring an unanswered box must not arm green
+    // for later, any more than it turns the border red now.
+    (value) => value.trim() !== "" && !isEmailUsable(value),
+  )
+  const secretField = useFieldFocus(
+    (value) => value !== "" && !isPasswordUsable(value, passwordPolicy),
+  )
   const [totp, setTotp] = useState<TotpEnrolment | null>(null)
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
@@ -163,6 +216,15 @@ export function SignUpForm({
   const order: Stage[] = [...ACCOUNT_STAGES, ...optional]
   const segment = SEGMENT[stage]
   const isLastStep = order.indexOf(segment) === order.length - 1
+
+  /*
+   * ⚠ DERIVED IN RENDER RATHER THAN HELD IN STATE. A verdict is a pure function
+   * of the value, the instance's rules and whether the field has been left — so
+   * storing it would mean three more `setState` calls per keystroke and a state
+   * that can disagree with the input it describes.
+   */
+  const emailState = emailVerdict(email, emailField)
+  const secretState = passwordVerdict(secret, passwordPolicy, secretField)
 
   /**
    * Somebody who is already signed in, with no step to resume onto.
@@ -252,8 +314,37 @@ export function SignUpForm({
     event.preventDefault()
     if (!signUp || busy) return
 
-    const form = new FormData(event.currentTarget)
-    const password = String(form.get("password") ?? "")
+    /*
+     * ⚠ THE CHECK HAPPENS HERE AND THE BUTTON STAYS ENABLED, WHICH IS THE
+     * DELIBERATE HALF OF THIS. Pressing Create account with both boxes empty
+     * used to show a spinner, spend a round trip on Clerk, and return a toast —
+     * for two questions this page can answer without asking anybody. Disabling
+     * the button until both are valid would also stop the round trip, and it
+     * would replace a wasted two seconds with a control that is dead for no
+     * stated reason, which is the worse of the two failures.
+     *
+     * Pressing it while something is wrong is instead what MARKS the fields as
+     * touched: the borders go red, the hints name what is missing, and the
+     * answer arrives in the same frame as the click.
+     */
+    const emailOk = isEmailUsable(email)
+    const secretOk = isPasswordUsable(secret, passwordPolicy)
+
+    if (!emailOk || !secretOk) {
+      // ⚠ THE BLUR COMES FIRST, AND IT IS NOT TIDYING UP. Submitting with Enter
+      // from inside a box leaves that box focused, and a focused field is never
+      // painted red — so without this, pressing Enter on a bad address is a form
+      // that refuses silently. See `releaseFocus` in _lib/field-state.ts.
+      releaseFocus()
+      // ⚠ EACH FIELD IS TOLD WHETHER IT IS THE PROBLEM. Revealing a field that
+      // was already valid would record it as having been shown wrong, and it
+      // would then go green the next time somebody clicked into it, for nothing.
+      emailField.reveal(!emailOk)
+      secretField.reveal(!secretOk)
+      return
+    }
+
+    const password = secret
 
     setBusy("credentials")
 
@@ -506,10 +597,25 @@ export function SignUpForm({
               <FloatingInput
                 id="email"
                 name="email"
+                /*
+                 * ⚠ STILL `type="email"` THOUGH THE FORM IS `noValidate` AND WE
+                 * CHECK IT OURSELVES. The type is what gives a phone keyboard an
+                 * @ key and a dot, and what tells a password manager which field
+                 * this is. Only the browser's own bubble is being suppressed.
+                 */
                 type="email"
                 label="Email address"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
+                // ⚠ THE BORDER TURNS RED ONLY ONCE THE CARET HAS LEFT, AND GOES
+                // BACK TO GREY WHEN IT RETURNS. See _lib/field-state.ts.
+                {...emailField.props}
+                state={emailState.state}
+                hint={emailState.hint}
+                // ⚠ NO RESERVED ROW: this hint is a validation message rather than a
+                // description, so it is drawn into the gap FieldGroup already
+                // leaves rather than making every field permanently taller.
+                reserveHint={false}
                 autoComplete="email"
                 disabled={locked}
                 autoFocus
@@ -527,10 +633,24 @@ export function SignUpForm({
                 id="password"
                 name="password"
                 label="Password"
+                value={secret}
+                onChange={(event) => setSecret(event.target.value)}
+                {...secretField.props}
+                state={secretState.state}
+                /*
+                 * ⚠ THE HINT IS THE INSTANCE'S OWN RULE, AND THAT REPLACED A
+                 * SENTENCE THAT WAS SIMPLY UNTRUE. It said "At least 8
+                 * characters" while Clerk was configured to require fifteen —
+                 * so the form invited a password it would then refuse, and the
+                 * refusal arrived from a server two seconds later. Now the
+                 * count ticks up as you type and the border only turns red
+                 * once you have left the box.
+                 */
+                hint={secretState.hint ?? describeRules(passwordPolicy)}
+                reserveHint={false}
                 autoComplete="new-password"
                 disabled={locked}
                 required
-                hint="At least 8 characters."
               />
               <Button type="submit" size="xl" disabled={!signUp || locked}>
                 {busy === "credentials" ? (

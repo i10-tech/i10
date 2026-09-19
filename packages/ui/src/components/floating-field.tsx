@@ -57,35 +57,41 @@ export type FieldState = "idle" | "pending" | "invalid" | "valid"
  * stylistic — it is the only form the compiler can see.
  */
 /*
- * ⚠ THE HORIZONTAL GEOMETRY IS ARITHMETIC, NOT TASTE, AND GETTING IT WRONG EATS
- * THE CORNER OF THE BORDER. Four numbers have to agree:
+ * ⚠ THE HORIZONTAL GEOMETRY IS ARITHMETIC, NOT TASTE, AND ALL OF IT IS ONE
+ * NUMBER. Four things have to agree on 24px:
  *
- *     control radius        28px   `rounded-pill` on `h-14` is height / 2
- *     legend box starts at  28px   fieldset border (1) + legend `ms-[27px]`
- *     label box starts at   28px   `start-7`
- *     glyphs start at       32px   both carry `px-1`, so the gap is 4px
- *                                  wider than the word on EACH side
- *     value inset           32px   `px-8`, BOTH sides
+ *     label glyphs      24px   `start-5` (20) + `px-1` (4), both states
+ *     legend glyphs     24px   `ms-[19px]` + fieldset border (1) + `px-1` (4)
+ *     value inset       24px   `px-6`, BOTH sides
+ *     hint inset        24px   `px-6` on the row under the control
  *
- * The first line is the constraint. A stadium's top border is only horizontal
- * from x = radius onward — before that it is the corner arc — so a notch that
- * opens at 16px, which is where this started, deletes the arc instead of
- * interrupting a straight line. On screen that is a field whose top-left corner
- * is simply missing, with the label hanging off the end of it.
+ * ⚠ THE LABEL DOES NOT MOVE SIDEWAYS AS IT RISES, AND THAT IS THE WHOLE
+ * ILLUSION. It starts where the value will be, at the value's size, and travels
+ * straight up while shrinking. A version of this shipped briefly with the
+ * resting position at 24 and the floated one at 32, on the theory that the notch
+ * had to clear the corner arc — it looked like the label sliding diagonally, and
+ * it put the resting placeholder a quarter of an inch off the rounded edge it is
+ * supposed to sit inside.
  *
- * ⚠ AND THE LABEL AND THE LEGEND USED TO BE 4px OUT OF STEP, which is the other
- * half of the same screenshot. The label sat at `start-3` (12) and the legend at
- * `ms-2` (16), so the gap opened four pixels to the RIGHT of the word: no
- * clearance before the first letter, double after the last. They are written as
- * one sum now so the next person changing either has to change both.
+ * ⚠ THE CORNER ARC IS NOT THE CONSTRAINT IT WAS TAKEN FOR. `rounded-pill` on
+ * `h-14` is a 28px radius, and the top border is only truly horizontal from
+ * x = 28 onward — but the arc is almost flat well before that. At x = 20 it sits
+ * 1.2px below the horizontal (28 − √(28² − 8²)), which is less than the border
+ * is wide. Opening the notch there interrupts what looks like a straight line;
+ * opening it at 16, which is where this started, leaves 2.7px of orphaned arc
+ * and reads as a missing corner.
  *
- * ⚠ SO THE VALUE IS PADDED TO 32px TOO, which is what keeps the resting label
- * sitting exactly where the text it names will appear. That is the whole
- * illusion — the label does not move sideways when it rises, it only goes up
- * and gets smaller.
+ * ⚠ AND THE LABEL AND THE LEGEND MUST NOT DRIFT APART. They were 4px out of step
+ * once — label at `start-3` (12), legend at `ms-2` (16) — so the gap opened four
+ * pixels to the RIGHT of the word: no clearance before the first letter, double
+ * after the last. The 20s above are one number written twice, and changing
+ * either means changing both.
  */
 const LABEL = cn(
-  "pointer-events-none absolute start-7 z-10 truncate px-1",
+  // ⚠ ONE HORIZONTAL POSITION FOR BOTH STATES. 20px + the `px-1` below puts the
+  // glyphs at 24px, which is where the VALUE starts — see `CONTROL_INPUT`. The
+  // label does not move sideways as it rises; only `top` and `font-size` do.
+  "pointer-events-none absolute start-5 z-10 truncate px-1",
   // ⚠ 14px FLOATED AGAINST A 16px VALUE, AND `leading-none` IS THE HALF THAT
   // FIXES THE ALIGNMENT. Tailwind pairs `text-sm` with a 20px line height, so
   // the label's BOX is 20px tall while the gap in the border is 14 — centre the
@@ -93,12 +99,39 @@ const LABEL = cn(
   // exactly the "too much on the top" the field was showing. `leading-none`
   // collapses the box onto the glyphs so the thing being centred is the text.
   "max-w-[calc(100%-3.5rem)] text-sm leading-none font-medium",
-  // ⚠ ONLY `top` AND `font-size` MOVE. The label keeps `-translate-y-1/2` in
-  // both states, so the animation is a single property travelling from the
-  // middle of the box to its top edge — no transform to interpolate, and
-  // nothing to land half a pixel off at the end.
+  // ⚠ NO TRANSFORM IS INTERPOLATED. The label keeps `-translate-y-1/2` in both
+  // states, so what animates is `top` and `font-size` — two lengths, each with
+  // an exact end value, and nothing to land half a pixel off.
+  /*
+   * ⚠ IT LEAVES AT ONCE AND TAKES ITS TIME ARRIVING, AND THOSE ARE TWO SEPARATE
+   * REQUIREMENTS THAT THREE CURVES FAILED BEFORE THIS ONE. Measured in the
+   * browser, sampling the label's computed `top` every 8ms, as a percentage of
+   * the travel in the first frame and at the moment the word reaches the border:
+   *
+   *                        1 frame   reaches the border
+   *   quint-out @100ms        ~60%          22ms    over before it began
+   *   quint-in-out @200ms       0%         119ms    a pause, then a lurch
+   *   spring-soft @200ms        1%         126ms    starts from rest: elastic
+   *   quad-out @200ms          15%          99ms    right shape, too slow
+   *   quad-out @100ms          31%          60ms    both
+   *
+   * `quint-out` is the curve this shipped with and it is not wrong, it is
+   * merely FAST: a fifth-power ease-out is most of the way there inside one
+   * frame, so lengthening the duration adds time to a tail nobody can see and
+   * the movement looks identical. The two curves tried in its place fixed that
+   * by removing the immediacy — they ease in, or start from rest — and the pause
+   * between the click and the response reads as the interface being slow.
+   *
+   * `--ease-quad-out` is the second-power ease-out: non-zero velocity at t=0, so
+   * the answer is immediate, and only a gentle deceleration, so the duration is
+   * spent travelling rather than settling. See its note in styles/tokens.css.
+   *
+   * ⚠ AND THE DURATION IS BACK ON THE 100ms RUNG. At 200ms the same curve was
+   * simply too slow — the point of the gentler curve is that the duration now
+   * MEANS something, which cuts both ways.
+   */
   "-translate-y-1/2 transition-[top,font-size,color]",
-  "duration-(--duration-instant) ease-(--ease-quint-out)",
+  "duration-(--duration-instant) ease-(--ease-quad-out)",
   "peer-[:placeholder-shown:not(:focus)]:text-base",
   "peer-[:placeholder-shown:not(:focus)]:font-normal",
 )
@@ -145,7 +178,20 @@ const FRAME = cn(
   "pointer-events-none absolute inset-0 -top-[7px]",
   "rounded-[inherit] border text-start",
   "transition-[color,border-color] duration-(--duration-instant) ease-(--ease-linear)",
+  /*
+   * ⚠ THE CLOSED STATE ALSO CARRIES THE CLOSING DELAY, WHICH IS ZERO. A
+   * transition reads its duration and delay from the state it is moving TO, so
+   * this is the one place the way OUT can be timed separately from the way in —
+   * no JavaScript, no second element.
+   *
+   * ⚠ AND IT IS NEEDED BECAUSE THE DELAY THAT IS RIGHT ON THE WAY IN IS WRONG
+   * ON THE WAY OUT. Measured with the same delay in both directions, the label
+   * left the border long before the gap began to close, leaving the same empty
+   * slot as before — just after the word rather than before it. At zero the gap
+   * starts closing at 28ms, which is the same frame the label clears the border.
+   */
   "peer-[:placeholder-shown:not(:focus)]:[&>legend]:max-w-[0.01px]",
+  "peer-[:placeholder-shown:not(:focus)]:[&>legend]:delay-[0ms]",
 )
 
 /**
@@ -166,13 +212,55 @@ const LEGEND = cn(
   // border clips the last character, if it is larger there is a visible slot of
   // missing border after it, and if it is SHORTER than the label's line box the
   // label rides up out of the gap.
-  // ⚠ `ms-[27px]` IS THE LABEL'S 28px LESS THE FIELDSET'S OWN 1px BORDER, which
-  // a legend is laid out INSIDE. Measured, not derived: with `ms-5` the gap
-  // opened at 29px against a label at 28, and the border clipped the first
-  // letter by a pixel on every field in the product.
-  "invisible ms-[27px] block h-[14px] w-auto max-w-full overflow-hidden p-0",
+  // ⚠ `ms-[19px]` IS THE LABEL'S 20px LESS THE FIELDSET'S OWN 1px BORDER, which
+  // a legend is laid out INSIDE. Measured, not derived: an earlier version had
+  // the legend one pixel outboard of the label and the border clipped the first
+  // letter on every field in the product.
+  "invisible ms-[19px] block h-[14px] w-auto max-w-full overflow-hidden p-0",
   "text-sm leading-none font-medium whitespace-nowrap",
-  "transition-[max-width] duration-(--duration-instant) ease-(--ease-quint-out)",
+  /*
+   * ⚠ A SHORT TRANSITION ON A DELAY, NOT A LONG ONE MATCHING THE LABEL, AND THE
+   * OBVIOUS VERSION OF THIS PRODUCED A VISIBLE BLIP. `max-width` animates from
+   * `0.01px` to `100%` — 100% of the FIELDSET, which is the whole control, so
+   * on a 350px field the range is 350px while the legend's own content is about
+   * 90. The gap is therefore fully open as soon as `max-width` passes 90, which
+   * is 26% of the range; under `quint-out` that is reached at 6% of the
+   * duration. The notch snapped open in roughly TWELVE MILLISECONDS and then
+   * spent the rest of the transition growing a max-width nothing could see —
+   * while the label was still travelling up towards it.
+   *
+   * What that looks like is a black slot appearing in the border out of nowhere
+   * and the label arriving in it a fifth of a second later, which is exactly
+   * how it was reported: "the background blips, then the placeholder moves up".
+   *
+   * ⚠ SO THE GAP IS DELAYED UNTIL THE LABEL IS THERE. Measured in the browser
+   * rather than tuned by eye, sampling `getBoundingClientRect()` on both
+   * elements every 8ms through a real transition:
+   *
+   *     60ms   the gap is fully open
+   *     60ms   the label's box reaches the border line
+   *
+   * With no delay the gap was fully open at 9ms against a label that did not
+   * arrive until 60 — fifty milliseconds of a black slot sitting in the border
+   * with nothing in it, which is exactly how it was reported: "the background
+   * blips, then the placeholder moves up".
+   *
+   * ⚠ THE NUMBER DEPENDS ON THE LABEL'S CURVE AND ITS DURATION, so this is not
+   * independent of `LABEL` above. The word has reached the border at 22ms, 60,
+   * 99 and 126 under the four combinations tried, and this delay moved with
+   * every one of them. Change one, re-measure the other — the harness is two
+   * `getBoundingClientRect()` calls in a loop.
+   *
+   * ⚠ AND CLOSING NEEDS A DIFFERENT DELAY, WHICH IS WHY `FRAME` CARRIES ONE.
+   * The same 35ms that is right on the way in is wrong on the way out: measured,
+   * the label leaves the border at 18ms while the gap did not start closing
+   * until 63 and was not shut until 107 — the same empty slot as before, just
+   * after the word rather than before it. A transition uses the timing declared
+   * on the state it is moving TO, so the closed rule sets its own delay of zero
+   * and the two directions are tuned separately without any JavaScript.
+   */
+  "transition-[max-width] duration-[60ms] delay-[45ms]",
+  "ease-(--ease-quint-out)",
 )
 
 /**
@@ -233,17 +321,17 @@ const CONTROL_INPUT = cn(
    * every sign-in. The console's 14px base is a density decision for tables;
    * a field somebody types their password into is not a table.
    */
-  // ⚠ `px-8` IS 32px, WHICH IS WHERE THE RESTING LABEL'S GLYPHS ARE. See the
+  // ⚠ `px-6` IS 24px, WHICH IS WHERE THE RESTING LABEL'S GLYPHS ARE. See the
   // sum in LABEL — if the LEADING value disagrees, the label jumps sideways as
-  // it rises.
+  // it rises, and the jump is at the instant somebody types their first
+  // character, which is the worst possible moment to move the thing they are
+  // reading.
   //
   // ⚠ AND THE TRAILING VALUE MATCHES IT RATHER THAN STAYING AT THE 16px A
-  // SQUARE INPUT WOULD USE. The leading inset is not a taste decision here — it
-  // is forced to 32px by the corner arc the notch has to clear — so leaving the
-  // other side at 16 makes a long value sit visibly off-centre in its own box,
-  // closer to the right edge than the left. Whatever the notch costs on one
-  // side, the other side pays too.
-  "peer h-full w-full min-w-0 bg-transparent px-8 text-base outline-none",
+  // SQUARE INPUT WOULD USE. Whatever the leading side costs, the other side
+  // pays too; a long value with 24px on the left and 16 on the right sits
+  // visibly off-centre in its own box.
+  "peer h-full w-full min-w-0 bg-transparent px-6 text-base outline-none",
   "selection:bg-primary selection:text-primary-foreground",
   "disabled:cursor-not-allowed",
   // ⚠ CHROME PAINTS AUTOFILLED FIELDS WITH ITS OWN YELLOW AND IGNORES
@@ -256,37 +344,78 @@ const CONTROL_INPUT = cn(
 )
 
 /**
- * The shared frame: control, and a hint line that is always there.
+ * The shared frame: the control, and the line underneath it.
  *
- * ⚠ THE HINT ROW RESERVES ITS HEIGHT WHETHER OR NOT THERE IS A HINT, AND THAT
- * IS THE WHOLE POINT OF IT BEING A ROW. A validation message that appears on
- * blur pushes every field below it down by twenty pixels — on a four-field form
- * the submit button moves under the cursor between the mousedown and the click.
- * Sixteen reserved pixels cost one line of vertical space and remove a class of
- * misclick that is invisible until somebody hits the wrong button.
+ * ⚠ THERE ARE TWO KINDS OF LINE UNDER A FIELD AND THEY WANT OPPOSITE LAYOUTS,
+ * WHICH IS WHY `reserveHint` EXISTS RATHER THAN ONE BEHAVIOUR FOR BOTH.
+ *
+ *   DESCRIPTION — "Must be HTTPS and publicly reachable", "e.g. production-api".
+ *   Always there, often two lines, and part of what the field IS. It belongs in
+ *   the flow: it is content, and the form should be as tall as its content.
+ *
+ *   VALIDATION — "That does not look like an email address". Absent most of the
+ *   time and present for a few seconds. Putting it in the flow means every
+ *   field permanently carries a strip of empty space against the moment it
+ *   might have something to say, and a sign-up form pays for four of those.
+ *
+ * ⚠ RESERVING IS STILL THE DEFAULT, AND THAT IS NOT TIMIDITY. Nineteen call
+ * sites across the console pass a description, several of which wrap to two
+ * lines at dialog width — overlaying those would put a second line of text on
+ * top of the next field. The caller that knows its hint is transient and short
+ * is the caller that can say so.
+ *
+ * ⚠ WHEN IT DOES OVERLAY, IT LANDS IN SPACE THAT ALREADY EXISTS. `FieldGroup`
+ * separates fields by `gap-7`, which is 28px; the line is 16px on a 6px offset,
+ * so it sits inside that gap with six pixels to spare and the field's own
+ * height is just the control. Nothing is reserved, so nothing can be pushed.
  */
 function Frame({
   id,
   hint,
   state,
+  reserveHint,
   className,
   children,
 }: {
   id: string
   hint?: React.ReactNode
   state: FieldState
+  reserveHint: boolean
   className?: string
   children: React.ReactNode
 }) {
   return (
-    <div className={cn("w-full", className)} data-slot="floating-field">
+    <div
+      className={cn("w-full", !reserveHint && "relative", className)}
+      data-slot="floating-field"
+    >
       {children}
       <div
         className={cn(
-          // ⚠ `px-8` MATCHES THE VALUE'S OWN INSET, so a validation message
-          // starts under the first character of what it is about.
-          "min-h-4 px-8 pt-1.5 text-2xs leading-4",
+          // ⚠ `px-6` MATCHES THE VALUE'S OWN INSET, so a validation message
+          // starts under the first character of what it is about. It moves with
+          // `CONTROL_INPUT`'s padding and has no independent opinion.
+          "px-6 pt-1.5 text-2xs leading-4",
           "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
+          /*
+           * ⚠ `min-h-4` IS THE RESERVATION, AND IT IS THE WHOLE POINT OF THE
+           * FLOW VERSION. A message that appears on blur without it pushes every
+           * field below it down by twenty pixels — on a four-field form the
+           * submit button moves under the cursor between the mousedown and the
+           * click. Sixteen reserved pixels remove a class of misclick that is
+           * invisible until somebody hits the wrong button.
+           */
+          reserveHint
+            ? "min-h-4"
+            : /*
+               * ⚠ `pointer-events-none` BECAUSE IT NOW HANGS OVER SOMETHING
+               * ELSE. Out of flow, this strip sits in the gap above whatever
+               * comes next — on the last field of a form, that is the submit
+               * button. An invisible 22px band across it would swallow clicks
+               * along its top edge, which is the kind of defect nobody reports
+               * because it only bites near one border.
+               */
+              "pointer-events-none absolute inset-x-0 top-full",
           TONES[state].hint,
         )}
         // ⚠ `polite`, AND ON THE ALWAYS-PRESENT ROW RATHER THAN ON THE MESSAGE.
@@ -324,6 +453,7 @@ export function FloatingInput({
   label,
   hint,
   state = "idle",
+  reserveHint = true,
   className,
   controlClassName,
   containerClassName,
@@ -334,6 +464,14 @@ export function FloatingInput({
   label: string
   hint?: React.ReactNode
   state?: FieldState
+  /**
+   * Keep a permanent row for the hint, or draw it into the gap below.
+   *
+   * ⚠ `true` FOR A DESCRIPTION, `false` FOR A VALIDATION MESSAGE. See `Frame`:
+   * a line that is always there is content and belongs in the flow; a line that
+   * appears for a few seconds should not make every field taller for ever.
+   */
+  reserveHint?: boolean
   /**
    * Classes for the `<input>` itself — type, size, letter spacing.
    *
@@ -358,7 +496,13 @@ export function FloatingInput({
   const tone = TONES[state]
 
   return (
-    <Frame id={id} hint={hint} state={state} className={containerClassName}>
+    <Frame
+      id={id}
+      hint={hint}
+      state={state}
+      reserveHint={reserveHint}
+      className={containerClassName}
+    >
       <div className={cn(CONTROL, "h-14 rounded-pill", controlClassName)}>
         <input
           id={id}
@@ -382,10 +526,12 @@ export function FloatingInput({
          */}
         <Notch label={label} className={cn(FRAME, tone.frame)} />
         {adornment && (
-          // ⚠ `end-8` IS THE SAME 32px THE VALUE IS INSET BY, so the reveal
+          // ⚠ `end-6` IS THE SAME 24px THE VALUE IS INSET BY, so the reveal
           // icon lines up with the right-hand edge of the text rather than
-          // hanging out over the corner arc. `pe-14` below clears its width.
-          <div className="absolute end-8 z-10 flex items-center text-muted-foreground">
+          // hanging out over the corner arc. `pe-14` on the input clears its
+          // width: the button is 36px wide and carries `-me-1`, so its leading
+          // edge lands at exactly 56px from the right.
+          <div className="absolute end-6 z-10 flex items-center text-muted-foreground">
             {adornment}
           </div>
         )}
@@ -398,6 +544,7 @@ export function FloatingTextarea({
   label,
   hint,
   state = "idle",
+  reserveHint = true,
   className,
   controlClassName,
   containerClassName,
@@ -408,6 +555,8 @@ export function FloatingTextarea({
   label: string
   hint?: React.ReactNode
   state?: FieldState
+  /** See `FloatingInput`. */
+  reserveHint?: boolean
   /** Classes for the `<textarea>` itself. See `FloatingInput`. */
   className?: string
   /** Classes for the bordered box. */
@@ -419,7 +568,13 @@ export function FloatingTextarea({
   const tone = TONES[state]
 
   return (
-    <Frame id={id} hint={hint} state={state} className={containerClassName}>
+    <Frame
+      id={id}
+      hint={hint}
+      state={state}
+      reserveHint={reserveHint}
+      className={containerClassName}
+    >
       {/*
        * ⚠ `rounded-xl` RATHER THAN THE PILL THE INPUT USES, and the reason is in
        * the pill token's own note: a stadium corner is height over two, so on a

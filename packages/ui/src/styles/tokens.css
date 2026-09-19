@@ -199,12 +199,9 @@
    * nothing had to be found and edited, and a component added by `shadcn add`
    * tomorrow inherits the system instead of arriving with stock shadows.
    */
-  --elevate-1:
-    0 1px 1px oklch(0 0 0 / 4%), 0 1px 2px -1px oklch(0 0 0 / 6%);
-  --elevate-2:
-    0 1px 2px oklch(0 0 0 / 4%), 0 4px 12px -4px oklch(0 0 0 / 7%);
-  --elevate-3:
-    0 1px 2px oklch(0 0 0 / 5%), 0 16px 40px -12px oklch(0 0 0 / 10%);
+  --elevate-1: 0 1px 1px oklch(0 0 0 / 4%), 0 1px 2px -1px oklch(0 0 0 / 6%);
+  --elevate-2: 0 1px 2px oklch(0 0 0 / 4%), 0 4px 12px -4px oklch(0 0 0 / 7%);
+  --elevate-3: 0 1px 2px oklch(0 0 0 / 5%), 0 16px 40px -12px oklch(0 0 0 / 10%);
 
   /*
    * The sidebar surface.
@@ -314,10 +311,8 @@
    * a table, which is exactly where the two are used.
    */
   --elevate-1: inset 0 1px 0 oklch(1 0 0 / 4%);
-  --elevate-2:
-    inset 0 1px 0 oklch(1 0 0 / 5%), 0 8px 24px -12px oklch(0 0 0 / 80%);
-  --elevate-3:
-    inset 0 1px 0 oklch(1 0 0 / 6%), 0 16px 48px -16px oklch(0 0 0 / 90%);
+  --elevate-2: inset 0 1px 0 oklch(1 0 0 / 5%), 0 8px 24px -12px oklch(0 0 0 / 80%);
+  --elevate-3: inset 0 1px 0 oklch(1 0 0 / 6%), 0 16px 48px -16px oklch(0 0 0 / 90%);
 
   /*
    * ⚠ IN DARK MODE THE SIDEBAR IS THE SAME TRUE BLACK AS THE PAGE, AND ONLY THE
@@ -470,8 +465,7 @@
     var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     sans-serif;
   --font-mono:
-    var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo,
-    monospace;
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
   /*
    * ⚠ THE DISPLAY FACE FALLS BACK TO `--font-sans`'s OWN STACK, NOT TO
@@ -481,8 +475,8 @@
    * See styles/fonts.css for why this face is allowed to be absent at all.
    */
   --font-display:
-    "i10 Display", var(--font-geist-sans), ui-sans-serif, system-ui,
-    -apple-system, "Segoe UI", sans-serif;
+    "i10 Display", var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
 
   /*
    * The ramp: a major second (1.125) from a 14px base, with line height
@@ -556,12 +550,54 @@
    * above already says.
    */
   --ease-spring: linear(
-    0, 0.0063, 0.0252, 0.0559, 0.0975, 0.1493, 0.2103, 0.2798, 0.3568, 0.4405,
-    0.5299, 0.624, 0.7218, 0.8221, 0.9236, 1.0026, 1.0217, 1.0348, 1.042,
-    1.0437, 1.0405, 1.0332, 1.0227, 1.0099, 0.9997, 0.9955, 0.9928, 0.9915,
-    0.9915, 0.9925, 0.9944, 0.9968, 0.9995, 1.0014, 1.0023, 1.0027, 1.0027,
-    1.0024, 1.0018, 1.0011, 1.0004, 0.9998, 0.9995, 0.9994, 0.9995, 0.9997,
-    1, 1
+    0,
+    0.0063,
+    0.0252,
+    0.0559,
+    0.0975,
+    0.1493,
+    0.2103,
+    0.2798,
+    0.3568,
+    0.4405,
+    0.5299,
+    0.624,
+    0.7218,
+    0.8221,
+    0.9236,
+    1.0026,
+    1.0217,
+    1.0348,
+    1.042,
+    1.0437,
+    1.0405,
+    1.0332,
+    1.0227,
+    1.0099,
+    0.9997,
+    0.9955,
+    0.9928,
+    0.9915,
+    0.9915,
+    0.9925,
+    0.9944,
+    0.9968,
+    0.9995,
+    1.0014,
+    1.0023,
+    1.0027,
+    1.0027,
+    1.0024,
+    1.0018,
+    1.0011,
+    1.0004,
+    0.9998,
+    0.9995,
+    0.9994,
+    0.9995,
+    0.9997,
+    1,
+    1
   );
 
   /*
@@ -571,9 +607,28 @@
    * clipped content. This is the same spring critically damped.
    */
   --ease-spring-soft: linear(
-    0, 0.0092, 0.0344, 0.0725, 0.1214, 0.1793, 0.2446, 0.3157, 0.3912, 0.4696,
-    0.5494, 0.6292, 0.7073, 0.7823, 0.8527, 0.9171, 0.9741, 0.9857, 0.9932,
-    0.9975, 0.9994, 1
+    0,
+    0.0092,
+    0.0344,
+    0.0725,
+    0.1214,
+    0.1793,
+    0.2446,
+    0.3157,
+    0.3912,
+    0.4696,
+    0.5494,
+    0.6292,
+    0.7073,
+    0.7823,
+    0.8527,
+    0.9171,
+    0.9741,
+    0.9857,
+    0.9932,
+    0.9975,
+    0.9994,
+    1
   );
 
   /* ⚠ LONGER THAN THE BASE DURATIONS ON PURPOSE. A spring needs time for the
@@ -585,6 +640,27 @@
   --ease-quint-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-quint-in: cubic-bezier(0.64, 0, 0.78, 0);
   --ease-quad-in: cubic-bezier(0.11, 0, 0.5, 0);
+  /*
+   * ⚠ THE GENTLE EASE-OUT, AND IT EXISTS BECAUSE `--ease-quint-out` IS TOO
+   * SHARP FOR ANYTHING THAT SHOULD BE WATCHED. A fifth-power ease-out is 48%
+   * travelled inside one frame and 97% by half the duration — which is exactly
+   * right for a control that must feel instant, and useless when the movement
+   * itself is meant to be legible. Lengthening the duration does not help: it
+   * adds time to a tail nobody can see, so the movement looks identical and
+   * merely finishes later.
+   *
+   * A second-power ease-out has the property both of those lack: it still
+   * leaves at once — non-zero velocity at t=0, so there is no pause between the
+   * click and the response — while spending the whole duration arriving. Half
+   * the travel is done at half the time, where a fifth-power ease-out is 97%
+   * done by then.
+   *
+   * ⚠ IT IS NOT A SUBSTITUTE FOR THE SPRINGS. Those start from REST, which is
+   * what makes them read as weight — and as elastic on a short travel. This has
+   * no overshoot and no ramp-up; it is the plainest possible "moves off
+   * immediately, slows into place".
+   */
+  --ease-quad-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --ease-linear: linear;
 
   --duration-instant: 100ms;
@@ -674,6 +750,100 @@
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+@layer components {
+  /*
+   * ICONS THAT DRAW THEMSELVES.
+   *
+   * ⚠ IT IS CSS ON THE ICON'S OWN GEOMETRY, NOT A TRANSFORM OF THE BOX AROUND
+   * IT, AND THAT IS THE ENTIRE DIFFERENCE. What the sidebar had before was a
+   * 12% scale and a pixel of lift — the icon as a rigid object being nudged.
+   * What reads as "alive" is the icon being DRAWN: each stroke arriving in
+   * order, the way somebody would sketch it. Lucide is a stroke-only set, so
+   * that is available uniformly to all 1500 of its glyphs without a line of
+   * per-icon choreography.
+   *
+   * ⚠ `stroke-dasharray: 100` IS ON THE ICON AT ALL TIMES AND CHANGES NOTHING
+   * AT REST. The longest stroke Lucide draws inside a 24×24 box is a circle at
+   * r=10, about 63 units; 100 is comfortably past every one of them, so with
+   * `stroke-dashoffset: 0` the dash pattern never reaches its first gap and the
+   * icon renders exactly as it would with no dasharray at all. Setting it only
+   * on hover would be a style recalculation at the moment the animation starts,
+   * which is the one moment it must not happen.
+   *
+   * ⚠ THE DELAY LADDER IS `nth-child`, WHICH IS WHY THERE IS NO JAVASCRIPT
+   * HERE. An icon's parts are already in the order the designer drew them —
+   * body first, detail last — so stepping the delay by index gives the
+   * sequencing for free. Six rungs covers essentially every glyph in the set;
+   * anything with more parts than that draws its tail together, which is not
+   * something anybody notices.
+   *
+   * ⚠ AND `prefers-reduced-motion` IS ALREADY HANDLED. The base layer collapses
+   * every animation on the page to 0.01ms, so this needs no query of its own —
+   * the icon simply appears drawn, which is its resting state anyway.
+   */
+  @keyframes i10-icon-draw {
+    from {
+      stroke-dashoffset: 100;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  [data-draw] svg > * {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 0;
+  }
+
+  /*
+   * ⚠ TWO TRIGGERS, AND THE SECOND ONE IS THE USEFUL ONE. Hovering the icon
+   * itself is a 16px target; hovering `.group` is whatever the caller marked —
+   * a whole navigation row, a whole button. Tailwind's `group` class is a real
+   * class in the DOM, so a plain descendant selector reaches it, and the caller
+   * opts in by the same `group` they would use for any other group-hover.
+   *
+   * ⚠ `:focus-visible` IS ON THE LIST BECAUSE A KEYBOARD USER GETS NOTHING
+   * OTHERWISE. Every one of these lives on something focusable, and an
+   * animation that only exists for people with a pointer is an animation half
+   * the point of which has been missed.
+   */
+  [data-draw]:hover svg > *,
+  .group:hover [data-draw] svg > *,
+  .group:focus-visible [data-draw] svg > * {
+    animation: i10-icon-draw var(--duration-exit) var(--ease-quint-out) both;
+  }
+
+  [data-draw]:hover svg > *:nth-child(2),
+  .group:hover [data-draw] svg > *:nth-child(2),
+  .group:focus-visible [data-draw] svg > *:nth-child(2) {
+    animation-delay: 45ms;
+  }
+
+  [data-draw]:hover svg > *:nth-child(3),
+  .group:hover [data-draw] svg > *:nth-child(3),
+  .group:focus-visible [data-draw] svg > *:nth-child(3) {
+    animation-delay: 90ms;
+  }
+
+  [data-draw]:hover svg > *:nth-child(4),
+  .group:hover [data-draw] svg > *:nth-child(4),
+  .group:focus-visible [data-draw] svg > *:nth-child(4) {
+    animation-delay: 135ms;
+  }
+
+  [data-draw]:hover svg > *:nth-child(5),
+  .group:hover [data-draw] svg > *:nth-child(5),
+  .group:focus-visible [data-draw] svg > *:nth-child(5) {
+    animation-delay: 180ms;
+  }
+
+  [data-draw]:hover svg > *:nth-child(n + 6),
+  .group:hover [data-draw] svg > *:nth-child(n + 6),
+  .group:focus-visible [data-draw] svg > *:nth-child(n + 6) {
+    animation-delay: 225ms;
   }
 }
 

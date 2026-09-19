@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { headers } from "next/headers"
 import { auth } from "@clerk/nextjs/server"
 import { ssoProviders } from "../_lib/providers"
-import { signUpAbilities } from "../_lib/environment"
+import { passwordRules, signUpAbilities } from "../_lib/environment"
 import { afterAuthUrl } from "../_lib/redirect"
 import { SignUpForm } from "./sign-up-form"
 
@@ -57,9 +57,17 @@ export default async function Page({
    * segments and then re-segment it to five, under somebody who has already
    * started counting.
    */
-  const [providers, abilities] = await Promise.all([
+  const [providers, abilities, password] = await Promise.all([
     ssoProviders((await headers()).get("user-agent")),
     signUpAbilities(),
+    /*
+     * ⚠ THE THIRD READ OF THE SAME DOCUMENT, AND STILL ONE REQUEST. What this
+     * instance will accept as a password is a property of the instance, so the
+     * hint under the box and the rule the submit button enforces both come from
+     * Clerk rather than from a constant that was wrong — it said eight
+     * characters against an instance requiring fifteen.
+     */
+    passwordRules(),
   ])
 
   /*
@@ -85,6 +93,7 @@ export default async function Page({
           redirectRaw={typeof raw === "string" ? raw : undefined}
           providers={providers}
           abilities={abilities}
+          password={password}
           startAt={startAt}
           alreadySignedIn={Boolean(userId) && startAt === undefined}
         />

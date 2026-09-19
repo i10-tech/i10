@@ -7,6 +7,7 @@ import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
 import { Toaster } from "@repo/ui/components/sonner"
 import { TooltipProvider } from "@repo/ui/components/tooltip"
+import { ActivateWorkspace } from "@/components/activate-workspace"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -68,10 +69,42 @@ function Providers({ children }: { children: React.ReactNode }) {
        */
       appearance={clerkAppearance}
     >
+      {/*
+       * ⚠ INSIDE THE PROVIDER AND ABOVE EVERY ROUTE, INCLUDING `/onboarding`.
+       * It picks the workspace a new account was provisioned and never had
+       * selected — see components/activate-workspace.tsx for why Clerk does not
+       * do this itself, and why an unselected organization is not merely a
+       * cosmetic problem. It renders nothing; the branch above, with no Clerk
+       * key, has no session for it to act on.
+       */}
+      <ActivateWorkspace />
       {children}
     </ClerkProvider>
   )
 }
+
+/**
+ * ⚠ THE WHOLE APP RENDERS AT REQUEST TIME, AND THIS LINE IS LOAD-BEARING RATHER
+ * THAN CAUTIOUS. Every PAGE here is already `force-dynamic`, but Next generates
+ * one route nobody declares — `/_not-found` — and with no config it is
+ * PRERENDERED AT BUILD TIME. The image is built in CI with no access to any
+ * environment's Clerk instance, so `process.env.CLERK_PUBLISHABLE_KEY` is
+ * undefined at that moment, and the 404's copy of this layout was baked with no
+ * `<ClerkProvider>` in it at all.
+ *
+ * ⚠ AND A ROOT LAYOUT IS SHARED ACROSS CLIENT NAVIGATIONS, WHICH IS WHAT TURNED
+ * THAT INTO A CRASH. Landing on a 404 and pressing "Go to the dashboard" is a
+ * soft navigation: Next keeps the layout it already has — the provider-less one
+ * from the static build — and mounts the dashboard shell inside it. The shell
+ * contains `<OrganizationSwitcher>`, which throws "can only be used within
+ * <ClerkProvider>". Reloading the same URL re-rendered the layout on the server,
+ * with the key, and everything worked, which is exactly the signature of a
+ * build-time value baked into one route.
+ *
+ * ⚠ IT COSTS NOTHING HERE. This is an authenticated dashboard; there is no page
+ * in it that could have been served from cache to two different people anyway.
+ */
+export const dynamic = "force-dynamic"
 
 export default function RootLayout({
   children,

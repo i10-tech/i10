@@ -50,10 +50,20 @@ interface AttributeEntry {
   used_for_second_factor?: boolean
 }
 
+interface PasswordSettings {
+  min_length?: number
+  max_length?: number
+  require_special_char?: boolean
+  require_numbers?: boolean
+  require_uppercase?: boolean
+  require_lowercase?: boolean
+}
+
 export interface ClerkEnvironment {
   user_settings?: {
     social?: Record<string, SocialEntry>
     attributes?: Record<string, AttributeEntry>
+    password_settings?: PasswordSettings
   }
 }
 
@@ -107,6 +117,56 @@ export async function signUpAbilities(): Promise<SignUpAbilities> {
       attributes.authenticator_app?.enabled === true &&
       attributes.authenticator_app.used_for_second_factor === true,
     backupCodes: attributes.backup_code?.enabled === true,
+  }
+}
+
+/**
+ * What Clerk will accept as a password, in the form the field needs.
+ *
+ * ⚠ IT IS READ FROM THE INSTANCE RATHER THAN WRITTEN DOWN HERE, AND THE VERSION
+ * THAT WAS WRITTEN DOWN WAS A LIE ON THE SCREEN. The password box said "At
+ * least 8 characters" while this instance has `min_length: 15`, so the form
+ * told people a rule, accepted input that satisfied it, spent a round trip on
+ * Clerk, and came back with a toast contradicting its own hint. A number in two
+ * places is a number that disagrees with itself the first time somebody changes
+ * one of them.
+ *
+ * ⚠ AND THE SAME DOCUMENT IS ALREADY BEING FETCHED FOR THE STEP LIST, so this
+ * costs nothing: Next dedupes the `fetch` within a render pass and caches it for
+ * five minutes across them. Turning the minimum down in the Clerk dashboard
+ * changes the hint, the live validation and the submit gate together, with no
+ * deploy.
+ *
+ * ⚠ THE FALLBACK IS CLERK'S OWN FLOOR, NOT A GUESS. Their minimum accepted
+ * value for `min_length` is 8; if the environment cannot be read, requiring 8
+ * is the weakest rule the instance could possibly have, so the field never
+ * refuses something Clerk would have taken.
+ */
+export interface PasswordRules {
+  minLength: number
+  /** 0 when the instance sets no maximum, which is what Clerk means by `0`. */
+  maxLength: number
+  requireSpecial: boolean
+  requireNumbers: boolean
+  requireUppercase: boolean
+  requireLowercase: boolean
+}
+
+export const CLERK_PASSWORD_FLOOR = 8
+
+export async function passwordRules(): Promise<PasswordRules> {
+  const settings = (await clerkEnvironment())?.user_settings?.password_settings ?? {}
+
+  return {
+    minLength:
+      typeof settings.min_length === "number" && settings.min_length > 0
+        ? settings.min_length
+        : CLERK_PASSWORD_FLOOR,
+    maxLength: typeof settings.max_length === "number" ? settings.max_length : 0,
+    requireSpecial: settings.require_special_char === true,
+    requireNumbers: settings.require_numbers === true,
+    requireUppercase: settings.require_uppercase === true,
+    requireLowercase: settings.require_lowercase === true,
   }
 }
 

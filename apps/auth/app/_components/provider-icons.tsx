@@ -1,5 +1,11 @@
 /*
- * Marks for the three identity providers, inline.
+ * The marks that appear on the sign-in buttons, inline.
+ *
+ * ⚠ THREE OF THESE ARE SOMEBODY ELSE'S TRADEMARK AND ONE IS NOT, WHICH IS THE
+ * ONLY REASON THEY SHARE A FILE. `PasskeyIcon` is a method rather than a brand,
+ * so nothing governs its path data and it is drawn to match Lucide's geometry —
+ * see its own note. The three below are governed, and the paragraph after this
+ * one is about them.
  *
  * ⚠ INLINE SVG RATHER THAN AN ICON PACKAGE, AND NOT FOR BUNDLE SIZE. These are
  * other companies' trademarks: Google, GitHub and Apple each publish brand
@@ -57,6 +63,55 @@ export function AppleIcon(props: React.ComponentProps<"svg">) {
         d="M17.05 12.54c-.03-2.6 2.12-3.85 2.22-3.91-1.21-1.77-3.09-2.02-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.9-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.89 2.65 3.24 2.6 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.38.81 1.4-.02 2.28-1.27 3.13-2.53.99-1.45 1.4-2.85 1.42-2.92-.03-.01-2.72-1.04-2.75-4.13M14.6 4.6c.71-.87 1.19-2.07 1.06-3.27-1.03.04-2.27.68-3.01 1.55-.66.76-1.24 1.98-1.09 3.15 1.15.09 2.32-.58 3.04-1.43"
         fill="currentColor"
       />
+    </svg>
+  )
+}
+
+/**
+ * A passkey: somebody, and the credential that proves it is them.
+ *
+ * ⚠ NOT LUCIDE'S `KeyRound`, AND THE DISTINCTION IS WORTH ONE SVG. A plain key
+ * is what this product already draws next to API keys; using it here would mean
+ * the same glyph stands for "a secret you paste into a header" and "the thing
+ * on your phone that replaces your password". The person beside the key is the
+ * conventional passkey mark precisely because it says WHOSE credential it is.
+ *
+ * ⚠ DRAWN TO LUCIDE'S GRID SO IT SITS WITH THE REST. 24×24, unfilled, 2px
+ * strokes with round caps and joins, and no `size-*` of its own — `Button`
+ * sizes any bare `<svg>` inside it, and a hard-coded size here would be the one
+ * icon in the row that ignored it.
+ */
+export function PasskeyIcon(props: React.ComponentProps<"svg">) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      {/*
+       * ⚠ THE PERSON IS LUCIDE'S `UserRound` AT 0.7 SCALE, NOT A SHAPE INVENTED
+       * HERE. Head at r=3.5 over a semicircular shoulder arc of r=5.5 — the same
+       * proportion between the two that every other person-glyph in the set
+       * uses. A first attempt drew the shoulders as a quarter-arc with a tick on
+       * the end, which at size renders as a crescent floating under an
+       * oversized head rather than as a figure.
+       */}
+      <circle cx="8" cy="7" r="3.5" />
+      <path d="M13.5 19.5a5.5 5.5 0 0 0-11 0" />
+      {/*
+       * ⚠ THE BOW IS SMALLER THAN THE HEAD AND SITS LOWER, which is what stops
+       * the two circles reading as a pair of eyes. The stem ends level with the
+       * shoulders so the glyph has one baseline rather than two.
+       */}
+      <circle cx="18" cy="8.5" r="3" />
+      <path d="M18 11.5v8" />
+      <path d="M18 15h3" />
+      <path d="M18 17.5h2.5" />
     </svg>
   )
 }

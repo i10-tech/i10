@@ -85,6 +85,25 @@ export function useCopy(timeout = 2000) {
   return { copied, copy }
 }
 
+/**
+ * A copy icon with a tooltip.
+ *
+ * ⚠ IT REQUIRES A `TooltipProvider` ABOVE IT AND THERE IS NO TYPE THAT SAYS SO.
+ * Radix's tooltip parts read their provider through a context whose consumer
+ * THROWS when nothing provided it — so dropping this component into an app that
+ * never mounted one does not degrade, it takes the page down. That is not
+ * hypothetical: it is what replaced the two-factor step of the sign-up flow with
+ * Next's built-in "This page couldn't load" screen, because apps/auth had no
+ * provider and this is the only component in that app that contains a tooltip.
+ *
+ * ⚠ AND THE FIX IS AT THE ROOT RATHER THAN HERE, DELIBERATELY. Wrapping every
+ * `Tooltip` in its own provider is what shadcn does upstream and it would make
+ * this component self-sufficient — but Radix resolves to the NEAREST provider,
+ * so it would also silently override the console's tuned `delayDuration={300}`
+ * on every tooltip in the product. One provider per app, mounted in the root
+ * layout, is the arrangement the console already had; apps/auth was simply
+ * missing it.
+ */
 export function CopyButton({
   value,
   label = "Copy",
