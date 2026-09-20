@@ -65,6 +65,7 @@ export interface DelegationInput {
    * "lame" — resolvers accept it, most of the time, and some caches do not.
    */
   claim: string
+  /** Defaults to `RECORD_TTL`. Overridden only by tests. */
   ttl?: number
 }
 
@@ -105,6 +106,32 @@ export const delegatedZoneNames = (domain: string) => ({
 })
 
 /**
+ * How long anything we publish may be cached, positively or negatively.
+ *
+ * ⚠ ONE CONSTANT FOR BOTH THE ZONES WE SERVE AND THE RECORDS WE WRITE INTO
+ * SOMEBODY ELSE'S, because they are the same decision and drifted apart once
+ * already. `dns/publish.ts` had its own `300` for the "Auto" case, so a change
+ * here would have moved half of a delegation's TTLs and left the other half.
+ *
+ * ⚠ SIXTY SECONDS, AND THE NUMBER IS CHOSEN FOR THE MINUTE AFTER PUBLISHING
+ * RATHER THAN FOR STEADY STATE. This TTL matters most in exactly one window:
+ * somebody is watching a screen waiting for records to appear, and every
+ * second of it is a second of somebody's attention. Sixty is the lowest value
+ * every provider we write to accepts — Cloudflare's floor is 60, Hetzner's is
+ * 60, DigitalOcean's is 30 — so it is the fastest we can be everywhere at once.
+ *
+ * ⚠ THE NEGATIVE TTL IS THE HALF THAT ACTUALLY BITES, AND IT IS THE LAST FIELD
+ * OF THE SOA RATHER THAN A PROPERTY OF ANY RECORD. It governs how long a
+ * resolver remembers that a name did NOT exist — so it is the cost of asking
+ * one second too early, paid by whoever asks next. Ours was 300; for
+ * comparison, Cloudflare publishes 1800 on the zones we delegate out of — half
+ * an hour of remembering that a record was not there — which is why the
+ * delegation proof reads the parent's nameservers directly rather than through
+ * a recursive resolver. See `domains/referral.ts`.
+ */
+export const RECORD_TTL = 60
+
+/**
  * ⚠ THE SOA'S SERIAL IS A CONSTANT, AND THAT IS SAFE ONLY BECAUSE NOTHING
  * TRANSFERS THESE ZONES. A serial matters to a secondary deciding whether to
  * pull; with a single primary and no AXFR there is no such reader. The moment a
@@ -117,10 +144,9 @@ const soa = (zone: string, primary: string, ttl: number): ZoneRecord => ({
   name: zone,
   type: "SOA",
   ttl,
-  // refresh, retry, expire, negative-cache — conventional values; the negative
-  // TTL is deliberately short so a record we add appears quickly for a resolver
-  // that already asked and got NXDOMAIN.
-  content: `${primary} hostmaster.${zone} ${SOA_SERIAL} 10800 3600 604800 300`,
+  // refresh, retry, expire, negative-cache. The last one is `RECORD_TTL` for
+  // the reason given there: it is the one a resolver pays for asking early.
+  content: `${primary} hostmaster.${zone} ${SOA_SERIAL} 10800 3600 604800 ${RECORD_TTL}`,
 })
 
 /**
@@ -143,7 +169,7 @@ export function delegatedZones({
   spfInclude,
   nameservers,
   claim,
-  ttl = 300,
+  ttl = RECORD_TTL,
 }: DelegationInput): Zone[] {
   const names = delegatedZoneNames(domain)
   const ours = delegatedNameservers(nameservers, claim)

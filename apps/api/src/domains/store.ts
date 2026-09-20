@@ -58,7 +58,37 @@ export interface DomainStore {
   remove(tenantId: string, id: string): Promise<boolean>
   /** Re-reads the provider and stores what it says. */
   verify(tenantId: string, id: string): Promise<VerifyOutcome>
+  /**
+   * The same question as `verify`, asked cheaply, for polling.
+   *
+   * ⚠ IT EXISTS BECAUSE `verify` IS A WRITE AGAINST SES AND POLLING IT IS
+   * ABUSE. Every `verify` re-asserts the DKIM signing key —
+   * `CreateEmailIdentity`, then `PutEmailIdentityDkimSigningAttributes` on the
+   * AlreadyExists — which is exactly right once, when the key may have changed,
+   * and is two writes against a low-TPS account-wide API every time after that.
+   * A console that checks back every few seconds until the badge turns green
+   * would have made twenty of those per domain.
+   *
+   * ⚠ AND IT PROVES NOTHING AND CLAIMS NOTHING. No DNS lookup, no ownership
+   * proof, no delegation claim, no zone published — it reads SES's opinion of
+   * an identity that `verify` has already established and stores it. A domain
+   * that has never been verified has no identity to ask about, so this answers
+   * `missing` rather than quietly starting the flow by the back door.
+   */
+  refresh(tenantId: string, id: string): Promise<RefreshOutcome>
 }
+
+/**
+ * ⚠ DELIBERATELY NARROWER THAN `VerifyOutcome`. There is no `claimed` and no
+ * `unproven` here because this asks nobody for anything it could lose — it
+ * cannot take a name from another workspace and it cannot fail a proof it
+ * never ran.
+ */
+export type RefreshOutcome =
+  | { status: "ok"; domain: Domain }
+  | { status: "missing" }
+  /** Never verified, so there is nothing at the provider to ask about. */
+  | { status: "not_registered"; domain: Domain }
 
 /**
  * ⚠ `claimed` EXISTS BECAUSE TWO TENANTS MAY HOLD THE SAME NAME AS PENDING.
@@ -807,6 +837,78 @@ export function domainStore({
           )
         }
       }
+    },
+
+    /*
+     * ⚠ THE CHEAP HALF OF `verify`, AND IT SHARES ITS WRITE RATHER THAN ITS
+     * DECISIONS. See the note on the interface for why polling `verify` is not
+     * an option; what is left once the proving, claiming, publishing and
+     * registering are taken out is one `GetEmailIdentity` and one UPDATE.
+     */
+    async refresh(tenantId, id) {
+      const existing = await withTenant(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select(COLUMNS)
+          .from(domains)
+          .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
+          .limit(1)
+        return row as Row | undefined
+      })
+      if (!existing) return { status: "missing" }
+
+      /*
+       * ⚠ `not_started` MEANS NO IDENTITY EXISTS YET, so asking SES about one
+       * would be asking about a name we have never registered — which for a
+       * name ANOTHER workspace holds is not merely useless but a reading of
+       * their identity. `verify` is the only thing that may create one, and it
+       * only does so after proving ownership.
+       */
+      if (existing.status === "not_started") {
+        return { status: "not_registered", domain: present(existing, region, dns) }
+      }
+
+      const seen = await identity.status(existing.name)
+
+      // ⚠ THE SAME RULE `verify` FOLLOWS: the stamp is the moment the domain
+      // first became usable and never moves backwards. A poll that happens to
+      // catch a `temporary_failure` must not un-verify a working domain.
+      const verifiedAt =
+        seen.status === "verified" && existing.status !== "verified" ? now() : undefined
+
+      const write = (status: DomainStatus, stamp?: Date) =>
+        withTenant(db, tenantId, async (tx) =>
+          tx
+            .update(domains)
+            .set({
+              status,
+              dnsCheckedAt: now(),
+              updatedAt: now(),
+              ...(stamp ? { verifiedAt: stamp } : {}),
+            })
+            .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
+            .returning(COLUMNS),
+        )
+
+      let row: Row | undefined
+      try {
+        ;[row] = (await write(seen.status, verifiedAt)) as Row[]
+      } catch (error) {
+        /*
+         * ⚠ THE VERIFIED-NAME INDEX, AND THIS IS NOT THE PLACE TO CONTEST IT.
+         * Another workspace holds this name verified; `verify` knows how to
+         * ask whether they still prove it and to take the name if they do not,
+         * because a person pressed a button and is waiting for an answer. A
+         * poll must never move a domain between customers, so it writes the
+         * check timestamp against the status the row already had and says
+         * nothing. The next `verify` resolves it properly.
+         */
+        if (!isUniqueViolation(error)) throw error
+        ;[row] = (await write(existing.status)) as Row[]
+      }
+
+      return row
+        ? { status: "ok", domain: present(row, region, dns) }
+        : { status: "missing" }
     },
 
     async verify(tenantId, id) {

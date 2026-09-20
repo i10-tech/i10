@@ -141,6 +141,27 @@ export async function verifyDomain(id: string) {
   )
 }
 
+/**
+ * The cheap re-check, for watching rather than acting.
+ *
+ * ⚠ NOT `verifyDomain` IN A LOOP. Every verify re-asserts the DKIM key at SES
+ * — two writes against an account-wide, low-rate API — which is right once and
+ * abusive on a timer. This asks what SES currently thinks and stores it, and
+ * nothing else. See `DomainStore.refresh` in the API.
+ *
+ * ⚠ AND IT REVALIDATES NOTHING. The caller is a poll that already re-renders
+ * when the answer changes; revalidating two paths on every tick would discard
+ * the cached render of the domains list several times a minute for a value
+ * that is usually identical to the last one.
+ */
+export async function refreshDomain(id: string) {
+  return run(() =>
+    api<Domain>(`/console/domains/${encodeURIComponent(id)}/refresh`, {
+      method: "POST",
+    }),
+  )
+}
+
 export async function deleteDomain(id: string) {
   return run(
     () =>

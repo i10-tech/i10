@@ -79,6 +79,19 @@ const PLANS = [
     ],
   },
   {
+    id: "starter",
+    name: "Starter",
+    rank: 5,
+    source: "catalog",
+    entitlements: [
+      { featureId: "emails", kind: "consumable", allowance: 5000, interval: "month" },
+      { featureId: "domains.sending", kind: "continuous", allowance: 5 },
+      { featureId: "domains.mailbox", kind: "continuous", allowance: 0 },
+      { featureId: "mailboxes", kind: "continuous", allowance: 0 },
+      { featureId: "storage.bytes", kind: "continuous", allowance: 0 },
+    ],
+  },
+  {
     id: "pro",
     name: "Pro",
     rank: 10,
@@ -97,9 +110,32 @@ const PLANS = [
   },
 ]
 
+/**
+ * ⚠ A PAID SUBSCRIPTION WITH A DOWNGRADE ALREADY SCHEDULED, BECAUSE THAT IS THE
+ * STATE WITH NOTHING ELSE TO SHOW IT. It used to be `subscription: null`, which
+ * renders the one billing state that has no dates, no status pill, no card on
+ * file and no deletion consequence — so every line of copy that had to be got
+ * right was invisible in preview. The fixtures are deliberately not all healthy;
+ * see the note above.
+ *
+ * `plan` stays Pro on purpose: a `next_period` change is not applied until the
+ * boundary, so the plan in force is still the one being left. That is exactly
+ * the pair the page has to render without reading as "nothing happened".
+ */
 const BILLING = {
-  plan: PLANS[0],
-  subscription: null,
+  plan: PLANS[2],
+  subscription: {
+    status: "active",
+    plan_id: "pro",
+    cancel_at_period_end: false,
+    current_period_end: new Date(now + 19 * DAY).toISOString(),
+    // ⚠ A DOWNGRADE TO A CHEAPER PAID PLAN, NOT TO FREE. Moving to free is a
+    // cancellation and shows up as `cancel_at_period_end`; a scheduled change
+    // to another product is the state that had nothing at all to render it.
+    scheduled_plan_id: "starter",
+    scheduled_at: new Date(now + 19 * DAY).toISOString(),
+    polar_customer_id: "cus_preview",
+  },
   anchor: ago(214),
   overage_enabled: false,
   storage_bytes: null,
@@ -492,7 +528,67 @@ const ROUTES: [
       const domain = DOMAINS.find((d) => d.id === m[1])
       // ⚠ NOT A FALLBACK TO THE FIRST ROW — see `PREVIEW_NOT_FOUND`.
       if (!domain) return PREVIEW_NOT_FOUND
+      /*
+       * ⚠ THE BADGE STAYS `pending` HERE EVEN AFTER THE WATCH BELOW REPORTS
+       * VERIFIED, AND THAT IS A LIMIT OF THE MODE RATHER THAN A BUG IN IT. A
+       * server action and a server render are separate module instances under
+       * `next dev`, so the counter the refresh route keeps is not the one this
+       * render would read — sharing it would need a store, which is the thing
+       * preview mode exists to avoid. In production the refresh writes the row
+       * and the re-render reads it back, so the badge does turn over.
+       */
       return { ...domain, records: recordsFor(domain) }
+    },
+  ],
+
+  /*
+   * ⚠ VERIFY AND REFRESH HAD NO FIXTURE AT ALL, AND AN ABSENT FIXTURE IS NOT
+   * AN INERT ONE. `previewFor` returns `undefined` for a path it does not
+   * know, `api()` hands that back as the payload, and the caller reads
+   * `.status` off it — so pressing Verify in preview threw
+   * "Cannot read properties of undefined" into the console rather than doing
+   * nothing. It went unnoticed while Verify was a button somebody had to press
+   * on purpose; the moment the page started checking by itself it threw seven
+   * times a minute on a screen nobody had touched.
+   */
+  [
+    /^\/console\/domains\/([^/]+)\/verify$/,
+    (m) => {
+      const domain = DOMAINS.find((d) => d.id === m[1])
+      if (!domain) return PREVIEW_NOT_FOUND
+      return {
+        ...domain,
+        records: recordsFor(domain),
+        // Preview does no DNS, and the proof is the half this mode can state
+        // honestly: the records exist in the fixture, so they were found.
+        ownership: { proven: true },
+      }
+    },
+  ],
+
+  /*
+   * ⚠ IT VERIFIES ON THE THIRD ASK, WHICH IS THE ONLY WAY THE WATCH IS
+   * REVIEWABLE AT ALL. A fixture that answers `pending` for ever shows the
+   * spinner and never the thing worth looking at — the moment the page
+   * notices, stops watching and re-renders itself green. A counter in a
+   * dev-only module is the cheapest honest way to have a second state.
+   */
+  [
+    /^\/console\/domains\/([^/]+)\/refresh$/,
+    (m) => {
+      const domain = DOMAINS.find((d) => d.id === m[1])
+      if (!domain) return PREVIEW_NOT_FOUND
+      if (domain.status === "verified" || domain.status === "failed") {
+        return { ...domain, records: recordsFor(domain) }
+      }
+
+      const seen = (refreshes.get(domain.id) ?? 0) + 1
+      refreshes.set(domain.id, seen)
+      return {
+        ...domain,
+        status: seen >= 3 ? "verified" : domain.status,
+        records: recordsFor(domain),
+      }
     },
   ],
 
@@ -961,6 +1057,12 @@ const ROUTES: [
  * everywhere looks like a styling bug; a thrown error names the path that needs
  * a fixture, which is the actual problem.
  */
+/**
+ * How many times each domain has been asked about, so the watch has somewhere
+ * to arrive. Dev-only, per server process, and reset by a restart.
+ */
+const refreshes = new Map<string, number>()
+
 export function previewFor(path: string, query?: Query, method = "GET"): unknown {
   for (const [pattern, build] of ROUTES) {
     const match = path.match(pattern)
@@ -1054,5 +1156,50 @@ function dnsFixtureFor(domain: string) {
       manualPath: "Cloudflare dashboard → your domain → DNS → Records → Add record",
     },
     confidence: "exact" as const,
+  }
+}
+
+/**
+ * What `/api/checkout-status/{id}` answers in preview mode.
+ *
+ * ⚠ READING A CHECKOUT IS NOT TAKING MONEY, WHICH IS WHY THIS EXISTS WHERE
+ * `POST /console/billing/checkout` DELIBERATELY REFUSES. That refusal is right:
+ * a fixture answering with a plausible checkout url would send whoever is
+ * reviewing to a real Polar page. This endpoint only reports what became of a
+ * checkout, and its five outcomes — granted, paid, closed, declined, expired —
+ * are five pieces of copy that somebody has to be able to look at. They were
+ * previously unreachable in preview, which is how "the redirect shows nothing"
+ * survived as long as it did.
+ *
+ * ⚠ THE OUTCOME IS CHOSEN BY THE ID'S FIRST BLOCK SO ALL OF THEM ARE REACHABLE.
+ * Append `?checkout_id=<uuid>` to the billing page or to `/onboarding`, using
+ * one of the prefixes below with any well-formed remainder — for example
+ * `00000004-0000-4000-8000-000000000000` for a declined card. Any other id is
+ * the ordinary success.
+ */
+export function previewCheckoutStatus(checkoutId: string): {
+  status: string
+  plan: string | null
+  detail?: string
+} {
+  switch (checkoutId.slice(0, 8).toLowerCase()) {
+    // The second or two between Polar taking the money and the entitlement
+    // landing. The page keeps polling through this one.
+    case "00000002":
+      return { status: "paid", plan: null }
+    // Closed without paying. Ordinary, and must not be dressed up as an error.
+    case "00000003":
+      return { status: "unpaid", plan: null, detail: "open" }
+    // A declined card.
+    case "00000004":
+      return { status: "unpaid", plan: null, detail: "failed" }
+    // A form left open too long.
+    case "00000005":
+      return { status: "unpaid", plan: null, detail: "expired" }
+    // Paid, and attributable to nobody. The one genuine dead end.
+    case "00000006":
+      return { status: "paid", plan: null, detail: "unattributed" }
+    default:
+      return { status: "granted", plan: "Pro" }
   }
 }

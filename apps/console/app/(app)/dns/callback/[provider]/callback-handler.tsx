@@ -6,12 +6,8 @@ import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
-import {
-  finishDnsConnect,
-  listDomains,
-  publishDnsRecords,
-  verifyDomain,
-} from "@/lib/actions"
+import { finishDnsConnect, listDomains } from "@/lib/actions"
+import { activateDomain } from "@/lib/domain-activation"
 
 /**
  * Finishing the whole job, not just the authorisation.
@@ -105,25 +101,26 @@ export function CallbackHandler({
       let wrote = 0
       const inTheWay: string[] = []
 
+      /*
+       * ⚠ THE SAME SEQUENCE THE ADD FORM AND THE ONBOARDING FLOW RUN, FROM THE
+       * SAME FILE. Publishing and then checking was written out three times,
+       * once per surface, and the three had drifted on what a 409 meant. See
+       * lib/domain-activation.ts.
+       *
+       * ⚠ AND A "not yet" FROM THE CHECK IS NOT A FAILURE. The records were
+       * written seconds ago; the check is a head start rather than the verdict,
+       * and the domain page watches from here on.
+       */
       for (const domain of pending) {
-        const result = await publishDnsRecords({ domainId: domain.id, provider })
+        const outcome = await activateDomain({ domainId: domain.id, provider })
 
-        if (!result.ok) {
-          // ⚠ A 409 IS THE PROTOCOL, NOT A FAILURE — see `blocked` above.
-          if (result.status === 409) inTheWay.push(domain.name)
+        if (outcome.kind === "conflicts") {
+          inTheWay.push(domain.name)
           continue
         }
+        if (outcome.kind === "failed") continue
 
         wrote += 1
-
-        /*
-         * ⚠ VERIFIED IMMEDIATELY, AND A "not yet" HERE IS NOT A FAILURE. The
-         * records were written seconds ago and a resolver may still be holding
-         * a negative answer for them, so this is a head start rather than the
-         * verdict — the domain keeps being re-checked for 72 hours either way.
-         * Nothing branches on the result for exactly that reason.
-         */
-        await verifyDomain(domain.id)
       }
 
       setPublished(wrote)
@@ -176,8 +173,9 @@ export function CallbackHandler({
                 </>
               ) : published > 0 ? (
                 <>
-                  We added the records at {provider} and started checking them.
-                  Verification usually follows within minutes.
+                  We added the records at {provider} and proved the domains are yours.
+                  Amazon&rsquo;s own check is the last step and usually lands within a
+                  few minutes — the domain pages update themselves.
                 </>
               ) : (
                 <>

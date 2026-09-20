@@ -1,4 +1,5 @@
 import type { Domain } from "@repo/contracts"
+import { RECORD_TTL } from "../domains/zone.js"
 import type { DnsConnectionStore } from "./connections.js"
 import {
   DnsWriteError,
@@ -193,11 +194,11 @@ function desiredFor(domain: Domain): DesiredRecord[] {
     name: record.name,
     type: record.type as DesiredRecord["type"],
     value: record.value,
-    // ⚠ 300 SECONDS FOR "Auto", MATCHING THE ZONES WE SERVE OURSELVES. A short
-    // TTL matters most in exactly this window: somebody is watching for the
-    // record to appear, and an hour-long negative cache is the difference
-    // between "it worked" and "it did nothing".
-    ttl: record.ttl === "Auto" ? 300 : Number(record.ttl) || 300,
+    // ⚠ `RECORD_TTL` FOR "Auto", IMPORTED RATHER THAN REPEATED. It is the same
+    // number the zones we serve ourselves use, and writing it twice is how the
+    // two halves of one delegation came to be able to disagree. See the note
+    // on the constant for why it is sixty seconds.
+    ttl: record.ttl === "Auto" ? RECORD_TTL : Number(record.ttl) || RECORD_TTL,
     ...(record.priority === undefined ? {} : { priority: record.priority }),
   }))
 }

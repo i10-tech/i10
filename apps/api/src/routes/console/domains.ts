@@ -135,6 +135,41 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   })
 
   /**
+   * The same answer as `verify`, cheap enough to ask repeatedly.
+   *
+   * ⚠ THIS IS WHAT THE CONSOLE POLLS WHILE SOMEBODY WATCHES, AND IT EXISTS SO
+   * THAT NOBODY HAS TO PRESS ANYTHING. Publishing records takes seconds and
+   * Amazon's verification takes as long as it takes; between those two facts
+   * sat a person refreshing a page. The console now asks this every few
+   * seconds until the badge turns green.
+   *
+   * ⚠ IT IS A POST BECAUSE IT WRITES, even though it reads like a GET. What it
+   * writes is SES's current opinion and the check timestamp — see the note on
+   * `DomainStore.refresh` for what it deliberately does NOT do, which is
+   * everything expensive or consequential in `verify`.
+   */
+  app.post("/domains/:id/refresh", async (c) => {
+    if (!d.domains) return c.json(notWired("Domains"), 501)
+    const { tenantId } = c.get("auth")
+    const outcome = await d.domains.refresh(tenantId, c.req.param("id"))
+
+    switch (outcome.status) {
+      case "ok":
+        return c.json(outcome.domain)
+      /*
+       * ⚠ 200 AND THE DOMAIN, NOT AN ERROR. "Nothing has been registered yet"
+       * is the ordinary state of a domain whose records are still being
+       * published, which is precisely when something is polling — answering
+       * 409 would turn the normal case into an error in somebody's console.
+       */
+      case "not_registered":
+        return c.json(outcome.domain)
+      default:
+        return c.json(notFound("No domain with that id."), 404)
+    }
+  })
+
+  /**
    * Why a delegated domain has not verified.
    *
    * ⚠ SEPARATE FROM `verify`, AND DELIBERATELY NOT FOLDED INTO IT. Verifying is
