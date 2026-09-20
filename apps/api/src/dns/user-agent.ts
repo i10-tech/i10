@@ -33,5 +33,15 @@
  * `curl`, `Bun/1.4.2`, this string, the old one, and no user agent at all — so
  * the user agent is not sufficient to cause a challenge on its own. It is one
  * reason to be refused, and the only one that is ours to remove.
+ *
+ * ⚠ AND IT WAS NOT THE REASON. The measurement above was taken from a
+ * residential line, WHERE NOTHING IS CHALLENGED — so it could not have
+ * reproduced the failure it was written for. Repeated the same day from
+ * psl-vps, `dash.cloudflare.com/oauth2/token` challenges every client we can
+ * build: curl and Bun, HTTP/1.1 and h2, over IPv4 and over IPv6. It is the
+ * ADDRESS, nothing here reaches it, and the exchange is now routed through
+ * services/dns-oauth-broker. Keep sending this string — every other provider's
+ * endpoint is an ordinary API host and identifying ourselves is still right —
+ * but do not reach for it again when Cloudflare refuses.
  */
 export const DNS_USER_AGENT = "i10/1.0"

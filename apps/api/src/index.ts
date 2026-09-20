@@ -209,6 +209,23 @@ if (env.DNS_OAUTH_IGNORED.length > 0) {
   )
 }
 
+/*
+ * ⚠ HALF A BROKER IS SILENT AND IS THE ONE SHAPE THAT LOOKS FINE. Both
+ * variables set is a working Cloudflare connection; neither is a direct call,
+ * which is correct wherever the egress is not challenged. ONE of them is a
+ * Cloudflare exchange that goes on failing with a bot challenge while the
+ * deployment believes it has been fixed — and the challenge is invisible until
+ * a customer presses Connect. Same reasoning as the ignored apps above.
+ */
+if (Boolean(env.DNS_OAUTH_BROKER_URL) !== Boolean(env.DNS_OAUTH_BROKER_SECRET)) {
+  log.warn(
+    { haveUrl: Boolean(env.DNS_OAUTH_BROKER_URL) },
+    "DNS OAuth broker ignored: DNS_OAUTH_BROKER_URL and DNS_OAUTH_BROKER_SECRET " +
+      "must both be set. Cloudflare's token exchange will be called directly and " +
+      "is expected to be challenged from the cluster.",
+  )
+}
+
 /**
  * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
  * `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a customer's signing
@@ -671,6 +688,21 @@ const app = createApp({
             stateSecret: createHmac("sha256", env.WEBHOOK_SECRET_KEY ?? "")
               .update("dns-oauth-state")
               .digest("hex"),
+            /*
+             * ⚠ BOTH OR NEITHER, DECIDED HERE SO THE MODULE NEVER SEES A HALF
+             * ONE. A URL without a secret would call an authenticated Worker
+             * with no credential and turn every Cloudflare exchange into a 401
+             * — a worse failure than the challenge it was meant to fix, and one
+             * that reads like a rejected client secret. See `DNS_OAUTH_BROKER_URL`.
+             */
+            ...(env.DNS_OAUTH_BROKER_URL && env.DNS_OAUTH_BROKER_SECRET
+              ? {
+                  broker: {
+                    url: env.DNS_OAUTH_BROKER_URL,
+                    secret: env.DNS_OAUTH_BROKER_SECRET,
+                  },
+                }
+              : {}),
           })
 
           return {

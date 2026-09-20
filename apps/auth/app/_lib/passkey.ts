@@ -156,6 +156,40 @@ function missingChallenge(error: unknown): boolean {
   )
 }
 
+/**
+ * The exceptions that mean the authenticator was asked and could not.
+ *
+ * ⚠ `OperationError` IS THE ONE FROM THE REPORT, AND IT REACHED US NAMELESS.
+ * `handlePublicKeyCreateError` in @clerk/shared maps four DOMExceptions —
+ * `InvalidStateError`, `NotAllowedError`, `AbortError`, `SecurityError` — and
+ * returns everything else UNTOUCHED, so an `OperationError` arrives as the raw
+ * browser exception with no `code` on it and lands in the fallback. It was only
+ * identifiable at all because `passkeyReference` now falls back to the
+ * exception name.
+ *
+ * ⚠ THEY ARE NOT IN `FROM_DOM`, BECAUSE THAT MAP IS INTENT-BLIND and these are
+ * not. `FROM_DOM` can map `NotAllowedError` for both halves of the product
+ * because the answer is silence either way; "could not create one" and "could
+ * not hand one over" are different sentences and only the caller knows which.
+ *
+ * ⚠ AND THE SENTENCE NAMES THE PASSWORD MANAGER, WHICH IS NOT A GUESS ABOUT
+ * BLAME — it is the one thing in that list somebody can actually change. A
+ * passkey request is intercepted by whatever provider claims it, so a browser
+ * extension answers it before the operating system ever draws a sheet; that is
+ * why this failure shows no prompt at all. If it were only ever the hardware,
+ * "try again" would be the whole of the advice and would rarely work.
+ */
+const AUTHENTICATOR_FAILED = new Set([
+  "OperationError",
+  "NotReadableError",
+  "UnknownError",
+  "ConstraintError",
+])
+
+function authenticatorFailed(error: unknown): boolean {
+  return error instanceof Error && AUTHENTICATOR_FAILED.has(error.name)
+}
+
 /** Every code this error mentions, wherever Clerk happened to put it. */
 function codesIn(error: unknown): string[] {
   if (!error || typeof error !== "object") return []
@@ -294,6 +328,19 @@ export function passkeyFailure(error: unknown, intent: "add" | "use"): string | 
   // is exactly what was wrong with it. Both intents get the same sentence:
   // neither flow got as far as the device, so neither may mention it.
   if (missingChallenge(error)) return OURS
+
+  /*
+   * ⚠ THE OPPOSITE END OF THE SAME STORY: here the request DID reach a
+   * provider, and the provider refused it. The fallback's "we could not add a
+   * passkey on this device" is not wrong so much as useless — it names no next
+   * step, and the next step that works is usually to stop whatever intercepted
+   * the request from intercepting it.
+   */
+  if (authenticatorFailed(error)) {
+    return intent === "add"
+      ? "Your device or password manager could not finish the passkey. Try again, or add one later from settings."
+      : "Your device or password manager could not hand over the passkey. Try again, or use another way in."
+  }
 
   return intent === "add"
     ? "We could not add a passkey on this device. You can add one later from settings."

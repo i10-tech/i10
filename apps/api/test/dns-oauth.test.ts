@@ -580,3 +580,120 @@ describe("exchanging the code", () => {
     ).rejects.toMatchObject({ kind: "exchange_failed" })
   })
 })
+
+/**
+ * Routing the one exchange our egress is refused for.
+ *
+ * ⚠ THE THING UNDER TEST IS *WHERE* THE REQUEST GOES, WHICH NOTHING ELSE HERE
+ * LOOKS AT. `dash.cloudflare.com` answers psl-vps with a managed challenge to
+ * every client we can construct — measured over IPv4 and IPv6, HTTP/1.1 and h2,
+ * curl and Bun — so the fix could only ever be a different caller. That makes
+ * the destination a correctness property rather than plumbing: brokering the
+ * wrong host sends a client secret somewhere it did not need to go, and
+ * brokering none of them leaves the feature broken in production while passing
+ * every other test in this file.
+ */
+describe("the OAuth broker", () => {
+  const spy = () => {
+    const calls: { url: string; init: RequestInit }[] = []
+    globalThis.fetch = (async (url: string | URL, init: RequestInit = {}) => {
+      calls.push({ url: String(url), init })
+      return new Response(JSON.stringify({ access_token: "at" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as unknown as typeof fetch
+    return calls
+  }
+
+  const withBroker = () =>
+    oauth({ broker: { url: "https://broker.workers.dev", secret: "shh" } })
+
+  it("sends Cloudflare's exchange to the broker, with the broker's own bearer", async () => {
+    const calls = spy()
+    const o = withBroker()
+    const { verifier } = o.verifyState(start(o).state)
+
+    await o.exchange({ slug: "cloudflare", code: "the-code", verifier })
+
+    expect(calls[0]?.url).toBe("https://broker.workers.dev")
+    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer shh",
+    )
+  })
+
+  it("still sends the client secret in the body, untouched", async () => {
+    const calls = spy()
+    const o = withBroker()
+    const { verifier } = o.verifyState(start(o).state)
+
+    await o.exchange({ slug: "cloudflare", code: "the-code", verifier })
+
+    // ⚠ THE BROKER AUTHORISES US TO THE WORKER; THIS AUTHORISES US TO
+    // CLOUDFLARE. Losing the second one would turn a fixed exchange into
+    // `invalid_client`, which is the failure this whole change is meant to
+    // stop being reported for the wrong reason.
+    const sent = new URLSearchParams(String(calls[0]?.init.body))
+    expect(sent.get("client_secret")).toBe("csec-456")
+    expect(sent.get("code_verifier")).toBe(verifier)
+  })
+
+  it("calls the provider directly when no broker is configured", async () => {
+    const calls = spy()
+    const o = oauth()
+    const { verifier } = o.verifyState(start(o).state)
+
+    await o.exchange({ slug: "cloudflare", code: "c", verifier })
+
+    expect(calls[0]?.url).toBe("https://dash.cloudflare.com/oauth2/token")
+    expect(calls[0]?.init.headers).not.toHaveProperty("Authorization")
+  })
+
+  /**
+   * ⚠ `api.cloudflare.com` IS NOT `dash.cloudflare.com`, AND THE DIFFERENCE IS
+   * THE WHOLE DIAGNOSIS. Every zone read and record write the publish path
+   * makes goes to the API host and has never been challenged from the cluster;
+   * only the dashboard host refuses us. A broker keyed on "Cloudflare" rather
+   * than on the host would have relayed calls that work perfectly well.
+   */
+  it("brokers by host, so only the challenged endpoint is routed", async () => {
+    const calls = spy()
+    const o = oauth({
+      apps: { digitalocean: { clientId: "do-id", clientSecret: "do-secret" } },
+      broker: { url: "https://broker.workers.dev", secret: "shh" },
+    })
+    const { verifier } = o.verifyState(
+      o.start({ slug: "digitalocean", tenantId: "t" }).state,
+    )
+
+    await o.exchange({ slug: "digitalocean", code: "c", verifier })
+
+    expect(calls[0]?.url).not.toBe("https://broker.workers.dev")
+    expect(calls[0]?.init.headers).not.toHaveProperty("Authorization")
+  })
+
+  /**
+   * ⚠ A 401 FROM THE BROKER AND A 401 FROM CLOUDFLARE ARE THE SAME STATUS AND
+   * OPPOSITE PROBLEMS. One is a rotated `BROKER_SECRET`, which is ours; the
+   * other is `invalid_client`, which sends an administrator to edit a client
+   * secret that was correct. `x-broker-error` is the only thing that tells them
+   * apart, and the Worker is the only thing that sets it.
+   */
+  it("reports the broker's own refusal as the broker's, not the provider's", async () => {
+    globalThis.fetch = (async () =>
+      new Response("unauthorized", {
+        status: 401,
+        headers: { "x-broker-error": "unauthorized" },
+      })) as unknown as typeof fetch
+
+    const o = withBroker()
+    const { verifier } = o.verifyState(start(o).state)
+
+    await expect(
+      o.exchange({ slug: "cloudflare", code: "c", verifier }),
+    ).rejects.toMatchObject({
+      kind: "exchange_failed",
+      detail: "the OAuth broker refused the request (unauthorized)",
+    })
+  })
+})
