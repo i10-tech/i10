@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { useSignIn } from "@clerk/nextjs"
+import { useAuth, useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field, FieldGroup, FieldSeparator } from "@repo/ui/components/field"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
@@ -17,6 +17,7 @@ import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/erro
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
+import { installAbortableWebAuthn } from "../_lib/webauthn"
 import { LastUsedBadge } from "../_components/last-used-badge"
 import { PasskeyCue } from "../_components/passkey-cue"
 import { PasskeyIcon } from "../_components/provider-icons"
@@ -70,6 +71,16 @@ export function SignInForm({
 }) {
   const router = useRouter()
   const { signIn } = useSignIn()
+
+  /*
+   * ⚠ ASKED ONLY SO THE PASSKEY OVERRIDE CAN WIN A RACE, AND `useSignIn` COULD
+   * NOT ANSWER IT. `signIn` arrives from a signals wrapper that exists before
+   * clerk-js does and carries no readiness of its own, so a truthy `signIn`
+   * does NOT mean `window.Clerk` is there to install onto. `useAuth` is the
+   * hook that re-renders when it is — see the autofill effect below, which must
+   * not arm until that install has actually landed.
+   */
+  const { isLoaded } = useAuth()
   const [busy, setBusy] = useState<string | null>(null)
 
   /**
@@ -126,7 +137,23 @@ export function SignInForm({
   const armed = useRef(false)
 
   useEffect(() => {
-    if (!signIn || armed.current) return
+    if (!isLoaded || !signIn || armed.current) return
+
+    /*
+     * ⚠ INSTALLED BEFORE THE REQUEST IT HAS TO BE ABLE TO CANCEL, AND THE ORDER
+     * IS THE WHOLE FIX. The call below stays pending for the life of the
+     * document, and an unknown address turns this page into a sign-up WITHOUT
+     * navigating — so four steps later `createPasskey()` meets Chromium's
+     * "A request is already pending." Whoever owns the controller when the
+     * request is armed owns it for good, so arming first would leave it
+     * un-abortable. See _lib/webauthn.
+     *
+     * ⚠ AND THE ARM IS SKIPPED IF THE INSTALL DID NOT LAND, rather than done
+     * anyway. Autofill is a convenience nobody asked for; a passkey somebody
+     * pressed a button for is not, and trading the second for the first is the
+     * wrong way round.
+     */
+    if (!installAbortableWebAuthn()) return
     armed.current = true
 
     void signIn
@@ -146,7 +173,7 @@ export function SignInForm({
         if (result.error) setBusy(null)
       })
       .catch(() => setBusy(null))
-  }, [signIn, afterAuthUrl])
+  }, [isLoaded, signIn, afterAuthUrl])
 
   /**
    * ⚠ THE FIRST STEP CREATES THE SIGN-IN RATHER THAN JUST REMEMBERING THE
