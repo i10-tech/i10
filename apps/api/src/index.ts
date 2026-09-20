@@ -412,6 +412,25 @@ const lifecycle = tenantLifecycle({
         throw error
       }
     },
+
+    /*
+     * ⚠ THE OTHER HALF OF `organizations.create` IN `provisioning` ABOVE, and
+     * the two sit in one file so the asymmetry is visible if it ever comes
+     * back. We make a personal organization for a user who has none; when the
+     * last member of one is deleted, we take it away again.
+     *
+     * ⚠ 404 IS SUCCESS. Svix redelivers `user.deleted`, and a second sweep must
+     * not report an error for a cleanup that already happened.
+     */
+    remove: async (clerkOrgId) => {
+      try {
+        await clerk.organizations.deleteOrganization(clerkOrgId)
+        return "deleted" as const
+      } catch (error) {
+        if (clerkNotFound(error)) return "already_gone" as const
+        throw error
+      }
+    },
   },
   freePlanId: env.METERING_FREE_PLAN_ID,
   log,
@@ -918,6 +937,12 @@ const app = createApp({
   pingDb: async () => {
     await sql`select 1`
   },
+  /*
+   * ⚠ BOTH, AND THE LOG IS NOT OPTIONAL. See `logError` on `AppDeps`: Sentry
+   * is the alert and stdout is the record, and the record is the one that
+   * survives a quota.
+   */
+  logError: (error, where) => log.error({ err: error, ...where }, "request failed"),
   reportError: captureError,
 })
 

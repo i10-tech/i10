@@ -94,6 +94,32 @@ export interface SubscriptionRevoker {
 export interface OrganizationLiveness {
   /** True when at least one member remains. False when none do, or it is gone. */
   hasMembers(clerkOrgId: string): Promise<boolean>
+  /**
+   * Deletes an organization nobody is left in.
+   *
+   * ⚠ THE SYMMETRIC HALF OF `onUserCreated`, WHICH CREATES ONE. A person who
+   * signs up with no organization gets a personal one made for them so they
+   * have a tenant to send from — see provision.ts. Nothing ever removed it
+   * again, so an account deleted in Clerk left the organization standing with
+   * zero members: unreachable by anybody, counting toward the instance, and
+   * still holding its slug. Measured 2026-09-20, two of them already.
+   *
+   * ⚠ AND LEAVING IT IS WORSE THAN A TIDINESS PROBLEM. `provision_tenant`
+   * resolves by `clerk_org_id`, so an empty organization that somebody later
+   * re-adds a member to maps straight back onto the tenant row we have just
+   * marked `deleted` — a workspace resurrected into a terminated billing state,
+   * which nothing downstream expects or checks. Deleting the organization is
+   * what makes the termination final in both systems rather than one.
+   *
+   * ⚠ IT TAKES ITS MEMBERSHIPS AND ITS PENDING INVITATIONS WITH IT. That is the
+   * right answer for an organization with no members — there is no admin left
+   * to manage either, and an invitee accepting into it would land in exactly
+   * the resurrected-dead-tenant state above.
+   *
+   * ⚠ `already_gone` IS A SUCCESS. Svix redelivers `user.deleted`, and the
+   * second pass must not turn a completed cleanup into an error.
+   */
+  remove(clerkOrgId: string): Promise<"deleted" | "already_gone">
 }
 
 export interface LifecycleDeps {
@@ -322,6 +348,43 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
         if (inUse) continue
 
         outcome = await terminate(tenant.clerkOrgId)
+
+        /*
+         * ⚠ AFTER THE TERMINATION, NEVER BEFORE, AND THE ORDER IS CHOSEN FOR
+         * THE FAILURE EXACTLY AS THE POLAR ONE IS. `terminate` is what stops
+         * the money; deleting the organization first and then failing to
+         * terminate would destroy the identity while leaving the tenant active
+         * and the card being charged, with the one thing that could find it —
+         * the organization id — gone.
+         *
+         * ⚠ AND IT NEVER FAILS THE SWEEP. The billing is already stopped by the
+         * time this runs; an unreachable Clerk must not turn a successful
+         * termination into a retry that would revoke an already-revoked
+         * subscription. What it leaves behind is an empty organization, which
+         * is logged and is exactly the state everything was in before this
+         * existed.
+         *
+         * ⚠ ONLY THIS PATH DELETES. `onOrganizationDeleted` must not, both
+         * because the organization is gone by definition when it runs and
+         * because Clerk fires that event in response to THIS call — so deleting
+         * there would be a second delete of the same thing on every sweep.
+         */
+        if (outcome === "no_tenant") continue
+
+        try {
+          const removed = await deps.organizations.remove(tenant.clerkOrgId)
+          deps.log.warn(
+            { ...tenant, removed },
+            "deleted the Clerk organization of a workspace nobody was left in",
+          )
+        } catch (error) {
+          deps.log.error(
+            { err: String(error), ...tenant },
+            "terminated a workspace but could not delete its empty Clerk " +
+              "organization — it remains with no members and must be removed " +
+              "by hand",
+          )
+        }
       }
 
       return outcome

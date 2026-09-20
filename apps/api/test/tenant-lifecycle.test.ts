@@ -26,7 +26,10 @@ const deps = (over: Record<string, unknown> = {}) => ({
   },
   polar: { revokeSubscription: mock(async () => "revoked" as const) },
   domains: { releaseDomains: mock(async () => ({ released: 2, failed: 0 })) },
-  organizations: { hasMembers: mock(async () => false) },
+  organizations: {
+    hasMembers: mock(async () => false),
+    remove: mock(async () => "deleted" as const),
+  },
   freePlanId: "free",
   log,
   ...over,
@@ -273,7 +276,10 @@ describe("a deleted user who owned workspaces", () => {
       },
       // Nobody is left in it — which is what Clerk actually reports for a
       // personal organization whose only member deleted their account.
-      organizations: { hasMembers: mock(async () => false) },
+      organizations: {
+        hasMembers: mock(async () => false),
+        remove: mock(async () => "deleted" as const),
+      },
     })
 
     expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("terminated")
@@ -293,7 +299,10 @@ describe("a deleted user who owned workspaces", () => {
         terminate: mock(async () => null),
         ownedBy: mock(async () => owned),
       },
-      organizations: { hasMembers: mock(async () => true) },
+      organizations: {
+        hasMembers: mock(async () => true),
+        remove: mock(async () => "deleted" as const),
+      },
     })
 
     expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("ignored")
@@ -314,6 +323,7 @@ describe("a deleted user who owned workspaces", () => {
         hasMembers: mock(async () => {
           throw new Error("clerk is down")
         }),
+        remove: mock(async () => "deleted" as const),
       },
     })
 
@@ -325,5 +335,148 @@ describe("a deleted user who owned workspaces", () => {
     const d = deps()
     expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("ignored")
     expect(d.organizations.hasMembers).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * ⚠ WE CREATE THE ORGANIZATION, SO WE HAVE TO REMOVE IT. `onUserCreated` makes
+ * a personal organization for anybody who signs up without one, and nothing
+ * ever took it away again — so a deleted account left an organization with zero
+ * members standing in Clerk for ever. Measured in production 2026-09-20: two of
+ * them, both answering 200 with `total_count: 0`.
+ */
+describe("the empty organization left behind by a deleted account", () => {
+  const owned = [{ tenantId: "ten-1", clerkOrgId: "org_1" }]
+
+  const abandoned = (over: Record<string, unknown> = {}) =>
+    deps({
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => ({
+          tenantId: "ten-1",
+          polarSubscriptionId: "sub_1",
+          alreadyDead: false,
+        })),
+        ownedBy: mock(async () => owned),
+      },
+      organizations: {
+        hasMembers: mock(async () => false),
+        remove: mock(async () => "deleted" as const),
+      },
+      ...over,
+    })
+
+  it("is deleted once nobody is left in it", async () => {
+    const d = abandoned()
+    await tenantLifecycle(d).onUserDeleted({ id: "user_1" })
+    expect(d.organizations.remove).toHaveBeenCalledWith("org_1")
+  })
+
+  // ⚠ THE ONE THAT IS STILL IN USE IS NOT TOUCHED, and the check that decides
+  // is membership rather than existence — see the note on the port.
+  it("is left alone while somebody is still a member", async () => {
+    const d = abandoned({
+      organizations: {
+        hasMembers: mock(async () => true),
+        remove: mock(async () => "deleted" as const),
+      },
+    })
+    await tenantLifecycle(d).onUserDeleted({ id: "user_1" })
+    expect(d.organizations.remove).not.toHaveBeenCalled()
+  })
+
+  /*
+   * ⚠ THE ORDER IS CHOSEN FOR THE FAILURE. Deleting the organization first and
+   * then failing to terminate would destroy the identity while leaving the
+   * tenant active and the card being charged — with the one handle that could
+   * find it gone.
+   */
+  it("stops the billing before it destroys the identity", async () => {
+    const order: string[] = []
+    const d = abandoned({
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => {
+          order.push("terminate")
+          return { tenantId: "ten-1", polarSubscriptionId: "sub_1", alreadyDead: false }
+        }),
+        ownedBy: mock(async () => owned),
+      },
+      organizations: {
+        hasMembers: mock(async () => false),
+        remove: mock(async () => {
+          order.push("remove-org")
+          return "deleted" as const
+        }),
+      },
+    })
+
+    await tenantLifecycle(d).onUserDeleted({ id: "user_1" })
+    expect(order).toEqual(["terminate", "remove-org"])
+  })
+
+  /*
+   * ⚠ AND A FAILURE HERE MUST NOT FAIL THE SWEEP. The billing is already
+   * stopped by the time this runs; throwing would have Svix retry a
+   * termination that succeeded, re-revoking a subscription that is already off.
+   * What it leaves is an empty organization, logged loudly.
+   */
+  it("does not undo a successful termination when Clerk refuses", async () => {
+    const error = mock((...args: unknown[]) => {
+      shouted.push(String(args[1]))
+    })
+    const shouted: string[] = []
+    const d = abandoned({
+      organizations: {
+        hasMembers: mock(async () => false),
+        remove: mock(async () => {
+          throw new Error("clerk is down")
+        }),
+      },
+      log: { ...log, error },
+    })
+
+    expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("terminated")
+    expect(shouted[0]).toContain("must be removed")
+  })
+
+  // Svix redelivers, and Clerk answers 404 the second time. That is done, not
+  // broken.
+  it("treats an already-deleted organization as done", async () => {
+    const d = abandoned({
+      organizations: {
+        hasMembers: mock(async () => false),
+        remove: mock(async () => "already_gone" as const),
+      },
+    })
+    expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("terminated")
+  })
+
+  /*
+   * ⚠ NOTHING IS DELETED FOR AN ORGANIZATION WE NEVER PROVISIONED A TENANT FOR.
+   * `no_tenant` means this is not ours to tidy — an organization from another
+   * instance, or one removed before its webhook ever landed.
+   */
+  it("does not delete an organization that was never ours", async () => {
+    const d = abandoned({
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => null),
+        ownedBy: mock(async () => owned),
+      },
+    })
+    await tenantLifecycle(d).onUserDeleted({ id: "user_1" })
+    expect(d.organizations.remove).not.toHaveBeenCalled()
+  })
+
+  /*
+   * ⚠ AND `organization.deleted` MUST NOT DELETE ANYTHING. Clerk fires it in
+   * response to the call above, so deleting there would be a second delete of
+   * the same organization on every single sweep.
+   */
+  it("is not re-deleted by the event Clerk fires in response", async () => {
+    const d = abandoned()
+    await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })
+    expect(d.organizations.remove).not.toHaveBeenCalled()
   })
 })
