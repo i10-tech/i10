@@ -61,11 +61,34 @@ const toStatus = (dkim: string | undefined): DomainStatus =>
   (dkim && STATUS[dkim]) || "pending"
 
 export function sesIdentity(client: SESv2Client): DomainIdentity {
+  /**
+   * ⚠ "NO SUCH IDENTITY" IS AN ANSWER, NOT A FAILURE, AND LETTING IT THROW WAS
+   * A 500 ON THE ONE BUTTON THIS FEATURE HAS. `GetEmailIdentity` raises
+   * `NotFoundException` for a name SES has never been told about, which is the
+   * ordinary state of every domain until `create` succeeds — and there are two
+   * ways to reach this call without that having happened. `registerIdentity`
+   * returns early for a row with no selector or no sealed key, and `refresh`
+   * asks about any domain past `not_started` without registering anything. Both
+   * then hit an uncaught exception, the API answered "Something went wrong.",
+   * and the console said "Could not check the records" for ever — about a
+   * domain whose DNS was perfect and whose records it had already published.
+   *
+   * ⚠ IT MAPS TO `not_started`, WHICH IS EXACTLY WHAT IT MEANS. SES's own
+   * vocabulary has a word for "the identity exists and I have not looked yet";
+   * this is one step before that, and the customer-facing consequence is
+   * identical — nothing has been confirmed, and the next verify is what starts
+   * it. Reporting `failed` would send somebody to fix DNS that is correct.
+   */
   async function read(domain: string) {
-    const identity = await client.send(
-      new GetEmailIdentityCommand({ EmailIdentity: domain }),
-    )
-    return { status: toStatus(identity.DkimAttributes?.Status) }
+    try {
+      const identity = await client.send(
+        new GetEmailIdentityCommand({ EmailIdentity: domain }),
+      )
+      return { status: toStatus(identity.DkimAttributes?.Status) }
+    } catch (error) {
+      if ((error as { name?: string }).name !== "NotFoundException") throw error
+      return { status: "not_started" as const }
+    }
   }
 
   return {

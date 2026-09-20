@@ -68,18 +68,27 @@ export type ApplyOutcome =
   | { status: "stale" }
 
 export interface SubscriptionGrants {
-  apply(state: SubscriptionState): Promise<ApplyOutcome>
+  /**
+   * `reassign` is passed ONLY by the post-checkout path. See
+   * `SubscriptionOps.record`: it takes the subscription id back from a tenant
+   * that a stale `customer.external_id` bound it to, which is the only thing
+   * standing between a re-signed-up customer and the plan they just paid for.
+   */
+  apply(
+    state: SubscriptionState,
+    options?: { reassign?: boolean },
+  ): Promise<ApplyOutcome>
 }
 
 export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
   return {
-    async apply(state) {
+    async apply(state, options) {
       // ⚠ THE ROW FIRST, ALWAYS. Polar is the state of record and this is our
       // durable copy of it; if the grant below throws, the truth is
       // already written and both the delivery retry and the reconciler can
       // repair the entitlement. The other order loses the fact that a payment
       // happened at all.
-      const recorded = await deps.subscriptions.record(state)
+      const recorded = await deps.subscriptions.record(state, options)
       if (recorded === "stale") {
         deps.log.info(
           { tenantId: state.tenantId, subscriptionId: state.polarSubscriptionId },

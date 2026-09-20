@@ -311,12 +311,24 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
          * itself, so there is nothing for the person to come back and do.
          */
         case "published":
-          toast.success(`${created.name} added and published`, {
-            description:
-              outcome.written === 0
-                ? `Every record was already in place at ${provider.name}. We are checking now — nothing else is needed from you.`
-                : `${outcome.written} records written to ${provider.name}. We are checking now — nothing else is needed from you.`,
-          })
+          /*
+           * ⚠ THE CHECK IS ONLY CLAIMED WHEN IT ANSWERED. Reporting "we are
+           * checking now" after a verify that returned 500 is how a broken
+           * check stayed invisible: the sentence was reassuring, so nobody
+           * looked, and the only way to find out was to press Verify by hand.
+           */
+          if (outcome.checked) {
+            toast.success(`${created.name} added and published`, {
+              description:
+                outcome.written === 0
+                  ? `Every record was already in place at ${provider.name}. We are checking now — nothing else is needed from you.`
+                  : `${outcome.written} records written to ${provider.name}. We are checking now — nothing else is needed from you.`,
+            })
+          } else {
+            toast.warning(`${created.name} added and published`, {
+              description: `The records are in place at ${provider.name}, but the check that follows them did not answer. Open the domain and press Verify.`,
+            })
+          }
           break
         case "conflicts":
           toast.warning(`${created.name} added`, {

@@ -81,6 +81,18 @@ export interface CheckoutState {
    * See `getCustomer` and routes/checkout-status.ts.
    */
   customerId: string | null
+  /**
+   * The product this checkout bought, and when it was created.
+   *
+   * ⚠ TOGETHER THEY IDENTIFY THE SUBSCRIPTION IT PRODUCED, which is the only
+   * way to grant for a customer whose `external_id` names somebody else. A
+   * customer can hold many subscriptions to many products; the one bought HERE
+   * is the one for this product that did not exist before this checkout did.
+   * Requiring both is what stops a reclaim reaching for a subscription that
+   * belongs to another workspace sharing the same Polar customer.
+   */
+  productId: string | null
+  createdAt: string | null
 }
 
 /** Just enough of a Polar customer to answer "will its events reach us". */
@@ -382,6 +394,8 @@ export function polarClient(opts: PolarOptions): PolarClient {
         id: string
         status: string
         customer_id?: string | null
+        product_id?: string | null
+        created_at?: string | null
         metadata?: Record<string, unknown> | null
       }
       const tenantId = body.metadata?.tenant_id
@@ -391,6 +405,8 @@ export function polarClient(opts: PolarOptions): PolarClient {
         status: body.status,
         tenantId: typeof tenantId === "string" && tenantId ? tenantId : null,
         customerId: body.customer_id ?? null,
+        productId: body.product_id ?? null,
+        createdAt: body.created_at ?? null,
       }
     },
 
@@ -400,6 +416,27 @@ export function polarClient(opts: PolarOptions): PolarClient {
       // Same rule as `getCheckout`: both statuses mean "no such customer", and
       // neither is a failure worth failing a page over.
       if (response.status === 404 || response.status === 422) return null
+
+      /*
+       * ⚠ A 403 HERE IS A MISSING SCOPE ON OUR OWN TOKEN, AND IT NEVER CLEARS.
+       * `customers:read` is NOT in the set a Polar organisation access token is
+       * created with by default — the same trap `createCustomerSession`
+       * already documents for `customer_sessions:write`. Measured against
+       * production 2026-09-20: every call to this endpoint answered
+       * `403 insufficient_scope`, which the caller caught and treated as "Polar
+       * is briefly unreachable, assume attribution is fine". So the whole
+       * attribution repair — detect AND fix — was dead on that deployment, and
+       * nothing said so. It is named here so the message points at the token
+       * rather than at the customer.
+       */
+      if (response.status === 403) {
+        throw new Error(
+          "polar customers.get refused: the access token is missing the " +
+            "`customers:read` scope. Add `customers:read` and `customers:write` " +
+            "to the organisation access token in Polar's dashboard and redeploy.",
+        )
+      }
+
       if (!response.ok) {
         throw new Error(`polar customers.get failed with ${response.status}`)
       }

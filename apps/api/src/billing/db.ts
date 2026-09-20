@@ -61,7 +61,34 @@ export interface SubscriptionOps {
    * produced this one overtook it in flight. It is a normal outcome, not a
    * failure, and the caller must not treat it as one.
    */
-  record(state: SubscriptionState): Promise<"applied" | "stale">
+  record(
+    state: SubscriptionState,
+    options?: {
+      /**
+       * Take this subscription id from whatever tenant currently holds it.
+       *
+       * ⚠ SET ONLY BY THE POST-CHECKOUT PATH, AND WITHOUT IT THE RECLAIM
+       * DEADLOCKS. `polar_subscription_id` is UNIQUE, deliberately — two
+       * tenants pointing at one subscription is one payment entitling two
+       * accounts. But when somebody re-signs up, Polar reuses their customer
+       * and keeps its stale `external_id`, so the WEBHOOK binds the brand-new
+       * subscription to the OLD, dead tenant moments before the checkout page
+       * tries to bind it to the live one — and that insert then dies on the
+       * constraint, is caught, and the plan never lands.
+       *
+       * ⚠ IT IS SAFE PRECISELY BECAUSE A SUBSCRIPTION ID HAS EXACTLY ONE
+       * BUYER. Polar creates it from one checkout, and that checkout names one
+       * tenant in metadata WE wrote. So this does not decide between two
+       * claimants — it corrects a binding made from a field Polar does not
+       * maintain, using the one it echoes back unchanged.
+       *
+       * ⚠ AND THE WEBHOOK MUST NEVER PASS IT. That path attributes by
+       * `external_id` alone; letting it reassign would let a stale id take a
+       * row back off the tenant that actually paid, once a month, for ever.
+       */
+      reassign?: boolean
+    },
+  ): Promise<"applied" | "stale">
   /**
    * Records that the entitlement now holds this plan.
    *
@@ -86,8 +113,33 @@ export interface SubscriptionOps {
 
 export function subscriptionOps(db: Database): SubscriptionOps {
   return {
-    async record(state) {
+    async record(state, options) {
       return withTenant(db, state.tenantId, async (tx) => {
+        if (options?.reassign) {
+          /*
+           * ⚠ IN THE SAME TRANSACTION AS THE INSERT BELOW, so there is no
+           * window where the id belongs to nobody and a concurrent webhook can
+           * claim it back.
+           *
+           * ⚠ AND IT IS A DELETE RATHER THAN AN UPDATE BECAUSE THE OTHER ROW
+           * HAS NOTHING LEFT TO SAY. It records that a tenant holds this
+           * subscription, which is the thing being corrected; keeping it with
+           * the id stripped out would leave a row claiming a plan with no
+           * subscription behind it, which is the shape the reconciler reports
+           * as `orphaned` and a human then has to dismiss.
+           *
+           * ⚠ `withTenant` SCOPES THIS TO THE NEW TENANT, WHOSE POLICY CANNOT
+           * SEE THE OLD ROW — so it runs through the same SECURITY DEFINER
+           * discipline as everything else that crosses a tenant boundary. See
+           * migration 0047.
+           */
+          await tx.execute(sql`
+            select core.release_subscription(
+              ${state.polarSubscriptionId}, ${state.tenantId}::uuid
+            )
+          `)
+        }
+
         // ⚠ ALIASED `s` SO THE GUARD CAN NAME THE EXISTING ROW. Inside `ON
         // CONFLICT DO UPDATE`, `excluded` is the incoming row and the table's
         // own name is the stored one; without the alias the predicate reads as

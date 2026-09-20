@@ -42,6 +42,10 @@ const succeeded: CheckoutState = {
   status: "succeeded",
   tenantId: "ten-1",
   customerId: "cus_1",
+  productId: "prod_pro",
+  // ⚠ THE FLOOR EVERY FIXTURE SUBSCRIPTION MUST SIT AFTER. A subscription older
+  // than the checkout belongs to a different purchase — see `pickForCheckout`.
+  createdAt: "2026-09-20T09:00:00Z",
 }
 
 const ask = (app: ReturnType<typeof createApp>, id = "c1") =>
@@ -503,24 +507,40 @@ describe("granting without waiting for the webhook", () => {
   // ⚠ THERE IS GENUINELY NOTHING TO GRANT FOR A STRANDED CHECKOUT — no
   // subscription of that customer's belongs to this tenant — and asking Polar
   // on every poll for an answer that cannot change is just load.
-  it("does not try to grant a stranded checkout", async () => {
-    const listed = mock(async () => [live])
+  /*
+   * ⚠ THIS ASSERTED THE OPPOSITE UNTIL 2026-09-20, AND THE ASSERTION WAS THE
+   * BUG. It pinned "a stranded checkout is never granted", on the reasoning
+   * that no subscription of that customer belongs to this tenant. That
+   * reasoning reads `customer.external_id` as the truth about who is paying —
+   * and it is not: Polar stamps it once, at customer creation, and never
+   * maintains it, so for anybody buying a second time it names whoever bought
+   * first. The customer it was protecting is the customer it was starving.
+   *
+   * The grant is safe here because it does not use that field at all. The
+   * checkout succeeded, it names this tenant in metadata we wrote, and the
+   * subscription taken is one on that customer, for that product, created no
+   * earlier than the checkout — which nothing but this purchase can be.
+   */
+  it("grants a stranded checkout anyway, from the checkout's own evidence", async () => {
+    const applied = mock(async () => ({ status: "applied" }))
     const app = createApp({
       checkoutStatus: {
         polar: {
           ...polar(succeeded, { id: "cus_1", externalId: "ten-other" }),
-          listSubscriptions: listed,
+          listSubscriptions: async () => [live],
         },
         subscriptions: ops(),
+        // A LIVE other tenant: the external_id must not be overwritten, and the
+        // plan must still be granted. Those are two different decisions.
         tenants: { isLive: async () => true },
-        grants: { apply: mock(async () => ({ status: "applied" })) },
+        grants: { apply: applied },
         options,
         log,
       },
     })
 
     await ask(app)
-    expect(listed).not.toHaveBeenCalled()
+    expect(applied).toHaveBeenCalledTimes(1)
   })
 
   // ⚠ THE PAGE POLLS EVERY TWO SECONDS FOR UP TO NINETY. Without a floor that
@@ -567,5 +587,172 @@ describe("granting without waiting for the webhook", () => {
     })
 
     expect(await (await ask(app)).json()).toMatchObject({ status: "paid" })
+  })
+})
+
+/*
+ * ⚠ THE PRODUCTION FAILURE OF 2026-09-20, AND IT IS THE ORDINARY CASE FOR ANY
+ * SECOND PURCHASE. Polar deduplicates customers by EMAIL and stamps
+ * `external_id` only on a customer it CREATES. So the customer of somebody who
+ * has bought before carries whoever bought FIRST — observed live as seven
+ * subscriptions on one customer, every one of them naming a tenant that no
+ * longer existed, including the one created thirty-six seconds after the
+ * checkout being answered.
+ *
+ * Filtering those by `customer.external_id` discards the subscription the
+ * customer has just paid for, so nothing is granted and nothing is reported:
+ * `{"status":"paid","plan":null}` for ever. The checkout is the stronger
+ * attribution — WE wrote its `metadata.tenant_id` from an authenticated session
+ * and Polar echoes it back — so that is what the grant uses.
+ */
+describe("a customer whose external_id names somebody else entirely", () => {
+  const options = {
+    planForProduct: (id: string) => (id === "prod_pro" ? "pro" : undefined),
+    freePlanId: "free",
+  }
+
+  /** Every subscription on the customer carries the OLD tenant, as in production. */
+  const stale = (over: Record<string, unknown> = {}) => ({
+    id: "sub_new",
+    status: "active",
+    product_id: "prod_pro",
+    customer_id: "cus_1",
+    customer: { external_id: "ten-OLD-and-gone" },
+    created_at: "2026-09-20T10:00:00Z",
+    ...over,
+  })
+
+  const app = (subs: unknown[], applied: unknown) =>
+    createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-OLD-and-gone" }),
+          listSubscriptions: async () => subs as never,
+        },
+        subscriptions: ops(),
+        grants: applied as never,
+        options,
+        log,
+      },
+    })
+
+  it("grants the tenant that the CHECKOUT names, not the customer", async () => {
+    const seen: { tenantId: string; polarSubscriptionId: string }[] = []
+    const applied = mock(
+      async (state: { tenantId: string; polarSubscriptionId: string }) => {
+        seen.push(state)
+        return { status: "applied" }
+      },
+    )
+
+    await ask(app([stale()], { apply: applied }))
+
+    expect(applied).toHaveBeenCalledTimes(1)
+    expect(seen[0]).toMatchObject({
+      tenantId: "ten-1",
+      polarSubscriptionId: "sub_new",
+    })
+  })
+
+  /*
+   * ⚠ THE WEBHOOK GETS THERE FIRST AND BINDS THE ID TO THE WRONG TENANT. It
+   * attributes by the same stale field, so without `reassign` this insert dies
+   * on `polar_subscription_id`'s unique index and the plan never lands.
+   */
+  it("takes the subscription id back from whoever the webhook gave it to", async () => {
+    const opts: { reassign?: boolean }[] = []
+    const applied = mock(async (_s: unknown, o?: { reassign?: boolean }) => {
+      opts.push(o ?? {})
+      return { status: "applied" }
+    })
+
+    await ask(app([stale()], { apply: applied }))
+    expect(opts[0]).toMatchObject({ reassign: true })
+  })
+
+  /*
+   * ⚠ THE GUARD THAT KEEPS THE OVERRIDE HONEST. Two live workspaces can share a
+   * Polar customer, and without a floor this would hand whoever completed a
+   * checkout the OTHER workspace's older subscription — a plan granted off the
+   * back of somebody else's payment.
+   */
+  it("refuses a subscription that predates the checkout", async () => {
+    const applied = mock(async () => ({ status: "applied" }))
+    await ask(
+      app([stale({ id: "sub_someone_else", created_at: "2026-09-19T00:00:00Z" })], {
+        apply: applied,
+      }),
+    )
+    expect(applied).not.toHaveBeenCalled()
+  })
+
+  // ⚠ AND THE PRODUCT MUST BE THE ONE BOUGHT. A customer on several products
+  // must not be handed the largest thing on the account.
+  it("refuses a subscription to a different product", async () => {
+    const applied = mock(async () => ({ status: "applied" }))
+    await ask(app([stale({ product_id: "prod_other" })], { apply: applied }))
+    expect(applied).not.toHaveBeenCalled()
+  })
+
+  /*
+   * ⚠ SIX DEAD SUBSCRIPTIONS AND ONE LIVE ONE IS THE SHAPE OF A REAL ACCOUNT,
+   * and newest-created is what picks the right one. `supersedes` ranks by
+   * entitlement first, which cannot separate six equally-unentitling rows.
+   */
+  it("picks the one this checkout made out of a pile of dead ones", async () => {
+    const seen: { polarSubscriptionId: string }[] = []
+    const applied = mock(async (state: { polarSubscriptionId: string }) => {
+      seen.push(state)
+      return { status: "applied" }
+    })
+
+    await ask(
+      app(
+        [
+          stale({
+            id: "sub_old_a",
+            status: "canceled",
+            created_at: "2026-09-20T09:30:00Z",
+          }),
+          stale({ id: "sub_new", created_at: "2026-09-20T10:00:00Z" }),
+          stale({
+            id: "sub_old_b",
+            status: "canceled",
+            created_at: "2026-09-20T09:45:00Z",
+          }),
+        ],
+        { apply: applied },
+      ),
+    )
+
+    expect(seen[0]).toMatchObject({ polarSubscriptionId: "sub_new" })
+  })
+
+  /*
+   * ⚠ AND A 403 FROM `getCustomer` MUST NOT STOP THE GRANT. That is precisely
+   * the deployment this was found on: the token lacks `customers:read`, so the
+   * attribution repair cannot run at all — and the grant must not depend on it,
+   * because the checkout already says everything needed.
+   */
+  it("still grants when the token cannot read customers at all", async () => {
+    const applied = mock(async () => ({ status: "applied" }))
+    const scopeless = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded),
+          getCustomer: async () => {
+            throw new Error("polar customers.get refused: missing `customers:read`")
+          },
+          listSubscriptions: async () => [stale()] as never,
+        },
+        subscriptions: ops(),
+        grants: { apply: applied },
+        options,
+        log,
+      },
+    })
+
+    await ask(scopeless)
+    expect(applied).toHaveBeenCalledTimes(1)
   })
 })

@@ -174,6 +174,23 @@ export interface AppDeps {
    * hook is the only path from a failed request to an alert.
    */
   reportError?: (error: unknown, context?: Record<string, unknown>) => void
+  /**
+   * Where a 500 is written down, as opposed to where it is alerted on.
+   *
+   * ⚠ `reportError` WAS THE ONLY RECORD OF A FAILED REQUEST, AND IT IS THE ONE
+   * THAT CAN BE TURNED OFF BY SOMEBODY ELSE. The handler below has said for a
+   * long time that "what went wrong is in the log and in Sentry" — and half of
+   * that was not true: nothing ever wrote a line. When Sentry stopped
+   * accepting events, every 500 in production became invisible. A customer
+   * reported "Could not check the records" on a domain whose DNS was perfect,
+   * `kubectl logs` showed nothing at all for the request, and the only way to
+   * find out what threw was to read the code and guess.
+   *
+   * ⚠ STDOUT IS THE FLOOR AND IT HAS NO QUOTA. The pod's logs are collected
+   * whatever else is broken, which is exactly the property wanted from the
+   * last thing that records a failure.
+   */
+  logError?: (error: unknown, context: Record<string, unknown>) => void
 }
 
 /**
@@ -513,7 +530,17 @@ export function createApp(deps: AppDeps = {}) {
     // ⚠ THE ROUTE PATTERN, NOT THE URL. `/emails/{id}` groups every failure of
     // one endpoint into one issue; the concrete path would open a new issue per
     // message id and bury the signal under its own volume.
-    deps.reportError?.(error, { route: routePath(c), method: c.req.method })
+    const where = { route: routePath(c), method: c.req.method }
+
+    /*
+     * ⚠ LOGGED FIRST, AND UNCONDITIONALLY. Reporting is a network call to a
+     * third party with a quota; the log line is a write to stdout that cannot
+     * be rate limited, rejected or switched off by a billing page. Doing the
+     * cheap, reliable one first means a Sentry outage costs us the alert and
+     * not the evidence.
+     */
+    deps.logError?.(error, where)
+    deps.reportError?.(error, where)
 
     // ⚠ THE SAME SHAPE AS EVERY OTHER ERROR THIS API RETURNS, and deliberately
     // no detail. What went wrong is in the log and in Sentry; a caller learning

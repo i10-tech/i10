@@ -330,6 +330,13 @@
       "when": 1789869351607,
       "tag": "0046_tenant_termination",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1789869352607,
+      "tag": "0047_release_subscription",
+      "breakpoints": true
     }
   ]
 }

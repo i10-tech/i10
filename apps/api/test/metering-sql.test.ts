@@ -82,6 +82,39 @@ describe("reading a window", () => {
     expect(statement).not.toContain("occurred_at <")
   })
 
+  /**
+   * ⚠ THE BOUNDS GO AS STRINGS, AND EVERY TEST IN THIS FILE USED TO ASSERT THE
+   * SQL AND NOTHING ELSE — WHICH IS PRECISELY HOW THIS SHIPPED. `usedInStatement`
+   * was the one statement in the file passing a `Date` straight through, the
+   * driver cannot serialise one ("The `string` argument must be of type string
+   * or an instance of Buffer or ArrayBuffer. Received an instance of Date"), and
+   * so EVERY usage read failed for every tenant and every feature. The
+   * placeholders were still `$4` and `$5`, so the assertions above stayed green
+   * throughout.
+   *
+   * ⚠ IT IS CAUGHT AND LOGGED RATHER THAN THROWN, which is why it ran for weeks
+   * as a warning every few seconds instead of as an outage: the meter fell back,
+   * allowances stopped being readable, and the console showed numbers that came
+   * from the fallback rather than from the events.
+   */
+  it("sends the window bounds as strings the driver can serialise", () => {
+    const { params } = render(usedInStatement(KEY, WINDOW))
+
+    for (const param of params) {
+      expect(param).not.toBeInstanceOf(Date)
+    }
+
+    expect(params).toContain("2026-02-01T00:00:00.000Z")
+    expect(params).toContain("2026-03-01T00:00:00.000Z")
+  })
+
+  /** ⚠ AND THE CAST IS EXPLICIT, so a text parameter compares as a timestamp. */
+  it("casts both bounds to timestamptz", () => {
+    const { sql: statement } = render(usedInStatement(KEY, WINDOW))
+    expect(statement).toContain("occurred_at >= $4::timestamptz")
+    expect(statement).toContain("occurred_at < $5::timestamptz")
+  })
+
   it("scopes to one shard, because the gate does", () => {
     const { sql: statement } = render(usedInStatement(KEY, WINDOW))
     expect(statement).toContain("shard       = $3")

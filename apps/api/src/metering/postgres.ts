@@ -216,6 +216,20 @@ export const hasAssignmentStatement = (tenantId: string): SQL => sql`
  * ⚠ AND IT IS SCOPED TO ONE SHARD, BECAUSE THE GATE IS. A shard draws against
  * its own slice of the allowance and never reads its siblings; summing them is
  * a reporting query, not something a send waits for.
+ *
+ * ⚠ THE BOUNDS ARE ISO STRINGS WITH AN EXPLICIT CAST, AND THIS WAS THE ONE
+ * STATEMENT IN THE FILE THAT PASSED A `Date` STRAIGHT THROUGH. The driver
+ * cannot serialise one here — it raises `The "string" argument must be of type
+ * string or an instance of Buffer or ArrayBuffer. Received an instance of
+ * Date` — so EVERY usage read failed, permanently, for every tenant and every
+ * feature. It was caught and logged rather than thrown, which is why it ran
+ * for weeks as a warning every few seconds instead of as an outage: the meter
+ * fell back, allowances stopped being readable, and the console reported
+ * numbers that came from the fallback rather than from the events.
+ *
+ * ⚠ EVERY OTHER DATE IN THIS FILE ALREADY DID THIS — the anchors above, the
+ * range, the event's `occurred_at`. This one was the exception, which is
+ * exactly why nobody looked at it.
  */
 export const usedInStatement = (key: MeterKey, window: ResetWindow): SQL => sql`
   select coalesce(sum(value), 0)::bigint as used
@@ -223,8 +237,12 @@ export const usedInStatement = (key: MeterKey, window: ResetWindow): SQL => sql`
    where tenant_id   = ${key.tenantId}::uuid
      and feature_id  = ${key.featureId}
      and shard       = ${key.shard}
-     and occurred_at >= ${window.start}
-     ${window.end === null ? sql`` : sql`and occurred_at < ${window.end}`}
+     and occurred_at >= ${window.start.toISOString()}::timestamptz
+     ${
+       window.end === null
+         ? sql``
+         : sql`and occurred_at < ${window.end.toISOString()}::timestamptz`
+     }
 `
 
 /**
