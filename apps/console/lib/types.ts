@@ -45,6 +45,13 @@ export interface BillingState {
     plan_id: string
     cancel_at_period_end: boolean
     current_period_end: string | null
+    /**
+     * A plan change accepted now and applied at the period boundary — what a
+     * downgrade looks like for the rest of the month. `plan_id` above is still
+     * the plan in force, deliberately: they keep what they paid for.
+     */
+    scheduled_plan_id: string | null
+    scheduled_at: string | null
     polar_customer_id: string
   } | null
   anchor: string | null

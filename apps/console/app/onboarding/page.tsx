@@ -32,7 +32,16 @@ export const metadata: Metadata = { title: "Set up" }
 // inherit that layout's setting and needs its own.
 export const dynamic = "force-dynamic"
 
-export default async function OnboardingPage() {
+export default async function OnboardingPage({
+  searchParams,
+}: {
+  // ⚠ POLAR APPENDS THIS ON THE WAY BACK, AND SO DOES OUR OWN EMBEDDED FLOW.
+  // Somebody who buys a plan on the last step of set-up lands back here; the
+  // plan step reports the outcome in place. See components/onboarding/step-plan.
+  searchParams: Promise<{ checkout_id?: string }>
+}) {
+  const { checkout_id: checkoutId } = await searchParams
+
   const [me, domains, plans] = await Promise.all([
     tryApi<Me>("/console/me"),
     tryApi<{ data: DomainSummary[] }>("/console/domains"),
@@ -106,6 +115,7 @@ export default async function OnboardingPage() {
         domains={domains.ok ? domains.data.data : []}
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
+        checkoutId={checkoutId ?? null}
       />
     </main>
   )

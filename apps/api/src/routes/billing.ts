@@ -193,6 +193,11 @@ export function createBilling(deps?: BillingDeps) {
         status: current.status,
         cancelAtPeriodEnd: current.cancelAtPeriodEnd,
         currentPeriodEnd: current.currentPeriodEnd?.toISOString() ?? null,
+        // ⚠ A DEFERRED DOWNGRADE IS INVISIBLE IN EVERY OTHER FIELD HERE. It is
+        // applied at the period boundary, so `plan` is still the plan they are
+        // leaving and `status` is still `active` — see billing/events.ts.
+        scheduledPlan: current.scheduledPlan,
+        scheduledAt: current.scheduledAt?.toISOString() ?? null,
       },
       200,
     )

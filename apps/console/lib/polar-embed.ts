@@ -57,6 +57,21 @@ export interface OpenCheckoutOptions {
   /** Fired once the payment is known to have succeeded, however we learn it. */
   onSuccess(): void
   /**
+   * Fired when the modal goes away without a known success — the ✕, Escape, or
+   * Polar's own close.
+   *
+   * ⚠ IT EXISTS BECAUSE "NOTHING HAPPENED" WAS THE ONLY OUTCOME WITH NO
+   * FEEDBACK AT ALL. A card that is declined, a checkout that expires while the
+   * tab sits open, somebody who closes the form — all three used to end with the
+   * overlay vanishing and the page underneath completely unchanged, which is
+   * indistinguishable from the Upgrade button not working. The caller uses this
+   * to ask our own status endpoint what actually became of the checkout.
+   *
+   * ⚠ AND IT IS NOT FIRED AFTER `onSuccess`. Both run through the same
+   * `done` guard, so a payment that succeeds produces exactly one of the two.
+   */
+  onClose?(): void
+  /**
    * Polar's checkout id, for the status poll that backstops their event.
    *
    * ⚠ OPTIONAL SO AN OLDER API BUILD STILL WORKS. Without it the modal depends
@@ -88,7 +103,7 @@ const THEIRS_SHOULD_HAVE_LOADED_MS = 6_000
 
 export async function openPolarCheckout(
   url: string,
-  { theme, onSuccess, checkoutId }: OpenCheckoutOptions,
+  { theme, onSuccess, onClose, checkoutId }: OpenCheckoutOptions,
 ): Promise<CheckoutHandle> {
   const { PolarEmbedCheckout } = await import("@polar-sh/checkout/embed")
 
@@ -178,10 +193,19 @@ export async function openPolarCheckout(
     onSuccess()
   }
 
+  /**
+   * ⚠ IT CHECKS `done` BEFORE CALLING BACK, NOT ONLY BEFORE TEARING DOWN.
+   * `teardown` is idempotent, so the old code could run it twice harmlessly —
+   * but Polar fires its own `close` event immediately after a successful
+   * payment closes the frame, and reporting that as a dismissal would have the
+   * page ask "what happened to this checkout" one beat after it had already
+   * been told, and answer over the top of its own success message.
+   */
   const dismiss = () => {
-    if (!dismissable) return
+    if (done || !dismissable) return
     teardown()
     remove()
+    onClose?.()
   }
 
   const onKey = (event: KeyboardEvent) => {
@@ -290,9 +314,21 @@ export async function openPolarCheckout(
        */
       instance.addEventListener("success", succeed)
 
-      // Their own `close` is real again now that `embed_origin` is sent, so
-      // ours would otherwise be a stray button over a removed iframe.
-      instance.addEventListener("close", teardown)
+      /*
+       * Their own `close` is real again now that `embed_origin` is sent, so
+       * ours would otherwise be a stray button over a removed iframe.
+       *
+       * ⚠ IT REPORTS THE CLOSE RATHER THAN ONLY CLEANING UP, AND IT DOES NOT GO
+       * THROUGH `dismiss`. Polar has already removed its own frame by the time
+       * this fires, so `remove()` would be asking a closed instance to close;
+       * but the page still needs to be told, because their ✕ is the one most
+       * people press and it used to leave no trace of the checkout at all.
+       */
+      instance.addEventListener("close", () => {
+        if (done) return
+        teardown()
+        onClose?.()
+      })
     })
     .catch(() => {})
 

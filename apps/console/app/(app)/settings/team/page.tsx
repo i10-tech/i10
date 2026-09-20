@@ -1,5 +1,8 @@
 import type { Metadata } from "next"
 import { TeamPanel } from "@/components/team-panel"
+import { DeletionWarning } from "@/components/deletion-warning"
+import { tryApi } from "@/lib/api"
+import type { Me } from "@/lib/types"
 import {
   Section,
   SectionContent,
@@ -30,7 +33,7 @@ export const metadata: Metadata = { title: "Team" }
  * account, which left this page as a heading over empty space — see
  * components/team-panel.tsx.
  */
-export default function TeamSettingsPage() {
+export default async function TeamSettingsPage() {
   /*
    * ⚠ CLERK'S COMPONENT THROWS OUTSIDE A PROVIDER, AND THE PROVIDER IS ONLY
    * MOUNTED WHEN A KEY EXISTS — see app/layout.tsx. This branch is for local
@@ -52,6 +55,10 @@ export default function TeamSettingsPage() {
     )
   }
 
+  // See the account page: read only to warn, and a failure falls back to the
+  // wording that is true of everybody rather than blanking the page.
+  const me = await tryApi<Me>("/console/me")
+
   return (
     <div>
       <Section className="pt-0">
@@ -60,7 +67,16 @@ export default function TeamSettingsPage() {
           Everyone here shares this workspace: its domains, its keys, its contacts and
           its bill. Invitations are sent by email.
         </SectionDescription>
-        <SectionContent>
+        <SectionContent className="space-y-4">
+          {/*
+           * ⚠ "Delete organization" IS INSIDE THE PANEL BELOW AND ITS DIALOG IS
+           * CLERK'S. It asks for the organization name and warns about members
+           * and sessions — correctly, and with no idea that a subscription
+           * exists. Deleting the organization now revokes that subscription
+           * immediately rather than leaving it billing a dead workspace, which
+           * is exactly the thing somebody should read before confirming.
+           */}
+          <DeletionWarning billing={me.ok ? me.data.billing : null} scope="workspace" />
           <TeamPanel />
         </SectionContent>
       </Section>

@@ -181,6 +181,32 @@ export interface PolarClient {
   cancelSubscription(subscriptionId: string): Promise<void>
 
   /**
+   * Ends a live subscription NOW — benefits revoked, billing stopped, no
+   * remainder of the period.
+   *
+   * ⚠ THE OPPOSITE OF `cancelSubscription`, AND THE DIFFERENCE IS WHO ASKED.
+   * Everything else in this file defers, because a customer who downgrades has
+   * paid for the rest of the month and taking it away would be both a refund
+   * question and a nasty surprise. Deleting a workspace is not that: the
+   * account is gone, the mailboxes are gone, nobody is left to use what the
+   * remainder of the period would buy — and leaving the subscription running to
+   * the boundary means charging somebody who has deleted their account, which
+   * is the one billing failure a customer will never accept an explanation for.
+   * The console says immediately, so this has to mean immediately.
+   *
+   * ⚠ `already_ended` IS A SUCCESS, NOT AN ERROR. Polar answers 403 for a
+   * subscription it has already revoked and 404 for one it does not know, and
+   * this runs from a webhook Svix redelivers — turning either into a throw
+   * would make every retry of a completed deletion a 500, retried until the
+   * budget runs out, against a subscription that is already off.
+   *
+   * ⚠ A 409 DOES THROW, THOUGH, AND THAT IS DELIBERATE. Polar locks a
+   * subscription while an update is pending; the answer is to try again in a
+   * moment, which is exactly what a non-2xx from the webhook buys us.
+   */
+  revokeSubscription(subscriptionId: string): Promise<"revoked" | "already_ended">
+
+  /**
    * A short-lived token for the embedded payment-method form.
    *
    * ⚠ MINTED SERVER-SIDE, WHICH IS WHY THIS EXISTS AT ALL. The embed needs a
@@ -463,6 +489,43 @@ export function polarClient(opts: PolarOptions): PolarClient {
           `polar subscription cancel failed: ${response.status} ${await response.text()}`,
         )
       }
+    },
+
+    async revokeSubscription(subscriptionId) {
+      const response = await call(
+        `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+        { method: "DELETE" },
+      )
+
+      if (response.status === 404) return "already_ended"
+
+      /*
+       * ⚠ 403 IS TWO DIFFERENT ANSWERS AND ONLY ONE OF THEM IS SUCCESS. Polar
+       * documents it as "subscription already revoked", which is exactly what
+       * this call wanted — but a token missing `subscriptions:write` answers
+       * 403 too, and reading that as "already done" would mean every deletion
+       * in the deployment silently leaves the subscription billing while the
+       * log says it was revoked. The body is what tells them apart.
+       */
+      if (response.status === 403) {
+        const detail = await response.text()
+        if (detail.includes("insufficient_scope")) {
+          throw new Error(
+            "polar subscription revoke refused: the access token is missing the " +
+              "`subscriptions:write` scope. Add it to the organisation access " +
+              "token in Polar's dashboard and redeploy.",
+          )
+        }
+        return "already_ended"
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `polar subscription revoke failed: ${response.status} ${await response.text()}`,
+        )
+      }
+
+      return "revoked"
     },
 
     async createCustomerSession(tenantId) {

@@ -50,6 +50,25 @@ export interface PolarSubscription {
   cancel_at_period_end?: boolean | null
   modified_at?: string | null
   created_at?: string | null
+  /**
+   * A change Polar has accepted and will apply at the next period boundary.
+   *
+   * ⚠ THIS IS WHAT A DOWNGRADE LOOKS LIKE FOR THE REST OF THE MONTH, AND
+   * READING IT IS THE ONLY WAY TO KNOW ONE HAPPENED. `prorationFor("downgrade")`
+   * asks for `next_period` precisely so the customer keeps what they paid for —
+   * and the consequence is that `product_id` above still names the OLD plan
+   * until the boundary passes. Everything else we store would say nothing had
+   * changed.
+   *
+   * ⚠ AND IT IS READ, NEVER ACTED ON. `applies_at` is in the future by
+   * definition; entitling the new product now would take away the allowance
+   * they are still paying for, which is the exact failure deferring the change
+   * exists to avoid.
+   */
+  pending_update?: {
+    product_id?: string | null
+    applies_at?: string | null
+  } | null
 }
 
 export interface PolarEvent {
@@ -83,6 +102,16 @@ export interface SubscriptionState {
    * the row still say what they bought after access ends.
    */
   entitledPlanId: string
+  /**
+   * The plan a deferred change will move them to, and when. Both null when
+   * nothing is scheduled, which is the ordinary case.
+   *
+   * ⚠ IT IS NOT AN ENTITLEMENT AND MUST NEVER BE READ AS ONE. See
+   * `pending_update` above: this describes a future, and the customer holds
+   * `entitledPlanId` until it arrives.
+   */
+  scheduledPlanId: string | null
+  scheduledAt: Date | null
 }
 
 export type Decision =
@@ -192,10 +221,21 @@ export function toState(
 
   const entitled = ENTITLED_STATUSES.has(sub.status) && !lapsed
 
+  // ⚠ A PENDING CHANGE TO A PRODUCT WE DO NOT SELL IS RECORDED AS NO CHANGE,
+  // NOT AS A FAILURE. It is the same judgement `planForProduct` already makes
+  // about the live product, and the stake is lower: the worst case is a console
+  // that does not mention a scheduled move, rather than an event retried for
+  // hours over a field nothing acts on.
+  const scheduledPlanId = sub.pending_update?.product_id
+    ? (opts.planForProduct(sub.pending_update.product_id) ?? null)
+    : null
+
   return {
     kind: "apply",
     state: {
       tenantId,
+      scheduledPlanId,
+      scheduledAt: scheduledPlanId ? parseDate(sub.pending_update?.applies_at) : null,
       polarSubscriptionId: sub.id,
       polarCustomerId: sub.customer_id,
       polarProductId: sub.product_id,
@@ -216,4 +256,71 @@ function parseDate(value: string | null | undefined): Date | null {
   if (!value) return null
   const at = new Date(value)
   return Number.isNaN(at.getTime()) ? null : at
+}
+
+/**
+ * Which of two subscriptions for the same tenant states their entitlement.
+ *
+ * ⚠ ENTITLEMENT WINS BEFORE RECENCY, AND THAT ORDER IS THE POINT. Recency
+ * alone answers the ordinary case — resubscribing after churn — but it answers
+ * it by accident, because the new subscription happens to have been modified
+ * last. It gives the wrong answer the moment anything at all touches an ended
+ * subscription after a live one was created, and that is a downgrade for
+ * somebody who is paying. Asking "does Polar say this customer holds a plan"
+ * first cannot fail that way: if any subscription entitles them, they are
+ * entitled, and recency only picks between subscriptions that agree.
+ *
+ * ⚠ IT LIVES HERE RATHER THAN IN THE RECONCILER BECAUSE IT IS NOW ASKED IN TWO
+ * PLACES, AND THE SECOND ONE IS WHERE IT MATTERS MOST. `pick` below is what the
+ * post-checkout page uses to decide which of a customer's subscriptions to
+ * grant from — and a customer who deleted an account and signed up again has
+ * two, one dead and one just paid for. Reading the list in order there would
+ * let the dead one decide, which is the precise bug this ordering prevents in
+ * the reconciler.
+ */
+export function supersedes(
+  candidate: SubscriptionState,
+  held: SubscriptionState,
+  freePlanId: string,
+): boolean {
+  const candidateEntitles = candidate.entitledPlanId !== freePlanId
+  const heldEntitles = held.entitledPlanId !== freePlanId
+  if (candidateEntitles !== heldEntitles) return candidateEntitles
+  return candidate.eventAt.getTime() > held.eventAt.getTime()
+}
+
+/**
+ * The one subscription that decides a tenant's plan, out of everything Polar
+ * holds for a customer.
+ *
+ * ⚠ POLAR NEVER DELETES A SUBSCRIPTION — a cancelled one stays in the list with
+ * status `canceled` for ever — so "the customer's subscriptions" is a growing
+ * list of which at most one is live, and `core.subscriptions` holds exactly one
+ * row per tenant. Applying them in list order means the dead one gets its turn
+ * at writing the live one's row, and the only thing standing between a paying
+ * customer and a downgrade is the `event_at` guard in `record` happening to
+ * reject it.
+ */
+export function pick(
+  subs: readonly (PolarSubscription | undefined)[],
+  opts: DecideOptions,
+  tenantId?: string,
+): SubscriptionState | null {
+  let held: SubscriptionState | null = null
+
+  for (const sub of subs) {
+    const decided = toState(sub, opts)
+    if (decided.kind === "ignore") continue
+    // ⚠ AND ONLY FOR THE TENANT ASKED ABOUT, WHEN ONE IS NAMED. One Polar
+    // customer can hold several subscriptions; deciding from a state whose
+    // tenant is not the one we are answering for would be writing an
+    // entitlement off the back of somebody else's purchase.
+    if (tenantId && decided.state.tenantId !== tenantId) continue
+
+    if (!held || supersedes(decided.state, held, opts.freePlanId)) {
+      held = decided.state
+    }
+  }
+
+  return held
 }

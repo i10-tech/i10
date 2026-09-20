@@ -14,6 +14,8 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
     status: null,
     cancelAtPeriodEnd: false,
     currentPeriodEnd: null,
+    scheduledPlan: null,
+    scheduledAt: null,
     polarSubscriptionId: "sub_1",
   }),
   ...over,
@@ -30,6 +32,7 @@ const polar = (
   ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
   updateSubscription: async () => {},
   cancelSubscription: async () => {},
+  revokeSubscription: async () => "revoked" as const,
   createCustomerSession: async () => ({ token: "polar_cst_test" }),
   listSubscriptions: async () => [],
 })
@@ -69,6 +72,8 @@ describe("the post-checkout status page", () => {
             status: "active",
             cancelAtPeriodEnd: false,
             currentPeriodEnd: null,
+            scheduledPlan: null,
+            scheduledAt: null,
             polarSubscriptionId: "sub_1",
           }),
         }),
@@ -90,6 +95,8 @@ describe("the post-checkout status page", () => {
       status: "active",
       cancelAtPeriodEnd: false,
       currentPeriodEnd: null,
+      scheduledPlan: null,
+      scheduledAt: null,
       polarSubscriptionId: "sub_1",
     }))
 
@@ -221,6 +228,8 @@ describe("the post-checkout status page", () => {
             status: "active",
             cancelAtPeriodEnd: false,
             currentPeriodEnd: null,
+            scheduledPlan: null,
+            scheduledAt: null,
             polarSubscriptionId: "sub_1",
           }),
         }),
@@ -304,5 +313,259 @@ describe("the post-checkout status page", () => {
 
     expect((await ask(app)).status).toBe(200)
     expect((await app.request("/billing/plan")).status).not.toBe(200)
+  })
+})
+
+/*
+ * ⚠ THE REPORTED BUG, AND IT IS A PERMANENT ONE RATHER THAN A DELAY. Polar
+ * deduplicates customers by email, so somebody who subscribed, deleted their
+ * account and signed up again is handed back the SAME Polar customer — still
+ * carrying their FIRST tenant's `external_id`. Every subscription event for it
+ * is then attributed to a workspace that no longer exists, in the webhook and
+ * the reconciler alike, and refusing to overwrite the id as a "collision" meant
+ * no path could ever fix it: money taken, no plan, for ever.
+ */
+describe("a Polar customer left behind by a deleted workspace", () => {
+  const grants = () => ({ apply: mock(async () => ({ status: "applied" })) })
+
+  const paidSub = {
+    id: "sub_new",
+    status: "active",
+    product_id: "prod_pro",
+    customer_id: "cus_1",
+    customer: { external_id: "ten-1" },
+    modified_at: "2026-09-20T10:00:00Z",
+  }
+
+  const options = {
+    planForProduct: (id: string) => (id === "prod_pro" ? "pro" : undefined),
+    freePlanId: "free",
+  }
+
+  it("is reclaimed when the tenant holding it is gone", async () => {
+    const wrote = mock(async () => true)
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-deleted" }),
+          setCustomerExternalId: wrote,
+          listSubscriptions: async () => [paidSub],
+        },
+        subscriptions: ops(),
+        tenants: { isLive: async () => false },
+        grants: grants(),
+        options,
+        log,
+      },
+    })
+
+    const body = await (await ask(app)).json()
+
+    expect(wrote).toHaveBeenCalledWith("cus_1", "ten-1")
+    // Not `unattributed`: there is nothing for a human to do here.
+    expect(body).not.toMatchObject({ detail: "unattributed" })
+  })
+
+  // ⚠ THE OTHER HALF, AND IT IS THE ONE THAT PROTECTS SOMEBODY ELSE'S MONEY. A
+  // live tenant's id is not ours to take, however inconvenient the dead end is.
+  it("is not reclaimed when that tenant is still live", async () => {
+    const wrote = mock(async () => true)
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-other" }),
+          setCustomerExternalId: wrote,
+        },
+        subscriptions: ops(),
+        tenants: { isLive: async () => true },
+        log,
+      },
+    })
+
+    expect(await (await ask(app)).json()).toMatchObject({ detail: "unattributed" })
+    expect(wrote).not.toHaveBeenCalled()
+  })
+
+  // ⚠ NOT BEING ABLE TO ASK IS NOT PERMISSION TO ASSUME. Without the dep the
+  // route must behave exactly as it did before it existed.
+  it("is not reclaimed when there is nothing to ask about liveness", async () => {
+    const wrote = mock(async () => true)
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-other" }),
+          setCustomerExternalId: wrote,
+        },
+        subscriptions: ops(),
+        log,
+      },
+    })
+
+    expect(await (await ask(app)).json()).toMatchObject({ detail: "unattributed" })
+    expect(wrote).not.toHaveBeenCalled()
+  })
+
+  /*
+   * ⚠ AND THE RECLAIM MUST NOT LET THE DEAD SUBSCRIPTION DECIDE. The customer
+   * this path exists for has two subscriptions — the one from the account they
+   * deleted and the one they just bought — and Polar returns both, for ever.
+   * Applying them in list order lets the cancelled one write the live one's row.
+   */
+  it("grants from the live subscription, not the one that ended", async () => {
+    // ⚠ THE STATE IS CAPTURED RATHER THAN READ OFF `mock.calls`, so the
+    // assertion below names the subscription that decided, not an index.
+    const decidedFrom: { polarSubscriptionId: string; entitledPlanId: string }[] = []
+    const applied = mock(
+      async (state: { polarSubscriptionId: string; entitledPlanId: string }) => {
+        decidedFrom.push(state)
+        return { status: "applied" }
+      },
+    )
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: null }),
+          listSubscriptions: async () => [
+            paidSub,
+            {
+              id: "sub_old",
+              status: "canceled",
+              product_id: "prod_pro",
+              customer_id: "cus_1",
+              customer: { external_id: "ten-1" },
+              // ⚠ MODIFIED LATER THAN THE LIVE ONE, WHICH IS THE WHOLE TRAP.
+              // Revoking the old subscription at deletion touches it, so
+              // "newest wins" picks the dead one.
+              modified_at: "2026-09-20T11:00:00Z",
+            },
+          ],
+        },
+        subscriptions: ops(),
+        grants: { apply: applied },
+        options,
+        log,
+      },
+    })
+
+    await ask(app)
+
+    expect(applied).toHaveBeenCalledTimes(1)
+    expect(decidedFrom[0]).toMatchObject({
+      polarSubscriptionId: "sub_new",
+      entitledPlanId: "pro",
+    })
+  })
+})
+
+/*
+ * ⚠ THE HALF-HOUR WAIT, WHICH IS WHAT THE PAGE USED TO PROMISE. The immediate
+ * grant used to run only after an attribution repair, so an ordinary lost
+ * webhook meant ninety seconds of spinner and then "we check for stragglers
+ * every half hour" — a job the customer cannot see, for a payment they have
+ * already made.
+ */
+describe("granting without waiting for the webhook", () => {
+  const options = {
+    planForProduct: (id: string) => (id === "prod_pro" ? "pro" : undefined),
+    freePlanId: "free",
+  }
+
+  const live = {
+    id: "sub_1",
+    status: "active",
+    product_id: "prod_pro",
+    customer_id: "cus_1",
+    customer: { external_id: "ten-1" },
+    modified_at: "2026-09-20T10:00:00Z",
+  }
+
+  it("grants a paid checkout whose attribution never needed repairing", async () => {
+    const applied = mock(async () => ({ status: "applied" }))
+    const app = createApp({
+      checkoutStatus: {
+        // `externalId` already ours: nothing to repair, and the old code did
+        // nothing at all in this case.
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-1" }),
+          listSubscriptions: async () => [live],
+        },
+        subscriptions: ops(),
+        grants: { apply: applied },
+        options,
+        log,
+      },
+    })
+
+    await ask(app)
+    expect(applied).toHaveBeenCalledTimes(1)
+  })
+
+  // ⚠ THERE IS GENUINELY NOTHING TO GRANT FOR A STRANDED CHECKOUT — no
+  // subscription of that customer's belongs to this tenant — and asking Polar
+  // on every poll for an answer that cannot change is just load.
+  it("does not try to grant a stranded checkout", async () => {
+    const listed = mock(async () => [live])
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-other" }),
+          listSubscriptions: listed,
+        },
+        subscriptions: ops(),
+        tenants: { isLive: async () => true },
+        grants: { apply: mock(async () => ({ status: "applied" })) },
+        options,
+        log,
+      },
+    })
+
+    await ask(app)
+    expect(listed).not.toHaveBeenCalled()
+  })
+
+  // ⚠ THE PAGE POLLS EVERY TWO SECONDS FOR UP TO NINETY. Without a floor that
+  // is forty-five list calls against Polar for one customer's one answer.
+  it("does not ask Polar again on every poll of the same checkout", async () => {
+    const listed = mock(async () => [live])
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-1" }),
+          listSubscriptions: listed,
+        },
+        subscriptions: ops(),
+        grants: { apply: mock(async () => ({ status: "applied" })) },
+        options,
+        log,
+      },
+    })
+
+    await ask(app)
+    await ask(app)
+    await ask(app)
+
+    expect(listed).toHaveBeenCalledTimes(1)
+  })
+
+  // ⚠ IT REPORTS THE ROW, NOT THE CALL. `grantNow` is best effort, so answering
+  // `granted` because it did not throw would claim an entitlement nobody
+  // confirmed — the exact lie `granted_plan_id` exists to prevent.
+  it("still says `paid` when the grant did not land", async () => {
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "ten-1" }),
+          listSubscriptions: async () => {
+            throw new Error("polar list is down")
+          },
+        },
+        subscriptions: ops(),
+        grants: { apply: mock(async () => ({ status: "applied" })) },
+        options,
+        log,
+      },
+    })
+
+    expect(await (await ask(app)).json()).toMatchObject({ status: "paid" })
   })
 })

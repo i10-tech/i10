@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import type { Database } from "../db/client.js"
 import { applyClerkEvent } from "../projection/writer.js"
 import type { TenantProvisioning } from "../tenants/provision.js"
+import type { TenantLifecycle } from "../tenants/lifecycle.js"
 import type { authEmailDelivery } from "../auth-email/deliver.js"
 import { readSvixHeaders, verifySvixSignature } from "../webhooks/svix.js"
 
@@ -21,6 +22,18 @@ export interface ClerkWebhookDeps {
    * sign-ups still update the mailbox projection and simply provision nothing.
    */
   provisioning?: TenantProvisioning
+  /**
+   * The other half of provisioning: a deleted organization stops being a
+   * tenant, and stops being billed.
+   *
+   * ⚠ ABSENT MEANS A DELETED WORKSPACE KEEPS PAYING, WHICH IS WHY IT IS WIRED
+   * WHEREVER PROVISIONING IS. Without it `organization.deleted` falls through
+   * to `ignored` — the state this endpoint was in until it was found: an
+   * account deleted in Clerk left `core.tenants` saying `active`, the plan
+   * assignment on Pro, and Polar charging a card every month for a workspace
+   * nobody could sign in to.
+   */
+  lifecycle?: TenantLifecycle
   /**
    * Sends Clerk's authentication mail through our own send path.
    *
@@ -177,13 +190,31 @@ async function provision(
   type: string,
   data: unknown,
 ): Promise<string | null> {
-  if (!deps.provisioning) return null
-
   switch (type) {
     case "user.created":
-      return deps.provisioning.onUserCreated(data)
+      return deps.provisioning?.onUserCreated(data) ?? null
     case "organization.created":
-      return deps.provisioning.onOrganizationCreated(data)
+      return deps.provisioning?.onOrganizationCreated(data) ?? null
+
+    /*
+     * ⚠ DELETION RUNS THROUGH THE SAME FUNCTION AS CREATION, AND THEREFORE
+     * OUTSIDE THE SVIX DEDUPE, FOR THE IDENTICAL REASON. `applyClerkEvent`
+     * claims the message id and answers `duplicate` on a redelivery — right for
+     * the mailbox projection, wrong here: if the Polar revoke failed the first
+     * time, the retry is the only thing that stops the billing, and a dedupe
+     * that swallowed it would leave a deleted account paying for ever. Both
+     * handlers below are idempotent by themselves.
+     *
+     * ⚠ AND `user.deleted` REACHES BOTH HALVES. The projection removes their
+     * mailbox; this asks whether the workspaces they owned went with them. They
+     * are different questions about the same event and neither subsumes the
+     * other.
+     */
+    case "organization.deleted":
+      return deps.lifecycle?.onOrganizationDeleted(data) ?? null
+    case "user.deleted":
+      return deps.lifecycle?.onUserDeleted(data) ?? null
+
     default:
       return null
   }

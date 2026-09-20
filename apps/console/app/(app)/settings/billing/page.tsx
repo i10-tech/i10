@@ -54,6 +54,21 @@ export default async function BillingPage({
 
   const { billing } = usage.data
 
+  /*
+   * ⚠ THE NAME, NOT THE ID. `scheduled_plan_id` is our internal handle — `pro`,
+   * `starter` — and everything else on this page renders `plan.name`. Printing
+   * the id would be the only place in the console where a customer is shown one,
+   * in the sentence that is supposed to reassure them about a change they just
+   * made. The catalogue may fail to load, in which case the id is still better
+   * than saying nothing.
+   */
+  const scheduledName = billing.subscription?.scheduled_plan_id
+    ? ((plans.ok
+        ? plans.data.data.find((p) => p.id === billing.subscription?.scheduled_plan_id)
+            ?.name
+        : null) ?? billing.subscription.scheduled_plan_id)
+    : null
+
   return (
     <div>
       {checkoutId && (
@@ -77,21 +92,37 @@ export default async function BillingPage({
               </p>
               {billing.subscription ? (
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {billing.subscription.cancel_at_period_end
-                    ? /*
-                       * ⚠ A CANCELLED SUBSCRIPTION IS STILL ACTIVE UNTIL THE
-                       * PERIOD ENDS, AND SAYING "cancelled" ALONE WOULD MAKE
-                       * SOMEBODY THINK THEIR SENDING HAS STOPPED. The date is
-                       * the whole message.
-                       */
-                      `Ends ${
-                        billing.subscription.current_period_end
-                          ? formatExact(billing.subscription.current_period_end)
+                  {/*
+                   * ⚠ A SCHEDULED CHANGE IS CHECKED FIRST, BECAUSE IT IS THE
+                   * ONE THING THIS LINE COULD NOT SAY. A downgrade is applied
+                   * at the period boundary so the customer keeps what they paid
+                   * for — which means every other field here still describes the
+                   * plan they are leaving, and the page read "Pro — renews on
+                   * the 4th" to somebody who had just downgraded. That is
+                   * indistinguishable from the button having done nothing, and
+                   * it is the same complaint cancelling used to get.
+                   */}
+                  {scheduledName
+                    ? `Changes to ${scheduledName} ${
+                        billing.subscription.scheduled_at
+                          ? `on ${formatExact(billing.subscription.scheduled_at)}`
                           : "at the end of this period"
-                      } — sending continues until then.`
-                    : billing.subscription.current_period_end
-                      ? `Renews ${formatExact(billing.subscription.current_period_end)}`
-                      : "Active"}
+                      } — you keep ${billing.plan?.name ?? "your current plan"} until then.`
+                    : billing.subscription.cancel_at_period_end
+                      ? /*
+                         * ⚠ A CANCELLED SUBSCRIPTION IS STILL ACTIVE UNTIL THE
+                         * PERIOD ENDS, AND SAYING "cancelled" ALONE WOULD MAKE
+                         * SOMEBODY THINK THEIR SENDING HAS STOPPED. The date is
+                         * the whole message.
+                         */
+                        `Ends ${
+                          billing.subscription.current_period_end
+                            ? formatExact(billing.subscription.current_period_end)
+                            : "at the end of this period"
+                        } — sending continues until then.`
+                      : billing.subscription.current_period_end
+                        ? `Renews ${formatExact(billing.subscription.current_period_end)}`
+                        : "Active"}
                 </p>
               ) : (
                 <p className="mt-0.5 text-xs text-muted-foreground">
@@ -134,6 +165,17 @@ export default async function BillingPage({
                 billing.subscription?.cancel_at_period_end &&
                 billing.subscription.current_period_end
                   ? formatExact(billing.subscription.current_period_end)
+                  : null
+              }
+              // ⚠ THE SAME RULE `endingAt` FOLLOWS, FOR THE OTHER DEFERRED
+              // CHANGE. A card whose plan is already scheduled must not offer
+              // "Downgrade" again: pressing it sends a second PATCH that
+              // supersedes an identical pending update, which changes nothing
+              // and reads as the first press having failed.
+              scheduledPlanId={billing.subscription?.scheduled_plan_id ?? null}
+              scheduledAt={
+                billing.subscription?.scheduled_at
+                  ? formatExact(billing.subscription.scheduled_at)
                   : null
               }
             />

@@ -6,7 +6,8 @@ import { subscriptionOps } from "./billing/db.js"
 import { subscriptionGrants } from "./billing/grants.js"
 import { planChange } from "./billing/plan-change.js"
 import { polarClient } from "./billing/polar.js"
-import { tenantStore } from "./tenants/db.js"
+import { tenantLifecycleStore, tenantStore } from "./tenants/db.js"
+import { tenantLifecycle } from "./tenants/lifecycle.js"
 import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { keyLookup, keyStore } from "./auth/store.js"
@@ -21,7 +22,7 @@ import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { domainStore } from "./domains/store.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
-import { clerkIdentity } from "./mailboxes/clerk.js"
+import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { dnsInspector } from "./console/dns.js"
@@ -312,6 +313,43 @@ const planOptions = {
   freePlanId: env.METERING_FREE_PLAN_ID,
 }
 
+const tenantDeaths = tenantLifecycleStore(db)
+
+/**
+ * Sign-up's other half: a deleted Clerk organization stops being a tenant, and
+ * stops being billed. See tenants/lifecycle.ts.
+ *
+ * ⚠ IT IS CONSTRUCTED AFTER `polar` BECAUSE IT NEEDS IT, AND IT IS BUILT EVEN
+ * WHEN POLAR IS ABSENT. Without a Polar client it can still mark the tenant
+ * dead and drop it to the free allowance — the half that is entirely ours — and
+ * it logs the subscription it could not cancel at `error`, which is the only
+ * remaining trace of a card that is still being charged.
+ */
+const lifecycle = tenantLifecycle({
+  tenants: tenantDeaths,
+  ...(polar ? { polar } : {}),
+  organizations: {
+    /*
+     * ⚠ 404 IS THE ANSWER THIS ASKS FOR, NOT A FAILURE. It is the whole
+     * question — has the organization behind this workspace gone with the user
+     * who owned it — and anything else about the request failing must NOT read
+     * as "gone", because that answer terminates a workspace. The throw is
+     * caught by the caller and skips that tenant.
+     */
+    exists: async (clerkOrgId) => {
+      try {
+        await clerk.organizations.getOrganization({ organizationId: clerkOrgId })
+        return true
+      } catch (error) {
+        if (clerkNotFound(error)) return false
+        throw error
+      }
+    },
+  },
+  freePlanId: env.METERING_FREE_PLAN_ID,
+  log,
+})
+
 log.info(
   {
     server: env.POLAR_SERVER,
@@ -454,6 +492,11 @@ const app = createApp({
     signingSecret: env.CLERK_WEBHOOK_SECRET,
     hostedDomains: env.MAIL_DOMAINS,
     provisioning,
+    // ⚠ THE OTHER HALF OF `provisioning`, AND WIRED UNCONDITIONALLY BESIDE IT.
+    // Without this, deleting an account in Clerk left the tenant `active`, the
+    // plan assignment on Pro, and Polar charging a card for a workspace nobody
+    // could sign in to. See tenants/lifecycle.ts.
+    lifecycle,
     // ⚠ ONLY WHEN BOTH HALVES EXIST. Without a from-address or i10's tenant we
     // would have nowhere to send from and nothing to attribute it to, and the
     // webhook then acknowledges the event while Clerk keeps sending — which is
@@ -586,6 +629,16 @@ const app = createApp({
           subscriptions,
           log,
           grants,
+          /*
+           * ⚠ WITHOUT THIS THE ROUTE CANNOT TELL A COLLISION FROM A RECLAIM,
+           * and has to assume the expensive one. Polar deduplicates customers
+           * by email, so somebody who subscribed, deleted their account and
+           * signed up again gets the SAME Polar customer back, still carrying
+           * their first tenant's id — and refusing to overwrite it meant their
+           * payment could never be attributed to anybody. This is the only
+           * thing that knows the first tenant is gone.
+           */
+          tenants: tenantDeaths,
           options: {
             planForProduct: (productId: string) =>
               Object.entries(env.POLAR_PRODUCTS).find(

@@ -32,6 +32,16 @@ export interface CurrentPlan {
   cancelAtPeriodEnd: boolean
   currentPeriodEnd: Date | null
   /**
+   * A plan change Polar has accepted and will apply at the period boundary.
+   *
+   * ⚠ IT IS WHAT MAKES A DOWNGRADE VISIBLE BEFORE IT HAPPENS. `plan` above is
+   * still the plan they hold and are still paying for — deliberately, because
+   * they keep it until the period ends — so without this the console has
+   * nothing to distinguish "downgrade accepted" from "nothing happened".
+   */
+  scheduledPlan: string | null
+  scheduledAt: Date | null
+  /**
    * Polar's id for the subscription, or `null` if there is none.
    *
    * ⚠ IT IS HERE SO A PLAN CHANGE HAS SOMETHING TO PATCH, and it is the one
@@ -111,7 +121,8 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         const rows = (await tx.execute(sql`
           insert into core.subscriptions as s (
             tenant_id, polar_subscription_id, polar_customer_id, polar_product_id,
-            plan_id, status, cancel_at_period_end, current_period_end, event_at
+            plan_id, status, cancel_at_period_end, current_period_end, event_at,
+            scheduled_plan_id, scheduled_at
           ) values (
             ${state.tenantId}::uuid,
             ${state.polarSubscriptionId},
@@ -121,7 +132,9 @@ export function subscriptionOps(db: Database): SubscriptionOps {
             ${state.status},
             ${state.cancelAtPeriodEnd},
             ${state.currentPeriodEnd?.toISOString() ?? null}::timestamptz,
-            ${state.eventAt.toISOString()}::timestamptz
+            ${state.eventAt.toISOString()}::timestamptz,
+            ${state.scheduledPlanId},
+            ${state.scheduledAt?.toISOString() ?? null}::timestamptz
           )
           on conflict (tenant_id) do update set
             polar_subscription_id = excluded.polar_subscription_id,
@@ -132,6 +145,13 @@ export function subscriptionOps(db: Database): SubscriptionOps {
             cancel_at_period_end  = excluded.cancel_at_period_end,
             current_period_end    = excluded.current_period_end,
             event_at              = excluded.event_at,
+            -- ⚠ OVERWRITTEN INCLUDING WITH NULL, WHICH IS THE HALF THAT MATTERS.
+            -- A scheduled change disappears from Polar's payload the moment it
+            -- is applied or superseded; keeping the old value where the new one
+            -- is null would leave the console announcing a downgrade that has
+            -- already happened, for ever.
+            scheduled_plan_id     = excluded.scheduled_plan_id,
+            scheduled_at          = excluded.scheduled_at,
             updated_at            = now()
           where s.event_at < excluded.event_at
              or (s.event_at = excluded.event_at
@@ -163,7 +183,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
       return withTenant(db, tenantId, async (tx) => {
         const rows = (await tx.execute(sql`
           select granted_plan_id, status, cancel_at_period_end, current_period_end,
-                 polar_subscription_id
+                 scheduled_plan_id, scheduled_at, polar_subscription_id
             from core.subscriptions
            where tenant_id = ${tenantId}::uuid
            limit 1
@@ -172,6 +192,8 @@ export function subscriptionOps(db: Database): SubscriptionOps {
           status: string
           cancel_at_period_end: boolean
           current_period_end: string | Date | null
+          scheduled_plan_id: string | null
+          scheduled_at: string | Date | null
           polar_subscription_id: string | null
         }[]
 
@@ -185,6 +207,8 @@ export function subscriptionOps(db: Database): SubscriptionOps {
             status: null,
             cancelAtPeriodEnd: false,
             currentPeriodEnd: null,
+            scheduledPlan: null,
+            scheduledAt: null,
             polarSubscriptionId: null,
           }
         }
@@ -194,6 +218,8 @@ export function subscriptionOps(db: Database): SubscriptionOps {
           status: row.status,
           cancelAtPeriodEnd: row.cancel_at_period_end,
           currentPeriodEnd: toDate(row.current_period_end),
+          scheduledPlan: row.scheduled_plan_id,
+          scheduledAt: toDate(row.scheduled_at),
           polarSubscriptionId: row.polar_subscription_id,
         }
       })

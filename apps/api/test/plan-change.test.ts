@@ -42,6 +42,8 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps =>
       status: "active",
       cancelAtPeriodEnd: false,
       currentPeriodEnd: null,
+      scheduledPlan: null,
+      scheduledAt: null,
       polarSubscriptionId: "sub_1",
     }),
     ...over,
@@ -51,6 +53,7 @@ const polar = (over: Partial<PolarClient> = {}): PolarClient =>
   ({
     updateSubscription: async () => {},
     cancelSubscription: async () => {},
+    revokeSubscription: async () => "revoked" as const,
     ...over,
   }) as PolarClient
 
@@ -156,6 +159,8 @@ describe("changing a plan", () => {
           status: null,
           cancelAtPeriodEnd: false,
           currentPeriodEnd: null,
+          scheduledPlan: null,
+          scheduledAt: null,
           polarSubscriptionId: null,
         }),
       }),
@@ -186,6 +191,8 @@ describe("changing a plan", () => {
           status: "active",
           cancelAtPeriodEnd: false,
           currentPeriodEnd: null,
+          scheduledPlan: null,
+          scheduledAt: null,
           polarSubscriptionId: "sub_1",
         }),
       }),
@@ -225,6 +232,8 @@ describe("changing a plan", () => {
           status: "active",
           cancelAtPeriodEnd: false,
           currentPeriodEnd: null,
+          scheduledPlan: null,
+          scheduledAt: null,
           polarSubscriptionId: "sub_1",
         }),
       }),

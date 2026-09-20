@@ -1105,6 +1105,23 @@ export const subscriptions = core.table(
     grantedPlanId: text("granted_plan_id"),
     grantedAt: timestamp("granted_at", { withTimezone: true }),
 
+    /**
+     * The plan a deferred change is waiting to become, and when.
+     *
+     * ⚠ WITHOUT THESE A DOWNGRADE LEAVES NO TRACE UNTIL IT HAPPENS. Polar
+     * applies a `next_period` change at the period boundary — which is the
+     * point of requesting downgrades that way, since the customer keeps what
+     * they paid for — so `plan_id` and `polar_product_id` both still name the
+     * OLD plan for the rest of the period. The console could therefore only
+     * say "Pro, renews on the 4th" to somebody who had just downgraded, which
+     * reads as a button that did nothing.
+     *
+     * Mapped from Polar's `pending_update` on the subscription. NULL is the
+     * normal state: no change is scheduled.
+     */
+    scheduledPlanId: text("scheduled_plan_id"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

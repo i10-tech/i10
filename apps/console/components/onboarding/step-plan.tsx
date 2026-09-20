@@ -2,6 +2,7 @@
 
 import { MeterRow } from "@repo/ui/components/meter"
 import { Button } from "@repo/ui/components/button"
+import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
 import { formatBytes, formatNumber } from "@/lib/format"
 import type { BillingState, PlanSummary } from "@/lib/types"
@@ -23,10 +24,19 @@ import type { BillingState, PlanSummary } from "@/lib/types"
 export function StepPlan({
   plans,
   billing,
+  checkoutId,
   onDone,
 }: {
   plans: PlanSummary[]
   billing: BillingState
+  /**
+   * ⚠ THREADED FROM THE PAGE RATHER THAN READ WITH `useSearchParams`, so this
+   * stays a component that renders what it is given. The hook would also pull
+   * the whole client tree above it out of prerendering unless it were wrapped
+   * in its own Suspense boundary — a real cost for a value the server already
+   * has in `searchParams`.
+   */
+  checkoutId: string | null
   onDone: () => void
 }) {
   const current = billing.plan
@@ -38,6 +48,16 @@ export function StepPlan({
 
   return (
     <div className="space-y-6">
+      {/*
+       * ⚠ BUYING DURING ONBOARDING NEEDED THE SAME ANSWER AND HAD NOWHERE TO
+       * PUT IT. `PlanCards` renders here as well as on the billing page, and
+       * both Polar's redirect and our own embedded flow come back with
+       * `?checkout_id=` — but only the billing page read it, so somebody who
+       * upgraded mid-set-up got a toast and nothing else. Same component, same
+       * row, same answer.
+       */}
+      {checkoutId && <CheckoutOutcome checkoutId={checkoutId} />}
+
       <div>
         <h1 className="text-xl font-semibold tracking-tight">
           {current ? `You are on ${current.name}` : "Your plan"}

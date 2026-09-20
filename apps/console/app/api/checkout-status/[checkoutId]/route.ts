@@ -11,6 +11,8 @@
  * page anyone may open into one holding a key that can send mail.
  */
 
+import { PREVIEW, previewCheckoutStatus } from "@/lib/preview"
+
 const API = process.env.I10_BASE_URL ?? "https://api.i10.tech"
 
 /**
@@ -28,6 +30,18 @@ export async function GET(
 
   if (!CHECKOUT_ID.test(checkoutId)) {
     return Response.json({ status: "unknown", plan: null }, { status: 200 })
+  }
+
+  /*
+   * ⚠ A FIXTURE HERE, EVEN THOUGH PREVIEW REFUSES TO START A CHECKOUT. Reading
+   * what became of one is not taking money, and its outcomes are five pieces of
+   * copy — success, still settling, closed, declined, expired — that were
+   * otherwise impossible to look at without a Polar account. `PREVIEW` folds to
+   * `false` at build time in production, so this branch is deleted rather than
+   * merely unreachable. See lib/preview.ts.
+   */
+  if (PREVIEW) {
+    return Response.json(previewCheckoutStatus(checkoutId), { status: 200 })
   }
 
   try {

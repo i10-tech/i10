@@ -11,11 +11,23 @@ import type { SubscriptionOps } from "./db.js"
  * answer comes from exactly one source: a signature-verified Polar event, or
  * the reconciler re-reading Polar's own list.
  *
- * ⚠ WHAT MUST NEVER CALL THIS: the checkout endpoint, and the page the customer
- * lands on afterwards. Polar's success redirect is a browser navigation —
- * anybody can type that URL, and granting on it makes Pro free to anyone who
- * reads their own address bar once. The landing page's only job is to poll our
- * own row and show a spinner until this has run.
+ * ⚠ WHAT MUST NEVER CALL THIS: the checkout endpoint. It creates a session and
+ * knows only what the browser asked for.
+ *
+ * ⚠ AND THE POST-CHECKOUT STATUS ROUTE CALLS IT, WHICH IS NOT THE EXCEPTION IT
+ * LOOKS LIKE. Polar's success redirect is a browser navigation — anybody can
+ * type that URL — so ARRIVING there still proves nothing and grants nothing.
+ * What that route may do is ask Polar, over our own access token, what
+ * subscriptions the checkout's customer holds, and hand the resulting
+ * `SubscriptionState` here. That is the same evidence from the same source as a
+ * verified webhook; the request merely chose the moment. The rule is not "only
+ * the webhook may call this", it is "only Polar may decide", and the type is
+ * what enforces it: `apply` takes a state that can only come out of `toState`.
+ *
+ * ⚠ THE ONE OTHER WRITER OF `plan_assignments` IS `core.terminate_tenant`, and
+ * it moves a deleted workspace to the FREE plan in the same statement that
+ * marks it dead. Moving somebody down is not granting, and doing it in SQL is
+ * what stops the tenant's status and its allowance from ever disagreeing.
  *
  * The narrow `Entitlements` interface below is the mechanism: this module takes
  * the two operations it needs rather than a whole client, so a future caller

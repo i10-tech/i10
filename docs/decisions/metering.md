@@ -833,6 +833,74 @@ downgrades a customer can upgrade on day 28, take the higher ceiling, downgrade
 on day 30 and be credited — which is why the per-direction call above is not a
 nicety.
 
+### Deletion is the one change that is NOT deferred
+
+⚠ **Every other downgrade defers; deleting a workspace revokes immediately, and
+the two rules must not be confused.** A customer who moves to a cheaper plan has
+paid for the rest of the period and keeps it — that is what
+`prorationFor("downgrade") === "next_period"` buys, and cancelling to free is
+the same rule with the largest step. Deleting is different in kind: the account
+is gone, the mailboxes are gone, nobody is left to use the remainder, and
+continuing to bill a card for a workspace that cannot be signed into is the one
+billing failure a customer will never accept an explanation for. So
+`organization.deleted` calls `DELETE /v1/subscriptions/{id}` — Polar's revoke —
+rather than setting `cancel_at_period_end`.
+
+⚠ **Nothing did this until 2026-09-20, and the bill kept arriving.**
+`tenants/provision.ts` turned `organization.created` into a tenant and there was
+no other half at all: deleting the account in Clerk removed the identity, left
+`core.tenants` saying `active`, left the plan assignment on the paid plan, and
+left Polar charging monthly. The only way to stop it was to find the
+subscription in Polar's dashboard by hand. See `tenants/lifecycle.ts` and
+migration 0046.
+
+⚠ **And the entitlement moves BEFORE Polar is called.**
+`core.terminate_tenant` marks the tenant dead, drops its assignment to free and
+marks the subscription row granted-to-free in one statement; the revoke follows.
+If the revoke throws, the webhook answers non-2xx and Svix retries it, with the
+workspace already switched off on our side. The other order leaves a window
+where Polar has stopped billing and we still believe the tenant is entitled — a
+free paid plan, granted by an error.
+
+### Polar deduplicates customers by email, and that made re-signing-up unpayable
+
+⚠ **A customer id is reclaimed from a DEAD tenant, and never from a live one.**
+Every subscription event is attributed by `customer.external_id` and nothing
+else, and Polar sets that field only on a customer it **creates** from a
+checkout's `external_customer_id`. Somebody who subscribed, deleted their
+account and signed up again is handed back the **same** Polar customer, still
+carrying their **first** tenant's id — so their new payment is attributed to a
+workspace that no longer exists, in the webhook and in the reconciler alike.
+
+Refusing to overwrite that id as a "collision" was right for two live
+workspaces and permanently wrong here: money taken, `stranded` logged, no plan
+granted, and no redelivery or reconciler run could ever repair it, because both
+attribute by the same field. `core.tenant_is_live` is the one question that
+separates the two readings, and `active` is the only answer that blocks a
+reclaim — a suspended tenant still exists and its customer is still theirs.
+
+### The post-checkout page grants, and that is not a hole in "only Polar decides"
+
+⚠ **Arriving at the success URL still proves nothing.** It is a browser
+navigation anybody can perform, so nothing in the request is believed — not the
+tenant, not the plan, not that a payment happened.
+
+⚠ **What changed is the WAIT, not the authority.** When Polar's own API says the
+checkout `succeeded` and our row shows no grant, `/checkout-status/{id}` reads
+that customer's subscriptions back over our access token and applies the one
+`toState` entitles — the same judgement, on the same evidence, as the webhook
+and the reconciler. Before this it only did so after repairing an attribution,
+so an ordinary lost webhook meant ninety seconds of spinner and then a message
+quoting the reconciler's half-hourly schedule to somebody who had already paid.
+The rule is not "only the webhook may grant", it is **"only Polar may decide"**,
+and the type enforces it: `grants.apply` takes a state that can only come out of
+`toState`.
+
+⚠ **One subscription decides, chosen by `pick`.** Polar never deletes a
+subscription, so the customer this path exists for — the one who subscribed,
+deleted their account and subscribed again — has two, and applying them in list
+order lets the dead one write the live one's row.
+
 ---
 
 ## Multi-tenancy
