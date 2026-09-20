@@ -6,7 +6,8 @@ import { subscriptionOps } from "./billing/db.js"
 import { subscriptionGrants } from "./billing/grants.js"
 import { planChange } from "./billing/plan-change.js"
 import { polarClient } from "./billing/polar.js"
-import { tenantStore } from "./tenants/db.js"
+import { tenantLifecycleStore, tenantStore } from "./tenants/db.js"
+import { tenantLifecycle } from "./tenants/lifecycle.js"
 import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { keyLookup, keyStore } from "./auth/store.js"
@@ -21,7 +22,7 @@ import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { domainStore } from "./domains/store.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
-import { clerkIdentity } from "./mailboxes/clerk.js"
+import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { dnsInspector } from "./console/dns.js"
@@ -312,6 +313,100 @@ const planOptions = {
   freePlanId: env.METERING_FREE_PLAN_ID,
 }
 
+const tenantDeaths = tenantLifecycleStore(db)
+
+/**
+ * Sign-up's other half: a deleted Clerk organization stops being a tenant, and
+ * stops being billed. See tenants/lifecycle.ts.
+ *
+ * ⚠ IT IS CONSTRUCTED AFTER `polar` BECAUSE IT NEEDS IT, AND IT IS BUILT EVEN
+ * WHEN POLAR IS ABSENT. Without a Polar client it can still mark the tenant
+ * dead and drop it to the free allowance — the half that is entirely ours — and
+ * it logs the subscription it could not cancel at `error`, which is the only
+ * remaining trace of a card that is still being charged.
+ */
+/**
+ * The one domain store, shared by everything that touches a domain.
+ *
+ * ⚠ IT WAS CONSTRUCTED TWICE, AND THE SECOND COPY'S OWN COMMENT SAID SO
+ * ("Two stores, one rule"). Two stores means two sets of DNS probes and two
+ * places for the SES gate, the nameserver list and the zone sink to be
+ * configured — and the failure mode of them drifting is a domain that verifies
+ * through one surface and not the other. This file already shares `sessionAuth`
+ * rather than building a second verifier, for exactly the same reason.
+ *
+ * ⚠ AND IT IS HOISTED ABOVE `lifecycle` BECAUSE TERMINATION NEEDS IT. Deleting
+ * a workspace has to hand back its SES identities and its delegated zones; see
+ * `releaseDomains`.
+ */
+const domains = secrets
+  ? domainStore({
+      db,
+      /*
+       * ⚠ `SES_ENABLED` GATES THE IDENTITY, NOT JUST THE SENDING. It used to
+       * gate only the latter, so a deployment with SES off still called
+       * `CreateEmailIdentity` on every domain creation — which on a laptop
+       * holding production AWS credentials wrote into the real account. The
+       * flag now means what it says. See `offlineIdentity`.
+       */
+      identity: env.SES_ENABLED
+        ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
+        : offlineIdentity(),
+      capacity: postgresMeter(db),
+      region: env.AWS_REGION,
+      // ⚠ OUR OWN SENDING DOMAINS, so nobody can add one. See the note on
+      // `ownDomains`: the delegated path would hand them our return path.
+      ownDomains: env.MAIL_DOMAINS,
+      dns: {
+        spfInclude: env.MAIL_SPF_INCLUDE,
+        bounceHost: env.MAIL_BOUNCE_HOST,
+        nameservers: env.MAIL_NAMESERVERS,
+      },
+      // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write in
+      // the same transaction as everything else rather than a call to a
+      // provider that can be down. Swapping this for Cloudflare or Route 53
+      // later is an adapter, not a migration.
+      zones: powerDnsZones(db),
+      log,
+      // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is nowhere
+      // safe to keep a DKIM private key, so the routes answer 501 rather than
+      // storing one in the clear — the same rule webhooks already follow.
+      secrets,
+    })
+  : null
+
+const lifecycle = tenantLifecycle({
+  tenants: tenantDeaths,
+  ...(polar ? { polar } : {}),
+  /*
+   * ⚠ WITHOUT THIS A DELETED WORKSPACE KEEPS ITS SES IDENTITIES AND OUR
+   * NAMESERVERS KEEP ANSWERING FOR ITS DELEGATED NAMES. Termination marks the
+   * tenant dead rather than deleting the row, so nothing cascades and nothing
+   * else was ever going to tear them down.
+   */
+  ...(domains ? { domains } : {}),
+  organizations: {
+    /*
+     * ⚠ 404 IS THE ANSWER THIS ASKS FOR, NOT A FAILURE. It is the whole
+     * question — has the organization behind this workspace gone with the user
+     * who owned it — and anything else about the request failing must NOT read
+     * as "gone", because that answer terminates a workspace. The throw is
+     * caught by the caller and skips that tenant.
+     */
+    exists: async (clerkOrgId) => {
+      try {
+        await clerk.organizations.getOrganization({ organizationId: clerkOrgId })
+        return true
+      } catch (error) {
+        if (clerkNotFound(error)) return false
+        throw error
+      }
+    },
+  },
+  freePlanId: env.METERING_FREE_PLAN_ID,
+  log,
+})
+
 log.info(
   {
     server: env.POLAR_SERVER,
@@ -454,6 +549,11 @@ const app = createApp({
     signingSecret: env.CLERK_WEBHOOK_SECRET,
     hostedDomains: env.MAIL_DOMAINS,
     provisioning,
+    // ⚠ THE OTHER HALF OF `provisioning`, AND WIRED UNCONDITIONALLY BESIDE IT.
+    // Without this, deleting an account in Clerk left the tenant `active`, the
+    // plan assignment on Pro, and Polar charging a card for a workspace nobody
+    // could sign in to. See tenants/lifecycle.ts.
+    lifecycle,
     // ⚠ ONLY WHEN BOTH HALVES EXIST. Without a from-address or i10's tenant we
     // would have nowhere to send from and nothing to attribute it to, and the
     // webhook then acknowledges the event while Clerk keeps sending — which is
@@ -586,6 +686,16 @@ const app = createApp({
           subscriptions,
           log,
           grants,
+          /*
+           * ⚠ WITHOUT THIS THE ROUTE CANNOT TELL A COLLISION FROM A RECLAIM,
+           * and has to assume the expensive one. Polar deduplicates customers
+           * by email, so somebody who subscribed, deleted their account and
+           * signed up again gets the SAME Polar customer back, still carrying
+           * their first tenant's id — and refusing to overwrite it meant their
+           * payment could never be attributed to anybody. This is the only
+           * thing that knows the first tenant is gone.
+           */
+          tenants: tenantDeaths,
           options: {
             planForProduct: (productId: string) =>
               Object.entries(env.POLAR_PRODUCTS).find(
@@ -601,45 +711,11 @@ const app = createApp({
    * the plan's domain limit enforceable at all — before this there was nowhere
    * to check it. It is handed the meter rather than the `Metering` seam,
    * because the seam answers about one feature and this asks about another.
+   *
+   * ⚠ AND IT IS THE SAME INSTANCE THE CONSOLE AND THE TERMINATION PATH USE.
+   * See where it is constructed, above `lifecycle`.
    */
-  ...(secrets
-    ? {
-        domains: domainStore({
-          db,
-          /*
-           * ⚠ `SES_ENABLED` GATES THE IDENTITY, NOT JUST THE SENDING. It used to
-           * gate only the latter, so a deployment with SES off still called
-           * `CreateEmailIdentity` on every domain creation — which on a laptop
-           * holding production AWS credentials wrote into the real account. The
-           * flag now means what it says. See `offlineIdentity`.
-           */
-          identity: env.SES_ENABLED
-            ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
-            : offlineIdentity(),
-          capacity: postgresMeter(db),
-          region: env.AWS_REGION,
-          // ⚠ OUR OWN SENDING DOMAINS, so nobody can add one. See the note on
-          // `ownDomains`: the delegated path would hand them our return path.
-          ownDomains: env.MAIL_DOMAINS,
-          dns: {
-            spfInclude: env.MAIL_SPF_INCLUDE,
-            bounceHost: env.MAIL_BOUNCE_HOST,
-            nameservers: env.MAIL_NAMESERVERS,
-          },
-          // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write
-          // in the same transaction as everything else rather than a call to a
-          // provider that can be down. Swapping this for Cloudflare or Route 53
-          // later is an adapter, not a migration.
-          zones: powerDnsZones(db),
-          log,
-          // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is
-          // nowhere safe to keep a DKIM private key, so the routes answer 501
-          // rather than storing one in the clear — the same rule webhooks
-          // already follow.
-          secrets,
-        }),
-      }
-    : {}),
+  ...(domains ? { domains } : {}),
   /**
    * The human half of i10, and the only routes that take a session.
    *
@@ -681,13 +757,18 @@ const app = createApp({
     // general-purpose fetcher running inside the cluster.
     dns: dnsInspector(),
     /*
-     * ⚠ IT IS GIVEN THE SAME `MAIL_NAMESERVERS` THE RECORDS ARE BUILT FROM, so
-     * the check and the instructions cannot disagree. Handing it a second list
-     * would let the console tell somebody to publish one set of nameservers and
-     * then diagnose against another — which would report a correct delegation
-     * as pointed elsewhere.
+     * ⚠ IT IS GIVEN NO NAMESERVERS AT ALL, AND THAT IS THE POINT. It used to be
+     * handed `MAIL_NAMESERVERS` so that "the check and the instructions cannot
+     * disagree" — which was true only while every customer was told to publish
+     * the same two names. Per-claim delegation made the instructions per
+     * domain and left this list behind, so the check and the instructions
+     * disagreed for every delegated domain in the product: a customer who had
+     * published exactly what the table asked for was told the records pointed
+     * somewhere else. The names now travel with the question, read off the
+     * domain's own record list in `routes/console/domains.ts`, which is the
+     * only version of this invariant that cannot rot again.
      */
-    delegation: delegationChecker({ nameservers: env.MAIL_NAMESERVERS }),
+    delegation: delegationChecker({}),
     /*
      * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
      * why all of it arrives together or not at all. A credential that can
@@ -754,27 +835,12 @@ const app = createApp({
           }
         })()
       : {}),
-    ...(secrets
+    ...(domains
       ? {
-          domains: domainStore({
-            db,
-            // ⚠ THE SAME GATE AS THE STORE ABOVE. Two stores, one rule —
-            // see the note there for why `SES_ENABLED` has to cover this.
-            identity: env.SES_ENABLED
-              ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
-              : offlineIdentity(),
-            capacity: postgresMeter(db),
-            region: env.AWS_REGION,
-            ownDomains: env.MAIL_DOMAINS,
-            dns: {
-              spfInclude: env.MAIL_SPF_INCLUDE,
-              bounceHost: env.MAIL_BOUNCE_HOST,
-              nameservers: env.MAIL_NAMESERVERS,
-            },
-            zones: powerDnsZones(db),
-            log,
-            secrets,
-          }),
+          // ⚠ THE SAME STORE, NOT A SECOND ONE. It used to be built again here
+          // with the note "Two stores, one rule" — which was the rule stated
+          // and the drift left possible. See where it is constructed.
+          domains,
         }
       : {}),
     keys: { store: keyStore(db), cache: redisKeyCache(cache) },

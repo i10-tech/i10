@@ -189,6 +189,87 @@ describe("POST /webhooks/clerk", () => {
   })
 })
 
+/*
+ * ⚠ THE OTHER HALF OF PROVISIONING, AND IT REACHED NOTHING. `organization.created`
+ * was handled and `organization.deleted` fell through to `ignored`, so deleting
+ * an account in Clerk left the tenant `active`, the plan assignment on Pro, and
+ * Polar charging a card for a workspace nobody could sign in to.
+ */
+describe("a deletion arriving from Clerk", () => {
+  const lifecycle = {
+    onOrganizationDeleted: mock(async () => "terminated" as const),
+    onUserDeleted: mock(async () => "ignored" as const),
+  }
+
+  const withLifecycle = () =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        lifecycle,
+      },
+    })
+
+  const send = (body: string, id: string) =>
+    withLifecycle().request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(body, id),
+      body,
+    })
+
+  beforeEach(() => {
+    lifecycle.onOrganizationDeleted.mockClear()
+    lifecycle.onUserDeleted.mockClear()
+  })
+
+  it("reaches the lifecycle for organization.deleted", async () => {
+    const body = JSON.stringify({ type: "organization.deleted", data: { id: "org_1" } })
+    const res = await send(body, "msg_org_del")
+
+    expect(res.status).toBe(200)
+    expect(lifecycle.onOrganizationDeleted).toHaveBeenCalledTimes(1)
+    await expect(res.json()).resolves.toMatchObject({ provisioned: "terminated" })
+  })
+
+  /*
+   * ⚠ BOTH HALVES RUN FOR `user.deleted`, AND NEITHER SUBSUMES THE OTHER. The
+   * projection removes their mailbox; the lifecycle asks whether the workspaces
+   * they owned went with them.
+   */
+  it("reaches both the projection and the lifecycle for user.deleted", async () => {
+    const body = JSON.stringify({ type: "user.deleted", data: { id: "user_1" } })
+    const res = await send(body, "msg_user_del")
+
+    expect(res.status).toBe(200)
+    expect(applyClerkEvent).toHaveBeenCalledTimes(1)
+    expect(lifecycle.onUserDeleted).toHaveBeenCalledTimes(1)
+  })
+
+  /*
+   * ⚠ IT RUNS OUTSIDE THE SVIX DEDUPE, WHICH IS THE POINT. `applyClerkEvent`
+   * claims the message id and answers `duplicate` on a redelivery — right for
+   * the projection, and fatal here: if the Polar revoke failed the first time,
+   * the retry is the only thing that stops the billing.
+   */
+  it("runs again on a redelivery the projection discards as a duplicate", async () => {
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+    const body = JSON.stringify({ type: "organization.deleted", data: { id: "org_1" } })
+
+    await send(body, "msg_org_del")
+    expect(lifecycle.onOrganizationDeleted).toHaveBeenCalledTimes(1)
+  })
+
+  // ⚠ A LIFECYCLE FAILURE IS A 500 SO SVIX RETRIES IT. A deletion that left the
+  // subscription running must not be acknowledged as done.
+  it("answers 500 when the subscription could not be ended", async () => {
+    lifecycle.onOrganizationDeleted.mockRejectedValueOnce(new Error("polar 409"))
+    const body = JSON.stringify({ type: "organization.deleted", data: { id: "org_1" } })
+
+    expect((await send(body, "msg_org_del")).status).toBe(500)
+  })
+})
+
 describe("GET /readyz", () => {
   it("reports ok when the database answers", async () => {
     const res = await createApp({ pingDb: async () => {} }).request("/readyz")

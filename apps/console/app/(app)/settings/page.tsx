@@ -7,6 +7,7 @@ import {
 } from "@repo/ui/components/page"
 import { CopyField } from "@repo/ui/components/copy"
 import { RenameWorkspace } from "@/components/rename-workspace"
+import { DeletionWarning } from "@/components/deletion-warning"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
@@ -78,26 +79,45 @@ export default async function GeneralSettingsPage() {
           Deleting a workspace deletes its domains, keys, contacts and the record of
           every message it has ever sent. There is no undo and no export afterwards.
         </SectionDescription>
-        <SectionContent>
+        <SectionContent className="space-y-4">
           {/*
-           * ⚠ DELIBERATELY NOT SELF-SERVE, AND THE PAGE SAYS WHY RATHER THAN
-           * HIDING THE OPTION. Deleting a tenant cascades through message
-           * history that a customer may be legally required to retain, and
-           * through mailboxes that other people are still using. Until there is
-           * an export and a grace period, a support conversation is the honest
-           * mechanism — a button that silently did all of that would be the
-           * single most destructive control in the product.
+           * ⚠ THE BILLING CONSEQUENCE IS STATED HERE BECAUSE DELETION HAPPENS
+           * SOMEWHERE ELSE. The control is "Delete organization" inside Clerk's
+           * own panel on the Team page; its dialog is Clerk's and says nothing
+           * about money. What deleting does to the subscription is now real —
+           * `organization.deleted` revokes it immediately — so it has to be
+           * readable before somebody goes and presses it.
+           */}
+          <DeletionWarning billing={me.ok ? me.data.billing : null} scope="workspace" />
+
+          {/*
+           * ⚠ DELIBERATELY NOT A BUTTON ON THIS PAGE, AND THE PAGE SAYS WHY
+           * RATHER THAN HIDING THE OPTION. Deleting a tenant cascades through
+           * message history that a customer may be legally required to retain,
+           * and through mailboxes that other people are still using. Until
+           * there is an export and a grace period, deleting through Clerk's own
+           * confirmation — which at least asks for the name — or a support
+           * conversation are the honest mechanisms; a one-click button here
+           * would be the single most destructive control in the product.
            */}
           <p className="text-sm text-muted-foreground">
-            Workspace deletion is handled by support so we can export your data first
-            and check that nobody else is relying on your mailboxes. Email{" "}
+            Deleting the organization under{" "}
+            <a
+              href="/settings/team"
+              className="text-foreground underline underline-offset-4"
+            >
+              Team
+            </a>{" "}
+            deletes this workspace with it. If you would rather we exported your data
+            first, or you are not sure whether anybody else relies on these mailboxes,
+            email{" "}
             <a
               href="mailto:support@i10.tech"
               className="text-foreground underline underline-offset-4"
             >
               support@i10.tech
             </a>{" "}
-            from an address on this workspace.
+            from an address on this workspace instead.
           </p>
         </SectionContent>
       </Section>

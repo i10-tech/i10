@@ -67,14 +67,58 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
       return
     }
 
+    /*
+     * ⚠ WHAT *WE* SAW IN DNS COMES FIRST, AND NOT HAVING IT WAS THE BUG. Below
+     * this is `status`, which is Amazon's opinion and lags DNS by minutes — so
+     * every outcome that is really about DNS used to arrive here wearing
+     * `pending` and got the propagation sentence. Somebody whose nameservers
+     * had timed out was told their records had not propagated; so was somebody
+     * whose DNS was finished and who was waiting on Amazon alone. Both then
+     * waited for a condition that had already passed or would never clear.
+     */
+    const ownership = result.data.ownership
+
+    if (ownership && !ownership.proven) {
+      if (ownership.reason === "unreachable") {
+        /*
+         * ⚠ THIS IS NOT "YOUR RECORDS ARE WRONG", AND SAYING SO WOULD SEND
+         * SOMEBODY TO BREAK RECORDS THAT ARE CORRECT. We never got an answer
+         * out of their nameservers, so we learned nothing at all about what is
+         * published — the same distinction the API keeps between `absent` and
+         * `unreachable`, carried all the way to the sentence.
+         */
+        toast("We could not reach your nameservers", {
+          description:
+            "The lookup timed out, so we have not been able to read your records yet — this says nothing about whether they are right. Try again in a moment.",
+          duration: 8000,
+        })
+      } else {
+        toast("We cannot see the records yet", {
+          description:
+            "We asked your nameservers and the records are not there yet. If you have just added them, propagation is usually minutes. If it has been longer, check the host of each row — many providers append the domain for you.",
+          duration: 8000,
+        })
+      }
+      router.refresh()
+      return
+    }
+
     switch (result.data.status) {
       case "verified":
         toast.success("Verified", { description: "This domain can send now." })
         break
+      /*
+       * ⚠ THE DNS HALF IS DONE HERE, AND SAYING SO IS THE POINT. Reaching this
+       * line means we read the customer's own nameservers and proved the
+       * domain; the only thing left is Amazon, which checks on its own
+       * schedule. The old wording — "the records have not propagated" — told
+       * the one person who had finished that they had not.
+       */
       case "pending":
-        toast("Not visible yet", {
+        toast("Records found, waiting on Amazon", {
           description:
-            "The records have not propagated. This is normal for the first few minutes and can take up to 72 hours.",
+            "We can see your DNS and it is correct. Amazon re-checks on its own schedule, usually within minutes — nothing else is needed from you.",
+          duration: 8000,
         })
         break
       case "temporary_failure":

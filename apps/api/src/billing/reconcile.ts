@@ -1,4 +1,5 @@
 import {
+  supersedes,
   toState,
   type DecideOptions,
   type PolarSubscription,
@@ -208,27 +209,4 @@ export async function reconcileSubscriptions(
   }
 
   return report
-}
-
-/**
- * Which of two subscriptions for the same tenant states their entitlement.
- *
- * ⚠ ENTITLEMENT WINS BEFORE RECENCY, AND THAT ORDER IS THE POINT. Recency
- * alone answers the ordinary case — resubscribing after churn — but it answers
- * it by accident, because the new subscription happens to have been modified
- * last. It gives the wrong answer the moment anything at all touches an ended
- * subscription after a live one was created, and that is a downgrade for
- * somebody who is paying. Asking "does Polar say this customer holds a plan"
- * first cannot fail that way: if any subscription entitles them, they are
- * entitled, and recency only picks between subscriptions that agree.
- */
-function supersedes(
-  candidate: SubscriptionState,
-  held: SubscriptionState,
-  freePlanId: string,
-): boolean {
-  const candidateEntitles = candidate.entitledPlanId !== freePlanId
-  const heldEntitles = held.entitledPlanId !== freePlanId
-  if (candidateEntitles !== heldEntitles) return candidateEntitles
-  return candidate.eventAt.getTime() > held.eventAt.getTime()
 }

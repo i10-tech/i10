@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test"
 import type { Domain } from "@repo/contracts"
 import { dnsPublisher } from "../src/dns/publish.js"
+import { RECORD_TTL } from "../src/domains/zone.js"
 import type { DnsConnectionStore } from "../src/dns/connections.js"
 import { DnsWriteError, type PublishOutcome, type ZoneWriter } from "../src/dns/port.js"
 
@@ -206,7 +207,7 @@ describe("translating the records the customer is looking at", () => {
    * appear, and an hour-long negative cache is the difference between "it
    * worked" and "it did nothing".
    */
-  it("turns an Auto TTL into 300 seconds and keeps a priority", async () => {
+  it("turns an Auto TTL into the shared record TTL and keeps a priority", async () => {
     let sent: readonly { name: string; ttl: number; priority?: number }[] = []
     const { publisher } = publisherWith(
       writer({
@@ -242,7 +243,13 @@ describe("translating the records the customer is looking at", () => {
       ]),
     })
 
-    expect(sent.map((r) => r.ttl)).toEqual([300, 300, 600])
+    /*
+     * ⚠ `RECORD_TTL`, NOT A NUMBER TYPED HERE. The whole point of the constant
+     * is that the zones we serve and the records we write into somebody else's
+     * cannot drift apart; a literal in this assertion would let them, and this
+     * test would be the thing that kept the drift green.
+     */
+    expect(sent.map((r) => r.ttl)).toEqual([RECORD_TTL, RECORD_TTL, 600])
     expect(sent[1]?.priority).toBe(10)
     expect(sent[0]).not.toHaveProperty("priority")
   })

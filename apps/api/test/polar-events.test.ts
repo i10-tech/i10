@@ -190,6 +190,67 @@ const post = (app: ReturnType<typeof createApp>, body: string, signature?: strin
 
 const log = { info: () => {}, warn: () => {}, error: () => {} }
 
+/*
+ * ⚠ A DOWNGRADE IS INVISIBLE IN EVERY OTHER FIELD FOR THE REST OF THE PERIOD,
+ * AND THAT IS BY DESIGN. `prorationFor("downgrade")` asks Polar for
+ * `next_period` precisely so the customer keeps what they paid for, so Polar
+ * leaves `product_id` naming the OLD plan until the boundary and describes the
+ * accepted change in `pending_update`. Reading it is the only way the console
+ * can say a downgrade happened at all.
+ */
+describe("a change Polar has accepted but not yet applied", () => {
+  it("keeps entitling the plan they are still paying for", () => {
+    const decided = decide(
+      event({
+        pending_update: { product_id: "prod_lite", applies_at: "2026-10-03T00:00:00Z" },
+      }),
+      {
+        ...options,
+        planForProduct: (id: string) =>
+          id === "prod_pro" ? "pro" : id === "prod_lite" ? "lite" : undefined,
+      },
+    )
+
+    expect(decided).toMatchObject({
+      kind: "apply",
+      state: {
+        // What they hold, and what they keep until the period ends.
+        entitledPlanId: "pro",
+        planId: "pro",
+        // What it becomes, and when.
+        scheduledPlanId: "lite",
+        scheduledAt: new Date("2026-10-03T00:00:00Z"),
+      },
+    })
+  })
+
+  it("records nothing scheduled when nothing is", () => {
+    expect(decide(event(), options)).toMatchObject({
+      kind: "apply",
+      state: { scheduledPlanId: null, scheduledAt: null },
+    })
+  })
+
+  // ⚠ A PRODUCT WE DO NOT SELL IS NOT A REASON TO RETRY AN EVENT FOR HOURS. The
+  // worst case is a console that does not mention a scheduled move.
+  it("ignores a pending change to a product that is not ours", () => {
+    expect(
+      decide(
+        event({
+          pending_update: {
+            product_id: "prod_someone_else",
+            applies_at: "2026-10-03T00:00:00Z",
+          },
+        }),
+        options,
+      ),
+    ).toMatchObject({
+      kind: "apply",
+      state: { scheduledPlanId: null, scheduledAt: null },
+    })
+  })
+})
+
 describe("POST /webhooks/polar", () => {
   it("applies a verified subscription event", async () => {
     const apply = mock(async () => ({ status: "applied" as const, planId: "pro" }))

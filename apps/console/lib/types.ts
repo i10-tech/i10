@@ -45,6 +45,13 @@ export interface BillingState {
     plan_id: string
     cancel_at_period_end: boolean
     current_period_end: string | null
+    /**
+     * A plan change accepted now and applied at the period boundary — what a
+     * downgrade looks like for the rest of the month. `plan_id` above is still
+     * the plan in force, deliberately: they keep what they paid for.
+     */
+    scheduled_plan_id: string | null
+    scheduled_at: string | null
     polar_customer_id: string
   } | null
   anchor: string | null
@@ -159,6 +166,26 @@ export interface DomainSummary {
 
 export interface Domain extends DomainSummary {
   records: DnsRecord[]
+}
+
+/**
+ * What `POST /verify` saw in DNS, as opposed to what SES thinks.
+ *
+ * ⚠ TWO ANSWERS, NOT ONE, AND KEEPING THEM APART IS THE POINT. `absent` means
+ * we asked the customer's nameservers and the records were not there;
+ * `unreachable` means we never got an answer to ask about. Telling the second
+ * person the first story sends them to re-check DNS that is already correct,
+ * which is the most expensive wrong sentence this screen can say.
+ *
+ * ⚠ AND IT IS SEPARATE FROM `status`. `status` is Amazon's opinion of the
+ * domain and lags DNS by minutes; this is what our own resolver saw during the
+ * request. A domain can be proved here and still `pending` there, which is the
+ * ordinary state between publishing records and being able to send — and the
+ * one state the console previously described as "the records have not
+ * propagated".
+ */
+export interface VerifiedDomain extends Domain {
+  ownership?: { proven: true } | { proven: false; reason: "absent" | "unreachable" }
 }
 
 export interface DnsInspection {

@@ -19,8 +19,18 @@ import type { DelegationReport, ZoneFinding } from "@/lib/types"
  * irrelevant: the customer can publish perfect records all day and nothing will
  * resolve. Reporting "not published yet" above it would send them to fix
  * something that is already correct.
+ *
+ * @param status The domain's own status. `not_started` means no verify has ever
+ * succeeded for it, which is the only way to know we have not published its
+ * zones — see the note on the `nameserver_silent` branch.
  */
-export function DelegationNote({ report }: { report: DelegationReport }) {
+export function DelegationNote({
+  report,
+  status,
+}: {
+  report: DelegationReport
+  status: string
+}) {
   if (!report.nameserversAnswering) {
     return (
       <Note
@@ -43,6 +53,40 @@ export function DelegationNote({ report }: { report: DelegationReport }) {
 
   const broken = report.zones.filter((z) => z.code === "nameserver_silent")
   if (broken.length > 0) {
+    /*
+     * ⚠ BEFORE THE FIRST SUCCESSFUL VERIFY THIS IS THE EXPECTED STATE, NOT A
+     * FAULT, AND CALLING IT ONE SENT PEOPLE TO SUPPORT FOR A BUTTON. We publish
+     * a delegated domain's zones inside `verify`, once ownership is proved — so
+     * between publishing the NS records and pressing Verify the delegation
+     * points at nameservers that correctly hold nothing. Every one of those
+     * customers was told "that is our side of the handover, contact support",
+     * which is the opposite of the truth: their side is finished and one press
+     * completes ours.
+     *
+     * ⚠ `not_started` IS THE SIGNAL BECAUSE IT IS THE ONE STATUS `verify` NEVER
+     * LEAVES BEHIND. A row is created `not_started` and the first proof that
+     * succeeds overwrites it with whatever SES says, so it means "no verify has
+     * ever got as far as publishing", which is exactly the question here.
+     */
+    if (status === "not_started") {
+      return (
+        <Note
+          tone="warning"
+          icon={<Clock className="size-4 text-warning" />}
+          title="Your records are in place — press Verify"
+          body={
+            <>
+              {list(broken.map((z) => z.zone))} {broken.length === 1 ? "is" : "are"}{" "}
+              delegated to us correctly. We start answering for{" "}
+              {broken.length === 1 ? "it" : "them"} once we have confirmed the
+              delegation is yours, which is what Verify does — nothing is wrong and
+              there is nothing else to change.
+            </>
+          }
+        />
+      )
+    }
+
     return (
       <Note
         tone="danger"

@@ -20,6 +20,7 @@ import { DnsRecords } from "@/components/dns-records"
 import { DomainDangerZone } from "@/components/domain-danger-zone"
 import { DelegationNote } from "@/components/delegation-note"
 import { PublishRecords } from "@/components/publish-records"
+import { VerificationWatch } from "@/components/verification-watch"
 import { VerifyButton } from "@/components/verify-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
@@ -180,7 +181,18 @@ export default async function DomainDetailPage({
           quiet={delegation?.ok === true}
         />
 
-        {delegation?.ok && <DelegationNote report={delegation.data} />}
+        {/*
+         * ⚠ IT WATCHES RATHER THAN WAITING TO BE ASKED. Everything above this
+         * line is a snapshot the server rendered; this is the one part of the
+         * page that notices the domain finishing and re-renders the rest. See
+         * the note on the component for why the last manual step in the whole
+         * flow was somebody pressing refresh.
+         */}
+        <VerificationWatch id={domain.id} status={domain.status} />
+
+        {delegation?.ok && (
+          <DelegationNote report={delegation.data} status={domain.status} />
+        )}
 
         <Section className="border-b-0 pt-0">
           <SectionTitle>

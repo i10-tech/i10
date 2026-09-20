@@ -101,6 +101,18 @@ export interface BillingState {
     plan_id: string
     cancel_at_period_end: boolean
     current_period_end: string | null
+    /**
+     * A plan change Polar has accepted and applies at the period boundary.
+     *
+     * ⚠ THE CONSOLE HAD NO WAY TO SHOW THAT A DOWNGRADE HAD BEEN ACCEPTED.
+     * Downgrades are requested with `next_period` so the customer keeps what
+     * they paid for, which means `plan_id` above still names the plan they are
+     * leaving for the rest of the period — so the page said "Pro, renews on the
+     * 4th" to somebody who had just pressed Downgrade, and the only
+     * acknowledgement was a toast that disappeared.
+     */
+    scheduled_plan_id: string | null
+    scheduled_at: string | null
     polar_customer_id: string
   } | null
   anchor: string | null
@@ -259,6 +271,8 @@ export function usageStore({
                 plan_id: sub.planId,
                 cancel_at_period_end: sub.cancelAtPeriodEnd,
                 current_period_end: sub.currentPeriodEnd?.toISOString() ?? null,
+                scheduled_plan_id: sub.scheduledPlanId,
+                scheduled_at: sub.scheduledAt?.toISOString() ?? null,
                 polar_customer_id: sub.polarCustomerId,
               }
             : null,

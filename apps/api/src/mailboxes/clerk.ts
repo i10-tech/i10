@@ -78,8 +78,14 @@ function toWire(user: User): ClerkUser {
  * between majors — and the failure mode of getting it wrong is silent: an
  * instanceof that stops matching turns every deleted user into a 500. Reading
  * the field degrades safely, because anything unrecognised is rethrown.
+ *
+ * ⚠ EXPORTED SO THERE IS ONE OF IT. The `user.deleted` sweep in
+ * tenants/lifecycle.ts asks Clerk whether an organization still exists and
+ * treats 404 as "gone" — an answer that ENDS A SUBSCRIPTION, so a second
+ * hand-written copy of this predicate drifting from the first is a workspace
+ * switched off by a mismatched field name.
  */
-function notFound(error: unknown): boolean {
+export function notFound(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&

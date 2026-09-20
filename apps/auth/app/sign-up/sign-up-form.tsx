@@ -467,6 +467,25 @@ export function SignUpForm({
   const locked = busy !== null
 
   /**
+   * Which box the caret lands in on the credentials step.
+   *
+   * ⚠ THE FIRST EMPTY BOX, NOT THE FIRST BOX, AND THE DIFFERENCE IS THE WHOLE
+   * POINT OF ARRIVING HERE WITH AN ADDRESS ALREADY IN HAND. Almost everybody
+   * reaching this step came through the one shared box on the sign-in page, so
+   * their email is filled in before the step renders — and focusing it put the
+   * caret at the end of a correct value and left the only thing still being
+   * asked for one tab key away. Coming BACK from the last-name step is the same
+   * situation and was the same waste: the address survives the round trip, so
+   * the field that needs typing is the password.
+   *
+   * ⚠ IT IS READ AT MOUNT AND NEVER AGAIN, which is what `autoFocus` means in
+   * React — the attribute focuses the element as it is created and does nothing
+   * on a later render. So this is not a rule about where focus should live; it
+   * is a decision made once, each time the step is entered.
+   */
+  const startOnPassword = email.trim() !== ""
+
+  /**
    * ⚠ BACK IS OFFERED ONLY WHERE GOING BACK IS HARMLESS. The first three steps
    * hold nothing but strings, so returning to one is free. From `verify`
    * onwards there is an attempt on Clerk's servers and then a real account, and
@@ -625,7 +644,8 @@ export function SignUpForm({
                 reserveHint={false}
                 autoComplete="email"
                 disabled={locked}
-                autoFocus
+                // ⚠ ONLY WHEN THERE IS NOTHING IN IT. See `startOnPassword`.
+                autoFocus={!startOnPassword}
               />
               {/*
                * ⚠ ONE PASSWORD BOX, NOT TWO, AND THE REVEAL IS WHY. The form
@@ -656,6 +676,7 @@ export function SignUpForm({
                 reserveHint={false}
                 autoComplete="new-password"
                 disabled={locked}
+                autoFocus={startOnPassword}
               />
               <Button type="submit" size="xl" disabled={!signUp || locked}>
                 {busy === "credentials" ? (

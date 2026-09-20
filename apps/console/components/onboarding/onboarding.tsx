@@ -50,12 +50,15 @@ export function Onboarding({
   domains,
   plans,
   billing,
+  checkoutId,
 }: {
   state: OnboardingState
   workspaceName: string
   domains: DomainSummary[]
   plans: PlanSummary[]
   billing: BillingState
+  /** From `?checkout_id=`, for the plan step's outcome banner. */
+  checkoutId: string | null
 }) {
   const router = useRouter()
 
@@ -159,7 +162,12 @@ export function Onboarding({
         )}
 
         {step === "plan" && (
-          <StepPlan plans={plans} billing={billing} onDone={finish} />
+          <StepPlan
+            plans={plans}
+            billing={billing}
+            checkoutId={checkoutId}
+            onDone={finish}
+          />
         )}
       </div>
 

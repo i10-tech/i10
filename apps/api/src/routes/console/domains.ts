@@ -87,9 +87,31 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
        * records resolve, which also answers 200. The domain comes back carrying
        * its record list, where the outstanding `Ownership` row is the signal.
        */
+
+      /*
+       * ⚠ `ownership` IS THE ANSWER THIS ROUTE USED TO THROW AWAY, AND ITS
+       * ABSENCE WAS MOST OF "I PUBLISHED THE RECORDS AND NOTHING HAPPENS".
+       * `verify` distinguishes three outcomes that matter to the person
+       * pressing the button — we proved the domain, we asked and the records
+       * were not there, we could not ask at all — and all three arrived at the
+       * console as the same unchanged domain row. The console then read
+       * `status`, which is SES's opinion, and said "the records have not
+       * propagated" to somebody whose records were fine and whose nameservers
+       * had simply timed out, and the same sentence again to somebody whose
+       * DNS half was finished and who was only waiting on Amazon.
+       *
+       * ⚠ AND IT IS A SIBLING OF THE DOMAIN RATHER THAN A FIELD ON IT. Whether
+       * we could read DNS a second ago is not a property of the domain; it is
+       * the result of this call, it is not stored, and putting it on the row
+       * would imply a durability it does not have.
+       */
       case "ok":
+        return c.json({ ...outcome.domain, ownership: { proven: true } })
       case "unproven":
-        return c.json(outcome.domain)
+        return c.json({
+          ...outcome.domain,
+          ownership: { proven: false, reason: outcome.reason },
+        })
       case "missing":
         return c.json(notFound("No domain with that id."), 404)
       default:
@@ -109,6 +131,41 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
           },
           409,
         )
+    }
+  })
+
+  /**
+   * The same answer as `verify`, cheap enough to ask repeatedly.
+   *
+   * ⚠ THIS IS WHAT THE CONSOLE POLLS WHILE SOMEBODY WATCHES, AND IT EXISTS SO
+   * THAT NOBODY HAS TO PRESS ANYTHING. Publishing records takes seconds and
+   * Amazon's verification takes as long as it takes; between those two facts
+   * sat a person refreshing a page. The console now asks this every few
+   * seconds until the badge turns green.
+   *
+   * ⚠ IT IS A POST BECAUSE IT WRITES, even though it reads like a GET. What it
+   * writes is SES's current opinion and the check timestamp — see the note on
+   * `DomainStore.refresh` for what it deliberately does NOT do, which is
+   * everything expensive or consequential in `verify`.
+   */
+  app.post("/domains/:id/refresh", async (c) => {
+    if (!d.domains) return c.json(notWired("Domains"), 501)
+    const { tenantId } = c.get("auth")
+    const outcome = await d.domains.refresh(tenantId, c.req.param("id"))
+
+    switch (outcome.status) {
+      case "ok":
+        return c.json(outcome.domain)
+      /*
+       * ⚠ 200 AND THE DOMAIN, NOT AN ERROR. "Nothing has been registered yet"
+       * is the ordinary state of a domain whose records are still being
+       * published, which is precisely when something is polling — answering
+       * 409 would turn the normal case into an error in somebody's console.
+       */
+      case "not_registered":
+        return c.json(outcome.domain)
+      default:
+        return c.json(notFound("No domain with that id."), 404)
     }
   })
 
@@ -141,8 +198,19 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       )
     }
 
+    /*
+     * ⚠ THE NAMES COME OFF THE DOMAIN'S OWN RECORD LIST, which is the list the
+     * customer is looking at three inches below this note. Per-claim
+     * delegation gives every domain its own nameserver hostnames, so checking
+     * against the deployment's `MAIL_NAMESERVERS` — which is what this did —
+     * told a customer who had published exactly what we asked for that their
+     * records pointed at somebody else, and named our own nameserver as the
+     * somebody else.
+     */
+    const expected = domain.records.filter((r) => r.type === "NS").map((r) => r.value)
+
     try {
-      return c.json(await d.delegation.check(domain.name))
+      return c.json(await d.delegation.check(domain.name, expected))
     } catch (error) {
       // ⚠ A FAILED DIAGNOSIS IS NOT A FAILED PAGE. This is advisory; answering
       // 502 would replace a domain's records with a red box because a resolver

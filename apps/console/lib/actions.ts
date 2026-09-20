@@ -13,6 +13,7 @@ import type {
   SegmentRow,
   TemplateRow,
   TopicRow,
+  VerifiedDomain,
   WebhookEndpoint,
 } from "@/lib/types"
 
@@ -130,10 +131,34 @@ export async function createDomain(input: {
 export async function verifyDomain(id: string) {
   return run(
     () =>
-      api<Domain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
+      // ⚠ `VerifiedDomain`, NOT `Domain`. The extra field is what the button
+      // needs to tell "we could not reach your nameservers" apart from "your
+      // records are not there yet" — see the note on the type.
+      api<VerifiedDomain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
         method: "POST",
       }),
     [`/domains/${encodeURIComponent(id)}`, "/domains"],
+  )
+}
+
+/**
+ * The cheap re-check, for watching rather than acting.
+ *
+ * ⚠ NOT `verifyDomain` IN A LOOP. Every verify re-asserts the DKIM key at SES
+ * — two writes against an account-wide, low-rate API — which is right once and
+ * abusive on a timer. This asks what SES currently thinks and stores it, and
+ * nothing else. See `DomainStore.refresh` in the API.
+ *
+ * ⚠ AND IT REVALIDATES NOTHING. The caller is a poll that already re-renders
+ * when the answer changes; revalidating two paths on every tick would discard
+ * the cached render of the domains list several times a minute for a value
+ * that is usually identical to the last one.
+ */
+export async function refreshDomain(id: string) {
+  return run(() =>
+    api<Domain>(`/console/domains/${encodeURIComponent(id)}/refresh`, {
+      method: "POST",
+    }),
   )
 }
 

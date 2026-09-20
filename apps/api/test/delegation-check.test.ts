@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { delegationChecker, type DelegationLookups } from "../src/console/delegation.js"
+import type { ReferralResult } from "../src/domains/referral.js"
 
 /**
  * Telling four indistinguishable failures apart.
@@ -18,13 +19,27 @@ import { delegationChecker, type DelegationLookups } from "../src/console/delega
  * while the console said "propagation can take up to 72 hours".
  */
 
-const NS = ["ns1.i10.tech", "ns2.i10.tech"]
+/**
+ * ⚠ THE EXPECTED NAMES ARE PER-CLAIM, WHICH IS WHAT THIS SUITE MISSED. It was
+ * written against `ns1.i10.tech`, the whole deployment's nameserver, and kept
+ * passing after per-claim delegation changed what customers are told to
+ * publish to `<claim>.ns1.i10.tech`. Every case below now uses a claim, so a
+ * checker that compares against the bare deployment names fails here instead
+ * of telling a correctly-configured customer their records point elsewhere.
+ */
+const CLAIM = "7d1f4c2ab8e94f0f9c3d5e6a7b8c9d01"
+const NS = [`${CLAIM}.ns1.i10.tech`, `${CLAIM}.ns2.i10.tech`]
 
 const missing = () => Object.assign(new Error("not found"), { code: "ENOTFOUND" })
 const servfail = () => Object.assign(new Error("servfail"), { code: "ESERVFAIL" })
 
+const delegated = (nameservers: string[]): ReferralResult => ({
+  kind: "delegated",
+  nameservers,
+})
+
 const lookups = (over: Partial<DelegationLookups> = {}): DelegationLookups => ({
-  nsOf: async () => NS,
+  referralTo: async () => delegated(NS),
   soaOf: async () => {},
   addressesOf: async () => ["203.0.113.1"],
   respondsAt: async () => true,
@@ -32,17 +47,22 @@ const lookups = (over: Partial<DelegationLookups> = {}): DelegationLookups => ({
 })
 
 const check = (over: Partial<DelegationLookups> = {}) =>
-  delegationChecker({ nameservers: NS, lookups: lookups(over) }).check("example.com")
+  delegationChecker({ lookups: lookups(over) }).check("example.com", NS)
 
 describe("the three zones", () => {
   it("checks the names the customer was actually told to publish", async () => {
     const asked: string[] = []
+    const parents: string[] = []
     await check({
-      nsOf: async (zone) => {
+      referralTo: async (parent, zone) => {
+        parents.push(parent)
         asked.push(zone)
-        return NS
+        return delegated(NS)
       },
     })
+
+    // ⚠ ASKED OF THE PARENT, WHICH IS THE ONLY PLACE THE DELEGATION EXISTS.
+    expect([...new Set(parents)]).toEqual(["example.com"])
 
     // ⚠ THE SAME NAMES `delegatedZoneNames` BUILDS THE RECORDS FROM. A check
     // against a different set would report a correct delegation as missing.
@@ -63,11 +83,7 @@ describe("the three zones", () => {
 describe("what each failure is called", () => {
   /** The ordinary state of somebody who added the domain a minute ago. */
   it("calls an absent NS record set `not_published`", async () => {
-    const report = await check({
-      nsOf: async () => {
-        throw missing()
-      },
-    })
+    const report = await check({ referralTo: async () => ({ kind: "undelegated" }) })
     expect(report.zones.map((z) => z.code)).toEqual([
       "not_published",
       "not_published",
@@ -83,16 +99,15 @@ describe("what each failure is called", () => {
    */
   it("keeps a broken lookup separate from a missing record", async () => {
     const report = await check({
-      nsOf: async () => {
-        throw servfail()
-      },
+      referralTo: async () => ({ kind: "unreachable", detail: "rcode 2" }),
     })
     expect(report.zones.every((z) => z.code === "lookup_failed")).toBe(true)
   })
 
   it("spots a delegation pointing at somebody else", async () => {
     const report = await check({
-      nsOf: async () => ["ns1.digitalocean.com", "ns2.digitalocean.com"],
+      referralTo: async () =>
+        delegated(["ns1.digitalocean.com", "ns2.digitalocean.com"]),
     })
 
     const first = report.zones[0]!
@@ -147,7 +162,7 @@ describe("whether our own nameservers are up", () => {
    */
   it("is true when only one of them answers", async () => {
     const report = await check({
-      respondsAt: async (_address, name) => name === "ns1.i10.tech",
+      respondsAt: async (_address, name) => name === NS[0],
     })
     expect(report.nameserversAnswering).toBe(true)
   })
@@ -155,7 +170,9 @@ describe("whether our own nameservers are up", () => {
 
 describe("comparing nameserver names", () => {
   it("ignores a trailing dot and case", async () => {
-    const report = await check({ nsOf: async () => ["NS1.I10.TECH.", "ns2.i10.tech."] })
+    const report = await check({
+      referralTo: async () => delegated([`${CLAIM}.NS1.I10.TECH.`, NS[1]!]),
+    })
     expect(report.zones.every((z) => z.code === "ok")).toBe(true)
   })
 
@@ -165,7 +182,43 @@ describe("comparing nameserver names", () => {
    * worth a red box.
    */
   it("accepts a partial delegation to us", async () => {
-    const report = await check({ nsOf: async () => ["ns1.i10.tech"] })
+    const report = await check({ referralTo: async () => delegated([NS[0]!]) })
     expect(report.zones.every((z) => z.code === "ok")).toBe(true)
+  })
+})
+
+/**
+ * The two ways this module told a correctly-configured customer they were wrong.
+ *
+ * ⚠ BOTH SURVIVED THE REDESIGN THAT CAUSED THEM, which is why they are pinned
+ * here rather than left to the cases above. Per-claim delegation changed the
+ * nameserver names and moved the only readable copy of the delegation into the
+ * parent's referral; this module kept comparing against the deployment's names
+ * and kept reading them with a recursive resolver. Neither change had a test
+ * that could fail.
+ */
+describe("the per-claim regression", () => {
+  it("accepts the names this domain's records actually carry", async () => {
+    const report = await check()
+    expect(report.zones.every((z) => z.code === "ok")).toBe(true)
+    // ⚠ REPORTED BACK PER CLAIM TOO. The console prints these as "our
+    // nameservers"; printing the deployment's would tell somebody to go and
+    // publish a different set from the one in the table.
+    expect(report.nameservers).toEqual(NS)
+  })
+
+  /**
+   * ⚠ THE BARE DEPLOYMENT NAME IS NOT THIS CLAIM'S, AND ACCEPTING IT WOULD
+   * REOPEN THE HOLE PER-CLAIM NAMESERVERS CLOSED. `mail.example.com NS
+   * ns1.i10.tech` says somebody delegated the name to i10 and nothing about
+   * which workspace — which is exactly the evidence this design refuses.
+   */
+  it("does not accept the deployment's own nameservers", async () => {
+    const report = await check({
+      referralTo: async () => delegated(["ns1.i10.tech", "ns2.i10.tech"]),
+    })
+
+    const first = report.zones[0]!
+    expect(first.code).toBe("delegated_elsewhere")
   })
 })

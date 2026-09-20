@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Check } from "lucide-react"
 import { toast } from "sonner"
@@ -66,6 +66,8 @@ export function PlanCards({
   currentPlanId,
   hasSubscription,
   endingAt = null,
+  scheduledPlanId = null,
+  scheduledAt = null,
 }: {
   plans: PlanSummary[]
   currentPlanId: string | null
@@ -76,13 +78,71 @@ export function PlanCards({
    * and pressing it a second time looks like the first press did nothing.
    */
   endingAt?: string | null
+  /**
+   * The plan a deferred change is already moving to, and when.
+   *
+   * ⚠ THE SAME PROBLEM `endingAt` SOLVES, FOR THE OTHER KIND OF DEFERRED
+   * CHANGE. A downgrade is applied at the period boundary, so the card for the
+   * plan they are moving TO still reads "Downgrade" and is still pressable —
+   * and pressing it sends a second PATCH that supersedes an identical pending
+   * update. Nothing changes, no error appears, and the only reading available
+   * is that the button does not work.
+   */
+  scheduledPlanId?: string | null
+  scheduledAt?: string | null
 }) {
   const router = useRouter()
+  const pathname = usePathname()
   const { resolvedTheme } = useTheme()
   const [pending, setPending] = React.useState<string | null>(null)
   const [confirming, setConfirming] = React.useState<PlanSummary | null>(null)
 
   const current = plans.find((plan) => plan.id === currentPlanId) ?? null
+
+  /**
+   * Put the checkout on the page's own URL, so its outcome is reported there.
+   *
+   * ⚠ THIS IS THE WHOLE OF "THE REDIRECT DOES NOT WORK". Polar's redirect back
+   * to `success_url?checkout_id=…` is what makes `CheckoutOutcome` render, and
+   * in the embedded flow that redirect very often never happens: whichever of
+   * their `success` event or our own status poll fires first tears the iframe
+   * out, and their default handler — the thing that navigates the parent — does
+   * not get to run. The customer was left with a toast that fades after a few
+   * seconds and a page that otherwise looked exactly as it had before they
+   * paid.
+   *
+   * ⚠ AND IT IS ATTACHED ON EVERY ENDING, NOT ONLY ON SUCCESS. Failure and
+   * abandonment had no feedback at all, which is the same bug in the direction
+   * nobody thinks to test. The banner reads the real state from our API — paid,
+   * granted, failed, expired, closed — so it tells the truth for all of them
+   * rather than being told what to say from here.
+   *
+   * ⚠ `replace`, NOT `push`. Back should return to wherever they were before
+   * the plan page, not to the same page minus a query parameter.
+   */
+  const reportOutcome = React.useCallback(
+    (checkoutId: string | null) => {
+      // ⚠ NO ID MEANS NO BANNER, AND THE REFRESH STILL HAPPENS. An older API
+      // build returns no checkout id — see `startCheckout` — and there is
+      // nothing for the status endpoint to be asked about, so this degrades to
+      // exactly the behaviour that existed before rather than routing somebody
+      // to `?checkout_id=null`.
+      if (!checkoutId) {
+        router.refresh()
+        return
+      }
+
+      // ⚠ `usePathname` IS NULLABLE AND THIS ONLY EVER RUNS IN THE BROWSER, so
+      // the real location is both available and authoritative. Defaulting to
+      // "" instead would send somebody who just paid to the site root.
+      const here = pathname ?? window.location.pathname
+      router.replace(`${here}?checkout_id=${encodeURIComponent(checkoutId)}`)
+      // The banner is client-side, but the plan above it is not — this is what
+      // makes "Current plan" catch up once the grant lands.
+      router.refresh()
+    },
+    [pathname, router],
+  )
 
   /*
    * ⚠ LEAVING A PAID PLAN IS A CONFIRMED ACTION, NOT A ONE-CLICK DOWNGRADE.
@@ -196,13 +256,20 @@ export function PlanCards({
         checkoutId: result.data.id,
         onSuccess: () => {
           toast.success("Payment received", {
-            description: "Your new allowances appear as soon as it clears.",
+            description: "Setting up your plan — it appears here in a moment.",
           })
-          // ⚠ A BEST EFFORT. The plan moves when Polar's webhook lands, a
-          // second or two later, so the wording above is written for somebody
-          // whose allowance has not updated yet.
-          router.refresh()
+          // ⚠ THE BANNER IS THE ACTUAL ANSWER; THE TOAST IS ONLY THE FIRST
+          // ACKNOWLEDGEMENT. It polls our own row and says "You're on Pro" when
+          // the entitlement is really there — which a toast cannot, because it
+          // has already faded by then.
+          reportOutcome(result.data.id)
         },
+        // ⚠ CLOSED WITHOUT A KNOWN SUCCESS IS NOT THE SAME AS FAILED, AND THE
+        // BANNER IS WHAT TELLS THEM APART. It asks our status endpoint, which
+        // asks Polar — so a declined card says so, an expired checkout says so,
+        // and a payment that went through while the modal was being closed is
+        // still reported as the success it was.
+        onClose: () => reportOutcome(result.data.id),
       })
 
       setPending(null)
@@ -242,6 +309,7 @@ export function PlanCards({
         const isUpgrade = current !== null && plan.rank > current.rank
         const isDowngrade = current !== null && plan.rank < current.rank
         const leaving = leavingPaidPlan(plan)
+        const scheduled = scheduledPlanId !== null && plan.id === scheduledPlanId
 
         return (
           <li
@@ -293,7 +361,12 @@ export function PlanCards({
               // its own — and a live button would send a second cancel that
               // Polar treats as a no-op, which reads as the first one having
               // failed.
-              disabled={isCurrent || pending !== null || (leaving && endingAt !== null)}
+              disabled={
+                isCurrent ||
+                pending !== null ||
+                (leaving && endingAt !== null) ||
+                scheduled
+              }
               onClick={() => choose(plan)}
             >
               {pending === plan.id && <Spinner />}
@@ -303,9 +376,23 @@ export function PlanCards({
                 isDowngrade,
                 leaving,
                 ending: endingAt !== null,
+                scheduled,
                 confirming: confirming?.id === plan.id,
               })}
             </Button>
+
+            {/*
+             * ⚠ THE DATE IS THE MESSAGE, EXACTLY AS IT IS FOR A CANCELLATION.
+             * "Scheduled" on its own invites the question this is supposed to
+             * answer — when, and what happens in the meantime.
+             */}
+            {scheduled && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                You move here{" "}
+                {scheduledAt ? `on ${scheduledAt}` : "at the end of this period"}. Your{" "}
+                {current?.name ?? "current"} allowance continues until then.
+              </p>
+            )}
 
             {/*
              * ⚠ THE CONSEQUENCE IS SPELLED OUT UNDER THE BUTTON THAT CAUSES IT,
@@ -345,9 +432,14 @@ function label(state: {
   isDowngrade: boolean
   leaving: boolean
   ending: boolean
+  scheduled: boolean
   confirming: boolean
 }): string {
   if (state.isCurrent) return "Current plan"
+  // ⚠ BEFORE `leaving`, because a scheduled move to the free plan is both, and
+  // "Cancel subscription" on a cancellation that has already been accepted is
+  // the wording this whole state exists to stop.
+  if (state.scheduled) return "Scheduled"
   if (state.leaving) {
     if (state.ending) return "Ending"
     return state.confirming ? "Confirm cancellation" : "Cancel subscription"

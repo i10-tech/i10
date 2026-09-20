@@ -13,12 +13,8 @@ import { StepStage } from "@repo/ui/components/step-stage"
 import { cn } from "cn"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { DetectionPanel } from "@/components/detection-panel"
-import {
-  createDomain,
-  dnsConnections,
-  lookupDns,
-  publishDnsRecords,
-} from "@/lib/actions"
+import { createDomain, dnsConnections, lookupDns } from "@/lib/actions"
+import { activateDomain } from "@/lib/domain-activation"
 import { domainProblem, isDomainMalformed } from "@/lib/domain-check"
 import { toastFailure } from "@/lib/toast"
 import type { DnsConnection, DnsInspection } from "@/lib/types"
@@ -290,26 +286,47 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
      * customer's records.
      */
     if (delivery === "automatic" && connected && provider) {
-      const published = await publishDnsRecords({
+      /*
+       * ⚠ THE SHARED SEQUENCE, NOT THIS FORM'S OWN. Publishing and then
+       * checking is the same job the onboarding flow and the OAuth callback
+       * do, and all three used to do it with their own idea of what each
+       * outcome meant. See lib/domain-activation.ts.
+       */
+      const outcome = await activateDomain({
         domainId: created.id,
         provider: provider.slug,
       })
 
-      if (published.ok) {
-        toast.success(`${created.name} added and published`, {
-          description:
-            published.data.created.length === 0
-              ? "Every record was already in place. Verification usually follows within minutes."
-              : `${published.data.created.length} records written to ${provider.name}. Verification usually follows within minutes.`,
-        })
-      } else if (published.status === 409) {
-        toast.warning(`${created.name} added`, {
-          description: "Some existing records are in the way. Review them to finish.",
-        })
-      } else {
-        toast.warning(`${created.name} added`, {
-          description: `We could not publish the records: ${published.error}`,
-        })
+      switch (outcome.kind) {
+        case "verified":
+          toast.success(`${created.name} is verified`, {
+            description: "The records are published and this domain can send now.",
+          })
+          break
+        /*
+         * ⚠ THIS IS SUCCESS, AND WORDING IT AS A CAVEAT WAS THE OLD MISTAKE.
+         * The records are written and we have proved the domain; what is left
+         * is Amazon's own check, which nobody here can hurry. The domain page
+         * this navigates to keeps watching and turns the badge green by
+         * itself, so there is nothing for the person to come back and do.
+         */
+        case "published":
+          toast.success(`${created.name} added and published`, {
+            description:
+              outcome.written === 0
+                ? `Every record was already in place at ${provider.name}. We are checking now — nothing else is needed from you.`
+                : `${outcome.written} records written to ${provider.name}. We are checking now — nothing else is needed from you.`,
+          })
+          break
+        case "conflicts":
+          toast.warning(`${created.name} added`, {
+            description: "Some existing records are in the way. Review them to finish.",
+          })
+          break
+        default:
+          toast.warning(`${created.name} added`, {
+            description: `We could not publish the records: ${outcome.reason}`,
+          })
       }
 
       if (onCreated) onCreated(created.id)

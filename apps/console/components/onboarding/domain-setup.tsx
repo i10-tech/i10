@@ -10,12 +10,8 @@ import { cn } from "cn"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { DnsRecords } from "@/components/dns-records"
 import { ProviderMark } from "@/components/provider-mark"
-import {
-  createDomain,
-  dnsConnections,
-  lookupDns,
-  publishDnsRecords,
-} from "@/lib/actions"
+import { createDomain, dnsConnections, lookupDns } from "@/lib/actions"
+import { activateDomain, watchUntilVerified } from "@/lib/domain-activation"
 import { toastFailure } from "@/lib/toast"
 import type { DnsInspection, Domain } from "@/lib/types"
 
@@ -60,6 +56,16 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
   const [connections, setConnections] = React.useState<string[]>([])
   const [domain, setDomain] = React.useState<Domain | null>(null)
   const [fallbackReason, setFallbackReason] = React.useState<string | null>(null)
+  /**
+   * Whether the provider has agreed yet, while the success screen is on show.
+   *
+   * ⚠ SEPARATE FROM `domain.status` BECAUSE IT KEEPS MOVING AFTER THE SCREEN
+   * RENDERS. The records are published within a second or two and Amazon's
+   * verification lands whenever it lands, so the honest screen is one that
+   * says "checking" and changes its own mind — not one that picks a sentence
+   * at render time and leaves somebody to reload the page to find out.
+   */
+  const [verified, setVerified] = React.useState(false)
 
   const candidate = name.trim().toLowerCase()
   const plausible = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(candidate)
@@ -130,11 +136,34 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     await attempt(created.data, slug)
   }
 
+  /*
+   * ⚠ THE SAME SEQUENCE THE ADD FORM AND THE OAUTH CALLBACK RUN, FROM THE SAME
+   * FILE. These three screens are the only ways a domain gets set up, and each
+   * used to publish and check in its own words — so "added and published" here
+   * and "connected and published" there could describe different amounts of
+   * work having actually happened. See lib/domain-activation.ts.
+   */
   async function attempt(target: Domain, slug: string) {
     setPhase("working")
 
-    const published = await publishDnsRecords({ domainId: target.id, provider: slug })
-    if (published.ok) {
+    const outcome = await activateDomain({ domainId: target.id, provider: slug })
+
+    if (outcome.kind === "verified") {
+      setDomain(outcome.domain)
+      setPhase("done")
+      return
+    }
+
+    /*
+     * ⚠ THE RECORDS ARE IN PLACE HERE, SO THE FLOW MOVES ON AND KEEPS WATCHING
+     * IN THE BACKGROUND. Amazon's check is the only thing outstanding and it
+     * answers on its own schedule; holding somebody on a spinner until it does
+     * would make the fastest possible setup feel like the slowest step of
+     * onboarding. The success screen says which of the two states it is in and
+     * corrects itself if the answer arrives while they are still reading it.
+     */
+    if (outcome.kind === "published") {
+      if (outcome.domain) setDomain(outcome.domain)
       setPhase("done")
       return
     }
@@ -147,12 +176,34 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
      * asked at the moment somebody understands the least.
      */
     setFallbackReason(
-      published.status === 409
+      outcome.kind === "conflicts"
         ? "Some records already at those names would have to be removed first, so these are yours to publish for now."
         : "We could not publish them for you, so these are yours to publish.",
     )
     setPhase("manual")
   }
+
+  /*
+   * ⚠ THE WATCH LIVES HERE RATHER THAN IN `attempt`, SO THAT LEAVING THE STEP
+   * STOPS IT. `attempt` is an event handler and anything it started would
+   * outlive this component — still polling, still trying to set state — after
+   * somebody pressed Continue. Tied to the phase, the abort is the cleanup.
+   */
+  const watching = phase === "done" && domain !== null && !verified
+  const watchedId = watching ? domain.id : null
+
+  React.useEffect(() => {
+    if (!watchedId) return
+
+    const controller = new AbortController()
+    void watchUntilVerified({ domainId: watchedId, signal: controller.signal }).then(
+      (result) => {
+        if (!controller.signal.aborted && result.verified) setVerified(true)
+      },
+    )
+
+    return () => controller.abort()
+  }, [watchedId])
 
   if (phase === "name") {
     return (
@@ -314,11 +365,23 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
   if (phase === "done" && domain) {
     return (
       <Shell
-        title={`${domain.name} is set up`}
-        blurb={`We published the records at ${provider?.name ?? "your provider"}. Verification usually follows within minutes.`}
+        title={
+          verified ? `${domain.name} is ready to send` : `${domain.name} is set up`
+        }
+        blurb={
+          verified
+            ? `The records are live at ${provider?.name ?? "your provider"} and the domain is verified. Nothing else to do.`
+            : `We published the records at ${provider?.name ?? "your provider"} and proved the domain is yours. We are waiting on Amazon's own check now — it usually lands within a few minutes, and nothing here needs you.`
+        }
       >
+        {/*
+         * ⚠ CONTINUE IS AVAILABLE EITHER WAY, AND THAT IS THE POINT OF DOING
+         * THE WAIT IN THE BACKGROUND. Nothing about the rest of onboarding
+         * depends on Amazon having answered, so a button disabled until it has
+         * would be holding somebody at the one step that is already finished.
+         */}
         <Button onClick={onDone}>
-          <Check />
+          {verified ? <Check /> : <Spinner className="size-4" />}
           Continue
         </Button>
       </Shell>
