@@ -287,3 +287,50 @@ describe("a step-up policy that reached the toast", () => {
     )
   })
 })
+
+/**
+ * The authenticator that was asked and refused.
+ *
+ * ⚠ `OperationError` IS THE ONE FROM THE REPORT. clerk-js maps four DOM
+ * exceptions and lets the rest through untouched, so this arrives as the raw
+ * browser exception with no code anywhere — and it was only identified because
+ * the reference line now falls back to the exception name. Its signature is
+ * that NO system prompt appears: a passkey provider that claims the request
+ * answers it before the operating system draws anything.
+ */
+const domError = (name: string, message = "The operation failed") =>
+  Object.assign(new Error(message), { name })
+
+describe("an authenticator that refused", () => {
+  it("names the password manager, because that is the part somebody can change", () => {
+    const reason = passkeyFailure(domError("OperationError"), "add")
+    expect(reason).toContain("password manager")
+    expect(reason).not.toContain("could not add a passkey on this device")
+  })
+
+  it("says the other sentence on the sign-in side", () => {
+    expect(passkeyFailure(domError("OperationError"), "use")).toContain(
+      "hand over the passkey",
+    )
+  })
+
+  // ⚠ THE SIBLINGS CLERK ALSO LETS THROUGH UNTOUCHED, for the same reason and
+  // with the same answer.
+  it("covers the rest of the untranslated family", () => {
+    for (const name of ["NotReadableError", "UnknownError", "ConstraintError"]) {
+      expect(passkeyFailure(domError(name), "add")).toContain("password manager")
+    }
+  })
+
+  // ⚠ THE NAME IS THE REPORT. Without it this failure is indistinguishable from
+  // every other unknown, which is exactly the state it was found in.
+  it("quotes the exception name so the report identifies it", () => {
+    expect(passkeyReference(domError("OperationError"))).toBe("OperationError")
+  })
+
+  // ⚠ A MAPPED EXCEPTION STILL WINS. `NotAllowedError` is somebody pressing
+  // Cancel and must stay silent, not become a password-manager sentence.
+  it("does not swallow a cancellation", () => {
+    expect(passkeyFailure(domError("NotAllowedError"), "add")).toBeNull()
+  })
+})
