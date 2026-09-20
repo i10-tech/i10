@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import { CheckCircle2, Clock, XCircle } from "lucide-react"
 import { cn } from "cn"
 import { Spinner } from "@repo/ui/components/spinner"
@@ -47,8 +48,34 @@ export function CheckoutOutcome({
   checkoutId: string | null
   className?: string
 }) {
+  const router = useRouter()
   const [result, setResult] = React.useState<Result | null>(null)
   const [timedOut, setTimedOut] = React.useState(false)
+
+  /*
+   * ⚠ THE PAGE AROUND THIS BANNER IS OLDER THAN THE BANNER, AND ONLY THE BANNER
+   * KNOWS IT. Everything below is server-rendered from `/console/me`, fetched
+   * at the moment the browser arrived — which is a second BEFORE the grant
+   * lands, because the grant is what this component is here to wait for. So the
+   * banner said "You're on Pro" while the plan step under it still read "You
+   * are on Free" and the free card still said "Current", for somebody who had
+   * just paid. Reported from production 2026-09-20.
+   *
+   * ⚠ A SOFT REFRESH, WHICH IS WHY IT IS SAFE HERE. `router.refresh()` re-runs
+   * the server components and reconciles; it does NOT remount the client tree,
+   * so onboarding keeps the step it is on. A hard navigation would throw
+   * somebody back to whatever step the facts imply — which is the dead end this
+   * whole flow was rebuilt to remove.
+   *
+   * ⚠ AND ONLY ON `granted`, BECAUSE THAT IS THE ONLY OUTCOME THAT MOVES THE
+   * DATA. `paid` is still in flight, and a refresh per poll would re-render the
+   * page every two seconds under somebody reading it. The effect keys on the
+   * status, so it fires once when it flips and never again.
+   */
+  React.useEffect(() => {
+    if (result?.status !== "granted") return
+    router.refresh()
+  }, [result?.status, router])
 
   React.useEffect(() => {
     if (!checkoutId) return
