@@ -7,10 +7,24 @@
 # to start. That is the single most confusing way for this to be broken, because
 # the DNS side would be working the whole time.
 #
-# ⚠ THE DNS PORTS ARE NOT LISTED, AND DO NOT NEED TO BE. hostPort traffic is
-# DNATed by the CNI portmap plugin before it reaches the pod network, so it is
-# not subject to a NetworkPolicy at all. The firewall on the node is what
-# controls who may ask; this file controls the cluster-internal side.
+# ⚠ THE DNS PORTS ARE LISTED, AND AN EARLIER VERSION OF THIS FILE SAID THEY DID
+# NOT NEED TO BE. The claim was that hostPort traffic is DNATed by the CNI
+# portmap plugin before it reaches the pod network and is therefore outside
+# NetworkPolicy. It is not: kube-router enforces policy AFTER that DNAT, on a
+# packet whose destination is now the pod, so an ingress rule listing only 8081
+# drops every DNS query that arrives from off-box.
+#
+# ⚠ AND IT FAILS ASYMMETRICALLY, WHICH IS WHY IT SURVIVED. A query from the node
+# itself is exempt — NetworkPolicy does not govern node-originated traffic — so
+# `dig @127.0.0.1` and `dig @<public ip>` ON THE NODE both answer, the pod is
+# Ready because its 8081 probe is allowed, and every check that can be run by
+# hand from the box says the nameserver is healthy. Only the internet is
+# refused, silently, with no drop logged anywhere anyone was looking.
+#
+# The node's firewall is a SECOND gate, not the only one, and it has the same
+# trap: hostPort makes these packets ROUTED rather than inbound, so ufw needs
+# `ufw route allow ... port 53` and an inbound `ufw allow 53` does nothing. Both
+# gates have to be open; either one alone looks like a total outage.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -29,6 +43,22 @@ spec:
         - ipBlock: { cidr: 0.0.0.0/0 }
       ports:
         - { port: 8081, protocol: TCP }
+    # ⚠ THE WHOLE INTERNET, BECAUSE THAT IS WHAT AN AUTHORITATIVE NAMESERVER IS
+    # FOR. Any resolver on earth may need to follow a delegation to us, so there
+    # is no narrower source to express here. What keeps that safe is the server
+    # itself rather than this file: no recursion, so it cannot be used as an
+    # amplification reflector, and no AXFR, so it will not hand over the zone
+    # list. See the deployment's flags.
+    #
+    # ⚠ TCP AS WELL AS UDP, AND THE TCP HALF IS NOT OPTIONAL. An answer over 512
+    # bytes sets the truncated bit and the resolver retries over TCP — so a
+    # UDP-only rule yields a nameserver that works until a zone grows a DKIM key,
+    # which is the hardest shape of DNS fault to see.
+    - from:
+        - ipBlock: { cidr: 0.0.0.0/0 }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
   egress:
     # ⚠ POSTGRES AND NOTHING ELSE. This process needs exactly one destination:
     # the pooler, where it reads the zones the API wrote. It does not recurse,
