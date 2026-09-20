@@ -92,6 +92,18 @@ export function tenantLifecycleStore(db: Database): TenantLifecycleStore {
       }
     },
 
+    async renameByOrg(clerkOrgId, name) {
+      const rows = (await db.execute(sql`
+        select tenant_id, renamed
+          from core.rename_tenant_by_org(${clerkOrgId}, ${name})
+      `)) as unknown as { tenant_id: string; renamed: boolean }[]
+
+      const row = rows[0]
+      // No row means no tenant for that organization — one from another Clerk
+      // instance, or one already terminated. Not an error and nothing to do.
+      return row ? { tenantId: row.tenant_id, renamed: row.renamed } : null
+    },
+
     async ownedBy(clerkUserId) {
       const rows = (await db.execute(sql`
         select tenant_id, clerk_org_id from core.tenants_owned_by(${clerkUserId})

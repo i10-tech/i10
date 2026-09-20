@@ -13,12 +13,13 @@ import { tenants } from "../db/core.js"
  * stale — and the one place a stale copy of "who is an admin" matters is
  * authorization.
  *
- * ⚠ AND RENAMING HERE DOES NOT RENAME THE CLERK ORGANIZATION. They are two
- * different names for two different things: Clerk's is the identity surface a
- * member sees in the switcher, ours is the billing entity. Keeping them in sync
- * would mean a write to Clerk inside a database transaction, and a Clerk outage
- * would then make renaming a workspace impossible. The console renames both,
- * separately, and says so.
+ * ⚠ AND RENAMING HERE STILL DOES NOT RENAME THE CLERK ORGANIZATION — THE ROUTE
+ * DOES, AFTERWARDS. That split is the whole design rather than an oversight:
+ * this is a transaction against our own database and must not contain a call to
+ * somebody else's, or a Clerk outage makes renaming a workspace impossible. So
+ * `PATCH /console/me/tenant` commits this first and asks Clerk second, best
+ * effort, where a failure costs a stale name in the switcher instead of a
+ * rename that did not happen. See routes/console/account.ts.
  */
 
 export interface TenantProfile {

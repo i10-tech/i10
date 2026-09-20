@@ -16,11 +16,19 @@ import type { Me } from "@/lib/types"
 export const metadata: Metadata = { title: "General settings" }
 
 /**
- * ⚠ THE WORKSPACE NAME AND THE CLERK ORGANIZATION NAME ARE TWO DIFFERENT
- * THINGS, AND THE PAGE SAYS SO. Ours is the billing entity that appears on an
- * invoice; Clerk's is the identity surface members see in the switcher. Keeping
- * them in sync automatically would mean a write to Clerk inside a database
- * transaction, so a Clerk outage would make renaming a workspace impossible.
+ * ⚠ THE WORKSPACE NAME AND THE ORGANIZATION NAME ARE ONE NAME, AND THIS PAGE
+ * USED TO EXPLAIN WHY THEY WERE TWO. The explanation was sound and the outcome
+ * was not: renaming here left the organization in the switcher on its old name
+ * — "Mohamed" months after the workspace became "i10 testing" — with nothing
+ * anywhere to reconcile them and no reason a customer could see for there being
+ * two names at all.
+ *
+ * ⚠ AND THE OBJECTION IT WAS BUILT AROUND IS STILL HONOURED. Syncing must not
+ * put a write to Clerk inside our rename transaction, or a Clerk outage stops
+ * renames. So `PATCH /console/me/tenant` commits ours first and asks Clerk
+ * afterwards, best effort; and `organization.updated` follows a rename made in
+ * Clerk's own panel back onto the workspace. Two directions, neither of them
+ * able to block the other.
  */
 export default async function GeneralSettingsPage() {
   const me = await tryApi<Me>("/console/me")
@@ -38,8 +46,8 @@ export default async function GeneralSettingsPage() {
       <Section className="pt-0">
         <SectionTitle>Workspace name</SectionTitle>
         <SectionDescription>
-          What appears on your invoices. Your team sees the organization name from the
-          switcher, which is set separately under Team.
+          What appears on your invoices, and what your team sees in the workspace
+          switcher. Renaming here renames both.
         </SectionDescription>
         <SectionContent>
           <RenameWorkspace current={tenant?.name ?? ""} />

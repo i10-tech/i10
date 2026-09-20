@@ -780,6 +780,20 @@ const app = createApp({
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
     marketing: marketingStore(db),
     profile: tenantProfileStore(db),
+    /*
+     * ⚠ RENAMING THE WORKSPACE NOW RENAMES THE ORGANIZATION, and this call used
+     * to be deliberately absent. The reason was sound — a write to Clerk inside
+     * a rename transaction would let a Clerk outage stop renames — and the
+     * route keeps that property by committing ours first and treating this as
+     * best effort afterwards. What the absence produced was an organization
+     * still called "Mohamed" in the switcher long after the workspace became
+     * something else, with nothing anywhere to reconcile the two.
+     */
+    organizations: {
+      rename: async (clerkOrgId: string, name: string) => {
+        await clerk.organizations.updateOrganization(clerkOrgId, { name })
+      },
+    },
     // ⚠ NO CREDENTIAL AND NO OUTBOUND HTTP BEYOND DNS-OVER-HTTPS TO TWO FIXED
     // HOSTS. See console/dns.ts: it resolves names the customer types, which is
     // a capability anybody already has with `dig`, and it must never become a

@@ -50,6 +50,19 @@ export interface TenantLifecycleStore {
   } | null>
   /** The live tenants this user owns, for the `user.deleted` sweep. */
   ownedBy(clerkUserId: string): Promise<{ tenantId: string; clerkOrgId: string }[]>
+  /**
+   * Follows a Clerk organization's new name onto the tenant behind it.
+   *
+   * ⚠ `renamed: false` MEANS THE NAME WAS ALREADY THAT, AND IT IS THE ORDINARY
+   * ANSWER RATHER THAN A FAILURE. Clerk fires `organization.updated` for every
+   * change to an organization — including the rename WE just asked it to make —
+   * so most deliveries here are echoes of our own write. Distinguishing them is
+   * what keeps the log quiet and the exchange finite.
+   */
+  renameByOrg(
+    clerkOrgId: string,
+    name: string,
+  ): Promise<{ tenantId: string; renamed: boolean } | null>
 }
 
 /**
@@ -152,12 +165,21 @@ export type LifecycleOutcome =
   | "already_terminated"
   /** No tenant was ever provisioned for that organization. */
   | "no_tenant"
+  /** The workspace took its Clerk organization's new name. */
+  | "renamed"
   /** Not an event this cares about, or nothing about it was actionable. */
   | "ignored"
 
 export interface TenantLifecycle {
   onOrganizationDeleted(data: unknown): Promise<LifecycleOutcome>
   onUserDeleted(data: unknown): Promise<LifecycleOutcome>
+  /**
+   * ⚠ THE WORKSPACE NAME AND THE ORGANIZATION NAME ARE ONE NAME NOW, and this
+   * is the direction that keeps that true when the rename happens on Clerk's
+   * side. The Team page mounts Clerk's own `<OrganizationProfile />`, which has
+   * a rename field we do not control.
+   */
+  onOrganizationUpdated(data: unknown): Promise<LifecycleOutcome>
 }
 
 export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
@@ -303,6 +325,25 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
      * not the same as being the last person in it: a team whose founder deletes
      * their own account still has members and must keep its plan.
      */
+    async onOrganizationUpdated(data) {
+      const org = (data ?? {}) as { id?: unknown; name?: unknown }
+      const orgId = typeof org.id === "string" ? org.id : null
+      const name = typeof org.name === "string" ? org.name.trim() : ""
+      if (!orgId || !name) return "ignored"
+
+      const moved = await deps.tenants.renameByOrg(orgId, name.slice(0, 120))
+
+      // No tenant for that organization, or the name already matched — which is
+      // what every echo of our own rename looks like. Neither is worth a line.
+      if (!moved?.renamed) return "ignored"
+
+      deps.log.info(
+        { tenantId: moved.tenantId, clerkOrgId: orgId, name },
+        "followed a Clerk organization rename onto its workspace",
+      )
+      return "renamed"
+    },
+
     async onUserDeleted(data) {
       const user = (data ?? {}) as { id?: unknown }
       const userId = typeof user.id === "string" ? user.id : null

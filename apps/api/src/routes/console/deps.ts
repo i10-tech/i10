@@ -31,6 +31,21 @@ export interface ConsoleDeps extends TenantAuthDeps {
   onboarding: OnboardingStore
   marketing: MarketingStore
   profile: TenantProfileStore
+  /**
+   * Renaming the Clerk organization behind the workspace.
+   *
+   * ⚠ IT IS A SEPARATE PORT RATHER THAN PART OF `profile` BECAUSE IT IS A
+   * SEPARATE SYSTEM WITH A SEPARATE FAILURE. `profile.rename` is a transaction
+   * against our own database and either happens or does not; this is a call
+   * over the network to somebody else's, and the whole point of the design
+   * below is that the second cannot take the first down with it.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS THE OLD BEHAVIOUR RATHER THAN AN ERROR.
+   * Without it renaming a workspace renames only ours, which is exactly what
+   * this endpoint did before — the two names simply drift, which is the
+   * complaint rather than a crash.
+   */
+  organizations?: { rename(clerkOrgId: string, name: string): Promise<void> }
   /** Optional for the same reason `AppDeps.domains` is — see createApp. */
   domains?: DomainStore
   /**

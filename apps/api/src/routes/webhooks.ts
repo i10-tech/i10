@@ -212,6 +212,16 @@ async function provision(
      */
     case "organization.deleted":
       return deps.lifecycle?.onOrganizationDeleted(data) ?? null
+
+    /*
+     * ⚠ THE ECHO OF OUR OWN RENAME ARRIVES HERE, AND IT HAS TO BE HARMLESS.
+     * `PATCH /console/me/tenant` renames our row and then asks Clerk to match;
+     * Clerk answers by firing this for the change we just made. The handler
+     * writes nothing when the name already agrees, so the exchange ends after
+     * one round trip rather than ringing back and forth.
+     */
+    case "organization.updated":
+      return deps.lifecycle?.onOrganizationUpdated(data) ?? null
     case "user.deleted":
       return deps.lifecycle?.onUserDeleted(data) ?? null
 
