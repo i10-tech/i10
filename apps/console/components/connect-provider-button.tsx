@@ -32,6 +32,7 @@ import { startDnsConnect } from "@/lib/actions"
 export function ConnectProviderButton({
   slug,
   providerName,
+  returnTo,
   label,
   variant = "outline",
   size = "sm",
@@ -41,6 +42,16 @@ export function ConnectProviderButton({
 }: {
   slug: string
   providerName: string
+  /**
+   * Where to come back to once the provider is done.
+   *
+   * ⚠ ONBOARDING WAS LOSING PEOPLE WITHOUT IT. The callback lands inside the
+   * console shell, so somebody who pressed this half-way through the setup
+   * flow came back to a page that knew nothing about it — the connection was
+   * made and the flow was gone. Every caller that is somewhere worth returning
+   * to passes its own path.
+   */
+  returnTo?: string
   /** Overrides the default "Connect X" wording. */
   label?: string
   /** Full width, for a step whose whole content is this one action. */
@@ -67,7 +78,7 @@ export function ConnectProviderButton({
 
   async function connect() {
     setPending(true)
-    const result = await startDnsConnect(slug)
+    const result = await startDnsConnect(slug, returnTo)
 
     if (!result.ok) {
       /*

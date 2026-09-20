@@ -2,26 +2,28 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { MoreHorizontal, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Checkbox } from "@repo/ui/components/checkbox"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { deleteDomain, revokeApiKey } from "@/lib/actions"
 import { useStepUp } from "@/lib/step-up"
 
 /**
- * ⚠ DELETING A DOMAIN STOPS ITS MAIL, SO IT ASKS FOR THE NAME. This is not
- * ceremony: the domain list is a table of similar-looking rows and the delete
- * is in a menu next to them. Typing the name is the difference between losing a
- * staging domain and losing production — and it is the only confirmation that
- * actually requires reading which row you are on.
+ * ⚠ IT IS A ZONE AT THE FOOT OF THE PAGE, NOT A ✕✕✕ MENU IN THE HEADER, AND
+ * THE MENU IS WHY THIS EXISTS. One destructive item behind an unlabelled
+ * affordance, sitting inches from "Verify", is a control somebody opens to see
+ * what is in it — and the only thing in it deletes their mail. Putting it at
+ * the bottom, behind its own heading, in its own red-bordered box, means
+ * nobody arrives at it by browsing: reaching it takes scrolling past everything
+ * the page is actually for, which is the correct amount of friction for the
+ * one action here that cannot be undone.
+ *
+ * ⚠ DELETING A DOMAIN STOPS ITS MAIL, SO IT STILL ASKS FOR THE NAME. This is
+ * not ceremony: typing it is the difference between losing a staging domain and
+ * losing production, and it is the only confirmation that requires reading
+ * which domain you are actually on.
  *
  * ⚠ AND IT ASKS ABOUT THE KEYS THAT ONLY WORKED HERE, BECAUSE NOTHING ELSE
  * EVER WILL. A key restricted to this domain becomes, the moment the domain
@@ -42,7 +44,7 @@ import { useStepUp } from "@/lib/step-up"
  * the API refuses the delete on its own, so this is the prompt rather than the
  * protection.
  */
-export function DomainActions({
+export function DomainDangerZone({
   id,
   name,
   scopedKeys = [],
@@ -72,19 +74,33 @@ export function DomainActions({
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label="Domain actions">
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
-            <Trash2 />
-            Delete domain
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/*
+       * ⚠ THE BORDER IS THE WHOLE SIGNAL, AND THE BOX IS NOT FILLED RED. A
+       * panel flooded with colour reads as an error the page is currently in —
+       * something has gone wrong — rather than as a control that is dangerous
+       * to press. The border and the button carry the warning; the box itself
+       * stays the same surface as every other section on the page.
+       */}
+      <div className="flex flex-col gap-4 rounded-xl border border-destructive/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Delete this domain</p>
+          <p className="text-sm text-muted-foreground">
+            Mail can no longer be sent from{" "}
+            <span className="font-mono text-foreground">{name}</span>, and its DNS
+            records stop being served if it was delegated. Messages already sent keep
+            their history. This cannot be undone.
+          </p>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="shrink-0 self-start sm:self-auto"
+          onClick={() => setConfirming(true)}
+        >
+          <Trash2 aria-hidden="true" />
+          Delete domain
+        </Button>
+      </div>
 
       <ConfirmDialog
         open={confirming}

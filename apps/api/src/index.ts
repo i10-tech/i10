@@ -561,9 +561,39 @@ const app = createApp({
           }),
           log,
         },
-        // Same two dependencies, no `products` and no `grants`: it can read a
-        // checkout and read our row, and there is nothing else it could do.
-        checkoutStatus: { polar, subscriptions, log },
+        /*
+         * ⚠ IT NOW HOLDS `grants`, AND THE NOTE THAT USED TO SAY IT DELIBERATELY
+         * DID NOT WAS RIGHT UNTIL THE REPAIR PATH EXISTED. Reading a checkout
+         * and reading our row is all this endpoint needs for every ordinary
+         * poll, and that is still all it does for them.
+         *
+         * ⚠ WHAT CHANGED IS THE ONE CASE ONLY IT CAN FIX. A checkout carries
+         * `metadata.tenant_id`; a subscription does not — so when Polar reuses a
+         * customer it did not create, and leaves `external_id` null, THIS is the
+         * only place in the system that knows both halves. It writes the id
+         * back, and then has to be able to grant what that customer already
+         * bought: Polar sends no new event because we patched a customer, so
+         * without this the repair would sit until the half-hourly reconciler on
+         * a page that gives up after ninety seconds.
+         *
+         * ⚠ IT STILL GRANTS NOTHING OF ITS OWN. `grants.apply` takes a state
+         * derived by `toState` from what Polar says, exactly as the webhook and
+         * the reconciler do — the money still decides, and this only removes the
+         * wait.
+         */
+        checkoutStatus: {
+          polar,
+          subscriptions,
+          log,
+          grants,
+          options: {
+            planForProduct: (productId: string) =>
+              Object.entries(env.POLAR_PRODUCTS).find(
+                ([, id]) => id === productId,
+              )?.[0],
+            freePlanId: env.METERING_FREE_PLAN_ID,
+          },
+        },
       }
     : {}),
   /**

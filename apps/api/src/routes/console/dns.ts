@@ -88,8 +88,27 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
       return c.json(validation(`We cannot publish records at ${slug} yet.`), 422)
     }
 
+    /*
+     * ⚠ WHERE TO GO AFTERWARDS, AND IT IS THE CALLER'S TO NAME BECAUSE ONLY THE
+     * CALLER KNOWS. The same button is pressed from onboarding, from the add
+     * form and from a domain page, and each of them is somewhere different to
+     * come back to — onboarding in particular was LOSING people, because the
+     * callback lands in the console shell and the flow they were half-way
+     * through is not there.
+     *
+     * ⚠ AND IT IS SANITISED WHERE IT IS SIGNED, NOT HERE. `dnsOAuth.start`
+     * refuses anything that is not a path on this origin; passing it through
+     * untouched keeps one rule in one place rather than two that can drift.
+     */
+    const body = await readJson(c)
+    const returnTo = typeof body?.return_to === "string" ? body.return_to : undefined
+
     try {
-      const start = d.dnsOAuth.start({ slug, tenantId })
+      const start = d.dnsOAuth.start({
+        slug,
+        tenantId,
+        ...(returnTo ? { returnTo } : {}),
+      })
       return c.json({ url: start.url })
     } catch (error) {
       if (error instanceof OAuthError) {
@@ -140,7 +159,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
     if (!code || !state)
       return c.json(validation("`code` and `state` are required."), 422)
 
-    let claimed: { slug: string; tenantId: string; verifier: string }
+    let claimed: { slug: string; tenantId: string; verifier: string; returnTo?: string }
     try {
       claimed = d.dnsOAuth.verifyState(state)
     } catch (error) {
@@ -204,7 +223,13 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
         zones: zones.map((z) => z.name),
       })
 
-      return c.json(saved, 201)
+      // ⚠ THE RETURN PATH COMES BACK WITH THE CONNECTION, so the callback page
+      // can finish the job and then put somebody back where they started. It
+      // came out of the signed `state` and was re-checked there.
+      return c.json(
+        { ...saved, ...(claimed.returnTo ? { return_to: claimed.returnTo } : {}) },
+        201,
+      )
     } catch (error) {
       /*
        * ⚠ `detail` IS THE ONLY FIELD THAT SAYS WHAT ACTUALLY HAPPENED, AND IT

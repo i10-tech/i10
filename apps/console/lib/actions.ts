@@ -181,12 +181,24 @@ export async function dnsConnections() {
   )
 }
 
-export async function startDnsConnect(provider: string) {
+/**
+ * @param returnTo Where to land once the connection is made — a path on this
+ * console, never a URL. It rides in the signed OAuth `state` because a
+ * provider compares `redirect_uri` exactly and will not accept an extra query
+ * parameter; the API re-checks it on the way back. See dns/oauth.ts.
+ */
+export async function startDnsConnect(provider: string, returnTo?: string) {
   return run(() =>
     api<{ url: string }>(`/console/dns/connect/${encodeURIComponent(provider)}`, {
       method: "POST",
+      body: returnTo ? { return_to: returnTo } : {},
     }),
   )
+}
+
+/** Every domain in this workspace, for the connect flow's follow-through. */
+export async function listDomains() {
+  return run(() => api<{ data: import("@/lib/types").Domain[] }>("/console/domains"))
 }
 
 export async function finishDnsConnect(input: {
@@ -196,7 +208,7 @@ export async function finishDnsConnect(input: {
 }) {
   return run(
     () =>
-      api<import("@/lib/types").DnsConnection>(
+      api<import("@/lib/types").DnsConnection & { return_to?: string }>(
         `/console/dns/callback/${encodeURIComponent(input.provider)}`,
         { method: "POST", body: { code: input.code, state: input.state } },
       ),
@@ -745,11 +757,17 @@ export async function deleteTemplate(id: string) {
  * share one Polar client and one product map, so there is no second price list
  * to disagree with the first.
  */
-export async function startCheckout(plan: string) {
+/**
+ * @param returnTo Where Polar should send the browser afterwards — a path on
+ * this console, so somebody who bought a plan mid-onboarding comes back to
+ * onboarding rather than to a confirmation page with no way onward. The API
+ * keeps its own origin and accepts only the path; see routes/console/account.ts.
+ */
+export async function startCheckout(plan: string, returnTo?: string) {
   return run(async () => {
     const result = await api<{ id?: string; url?: string; expiresAt?: string }>(
       "/console/billing/checkout",
-      { method: "POST", body: { plan } },
+      { method: "POST", body: { plan, ...(returnTo ? { return_to: returnTo } : {}) } },
     )
 
     /*

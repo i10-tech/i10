@@ -115,8 +115,30 @@ export interface PolarClient {
    * loud rather than something nobody can see.
    */
   getCustomer(customerId: string): Promise<CustomerState | null>
-  /** Every subscription Polar holds for this organisation. The reconciler's view. */
-  listSubscriptions(): Promise<PolarSubscription[]>
+  /**
+   * Stamps our tenant id onto a Polar customer that has none.
+   *
+   * ⚠ THIS IS THE REPAIR FOR THE ONE FAILURE NOTHING ELSE CAN REACH. Polar sets
+   * `external_id` only on a customer it CREATES from a checkout's
+   * `external_customer_id`; a customer that already existed — bought something
+   * before, or was made by hand in their dashboard — keeps a null one. Every
+   * subscription event for that customer is then dropped by `toState`, in the
+   * webhook and in the reconciler alike, so the payment succeeds and no plan is
+   * ever granted. Writing the id back is the only thing that unblocks it.
+   *
+   * ⚠ IT RESOLVES `false` RATHER THAN THROWING. It runs inside a status poll a
+   * customer is watching; a repair that did not work must not turn a page that
+   * was about to say "your plan is active" into an error.
+   */
+  setCustomerExternalId(customerId: string, externalId: string): Promise<boolean>
+  /**
+   * Every subscription Polar holds for this organisation. The reconciler's view.
+   *
+   * ⚠ `customerId` NARROWS IT FOR THE REPAIR PATH AND MUST NOT BE USED BY THE
+   * RECONCILER. That job compares Polar's whole picture against ours, and a
+   * filtered list would make it blind to the subscriptions it exists to find.
+   */
+  listSubscriptions(filter?: { customerId?: string }): Promise<PolarSubscription[]>
   /**
    * Usage, into Polar's meter.
    *
@@ -496,9 +518,21 @@ export function polarClient(opts: PolarOptions): PolarClient {
       return { token: body.token }
     },
 
-    async listSubscriptions() {
+    async setCustomerExternalId(customerId, externalId) {
+      const response = await call(`/v1/customers/${encodeURIComponent(customerId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ external_id: externalId }),
+      }).catch(() => null)
+
+      return response?.ok === true
+    },
+
+    async listSubscriptions(filter) {
       const all: PolarSubscription[] = []
       let page = 1
+      const scope = filter?.customerId
+        ? `&customer_id=${encodeURIComponent(filter.customerId)}`
+        : ""
 
       // ⚠ EVERY SUBSCRIPTION, NOT ONLY THE ACTIVE ONES. `?active=true` would
       // make the reconciler blind to exactly the case it exists for: a
@@ -506,7 +540,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
       // row still says the customer is entitled. What is absent from an
       // active-only list is indistinguishable from what never existed.
       for (;;) {
-        const response = await call(`/v1/subscriptions/?page=${page}&limit=100`)
+        const response = await call(`/v1/subscriptions/?page=${page}&limit=100${scope}`)
         if (!response.ok) {
           throw new Error(`polar subscriptions.list failed with ${response.status}`)
         }

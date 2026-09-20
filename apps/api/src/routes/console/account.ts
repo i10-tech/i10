@@ -100,7 +100,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       const checkout = await d.billing.polar.createCheckout({
         productId,
         tenantId,
-        successUrl: d.billing.successUrl,
+        successUrl: returnTo(d.billing.successUrl, body?.return_to),
       })
 
       /*
@@ -311,4 +311,39 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     const billing = await d.usage.billing(tenantId)
     return c.json(await d.onboarding.get(tenantId, billing.plan?.id ?? null))
   })
+}
+
+/**
+ * Where Polar sends the browser back, for the page that started the checkout.
+ *
+ * ⚠ SOMEBODY WHO BOUGHT A PLAN DURING ONBOARDING BELONGS BACK IN ONBOARDING.
+ * `POLAR_SUCCESS_URL` names one page for every checkout in the product, so
+ * everyone landed on the same confirmation regardless of what they were in the
+ * middle of — and for a flow with steps after the payment, that is a dead end
+ * dressed as a success.
+ *
+ * ⚠ THE ORIGIN IS ALWAYS OURS, AND ONLY THE PATH IS THE CALLER'S. Polar will
+ * redirect a browser to whatever `success_url` says, so accepting a whole URL
+ * here would make this endpoint an open redirect that a payment page performs —
+ * and one that looks entirely legitimate, because the money really was taken.
+ * The configured value supplies the origin; the request may only choose a path
+ * beneath it.
+ *
+ * ⚠ AND `//` IS REFUSED ALONGSIDE AN ABSOLUTE URL, because it starts with a
+ * slash and still resolves to another origin. Same rule, same reason, as
+ * `safeReturnTo` in dns/oauth.ts — see the note there.
+ */
+function returnTo(
+  configured: string | undefined,
+  requested: unknown,
+): string | undefined {
+  if (!configured) return undefined
+  if (typeof requested !== "string" || !requested.startsWith("/")) return configured
+  if (/^\/[/\\]/.test(requested)) return configured
+
+  try {
+    return new URL(requested, new URL(configured).origin).toString()
+  } catch {
+    return configured
+  }
 }

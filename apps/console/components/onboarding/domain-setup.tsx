@@ -254,9 +254,18 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
         blurb={`We only ask for permission to read your zones and edit DNS records — nothing else in your ${provider.name} account.`}
         onBack={() => setPhase("mode")}
       >
+        {/*
+         * ⚠ IT NAMES WHERE TO COME BACK TO, AND WITHOUT THAT THIS STEP WAS A
+         * DEAD END. Connecting is a full navigation to the provider and back
+         * through `/dns/callback/…`, which lives in the console shell — so
+         * somebody who pressed this landed on a page that knew nothing about
+         * the flow they were half-way through. The connection was made and the
+         * onboarding was simply gone, which read as the button not working.
+         */}
         <ConnectProviderButton
           slug={provider.slug}
           providerName={provider.name}
+          returnTo="/onboarding"
           size="xl"
           block
           brand
