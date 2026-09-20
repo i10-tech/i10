@@ -1,0 +1,27 @@
+-- One connection per workspace per provider, enforced rather than assumed.
+--
+-- ⚠ `save()` UPSERTS ON THIS PAIR AND POSTGRES WAS REFUSING IT. The insert
+-- carries `ON CONFLICT ("tenant_id","provider")`, which requires a UNIQUE index
+-- or constraint on exactly those columns; 0037 created a plain one. Every
+-- insert this table has ever received therefore failed with 42P10, "no unique
+-- or exclusion constraint matching the ON CONFLICT specification".
+--
+-- ⚠ WHICH IS WHY THE TABLE IS EMPTY, AND WHY THIS NEEDS NO DEDUPE. `save()` is
+-- the only writer of `core.dns_connections` and it has always carried that
+-- clause, so no row has ever been written. Nothing can collide with the unique
+-- index below.
+--
+-- ⚠ IT WENT UNNOTICED BECAUSE NOTHING EVER REACHED THE INSERT. The Cloudflare
+-- OAuth exchange was being answered with a bot challenge before there was a
+-- credential to store, so the first authorisation that actually completed is
+-- the one that found this.
+--
+-- ⚠ AND UNIQUENESS IS THE INTENT, NOT A WORKAROUND FOR THE UPSERT.
+-- Re-authorising REPLACES a connection — two live tokens for one account is two
+-- things to revoke and only one anybody remembers — and `get()` reads a single
+-- row per provider. See apps/api/src/dns/connections.ts.
+--
+-- The name is kept so the lookup it already serves, (tenant_id, provider), is
+-- unaffected: a unique btree index answers exactly the same queries.
+DROP INDEX IF EXISTS "core"."dns_connections_tenant_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "dns_connections_tenant_idx" ON "core"."dns_connections" USING btree ("tenant_id","provider");
