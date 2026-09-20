@@ -25,10 +25,123 @@ const deps = (over: Record<string, unknown> = {}) => ({
     ownedBy: mock(async () => []),
   },
   polar: { revokeSubscription: mock(async () => "revoked" as const) },
+  domains: { releaseDomains: mock(async () => ({ released: 2, failed: 0 })) },
   organizations: { exists: mock(async () => false) },
   freePlanId: "free",
   log,
   ...over,
+})
+
+/**
+ * ⚠ A TERMINATED WORKSPACE USED TO KEEP ITS SES IDENTITIES AND ITS NAMESERVERS.
+ * Termination marks the tenant `deleted` rather than deleting the row, so the
+ * `on delete cascade` on `domains.tenant_id` never fires and nothing tore
+ * anything down: a verified SES identity per domain, and our own PowerDNS
+ * still answering for every delegated name — serving DKIM keys and return
+ * paths for an account that no longer exists, with no way to find them except
+ * by reading the database.
+ */
+describe("what a terminated workspace gives back", () => {
+  it("releases its domains", async () => {
+    const d = deps()
+    await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })
+    expect(d.domains.releaseDomains).toHaveBeenCalledWith("ten-1")
+  })
+
+  /*
+   * ⚠ THE TEARDOWN HANGS OFF EVERY EXIT, NOT OFF THE ONE WITH A SUBSCRIPTION.
+   * Most deleted workspaces are on the free plan and leave through the "no
+   * subscription to cancel" branch, so a release attached to the Polar path
+   * would have skipped exactly the accounts it was written for.
+   */
+  it("releases them for a workspace that never had a subscription", async () => {
+    const d = deps({
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => ({
+          tenantId: "ten-1",
+          polarSubscriptionId: null,
+          alreadyDead: false,
+        })),
+        ownedBy: mock(async () => []),
+      },
+    })
+
+    await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })
+    expect(d.domains.releaseDomains).toHaveBeenCalledWith("ten-1")
+  })
+
+  /*
+   * ⚠ AND ON A REDELIVERY TOO. `alreadyDead` says we have seen the deletion
+   * before; it does not say the teardown finished. Re-running it is how a
+   * partial one repairs itself, and it costs one empty query when there is
+   * nothing left.
+   */
+  it("releases them again on a redelivery", async () => {
+    const d = deps({
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => ({
+          tenantId: "ten-1",
+          polarSubscriptionId: null,
+          alreadyDead: true,
+        })),
+        ownedBy: mock(async () => []),
+      },
+    })
+
+    expect(await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })).toBe(
+      "already_terminated",
+    )
+    expect(d.domains.releaseDomains).toHaveBeenCalledWith("ten-1")
+  })
+
+  /*
+   * ⚠ THE BILLING STOP IS THE PART WITH A DEADLINE, AND THE TEARDOWN MUST NOT
+   * BE ABLE TO UNDO IT. A failing SES call or an unreachable nameserver would
+   * otherwise throw out of the webhook, answer 500, and have Svix redeliver a
+   * deletion whose only outstanding work is cleanup.
+   */
+  it("does not fail the termination when the teardown throws", async () => {
+    const shouted: string[] = []
+    const error = mock((...args: unknown[]) => {
+      shouted.push(String(args[1]))
+    })
+
+    const d = deps({
+      domains: {
+        releaseDomains: mock(async () => {
+          throw new Error("pdns unreachable")
+        }),
+      },
+      log: { ...log, error },
+    })
+
+    expect(await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })).toBe(
+      "terminated",
+    )
+    expect(d.polar.revokeSubscription).toHaveBeenCalledWith("sub_1")
+    expect(shouted.join(" ")).toContain("could not be released")
+  })
+
+  /*
+   * ⚠ AND A DEPLOYMENT WITH NO RELEASER SAYS SO AT `error`, on the same rule as
+   * the missing Polar client. This is not an absent feature — it is our
+   * nameservers going on answering for a deleted customer's domains.
+   */
+  it("shouts when it can delete the workspace but not its domains", async () => {
+    const shouted: string[] = []
+    const error = mock((...args: unknown[]) => {
+      shouted.push(String(args[1]))
+    })
+
+    const d = deps({ domains: undefined, log: { ...log, error } })
+
+    expect(await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })).toBe(
+      "terminated",
+    )
+    expect(shouted.join(" ")).toContain("STILL LIVE")
+  })
 })
 
 describe("a deleted organization", () => {

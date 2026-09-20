@@ -52,6 +52,19 @@ export interface TenantLifecycleStore {
   ownedBy(clerkUserId: string): Promise<{ tenantId: string; clerkOrgId: string }[]>
 }
 
+/**
+ * Tearing down a dead workspace's domains. The one method of `DomainStore` this
+ * needs.
+ *
+ * ⚠ A NARROW PORT RATHER THAN THE STORE, for the reason every other dependency
+ * here is narrowed: this module decides WHEN a workspace's resources go, and
+ * nothing about it should be able to create a domain, verify one, or read
+ * another tenant's.
+ */
+export interface DomainReleaser {
+  releaseDomains(tenantId: string): Promise<{ released: number; failed: number }>
+}
+
 /** Ending a subscription now. The one method of `PolarClient` this needs. */
 export interface SubscriptionRevoker {
   revokeSubscription(subscriptionId: string): Promise<"revoked" | "already_ended">
@@ -82,6 +95,14 @@ export interface LifecycleDeps {
    * subscription behind has to say so where somebody will see it.
    */
   polar?: SubscriptionRevoker
+  /**
+   * ⚠ OPTIONAL FOR THE SAME REASON `polar` IS, AND ITS ABSENCE IS AS LOUD. The
+   * domain store is itself optional — a deployment with no sealing key has no
+   * domains at all — but where there are domains and no releaser, a terminated
+   * workspace leaves live SES identities and nameservers still answering for
+   * its delegated names, and nothing downstream ever asks about them again.
+   */
+  domains?: DomainReleaser
   /** Asked before terminating on a `user.deleted`. Never on an org event. */
   organizations?: OrganizationExistence
   freePlanId: string
@@ -104,6 +125,54 @@ export interface TenantLifecycle {
 }
 
 export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
+  /**
+   * Giving back everything the workspace was holding outside our database.
+   *
+   * ⚠ IT RUNS LAST AND IT NEVER THROWS, AND BOTH HALVES ARE THE POINT. The
+   * billing stop above is the part with a deadline and the part Svix retries;
+   * a slow SES call or an unreachable nameserver must not delay it, and must
+   * not fail a termination that has already succeeded at the thing that costs
+   * money. What it leaves behind on a failure is an identity and a zone, which
+   * are logged and can be swept later.
+   *
+   * ⚠ AND IT RUNS ON A REDELIVERY TOO, NOT ONLY ON THE FIRST TERMINATION.
+   * `alreadyDead` means we have seen this deletion before; it does not mean
+   * the teardown finished, and re-running it is how a partial one repairs
+   * itself. A workspace with nothing left costs one empty query.
+   */
+  async function release(tenantId: string, clerkOrgId: string): Promise<void> {
+    if (!deps.domains) {
+      /*
+       * ⚠ `error`, NOT `warn`, ON THE SAME RULE AS THE MISSING POLAR CLIENT.
+       * This is not an absent feature — it is our nameservers going on
+       * answering for a deleted customer's mail domains, and a verified SES
+       * identity nobody owns, with no trace anywhere that they are orphaned.
+       */
+      deps.log.error(
+        { tenantId, clerkOrgId },
+        "workspace deleted but domain teardown is not configured — its SES " +
+          "identities and delegated zones are STILL LIVE and must be removed by hand",
+      )
+      return
+    }
+
+    try {
+      const { released, failed } = await deps.domains.releaseDomains(tenantId)
+      if (released > 0 || failed > 0) {
+        deps.log.warn(
+          { tenantId, clerkOrgId, released, failed },
+          "released a terminated workspace's domains",
+        )
+      }
+    } catch (error) {
+      deps.log.error(
+        { tenantId, clerkOrgId, err: String(error) },
+        "workspace terminated, but its domains could not be released — SES " +
+          "identities and delegated zones may be left behind",
+      )
+    }
+  }
+
   /** The whole of a termination, for one organization we know is gone. */
   async function terminate(clerkOrgId: string): Promise<LifecycleOutcome> {
     const ended = await deps.tenants.terminate(clerkOrgId, deps.freePlanId)
@@ -116,12 +185,24 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
       return "no_tenant"
     }
 
+    /*
+     * ⚠ THE DOMAINS GO ON THE WAY OUT OF EVERY EXIT BELOW, NOT AT ONE OF THEM.
+     * There are three ways a termination finishes — no subscription, no Polar
+     * client, a revoke that succeeded — and a teardown attached to the last of
+     * them would silently skip the two commonest. The only exit it is NOT
+     * reached from is the revoke throwing, which is the one Svix retries.
+     */
+    const finish = async (outcome: LifecycleOutcome): Promise<LifecycleOutcome> => {
+      await release(ended.tenantId, clerkOrgId)
+      return outcome
+    }
+
     if (!ended.polarSubscriptionId) {
       deps.log.info(
         { tenantId: ended.tenantId, clerkOrgId },
         "terminated a workspace with no subscription to cancel",
       )
-      return ended.alreadyDead ? "already_terminated" : "terminated"
+      return finish(ended.alreadyDead ? "already_terminated" : "terminated")
     }
 
     if (!deps.polar) {
@@ -139,7 +220,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
         "workspace deleted but billing is not configured — its Polar " +
           "subscription is STILL ACTIVE and must be cancelled by hand",
       )
-      return "terminated"
+      return finish("terminated")
     }
 
     /*
@@ -160,7 +241,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
       "terminated a workspace and ended its subscription immediately",
     )
 
-    return ended.alreadyDead ? "already_terminated" : "terminated"
+    return finish(ended.alreadyDead ? "already_terminated" : "terminated")
   }
 
   return {

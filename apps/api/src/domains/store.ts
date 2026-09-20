@@ -76,6 +76,36 @@ export interface DomainStore {
    * `missing` rather than quietly starting the flow by the back door.
    */
   refresh(tenantId: string, id: string): Promise<RefreshOutcome>
+  /**
+   * Tears down every domain a workspace holds. For account termination.
+   *
+   * ⚠ IT EXISTS BECAUSE TERMINATION MARKS THE TENANT DEAD RATHER THAN DELETING
+   * IT, so the `on delete cascade` on `domains.tenant_id` never fires and
+   * nothing anywhere was tearing these down. What survived a deleted workspace
+   * was a live SES identity per domain and a PowerDNS zone still answering for
+   * every delegated one — our nameservers serving DKIM keys and return paths
+   * for an account that no longer exists, indefinitely, with no way to find
+   * them except by reading the database.
+   *
+   * ⚠ IT IS `remove` IN A LOOP, NOT A SECOND TEARDOWN. Deleting a domain
+   * safely means reading who actually holds the delegation and who actually
+   * holds the SES identity before touching either — two cross-tenant checks
+   * that took two separate bugs to get right. A bulk path with its own copy
+   * would be the third.
+   */
+  releaseDomains(tenantId: string): Promise<ReleaseSummary>
+}
+
+export interface ReleaseSummary {
+  /** Rows deleted, whose SES identity and zones were tidied behind them. */
+  released: number
+  /**
+   * ⚠ COUNTED RATHER THAN THROWN, because the caller is a webhook finishing a
+   * deletion. One domain whose row will not delete must not stop the other
+   * four, and must not fail a termination that has already stopped the
+   * billing — see the note where this is called.
+   */
+  failed: number
 }
 
 /**
@@ -747,6 +777,35 @@ export function domainStore({
       })
     },
 
+    async releaseDomains(tenantId) {
+      const held = await this.list(tenantId)
+
+      let released = 0
+      let failed = 0
+
+      for (const domain of held) {
+        try {
+          if (await this.remove(tenantId, domain.id)) released += 1
+        } catch (error) {
+          /*
+           * ⚠ ONE FAILURE MUST NOT TAKE THE REST WITH IT. `remove` already
+           * swallows a failing SES call and a failing zone delete — those are
+           * tidies and are logged where they happen — so reaching here means
+           * the row itself would not delete. That is worth a line and worth
+           * counting, and it is not worth abandoning the other domains of a
+           * workspace that has already been shut off.
+           */
+          failed += 1
+          log?.warn(
+            { err: String(error), tenantId, domain: domain.name },
+            "could not release a domain while terminating its workspace",
+          )
+        }
+      }
+
+      return { released, failed }
+    },
+
     async remove(tenantId, id) {
       const existing = await this.get(tenantId, id)
       if (!existing) return false
@@ -780,6 +839,38 @@ export function domainStore({
           return claim?.domainId === id
         }))
 
+      /*
+       * Whether the SES identity for this NAME is this row's to delete.
+       *
+       * ⚠ IT IS THE SAME CROSS-TENANT HOLE `holdsZones` ABOVE CLOSES, LEFT OPEN
+       * ON THE OTHER HALF OF THE SAME TEARDOWN. SES keys an identity by domain
+       * name within ONE AWS ACCOUNT, and several workspaces may hold the same
+       * name as pending — migration 0039 exists to allow exactly that, and the
+       * note above records `pslhq.app` held by three tenants in production. So
+       * a workspace that never verified anything could delete its own pending
+       * row and, with it, the SES identity another workspace is SENDING from.
+       * Their mail stops, nothing in their console changes, and the cause is a
+       * delete in an account they have never heard of.
+       *
+       * ⚠ TWO CONDITIONS, AND THEY FAIL IN THE CHEAP DIRECTION ON PURPOSE.
+       * Leaving an identity behind costs an inert record in AWS that the next
+       * `verify` of that name re-asserts anyway; deleting one that is in use
+       * stops somebody's mail. So anything uncertain leaves it alone.
+       *
+       * ⚠ AND `verified_holder` IS READ BEFORE THE ROW GOES, for the same
+       * reason `holdsZones` is: afterwards there is nothing left to ask, and
+       * the answer would have to be guessed from a row that no longer exists.
+       */
+      const ownsIdentity =
+        existing.status !== "not_started" &&
+        (await (async () => {
+          const rows = (await db.execute(
+            sql`select * from core.verified_holder(${existing.name})`,
+          )) as unknown as { domain_id: string }[]
+          const holder = rows[0]
+          return holder === undefined || holder.domain_id === id
+        })())
+
       // ⚠ THE ROW GOES FIRST, AND THE ORDER IS THE OPPOSITE OF `create`'s ON
       // PURPOSE. Both orders leak something if the second step fails; this one
       // leaks an unused SES identity, which is inert. The other leaves a row
@@ -806,7 +897,12 @@ export function domainStore({
        * delete touches a second system that can be down. Neither can resurrect
        * the domain, so neither is worth a 500 the customer cannot act on.
        */
-      await tidy("ses identity", () => identity.remove(existing.name))
+      // ⚠ ONLY THE IDENTITY THIS ROW ACTUALLY OWNS — see `ownsIdentity`. A row
+      // that never registered one, or a name another workspace holds verified,
+      // leaves it strictly alone.
+      if (ownsIdentity) {
+        await tidy("ses identity", () => identity.remove(existing.name))
+      }
 
       // ⚠ THE ZONES GO TOO, OR THE DELEGATION OUTLIVES THE DOMAIN. The customer's
       // NS records still point here after a delete, so a zone left behind keeps

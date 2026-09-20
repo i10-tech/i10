@@ -24,6 +24,8 @@ import type { DomainIdentity } from "../src/domains/identity.js"
 
 const TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
 const ID = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb"
+/** A second domain on the same workspace, for the bulk teardown. */
+const OTHER_ID = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60cc"
 const NOW = new Date("2026-09-05T12:00:00.000Z")
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -81,6 +83,14 @@ function fakeDb(handlers: {
   taken?: boolean
   /** `core.verified_holder` — the workspace a challenger has to displace. */
   holder?: () => unknown[]
+  /**
+   * ⚠ `list` READS THROUGH `orderBy` AND `get` THROUGH `limit`, WHICH IS THE
+   * ONLY THING THAT TELLS THEM APART HERE. `releaseDomains` calls both — the
+   * list to find the domains, then one `get` per domain inside `remove` — and
+   * a fake that answered them from one handler could not express "this tenant
+   * holds two domains", which is the whole case worth testing.
+   */
+  many?: () => unknown[]
 }) {
   const tx = {
     execute: async (q: unknown) =>
@@ -97,7 +107,7 @@ function fakeDb(handlers: {
             projection && "domainId" in projection
               ? (handlers.claim?.() ?? [])
               : (handlers.select?.() ?? []),
-          orderBy: async () => handlers.select?.() ?? [],
+          orderBy: async () => handlers.many?.() ?? handlers.select?.() ?? [],
         }),
       }),
     }),
@@ -322,6 +332,86 @@ describe("deleting a domain whose cleanup fails", () => {
     expect(warn).toHaveBeenCalledTimes(3)
   })
 
+  /**
+   * ⚠ THE SES IDENTITY IS KEYED BY NAME ACROSS THE WHOLE AWS ACCOUNT, AND THIS
+   * IS THE HOLE THAT MADE A DELETE CROSS-TENANT. Several workspaces may hold
+   * one name as pending — migration 0039 exists to allow it — so a workspace
+   * that never verified anything could delete its own pending row and take out
+   * the identity another workspace is SENDING from. Their mail stops, their
+   * console says nothing, and the cause is a delete in an account they have
+   * never heard of. It is the same hole `holdsZones` closes for the zones,
+   * left open on the other half of the same teardown.
+   */
+  it("leaves the SES identity alone when another workspace holds the name", async () => {
+    const removed: string[] = []
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        // ⚠ A DIFFERENT `domain_id`: somebody else is verified on this name.
+        holder: () => [{ domain_id: "99999999-9999-4999-8999-999999999999" }],
+      }),
+      identity: identity({
+        remove: async (name) => {
+          removed.push(name)
+        },
+      }),
+    })
+
+    expect(await store.remove(TENANT, ID)).toBe(true)
+    expect(removed).toEqual([])
+  })
+
+  /**
+   * ⚠ `not_started` MEANS NO IDENTITY WAS EVER REGISTERED FOR THIS ROW, so
+   * there is nothing of ours under that name to delete and anything that IS
+   * there belongs to somebody else. `verify` is the only thing that registers
+   * one, and it does so only after proving ownership.
+   */
+  it("leaves the SES identity alone for a row that never registered one", async () => {
+    const removed: string[] = []
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [row({ status: "not_started" })] }),
+      identity: identity({
+        remove: async (name) => {
+          removed.push(name)
+        },
+      }),
+    })
+
+    expect(await store.remove(TENANT, ID)).toBe(true)
+    expect(removed).toEqual([])
+  })
+
+  /**
+   * ⚠ AND THE GUARD MUST NOT BECOME A LEAK. Failing closed on every delete
+   * would leave an identity in AWS for every domain anybody ever removed —
+   * inert, billable, and enough to block the name being re-added cleanly. The
+   * holder being THIS row is the ordinary case and has to still go.
+   */
+  it("removes the identity when this row is the one holding the name", async () => {
+    const removed: string[] = []
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row({ status: "verified" })],
+        holder: () => [{ domain_id: ID }],
+      }),
+      identity: identity({
+        remove: async (name) => {
+          removed.push(name)
+        },
+      }),
+    })
+
+    expect(await store.remove(TENANT, ID)).toBe(true)
+    expect(removed).toEqual(["example.com"])
+  })
+
   /** ⚠ THE LOGGER IS OPTIONAL AND ITS ABSENCE MUST NOT THROW ON THE FAILURE PATH. */
   it("does not require a logger", async () => {
     const store = domainStore({
@@ -334,6 +424,102 @@ describe("deleting a domain whose cleanup fails", () => {
       }),
     })
     expect(await store.remove(TENANT, ID)).toBe(true)
+  })
+})
+
+/**
+ * Handing everything back when the workspace is deleted.
+ *
+ * ⚠ NOTHING DID THIS, AND WHAT SURVIVED WAS LIVE. Termination marks the tenant
+ * `deleted` rather than deleting the row, so the `on delete cascade` on
+ * `domains.tenant_id` never fires — leaving a verified SES identity per domain
+ * and our own nameservers still answering for every delegated one, serving
+ * DKIM keys and return paths for an account that no longer exists.
+ */
+describe("releasing a terminated workspace's domains", () => {
+  it("tears down every domain the workspace holds", async () => {
+    const deleted: number[] = []
+    const removed: string[] = []
+    const zonesGone: string[] = []
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        many: () => [row({ id: ID }), row({ id: OTHER_ID, name: "second.com" })],
+        select: () => [row({ status: "verified", delegated: true })],
+        claim: () => [{ domainId: ID }],
+        del: () => {
+          deleted.push(1)
+        },
+      }),
+      identity: identity({
+        remove: async (name) => {
+          removed.push(name)
+        },
+      }),
+      zones: {
+        put: async () => {},
+        remove: async (zone) => {
+          zonesGone.push(zone)
+        },
+      },
+    })
+
+    expect(await store.releaseDomains(TENANT)).toEqual({ released: 2, failed: 0 })
+    expect(deleted).toHaveLength(2)
+    // ⚠ THE SES IDENTITY GOES FOR EACH. (The fake answers every `get` with the
+    // same row, so both report one name; what is being asserted is that the
+    // teardown ran twice rather than once.)
+    expect(removed).toHaveLength(2)
+
+    /*
+     * ⚠ THREE ZONES, NOT SIX, AND THAT IS THE GUARD WORKING RATHER THAN A
+     * MISCOUNT. Only the domain that actually holds the delegation claim gives
+     * up its zones — the fake grants the claim to `ID` alone — so the bulk path
+     * keeps the per-domain check that stops one workspace's delete taking
+     * another's DNS. A bulk teardown with its own copy of this logic is exactly
+     * what `releaseDomains` refuses to be.
+     */
+    expect(zonesGone).toHaveLength(3)
+  })
+
+  /*
+   * ⚠ ONE DOMAIN THAT WILL NOT DELETE MUST NOT STRAND THE REST. The caller is
+   * a webhook finishing a deletion that has already stopped the billing;
+   * abandoning the remaining domains would leave live identities behind for a
+   * reason that has nothing to do with them.
+   */
+  it("keeps going past a domain it cannot delete, and counts it", async () => {
+    let seen = 0
+    const warn = mock(() => {})
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        many: () => [row({ id: ID }), row({ id: OTHER_ID, name: "second.com" })],
+        select: () => [row()],
+        del: () => {
+          seen += 1
+          if (seen === 1) throw new Error("deadlock detected")
+        },
+      }),
+      identity: identity(),
+      log: { warn },
+    })
+
+    expect(await store.releaseDomains(TENANT)).toEqual({ released: 1, failed: 1 })
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  /** A workspace with nothing to give back costs one query and says so. */
+  it("is a no-op for a workspace with no domains", async () => {
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ many: () => [] }),
+      identity: identity(),
+    })
+
+    expect(await store.releaseDomains(TENANT)).toEqual({ released: 0, failed: 0 })
   })
 })
 

@@ -325,9 +325,66 @@ const tenantDeaths = tenantLifecycleStore(db)
  * it logs the subscription it could not cancel at `error`, which is the only
  * remaining trace of a card that is still being charged.
  */
+/**
+ * The one domain store, shared by everything that touches a domain.
+ *
+ * ⚠ IT WAS CONSTRUCTED TWICE, AND THE SECOND COPY'S OWN COMMENT SAID SO
+ * ("Two stores, one rule"). Two stores means two sets of DNS probes and two
+ * places for the SES gate, the nameserver list and the zone sink to be
+ * configured — and the failure mode of them drifting is a domain that verifies
+ * through one surface and not the other. This file already shares `sessionAuth`
+ * rather than building a second verifier, for exactly the same reason.
+ *
+ * ⚠ AND IT IS HOISTED ABOVE `lifecycle` BECAUSE TERMINATION NEEDS IT. Deleting
+ * a workspace has to hand back its SES identities and its delegated zones; see
+ * `releaseDomains`.
+ */
+const domains = secrets
+  ? domainStore({
+      db,
+      /*
+       * ⚠ `SES_ENABLED` GATES THE IDENTITY, NOT JUST THE SENDING. It used to
+       * gate only the latter, so a deployment with SES off still called
+       * `CreateEmailIdentity` on every domain creation — which on a laptop
+       * holding production AWS credentials wrote into the real account. The
+       * flag now means what it says. See `offlineIdentity`.
+       */
+      identity: env.SES_ENABLED
+        ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
+        : offlineIdentity(),
+      capacity: postgresMeter(db),
+      region: env.AWS_REGION,
+      // ⚠ OUR OWN SENDING DOMAINS, so nobody can add one. See the note on
+      // `ownDomains`: the delegated path would hand them our return path.
+      ownDomains: env.MAIL_DOMAINS,
+      dns: {
+        spfInclude: env.MAIL_SPF_INCLUDE,
+        bounceHost: env.MAIL_BOUNCE_HOST,
+        nameservers: env.MAIL_NAMESERVERS,
+      },
+      // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write in
+      // the same transaction as everything else rather than a call to a
+      // provider that can be down. Swapping this for Cloudflare or Route 53
+      // later is an adapter, not a migration.
+      zones: powerDnsZones(db),
+      log,
+      // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is nowhere
+      // safe to keep a DKIM private key, so the routes answer 501 rather than
+      // storing one in the clear — the same rule webhooks already follow.
+      secrets,
+    })
+  : null
+
 const lifecycle = tenantLifecycle({
   tenants: tenantDeaths,
   ...(polar ? { polar } : {}),
+  /*
+   * ⚠ WITHOUT THIS A DELETED WORKSPACE KEEPS ITS SES IDENTITIES AND OUR
+   * NAMESERVERS KEEP ANSWERING FOR ITS DELEGATED NAMES. Termination marks the
+   * tenant dead rather than deleting the row, so nothing cascades and nothing
+   * else was ever going to tear them down.
+   */
+  ...(domains ? { domains } : {}),
   organizations: {
     /*
      * ⚠ 404 IS THE ANSWER THIS ASKS FOR, NOT A FAILURE. It is the whole
@@ -654,45 +711,11 @@ const app = createApp({
    * the plan's domain limit enforceable at all — before this there was nowhere
    * to check it. It is handed the meter rather than the `Metering` seam,
    * because the seam answers about one feature and this asks about another.
+   *
+   * ⚠ AND IT IS THE SAME INSTANCE THE CONSOLE AND THE TERMINATION PATH USE.
+   * See where it is constructed, above `lifecycle`.
    */
-  ...(secrets
-    ? {
-        domains: domainStore({
-          db,
-          /*
-           * ⚠ `SES_ENABLED` GATES THE IDENTITY, NOT JUST THE SENDING. It used to
-           * gate only the latter, so a deployment with SES off still called
-           * `CreateEmailIdentity` on every domain creation — which on a laptop
-           * holding production AWS credentials wrote into the real account. The
-           * flag now means what it says. See `offlineIdentity`.
-           */
-          identity: env.SES_ENABLED
-            ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
-            : offlineIdentity(),
-          capacity: postgresMeter(db),
-          region: env.AWS_REGION,
-          // ⚠ OUR OWN SENDING DOMAINS, so nobody can add one. See the note on
-          // `ownDomains`: the delegated path would hand them our return path.
-          ownDomains: env.MAIL_DOMAINS,
-          dns: {
-            spfInclude: env.MAIL_SPF_INCLUDE,
-            bounceHost: env.MAIL_BOUNCE_HOST,
-            nameservers: env.MAIL_NAMESERVERS,
-          },
-          // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write
-          // in the same transaction as everything else rather than a call to a
-          // provider that can be down. Swapping this for Cloudflare or Route 53
-          // later is an adapter, not a migration.
-          zones: powerDnsZones(db),
-          log,
-          // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is
-          // nowhere safe to keep a DKIM private key, so the routes answer 501
-          // rather than storing one in the clear — the same rule webhooks
-          // already follow.
-          secrets,
-        }),
-      }
-    : {}),
+  ...(domains ? { domains } : {}),
   /**
    * The human half of i10, and the only routes that take a session.
    *
@@ -812,27 +835,12 @@ const app = createApp({
           }
         })()
       : {}),
-    ...(secrets
+    ...(domains
       ? {
-          domains: domainStore({
-            db,
-            // ⚠ THE SAME GATE AS THE STORE ABOVE. Two stores, one rule —
-            // see the note there for why `SES_ENABLED` has to cover this.
-            identity: env.SES_ENABLED
-              ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
-              : offlineIdentity(),
-            capacity: postgresMeter(db),
-            region: env.AWS_REGION,
-            ownDomains: env.MAIL_DOMAINS,
-            dns: {
-              spfInclude: env.MAIL_SPF_INCLUDE,
-              bounceHost: env.MAIL_BOUNCE_HOST,
-              nameservers: env.MAIL_NAMESERVERS,
-            },
-            zones: powerDnsZones(db),
-            log,
-            secrets,
-          }),
+          // ⚠ THE SAME STORE, NOT A SECOND ONE. It used to be built again here
+          // with the note "Two stores, one rule" — which was the rule stated
+          // and the drift left possible. See where it is constructed.
+          domains,
         }
       : {}),
     keys: { store: keyStore(db), cache: redisKeyCache(cache) },
