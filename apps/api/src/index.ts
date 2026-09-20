@@ -681,13 +681,18 @@ const app = createApp({
     // general-purpose fetcher running inside the cluster.
     dns: dnsInspector(),
     /*
-     * ⚠ IT IS GIVEN THE SAME `MAIL_NAMESERVERS` THE RECORDS ARE BUILT FROM, so
-     * the check and the instructions cannot disagree. Handing it a second list
-     * would let the console tell somebody to publish one set of nameservers and
-     * then diagnose against another — which would report a correct delegation
-     * as pointed elsewhere.
+     * ⚠ IT IS GIVEN NO NAMESERVERS AT ALL, AND THAT IS THE POINT. It used to be
+     * handed `MAIL_NAMESERVERS` so that "the check and the instructions cannot
+     * disagree" — which was true only while every customer was told to publish
+     * the same two names. Per-claim delegation made the instructions per
+     * domain and left this list behind, so the check and the instructions
+     * disagreed for every delegated domain in the product: a customer who had
+     * published exactly what the table asked for was told the records pointed
+     * somewhere else. The names now travel with the question, read off the
+     * domain's own record list in `routes/console/domains.ts`, which is the
+     * only version of this invariant that cannot rot again.
      */
-    delegation: delegationChecker({ nameservers: env.MAIL_NAMESERVERS }),
+    delegation: delegationChecker({}),
     /*
      * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
      * why all of it arrives together or not at all. A credential that can

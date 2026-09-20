@@ -1,4 +1,5 @@
 import { Resolver } from "node:dns/promises"
+import { readDelegation, type ReferralResult } from "../domains/referral.js"
 import { delegatedZoneNames } from "../domains/zone.js"
 
 /**
@@ -55,7 +56,12 @@ export interface DelegationReport {
 }
 
 export interface DelegationChecker {
-  check(domain: string): Promise<DelegationReport>
+  /**
+   * @param expected The nameserver names THIS DOMAIN'S records name, which is
+   * `<claim>.ns1.i10.tech` and not `ns1.i10.tech`. See the note on the
+   * parameter where it is read.
+   */
+  check(domain: string, expected: readonly string[]): Promise<DelegationReport>
 }
 
 /**
@@ -69,8 +75,20 @@ export interface DelegationChecker {
  * them apart is a test nobody writes.
  */
 export interface DelegationLookups {
-  /** NS records at `zone`, from the parent. Rejects when there are none. */
-  nsOf(zone: string): Promise<string[]>
+  /**
+   * What the PARENT publishes as the delegation for `zone`.
+   *
+   * ⚠ THE PARENT'S REFERRAL, NOT `resolveNs`, AND THE DIFFERENCE IS THE WHOLE
+   * ANSWER THIS SCREEN GIVES. A recursive resolver FOLLOWS a delegation and
+   * returns the NS records from the zone at the far end — ours — so it reports
+   * what we published about ourselves rather than what the customer published
+   * about us. Worse, in the state this screen is opened in most often, our zone
+   * does not exist yet: the resolver chases the referral to a server that
+   * answers REFUSED, returns SERVFAIL, and a perfectly correct delegation is
+   * classified `lookup_failed`. `domains/referral.ts` exists for precisely this
+   * question and has said so since it was written.
+   */
+  referralTo(parent: string, zone: string): Promise<ReferralResult>
   /** The zone's own SOA, followed through the delegation. Rejects if unserved. */
   soaOf(zone: string): Promise<void>
   /** Addresses for one of our nameserver hostnames. */
@@ -80,7 +98,13 @@ export interface DelegationLookups {
 }
 
 export interface DelegationCheckerOptions {
-  nameservers: readonly string[]
+  /*
+   * ⚠ THERE IS NO `nameservers` HERE ANY MORE, AND ITS ABSENCE IS THE FIX. A
+   * deployment-wide list is the wrong grain for a per-claim delegation: two
+   * domains in the same deployment are told to publish different nameserver
+   * names, so the set to check against belongs to the domain and arrives with
+   * the question. Leaving it here would leave the wrong answer reachable.
+   */
   /** Same reasoning as `dnsInspector`: an unbounded lookup blocks a screen. */
   timeoutMs?: number
   /** Overridden only by tests. Production uses the resolver below. */
@@ -96,12 +120,27 @@ export function delegationChecker(
   options: DelegationCheckerOptions,
 ): DelegationChecker {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT
-  const ours = new Set(options.nameservers.map(canonical))
   const dns = options.lookups ?? resolverLookups(timeoutMs)
 
   return {
-    async check(domain) {
+    /*
+     * ⚠ `expected` IS THIS DOMAIN'S NAMESERVER NAMES, NOT THE DEPLOYMENT'S, AND
+     * READING THE DEPLOYMENT'S WAS A BUG THAT SURVIVED A WHOLE REDESIGN. Every
+     * delegating customer used to publish the same `ns1.i10.tech`, so matching
+     * against `MAIL_NAMESERVERS` was the same question. Per-claim nameservers
+     * changed what customers are told to publish to `<claim>.ns1.i10.tech` and
+     * this module was not changed with them, so a customer who had followed the
+     * instructions exactly was told their records "point at somebody else" —
+     * naming, as the somebody else, our own nameserver.
+     *
+     * ⚠ AND IT COMES FROM THE RECORD LIST THE CUSTOMER IS LOOKING AT rather
+     * than being rebuilt here. A second derivation of the same names is a
+     * second chance for the table and the check to disagree, and the disagreement
+     * is invisible because both look right on their own.
+     */
+    async check(domain, expected) {
       const names = Object.values(delegatedZoneNames(domain))
+      const ours = new Set(expected.map(canonical))
 
       /*
        * ⚠ THE NAMESERVER CHECK RUNS ALONGSIDE THE ZONE CHECKS, NOT AFTER THEM.
@@ -111,8 +150,8 @@ export function delegationChecker(
        * answer that matters most.
        */
       const [nameserversAnswering, zones] = await Promise.all([
-        answering(options.nameservers, dns),
-        Promise.all(names.map((zone) => checkZone(zone))),
+        answering([...ours], dns),
+        Promise.all(names.map((zone) => checkZone(domain, zone, ours))),
       ])
 
       return {
@@ -124,23 +163,28 @@ export function delegationChecker(
     },
   }
 
-  async function checkZone(zone: string): Promise<ZoneFinding> {
-    let observed: string[]
+  async function checkZone(
+    parent: string,
+    zone: string,
+    ours: ReadonlySet<string>,
+  ): Promise<ZoneFinding> {
+    let referral: ReferralResult
     try {
-      observed = (await dns.nsOf(zone)).map(canonical)
-    } catch (error) {
-      /*
-       * ⚠ NXDOMAIN AND "NO SUCH RECORD" ARE "NOT PUBLISHED YET", WHICH IS THE
-       * NORMAL STATE OF A DOMAIN SOMEBODY IS PART-WAY THROUGH. Anything else —
-       * SERVFAIL, a timeout — is a failure of the lookup rather than an answer
-       * about the records, and must not be reported as though the customer had
-       * done something wrong.
-       */
-      return isMissing(error)
-        ? { zone, code: "not_published" }
-        : { zone, code: "lookup_failed" }
+      referral = await dns.referralTo(parent, zone)
+    } catch {
+      return { zone, code: "lookup_failed" }
     }
 
+    /*
+     * ⚠ "WE COULD NOT ASK" IS NOT AN ANSWER ABOUT THE RECORDS, which is the
+     * distinction `referral.ts` keeps and the reason it reports three outcomes
+     * rather than two. A parent that timed out must not be reported as a
+     * customer who published nothing.
+     */
+    if (referral.kind === "unreachable") return { zone, code: "lookup_failed" }
+    if (referral.kind === "undelegated") return { zone, code: "not_published" }
+
+    const observed = referral.nameservers.map(canonical)
     if (observed.length === 0) return { zone, code: "not_published" }
 
     // ⚠ `some`, NOT `every`. A customer part-way through publishing has one of
@@ -225,7 +269,16 @@ function resolverLookups(timeoutMs: number): DelegationLookups {
   const fresh = (tries = 2) => new Resolver({ timeout: timeoutMs, tries })
 
   return {
-    nsOf: (zone) => fresh().resolveNs(zone),
+    /*
+     * ⚠ THE ONE LOOKUP HERE THAT IS NOT node's RESOLVER, because node's
+     * resolver cannot ask this question at all. See the note on the port and
+     * the long one at the top of `domains/referral.ts`: the delegation lives in
+     * the PARENT's referral, and every recursive resolver hides it by following
+     * it. `readDelegation` is the same reader `verify` proves ownership with,
+     * so the screen that explains a failure and the check that causes one can
+     * no longer disagree about what DNS says.
+     */
+    referralTo: (parent, zone) => readDelegation(parent, zone, { timeoutMs }),
     soaOf: async (zone) => {
       await fresh().resolveSoa(zone)
     },
@@ -256,10 +309,6 @@ function resolverLookups(timeoutMs: number): DelegationLookups {
 }
 
 const codeOf = (error: unknown) => (error as { code?: string }).code ?? ""
-
-/** NXDOMAIN, or the name exists with no record of that type. */
-const isMissing = (error: unknown) =>
-  ["ENOTFOUND", "ENODATA", "NOTFOUND", "NODATA"].includes(codeOf(error))
 
 const isTimeout = (error: unknown) =>
   ["ETIMEOUT", "ETIMEDOUT", "ECONNREFUSED"].includes(codeOf(error))

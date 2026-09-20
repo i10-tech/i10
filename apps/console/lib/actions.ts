@@ -13,6 +13,7 @@ import type {
   SegmentRow,
   TemplateRow,
   TopicRow,
+  VerifiedDomain,
   WebhookEndpoint,
 } from "@/lib/types"
 
@@ -130,7 +131,10 @@ export async function createDomain(input: {
 export async function verifyDomain(id: string) {
   return run(
     () =>
-      api<Domain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
+      // ⚠ `VerifiedDomain`, NOT `Domain`. The extra field is what the button
+      // needs to tell "we could not reach your nameservers" apart from "your
+      // records are not there yet" — see the note on the type.
+      api<VerifiedDomain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
         method: "POST",
       }),
     [`/domains/${encodeURIComponent(id)}`, "/domains"],

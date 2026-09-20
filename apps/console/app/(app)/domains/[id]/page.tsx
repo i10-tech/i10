@@ -180,7 +180,9 @@ export default async function DomainDetailPage({
           quiet={delegation?.ok === true}
         />
 
-        {delegation?.ok && <DelegationNote report={delegation.data} />}
+        {delegation?.ok && (
+          <DelegationNote report={delegation.data} status={domain.status} />
+        )}
 
         <Section className="border-b-0 pt-0">
           <SectionTitle>
