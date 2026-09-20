@@ -13,10 +13,12 @@ import { ValidatedInput } from "@repo/ui/components/validated-field"
  * half-typed password, and on the sign-up page it fires validation against a
  * form nobody finished.
  *
- * ⚠ AND IT NEVER AUTOFOCUSES OR STEALS THE CARET. Toggling `type` between
- * `password` and `text` keeps the value and the cursor where they were in every
- * browser we care about; re-rendering a different element instead would drop
- * the caret to the end mid-word.
+ * ⚠ AND THE TOGGLE NEVER MOVES THE CARET. Switching `type` between `password`
+ * and `text` keeps the value and the cursor where they were in every browser we
+ * care about; re-rendering a different element instead would drop the caret to
+ * the end mid-word. Where the caret STARTS is the caller's business — sign-up
+ * autofocuses this field when it already has the address, see `startOnPassword`
+ * there — and `autoFocus` passes straight through with everything else.
  *
  * ⚠ THE LABEL IS NOW INSIDE THE FIELD RATHER THAN ABOVE IT. `FloatingInput`
  * owns the association, so the caller passes `label` instead of pairing an
