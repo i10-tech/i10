@@ -189,6 +189,7 @@ describe("reconciling against Polar", () => {
       polar: {
         getCheckout: mock(),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
@@ -220,6 +221,7 @@ describe("reconciling against Polar", () => {
       polar: {
         getCheckout: mock(),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
         updateSubscription: async () => {},
         cancelSubscription: async () => {},
@@ -246,6 +248,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [polarSub()],
         createCheckout: mock(),
       },
@@ -273,6 +276,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [
           polarSub({
             id: "sub_old",
@@ -309,6 +313,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [
           polarSub({ id: "sub_live", modified_at: "2026-09-03T12:00:00Z" }),
           polarSub({
@@ -341,6 +346,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [polarSub()],
         createCheckout: mock(),
       },
@@ -366,6 +372,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [polarSub()],
         createCheckout: mock(),
       },
@@ -388,6 +395,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [
           polarSub({ status: "canceled", modified_at: "2026-09-04T12:00:00Z" }),
         ],
@@ -417,6 +425,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [polarSub({ id: "sub_other" })],
         createCheckout: mock(),
       },
@@ -441,6 +450,7 @@ describe("reconciling against Polar", () => {
         cancelSubscription: async () => {},
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
         getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
         listSubscriptions: async () => [
           polarSub({ id: "sub_1", customer: { external_id: "ten-1" } }),
           polarSub({ id: "sub_2", customer: { external_id: "ten-2" } }),
@@ -500,6 +510,7 @@ describe("POST /billing/checkout", () => {
           cancelSubscription: mock(),
           createCustomerSession: mock(),
           getCustomer: mock(),
+          setCustomerExternalId: async () => true,
         },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
@@ -538,6 +549,7 @@ describe("POST /billing/checkout", () => {
           cancelSubscription: mock(),
           createCustomerSession: mock(),
           getCustomer: mock(),
+          setCustomerExternalId: async () => true,
         },
         subscriptions: ops(),
         products: { pro: "prod_pro" },
@@ -567,6 +579,7 @@ describe("POST /billing/checkout", () => {
           cancelSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
           getCustomer: async () => null,
+          setCustomerExternalId: async () => true,
           listSubscriptions: mock(),
         },
         subscriptions: ops(),
@@ -601,6 +614,7 @@ describe("GET /billing/plan", () => {
           cancelSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
           getCustomer: async () => null,
+          setCustomerExternalId: async () => true,
           listSubscriptions: mock(),
         },
         subscriptions: ops({
@@ -648,6 +662,7 @@ describe("GET /billing/plan", () => {
           cancelSubscription: async () => {},
           createCustomerSession: async () => ({ token: "polar_cst_test" }),
           getCustomer: async () => null,
+          setCustomerExternalId: async () => true,
           listSubscriptions: mock(),
         },
         subscriptions: ops({

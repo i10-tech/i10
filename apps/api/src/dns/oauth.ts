@@ -112,6 +112,24 @@ export interface AuthorizationStart {
 
 const STATE_TTL_MS = 10 * 60 * 1000
 
+/**
+ * A place on our own console, or nothing.
+ *
+ * ⚠ THE `//` CASE IS THE WHOLE REASON THIS IS A FUNCTION. `/foo` is a path and
+ * `https://evil.test` is obviously not — but `//evil.test` is BOTH: it starts
+ * with a slash and every browser reads it as a protocol-relative URL to another
+ * origin. A check for a leading slash alone passes it, which is the classic
+ * open-redirect bug and it would be one we had signed.
+ *
+ * ⚠ AND A BACKSLASH COUNTS TOO, because several browsers normalise `/\` to
+ * `//` before resolving it.
+ */
+function safeReturnTo(value: string | undefined): string | undefined {
+  if (!value || !value.startsWith("/")) return undefined
+  if (/^\/[/\\]/.test(value)) return undefined
+  return value
+}
+
 /** RFC 6749's token response, and RFC 6749's error response. */
 interface TokenResponse {
   access_token?: string
@@ -298,14 +316,37 @@ export interface TokenGrant {
 export interface DnsOAuth {
   /** `null` when no app is configured for that provider. */
   isConfigured(slug: string): boolean
-  start(input: { slug: string; tenantId: string }): AuthorizationStart
+  start(input: {
+    slug: string
+    tenantId: string
+    /**
+     * Where to send the browser once the connection is made.
+     *
+     * ⚠ IT TRAVELS IN THE SIGNED `state` BECAUSE IT CANNOT TRAVEL ANYWHERE
+     * ELSE. Providers compare `redirect_uri` character for character against
+     * what is registered, so a query parameter cannot be appended to it — and
+     * `state` is the only field that round-trips untouched.
+     *
+     * ⚠ AND IT IS A PATH, NEVER A URL. An absolute value here would be an open
+     * redirect signed by us: anybody who can start an authorisation could send
+     * the browser to their own origin carrying whatever the callback page
+     * renders. `safeReturnTo` is what enforces that, on the way out AND back.
+     */
+    returnTo?: string
+  }): AuthorizationStart
   /**
    * Verifies `state` and returns who it belongs to. Throws on tampering.
    *
    * ⚠ IT ALSO RETURNS THE PKCE VERIFIER, RECOMPUTED RATHER THAN REMEMBERED.
    * See `pkceVerifier` below for why that is not a shortcut.
    */
-  verifyState(state: string): { slug: string; tenantId: string; verifier: string }
+  verifyState(state: string): {
+    slug: string
+    tenantId: string
+    verifier: string
+    /** Absent when the flow did not name one. Always a path; see `start`. */
+    returnTo?: string
+  }
   exchange(input: {
     slug: string
     code: string
@@ -366,7 +407,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       return Boolean(config.apps[slug])
     },
 
-    start({ slug, tenantId }) {
+    start({ slug, tenantId, returnTo }) {
       const provider = providerBySlug(slug)
       const oauth = provider?.api?.oauth
       const app = config.apps[slug]
@@ -397,7 +438,15 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       // 18 bytes rather than 9: it is the only unpredictable input standing
       // between somebody holding a stolen code and a working credential.
       const nonce = randomBytes(18).toString("base64url")
-      const payload = [tenantId, slug, nonce, String(now() + STATE_TTL_MS)].join("|")
+      // ⚠ LAST, AND JOINED RATHER THAN INTERLEAVED, so a state written before
+      // this field existed still parses into the first four values.
+      const payload = [
+        tenantId,
+        slug,
+        nonce,
+        String(now() + STATE_TTL_MS),
+        safeReturnTo(returnTo) ?? "",
+      ].join("|")
       const state = `${Buffer.from(payload).toString("base64url")}.${sign(payload)}`
 
       const url = new URL(oauth.authorizeUrl)
@@ -448,7 +497,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         throw new OAuthError("bad_state", "That authorisation could not be verified.")
       }
 
-      const [tenantId, slug, nonce, expiry] = payload.split("|")
+      const [tenantId, slug, nonce, expiry, returnTo] = payload.split("|")
       if (!tenantId || !slug || !nonce || !expiry) {
         throw new OAuthError("bad_state", "That authorisation link is malformed.")
       }
@@ -459,7 +508,15 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         )
       }
 
-      return { slug, tenantId, verifier: pkceVerifier(nonce) }
+      return {
+        slug,
+        tenantId,
+        verifier: pkceVerifier(nonce),
+        // ⚠ RE-CHECKED ON THE WAY BACK, not trusted because we signed it. The
+        // signature proves we issued it; it does not prove the rules that
+        // applied when we did are the rules that apply now.
+        ...(safeReturnTo(returnTo) ? { returnTo: safeReturnTo(returnTo) } : {}),
+      }
     },
 
     async exchange({ slug, code, verifier }) {

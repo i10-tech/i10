@@ -26,6 +26,7 @@ const polar = (
   createCheckout: async () => ({ id: "c1", url: "https://x", expiresAt: "" }),
   getCheckout: async () => checkout,
   getCustomer: async () => customer,
+  setCustomerExternalId: async () => true,
   ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
   updateSubscription: async () => {},
   cancelSubscription: async () => {},
@@ -105,18 +106,67 @@ describe("the post-checkout status page", () => {
   })
 
   /*
-   * ⚠ THE ONE PENDING STATE THAT IS NOT PENDING. Polar sets a customer's
-   * `external_id` only on a customer it CREATES from the checkout, so a
-   * checkout that resolved to a customer Polar already had carries no tenant id
-   * on that record — and `toState` drops every subscription event for it, in
-   * the webhook AND in the reconciler, by the same rule. Reporting this as the
-   * ordinary "any second now" is what left somebody watching an amber page for
-   * a payment nothing was ever going to grant.
+   * ⚠ THE ONE PENDING STATE THAT IS NOT PENDING, AND IT IS NOW REPAIRED RATHER
+   * THAN REPORTED. Polar sets a customer's `external_id` only on a customer it
+   * CREATES from the checkout, so a checkout that resolved to a customer Polar
+   * already had carries no tenant id — and `toState` drops every subscription
+   * event for it, in the webhook AND the reconciler, by the same rule. Telling
+   * the customer to email support was the old answer; the id is ours to write.
    */
-  it("names a paid checkout whose Polar customer does not carry our tenant id", async () => {
+  it("writes our tenant id onto a paid checkout's customer that has none", async () => {
+    const wrote = mock(async () => true)
     const app = createApp({
       checkoutStatus: {
-        polar: polar(succeeded, { id: "cus_1", externalId: null }),
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: null }),
+          setCustomerExternalId: wrote,
+        },
+        subscriptions: ops(),
+        log,
+      },
+    })
+
+    const body = await (await ask(app)).json()
+
+    expect(wrote).toHaveBeenCalledWith("cus_1", "ten-1")
+    // Repaired, so it is an ordinary wait rather than a dead end.
+    expect(body).toMatchObject({ status: "paid" })
+    expect(body).not.toHaveProperty("detail")
+  })
+
+  /*
+   * ⚠ A CUSTOMER CARRYING SOMEBODY ELSE'S TENANT ID IS A COLLISION, NOT A GAP.
+   * Stamping ours over it would move another workspace's billing onto this one
+   * — a far worse outcome than the stuck page it would fix.
+   */
+  it("refuses to overwrite a different tenant's id, and says so", async () => {
+    const wrote = mock(async () => true)
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: "someone-else" }),
+          setCustomerExternalId: wrote,
+        },
+        subscriptions: ops(),
+        log,
+      },
+    })
+
+    expect(await (await ask(app)).json()).toMatchObject({
+      status: "paid",
+      detail: "unattributed",
+    })
+    expect(wrote).not.toHaveBeenCalled()
+  })
+
+  // ⚠ A REPAIR THAT DID NOT LAND IS STILL A DEAD END, and must read as one.
+  it("still reports unattributed when the write fails", async () => {
+    const app = createApp({
+      checkoutStatus: {
+        polar: {
+          ...polar(succeeded, { id: "cus_1", externalId: null }),
+          setCustomerExternalId: async () => false,
+        },
         subscriptions: ops(),
         log,
       },

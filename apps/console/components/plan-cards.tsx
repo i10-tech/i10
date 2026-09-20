@@ -145,7 +145,13 @@ export function PlanCards({
       return
     }
 
-    const result = await startCheckout(plan.id)
+    /*
+     * ⚠ THE PAGE THIS WAS PRESSED ON, SO POLAR RETURNS TO IT. The cards render
+     * on the billing settings page and inside onboarding, and those are two
+     * different places to come back to — one confirmation page for both was a
+     * dead end for whichever flow had steps left.
+     */
+    const result = await startCheckout(plan.id, window.location.pathname)
 
     if (!result.ok) {
       setPending(null)

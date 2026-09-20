@@ -6,10 +6,22 @@ import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
-import { finishDnsConnect } from "@/lib/actions"
+import {
+  finishDnsConnect,
+  listDomains,
+  publishDnsRecords,
+  verifyDomain,
+} from "@/lib/actions"
 
 /**
- * Exchanging the authorisation code, exactly once.
+ * Finishing the whole job, not just the authorisation.
+ *
+ * ⚠ CONNECTING USED TO BE ONE OF THREE THINGS SOMEBODY HAD TO DO, AND THE OTHER
+ * TWO LOOKED OPTIONAL. You authorised the provider, came back to "Connected",
+ * and then had to find the domain, press "Publish these for me", and press
+ * "Verify" — three deliberate actions for one intention, with nothing on screen
+ * saying the first had not finished anything. Authorising IS the instruction:
+ * publish the records and check them, then say what happened.
  *
  * ⚠ THE GUARD IS NOT DEFENSIVE PROGRAMMING; AN AUTHORISATION CODE IS SINGLE
  * USE. React runs effects twice in development's strict mode and a router
@@ -18,6 +30,9 @@ import { finishDnsConnect } from "@/lib/actions"
  * connection that was in fact created a moment earlier by the first call. The
  * ref is checked and set synchronously so two renders cannot both pass it.
  */
+
+type Phase = "working" | "publishing" | "done" | "failed"
+
 export function CallbackHandler({
   provider,
   code,
@@ -31,12 +46,22 @@ export function CallbackHandler({
 }) {
   const router = useRouter()
   const started = React.useRef(false)
-  const [status, setStatus] = React.useState<"working" | "done" | "failed">(
+  const [phase, setPhase] = React.useState<Phase>(
     providerError || !code || !state ? "failed" : "working",
   )
   const [message, setMessage] = React.useState<string | null>(
     providerError ?? (code && state ? null : "That link is missing its authorisation."),
   )
+  const [published, setPublished] = React.useState(0)
+  /**
+   * ⚠ RECORDS SOMEBODY ELSE'S RECORDS ARE IN THE WAY, AND STOPS. Publishing a
+   * delegation shadows anything already at those names — a DMARC record is the
+   * usual one — and removing it is never ours to decide unprompted. The API
+   * answers 409 without writing, and this reports it rather than retrying with
+   * `replace_conflicts`, which would be deciding by hand what the dialog on the
+   * domain page exists to ask.
+   */
+  const [blocked, setBlocked] = React.useState<string[]>([])
 
   React.useEffect(() => {
     if (started.current) return
@@ -44,9 +69,9 @@ export function CallbackHandler({
     started.current = true
 
     void (async () => {
-      const result = await finishDnsConnect({ provider, code, state })
-      if (!result.ok) {
-        setStatus("failed")
+      const connected = await finishDnsConnect({ provider, code, state })
+      if (!connected.ok) {
+        setPhase("failed")
         /*
          * ⚠ THE PROVIDER'S OWN WORDS, WHERE THE API SENT THEM. Every token
          * exchange that fails reads "X did not complete the authorisation",
@@ -57,34 +82,109 @@ export function CallbackHandler({
          * who authorised the account a moment ago.
          */
         const detail =
-          typeof result.body?.detail === "string" ? result.body.detail : null
-        setMessage(detail ? `${result.error} (${detail})` : result.error)
+          typeof connected.body?.detail === "string" ? connected.body.detail : null
+        setMessage(detail ? `${connected.error} (${detail})` : connected.error)
         return
       }
-      setStatus("done")
+
+      setPhase("publishing")
+
+      /*
+       * ⚠ EVERY UNVERIFIED DOMAIN, NOT THE ONE THEY CAME FROM. The flow does
+       * not carry a domain — somebody can reach this from onboarding, from the
+       * add form or from a domain page — and a credential for a provider is a
+       * credential for every zone in that account. Publishing for all of them
+       * is what the customer asked for by connecting; a domain hosted
+       * elsewhere answers `zone_not_found` and is skipped without comment.
+       */
+      const domains = await listDomains()
+      const pending = domains.ok
+        ? domains.data.data.filter((domain) => domain.status !== "verified")
+        : []
+
+      let wrote = 0
+      const inTheWay: string[] = []
+
+      for (const domain of pending) {
+        const result = await publishDnsRecords({ domainId: domain.id, provider })
+
+        if (!result.ok) {
+          // ⚠ A 409 IS THE PROTOCOL, NOT A FAILURE — see `blocked` above.
+          if (result.status === 409) inTheWay.push(domain.name)
+          continue
+        }
+
+        wrote += 1
+
+        /*
+         * ⚠ VERIFIED IMMEDIATELY, AND A "not yet" HERE IS NOT A FAILURE. The
+         * records were written seconds ago and a resolver may still be holding
+         * a negative answer for them, so this is a head start rather than the
+         * verdict — the domain keeps being re-checked for 72 hours either way.
+         * Nothing branches on the result for exactly that reason.
+         */
+        await verifyDomain(domain.id)
+      }
+
+      setPublished(wrote)
+      setBlocked(inTheWay)
+      setPhase("done")
       router.refresh()
+
+      /*
+       * ⚠ BACK WHERE THEY STARTED, IF THEY STARTED SOMEWHERE. The path came out
+       * of the signed `state` and the API re-checked that it is a path on this
+       * console. Without it, onboarding lost people here: the callback lands in
+       * the console shell and the flow they were half-way through is not in it.
+       *
+       * ⚠ AND ONLY WHEN NOTHING NEEDS SAYING. A conflict is a decision waiting
+       * for them; navigating away from it would hide the one thing on this page
+       * that is not automatic.
+       */
+      const returnTo = connected.data.return_to
+      if (returnTo && inTheWay.length === 0) router.replace(returnTo)
     })()
   }, [code, state, provider, providerError, router])
 
   return (
     <div className="mx-auto flex min-h-[60vh] w-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
-      {status === "working" && (
+      {(phase === "working" || phase === "publishing") && (
         <>
           <Spinner className="size-6" />
           <p className="text-sm text-muted-foreground">
-            Finishing the connection with {provider}…
+            {phase === "working"
+              ? `Finishing the connection with ${provider}…`
+              : "Publishing your records and checking them…"}
           </p>
         </>
       )}
 
-      {status === "done" && (
+      {phase === "done" && (
         <>
           <CheckCircle2 className="size-8 text-success" />
           <div>
-            <p className="text-sm font-medium">Connected</p>
+            <p className="text-sm font-medium">
+              {published > 0 ? "Connected and published" : "Connected"}
+            </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              We can publish records for domains hosted at {provider}. Open a domain and
-              press &ldquo;Publish these for me&rdquo;.
+              {blocked.length > 0 ? (
+                <>
+                  We published what we could, but {blocked.join(", ")} already{" "}
+                  {blocked.length === 1 ? "has records" : "have records"} at the names
+                  we need. Open {blocked.length === 1 ? "it" : "them"} to choose whether
+                  to replace {blocked.length === 1 ? "them" : "those"}.
+                </>
+              ) : published > 0 ? (
+                <>
+                  We added the records at {provider} and started checking them.
+                  Verification usually follows within minutes.
+                </>
+              ) : (
+                <>
+                  We can publish records for domains hosted at {provider}. Add a domain
+                  and we will do the rest.
+                </>
+              )}
             </p>
           </div>
           <Button asChild>
@@ -93,7 +193,7 @@ export function CallbackHandler({
         </>
       )}
 
-      {status === "failed" && (
+      {phase === "failed" && (
         <>
           <AlertTriangle className="size-8 text-danger" />
           <div>

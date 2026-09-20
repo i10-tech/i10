@@ -697,3 +697,61 @@ describe("the OAuth broker", () => {
     })
   })
 })
+
+/**
+ * Where the browser is sent once the provider is done with it.
+ *
+ * ⚠ THE VALUE IS SIGNED BY US, WHICH IS EXACTLY WHY IT HAS TO BE CHECKED. It
+ * cannot ride on `redirect_uri` — providers compare that character for
+ * character — so it rides in `state`, and a `state` we signed is one the
+ * callback trusts. An absolute URL accepted here would be an open redirect with
+ * our signature on it: start an authorisation naming your own origin, send
+ * somebody the link, and the callback hands them to you.
+ */
+describe("the return path", () => {
+  const withReturn = (returnTo: string) =>
+    oauth().start({ slug: "cloudflare", tenantId: "tenant-1", returnTo })
+
+  it("round-trips a path on our own console", () => {
+    const o = oauth()
+    const { state } = o.start({
+      slug: "cloudflare",
+      tenantId: "tenant-1",
+      returnTo: "/onboarding?step=domain",
+    })
+    expect(o.verifyState(state).returnTo).toBe("/onboarding?step=domain")
+  })
+
+  it("drops an absolute URL rather than redirecting off-origin", () => {
+    expect(oauth().verifyState(withReturn("https://evil.test").state).returnTo).toBe(
+      undefined,
+    )
+  })
+
+  /*
+   * ⚠ `//evil.test` IS THE ONE A LEADING-SLASH CHECK LETS THROUGH. It starts
+   * with a slash and every browser resolves it as protocol-relative to another
+   * origin — the classic open redirect, and the reason the guard is not simply
+   * `startsWith("/")`.
+   */
+  it("drops a protocol-relative path", () => {
+    expect(oauth().verifyState(withReturn("//evil.test").state).returnTo).toBe(
+      undefined,
+    )
+  })
+
+  // ⚠ SEVERAL BROWSERS NORMALISE `/\` TO `//` BEFORE RESOLVING IT.
+  it("drops a backslash-escaped path", () => {
+    expect(oauth().verifyState(withReturn("/\\evil.test").state).returnTo).toBe(
+      undefined,
+    )
+  })
+
+  it("still verifies a state carrying no return path at all", () => {
+    const o = oauth()
+    const { state } = o.start({ slug: "cloudflare", tenantId: "tenant-1" })
+    const claimed = o.verifyState(state)
+    expect(claimed.tenantId).toBe("tenant-1")
+    expect(claimed.returnTo).toBe(undefined)
+  })
+})

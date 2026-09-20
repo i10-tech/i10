@@ -17,7 +17,7 @@ import {
 } from "@repo/ui/components/page"
 import { Status } from "@/components/status"
 import { DnsRecords } from "@/components/dns-records"
-import { DomainActions } from "@/components/domain-actions"
+import { DomainDangerZone } from "@/components/domain-danger-zone"
 import { DelegationNote } from "@/components/delegation-note"
 import { PublishRecords } from "@/components/publish-records"
 import { VerifyButton } from "@/components/verify-button"
@@ -157,7 +157,6 @@ export default async function DomainDetailPage({
               />
             )}
             <VerifyButton id={domain.id} status={domain.status} />
-            <DomainActions id={domain.id} name={domain.name} scopedKeys={scopedKeys} />
           </PageActions>
         </PageHeaderRow>
       </PageHeader>
@@ -228,6 +227,23 @@ export default async function DomainDetailPage({
               <Detail label="Added" value={formatExact(domain.created_at)} />
               <Detail label="Domain ID" value={domain.id} mono />
             </dl>
+          </SectionContent>
+        </Section>
+
+        {/*
+         * ⚠ LAST, AND THAT IS THE POINT. Deleting a domain stops its mail, and
+         * it used to sit behind a ✕✕✕ in the header an inch from "Verify" —
+         * an unlabelled menu whose only contents were destructive. Reaching it
+         * now means scrolling past everything the page is actually for.
+         */}
+        <Section>
+          <SectionTitle className="text-destructive">Danger zone</SectionTitle>
+          <SectionContent>
+            <DomainDangerZone
+              id={domain.id}
+              name={domain.name}
+              scopedKeys={scopedKeys}
+            />
           </SectionContent>
         </Section>
       </PageBody>

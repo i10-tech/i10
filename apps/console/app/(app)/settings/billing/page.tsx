@@ -7,6 +7,7 @@ import {
   SectionTitle,
 } from "@repo/ui/components/page"
 import { Status } from "@/components/status"
+import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
 import { PanelError } from "@/components/panel-error"
 import { PaymentMethodButton } from "@/components/payment-method-button"
@@ -31,7 +32,17 @@ export const metadata: Metadata = { title: "Billing" }
  * through a plan change has nothing to change. The rule lives in `PlanCards`,
  * which reads `billing.subscription`.
  */
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ checkout_id?: string }>
+}) {
+  // ⚠ POLAR APPENDS THIS ON THE WAY BACK. `success_url` now points at whichever
+  // page started the checkout rather than at one confirmation screen for the
+  // whole product, so the outcome is reported here, in place, above the plan
+  // the customer just bought. See routes/console/account.ts.
+  const { checkout_id: checkoutId } = await searchParams
+
   const [plans, usage] = await Promise.all([
     tryApi<{ data: PlanSummary[] }>("/console/plans"),
     tryApi<{ usage: FeatureUsage[]; billing: BillingState }>("/console/usage"),
@@ -45,7 +56,13 @@ export default async function BillingPage() {
 
   return (
     <div>
-      <Section className="pt-0">
+      {checkoutId && (
+        <Section className="pt-0">
+          <CheckoutOutcome checkoutId={checkoutId} />
+        </Section>
+      )}
+
+      <Section className={checkoutId ? undefined : "pt-0"}>
         <SectionTitle>Current plan</SectionTitle>
         <SectionContent>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
