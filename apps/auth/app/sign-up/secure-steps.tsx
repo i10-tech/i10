@@ -17,6 +17,7 @@ import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { StepHeading } from "../_components/step-heading"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
+import { abortPendingWebAuthn } from "../_lib/webauthn"
 import type { SsoProvider } from "../_lib/providers"
 import {
   AppleIcon,
@@ -94,6 +95,24 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
   async function add() {
     if (!user || locked) return
     onBusy("passkey")
+
+    /*
+     * ⚠ THE BROWSER ALLOWS ONE WEBAUTHN REQUEST PER DOCUMENT, AND THE PAGE
+     * UNDERNEATH THIS ONE ALREADY TOOK IT. The sign-in form arms conditional
+     * mediation — the passkey offered inside the email field's autofill menu —
+     * on mount, and it stays pending for the life of the document because it is
+     * waiting for a choice nobody may ever make. Since an unknown address turns
+     * that page into this flow WITHOUT navigating, the request is still open
+     * here, and Chromium answers `create()` with `OperationError: A request is
+     * already pending.` — which clerk-js does not translate, so it surfaced as
+     * "we could not add a passkey on this device" with no prompt ever shown.
+     *
+     * ⚠ AND IT IS CALLED UNCONDITIONALLY, because this step is reachable two
+     * ways. A provider round trip lands on `?step=passkey` in a FRESH document
+     * where nothing is pending; asking which route brought somebody here would
+     * be a second, forgettable copy of a fact `_lib/webauthn` already holds.
+     */
+    abortPendingWebAuthn()
 
     try {
       await addPasskey()

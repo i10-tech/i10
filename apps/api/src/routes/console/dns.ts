@@ -191,7 +191,15 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
       const saved = await d.dnsConnections.save({
         tenantId,
         provider: slug,
-        label: grant.scopes ?? null,
+        /*
+         * ⚠ NOT `grant.scopes`. `label` is "what the customer called it" and is
+         * rendered as the connection's name, so putting the granted scope
+         * string there made every OAuth connection display as
+         * "dns.write zone.read offline_access". An authorisation supplies no
+         * name, and `null` is the honest answer — the console already shows the
+         * provider and the zones it reached.
+         */
+        label: null,
         credential,
         zones: zones.map((z) => z.name),
       })
@@ -234,8 +242,21 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
         {
           statusCode: 502,
           name: "internal_server_error" as const,
+          /*
+           * ⚠ ONLY AN `OAuthError`'S MESSAGE IS SAFE TO RETURN, AND `instanceof
+           * Error` WAS NOT A NEAR-MISS — IT PUBLISHED A CREDENTIAL. Those
+           * messages are written for a customer to read. Every OTHER Error
+           * reaching here is internal, and drizzle's in particular embeds the
+           * full failing statement WITH ITS PARAMETERS — which for this insert
+           * means the sealed credential, the tenant id and the customer's zone
+           * names, rendered in the browser on the callback page.
+           *
+           * ⚠ THE CAUSE STILL GOES TO THE LOG, one line above. Nothing is lost
+           * for whoever has to diagnose it; what is lost is the copy that was
+           * being handed to the browser.
+           */
           message:
-            error instanceof OAuthError || error instanceof Error
+            error instanceof OAuthError
               ? error.message
               : "Could not complete the connection.",
           /*

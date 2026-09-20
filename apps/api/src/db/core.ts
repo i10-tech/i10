@@ -1898,7 +1898,23 @@ export const dnsConnections = core.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("dns_connections_tenant_idx").on(t.tenantId, t.provider)],
+  /*
+   * ⚠ UNIQUE, AND IT HAS TO BE: `save()` UPSERTS ON THIS EXACT PAIR. A plain
+   * index satisfies the lookup but NOT `ON CONFLICT ("tenant_id","provider")`,
+   * which Postgres refuses with 42P10 — "no unique or exclusion constraint
+   * matching the ON CONFLICT specification". So every insert this table has
+   * ever received failed, and the table has never held a row.
+   *
+   * ⚠ IT WAS INVISIBLE BECAUSE NOTHING EVER GOT THIS FAR. The OAuth exchange
+   * was being challenged before a credential existed to store, so the first
+   * authorisation that actually succeeded is the one that found this.
+   *
+   * ⚠ AND UNIQUENESS IS THE MODEL, NOT JUST THE MECHANISM. Re-authorising
+   * REPLACES a connection — two live tokens for one account is two things to
+   * revoke and only one that anybody remembers — and `get()` reads one row per
+   * provider. See dns/connections.ts.
+   */
+  (t) => [uniqueIndex("dns_connections_tenant_idx").on(t.tenantId, t.provider)],
 )
 
 /**
