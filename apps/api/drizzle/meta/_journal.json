@@ -337,6 +337,13 @@
       "when": 1789869352607,
       "tag": "0047_release_subscription",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1789869353607,
+      "tag": "0048_rename_tenant_by_org",
+      "breakpoints": true
     }
   ]
 }

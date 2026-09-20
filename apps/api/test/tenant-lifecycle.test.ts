@@ -23,6 +23,7 @@ const deps = (over: Record<string, unknown> = {}) => ({
       alreadyDead: false,
     })),
     ownedBy: mock(async () => []),
+    renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
   },
   polar: { revokeSubscription: mock(async () => "revoked" as const) },
   domains: { releaseDomains: mock(async () => ({ released: 2, failed: 0 })) },
@@ -67,6 +68,7 @@ describe("what a terminated workspace gives back", () => {
           alreadyDead: false,
         })),
         ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
     })
 
@@ -90,6 +92,7 @@ describe("what a terminated workspace gives back", () => {
           alreadyDead: true,
         })),
         ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
     })
 
@@ -190,6 +193,7 @@ describe("a deleted organization", () => {
           alreadyDead: true,
         })),
         ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
     })
 
@@ -204,6 +208,7 @@ describe("a deleted organization", () => {
         isLive: mock(async () => true),
         terminate: mock(async () => null),
         ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
     })
 
@@ -224,6 +229,7 @@ describe("a deleted organization", () => {
           alreadyDead: false,
         })),
         ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
     })
 
@@ -273,6 +279,7 @@ describe("a deleted user who owned workspaces", () => {
           alreadyDead: false,
         })),
         ownedBy: mock(async () => owned),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
       // Nobody is left in it — which is what Clerk actually reports for a
       // personal organization whose only member deleted their account.
@@ -298,6 +305,7 @@ describe("a deleted user who owned workspaces", () => {
         isLive: mock(async () => true),
         terminate: mock(async () => null),
         ownedBy: mock(async () => owned),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
       organizations: {
         hasMembers: mock(async () => true),
@@ -318,6 +326,7 @@ describe("a deleted user who owned workspaces", () => {
         isLive: mock(async () => true),
         terminate: mock(async () => null),
         ownedBy: mock(async () => owned),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
       organizations: {
         hasMembers: mock(async () => {
@@ -358,6 +367,7 @@ describe("the empty organization left behind by a deleted account", () => {
           alreadyDead: false,
         })),
         ownedBy: mock(async () => owned),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
       organizations: {
         hasMembers: mock(async () => false),
@@ -401,6 +411,7 @@ describe("the empty organization left behind by a deleted account", () => {
           return { tenantId: "ten-1", polarSubscriptionId: "sub_1", alreadyDead: false }
         }),
         ownedBy: mock(async () => owned),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
       organizations: {
         hasMembers: mock(async () => false),
@@ -463,6 +474,7 @@ describe("the empty organization left behind by a deleted account", () => {
         isLive: mock(async () => true),
         terminate: mock(async () => null),
         ownedBy: mock(async () => owned),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
     })
     await tenantLifecycle(d).onUserDeleted({ id: "user_1" })
@@ -478,5 +490,75 @@ describe("the empty organization left behind by a deleted account", () => {
     const d = abandoned()
     await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })
     expect(d.organizations.remove).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * ⚠ THE WORKSPACE NAME AND THE CLERK ORGANIZATION NAME ARE ONE NAME NOW. They
+ * were deliberately two, for a sound reason — syncing them must not put a write
+ * to Clerk inside a rename transaction — but the result was an organization
+ * still called "Mohamed" in the switcher long after the workspace became
+ * "i10 testing", reported from production. The console renames ours and asks
+ * Clerk to match; this is the other direction, for the rename field inside
+ * Clerk's own `<OrganizationProfile />` on the Team page.
+ */
+describe("a Clerk organization that has been renamed", () => {
+  const named = (over: Record<string, unknown> = {}) =>
+    deps({
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => null),
+        ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
+        ...(over.tenants as object),
+      },
+    })
+
+  it("renames the workspace behind it", async () => {
+    const d = named()
+    expect(
+      await tenantLifecycle(d).onOrganizationUpdated({
+        id: "org_1",
+        name: "i10 testing",
+      }),
+    ).toBe("renamed")
+    expect(d.tenants.renameByOrg).toHaveBeenCalledWith("org_1", "i10 testing")
+  })
+
+  /*
+   * ⚠ THE ECHO OF OUR OWN RENAME IS THE COMMON CASE AND MUST BE A NO-OP. Clerk
+   * fires `organization.updated` for the change WE just asked for, so most
+   * deliveries here carry a name the row already holds. `renamed: false` is
+   * what keeps the exchange to one round trip instead of ringing back and
+   * forth, and keeps the log quiet.
+   */
+  it("says nothing when the name already matches", async () => {
+    const d = named({
+      tenants: {
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: false })),
+      },
+    })
+    expect(
+      await tenantLifecycle(d).onOrganizationUpdated({ id: "org_1", name: "same" }),
+    ).toBe("ignored")
+  })
+
+  it("ignores an organization we have no tenant for", async () => {
+    const d = named({ tenants: { renameByOrg: mock(async () => null) } })
+    expect(
+      await tenantLifecycle(d).onOrganizationUpdated({ id: "org_x", name: "n" }),
+    ).toBe("ignored")
+  })
+
+  // ⚠ AN UPDATE THAT IS NOT A RENAME ARRIVES HERE TOO. Clerk fires this event
+  // for logo changes, metadata, slug — anything. A blank name is not one.
+  it.each([
+    ["no name at all", { id: "org_1" }],
+    ["a blank name", { id: "org_1", name: "   " }],
+    ["no organization id", { name: "i10" }],
+  ])("ignores an update with %s", async (_why, payload) => {
+    const d = named()
+    expect(await tenantLifecycle(d).onOrganizationUpdated(payload)).toBe("ignored")
+    expect(d.tenants.renameByOrg).not.toHaveBeenCalled()
   })
 })

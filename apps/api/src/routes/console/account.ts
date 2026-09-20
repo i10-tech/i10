@@ -54,7 +54,46 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     if (name.length > 120) return c.json(validation("`name` is too long."), 422)
 
     const updated = await d.profile.rename(tenantId, name)
-    return updated ? c.json({ ok: true, name }) : c.json(notFound("No workspace."), 404)
+    if (!updated) return c.json(notFound("No workspace."), 404)
+
+    /*
+     * ⚠ THE CLERK ORGANIZATION IS RENAMED TOO, AND THE NOTE THAT USED TO SAY IT
+     * DELIBERATELY WAS NOT HAD THE RIGHT REASON AND THE WRONG CONCLUSION. The
+     * reason was real: keeping them in sync must not mean a write to somebody
+     * else's API inside a database transaction, or a Clerk outage makes
+     * renaming a workspace impossible. The conclusion — leave them unconnected
+     * — produced the thing customers actually hit: an organization still called
+     * "Mohamed" in the switcher months after the workspace became "i10 testing",
+     * with no way to reconcile them and no explanation of why there are two.
+     *
+     * ⚠ SO: OURS FIRST, COMMITTED, AND THEN CLERK OUTSIDE THE TRANSACTION. The
+     * rename has already succeeded by the time this runs; a Clerk failure
+     * leaves the two names apart for a while, which is precisely the state the
+     * old behaviour was in permanently. It is logged and the caller still gets
+     * its 200, because telling somebody their rename failed when their
+     * workspace is already renamed would be a lie that invites them to do it
+     * again.
+     *
+     * ⚠ AND IT DOES NOT LOOP. Clerk answers this with an `organization.updated`
+     * webhook, which renames our row to the value it already holds and writes
+     * nothing back — see routes/webhooks.ts.
+     */
+    if (d.organizations) {
+      const profile = await d.profile.get(tenantId)
+      if (profile?.clerk_org_id) {
+        try {
+          await d.organizations.rename(profile.clerk_org_id, name)
+        } catch (error) {
+          d.log.warn(
+            { err: String(error), tenantId, clerkOrgId: profile.clerk_org_id, name },
+            "renamed the workspace but could not rename its Clerk organization — " +
+              "the switcher keeps the old name until somebody renames it again",
+          )
+        }
+      }
+    }
+
+    return c.json({ ok: true, name })
   })
 
   // ───────────────────────────────────────────────────────────────────────────

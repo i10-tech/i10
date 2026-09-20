@@ -199,6 +199,7 @@ describe("a deletion arriving from Clerk", () => {
   const lifecycle = {
     onOrganizationDeleted: mock(async () => "terminated" as const),
     onUserDeleted: mock(async () => "ignored" as const),
+    onOrganizationUpdated: mock(async () => "renamed" as const),
   }
 
   const withLifecycle = () =>
