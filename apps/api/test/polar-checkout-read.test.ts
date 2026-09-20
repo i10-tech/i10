@@ -43,6 +43,12 @@ describe("reading a Polar checkout by id", () => {
       status: "succeeded",
       tenantId: "ten-1",
       customerId: null,
+      // ⚠ NULL RATHER THAN ABSENT, and both are read off the checkout rather
+      // than assumed. They are what identifies the subscription this checkout
+      // produced when the customer's `external_id` names somebody else — see
+      // `pickForCheckout`.
+      productId: null,
+      createdAt: null,
     })
   })
 
@@ -110,7 +116,7 @@ describe("reading a Polar customer by id", () => {
     expect(await client(status).getCustomer("cus_1")).toBe(null)
   })
 
-  it.each([401, 403, 500])(
+  it.each([401, 500])(
     "throws on %i rather than inventing an answer",
     async (status) => {
       expect(client(status).getCustomer("cus_1")).rejects.toThrow(
@@ -118,4 +124,21 @@ describe("reading a Polar customer by id", () => {
       )
     },
   )
+
+  /*
+   * ⚠ A 403 STILL THROWS, AND NOW IT NAMES THE THING THAT IS ACTUALLY WRONG.
+   * `customers:read` is not in the scope set a Polar organisation access token
+   * is created with by default, so this is not a transient failure — it is a
+   * deployment where attribution repair can never run. Measured in production
+   * 2026-09-20: every call answered `403 insufficient_scope`, the caller read it
+   * as "Polar is briefly unreachable, assume attribution is fine", and a
+   * customer who had paid sat on the free plan with nothing logged loudly
+   * enough to notice. A generic "failed with 403" sends whoever reads it
+   * looking at the customer record instead of at the token.
+   */
+  it("names the missing scope on a 403, rather than the status code", async () => {
+    const failing = client(403).getCustomer("cus_1")
+    await expect(failing).rejects.toThrow("customers:read")
+    await expect(failing).rejects.toThrow("access token")
+  })
 })

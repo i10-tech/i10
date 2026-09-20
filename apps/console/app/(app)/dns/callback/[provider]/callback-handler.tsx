@@ -58,6 +58,16 @@ export function CallbackHandler({
    * domain page exists to ask.
    */
   const [blocked, setBlocked] = React.useState<string[]>([])
+  /**
+   * Records written, but the check that follows them did not answer.
+   *
+   * ⚠ IT IS A SEPARATE LIST BECAUSE IT USED TO BE SILENTLY FOLDED INTO
+   * SUCCESS. A verify that answered 500 still counted as published, so this
+   * screen said "we proved the domains are yours" — two claims, one measured
+   * and one invented — and the person had no reason to look any further. The
+   * failing call stayed invisible until they pressed Verify by hand.
+   */
+  const [unchecked, setUnchecked] = React.useState<string[]>([])
 
   React.useEffect(() => {
     if (started.current) return
@@ -100,6 +110,7 @@ export function CallbackHandler({
 
       let wrote = 0
       const inTheWay: string[] = []
+      const notChecked: string[] = []
 
       /*
        * ⚠ THE SAME SEQUENCE THE ADD FORM AND THE ONBOARDING FLOW RUN, FROM THE
@@ -121,10 +132,15 @@ export function CallbackHandler({
         if (outcome.kind === "failed") continue
 
         wrote += 1
+        // ⚠ PUBLISHED AND CHECKED ARE COUNTED SEPARATELY — see `unchecked`.
+        if (outcome.kind === "published" && !outcome.checked) {
+          notChecked.push(domain.name)
+        }
       }
 
       setPublished(wrote)
       setBlocked(inTheWay)
+      setUnchecked(notChecked)
       setPhase("done")
       router.refresh()
 
@@ -139,7 +155,9 @@ export function CallbackHandler({
        * that is not automatic.
        */
       const returnTo = connected.data.return_to
-      if (returnTo && inTheWay.length === 0) router.replace(returnTo)
+      if (returnTo && inTheWay.length === 0 && notChecked.length === 0) {
+        router.replace(returnTo)
+      }
     })()
   }, [code, state, provider, providerError, router])
 
@@ -170,6 +188,12 @@ export function CallbackHandler({
                   {blocked.length === 1 ? "has records" : "have records"} at the names
                   we need. Open {blocked.length === 1 ? "it" : "them"} to choose whether
                   to replace {blocked.length === 1 ? "them" : "those"}.
+                </>
+              ) : unchecked.length > 0 ? (
+                <>
+                  We added the records at {provider}, but the check that follows them
+                  did not answer for {unchecked.join(", ")}. The records are in place —
+                  open the domain and press Verify, and tell us if that keeps failing.
                 </>
               ) : published > 0 ? (
                 <>

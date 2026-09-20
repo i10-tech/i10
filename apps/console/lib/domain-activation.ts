@@ -39,7 +39,23 @@ export type Activation =
    * its schedule and not ours. A caller that renders this as a problem is
    * telling somebody who is done that they are not.
    */
-  | { kind: "published"; domain: Domain | null; written: number }
+  | {
+      kind: "published"
+      domain: Domain | null
+      written: number
+      /**
+       * Whether the check that follows publishing actually answered.
+       *
+       * ⚠ FALSE MEANS WE DO NOT KNOW, AND CONFLATING IT WITH TRUE HID A
+       * PRODUCTION 500 FOR DAYS. This used to report `published` either way, so
+       * a verify that answered 500 produced "we added the records and proved
+       * the domains are yours" — a sentence with two claims in it, one of them
+       * measured and one of them invented. The person reading it had no reason
+       * to look further, and the failing call was invisible until they pressed
+       * Verify by hand and got the error the flow had already swallowed.
+       */
+      checked: boolean
+    }
   /** Nothing was written. Somebody has to agree to the removals first. */
   | { kind: "conflicts"; conflicts: ConflictingRecord[] }
   /** We could not write them. The records are still the customer's to publish. */
@@ -102,10 +118,12 @@ export async function activateDomain({
      * saying "we could not publish" here would be false. The written count is
      * the fact we have; the check is a head start that did not land.
      */
-    // ⚠ `null` RATHER THAN A GUESS. The publish response carries what was
-    // written, not the domain row, and the one call that would have returned a
-    // fresh row is the one that just failed.
-    return { kind: "published", domain: null, written: published.data.created.length }
+    return {
+      kind: "published",
+      domain: null,
+      written: published.data.created.length,
+      checked: false,
+    }
   }
 
   return checked.data.status === "verified"
@@ -114,6 +132,7 @@ export async function activateDomain({
         kind: "published",
         domain: checked.data,
         written: published.data.created.length,
+        checked: true,
       }
 }
 

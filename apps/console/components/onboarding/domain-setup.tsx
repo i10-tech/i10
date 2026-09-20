@@ -164,6 +164,20 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
      */
     if (outcome.kind === "published") {
       if (outcome.domain) setDomain(outcome.domain)
+      /*
+       * ⚠ A CHECK THAT DID NOT ANSWER IS NOT THE HAPPY PATH, AND SHOWING THE
+       * HAPPY SCREEN FOR IT IS HOW A 500 ON EVERY VERIFY WENT UNNOTICED. The
+       * records are published either way, so the fallback screen is the right
+       * one — it shows them, says they are in place, and asks nothing further.
+       */
+      if (!outcome.checked) {
+        setFallbackReason(
+          "The records are published, but the check that follows them did not " +
+            "answer. Nothing here needs doing — these are what we added.",
+        )
+        setPhase("manual")
+        return
+      }
       setPhase("done")
       return
     }

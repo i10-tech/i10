@@ -176,6 +176,31 @@ export function decide(event: PolarEvent, opts: DecideOptions): Decision {
 export function toState(
   sub: PolarSubscription | undefined,
   opts: DecideOptions,
+  /**
+   * The tenant to attribute this subscription to, overriding
+   * `customer.external_id`.
+   *
+   * ⚠ ONLY EVER THE TENANT ON A SUCCEEDED CHECKOUT, AND THAT IS A STRONGER
+   * ATTRIBUTION THAN THE FIELD IT OVERRIDES — not a weaker one. `external_id`
+   * is stamped by Polar ONCE, when it creates a customer from a checkout's
+   * `external_customer_id`, and is never maintained afterwards. Polar
+   * deduplicates customers by EMAIL, so every later purchase by the same person
+   * — a new workspace, a re-signup after deleting an account — reuses that
+   * customer and inherits an id naming whoever bought FIRST. Observed in
+   * production 2026-09-20: seven subscriptions on one customer, all seven
+   * carrying a tenant that no longer existed, including one created thirty
+   * seconds after the checkout being answered.
+   *
+   * `metadata.tenant_id` on the checkout is the opposite: OUR API writes it at
+   * creation, from an authenticated session, and Polar echoes it back
+   * unchanged. Combined with `status === "succeeded"` — Polar's own word that
+   * the money moved for THIS checkout — it says exactly who paid for what.
+   *
+   * ⚠ IT IS A PARAMETER RATHER THAN A FIELD ON `DecideOptions` SO THE WEBHOOK
+   * CANNOT REACH IT. That path has no checkout and no business overriding
+   * anything; `decide` does not pass it and cannot.
+   */
+  attributeTo?: string,
 ): Decision {
   if (!sub || typeof sub.id !== "string" || typeof sub.status !== "string") {
     return { kind: "ignore", reason: "payload is not a subscription" }
@@ -184,7 +209,7 @@ export function toState(
   // ⚠ THE TENANT COMES FROM `external_customer_id`, WHICH WE SET AT CHECKOUT.
   // Not from the email — a customer can change that mid-checkout, and matching
   // on it would attach a plan to whoever else happens to own the address.
-  const tenantId = sub.customer?.external_id ?? undefined
+  const tenantId = attributeTo ?? sub.customer?.external_id ?? undefined
   if (!tenantId) {
     /*
      * ⚠ THIS IS NOT A MALFORMED PAYLOAD, AND TREATING IT AS ONE IS WHY IT WENT
@@ -319,6 +344,78 @@ export function pick(
 
     if (!held || supersedes(decided.state, held, opts.freePlanId)) {
       held = decided.state
+    }
+  }
+
+  return held
+}
+
+/**
+ * The subscription a succeeded checkout produced, attributed to the tenant that
+ * checkout names.
+ *
+ * ⚠ THIS EXISTS BECAUSE `pick` CANNOT ANSWER FOR THE CUSTOMER WHO HAS BOUGHT
+ * BEFORE, AND THAT IS THE COMMON CASE RATHER THAN AN EDGE ONE. It filters by
+ * `customer.external_id`, which names whoever created the Polar customer — so
+ * for anybody on their second workspace it discards every subscription they
+ * own, including the one they have just paid for, and grants nothing at all.
+ * Silently: no error, no `stranded`, just a page that spins and a plan that
+ * never arrives. That is the bug this function is the fix for.
+ *
+ * ⚠ AND IT NEEDS NO `customers` SCOPE, WHICH IS THE OTHER HALF OF WHY. Repairing
+ * `external_id` requires `customers:read` and `customers:write`, which a Polar
+ * organisation access token does NOT carry by default — so on a deployment
+ * missing them the repair path cannot even look at the customer, let alone fix
+ * it. Checkouts and subscriptions are readable with the scopes every deployment
+ * already has.
+ *
+ * ⚠ THE PRODUCT MUST MATCH THE CHECKOUT'S. One customer can hold subscriptions
+ * to several products; the one being granted has to be the one that was bought
+ * here, not the largest thing on the account.
+ *
+ * ⚠ AND NEWEST-CREATED WINS AMONG EQUALS, NOT `supersedes`. That rule ranks by
+ * entitlement first and is right for "what does this tenant hold overall" —
+ * here the question is narrower and has an exact answer: Polar creates the
+ * subscription moments after the checkout succeeds, so the newest one for that
+ * product IS the one just bought. Observed: six cancelled subscriptions for the
+ * same product on the same customer, any of which `supersedes` would have been
+ * content to return once they were all equally unentitling.
+ */
+export function pickForCheckout(
+  subs: readonly (PolarSubscription | undefined)[],
+  opts: DecideOptions,
+  checkout: { tenantId: string; productId: string | null; createdAt?: string | null },
+): SubscriptionState | null {
+  let held: SubscriptionState | null = null
+  let heldAt = -Infinity
+
+  /*
+   * ⚠ THE SUBSCRIPTION THIS CHECKOUT MADE CANNOT PREDATE THE CHECKOUT, and that
+   * one inequality is what keeps the override honest. Two live workspaces can
+   * share a Polar customer — same person, same email — and without a floor this
+   * would happily attribute the OTHER workspace's older subscription to
+   * whoever just completed a checkout. Polar creates the subscription moments
+   * after the money clears, so anything older than the checkout belongs to a
+   * different purchase.
+   */
+  const floor = Date.parse(checkout.createdAt ?? "") || 0
+
+  for (const sub of subs) {
+    if (!sub) continue
+    if (checkout.productId && sub.product_id !== checkout.productId) continue
+
+    const createdAt = Date.parse(sub.created_at ?? "") || 0
+    if (floor && createdAt && createdAt < floor) continue
+
+    const decided = toState(sub, opts, checkout.tenantId)
+    if (decided.kind === "ignore") continue
+
+    // `created_at` rather than `modified_at`: cancelling touches the second and
+    // never the first, and "which subscription did this checkout make" is a
+    // question about when it came into existence.
+    if (!held || createdAt > heldAt) {
+      held = decided.state
+      heldAt = createdAt
     }
   }
 

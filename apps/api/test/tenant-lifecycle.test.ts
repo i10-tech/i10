@@ -26,7 +26,7 @@ const deps = (over: Record<string, unknown> = {}) => ({
   },
   polar: { revokeSubscription: mock(async () => "revoked" as const) },
   domains: { releaseDomains: mock(async () => ({ released: 2, failed: 0 })) },
-  organizations: { exists: mock(async () => false) },
+  organizations: { hasMembers: mock(async () => false) },
   freePlanId: "free",
   log,
   ...over,
@@ -260,7 +260,7 @@ describe("a deleted organization", () => {
 describe("a deleted user who owned workspaces", () => {
   const owned = [{ tenantId: "ten-1", clerkOrgId: "org_1" }]
 
-  it("ends the subscription of a workspace that went with them", async () => {
+  it("ends the subscription of a workspace nobody is left in", async () => {
     const d = deps({
       tenants: {
         isLive: mock(async () => true),
@@ -271,8 +271,9 @@ describe("a deleted user who owned workspaces", () => {
         })),
         ownedBy: mock(async () => owned),
       },
-      // Clerk no longer has it: the cascade happened.
-      organizations: { exists: mock(async () => false) },
+      // Nobody is left in it — which is what Clerk actually reports for a
+      // personal organization whose only member deleted their account.
+      organizations: { hasMembers: mock(async () => false) },
     })
 
     expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("terminated")
@@ -285,14 +286,14 @@ describe("a deleted user who owned workspaces", () => {
    * deletes their own account still has members, mailboxes and mail in flight;
    * terminating on ownership alone would switch all of that off.
    */
-  it("leaves a team alone when its organization is still there", async () => {
+  it("leaves a team alone while anybody is still a member", async () => {
     const d = deps({
       tenants: {
         isLive: mock(async () => true),
         terminate: mock(async () => null),
         ownedBy: mock(async () => owned),
       },
-      organizations: { exists: mock(async () => true) },
+      organizations: { hasMembers: mock(async () => true) },
     })
 
     expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("ignored")
@@ -310,7 +311,7 @@ describe("a deleted user who owned workspaces", () => {
         ownedBy: mock(async () => owned),
       },
       organizations: {
-        exists: mock(async () => {
+        hasMembers: mock(async () => {
           throw new Error("clerk is down")
         }),
       },
@@ -323,6 +324,6 @@ describe("a deleted user who owned workspaces", () => {
   it("does nothing for somebody who owned no workspace", async () => {
     const d = deps()
     expect(await tenantLifecycle(d).onUserDeleted({ id: "user_1" })).toBe("ignored")
-    expect(d.organizations.exists).not.toHaveBeenCalled()
+    expect(d.organizations.hasMembers).not.toHaveBeenCalled()
   })
 })

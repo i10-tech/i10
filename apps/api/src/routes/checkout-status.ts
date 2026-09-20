@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 import type { SubscriptionOps } from "../billing/db.js"
-import { pick, type DecideOptions } from "../billing/events.js"
+import { pickForCheckout, type DecideOptions } from "../billing/events.js"
 import type { SubscriptionState } from "../billing/events.js"
 import type { Logger } from "../billing/grants.js"
 import type { PolarClient } from "../billing/polar.js"
@@ -54,7 +54,12 @@ export interface CheckoutStatusDeps {
    * seconds. With them, a checkout Polar says succeeded is granted inside the
    * poll that noticed it, whatever happened to the webhook.
    */
-  grants?: { apply(state: SubscriptionState): Promise<{ status: string }> }
+  grants?: {
+    apply(
+      state: SubscriptionState,
+      options?: { reassign?: boolean },
+    ): Promise<{ status: string }>
+  }
   options?: DecideOptions
   /**
    * Whether a tenant id still names a live workspace.
@@ -239,7 +244,13 @@ const ATTEMPT_MEMORY_MS = 15 * 60_000
 async function grantNow(
   deps: CheckoutStatusDeps,
   attempted: Map<string, number>,
-  checkout: { id: string; tenantId: string; customerId: string | null },
+  checkout: {
+    id: string
+    tenantId: string
+    customerId: string | null
+    productId: string | null
+    createdAt: string | null
+  },
 ): Promise<void> {
   if (!deps.grants || !deps.options || !checkout.customerId) return
 
@@ -258,11 +269,38 @@ async function grantNow(
 
   try {
     const subs = await deps.polar.listSubscriptions({ customerId: checkout.customerId })
-    const state = pick(subs, deps.options, checkout.tenantId)
-    if (state) await deps.grants.apply(state)
+
+    /*
+     * ⚠ ATTRIBUTED TO THE CHECKOUT'S TENANT, NOT THE CUSTOMER'S. This used to
+     * call `pick`, which filters on `customer.external_id` exactly as the
+     * webhook does — and that field names whoever created the Polar customer,
+     * not whoever is paying now. For anybody on their second workspace it
+     * therefore discarded every subscription they owned, including the one just
+     * bought, and granted nothing while reporting nothing. See
+     * `pickForCheckout`.
+     */
+    const state = pickForCheckout(subs, deps.options, {
+      tenantId: checkout.tenantId,
+      productId: checkout.productId,
+      createdAt: checkout.createdAt,
+    })
+
+    if (!state) {
+      deps.log.warn(
+        { checkoutId: checkout.id, tenantId: checkout.tenantId, subs: subs.length },
+        "a succeeded checkout has no matching subscription on its customer yet",
+      )
+      return
+    }
+
+    // ⚠ `reassign`, BECAUSE THE WEBHOOK HAS PROBABLY ALREADY CLAIMED IT FOR THE
+    // WRONG TENANT. It attributes by the same stale `external_id`, lands first,
+    // and binds the new subscription to a dead workspace — after which this
+    // insert dies on the unique index unless the id is taken back. See db.ts.
+    await deps.grants.apply(state, { reassign: true })
   } catch (err) {
-    deps.log.warn(
-      { tenantId: checkout.tenantId, err: String(err) },
+    deps.log.error(
+      { checkoutId: checkout.id, tenantId: checkout.tenantId, err: String(err) },
       "could not grant from the checkout status poll — the reconciler will " +
         "pick it up",
     )
@@ -362,29 +400,38 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
      * confirmed — the exact lie the `granted_plan_id` rule above exists to
      * prevent.
      *
-     * ⚠ AND IT RUNS FOR EVERY PAID-BUT-UNGRANTED CHECKOUT, NOT ONLY A REPAIRED
-     * ONE. That condition used to be `attribution === "repaired"`, which made
-     * the immediate grant available to exactly the customer whose attribution
-     * we had just fixed and to nobody else — so a plain lost webhook still
-     * meant a spinner, a ninety-second give-up and a half-hour wait, which is
-     * the complaint this is answering. `stranded` is the one case left out, and
-     * only because there is genuinely nothing to grant: no subscription of that
-     * customer's belongs to this tenant.
+     * ⚠ AND IT RUNS FOR EVERY PAID-BUT-UNGRANTED CHECKOUT, WITHOUT CONSULTING
+     * THE ATTRIBUTION VERDICT AT ALL. It was gated first on `repaired` and then
+     * on "not `stranded`", and both gates made the grant depend on a repair
+     * that needs `customers:read` and `customers:write` — scopes a Polar
+     * organisation access token does not carry by default. Measured in
+     * production 2026-09-20: `getCustomer` answered `403 insufficient_scope` on
+     * every call, so the verdict was never better than a guess, and a customer
+     * who had paid sat on `{"status":"paid","plan":null}` indefinitely.
+     *
+     * ⚠ THE GRANT DOES NOT NEED THAT VERDICT, BECAUSE THE CHECKOUT ALREADY
+     * ANSWERS IT. Polar says this checkout `succeeded` — its word that the
+     * money moved for THIS checkout — and its `metadata.tenant_id` is a value
+     * OUR API wrote from an authenticated session. `pickForCheckout` then takes
+     * only a subscription on that customer, for that product, created no
+     * earlier than the checkout itself, which can be nothing other than the one
+     * just bought. `attribution` is now about the durable REPAIR and about what
+     * to tell somebody when the grant did not land — not about permission.
      */
-    if (attribution !== "stranded") {
-      await grantNow(deps, attempted, {
-        id: checkoutId,
-        tenantId: checkout.tenantId,
-        customerId: checkout.customerId,
-      })
+    await grantNow(deps, attempted, {
+      id: checkoutId,
+      tenantId: checkout.tenantId,
+      customerId: checkout.customerId,
+      productId: checkout.productId,
+      createdAt: checkout.createdAt,
+    })
 
-      const after = await deps.subscriptions.current(checkout.tenantId)
-      if (after.plan) {
-        return c.json(
-          { status: "granted" satisfies CheckoutStatus, plan: after.plan },
-          200,
-        )
-      }
+    const after = await deps.subscriptions.current(checkout.tenantId)
+    if (after.plan) {
+      return c.json(
+        { status: "granted" satisfies CheckoutStatus, plan: after.plan },
+        200,
+      )
     }
 
     return c.json(
