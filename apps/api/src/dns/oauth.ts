@@ -73,8 +73,37 @@ export interface OAuthConfig {
   redirectBase: string
   /** Signs `state`. Not the same key as anything else; see `env.ts`. */
   stateSecret: string
+  /**
+   * Where to send a token exchange that our own egress is refused for.
+   *
+   * ⚠ IT EXISTS FOR EXACTLY ONE MEASURED FAILURE AND IS NOT A GENERAL PROXY.
+   * `dash.cloudflare.com` is a dashboard host behind Cloudflare's bot
+   * management; from psl-vps it answers a managed challenge to every client we
+   * can construct — curl and Bun alike, HTTP/1.1 and h2 alike, over IPv4 and
+   * IPv6 alike — while answering ordinary OAuth JSON to the same request from a
+   * residential line. No header fixes that, because it is a decision about the
+   * ADDRESS. See services/dns-oauth-broker.
+   *
+   * ⚠ UNSET IS A SUPPORTED STATE AND MEANS "CALL DIRECTLY". Every other
+   * provider's token endpoint is an ordinary API host that answers us, and
+   * routing eight providers through one Worker would turn a Cloudflare-shaped
+   * problem into a single point of failure for all of them.
+   */
+  broker?: { url: string; secret: string }
   now?: () => number
 }
+
+/**
+ * Token endpoints that will not answer our egress, so the broker is used.
+ *
+ * ⚠ A HOST LIST RATHER THAN A PROVIDER LIST, BECAUSE THE PROBLEM IS THE HOST.
+ * What is challenged is `dash.cloudflare.com` — the dashboard — and not
+ * Cloudflare as a company: their `api.cloudflare.com`, which the publish path
+ * uses for every zone read and record write, has never been challenged from the
+ * cluster. Keying on the provider slug would have brokered calls that work
+ * perfectly well and hidden which half of Cloudflare is actually the problem.
+ */
+const BROKERED_HOSTS = new Set(["dash.cloudflare.com"])
 
 export interface AuthorizationStart {
   url: string
@@ -482,21 +511,36 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       throw new OAuthError("unconfigured", `${slug} is not configured for OAuth.`)
     }
 
+    /*
+     * ⚠ THE BODY IS BUILT ONCE AND SENT WHICHEVER WAY IT GOES. The broker
+     * forwards it verbatim, so a difference between the two paths here would be
+     * a bug that only ever appears for Cloudflare and only in production.
+     */
+    const payload = new URLSearchParams(form(app))
+    const broker = BROKERED_HOSTS.has(new URL(oauth.tokenUrl).host)
+      ? config.broker
+      : undefined
+
     let response: Response
     try {
-      response = await fetch(oauth.tokenUrl, {
+      response = await fetch(broker ? broker.url : oauth.tokenUrl, {
         method: "POST",
         headers: {
+          /*
+           * ⚠ THE BROKER'S OWN CREDENTIAL, AND IT IS NOT THE PROVIDER'S. It
+           * authorises us to the Worker; the client secret that authorises us
+           * to Cloudflare is in the body, untouched, exactly as it would be on
+           * the direct path.
+           */
+          ...(broker ? { Authorization: `Bearer ${broker.secret}` } : {}),
           "Content-Type": "application/x-www-form-urlencoded",
           Accept: "application/json",
           /*
            * ⚠ CLOUDFLARE'S TOKEN ENDPOINT IS BEHIND THEIR OWN BOT MANAGEMENT,
-           * WHICH MAKES THIS MORE THAN POLITENESS. `dash.cloudflare.com` is a
-           * dashboard host, not an API host, and it refuses clients it does
-           * not like with an HTML challenge rather than an OAuth error —
-           * measured: `python-urllib` gets error 1010, curl gets JSON. Bun's
-           * default `User-Agent` is the literal string `Bun/1.4.2`. See
-           * ./user-agent.ts.
+           * AND IT IS NOT WHAT FIXED CLOUDFLARE. Identifying ourselves is worth
+           * doing on every provider's endpoint; it is simply not sufficient on
+           * `dash.cloudflare.com`, which refuses us on the address regardless.
+           * See ./user-agent.ts and `broker` above.
            */
           "User-Agent": DNS_USER_AGENT,
         },
@@ -505,7 +549,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
          * permitted by RFC 6749 and providers differ on which they accept;
          * the body form is the one every provider in this registry documents.
          */
-        body: new URLSearchParams(form(app)),
+        body: payload,
         signal: AbortSignal.timeout(10_000),
       })
     } catch (error) {
@@ -513,6 +557,24 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         "exchange_failed",
         `Could not reach ${provider.name}.`,
         String(error),
+      )
+    }
+
+    /*
+     * ⚠ THE BROKER'S OWN REFUSAL IS NOT THE PROVIDER'S, AND CONFLATING THEM
+     * WOULD UNDO THE POINT OF IT. A rotated broker secret answers 401, which is
+     * the same status Cloudflare uses for `invalid_client` — so without this
+     * header a misconfigured Worker would be reported to an administrator as
+     * "your client secret is wrong", sending them to edit the one thing that
+     * was correct. `x-broker-error` is set only by the Worker; Cloudflare never
+     * sends it.
+     */
+    const brokerError = response.headers.get("x-broker-error")
+    if (brokerError) {
+      throw new OAuthError(
+        "exchange_failed",
+        `Could not reach ${provider.name}.`,
+        `the OAuth broker refused the request (${brokerError})`,
       )
     }
 

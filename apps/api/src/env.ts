@@ -719,6 +719,31 @@ const schema = z.object({
   DNS_OAUTH_REDIRECT_BASE: z.url().default("https://dash.i10.tech/dns/callback"),
 
   /**
+   * A Worker that performs the token exchange Cloudflare will not let us make.
+   *
+   * ⚠ THIS IS NOT A PROXY FOR CONVENIENCE; IT IS FOR ONE MEASURED REFUSAL.
+   * `dash.cloudflare.com` is a DASHBOARD host with bot management on, and from
+   * psl-vps it answers a managed challenge — `403`, `cf-mitigated: challenge` —
+   * to every client we can build: curl and Bun, HTTP/1.1 and h2, IPv4 and IPv6.
+   * The identical request from a residential line gets ordinary OAuth JSON.
+   * It is a decision about our ADDRESS, so no header, client or HTTP version
+   * changes it, and the user-agent work that preceded this could not have.
+   *
+   * ⚠ ONLY THE TOKEN EXCHANGE, AND ONLY CLOUDFLARE'S. `api.cloudflare.com` —
+   * every zone read and record write the publish path makes — has never been
+   * challenged from the cluster, and no other provider's token endpoint is
+   * either. The host list lives in `dns/oauth.ts`; see `BROKERED_HOSTS`.
+   *
+   * ⚠ BOTH OR NEITHER. A URL with no secret would call an authenticated Worker
+   * with no credential and fail every exchange; a secret with no URL does
+   * nothing. Set neither and Cloudflare is simply called directly, which is
+   * correct anywhere the egress is not challenged — local development, or a
+   * deployment whose addresses Cloudflare has since exempted.
+   */
+  DNS_OAUTH_BROKER_URL: z.url().optional(),
+  DNS_OAUTH_BROKER_SECRET: z.string().min(1).optional(),
+
+  /**
    * Where Polar returns the browser after payment.
    *
    * ⚠ A PAGE THAT POLLS, NOT A PAGE THAT GRANTS. Anybody can navigate here —

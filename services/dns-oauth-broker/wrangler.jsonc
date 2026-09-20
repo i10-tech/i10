@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "i10-dns-oauth-broker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+
+  // ⚠ NO ROUTES, NO CUSTOM DOMAIN, AND `workers_dev` LEFT ON DELIBERATELY. The
+  // API reaches this by its URL and nothing else does; putting it on an i10
+  // hostname would buy nothing and would put an OAuth relay on a name that
+  // resolves publicly and predictably.
+  //
+  // ⚠ ITS ONLY SECRET IS `BROKER_SECRET`, SET OUT OF BAND:
+  //     wrangler secret put BROKER_SECRET
+  // It is NOT in this file and must never be — see the README.
+  "observability": { "enabled": true },
+}
