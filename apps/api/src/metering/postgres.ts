@@ -1,6 +1,6 @@
 import { sql, type SQL } from "drizzle-orm"
 import { z } from "zod"
-import { withTenant, type Database } from "../db/client.js"
+import { ts, withTenant, type Database } from "../db/client.js"
 import type {
   Assignment,
   AssignmentStore,
@@ -237,12 +237,8 @@ export const usedInStatement = (key: MeterKey, window: ResetWindow): SQL => sql`
    where tenant_id   = ${key.tenantId}::uuid
      and feature_id  = ${key.featureId}
      and shard       = ${key.shard}
-     and occurred_at >= ${window.start.toISOString()}::timestamptz
-     ${
-       window.end === null
-         ? sql``
-         : sql`and occurred_at < ${window.end.toISOString()}::timestamptz`
-     }
+     and occurred_at >= ${ts(window.start)}
+     ${window.end === null ? sql`` : sql`and occurred_at < ${ts(window.end)}`}
 `
 
 /**

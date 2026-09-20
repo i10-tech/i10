@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
-import { withTenant, type Database } from "../db/client.js"
+import { ts, withTenant, type Database } from "../db/client.js"
 import {
   apiKeys,
   apiRequests,
@@ -298,7 +298,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
           await Promise.all([
             tx.execute(sql`
               select bucket, sent, delivered, bounced, complained, delayed, failed
-                from core.message_stats(${tenantId}::uuid, ${from}, ${to})
+                from core.message_stats(${tenantId}::uuid, ${ts(from)}, ${ts(to)})
             `) as unknown as Promise<
               {
                 bucket: Date | string

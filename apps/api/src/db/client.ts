@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm"
+import { sql, type SQL } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres, { type Sql } from "postgres"
 import * as schema from "./schema.js"
@@ -49,6 +49,31 @@ export function createDb(url: string) {
  * connection that the next request picks up, and the leak would look like
  * working software.
  */
+/**
+ * A timestamp parameter, serialised the only way the driver accepts.
+ *
+ * ⚠ THIS EXISTS BECAUSE THE SAME MISTAKE HAS SHIPPED THREE TIMES. postgres.js
+ * binds a parameter by writing its bytes, and a `Date` is not a string, so
+ * `sql\`... > ${'${someDate}'}\`` throws `ERR_INVALID_ARG_TYPE` from inside the driver
+ * before the query is ever sent:
+ *
+ *   The "string" argument must be of type string or an instance of Buffer or
+ *   ArrayBuffer. Received an instance of Date
+ *
+ * ⚠ AND IT FAILS AT RUN TIME, NOT AT COMPILE TIME, WHICH IS THE WHOLE PROBLEM.
+ * A `Date` is a perfectly good template value as far as TypeScript is
+ * concerned, so nothing catches it until the query runs — and each of the
+ * three occurrences was found by a customer rather than by us. It stopped
+ * usage reconciliation completing, then it made every metering read fall back
+ * silently for weeks, then it 500'd the console's overview page.
+ *
+ * ⚠ THE CAST IS PART OF IT, NOT DECORATION. Without `::timestamptz` the bound
+ * value is `text` and Postgres compares it as a string, which is wrong in
+ * exactly the cases that matter — a different offset, or a different number of
+ * fractional digits, orders incorrectly.
+ */
+export const ts = (value: Date): SQL => sql`${value.toISOString()}::timestamptz`
+
 export async function withTenant<T>(
   db: Database,
   tenantId: string,
