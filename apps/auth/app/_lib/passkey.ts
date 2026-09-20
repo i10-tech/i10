@@ -40,6 +40,24 @@ const CANCELLED = new Set([
 ])
 
 /**
+ * What to say when the challenge never arrived.
+ *
+ * ⚠ IT DOES NOT BLAME THE DEVICE, BECAUSE THE DEVICE WAS NEVER ASKED. A passkey
+ * is created in two halves: clerk-js fetches a challenge from FAPI, and only
+ * then opens the platform's sheet. This is the first half failing, so no sheet
+ * ever appears — and "we could not add a passkey on this device" told somebody
+ * whose device is fine to go and look at their device. It is the same trade as
+ * `passkey_invalid_rpID_or_domain`: when the fault is ours, the sentence says
+ * so and points at the one route that can actually resolve it.
+ *
+ * ⚠ AND IT DOES NOT SAY "TRY AGAIN" FIRST. Trying again re-runs the identical
+ * request against the identical configuration; offering it as the primary
+ * advice is sending somebody round a loop we already know the shape of.
+ */
+const OURS =
+  "We could not start a passkey — that is our side, not your device. Email support@i10.tech and we will fix it."
+
+/**
  * ⚠ EVERY SENTENCE NAMES A DIFFERENT NEXT STEP, which is the point of having
  * more than one. "Something went wrong" is true of all four of these and tells
  * nobody whether to try again, use another device, or write to us.
@@ -68,6 +86,74 @@ const REASONS: Record<string, string> = {
   passkey_not_supported: "This browser cannot use passkeys. Try another way in.",
   passkey_pa_not_supported:
     "This device has no fingerprint, face or screen-lock unlock to use. Try another way in.",
+  /*
+   * ⚠ THE SIGN-IN HALF OF THE MISSING CHALLENGE, AND IT IS THE HALF THAT HAS A
+   * CODE. Both flows ask FAPI for a challenge before touching the platform, and
+   * both can be answered without one — but clerk-js raises this one as a coded
+   * `ClerkRuntimeError` and the sign-up one as a bare `Error`. See
+   * `MISSING_CHALLENGE` below, which is the same failure wearing no code.
+   */
+  missing_public_key_options: OURS,
+  /*
+   * ⚠ A SAFETY NET UNDER `useReverification`, NOT A REPLACEMENT FOR IT. Adding
+   * a passkey is a protected operation on an instance with reverification on,
+   * so FAPI answers `POST /v1/me/passkeys` with a 403 carrying this code — and
+   * `PasskeyStep` wraps the call in Clerk's hook precisely so that the 403 is
+   * swallowed, the step-up prompt is shown, and the call is replayed. Nothing
+   * here should ever run.
+   *
+   * ⚠ WHICH IS EXACTLY WHY IT IS WRITTEN DOWN. It was NOT here, so on the one
+   * occasion the hook did not intercept — a real 403, observed in production,
+   * reported from a live console — the code fell past every reader in this file
+   * and came out as "we could not add a passkey on this device". A step-up
+   * policy is not a broken device, and the person is not out of options: the
+   * sentence says what the system wants and that the account is unharmed.
+   *
+   * ⚠ AND IT SAYS "ADD ONE FROM SETTINGS" RATHER THAN "TRY AGAIN", because
+   * pressing the same button repeats the same unintercepted 403. Settings is a
+   * fresh page with a fresh session and is the route that actually works.
+   */
+  session_reverification_required:
+    "We need you to confirm it is you before adding a passkey. Your account is fine — add one from settings and we will ask you there.",
+}
+
+/**
+ * The one failure clerk-js raises with no code on it anywhere.
+ *
+ * ⚠ THIS IS THE BUG THIS FILE WAS REOPENED FOR, AND IT IS INVISIBLE TO EVERY
+ * OTHER READER HERE. `Passkey.registerPasskey()` asks FAPI for a challenge, and
+ * when the answer comes back without one it raises a BARE `Error`:
+ *
+ *   Clerk: Missing publicKey. When calling 'navigator.credentials.create()'
+ *   it is required to pass a publicKey object.
+ *
+ * There is no `code`, no `errors[]`, and no `(code="…")` fragment in the text —
+ * so `codesIn` finds nothing, `REASONS` cannot be consulted, and it fell all
+ * the way to the generic sentence with an EMPTY reference under it. That is the
+ * precise combination somebody reported: no system sheet, and no code to quote.
+ *
+ * ⚠ MATCHED ON THE MESSAGE, WHICH IS DISTASTEFUL AND IS THE ONLY HANDLE THERE
+ * IS. The alternative is leaving the one failure we cannot otherwise name
+ * indistinguishable from every unknown — and the string is clerk-js's own
+ * `errorThrower` template, not a localised or user-facing one, so it does not
+ * move when copy does.
+ */
+const MISSING_CHALLENGE = /missing\s+publickey/i
+
+/**
+ * ⚠ A SYNTHETIC CODE, AND IT IS MARKED AS OURS SO NOBODY GREPS CLERK FOR IT.
+ * The reference line exists to be quoted back to us in a report; a blank one is
+ * the failure mode this whole mechanism was built to prevent, so the uncoded
+ * error is given a name rather than left without one.
+ */
+const NO_CHALLENGE_REFERENCE = "i10_passkey_no_challenge"
+
+function missingChallenge(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    typeof error.message === "string" &&
+    MISSING_CHALLENGE.test(error.message)
+  )
 }
 
 /** Every code this error mentions, wherever Clerk happened to put it. */
@@ -146,6 +232,14 @@ function allCodes(error: unknown): string[] {
  *
  * ⚠ AND A CANCELLATION HAS NO REFERENCE, because a cancellation has no message
  * to attach one to. `passkeyFailure` returns `null` there and nothing is shown.
+ *
+ * ⚠ BUT A FAILURE ALWAYS HAS ONE NOW, AND IT DID NOT BEFORE. An error carrying
+ * no code at all — which is one real, reachable case, see `MISSING_CHALLENGE` —
+ * used to return `undefined` here, so the toast that most needed a reference
+ * was the single toast that shipped without one. The exception `name` is a
+ * weaker handle than a Clerk code and it is enormously better than a blank
+ * line: `SyntaxError` and `TypeError` are different bugs, and a report that
+ * says which is a report that can be answered.
  */
 export function passkeyReference(error: unknown): string | undefined {
   const codes = allCodes(error)
@@ -155,7 +249,22 @@ export function passkeyReference(error: unknown): string | undefined {
   // errors arrive alongside generic form codes, and `form_param_unknown` next
   // to `passkey_registration_failed` is the less specific of the two.
   const specific = codes.find((code) => code.startsWith("passkey_"))
-  return specific ?? codes[0]
+
+  /*
+   * ⚠ `api_response_error` IS AN ENVELOPE, NOT AN ANSWER, AND IT SORTS FIRST.
+   * `ClerkAPIResponseError`'s constructor hardcodes it as the `code` of EVERY
+   * error it wraps, while the code that means something sits in `errors[]` — so
+   * `codes[0]` is the envelope and `codes[1]` is the fact. A real 403 from
+   * `POST /v1/me/passkeys` would have printed `api_response_error` under the
+   * toast, which is true of a rate limit, a bad parameter and a step-up policy
+   * alike, and so tells whoever reads the report nothing at all.
+   */
+  const meaningful = codes.find((code) => code !== "api_response_error")
+  const best = specific ?? meaningful ?? codes[0]
+  if (best) return best
+
+  if (missingChallenge(error)) return NO_CHALLENGE_REFERENCE
+  return error instanceof Error && error.name ? error.name : undefined
 }
 
 /**
@@ -178,6 +287,13 @@ export function passkeyFailure(error: unknown, intent: "add" | "use"): string | 
     const reason = REASONS[code]
     if (reason) return reason
   }
+
+  // ⚠ CHECKED AFTER THE CODES AND BEFORE THE FALLBACK, WHICH IS THE ONLY PLACE
+  // IT CAN GO. It is a message match, so anything that named itself properly
+  // outranks it; and it has to come before the fallback, because the fallback
+  // is exactly what was wrong with it. Both intents get the same sentence:
+  // neither flow got as far as the device, so neither may mention it.
+  if (missingChallenge(error)) return OURS
 
   return intent === "add"
     ? "We could not add a passkey on this device. You can add one later from settings."

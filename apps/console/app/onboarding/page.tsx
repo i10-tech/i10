@@ -80,9 +80,23 @@ export default async function OnboardingPage() {
          * `/` was bounced back to this page — the button appeared to do nothing
          * at all. The route records the choice for this browser and then sends
          * them on. See lib/onboarding-skip.ts.
+         *
+         * ⚠ IT IS A PLAIN `<a>`, AND THAT IS THE WHOLE OF THE THIRD VERSION OF
+         * THIS BUG. `next/link` does not navigate — it fetches the destination
+         * as an RSC payload and swaps the tree client-side. `/onboarding/skip`
+         * is a ROUTE HANDLER: it has no RSC payload, it answers a 307 with a
+         * `Set-Cookie`, and the router has nothing it can do with that. So the
+         * click fired `GET /onboarding/skip?_rsc=…`, the router discarded the
+         * answer, the URL never changed and the cookie was never kept — the
+         * button did nothing, again, for the third distinct reason, having twice
+         * been fixed for doing nothing.
+         *
+         * A real anchor is a real navigation: the browser follows the redirect
+         * and applies the cookie on the way through. `next/link` is for pages;
+         * this is not one.
          */}
         <Button variant="ghost" size="sm" asChild>
-          <Link href="/onboarding/skip">Skip to the dashboard</Link>
+          <a href="/onboarding/skip">Skip to the dashboard</a>
         </Button>
       </header>
 

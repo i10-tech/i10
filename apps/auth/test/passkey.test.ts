@@ -168,3 +168,122 @@ describe("the reference somebody can quote back", () => {
     expect(passkeyReference(null)).toBeUndefined()
   })
 })
+
+/**
+ * The challenge that never arrived.
+ *
+ * ⚠ THE FIXTURE IS CLERK-JS'S OWN STRING, COPIED FROM THE BUNDLE. It is thrown
+ * by `errorThrower` inside `Passkey.registerPasskey()` when FAPI answers the
+ * challenge request without a nonce, and it is a BARE `Error`: no `code`, no
+ * `errors[]`, no `(code="…")` fragment. That is what let it fall through every
+ * reader in the file and come out as the generic sentence with a blank
+ * reference — the exact pair of symptoms in the report, no system sheet and no
+ * code to quote.
+ */
+const missingPublicKey = () =>
+  new Error(
+    "Clerk: Missing publicKey. When calling 'navigator.credentials.create()' " +
+      "it is required to pass a publicKey object.",
+  )
+
+describe("a challenge our side never produced", () => {
+  // ⚠ THE DEVICE IS NOT MENTIONED, AND THAT IS THE WHOLE FIX. No sheet was ever
+  // opened, so there is nothing about the device to report — the old sentence
+  // sent somebody to go and check hardware that was never asked to do anything.
+  it("owns the failure instead of blaming the device", () => {
+    const reason = passkeyFailure(missingPublicKey(), "add")
+    expect(reason).toContain("our side")
+    expect(reason).toContain("support@i10.tech")
+    expect(reason).not.toContain("this device")
+  })
+
+  it("says the same thing on the sign-in side", () => {
+    expect(passkeyFailure(missingPublicKey(), "use")).toContain("our side")
+  })
+
+  // ⚠ THE SIGN-IN HALF ARRIVES CODED, and has to reach the same sentence by the
+  // other road — `REASONS` rather than the message match.
+  it("reaches it by the code when clerk-js supplies one", () => {
+    const error = clerkError(
+      "missing_public_key_options",
+      "Clerk: Missing public key options",
+    )
+    expect(passkeyFailure(error, "use")).toContain("our side")
+  })
+
+  // ⚠ THE REFERENCE IS THE OTHER HALF OF THE REPORT. A blank line under this
+  // message is what made the original report unanswerable.
+  it("carries a reference despite having no code anywhere", () => {
+    expect(passkeyReference(missingPublicKey())).toBe("i10_passkey_no_challenge")
+  })
+
+  // ⚠ A NAMED CODE STILL WINS. The message match is the weakest reader here and
+  // must never overrule an error that identified itself properly.
+  it("does not overrule an error that named itself", () => {
+    const error = clerkError(
+      "passkey_already_exists",
+      'Clerk: Missing publicKey. (code="passkey_already_exists")',
+    )
+    expect(passkeyFailure(error, "add")).toBe(
+      "This device already has a passkey for your account.",
+    )
+  })
+})
+
+describe("an error carrying no code at all", () => {
+  // ⚠ `SyntaxError` AND `TypeError` ARE DIFFERENT BUGS, and before this the
+  // toast could not tell us which one somebody had hit.
+  it("falls back to the exception name so the report says something", () => {
+    const error = Object.assign(new Error("Unexpected token < in JSON"), {
+      name: "SyntaxError",
+    })
+    expect(passkeyReference(error)).toBe("SyntaxError")
+    expect(passkeyFailure(error, "add")).toContain("later from settings")
+  })
+})
+
+/**
+ * The step-up policy, arriving as a 403 that nothing intercepted.
+ *
+ * ⚠ THE FIXTURE IS A REAL PRODUCTION ERROR, read out of a live console. Adding
+ * a passkey is a protected operation on an instance with reverification on, so
+ * FAPI answers with a 403 whose `code` is the ENVELOPE — `ClerkAPIResponseError`
+ * stamps `api_response_error` on everything it wraps — and whose meaning sits
+ * one level down in `errors[]`. `PasskeyStep` wraps the call in Clerk's
+ * `useReverification` so this is normally swallowed and replayed; these are the
+ * assertions for the occasion it is not.
+ */
+const reverificationRequired = () =>
+  Object.assign(
+    new Error("You need to provide additional verification to perform this operation"),
+    {
+      code: "api_response_error",
+      errors: [
+        {
+          code: "session_reverification_required",
+          message: "Reverification required",
+          longMessage:
+            "You need to provide additional verification to perform this operation",
+        },
+      ],
+    },
+  )
+
+describe("a step-up policy that reached the toast", () => {
+  // ⚠ A POLICY IS NOT A BROKEN DEVICE. This is the sentence the reported bug
+  // actually produced, and the device had nothing to do with it.
+  it("does not blame the device for a policy decision", () => {
+    const reason = passkeyFailure(reverificationRequired(), "add")
+    expect(reason).toContain("confirm it is you")
+    expect(reason).not.toContain("could not add a passkey on this device")
+  })
+
+  // ⚠ THE ENVELOPE MUST NOT WIN. `api_response_error` is on every Clerk API
+  // error alike and names nothing, so a report carrying it is no better than a
+  // report carrying nothing.
+  it("quotes the code that means something, not the envelope", () => {
+    expect(passkeyReference(reverificationRequired())).toBe(
+      "session_reverification_required",
+    )
+  })
+})
