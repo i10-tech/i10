@@ -160,7 +160,7 @@ export function Onboarding({
               >
                 <span
                   className={cn(
-                    "grid size-4 shrink-0 place-items-center rounded-full border text-[9px]",
+                    "grid size-4 shrink-0 place-items-center rounded-full border text-[9px]/none tabular-nums",
                     done && "border-foreground bg-foreground text-background",
                     current && "border-foreground",
                   )}
