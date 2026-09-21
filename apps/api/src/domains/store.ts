@@ -57,7 +57,11 @@ export interface DomainStore {
   list(tenantId: string): Promise<DomainSummary[]>
   remove(tenantId: string, id: string): Promise<boolean>
   /** Re-reads the provider and stores what it says. */
-  verify(tenantId: string, id: string): Promise<VerifyOutcome>
+  verify(
+    tenantId: string,
+    id: string,
+    options?: VerifyOptions,
+  ): Promise<VerifyOutcome>
   /**
    * The same question as `verify`, asked cheaply, for polling.
    *
@@ -144,6 +148,29 @@ export type VerifyOutcome =
    * not a customer who published nothing.
    */
   | { status: "unproven"; domain: Domain; reason: "absent" | "unreachable" }
+
+export interface VerifyOptions {
+  /**
+   * Whether this verify may take a name away from the workspace holding it.
+   *
+   * ⚠ IT EXISTS SO THAT A SWEEP CAN REUSE `verify` WITHOUT INHERITING ITS ONE
+   * DESTRUCTIVE POWER. On the route this is a person pressing a button and
+   * waiting for an answer, so contesting is right: if they prove a name the
+   * incumbent can no longer prove, the domain has changed hands and should
+   * move. Run from a cron on every unproved row in the table, the same code
+   * would migrate domains between customers on its own schedule with nobody
+   * asking — which is exactly what `catch-up.ts` refuses to do, for the same
+   * reason, in its own words: "a poll must never move a domain between
+   * customers".
+   *
+   * ⚠ FALSE DOES NOT MEAN "PRETEND IT VERIFIED". The contest is skipped and the
+   * outcome is reported as `claimed`, unchanged — the next verify a person
+   * presses resolves it properly.
+   *
+   * Defaults to true, so every existing caller keeps the behaviour it had.
+   */
+  contest?: boolean
+}
 
 export interface DomainStoreDeps {
   db: Database
@@ -427,12 +454,20 @@ export function domainStore({
    * only secret in this feature has no business travelling inside the row shape
    * that `present()` turns into an API response.
    */
+  /*
+   * ⚠ IT REPORTS WHETHER IT ACTUALLY REGISTERED, AND THE CALLER NEEDS THAT TO
+   * READ SES HONESTLY. Both early returns below leave no identity behind, so a
+   * `not_started` from the status read that follows means two different things
+   * depending on which path got here — "nothing exists" or "it exists and
+   * Amazon has not looked yet". `verify` collapses that with this boolean; see
+   * the floor it applies.
+   */
   async function registerIdentity(
     tenantId: string,
     id: string,
     row: Row,
-  ): Promise<void> {
-    if (!row.dkimSelector) return
+  ): Promise<boolean> {
+    if (!row.dkimSelector) return false
 
     const sealed = await withTenant(db, tenantId, async (tx) => {
       const [key] = await tx
@@ -442,7 +477,7 @@ export function domainStore({
         .limit(1)
       return key?.sealed ?? null
     })
-    if (!sealed) return
+    if (!sealed) return false
 
     await identity.create({
       domain: row.name,
@@ -450,6 +485,8 @@ export function domainStore({
       selector: row.dkimSelector,
       privateKey: secrets.open(sealed),
     })
+
+    return true
   }
 
   /**
@@ -1030,7 +1067,9 @@ export function domainStore({
         : { status: "missing" }
     },
 
-    async verify(tenantId, id) {
+    async verify(tenantId, id, options = {}) {
+      const { contest = true } = options
+
       const existing = await withTenant(db, tenantId, async (tx) => {
         const [row] = await tx
           .select(COLUMNS)
@@ -1041,6 +1080,28 @@ export function domainStore({
       })
       if (!existing) return { status: "missing" }
 
+      /**
+       * Write down that we looked, without claiming anything about what we saw.
+       *
+       * ⚠ EVERY UNPROVEN EXIT BELOW USED TO RETURN WITHOUT TOUCHING THE ROW, AND
+       * THAT MADE THE ROW UNSWEEPABLE. `dns_checked_at` is the staleness clock
+       * every background selector orders and filters on, so a domain that never
+       * proves never advances it — and a sweep that picks rows oldest-first
+       * would take the same head of the table on every run, for ever, while the
+       * rows behind it were never reached. Stamping it is simply true: we did
+       * ask, and the answer was "not yet".
+       *
+       * ⚠ AND IT MOVES NOTHING ELSE. Not the status, not `verified_at`. The
+       * only thing it asserts is the time of the question.
+       */
+      const noteChecked = () =>
+        withTenant(db, tenantId, async (tx) =>
+          tx
+            .update(domains)
+            .set({ dnsCheckedAt: now(), updatedAt: now() })
+            .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id))),
+        )
+
       /*
        * ⚠ AHEAD OF ASKING SES ANYTHING, because for a delegated domain the
        * record SES is about to look for lives in a zone we have not published
@@ -1050,6 +1111,7 @@ export function domainStore({
       if (existing.delegated && zones) {
         const settled = await settleDelegation(tenantId, existing, zones)
         if (settled !== "ready") {
+          await noteChecked()
           const domain = present(existing, region, dns)
           return settled === "taken"
             ? { status: "claimed", domain }
@@ -1072,6 +1134,7 @@ export function domainStore({
          */
         const proof = await proveDomain(probes, existing, dns.nameservers)
         if (!proof.proven) {
+          await noteChecked()
           return {
             status: "unproven",
             domain: present(existing, region, dns),
@@ -1081,9 +1144,30 @@ export function domainStore({
       }
 
       // ⚠ ONLY NOW. Ownership has been proved by one route or the other.
-      await registerIdentity(tenantId, id, existing)
+      const registered = await registerIdentity(tenantId, id, existing)
 
-      const seen = await identity.status(existing.name)
+      const read = await identity.status(existing.name)
+
+      /*
+       * ⚠ `not_started` CANNOT BE TRUE OF AN IDENTITY WE JUST CREATED, AND
+       * WRITING IT ANYWAY MADE THE ROW INVISIBLE TO EVERYTHING. Two things
+       * produce it here: SES's own `NOT_STARTED`, and a `NotFoundException`
+       * from reading back an identity a moment after creating it — the adapter
+       * maps both to the same word. Stored, that word means something entirely
+       * different to the rest of the system: `domains_awaiting_provider`
+       * excludes it, so the catch-up sweep never asks about the row again, and
+       * `ownsIdentity` in `remove` skips it, so deleting the domain leaves the
+       * identity behind in SES. A live identity, unwatched and unremovable.
+       *
+       * ⚠ SO IT IS FLOORED AT `pending`, WHICH IS WHAT IT ACTUALLY IS: an
+       * identity exists and nothing has confirmed it. Only when we did NOT
+       * register — no selector, no sealed key — is `not_started` still the
+       * honest answer, and that is exactly what `registered` distinguishes.
+       */
+      const seen =
+        registered && read.status === "not_started"
+          ? { status: "pending" as const }
+          : read
 
       // ⚠ `verified_at` IS SET ONCE AND NEVER MOVED BACKWARDS BY A LATER CHECK.
       // It is the moment the domain first became usable, and things downstream
@@ -1134,7 +1218,17 @@ export function domainStore({
          * prove it again is the only way that resolves, and it resolves in the
          * direction DNS actually points.
          */
-        if ((await incumbentStillProvesIt(existing.name, "verified")) === "displaced") {
+        /*
+         * ⚠ A SWEEP STOPS HERE. Everything below this line can move a domain
+         * from one workspace to another, which is right when a person pressed
+         * Verify and is waiting, and is not something a cron may decide on its
+         * own. `contest: false` reports the conflict and leaves it for the next
+         * verify somebody actually asks for.
+         */
+        if (
+          contest &&
+          (await incumbentStillProvesIt(existing.name, "verified")) === "displaced"
+        ) {
           try {
             const [moved] = await write(seen.status, verifiedAt ?? now())
             if (moved)

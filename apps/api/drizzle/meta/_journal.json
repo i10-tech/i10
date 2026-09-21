@@ -351,6 +351,13 @@
       "when": 1789869354607,
       "tag": "0049_domains_awaiting_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789869355607,
+      "tag": "0050_domains_awaiting_proof",
+      "breakpoints": true
     }
   ]
 }

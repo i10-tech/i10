@@ -1,0 +1,117 @@
+# Tries again to prove the domains nobody has proved yet, on a schedule.
+#
+# ⚠ THE SAME IMAGE AND A SEVENTH COMMAND, like the worker, the sweep, the
+# reconciler, the re-check, the catch-up and the migration Job.
+# `bun dist/domain-prove.js` runs one pass and exits.
+#
+# ⚠ WHY THIS EXISTS, AND IT IS NOT THE SAME BUG AS domain-catchup.yaml. That job
+# asks SES about identities that ALREADY EXIST; its selector,
+# `core.domains_awaiting_provider`, filters `status <> 'not_started'` precisely
+# because an unproved domain has no identity to ask about. And domain-recheck
+# reads `status = 'verified'`. So the state EVERY domain is created in —
+# `not_started` — had no background reader anywhere in the system.
+#
+# ⚠ THE VISIBLE SHAPE OF THAT BUG WAS A DOMAIN THAT COULD NEVER GO GREEN. Only
+# `verify` may create an SES identity, and `verify` is reachable from two HTTP
+# routes and nothing else. The console calls it ONCE, about a second after
+# writing the records — so if DNS was not serving at that instant, or the
+# customer was on the manual path and published an hour later, the single
+# attempt missed and nothing ever made another. Meanwhile the console's watch
+# polled `refresh`, which returns `not_registered` for such a row and writes
+# nothing, and the onboarding screen said "verification continues without this
+# page open". It did not. The domain was stuck until somebody pressed Verify by
+# hand at exactly the right moment.
+#
+# ⚠ EVERY MINUTE, BECAUSE THE READER IS A PERSON WAITING — the same argument as
+# catch-up. Somebody who has just published their records is watching a badge,
+# and beyond the console's own minute of polling this schedule IS how long they
+# wait.
+#
+# ⚠ AND THE SCHEDULE IS NOT WHAT LIMITS THE DNS QUERIES. `staleMs` inside the
+# sweep decides how often any ONE domain may be asked again — two minutes, twice
+# catch-up's window, because a proof costs several bounded lookups against
+# somebody else's nameservers rather than one cheap API call. The schedule only
+# decides how soon a newly-stale row is noticed.
+#
+# ⚠ AND IT COSTS ALMOST NOTHING WHEN THERE IS NOTHING TO DO. The selector is
+# bounded by a staleness window AND a seven-day horizon, so a deployment with no
+# domains mid-setup does one indexed read and exits.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-domain-prove
+  namespace: i10-prod
+spec:
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/domain-prove.ts, AND THEY MUST AGREE.
+  # Sentry decides a run is MISSING by comparing the clock against the schedule
+  # the job declares in its check-in, so changing it here alone leaves the job
+  # working and the alerting wrong.
+  schedule: "*/1 * * * *"
+  # ⚠ NEVER TWO AT ONCE, AND IT MATTERS MORE HERE THAN IT DOES FOR CATCH-UP. Two
+  # passes proving the same delegated domain would both publish its zone and
+  # both race for the same `delegations` row — survivable, because the claim is
+  # constrained and the zone write is idempotent, but it turns a clean unique
+  # violation into contention for no gain.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Failed runs kept longer than successful ones: the check-in says a run failed,
+  # the pod is where the reason is.
+  failedJobsHistoryLimit: 5
+  # ⚠ SHORTER THAN THE INTERVAL, WHICH ON A MINUTE CADENCE MEANS SECONDS. A pass
+  # that could not be placed within half a slot should be abandoned rather than
+  # run late into the next one's window.
+  startingDeadlineSeconds: 30
+  jobTemplate:
+    spec:
+      # One attempt per slot. Every write this job makes is idempotent and the
+      # next slot is a minute away, so an immediate retry only compresses the
+      # same failure into a tighter loop.
+      backoffLimit: 0
+      # ⚠ UNDER THE ONE-MINUTE INTERVAL, AND THAT BOUND IS WHY THE BATCH IS 50
+      # RATHER THAN CATCH-UP'S 100. Each row here is several DNS lookups with a
+      # three-second bound apiece against nameservers we do not control, plus a
+      # zone write for a delegated domain — several times the cost of one
+      # `GetEmailIdentity`. A pass that hangs must be killed before the next is
+      # due, or `Forbid` turns one stuck pod into a sweep that never runs again.
+      # A backlog is not lost: the selector orders oldest-first, so the next
+      # minute resumes where this one stopped.
+      activeDeadlineSeconds: 50
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: prove
+              image: ghcr.io/i10-tech/i10-api:prod-3f659be1c927de41d1978de66af867457045724c@sha256:ac64e7714a8930ed9a939dd401d1c85f09e2daa38fdfa0411214f4c6637f8995
+              imagePullPolicy: Always
+              command: ["bun", "dist/domain-prove.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # This pass reaches across every tenant, and it does it through
+                # one narrow SECURITY DEFINER function
+                # (`core.domains_awaiting_proof`) rather than by holding a role
+                # that can see everything. Every write underneath still goes
+                # through `withTenant`, so the policies apply as on a request.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                # Mostly waiting on other people's nameservers, so the CPU
+                # request is small; the memory ceiling only has to hold one
+                # batch of rows.
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

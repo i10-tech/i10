@@ -313,6 +313,113 @@ describe("verifying", () => {
 
     expect(written).toMatchObject({ status: "verified", verifiedAt: NOW })
   })
+
+  /**
+   * ⚠ `not_started` CANNOT BE TRUE OF AN IDENTITY WE JUST CREATED, AND WRITING
+   * IT ANYWAY MADE THE ROW INVISIBLE TO EVERYTHING THAT MATTERS. Two things
+   * produce it from the status read: SES's own `NOT_STARTED`, and a
+   * `NotFoundException` from reading back an identity a moment after creating
+   * it — the adapter maps both to the same word, deliberately, because for a
+   * row that was never registered they mean the same thing.
+   *
+   * ⚠ STORED, THOUGH, IT MEANS SOMETHING ELSE ENTIRELY TO THE REST OF THE
+   * SYSTEM. `core.domains_awaiting_provider` excludes it, so the catch-up sweep
+   * never asks about the row again and the domain stays `not_started` for ever
+   * while SES quietly verifies it. And `ownsIdentity` in `remove` skips it, so
+   * deleting the domain leaves a live identity behind in AWS. One wrong word,
+   * two silent leaks.
+   */
+  it("never writes not_started for an identity it has just registered", async () => {
+    let written: Record<string, unknown> | undefined
+    const db = {
+      transaction: async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          execute: async () => [],
+          select: () => ({
+            from: () => ({
+              where: () => ({
+                /*
+                 * ⚠ BOTH SHAPES AT ONCE, because one fake select serves two
+                 * different reads. `verify` reads the ROW, and
+                 * `registerIdentity` reads the sealed private key on its own —
+                 * projected as `{ sealed }`, deliberately kept out of `COLUMNS`
+                 * so the only secret in this feature never travels inside the
+                 * shape `present()` turns into an API response. A fixture with
+                 * only the row shape makes `registerIdentity` return false, and
+                 * the test then silently measures the unregistered path.
+                 */
+                limit: async () => [{ ...row({ status: "not_started" }), sealed: "k" }],
+              }),
+            }),
+          }),
+          update: () => ({
+            set: (v: Record<string, unknown>) => {
+              written = v
+              return { where: () => ({ returning: async () => [row()] }) }
+            },
+          }),
+        }),
+    } as unknown as Database
+
+    await domainStore({
+      db,
+      identity: identity({
+        // What SES answers for an identity it has only just been told about.
+        status: async () => ({ dkimTokens: ["aaa"], status: "not_started" }),
+      }),
+      capacity: roomFor("allowed"),
+      ...deps,
+      now: () => NOW,
+    }).verify(TENANT, row().id)
+
+    expect(written).toMatchObject({ status: "pending" })
+  })
+
+  /**
+   * ⚠ THE STALENESS CLOCK ONLY TICKS IF AN UNPROVEN VERIFY STAMPS IT. Every
+   * unproven exit used to return without touching the row, so `dns_checked_at`
+   * stayed NULL for exactly the rows the proof sweep selects — and an
+   * oldest-first sweep would take the same head of the table on every run for
+   * ever, while the rows behind it were never reached. Stamping it asserts only
+   * that we asked.
+   */
+  it("stamps the check even when ownership does not prove", async () => {
+    let written: Record<string, unknown> | undefined
+    const db = {
+      transaction: async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          execute: async () => [],
+          select: () => ({
+            from: () => ({
+              where: () => ({ limit: async () => [row({ status: "not_started" })] }),
+            }),
+          }),
+          update: () => ({
+            set: (v: Record<string, unknown>) => {
+              written = v
+              return { where: () => ({ returning: async () => [row()] }) }
+            },
+          }),
+        }),
+    } as unknown as Database
+
+    const outcome = await domainStore({
+      db,
+      identity: identity(),
+      capacity: roomFor("allowed"),
+      ...deps,
+      // ⚠ NOTHING PUBLISHED, which is the ordinary state of a domain whose
+      // records have not gone up yet.
+      txt: async () => [],
+      now: () => NOW,
+    }).verify(TENANT, row().id)
+
+    expect(outcome.status).toBe("unproven")
+    expect(written).toMatchObject({ dnsCheckedAt: NOW })
+    // ⚠ AND IT ASSERTS NOTHING ELSE. Not the status, not `verified_at`.
+    expect(written).not.toHaveProperty("status")
+    expect(written).not.toHaveProperty("verifiedAt")
+  })
 })
 
 /**
