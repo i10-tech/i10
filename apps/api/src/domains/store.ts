@@ -125,6 +125,19 @@ export type RefreshOutcome =
   | { status: "not_registered"; domain: Domain }
 
 /**
+ * Why a domain could not be proved.
+ *
+ * ⚠ THE THREE ARE KEPT APART BECAUSE THEY SEND SOMEBODY TO THREE DIFFERENT
+ * PLACES. `absent` means publish the records; `unreachable` means we could not
+ * ask and nothing is wrong yet; `superseded` means the records are published,
+ * correct-looking, and name an older claim — which happens every time a domain
+ * is deleted and added again, because the token is per row. Flattening the
+ * third into the first is what sends a customer to re-check DNS that is
+ * present and correct.
+ */
+export type UnprovenReason = "absent" | "unreachable" | "superseded"
+
+/**
  * ⚠ `claimed` EXISTS BECAUSE TWO TENANTS MAY HOLD THE SAME NAME AS PENDING.
  * Only one may hold it verified (migration 0039), so the loser of that race
  * needs an answer that is neither "verified" nor "your DNS is wrong" — both
@@ -147,7 +160,7 @@ export type VerifyOutcome =
    * `TEMPORARY_FAILURE` SEPARATE FROM `FAILED`. A nameserver that timed out is
    * not a customer who published nothing.
    */
-  | { status: "unproven"; domain: Domain; reason: "absent" | "unreachable" }
+  | { status: "unproven"; domain: Domain; reason: UnprovenReason }
 
 export interface VerifyOptions {
   /**
@@ -506,7 +519,7 @@ export function domainStore({
     tenantId: string,
     row: Row,
     sink: DnsZones,
-  ): Promise<"ready" | "absent" | "unreachable" | "taken"> {
+  ): Promise<"ready" | "taken" | UnprovenReason> {
     const alreadyOurs = await withTenant(db, tenantId, async (tx) => {
       const [claim] = await tx
         .select({ domainId: delegations.domainId })
@@ -869,21 +882,56 @@ export function domainStore({
        * resolving. `pslhq.app` is currently held by three tenants in
        * production, so this was one delete away from happening.
        */
+      /*
+       * ⚠ AND THE CLAIM ALONE WAS NOT ENOUGH TO ANSWER IT, WHICH LEAKED EVERY
+       * ZONE PUBLISHED BEFORE CLAIMS EXISTED. Zones used to be written by
+       * `create` — see the note there that begins "NO ZONE IS PUBLISHED HERE
+       * ANY MORE" — so a delegated domain from before that change has three
+       * live zones and NO row in `core.delegations`. Reading the claim through
+       * `withTenant` then returned undefined, `holdsZones` was false, and the
+       * delete left our nameservers serving a DKIM key and a return path for a
+       * domain nobody owns. In this deployment that is currently EVERY
+       * delegated domain: `core.delegations` is empty and `pdns` holds six
+       * zones.
+       *
+       * ⚠ "NO CLAIM MEANS IT IS MINE" WOULD REOPEN THE HOLE THE CLAIM CLOSED.
+       * Several workspaces may hold one name as pending, so if two of them hold
+       * a claimless name, neither may take the other's zones. The fallback is
+       * therefore the strictest one that still helps: no claim AND nobody else
+       * holds the name at all.
+       *
+       * ⚠ IT FAILS IN THE CHEAP DIRECTION, the same rule `ownsIdentity` states
+       * below. A zone left behind is republished wholesale by the next verify
+       * of that name; a zone deleted out from under somebody stops their mail.
+       */
       const holdsZones =
         existing.delegated &&
-        (await withTenant(db, tenantId, async (tx) => {
-          const [claim] = await tx
-            .select({ domainId: delegations.domainId })
-            .from(delegations)
-            .where(
-              and(
-                eq(delegations.tenantId, tenantId),
-                eq(delegations.name, existing.name),
-              ),
-            )
-            .limit(1)
-          return claim?.domainId === id
-        }))
+        (await (async () => {
+          const rows = (await db.execute(
+            sql`select * from core.zone_owner(${existing.name})`,
+          )) as unknown as { claim_domain_id: string | null; holders: number }[]
+          const owner = rows[0]
+
+          /*
+           * ⚠ NO ANSWER IS NOT AN ANSWER. A migration not yet applied, a
+           * permission lost, a function renamed — any of them returns no row,
+           * and a count defaulted to zero would then satisfy "nobody else holds
+           * it" and authorise the delete. The absent case has to be the
+           * refusing case.
+           */
+          if (!owner) return false
+
+          // A claim, when there is one, settles it outright.
+          if (owner.claim_domain_id) return owner.claim_domain_id === id
+
+          /*
+           * ⚠ EXACTLY ONE, NOT "AT MOST ONE". This row is still in the table
+           * when the count is taken — it is deleted below — so one means this
+           * row alone, and zero means the count did not see what we are holding
+           * and cannot be trusted either.
+           */
+          return Number(owner.holders) === 1
+        })())
 
       /*
        * Whether the SES identity for this NAME is this row's to delete.

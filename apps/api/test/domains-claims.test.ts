@@ -93,10 +93,25 @@ function fakeDb(handlers: {
   many?: () => unknown[]
 }) {
   const tx = {
-    execute: async (q: unknown) =>
-      queryText(q).includes("_holder")
+    execute: async (q: unknown) => {
+      const text = queryText(q)
+      /*
+       * ⚠ `core.zone_owner` IS DERIVED FROM THE SAME `claim` HANDLER THESE
+       * TESTS ALREADY SET, so each one keeps the intent it was written with.
+       * `remove` used to read the claim through drizzle and now asks a definer
+       * function instead — because the honest question spans tenants and a
+       * row-level-security read cannot see the other workspaces holding a name.
+       * Modelling it as a separate fixture would have meant every existing test
+       * silently exercising the "nobody owns this" branch.
+       */
+      if (text.includes("zone_owner")) {
+        const claimed = (handlers.claim?.() ?? []) as { domainId?: string }[]
+        return [{ claim_domain_id: claimed[0]?.domainId ?? null, holders: 1 }]
+      }
+      return text.includes("_holder")
         ? (handlers.holder?.() ?? [])
-        : [{ taken: handlers.taken ?? false }],
+        : [{ taken: handlers.taken ?? false }]
+    },
     insert: () => ({
       values: () => ({ returning: async () => handlers.insert?.() ?? [] }),
     }),
@@ -131,6 +146,8 @@ function fakeDb(handlers: {
 const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
   create: async () => ({ dkimTokens: ["aaa"], status: "pending" }),
   status: async () => ({ dkimTokens: ["aaa"], status: "pending" }),
+  list: async () => [],
+  signature: async () => ({ origin: null, tokens: [] }),
   remove: async () => {},
   ...over,
 })

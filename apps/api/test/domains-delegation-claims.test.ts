@@ -85,6 +85,17 @@ function fakeDb(handlers: {
   del?: () => void
   /** `core.delegation_holder` — who a challenger must displace, if anybody. */
   holder?: () => unknown[]
+  /**
+   * `core.zone_owner` — who a delegated domain's zones belong to on delete.
+   *
+   * ⚠ IT IS SEPARATE FROM `claim` BECAUSE THE QUESTION SPANS TENANTS AND THE
+   * DRIZZLE READ DOES NOT. `claim` models this tenant's own row in
+   * `core.delegations`, which is what `settleDelegation` reads; this models the
+   * definer function `remove` asks, which also has to know how many OTHER
+   * workspaces hold the same name. Answering the second with the first is what
+   * made a claimless zone look unowned.
+   */
+  zoneOwner?: () => unknown[]
   /** Every raw statement the store issued, so displacement can be observed. */
   onExecute?: (text: string) => void
 }) {
@@ -92,6 +103,7 @@ function fakeDb(handlers: {
     execute: async (q: unknown) => {
       const text = queryText(q)
       handlers.onExecute?.(text)
+      if (text.includes("zone_owner")) return handlers.zoneOwner?.() ?? []
       return text.includes("_holder") ? (handlers.holder?.() ?? []) : [{ taken: false }]
     },
     insert: () => ({
@@ -134,6 +146,8 @@ function fakeDb(handlers: {
 const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
   create: async () => ({ dkimTokens: ["aaa"], status: "pending" }),
   status: async () => ({ dkimTokens: ["aaa"], status: "pending" }),
+  list: async () => [],
+  signature: async () => ({ origin: null, tokens: [] }),
   remove: async () => {},
   ...over,
 })
@@ -282,7 +296,27 @@ describe("the squatter, verifying a domain they do not own", () => {
     const out = await store.verify(STRANGER, ID)
 
     expect(out.status).toBe("unproven")
-    expect(out.status === "unproven" && out.reason).toBe("absent")
+    /*
+     * ⚠ `superseded`, AND THE SQUATTER GETS THE SAME WORD THE REAL OWNER WOULD.
+     * From DNS alone the two situations are IDENTICAL: the parent delegates to
+     * our nameservers under a claim that is not this row's. That is true of a
+     * customer who deleted their domain and added it again, and equally true of
+     * a stranger looking at somebody else's delegation. Nothing in a referral
+     * says which, so the check reports what it saw rather than guessing at
+     * intent.
+     *
+     * ⚠ AND IT DISCLOSES NOTHING, which is the only reason this is acceptable.
+     * The message tells them these nameservers are i10's — a fact anybody can
+     * read with `dig NS mail.example.com` — and never names the workspace
+     * holding it, the same restraint `create`'s conflict wording keeps. Acting
+     * on the advice requires control of the domain's DNS, which a squatter by
+     * definition does not have.
+     *
+     * ⚠ THE REFUSAL IS WHAT MATTERS AND IT IS UNCHANGED: no claim taken, no
+     * zone served. Those two assertions below are the security property; this
+     * one is only the wording.
+     */
+    expect(out.status === "unproven" && out.reason).toBe("superseded")
     expect(claimed).toBe(false)
     // ⚠ AND NOTHING WAS SERVED. A refusal that still published the zone would
     // hand over the domain while apologising for it.
@@ -407,7 +441,11 @@ describe("deleting a delegated domain", () => {
     const zones = spyZones()
     const store = domainStore({
       ...base,
-      db: fakeDb({ select: () => [row()], claim: () => [{ domainId: ID }] }),
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [{ domainId: ID }],
+        zoneOwner: () => [{ claim_domain_id: ID, holders: 1 }],
+      }),
       identity: identity(),
       zones,
       delegation: delegating(),
@@ -431,7 +469,11 @@ describe("deleting a delegated domain", () => {
     const zones = spyZones()
     const store = domainStore({
       ...base,
-      db: fakeDb({ select: () => [row()], claim: () => [{ domainId: OTHER_ID }] }),
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [{ domainId: OTHER_ID }],
+        zoneOwner: () => [{ claim_domain_id: OTHER_ID, holders: 2 }],
+      }),
       identity: identity(),
       zones,
       delegation: delegating(),
@@ -441,17 +483,79 @@ describe("deleting a delegated domain", () => {
     expect(zones.remove).not.toHaveBeenCalled()
   })
 
-  it("removes no zone when there is no claim to read", async () => {
+  /**
+   * ⚠ NO CLAIM IS NOT THE SAME QUESTION AS NO OWNER, and treating it as one is
+   * what leaked every zone published before claims existed. Zones used to be
+   * written by `create`; a delegated domain from before that change has three
+   * live zones and no row in `core.delegations` at all. This deployment is
+   * entirely in that state — `core.delegations` is empty while `pdns` holds six
+   * zones — so the old rule left all of them behind on delete, answering for
+   * ever with a DKIM key and a return path for a domain nobody owns.
+   */
+  it("removes the zones when there is no claim and nobody else holds the name", async () => {
     const zones = spyZones()
     const store = domainStore({
       ...base,
-      db: fakeDb({ select: () => [row()], claim: () => [] }),
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        zoneOwner: () => [{ claim_domain_id: null, holders: 1 }],
+      }),
+      identity: identity(),
+      zones,
+      delegation: delegating(),
+    })
+
+    expect(await store.remove(OWNER, ID)).toBe(true)
+    expect(zones.remove.mock.calls.map(([name]) => name).sort()).toEqual([
+      "_dmarc.example.com",
+      "_domainkey.example.com",
+      "mail.example.com",
+    ])
+  })
+
+  /**
+   * ⚠ AND THE CROSS-TENANT GUARD SURVIVES THAT CHANGE, which is the only reason
+   * it is safe to make. The hole the claim was invented to close needs TWO rows
+   * holding one name — a stranger with an unproven row deleting the zones of
+   * whoever is actually being served. Two holders is exactly what the fallback
+   * refuses, claim or no claim.
+   */
+  it("removes no zone when there is no claim but somebody else holds the name", async () => {
+    const zones = spyZones()
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        claim: () => [],
+        zoneOwner: () => [{ claim_domain_id: null, holders: 3 }],
+      }),
       identity: identity(),
       zones,
       delegation: delegating(),
     })
 
     expect(await store.remove(STRANGER, ID)).toBe(true)
+    expect(zones.remove).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⚠ A FUNCTION THAT ANSWERED NOTHING MUST NOT READ AS "MINE". If the definer
+   * call returns no row at all — a migration not yet applied, a permission lost
+   * — the count falls back to zero, and zero must not satisfy "I am the only
+   * holder". Failing in the cheap direction means leaving the zone.
+   */
+  it("removes no zone when the owner lookup answers nothing", async () => {
+    const zones = spyZones()
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [row()], claim: () => [], zoneOwner: () => [] }),
+      identity: identity(),
+      zones,
+      delegation: delegating(),
+    })
+
+    expect(await store.remove(OWNER, ID)).toBe(true)
     expect(zones.remove).not.toHaveBeenCalled()
   })
 })
