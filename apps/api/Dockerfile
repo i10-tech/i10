@@ -55,6 +55,32 @@ COPY . .
 # `exports` to a dist/ that does not exist yet.
 RUN bunx turbo run build --filter=@i10/api
 
+# ⚠ EVERY ENTRYPOINT THE MANIFESTS NAME, ASSERTED HERE, BECAUSE THE LAYOUT OF
+# dist/ IS NOT STABLE AND MOVED ONCE WITHOUT ANYTHING NOTICING. `bun build`
+# derives its output root from the COMMON ANCESTOR of the entrypoints unless
+# `--root` says otherwise — so adding one more `src/*.ts` to the build script
+# silently moved all nine outputs from `dist/x.js` to `dist/src/x.js`. The build
+# succeeded, CI went green, the image pushed, and every Deployment and CronJob
+# in it then died with `Module not found "dist/migrate.js"`. The PreSync
+# migration hook is one of them, so the failure also wedged Argo: no sync could
+# complete, and the fixed image could not be rolled out by the usual path.
+#
+# ⚠ `--root=src` IN THE BUILD SCRIPT IS THE FIX; THIS IS THE TRIPWIRE. The flag
+# pins the root so the entry set cannot move the output, and these lines fail
+# the IMAGE BUILD rather than the cluster if it ever moves again. A runtime
+# `Module not found` is the most expensive possible place to learn this.
+#
+# Keep in step with the `command:` lines in infra/k8s/i10/workloads/*.yaml.
+RUN set -eu; \
+    for entry in index worker migrate sweep reconcile recheck \
+                 domain-catchup domain-prove domain-orphans; do \
+      if [ ! -f "apps/api/dist/${entry}.js" ]; then \
+        echo "dist/${entry}.js is missing — bun build moved the output layout."; \
+        echo "Found instead:"; ls apps/api/dist; \
+        exit 1; \
+      fi; \
+    done
+
 # ⚠ NO node_modules IN THE RUNTIME STAGE, AND NOTHING TO FLATTEN ONE WITH.
 # The pnpm image ran `pnpm deploy --prod --legacy /app` to turn the workspace
 # into a self-contained tree; `bun build` bundles instead, so dist/ has no
