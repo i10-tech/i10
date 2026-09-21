@@ -2,6 +2,7 @@
 
 import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
+import { hasLiveSubscription } from "@/lib/billing"
 import type { BillingState, PlanSummary } from "@/lib/types"
 
 /**
@@ -94,7 +95,7 @@ export function StepPlan({
           <PlanCards
             plans={plans}
             currentPlanId={current?.id ?? null}
-            hasSubscription={billing.subscription !== null}
+            hasSubscription={hasLiveSubscription(billing)}
             /*
              * ⚠ THE CURRENT PLAN'S CARD IS HOW THIS STEP ENDS, WHICH IS WHY
              * "Finish set-up" IS NO LONGER UNDER IT. Staying on free was

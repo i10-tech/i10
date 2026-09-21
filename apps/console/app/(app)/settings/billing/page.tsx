@@ -13,6 +13,7 @@ import { PanelError } from "@/components/panel-error"
 import { PaymentMethodButton } from "@/components/payment-method-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
+import { hasLiveSubscription } from "@/lib/billing"
 import type { BillingState, FeatureUsage, PlanSummary } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Billing" }
@@ -155,7 +156,7 @@ export default async function BillingPage({
             <PlanCards
               plans={plans.data.data}
               currentPlanId={billing.plan?.id ?? null}
-              hasSubscription={billing.subscription !== null}
+              hasSubscription={hasLiveSubscription(billing)}
               // ⚠ ONLY WHEN IT IS ACTUALLY ENDING. `cancel_at_period_end` with no
               // date is a subscription Polar has marked but not yet dated; the
               // cards use the presence of a date to decide whether to disable
@@ -199,7 +200,7 @@ export default async function BillingPage({
            * docs/decisions/console.md §7, which is why the sentence below stays
            * rather than becoming a second, dead button.
            */}
-          <PaymentMethodButton hasSubscription={billing.subscription !== null} />
+          <PaymentMethodButton hasSubscription={hasLiveSubscription(billing)} />
 
           {!billing.subscription && (
             /*
