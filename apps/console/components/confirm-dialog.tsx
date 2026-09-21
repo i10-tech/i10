@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Check, Copy, CornerDownLeft } from "lucide-react"
+import { Check, Copy, Redo2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -288,12 +288,19 @@ export function ConfirmDialog({
              * typed at whatever weight and baseline the UI face gives it — in
              * Geist it lands small and low.
              *
+             * ⚠ AND IT IS `Redo2` TURNED HALF A TURN, WHICH IS NOT A BODGE.
+             * Lucide has no return-key glyph in the version we are on —
+             * `ArrowTurnDownLeft` arrived later — and `Redo2` upside down is
+             * exactly it: a curve that drops and turns back to the left.
+             * `CornerDownLeft`, the usual stand-in, is drawn from straight
+             * segments and reads as a corner rather than a key.
+             *
              * ⚠ `size-2.5` RATHER THAN `Kbd`'s DEFAULT 12px. An icon at the
              * same size as the text beside it reads heavier than the text
              * does; this sits it back down next to `Esc`.
              */}
             <Kbd className={KBD_ON_BUTTON[destructive ? "destructive" : "default"]}>
-              <CornerDownLeft aria-hidden="true" className="size-2.5" />
+              <Redo2 aria-hidden="true" className="size-2.5 rotate-180" />
             </Kbd>
           </Button>
         </DialogFooter>

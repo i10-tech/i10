@@ -106,11 +106,58 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     return () => clearTimeout(timer)
   }, [candidate, plausible])
 
-  async function begin(delegated: boolean) {
+  /**
+   * How long "Setting it up…" stays once it has been shown, in milliseconds.
+   *
+   * ⚠ THE SCREEN WAS APPEARING AND LEAVING INSIDE ONE ANIMATION FRAME, AND A
+   * FRAME OF "Setting it up…" IS WORSE THAN NO SCREEN AT ALL. Against a local
+   * API `createDomain` answers in tens of milliseconds, so pressing Delegate
+   * flashed a spinner and a sentence nobody could read on the way to the next
+   * question — which reads as a glitch, not as progress, and makes the step
+   * that follows feel like it arrived by accident.
+   *
+   * ⚠ 900ms IS A BEAT, NOT A WAIT. Long enough to read four words and register
+   * that something happened, short enough that nobody is sitting there. The
+   * alternative — suppressing the screen until the work is slow — hides the
+   * one moment in onboarding where the product is doing the work it just
+   * promised to do, and it is the promise that makes the next screen make
+   * sense.
+   *
+   * ⚠ IT IS A FLOOR, NOT A DELAY. Real work that takes longer is never
+   * padded: `settle` waits only for whatever is left of the beat, and for a
+   * slow provider that is nothing at all.
+   */
+  const SETTLE_MS = 900
+
+  /** When the working screen went up, or `null` when it is not showing. */
+  const workingSince = React.useRef<number | null>(null)
+
+  function startWorking() {
+    workingSince.current = Date.now()
     setPhase("working")
+  }
+
+  /** Waits out the rest of the beat, if any of it is left. */
+  async function settle() {
+    const since = workingSince.current
+    workingSince.current = null
+    if (since === null) return
+    const left = SETTLE_MS - (Date.now() - since)
+    if (left > 0) await new Promise((resolve) => setTimeout(resolve, left))
+  }
+
+  async function begin(delegated: boolean) {
+    startWorking()
 
     const created = await createDomain({ name: candidate, delegated })
     if (!created.ok) {
+      /*
+       * ⚠ THE BEAT IS WAITED OUT ON THE FAILURE PATH TOO. Bouncing straight
+       * back to the question with a toast makes it look as though the press
+       * did not register; arriving a moment later, with the toast, reads as
+       * an answer.
+       */
+      await settle()
       toastFailure(created)
       setPhase("mode")
       return
@@ -124,11 +171,13 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           ? `We cannot write records at ${provider.name} yet, so these are yours to publish.`
           : "Publish these at your DNS provider to finish.",
       )
+      await settle()
       setPhase("manual")
       return
     }
 
     if (!connections.includes(slug)) {
+      await settle()
       setPhase("connect")
       return
     }
@@ -144,11 +193,16 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
    * work having actually happened. See lib/domain-activation.ts.
    */
   async function attempt(target: Domain, slug: string) {
-    setPhase("working")
+    /*
+     * ⚠ ONLY IF IT IS NOT ALREADY UP. `begin` hands straight over to this, so
+     * restarting the clock here would charge the beat twice for one press.
+     */
+    if (workingSince.current === null) startWorking()
 
     const outcome = await activateDomain({ domainId: target.id, provider: slug })
 
     if (outcome.kind === "verified") {
+      await settle()
       setDomain(outcome.domain)
       setPhase("done")
       return
@@ -170,6 +224,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
        * records are published either way, so the fallback screen is the right
        * one — it shows them, says they are in place, and asks nothing further.
        */
+      await settle()
       if (!outcome.checked) {
         setFallbackReason(
           "The records are published, but the check that follows them did not " +
@@ -189,6 +244,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
      * during onboarding would be the most consequential question of the flow
      * asked at the moment somebody understands the least.
      */
+    await settle()
     setFallbackReason(
       outcome.kind === "conflicts"
         ? "Some records already at those names would have to be removed first, so these are yours to publish for now."
