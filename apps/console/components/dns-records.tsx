@@ -57,7 +57,7 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
           : record.value
 
       const priority = record.priority === undefined ? "" : `${record.priority} `
-      return `${record.name}.\t${record.ttl === "Auto" ? "3600" : record.ttl}\tIN\t${record.type}\t${priority}${value}`
+      return `${record.name}.\t${record.ttl}\tIN\t${record.type}\t${priority}${value}`
     })
 
     void copy(lines.join("\n")).then((ok) => {
@@ -81,11 +81,23 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
           <tbody className="divide-y">
             {records.map((record, index) => (
               <tr key={`${record.type}-${record.name}-${index}`}>
+                {/*
+                 * ⚠ THE SECOND LINE IS DROPPED WHEN IT REPEATS THE FIRST. The
+                 * two fields answer different questions — `type` is the DNS
+                 * record type, `record` is what the record is FOR — and for a
+                 * manual domain they differ usefully: TXT over "DKIM", MX
+                 * over "SPF". For a delegated one every row is an NS record
+                 * whose purpose is the delegation, so both fields say "NS"
+                 * and the cell printed the same word twice, in two sizes,
+                 * which reads as a rendering fault rather than as two facts.
+                 */}
                 <Td>
                   <span className="font-mono text-xs font-medium">{record.type}</span>
-                  <span className="mt-0.5 block text-2xs text-muted-foreground">
-                    {record.record}
-                  </span>
+                  {record.record !== record.type && (
+                    <span className="mt-0.5 block text-2xs text-muted-foreground">
+                      {record.record}
+                    </span>
+                  )}
                 </Td>
                 <Td>
                   <div className="flex items-center gap-1">
@@ -154,9 +166,12 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
             <div className="flex items-center justify-between gap-2">
               <span className="font-mono text-xs font-medium">
                 {record.type}
-                <span className="ml-1.5 font-sans text-2xs text-muted-foreground">
-                  {record.record}
-                </span>
+                {/* Same rule as the table: see the note there. */}
+                {record.record !== record.type && (
+                  <span className="ml-1.5 font-sans text-2xs text-muted-foreground">
+                    {record.record}
+                  </span>
+                )}
               </span>
               <Status status={record.status} />
             </div>

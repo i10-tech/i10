@@ -277,7 +277,9 @@ export function delegationRecordsFor(
       record: "NS",
       name: zone,
       type: "NS",
-      ttl: "Auto",
+      // ⚠ THE SAME NUMBER WE PUBLISH AND SERVE — see `RECORD_TTL`. It used to
+      // say "Auto", which named nothing and disagreed with both.
+      ttl: String(RECORD_TTL),
       status,
       value: ns,
     })),

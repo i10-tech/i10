@@ -306,10 +306,15 @@ describe("a publish the adapter refused", () => {
 
 describe("translating the records the customer is looking at", () => {
   /**
-   * ⚠ `"Auto"` BECOMES 300, MATCHING THE ZONES WE SERVE OURSELVES. A short TTL
-   * matters most in exactly this window: somebody is watching for the record to
-   * appear, and an hour-long negative cache is the difference between "it
-   * worked" and "it did nothing".
+   * ⚠ `"Auto"` BECOMES `RECORD_TTL`, WHICH IS 60 AND NOT THE 300 THIS NOTE
+   * USED TO CLAIM. A short TTL matters most in exactly this window: somebody
+   * is watching for the record to appear, and an hour-long negative cache is
+   * the difference between "it worked" and "it did nothing".
+   *
+   * ⚠ AND NOTHING WE ISSUE SAYS "Auto" ANY MORE — the records carry the number
+   * itself. The fallback stays because a domain row created before that change
+   * still has the old string in whatever the caller is holding, and mapping it
+   * is one line against a publish that would otherwise write a TTL of zero.
    */
   it("turns an Auto TTL into the shared record TTL and keeps a priority", async () => {
     let sent: readonly { name: string; ttl: number; priority?: number }[] = []

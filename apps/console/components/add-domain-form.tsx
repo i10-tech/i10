@@ -266,9 +266,21 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
       ...(returnPath.trim() ? { custom_return_path: returnPath.trim() } : {}),
     })
 
-    setSubmitting(false)
-
+    /*
+     * ⚠ STILL SUBMITTING. This used to clear here, the moment the domain row
+     * existed — and then went on to publish the records and navigate, which
+     * takes seconds. So the button un-spun and became pressable again while
+     * the work it started was still running, and a second press created a
+     * second domain. It reads as the press not having registered, which is
+     * exactly what invites the second press.
+     *
+     * ⚠ AND EVERY SUCCESSFUL PATH BELOW LEAVES THE PAGE, so nothing clears it
+     * again: the form unmounts on `router.push`, and `onCreated` swaps the
+     * onboarding step out. Only the failures come back to a live form, and
+     * each of them clears it as it returns.
+     */
     if (!result.ok) {
+      setSubmitting(false)
       /*
        * ⚠ A PLAN LIMIT GETS A BUTTON, NOT JUST A MESSAGE. It is the one refusal
        * on this surface that the person can resolve in ten seconds, and leaving

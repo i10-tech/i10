@@ -262,6 +262,11 @@ function desiredFor(domain: Domain): DesiredRecord[] {
     // number the zones we serve ourselves use, and writing it twice is how the
     // two halves of one delegation came to be able to disagree. See the note
     // on the constant for why it is sixty seconds.
+    //
+    // ⚠ THE "Auto" BRANCH IS NOW LEGACY TOLERANCE, NOT THE ORDINARY PATH.
+    // `dnsRecordsFor` issues the number itself; this stays for a record list
+    // built before that and held by a caller, where the alternative is
+    // `Number("Auto")` — NaN, falling to a TTL of zero at the provider.
     ttl: record.ttl === "Auto" ? RECORD_TTL : Number(record.ttl) || RECORD_TTL,
     ...(record.priority === undefined ? {} : { priority: record.priority }),
   }))
