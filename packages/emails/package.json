@@ -19,7 +19,7 @@
     "@react-email/components": "1.0.12"
   },
   "devDependencies": {
-    "@react-email/ui": "6.9.3",
+    "@react-email/ui": "6.9.5",
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/react": "^19.2.0",
