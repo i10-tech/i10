@@ -36,7 +36,7 @@ function fakeDb(handlers: { known?: string[]; zones?: unknown[] }) {
 const identity = (over: Record<string, unknown> = {}) => ({
   list: async () => [],
   signature: async () => ({ origin: null, tokens: [] as string[] }),
-  remove: mock(async (_d: string) => {}),
+  remove: mock(async () => {}),
   ...over,
 })
 
@@ -169,7 +169,7 @@ describe("sweeping orphans", () => {
   })
 
   it("reports orphaned zones and removes them only when told", async () => {
-    const zones = { remove: mock(async (_z: string) => {}) }
+    const zones = { remove: mock(async () => {}) }
     const orphan = [{ zone_id: 1, zone_name: "mail.gone.com", domain_name: "gone.com" }]
 
     const reported = await sweepOrphans({

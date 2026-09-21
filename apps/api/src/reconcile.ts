@@ -450,8 +450,10 @@ await withMonitor(
         process.exitCode = 1
         captureError(
           new Error(
-            `${report.unknownTenant.length} Polar subscription(s) name a tenant ` +
-              "that no longer exists; revoke them in Polar or restore the workspace",
+            `${report.unknownTenant.length} Polar subscription(s) name a tenant id ` +
+              "this database does not hold — usually a re-signup whose Polar customer " +
+              "kept its old external_id. DO NOT revoke without checking: the customer " +
+              "is probably live on a new workspace.",
           ),
           { unknownTenant: report.unknownTenant.slice(0, 20) },
         )

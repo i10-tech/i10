@@ -98,10 +98,27 @@ export interface ReconcileReport {
    * well-formed and names a workspace that is gone: we know exactly who it was
    * and there is no longer anybody to grant anything to.
    *
-   * ⚠ AND IT IS A BILLING PROBLEM, NOT A SYNC ONE. Retrying cannot fix it —
-   * only revoking the subscription in Polar, or restoring the tenant, can. The
-   * deletion path is supposed to revoke immediately, so anything landing here
-   * is also evidence that it did not.
+   * ⚠ AND THE COMMONEST CAUSE IS NOT A DELETED CUSTOMER — IT IS A RE-SIGNUP.
+   * See `reassign` in db.ts, which documents the same mechanism from the other
+   * end: Polar reuses a returning customer's record and keeps its stale
+   * `external_id`, so a brand-new subscription is bound to the tenant id that
+   * person had LAST time. The human, their Clerk organisation and their current
+   * workspace are all perfectly alive; the only dead thing is the id Polar is
+   * holding. Reading this list as "deleted workspaces, revoke them" would
+   * cancel live customers' subscriptions.
+   *
+   * ⚠ WHICH MEANS IT CANNOT BE RESOLVED FROM HERE, and must not be guessed at.
+   * Re-pointing the Polar customer at the live tenant is a claim about WHICH
+   * workspace a payment belongs to, and the only place that is known for
+   * certain is the checkout, which writes the tenant id into metadata itself —
+   * that is why `reassign` is set there and nowhere else. A reconciler
+   * inferring it from an email address would attach somebody's subscription to
+   * the wrong workspace.
+   *
+   * ⚠ A TERMINATED TENANT IS NOT THIS. `tenants.status` is set to dead and the
+   * ROW REMAINS, so a terminated workspace still satisfies the foreign key and
+   * never reaches here. Landing in this list means the id was never in this
+   * database at all.
    */
   unknownTenant: { tenantId: string; subscriptionId: string; planId: string }[]
 }
