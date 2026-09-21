@@ -121,6 +121,36 @@ export interface ReconcileReport {
    * database at all.
    */
   unknownTenant: { tenantId: string; subscriptionId: string; planId: string }[]
+  /**
+   * Subscriptions Polar and our own table disagree about the owner of.
+   *
+   * ⚠ THIS WAS A UNIQUE VIOLATION, EVERY THIRTY MINUTES, ALONGSIDE THE FOREIGN
+   * KEY ONE. `polar_subscription_id` is UNIQUE deliberately — two tenants
+   * pointing at one subscription is one payment entitling two accounts — and the
+   * reconciler attributed by `customer.external_id` without ever checking who
+   * already held the id. When they disagreed the INSERT died on the constraint,
+   * was caught as a generic failure, and was retried for ever.
+   *
+   * ⚠ AND THE FIELD IT TRUSTS IS THE UNRELIABLE ONE, WHICH IS WHY THIS MUST NOT
+   * AUTO-RESOLVE. `reassign` in db.ts records the reason: Polar reuses a
+   * returning customer and keeps its stale `external_id`, so external_id can
+   * name the tenant that person had LAST time while our row names the one that
+   * actually checked out. Believing Polar here would move a live subscription
+   * off the workspace that paid for it; believing our row blindly would strand a
+   * genuine re-attribution. The checkout's own metadata is the only thing that
+   * settles it, and that is not in this job's hands.
+   *
+   * ⚠ SO IT IS REPORTED AND NEVER ACTED ON, the same rule `orphaned` follows for
+   * the same reason: acting on an ambiguous signal at this scale is how one bad
+   * assumption moves everybody's plan at once.
+   */
+  contested: {
+    subscriptionId: string
+    /** Who Polar's `customer.external_id` names. */
+    claimedBy: string
+    /** Who our row already binds the subscription to. */
+    heldBy: string
+  }[]
 }
 
 export async function reconcileSubscriptions(
@@ -139,9 +169,17 @@ export async function reconcileSubscriptions(
     failed: [],
     stranded: [],
     unknownTenant: [],
+    contested: [],
   }
 
   const byTenant = new Map(ours.map((row) => [row.tenantId, row]))
+  /*
+   * ⚠ THE OTHER WAY ROUND, BECAUSE THE UNIQUE CONSTRAINT IS ON THE SUBSCRIPTION
+   * ID RATHER THAN THE TENANT. `byTenant` answers "what do we think this tenant
+   * holds"; this answers "who already holds this subscription", which is the
+   * question the INSERT actually fails on and the one nothing was asking.
+   */
+  const holderOf = new Map(ours.map((row) => [row.polarSubscriptionId, row.tenantId]))
   const seen = new Set<string>()
 
   // ⚠ ONE SUBSCRIPTION PER TENANT DECIDES, AND CHOOSING WHICH IS NOT
@@ -216,6 +254,31 @@ export async function reconcileSubscriptions(
         },
         "Polar has a subscription for a workspace that no longer exists — " +
           "nothing to grant, and the deletion should have revoked it",
+      )
+      continue
+    }
+
+    /*
+     * ⚠ ALSO BEFORE `outOfStep`, AND FOR THE SAME REASON: a tenant whose
+     * subscription is held by somebody else has no row of its own, so the check
+     * below would send it to `grants.apply` and the unique constraint.
+     */
+    const heldBy = holderOf.get(state.polarSubscriptionId)
+    if (heldBy && heldBy !== state.tenantId) {
+      report.contested.push({
+        subscriptionId: state.polarSubscriptionId,
+        claimedBy: state.tenantId,
+        heldBy,
+      })
+      deps.log.error(
+        {
+          subscriptionId: state.polarSubscriptionId,
+          claimedBy: state.tenantId,
+          heldBy,
+        },
+        "Polar and our row disagree about who owns a subscription — not moved, " +
+          "because external_id goes stale on a re-signup and the checkout is the " +
+          "only thing that knows",
       )
       continue
     }

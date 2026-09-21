@@ -309,6 +309,52 @@ describe("reconciling against Polar", () => {
   })
 
   /*
+   * ⚠ THE SECOND CRASH, AND IT IS NOT THE SAME BUG AS THE ONE ABOVE. These two
+   * arrived together in production and looked alike in the log — three tenants,
+   * every run, all counted as `failed` — but one was a foreign key on a tenant
+   * that does not exist and two were this: a UNIQUE violation on
+   * `polar_subscription_id`, for tenants that exist perfectly well, because
+   * somebody else's row already holds the subscription Polar attributes to them.
+   */
+  it("reports a subscription held by another tenant instead of colliding with the unique constraint", async () => {
+    const apply = mock()
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        resumeSubscription: async () => {},
+        revokeSubscription: async () => "revoked" as const,
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        // Polar's external_id names ten-1; our row binds sub_1 to ten-2.
+        listSubscriptions: async () => [polarSub()],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({
+        snapshot: async () => [row({ tenantId: "ten-2" })],
+        knownTenants: async (ids: readonly string[]) => new Set(ids),
+      }),
+      grants: { apply },
+      options,
+      log,
+    })
+
+    expect(report.contested).toEqual([
+      { subscriptionId: "sub_1", claimedBy: "ten-1", heldBy: "ten-2" },
+    ])
+    /*
+     * ⚠ NOTHING MOVED, WHICH IS THE POINT. `external_id` goes stale on a
+     * re-signup, so believing it here would take a live subscription off the
+     * workspace that actually paid for it.
+     */
+    expect(apply).not.toHaveBeenCalled()
+    expect(report.failed).toEqual([])
+  })
+
+  /*
    * ⚠ AND A LIVE TENANT WITH NO ROW IS STILL REPAIRED, which is the case the
    * whole job exists for. If the new check swallowed this one it would have
    * turned a lost webhook into a silent permanent downgrade — strictly worse

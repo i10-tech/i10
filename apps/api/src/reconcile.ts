@@ -459,6 +459,26 @@ await withMonitor(
         )
       }
 
+      /*
+       * ⚠ ITS OWN ALERT TOO, AND DELIBERATELY NOT FOLDED IN WITH THE ONE ABOVE.
+       * They arrived together and look alike in a log — both are a subscription
+       * the reconciler declined to write — but the fix is opposite. An unknown
+       * tenant means the id names nobody; a contested one means it names the
+       * WRONG somebody while a live row holds it. Merging them would produce an
+       * alert whose remedy depends on which member you happened to read.
+       */
+      if (report.contested.length > 0) {
+        process.exitCode = 1
+        captureError(
+          new Error(
+            `${report.contested.length} subscription(s) are claimed by one tenant ` +
+              "and held by another; nothing was moved — check the checkout metadata " +
+              "before changing either side",
+          ),
+          { contested: report.contested.slice(0, 20) },
+        )
+      }
+
       if (report.stranded.length > 0) {
         process.exitCode = 1
         captureError(
