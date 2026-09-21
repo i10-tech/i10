@@ -37,7 +37,14 @@ export interface Logger {
 
 /** One process, one of these. It becomes the `service` tag on every event. */
 export type Service =
-  "api" | "worker" | "reconcile" | "sweep" | "domain-recheck" | "domain-catchup"
+  | "api"
+  | "worker"
+  | "reconcile"
+  | "sweep"
+  | "domain-recheck"
+  | "domain-catchup"
+  | "domain-prove"
+  | "domain-orphans"
 
 export interface ObservabilityOptions {
   /**

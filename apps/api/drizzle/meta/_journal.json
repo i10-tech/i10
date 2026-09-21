@@ -351,6 +351,34 @@
       "when": 1789869354607,
       "tag": "0049_domains_awaiting_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789869355607,
+      "tag": "0050_domains_awaiting_proof",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1789869356607,
+      "tag": "0051_zone_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1789869357607,
+      "tag": "0052_orphaned_zones",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1789869358607,
+      "tag": "0053_tenants_known",
+      "breakpoints": true
     }
   ]
 }

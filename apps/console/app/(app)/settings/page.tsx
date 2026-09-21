@@ -50,7 +50,12 @@ export default async function GeneralSettingsPage() {
           switcher. Renaming here renames both.
         </SectionDescription>
         <SectionContent>
-          <RenameWorkspace current={tenant?.name ?? ""} />
+          <RenameWorkspace
+            current={tenant?.name ?? ""}
+            /* See WorkspaceBar: Clerk's hooks throw outside a provider, and
+               the provider is only mounted when a key exists. */
+            clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+          />
         </SectionContent>
       </Section>
 

@@ -429,6 +429,36 @@ await withMonitor(
        * outside the pod logs, and it has to name the subscription so the fix is
        * a two-field edit rather than a search.
        */
+      /*
+       * ⚠ ITS OWN ALERT, AND ITS OWN PROBLEM, FOR THE SAME REASON `stranded`
+       * HAS ONE. Until this existed these landed in `failed`, where they were
+       * indistinguishable from a transient repair that the next run would fix —
+       * except that no run would ever fix them, so the job failed every thirty
+       * minutes and carried the whole Argo Application to Degraded with it.
+       *
+       * ⚠ AND IT REPORTS TWO THINGS AT ONCE. Polar is holding a live
+       * subscription for a workspace that no longer exists, AND the deletion
+       * path that is supposed to revoke immediately did not. The second is the
+       * one worth chasing: this list is the evidence for it.
+       *
+       * ⚠ IT STILL EXITS NON-ZERO, WHICH MEANS THE JOB STAYS RED UNTIL SOMEBODY
+       * ACTS. That is deliberate and it is the same call `stranded` makes:
+       * money is involved, nothing here can resolve it, and a green run would
+       * say the reconciliation agreed with Polar when it did not.
+       */
+      if (report.unknownTenant.length > 0) {
+        process.exitCode = 1
+        captureError(
+          new Error(
+            `${report.unknownTenant.length} Polar subscription(s) name a tenant id ` +
+              "this database does not hold — usually a re-signup whose Polar customer " +
+              "kept its old external_id. DO NOT revoke without checking: the customer " +
+              "is probably live on a new workspace.",
+          ),
+          { unknownTenant: report.unknownTenant.slice(0, 20) },
+        )
+      }
+
       if (report.stranded.length > 0) {
         process.exitCode = 1
         captureError(

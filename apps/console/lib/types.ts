@@ -185,7 +185,16 @@ export interface Domain extends DomainSummary {
  * propagated".
  */
 export interface VerifiedDomain extends Domain {
-  ownership?: { proven: true } | { proven: false; reason: "absent" | "unreachable" }
+  /**
+   * ⚠ `superseded` IS THE THIRD REASON AND IT NEEDS ITS OWN SENTENCE. It means
+   * the NS records are published and point at us, but name an EARLIER claim —
+   * which is what every delete-and-re-add produces, because the delegation
+   * token is issued per domain row. Folding it into `absent` tells somebody
+   * their records are missing while they are looking straight at them.
+   */
+  ownership?:
+    | { proven: true }
+    | { proven: false; reason: "absent" | "unreachable" | "superseded" }
 }
 
 export interface DnsInspection {

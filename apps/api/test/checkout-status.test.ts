@@ -9,6 +9,14 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
   snapshot: async () => [],
+  /*
+   * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
+   * was written for. The reconciler now asks whether a tenant still exists
+   * before trying to repair it — a fake that answered "no" would send every one
+   * of these through the new unknown-tenant branch instead of the repair path
+   * they are actually about.
+   */
+  knownTenants: async (ids: readonly string[]) => new Set(ids),
   // Not reached here — this suite is about the checkout poll, not cancelling.
   noteCancelling: async () => {},
   noteResuming: async () => {},

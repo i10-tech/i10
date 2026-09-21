@@ -104,14 +104,25 @@ async function run<T>(
 
 // ── Workspace ───────────────────────────────────────────────────────────────
 
+/**
+ * ⚠ IT REVALIDATES NOTHING, AND THAT IS THE POINT. `revalidatePath("/settings")`
+ * is a re-render of the page this is called FROM — the whole settings tree
+ * re-fetched and reconciled for one string, which reads as the page blinking
+ * a beat after Save. Nothing else on that page shows the name: the field
+ * already holds what was typed, and the only other place it appears is the
+ * workspace bar in the rail, which the caller updates directly. See
+ * components/rename-workspace.tsx.
+ *
+ * ⚠ THE COST IS A STALE CACHE ENTRY FOR OTHER ROUTES until something else
+ * revalidates them, which is the same cost every page here already pays for
+ * a name it does not render.
+ */
 export async function renameWorkspace(name: string) {
-  return run(
-    () =>
-      api<{ ok: true; name: string }>("/console/me/tenant", {
-        method: "PATCH",
-        body: { name },
-      }),
-    ["/settings"],
+  return run(() =>
+    api<{ ok: true; name: string }>("/console/me/tenant", {
+      method: "PATCH",
+      body: { name },
+    }),
   )
 }
 

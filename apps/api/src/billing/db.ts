@@ -101,6 +101,24 @@ export interface SubscriptionOps {
   /** Every tenant's current subscription. The reconciler's only read. */
   snapshot(): Promise<SubscriptionRow[]>
   /**
+   * Of these tenant ids, the ones this database still holds.
+   *
+   * ⚠ IT EXISTS BECAUSE THE RECONCILER FOUND OUT BY CRASHING. Polar keeps
+   * `customer.external_id` for ever, including after the workspace it names is
+   * deleted — so a subscription can name a tenant that no longer exists. With
+   * no way to ask, the reconciler read that as "a webhook we never received",
+   * tried to repair it, and the INSERT died on
+   * `subscriptions_tenant_id_tenants_id_fk` every thirty minutes for ever.
+   *
+   * ⚠ AND THE TWO CASES IT SEPARATES LOOK IDENTICAL FROM `snapshot()` ALONE. No
+   * subscription row for a LIVE tenant is the ordinary lost-webhook case this
+   * job exists to repair; no TENANT is a subscription Polar is still billing
+   * for a workspace that is gone. One is repairable and one is a money problem,
+   * so the question has to be asked before the write rather than discovered
+   * after it.
+   */
+  knownTenants(ids: readonly string[]): Promise<Set<string>>
+  /**
    * Records that Polar has accepted a cancellation, now.
    *
    * ⚠ IT EXISTS BECAUSE THE WEBHOOK IS TOO LATE TO BE THE ONLY WRITER. Polar
@@ -359,6 +377,21 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         grantedPlanId: r.granted_plan_id,
         eventAt: toDate(r.event_at) ?? new Date(0),
       }))
+    },
+
+    async knownTenants(ids) {
+      /*
+       * ⚠ AN EMPTY INPUT MUST NOT REACH THE QUERY. `= ANY('{}')` is a perfectly
+       * good way to ask a question with one answer, and it is still a round
+       * trip per run on a deployment that has no subscriptions at all.
+       */
+      if (ids.length === 0) return new Set<string>()
+
+      const rows = (await db.execute(
+        sql`select tenant_id from core.tenants_known(${[...ids]}::uuid[])`,
+      )) as unknown as { tenant_id: string }[]
+
+      return new Set(rows.map((r) => r.tenant_id))
     },
   }
 }

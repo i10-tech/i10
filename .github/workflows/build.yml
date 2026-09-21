@@ -370,7 +370,6 @@ jobs:
     # The VALUES are never exposed this way — only whether they are set.
     env:
       HAS_TAILSCALE: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID != '' }}
-      HAS_DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -528,39 +527,53 @@ jobs:
           oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
           tags: tag:ci
 
+      # ⚠ THE TAILNET IS THE CREDENTIAL, AND THERE IS NO SSH KEY AT ALL. This
+      # used to carry a private key, a pinned host key and a forced command on
+      # the box — a design that is strictly stronger and that DOES NOT WORK
+      # HERE, because psl-vps runs Tailscale SSH. `tailscaled` intercepts port
+      # 22 before sshd sees it and never reads `authorized_keys`, so the forced
+      # command was inert and the key authenticated nothing. The symptom is a
+      # shell and `<sha>: command not found`, which reads exactly like a broken
+      # key. See infra/scripts/README.md.
+      #
+      # ⚠ SO AUTHORISATION MOVED TO WHERE IT ACTUALLY LIVES: the tailnet ACL.
+      # The runner joins as an ephemeral node tagged `tag:ci`, and an `ssh` rule
+      # admits that tag to ONE user on ONE host. This is the same model psl uses
+      # for Infisical and the deploy webhooks — be on the tailnet, then talk to
+      # the thing — and it is two secrets instead of five.
+      #
+      # ⚠ WHAT IS GIVEN UP, SAID PLAINLY: `tag:ci` gets a shell as
+      # `i10-deploy`, not one pinned command. Tailscale SSH has no forced-command
+      # concept, so the blast radius is bounded by that user's RBAC instead —
+      # get/list/watch on applications, deployments and pods, plus patch on
+      # applications, and no sudo. A leaked OAuth secret reaches a read-only
+      # view of one namespace, not the box.
+      #
+      # ⚠ AND `accept-new` IS CORRECT HERE RATHER THAN LAX, which it would not
+      # be on the public internet. The connection is already authenticated and
+      # encrypted by WireGuard before SSH begins, so impersonating the host
+      # means already holding a tailnet identity — at which point the host key
+      # is not what is protecting anything. Pinning one is also actively wrong
+      # now: the key presented is Tailscale SSH's, not sshd's.
       - name: Verify the rollout
         id: verify
-        if: ${{ steps.push.outputs.pushed == 'true' && env.HAS_DEPLOY_KEY == 'true' && env.HAS_TAILSCALE == 'true' }}
+        if: ${{ steps.push.outputs.pushed == 'true' && env.HAS_TAILSCALE == 'true' }}
         continue-on-error: true
         env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
-          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER || 'i10-deploy' }}
-          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST || secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER || 'i10-deploy' }}
           PINNED: ${{ steps.pin.outputs.pinned }}
           REVISION: ${{ steps.revision.outputs.sha }}
         run: |
           set -euo pipefail
 
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
-          chmod 600 ~/.ssh/deploy
-
-          # ⚠ A PINNED HOST KEY, NEVER `StrictHostKeyChecking=no`. Turning the
-          # check off means the first machine to answer on that address gets a
-          # CI credential and the commands it runs — which is the entire attack
-          # this file is otherwise careful about.
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
           images=$(tr ' ' ',' <<<"${PINNED:-}")
 
-          ssh -i ~/.ssh/deploy \
-              -o IdentitiesOnly=yes \
-              -o BatchMode=yes \
+          ssh -o BatchMode=yes \
+              -o StrictHostKeyChecking=accept-new \
               -o ConnectTimeout=20 \
               "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" \
-              "${REVISION} ${images}"
+              "/usr/local/bin/i10-verify-rollout ${REVISION} ${images}"
 
       - name: Summarise
         env:
@@ -598,10 +611,9 @@ jobs:
                 if [ "${PUSHED:-false}" != "true" ]; then
                   echo "Nothing to deploy — the manifests already referenced these digests."
                 else
-                  echo "⚠ Rollout not verified — \`DEPLOY_SSH_KEY\` or"
-                  echo "\`TAILSCALE_OAUTH_CLIENT_ID\` is not configured. The box's sshd"
-                  echo "listens only on the tailnet, so both are required."
-                  echo "See infra/scripts/README.md."
+                  echo "⚠ Rollout not verified — \`TAILSCALE_OAUTH_CLIENT_ID\` is not"
+                  echo "configured. The box is reachable only over the tailnet, and the"
+                  echo "tailnet is what authorises CI. See infra/scripts/README.md."
                 fi
                 ;;
             esac
