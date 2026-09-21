@@ -96,8 +96,19 @@ export function StepVerify({
             <Status status={domain.status} />
 
             <div className="flex items-center gap-2">
+              {/*
+               * ⚠ THROUGH `/onboarding/skip`, NOT STRAIGHT AT THE DOMAIN PAGE,
+               * AND THE DIRECT LINK IS WHY THIS BUTTON DID NOTHING. `/domains/…`
+               * is under the console layout, which redirects to `/onboarding`
+               * for as long as `should_onboard` is true — so the click
+               * navigated, was bounced, and landed back on the screen it
+               * started from. Exactly the bug "Skip to the console" had, which
+               * is why that one is a route and not a link either.
+               */}
               <Button variant="outline" size="sm" asChild>
-                <Link href={`/domains/${domain.id}`}>
+                <Link
+                  href={`/onboarding/skip?to=${encodeURIComponent(`/domains/${domain.id}`)}`}
+                >
                   Records
                   <ExternalLink />
                 </Link>

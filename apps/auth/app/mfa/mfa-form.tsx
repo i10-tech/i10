@@ -58,6 +58,8 @@ export function MfaForm({
   const [code, setCode] = useState("")
   /** Clerk's own sentence about the last code, shown under the boxes. */
   const [rejected, setRejected] = useState<string | null>(null)
+  /** The code was accepted, for the half-second before this screen leaves. */
+  const [accepted, setAccepted] = useState(false)
   const [pending, setPending] = useState(false)
   /**
    * Which strategies have already had a code dispatched.
@@ -158,6 +160,9 @@ export function MfaForm({
       }
 
       if (signIn.status === "complete") {
+        // ⚠ BEFORE THE NAVIGATION, so the green lands while there is still a
+        // screen to land on. See `verified` on OtpField.
+        setAccepted(true)
         // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
         // see the sign-in form. `finalizeAndLeave` also replaces rather than
         // assigns, and navigates itself if Clerk's callback never runs: see
@@ -242,6 +247,7 @@ export function MfaForm({
             onComplete={() => {
               if (!pending) formRef.current?.requestSubmit()
             }}
+            verified={accepted}
             state={rejected ? "invalid" : "idle"}
             hint={rejected}
             autoFocus

@@ -1,6 +1,7 @@
 "use client"
 
 import type * as React from "react"
+import { Check } from "lucide-react"
 import { Field, FieldLabel } from "@repo/ui/components/field"
 import { fieldHintTone, type FieldState } from "@repo/ui/components/floating-field"
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@repo/ui/components/input-otp"
@@ -30,6 +31,7 @@ export function OtpField({
   autoFocus,
   state = "idle",
   hint,
+  verified = false,
 }: {
   value: string
   onChange: (value: string) => void
@@ -54,7 +56,28 @@ export function OtpField({
   state?: FieldState
   /** The sentence under the boxes. Takes its colour from `state`. */
   hint?: React.ReactNode
+  /**
+   * The code was accepted.
+   *
+   * ⚠ IT IS A SEPARATE PROP RATHER THAN `state="valid"` AT EACH CALL SITE,
+   * because the accepted state is not just a colour — it is a colour, a word
+   * and a movement, and four screens reproducing that from three props is four
+   * chances for them to disagree. Everything that asks for a code now confirms
+   * it identically.
+   *
+   * ⚠ AND IT IS WORTH SHOWING AT ALL EVEN THOUGH THE SCREEN IS ABOUT TO
+   * NAVIGATE. Six boxes that simply empty and vanish leave somebody unsure
+   * whether the code worked or the page glitched; half a second of green is
+   * the difference between "done" and "what just happened".
+   */
+  verified?: boolean
 }) {
+  /*
+   * ⚠ ACCEPTANCE OUTRANKS EVERYTHING, INCLUDING A STALE `invalid`. A caller
+   * that forgets to clear its rejection message before reporting success would
+   * otherwise paint red boxes around a code that was just accepted.
+   */
+  const tone: FieldState = verified ? "valid" : state
   return (
     <Field>
       {/*
@@ -80,7 +103,7 @@ export function OtpField({
       >
         <InputOTPGroup>
           {Array.from({ length: OTP_LENGTH }, (_, i) => (
-            <InputOTPSlot key={i} index={i} state={state} />
+            <InputOTPSlot key={i} index={i} state={tone} />
           ))}
         </InputOTPGroup>
       </InputOTP>
@@ -100,10 +123,23 @@ export function OtpField({
         className={cn(
           "min-h-4 text-center text-2xs leading-4",
           "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
-          fieldHintTone(state),
+          fieldHintTone(tone),
         )}
       >
-        {hint}
+        {verified ? (
+          /*
+           * ⚠ IT ENTERS RATHER THAN APPEARING, and the movement is the half
+           * that reads as confirmation. A word that is simply present on the
+           * next frame is indistinguishable from a word that was always there;
+           * one that arrives is an answer to something.
+           */
+          <span className="inline-flex animate-in items-center gap-1 fade-in-0 zoom-in-95 duration-(--duration-instant)">
+            <Check aria-hidden="true" className="size-3" />
+            Verified
+          </span>
+        ) : (
+          hint
+        )}
       </p>
     </Field>
   )

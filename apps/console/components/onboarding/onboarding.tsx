@@ -51,6 +51,7 @@ export function Onboarding({
   plans,
   billing,
   checkoutId,
+  stepFromUrl,
 }: {
   state: OnboardingState
   workspaceName: string
@@ -59,6 +60,17 @@ export function Onboarding({
   billing: BillingState
   /** From `?checkout_id=`, for the plan step's outcome banner. */
   checkoutId: string | null
+  /**
+   * From `?step=`, and it outranks everything below.
+   *
+   * ⚠ IT EXISTS BECAUSE PAYING THREW PEOPLE BACKWARDS. The step is local state;
+   * returning from Polar's checkout remounts this component, the initialiser
+   * below runs again, and the facts it reads say "has a domain, not verified" —
+   * so somebody who paid on step five was put back on step three. The facts
+   * were right and the conclusion was wrong: they had not gone back, they had
+   * come back.
+   */
+  stepFromUrl: string | null
 }) {
   const router = useRouter()
 
@@ -70,6 +82,14 @@ export function Onboarding({
    * truth.
    */
   const [step, setStep] = React.useState<StepId>(() => {
+    /*
+     * ⚠ THE URL FIRST, BECAUSE IT IS THE ONLY SOURCE THAT SURVIVES A REMOUNT
+     * AND SAYS WHERE SOMEBODY *WAS* RATHER THAN WHERE THEY OUGHT TO BE. The
+     * derivation below is about a fresh arrival; this is about coming back.
+     */
+    if (stepFromUrl && STEPS.some((s) => s.id === stepFromUrl)) {
+      return stepFromUrl as StepId
+    }
     if (state.completed_at) return "plan"
     if (state.facts.has_verified_domain && state.facts.has_api_key) return "plan"
     if (state.facts.has_verified_domain) return "send"
@@ -81,6 +101,24 @@ export function Onboarding({
 
   const go = React.useCallback((next: StepId) => {
     setStep(next)
+
+    /*
+     * ⚠ `history.replaceState`, NOT `router.replace`. Both put the step in the
+     * URL; only this one does it without a navigation, so the server components
+     * are not re-fetched and this tree is not re-rendered on every "Next".
+     * Next.js supports it explicitly and keeps `useSearchParams` in sync with
+     * it — see "Native History API" in the linking-and-navigating guide.
+     *
+     * ⚠ AND `replace` RATHER THAN `push`, so the browser's Back button still
+     * means "leave set-up" rather than walking back through five steps one
+     * entry at a time. The stepper above is how you go back.
+     */
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search)
+      params.set("step", next)
+      window.history.replaceState(null, "", `?${params.toString()}`)
+    }
+
     // ⚠ NOT AWAITED. The person is already looking at the next step; making
     // them wait for a write whose only purpose is resuming later would add
     // latency to every click for no visible benefit.

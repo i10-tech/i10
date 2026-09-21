@@ -136,7 +136,18 @@ export function PlanCards({
       // the real location is both available and authoritative. Defaulting to
       // "" instead would send somebody who just paid to the site root.
       const here = pathname ?? window.location.pathname
-      router.replace(`${here}?checkout_id=${encodeURIComponent(checkoutId)}`)
+
+      /*
+       * ⚠ THE QUERY THAT WAS ALREADY THERE IS KEPT, AND DROPPING IT PUT PEOPLE
+       * BACK ON THE WRONG STEP. This used to build the URL from the path alone,
+       * so `?step=plan` — which is how onboarding remembers where somebody is —
+       * was discarded by the very navigation that reports a successful payment.
+       * The flow then remounted, re-derived its step from the facts, and put
+       * somebody who had just paid on the last step back on "Verify".
+       */
+      const params = new URLSearchParams(window.location.search)
+      params.set("checkout_id", checkoutId)
+      router.replace(`${here}?${params.toString()}`)
       // The banner is client-side, but the plan above it is not — this is what
       // makes "Current plan" catch up once the grant lands.
       router.refresh()
@@ -211,7 +222,17 @@ export function PlanCards({
      * different places to come back to — one confirmation page for both was a
      * dead end for whichever flow had steps left.
      */
-    const result = await startCheckout(plan.id, window.location.pathname)
+    /*
+     * ⚠ PATH *AND* QUERY, FOR THE SAME REASON THE BANNER'S URL KEEPS ITS QUERY.
+     * This is the `success_url` Polar sends the browser to when the embed is
+     * not used or does not survive, and a path alone loses the step somebody
+     * was on — turning the redirect fallback into the same backwards jump the
+     * embedded path had.
+     */
+    const result = await startCheckout(
+      plan.id,
+      `${window.location.pathname}${window.location.search}`,
+    )
 
     if (!result.ok) {
       setPending(null)

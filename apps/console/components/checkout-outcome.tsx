@@ -142,6 +142,26 @@ export function CheckoutOutcome({
 
   const view = present(result, timedOut)
 
+  /*
+   * ⚠ NOTHING IS SHOWN WHILE THE ANSWER IS STILL BEING FETCHED, AND THAT IS A
+   * DELIBERATE REVERSAL. This used to render an amber "Checking your payment"
+   * the instant the page loaded, which meant the ordinary happy path — pay,
+   * come back, grant lands a second or two later — was a warning-coloured box
+   * that turned green. Two states for one event, the first of which says
+   * "something may be wrong" about something that is going fine.
+   *
+   * ⚠ AND THE PAGE UNDERNEATH WAS SAYING THE OPPOSITE AT THE SAME TIME. The
+   * plan step is server-rendered from a `/console/me` fetched BEFORE the grant
+   * landed, so for those seconds the screen held an amber "checking" banner
+   * above a card marked "Current: Free" for somebody who had just paid for Pro.
+   * Waiting quietly and then saying one thing once is the honest version.
+   *
+   * ⚠ THE TIMEOUT STILL SPEAKS, BECAUSE SILENCE IS ONLY HONEST WHILE SOMETHING
+   * IS ACTUALLY HAPPENING. Once the ceiling fires there is nothing in flight,
+   * and a customer who paid needs to be told that rather than shown nothing.
+   */
+  if (view.tone === "waiting" && !timedOut) return null
+
   return (
     <div
       className={cn(

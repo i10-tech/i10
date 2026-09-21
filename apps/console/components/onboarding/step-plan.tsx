@@ -59,8 +59,20 @@ export function StepPlan({
       {checkoutId && <CheckoutOutcome checkoutId={checkoutId} />}
 
       <div>
+        {/*
+         * ⚠ THE PLAN IS NAMED ONCE ON THIS SCREEN, NOT TWICE. Arriving from a
+         * checkout, the banner above already says "You're on Pro" — and this
+         * heading said "You are on Pro" directly underneath it, which reads as
+         * two separate announcements of one fact and made the screen look like
+         * it was confirming twice because it was unsure. The banner is the
+         * better place for it: it is the thing that just happened.
+         */}
         <h1 className="text-xl font-semibold tracking-tight">
-          {current ? `You are on ${current.name}` : "Your plan"}
+          {checkoutId
+            ? "What your plan includes"
+            : current
+              ? `You are on ${current.name}`
+              : "Your plan"}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Here is what that includes. You can change plan at any time — allowances move
