@@ -92,6 +92,26 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
             "The lookup timed out, so we have not been able to read your records yet — this says nothing about whether they are right. Try again in a moment.",
           duration: 8000,
         })
+      } else if (ownership.reason === "superseded") {
+        /*
+         * ⚠ THE RECORDS ARE PUBLISHED AND THEY ARE WRONG, WHICH IS A SENTENCE
+         * THE OTHER TWO BRANCHES CANNOT SAY. A delegation token is generated per
+         * domain ROW, so deleting a domain and adding it again issues a new one
+         * — and the NS records already in their DNS name the old claim. They
+         * resolve, they point at our nameservers, and they look exactly right in
+         * a DNS panel. "We cannot see the records" would be false and would send
+         * somebody to stare at records that are present and correct-looking, for
+         * as long as it took them to give up.
+         *
+         * ⚠ AND THE INSTRUCTION IS TO REPLACE, NOT TO ADD. Leaving the old rows
+         * in place beside the new ones is the state they are already in, so a
+         * message that only says "add these" changes nothing.
+         */
+        toast("Your records point at an earlier setup", {
+          description:
+            "These nameserver records are ours, but they name a previous version of this domain — adding a domain again issues new ones. Replace the existing rows with the records shown on this page, then check again.",
+          duration: 12_000,
+        })
       } else {
         toast("We cannot see the records yet", {
           description:

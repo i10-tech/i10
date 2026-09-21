@@ -41,7 +41,22 @@ import type { ReferralResult } from "./referral.js"
  * person sends them to re-check records that are already correct.
  */
 export type Ownership =
-  { proven: true } | { proven: false; reason: "absent" | "unreachable" }
+  | { proven: true }
+  /**
+   * ⚠ `superseded` IS THE THIRD DISTINCT ANSWER AND IT WAS BEING REPORTED AS
+   * `absent`, WHICH IS THE MOST EXPENSIVE WRONG ANSWER THIS CHECK CAN GIVE. A
+   * `delegation_token` is generated per ROW, so deleting a domain and adding it
+   * again issues a NEW claim — and every NS record the customer already
+   * published names the OLD one. Those records resolve, they point at our
+   * nameservers, and they look exactly right in their DNS panel. Telling that
+   * person their records are missing sends them to re-check DNS that is
+   * present, correct, and simply no longer ours to answer for.
+   *
+   * ⚠ IT IS DETECTED POSITIVELY, not inferred from a failure. The parent must
+   * actually be delegating to OUR nameservers under some other claim — anything
+   * else is genuinely absent.
+   */
+  | { proven: false; reason: "absent" | "unreachable" | "superseded" }
 
 /** Every TXT record at a name, each already joined from its chunks. */
 export type TxtLookup = (name: string) => Promise<string[]>
@@ -130,9 +145,17 @@ export async function proveDelegation(
   const wanted = new Set(
     delegatedNameservers(nameservers, claim).map((n) => n.toLowerCase()),
   )
+  /*
+   * ⚠ THE BARE NAMESERVERS, SO A CLAIM THAT IS NOT OURS CAN STILL BE
+   * RECOGNISED AS POINTING AT US. `delegatedNameservers` prefixes each one with
+   * the claim; stripping back to the suffix is what lets us tell "delegated to
+   * i10 under a different claim" apart from "delegated somewhere else entirely".
+   */
+  const oursSuffixes = nameservers.map((n) => `.${n.toLowerCase()}`)
   const zones = Object.values(delegatedZoneNames(domain))
 
   let sawAnswer = false
+  let sawOurs = false
 
   for (const zone of zones) {
     let result: ReferralResult
@@ -145,11 +168,21 @@ export async function proveDelegation(
     if (result.kind === "unreachable") continue
     sawAnswer = true
 
-    if (
-      result.kind === "delegated" &&
-      result.nameservers.some((ns) => wanted.has(ns.toLowerCase()))
-    ) {
+    if (result.kind !== "delegated") continue
+
+    if (result.nameservers.some((ns) => wanted.has(ns.toLowerCase()))) {
       return { proven: true }
+    }
+
+    // ⚠ POINTED AT US, UNDER SOMEBODY ELSE'S CLAIM — almost always this row's
+    // own predecessor, after a delete and re-add issued a fresh token.
+    if (
+      result.nameservers.some((ns) => {
+        const lower = ns.toLowerCase()
+        return oursSuffixes.some((suffix) => lower.endsWith(suffix))
+      })
+    ) {
+      sawOurs = true
     }
   }
 
@@ -158,6 +191,8 @@ export async function proveDelegation(
    * back unreachable we learned precisely nothing, and reporting that as an
    * absent delegation is what turns a DNS outage into customers losing domains.
    */
+  if (sawOurs) return { proven: false, reason: "superseded" }
+
   return sawAnswer
     ? { proven: false, reason: "absent" }
     : { proven: false, reason: "unreachable" }
