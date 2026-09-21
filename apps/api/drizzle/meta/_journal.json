@@ -386,6 +386,13 @@
       "when": 1789869359607,
       "tag": "0054_subscription_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1789869360607,
+      "tag": "0055_polar_checkouts",
+      "breakpoints": true
     }
   ]
 }

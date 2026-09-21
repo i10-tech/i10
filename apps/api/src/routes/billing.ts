@@ -85,6 +85,28 @@ export function createBilling(deps?: BillingDeps) {
         tenantId: auth.tenantId,
         successUrl: deps.successUrl,
       })
+
+      /*
+       * ⚠ RECORDED BEFORE THE CUSTOMER IS SENT TO PAY, AND THIS ROW IS WHAT
+       * ATTRIBUTES THE PAYMENT. Every subscription Polar creates carries
+       * `checkout_id`, so this is how a webhook learns whose it is without
+       * asking Polar to remember a tenant for us — see billing/attribution.ts
+       * and migration 0055.
+       *
+       * ⚠ IT NEVER FAILS THE CHECKOUT. The customer has a working payment link
+       * either way, and attribution falls back to the subscription holder and
+       * then to `external_id` — so losing this row costs a legacy fallback, not
+       * a sale.
+       */
+      try {
+        await deps.subscriptions.recordCheckout(checkout.id, auth.tenantId)
+      } catch (error) {
+        deps.log.error(
+          { err: error, checkoutId: checkout.id, tenantId: auth.tenantId },
+          "could not record which workspace a checkout belongs to",
+        )
+      }
+
       return c.json({ url: checkout.url, expiresAt: checkout.expiresAt }, 200)
     } catch (error) {
       deps.log.error({ err: error, tenantId: auth.tenantId, plan }, "checkout failed")

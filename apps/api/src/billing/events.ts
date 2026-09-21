@@ -45,6 +45,17 @@ export interface PolarSubscription {
   status: string
   product_id: string
   customer_id: string
+  /**
+   * The checkout that bought this subscription.
+   *
+   * ⚠ IT IS THE ONLY FIELD ON A SUBSCRIPTION THAT NAMES A WORKSPACE, and it
+   * does so indirectly and reliably. We create the checkout, so
+   * `core.polar_checkouts` holds the tenant it was started for — written
+   * before the redirect, from an authenticated session, unreachable from
+   * Polar's side. `customer.external_id` cannot do this job: it is scoped to
+   * the PERSON, deduplicated by email, and immutable once set.
+   */
+  checkout_id?: string | null
   customer?: { external_id?: string | null } | null
   current_period_end?: string | null
   cancel_at_period_end?: boolean | null
@@ -80,6 +91,11 @@ export interface PolarEvent {
 export interface SubscriptionState {
   tenantId: string
   polarSubscriptionId: string
+  /**
+   * The checkout this subscription came from, for attribution. `null` on one
+   * created any other way, or predating the field.
+   */
+  checkoutId: string | null
   polarCustomerId: string
   polarProductId: string
   /** Our plan id, from the product map. What they bought. */
@@ -155,12 +171,32 @@ export interface DecideOptions {
  * subscription for a product we do not recognise would be retried forever.
  * Neither is a failure — they are events that are not ours.
  */
-export function decide(event: PolarEvent, opts: DecideOptions): Decision {
+export function decide(
+  event: PolarEvent,
+  opts: DecideOptions,
+  /**
+   * The tenant this subscription belongs to, resolved from our own tables.
+   *
+   * ⚠ THIS PARAMETER USED TO BE WITHHELD FROM THIS PATH ON PURPOSE, AND THE
+   * REASON IT IS NOW PASSED IS THE OPPOSITE OF A RELAXATION. The old rule was
+   * "the webhook attributes by `external_id` and may not override it", which
+   * protected against attribution from a weaker source. `billing/attribution.ts`
+   * is a STRONGER source than the field it replaces: the subscription row we
+   * already hold, then the checkout row we wrote before the customer was
+   * redirected. Both are ours; `external_id` is Polar's, immutable, and stale
+   * the moment somebody re-signs up.
+   *
+   * ⚠ AND IT IS STILL NOT SOMETHING THE PAYLOAD CAN CHOOSE. The caller resolves
+   * it from the database using the subscription and checkout ids; nothing a
+   * sender puts in the body reaches this argument.
+   */
+  attributeTo?: string,
+): Decision {
   if (!event.type.startsWith("subscription.")) {
     return { kind: "ignore", reason: `not a subscription event (${event.type})` }
   }
 
-  return toState(event.data, opts)
+  return toState(event.data, opts, attributeTo)
 }
 
 /**
@@ -262,6 +298,7 @@ export function toState(
       scheduledPlanId,
       scheduledAt: scheduledPlanId ? parseDate(sub.pending_update?.applies_at) : null,
       polarSubscriptionId: sub.id,
+      checkoutId: sub.checkout_id ?? null,
       polarCustomerId: sub.customer_id,
       polarProductId: sub.product_id,
       planId,

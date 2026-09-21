@@ -1,3 +1,4 @@
+import type { SubscriptionOps } from "../../billing/db.js"
 import type { TenantAuthDeps } from "../../middleware/tenant.js"
 import type { FreshAuthReader } from "../../middleware/session.js"
 import type { ConsoleQueries } from "../../console/queries.js"
@@ -96,6 +97,14 @@ export interface ConsoleDeps extends TenantAuthDeps {
     polar: PolarClient
     /** Our plan id → Polar product id. The only plans that can be bought. */
     products: Record<string, string>
+    /**
+     * ⚠ NARROWED TO THE ONE WRITE THIS ROUTE OWES THE REST OF THE SYSTEM.
+     * Recording which workspace a checkout was started for is what attributes
+     * the payment later — see billing/attribution.ts. It is deliberately not
+     * the whole `SubscriptionOps`: nothing in the console may record a
+     * subscription or grant a plan.
+     */
+    subscriptions: Pick<SubscriptionOps, "recordCheckout">
     successUrl?: string
     planChange?: PlanChange
   }

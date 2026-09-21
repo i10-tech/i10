@@ -109,6 +109,23 @@ export interface SubscriptionOps {
    */
   ownerOf(polarSubscriptionId: string): Promise<string | null>
   /**
+   * Remembers which workspace a checkout was started for, before the customer
+   * is redirected to pay.
+   *
+   * ⚠ IT IS WRITTEN BEFORE THE MONEY MOVES AND READ LONG AFTERWARDS, which is
+   * what makes it the attribution of record. One checkout buys one subscription
+   * for one workspace; `subscription.checkout_id` is on every subscription
+   * Polar returns, so this row answers "whose is this" for every event that
+   * subscription will ever produce — without asking Polar to remember anything
+   * for us. See migration 0055.
+   */
+  recordCheckout(polarCheckoutId: string, tenantId: string): Promise<void>
+  /**
+   * The workspace a checkout was started for. `null` for a checkout we did not
+   * create, or one that predates the table.
+   */
+  checkoutTenant(polarCheckoutId: string): Promise<string | null>
+  /**
    * Records that the entitlement now holds this plan.
    *
    * ⚠ SCOPED TO THE EXACT EVENT THAT WAS GRANTED FOR. If a newer event landed
@@ -382,6 +399,30 @@ export function subscriptionOps(db: Database): SubscriptionOps {
       // than through a policy that is guaranteed to hide the answer.
       const rows = (await db.execute(sql`
         select core.subscription_owner(${polarSubscriptionId}) as tenant_id
+      `)) as unknown as { tenant_id: string | null }[]
+
+      return rows[0]?.tenant_id ?? null
+    },
+
+    async recordCheckout(polarCheckoutId, tenantId) {
+      await withTenant(db, tenantId, async (tx) => {
+        // ⚠ IDEMPOTENT, BECAUSE A RETRIED CHECKOUT CREATION IS NOT AN ERROR.
+        // The id is Polar's and unique per checkout, so a second write is
+        // either the same fact again or a caller that would be wrong to
+        // overwrite it — and the first one is the one that matched the redirect.
+        await tx.execute(sql`
+          insert into core.polar_checkouts (polar_checkout_id, tenant_id)
+          values (${polarCheckoutId}, ${tenantId}::uuid)
+          on conflict (polar_checkout_id) do nothing
+        `)
+      })
+    },
+
+    async checkoutTenant(polarCheckoutId) {
+      // Unscoped for the same reason `ownerOf` is: the caller is a webhook with
+      // no tenant, asking which tenant this is.
+      const rows = (await db.execute(sql`
+        select core.checkout_tenant(${polarCheckoutId}) as tenant_id
       `)) as unknown as { tenant_id: string | null }[]
 
       return rows[0]?.tenant_id ?? null

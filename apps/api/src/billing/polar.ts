@@ -167,47 +167,6 @@ export interface PolarClient {
    */
   setCustomerExternalId(customerId: string, externalId: string): Promise<boolean>
   /**
-   * Deletes the Polar customer carrying this tenant id, when the workspace is
-   * deleted.
-   *
-   * ⚠ THIS IS THE ROOT FIX FOR STALE ATTRIBUTION, AND IT IS THE ONLY ONE THERE
-   * CAN BE. Polar deduplicates customers by EMAIL and stamps `external_id` only
-   * when it CREATES one — and that field is IMMUTABLE, verified against the API
-   * (`422 Customer external ID cannot be updated`). So a customer left standing
-   * after a workspace is deleted will be reused on the person's next signup,
-   * carrying the dead tenant's id for the rest of the account's life, and no
-   * edit can ever correct it. Deleting it means the next signup gets a FRESH
-   * customer whose `external_id` is stamped, correctly, at creation.
-   *
-   * ⚠ BY EXTERNAL ID, NOT BY CUSTOMER ID, WHICH IS ALSO A SAFETY PROPERTY. We
-   * need no stored customer id — so this works for a workspace whose
-   * subscription row we lost — and it can only ever match a customer carrying
-   * OUR tenant id. A customer whose `external_id` names somebody else is not
-   * found and not touched.
-   *
-   * ⚠ WHAT IT DOES AND DOES NOT DESTROY, read out of Polar's own source
-   * (`server/polar/customer/service.py`) because the answer decides whether
-   * this is safe at all:
-   *   - the customer row is SOFT deleted (`deleted_at = now()`), not removed;
-   *   - orders, payments and invoices are UNTOUCHED — `OrderRepository`'s
-   *     soft-deletion filter applies to `Order.deleted_at`, and its join to
-   *     `Customer` carries no deleted predicate, so they stay listed;
-   *   - `anonymize` defaults to FALSE on the endpoint, so no PII is scrubbed
-   *     unless asked, and even that path preserves the payment-processor id,
-   *     `external_id` and `tax_id`, keeping invoices intact;
-   *   - every billable subscription IS cancelled immediately, `past_due`
-   *     included, and pending orders are voided.
-   *
-   * ⚠ SO IT MUST NEVER RUN BEFORE THE REVOKE IT FOLLOWS. That cancellation is
-   * Polar's, on its own schedule; ours is the one we report on. And afterwards
-   * `GET /v1/customers/{id}` answers 404 for that customer, so anything holding
-   * its id can no longer read it back.
-   *
-   * `not_found` is an ordinary answer — no customer ever carried this tenant —
-   * and not a failure.
-   */
-  deleteCustomerByExternalId(externalId: string): Promise<"deleted" | "not_found">
-  /**
    * Every subscription Polar holds for this organisation. The reconciler's view.
    *
    * ⚠ `customerId` NARROWS IT FOR THE REPAIR PATH AND MUST NOT BE USED BY THE
@@ -389,7 +348,22 @@ export function polarClient(opts: PolarOptions): PolarClient {
         method: "POST",
         body: JSON.stringify({
           products: [input.productId],
-          external_customer_id: input.tenantId,
+          /*
+           * ⚠ THE TENANT IS NO LONGER SENT AS `external_customer_id`, AND THAT
+           * REMOVAL IS THE FIX FOR A WHOLE CLASS OF BUG RATHER THAN A TIDY-UP.
+           * Polar stores that value on the CUSTOMER — a record it scopes to a
+           * person, deduplicates by EMAIL, stamps only at creation, and refuses
+           * to update ever after (`422 Customer external ID cannot be
+           * updated`). A workspace and a person do not share a lifetime: delete
+           * the workspace, sign up again, and Polar hands back the same
+           * customer still naming the workspace that is gone — permanently,
+           * repairable from neither side.
+           *
+           * Attribution now comes from `core.polar_checkouts`, written here by
+           * the caller before the customer is redirected, and read back through
+           * `subscription.checkout_id`. See billing/attribution.ts and
+           * migration 0055.
+           */
           ...(input.email ? { customer_email: input.email } : {}),
           ...(input.successUrl
             ? {
@@ -430,10 +404,13 @@ export function polarClient(opts: PolarOptions): PolarClient {
                 embed_origin: new URL(input.successUrl).origin,
               }
             : {}),
-          // ⚠ THE TENANT IS SENT TWICE ON PURPOSE. `external_customer_id` is
-          // what Polar promotes onto the customer and echoes on subscription
-          // events; `metadata` is what survives on the checkout object itself
-          // if we ever need to answer "who started this and never finished".
+          /*
+           * ⚠ KEPT, BUT NO LONGER LOAD-BEARING. `core.polar_checkouts` is the
+           * attribution of record; this stays so the checkout object itself
+           * still answers "who started this and never finished" in Polar's own
+           * dashboard, and so `getCheckout` keeps working for checkouts created
+           * before that table existed.
+           */
           metadata: { tenant_id: input.tenantId },
         }),
       })
@@ -732,25 +709,6 @@ export function polarClient(opts: PolarOptions): PolarClient {
       }).catch(() => null)
 
       return response?.ok === true
-    },
-
-    async deleteCustomerByExternalId(externalId) {
-      const response = await call(
-        `/v1/customers/external/${encodeURIComponent(externalId)}`,
-        { method: "DELETE" },
-      )
-
-      // ⚠ 404 IS SUCCESS, NOT AN ERROR TO REPORT. A workspace that never
-      // reached a checkout has no Polar customer, and that is the commonest
-      // deletion of all — treating it as a failure would put an error in the
-      // log for every free account that ever leaves.
-      if (response.status === 404) return "not_found"
-
-      if (!response.ok) {
-        throw new Error(`polar customers.delete failed with ${response.status}`)
-      }
-
-      return "deleted"
     },
 
     async listSubscriptions(filter) {

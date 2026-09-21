@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { attribute, type AttributionSource } from "../billing/attribution.js"
 import { decide, type DecideOptions, type PolarEvent } from "../billing/events.js"
 import type { Logger, SubscriptionGrants } from "../billing/grants.js"
 import { verifyPolarWebhook } from "../billing/signature.js"
@@ -34,6 +35,11 @@ import { verifyPolarWebhook } from "../billing/signature.js"
 export interface PolarWebhookDeps {
   /** The endpoint secret from Polar's dashboard. Sandbox and production differ. */
   secret: string
+  /**
+   * Where "whose subscription is this" is answered — our own tables, never the
+   * payload. See billing/attribution.ts.
+   */
+  attribution: AttributionSource
   grants: SubscriptionGrants
   options: DecideOptions
   log: Logger
@@ -97,7 +103,20 @@ export function createPolarWebhooks(deps?: PolarWebhookDeps) {
       return c.json({ ok: true, outcome: "unparseable" }, 202)
     }
 
-    const decided = decide(event, deps.options)
+    /*
+     * ⚠ ATTRIBUTED BEFORE IT IS DECIDED, AND FROM OUR OWN ROWS. The payload's
+     * `customer.external_id` is the weakest of the three answers and the only
+     * one that can be stale, so it is consulted last and only for customers
+     * predating `core.polar_checkouts`. A resolution failure is not an error
+     * here — `toState` turns it into the `stranded` ignore below, which is the
+     * one ignore that shouts.
+     */
+    const attributed =
+      event.type.startsWith("subscription.") && event.data
+        ? await attribute(event.data, deps.attribution)
+        : null
+
+    const decided = decide(event, deps.options, attributed?.tenantId)
     if (decided.kind === "ignore") {
       /*
        * ⚠ STILL 202, BECAUSE A RETRY CANNOT HELP EITHER WAY — BUT NOT STILL
@@ -111,7 +130,8 @@ export function createPolarWebhooks(deps?: PolarWebhookDeps) {
         deps.log.error(
           { webhookId: verified.id, type: event.type, reason: decided.reason },
           "a paid subscription could not be attributed to a tenant and was " +
-            "DISCARDED — set the Polar customer's external_id to the tenant id",
+            "DISCARDED — no row of ours holds it, no checkout of ours created " +
+            "it, and its customer carries no tenant id",
         )
       } else {
         deps.log.info(

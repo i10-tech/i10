@@ -12,6 +12,13 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   // billing.test.ts. The checkout path passes `reassign`, which skips the
   // lookup entirely, so these tests never reach it.
   ownerOf: async () => null,
+  /*
+   * ⚠ NO CHECKOUT ROW BY DEFAULT EITHER, so attribution falls through to
+   * `external_id` and every test written before `core.polar_checkouts`
+   * keeps the path it was written for.
+   */
+  recordCheckout: async () => {},
+  checkoutTenant: async () => null,
   snapshot: async () => [],
   /*
    * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
@@ -44,7 +51,6 @@ const polar = (
   getCheckout: async () => checkout,
   getCustomer: async () => customer,
   setCustomerExternalId: async () => true,
-  deleteCustomerByExternalId: async () => "not_found" as const,
   ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
   updateSubscription: async () => {},
   cancelSubscription: async () => {},
@@ -148,7 +154,6 @@ describe("the post-checkout status page", () => {
         polar: {
           ...polar(succeeded, { id: "cus_1", externalId: null }),
           setCustomerExternalId: wrote,
-          deleteCustomerByExternalId: async () => "not_found" as const,
         },
         subscriptions: ops(),
         log,
@@ -175,7 +180,6 @@ describe("the post-checkout status page", () => {
         polar: {
           ...polar(succeeded, { id: "cus_1", externalId: "someone-else" }),
           setCustomerExternalId: wrote,
-          deleteCustomerByExternalId: async () => "not_found" as const,
         },
         subscriptions: ops(),
         log,
@@ -196,7 +200,6 @@ describe("the post-checkout status page", () => {
         polar: {
           ...polar(succeeded, { id: "cus_1", externalId: null }),
           setCustomerExternalId: async () => false,
-          deleteCustomerByExternalId: async () => "not_found" as const,
         },
         subscriptions: ops(),
         log,
@@ -381,7 +384,6 @@ describe("a Polar customer left behind by a deleted workspace", () => {
         polar: {
           ...polar(succeeded, { id: "cus_1", externalId: "ten-deleted" }),
           setCustomerExternalId: wrote,
-          deleteCustomerByExternalId: async () => "not_found" as const,
           listSubscriptions: async () => [paidSub],
         },
         subscriptions: ops(),
@@ -410,7 +412,6 @@ describe("a Polar customer left behind by a deleted workspace", () => {
         polar: {
           ...polar(succeeded, { id: "cus_1", externalId: "ten-other" }),
           setCustomerExternalId: wrote,
-          deleteCustomerByExternalId: async () => "not_found" as const,
         },
         subscriptions: ops(),
         tenants: { isLive: async () => true },
@@ -431,7 +432,6 @@ describe("a Polar customer left behind by a deleted workspace", () => {
         polar: {
           ...polar(succeeded, { id: "cus_1", externalId: "ten-other" }),
           setCustomerExternalId: wrote,
-          deleteCustomerByExternalId: async () => "not_found" as const,
         },
         subscriptions: ops(),
         log,

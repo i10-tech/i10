@@ -78,19 +78,9 @@ export interface DomainReleaser {
   releaseDomains(tenantId: string): Promise<{ released: number; failed: number }>
 }
 
-/** Ending a subscription now, and retiring the customer behind it. */
+/** Ending a subscription now. The one method of `PolarClient` this needs. */
 export interface SubscriptionRevoker {
   revokeSubscription(subscriptionId: string): Promise<"revoked" | "already_ended">
-  /**
-   * ⚠ WITHOUT THIS, DELETING AN ACCOUNT PLANTS A BUG IN THE NEXT ONE. Polar
-   * deduplicates customers by email and stamps `external_id` only at creation,
-   * and the field is immutable — so a customer left behind is reused on the
-   * person's next signup still naming the workspace they just deleted, for
-   * ever. See `deleteCustomerByExternalId` in billing/polar.ts for what the
-   * delete does and does not destroy; the short version is that orders,
-   * payments and invoices survive it untouched.
-   */
-  deleteCustomerByExternalId(externalId: string): Promise<"deleted" | "not_found">
 }
 
 /**
@@ -254,46 +244,6 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
     }
 
     /*
-     * ⚠ IT HANGS OFF `finish` SO IT CANNOT RUN BEFORE A REVOKE THAT FAILED.
-     * `finish` is reached from every exit EXCEPT the revoke throwing, which is
-     * exactly the ordering this needs: deleting the customer cancels its
-     * subscriptions on Polar's own terms, and doing that in place of a revoke we
-     * could not confirm would leave us reporting a cancellation we never made.
-     *
-     * ⚠ AND IT RUNS ON THE NO-SUBSCRIPTION EXIT TOO, WHICH IS THE POINT RATHER
-     * THAN AN OVERSIGHT. A workspace that started a checkout and never finished
-     * it has a Polar customer and no subscription row of ours — and that
-     * customer is precisely the one that will be reused, carrying this dead
-     * tenant's id, the next time the same person signs up.
-     *
-     * ⚠ IT NEVER THROWS. A failed delete leaves exactly today's behaviour — a
-     * stale `external_id` that `grants.apply` and the reconciler already resolve
-     * by deferring to the tenant holding the subscription — so failing the
-     * termination over it would turn a handled situation into a webhook 500 and
-     * a Svix retry of a deletion that has already happened.
-     */
-    const retireCustomer = async (): Promise<void> => {
-      if (!deps.polar) return
-
-      try {
-        const retired = await deps.polar.deleteCustomerByExternalId(ended.tenantId)
-        if (retired === "deleted") {
-          deps.log.info(
-            { tenantId: ended.tenantId, clerkOrgId },
-            "retired the Polar customer so a re-signup gets a fresh one",
-          )
-        }
-      } catch (error) {
-        deps.log.error(
-          { err: error, tenantId: ended.tenantId, clerkOrgId },
-          "could not delete the Polar customer for a deleted workspace — if this " +
-            "person signs up again Polar will reuse it, and every event for the " +
-            "new subscription will name this dead tenant",
-        )
-      }
-    }
-
-    /*
      * ⚠ THE DOMAINS GO ON THE WAY OUT OF EVERY EXIT BELOW, NOT AT ONE OF THEM.
      * There are three ways a termination finishes — no subscription, no Polar
      * client, a revoke that succeeded — and a teardown attached to the last of
@@ -301,7 +251,6 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
      * reached from is the revoke throwing, which is the one Svix retries.
      */
     const finish = async (outcome: LifecycleOutcome): Promise<LifecycleOutcome> => {
-      await retireCustomer()
       await release(ended.tenantId, clerkOrgId)
       return outcome
     }
