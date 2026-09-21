@@ -45,6 +45,7 @@ export function CheckoutOutcome({
   checkoutId,
   className,
   show = true,
+  spacing,
 }: {
   /** From `?checkout_id=`. Nothing renders without one. */
   checkoutId: string | null
@@ -56,6 +57,13 @@ export function CheckoutOutcome({
    * an unmounted element cannot animate out.
    */
   show?: boolean
+  /**
+   * ⚠ THE GAP THIS BLOCK OWES ITS NEIGHBOURS, WHICH ONLY THE CALLER KNOWS.
+   * `Reveal` animates height, so the gap has to travel with it or the space
+   * appears in one frame while the banner grows in over several. Default is
+   * the bottom gap of a `space-y-6` stack; under a card it is the top one.
+   */
+  spacing?: string
 }) {
   const router = useRouter()
   const [result, setResult] = React.useState<Result | null>(null)
@@ -219,6 +227,7 @@ export function CheckoutOutcome({
       title={view.title}
       body={view.body}
       className={className}
+      {...(spacing === undefined ? {} : { spacing })}
     />
   )
 }
@@ -244,6 +253,7 @@ export function BillingBanner({
   title,
   body,
   className,
+  spacing = "pb-6",
 }: {
   show: boolean
   tone: "success" | "waiting" | "failed"
@@ -251,9 +261,11 @@ export function BillingBanner({
   title: React.ReactNode
   body: React.ReactNode
   className?: string
+  /** See `Reveal`: the gap this block owns, re-expressed as padding. */
+  spacing?: string
 }) {
   return (
-    <Reveal show={show} spacing="pb-6">
+    <Reveal show={show} spacing={spacing}>
       <div
         className={cn(
           "flex items-start gap-3 rounded-xl border p-4",

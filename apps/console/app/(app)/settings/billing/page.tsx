@@ -72,13 +72,20 @@ export default async function BillingPage({
 
   return (
     <div>
-      {checkoutId && (
-        <Section className="pt-0">
-          <CheckoutOutcome checkoutId={checkoutId} />
-        </Section>
-      )}
-
-      <Section className={checkoutId ? undefined : "pt-0"}>
+      {/*
+       * ⚠ THE OUTCOME USED TO BE A SECTION OF ITS OWN AND THAT SECTION WAS
+       * THE JUMP. `Section` carries `border-b py-6`, and it is rendered by
+       * the server the moment `?checkout_id=` is in the URL — so the page
+       * painted an empty bordered box with 24px of padding, and the banner
+       * only grew into it a second later when the poll answered. The
+       * separator arriving in one frame is what pushed everything down.
+       *
+       * ⚠ SO IT LIVES UNDER THE PLAN CARD INSTEAD, INSIDE THAT SECTION. It
+       * is news about the plan named directly above it, the whole block
+       * animates as one, and there is no rule of its own to appear before it
+       * has anything to say.
+       */}
+      <Section className="pt-0">
         <SectionTitle>Current plan</SectionTitle>
         <SectionContent>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
@@ -136,6 +143,9 @@ export default async function BillingPage({
               <Status status={billing.subscription.status} variant="pill" />
             )}
           </div>
+
+          {/* ⚠ `pt-3`, NOT `pb-6`: the gap it owns here is the one above it. */}
+          {checkoutId && <CheckoutOutcome checkoutId={checkoutId} spacing="pt-3" />}
         </SectionContent>
       </Section>
 
