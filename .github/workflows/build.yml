@@ -569,11 +569,19 @@ jobs:
 
           images=$(tr ' ' ',' <<<"${PINNED:-}")
 
+          # ⚠ TWO SHAS, AND THEY ARE DIFFERENT COMMITS. `REVISION` is the deploy
+          # commit Argo must reach — created by the step above, after the merge.
+          # `GITHUB_SHA` is the merge commit, which is what the images are
+          # TAGGED with (`:prod-${GITHUB_SHA}` in the pin step). Passing only the
+          # first made the script's image assertion compare against a tag that
+          # never exists, so it reported "stale images" on every deploy however
+          # correct the rollout was.
+
           ssh -o BatchMode=yes \
               -o StrictHostKeyChecking=accept-new \
               -o ConnectTimeout=20 \
               "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" \
-              "/usr/local/bin/i10-verify-rollout ${REVISION} ${images}"
+              "/usr/local/bin/i10-verify-rollout ${REVISION} ${images} ${GITHUB_SHA}"
 
       - name: Summarise
         env:
