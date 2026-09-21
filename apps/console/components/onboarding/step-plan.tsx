@@ -1,10 +1,7 @@
 "use client"
 
-import { MeterRow } from "@repo/ui/components/meter"
-import { Button } from "@repo/ui/components/button"
 import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
-import { formatBytes, formatNumber } from "@/lib/format"
 import type { BillingState, PlanSummary } from "@/lib/types"
 
 /**
@@ -41,10 +38,6 @@ export function StepPlan({
 }) {
   const current = billing.plan
 
-  // ⚠ DERIVED FROM THE CATALOGUE, NOT FROM A METER READ. This step runs before
-  // anybody has sent anything, so a usage query would show five zeroes; what is
-  // useful here is what the plan GRANTS.
-  const entitlements = current?.entitlements ?? []
 
   return (
     <div className="space-y-6">
@@ -58,67 +51,64 @@ export function StepPlan({
        */}
       {checkoutId && <CheckoutOutcome checkoutId={checkoutId} />}
 
-      <div>
-        {/*
-         * ⚠ THE PLAN IS NAMED ONCE ON THIS SCREEN, NOT TWICE. Arriving from a
-         * checkout, the banner above already says "You're on Pro" — and this
-         * heading said "You are on Pro" directly underneath it, which reads as
-         * two separate announcements of one fact and made the screen look like
-         * it was confirming twice because it was unsure. The banner is the
-         * better place for it: it is the thing that just happened.
-         */}
+      {/*
+       * ⚠ THE HEADING ASKS FOR A DECISION NOW, RATHER THAN NARRATING ONE
+       * ALREADY MADE. This said "You are on Free" over a meter panel and a
+       * "Change plan" heading, which framed the last step of set-up as a
+       * receipt with an afterthought attached — so the cards read as optional
+       * detail and the only live control was "Finish set-up" at the bottom.
+       */}
+      <div className="text-center">
         <h1 className="text-xl font-semibold tracking-tight">
-          {checkoutId
-            ? "What your plan includes"
-            : current
-              ? `You are on ${current.name}`
-              : "Your plan"}
+          {checkoutId ? "You are all set" : "Pick a plan"}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Here is what that includes. You can change plan at any time — allowances move
-          the moment the payment clears.
+        <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+          {checkoutId
+            ? "Your plan is active. Carry on, or change it here — you can do either at any time."
+            : "Start free and change it whenever. Allowances move the moment a payment clears."}
         </p>
       </div>
 
-      {entitlements.length > 0 && (
-        <div className="max-w-xl space-y-5 rounded-lg border p-4">
-          {entitlements.map((entitlement) => (
-            <MeterRow
-              key={entitlement.featureId}
-              label={LABELS[entitlement.featureId] ?? entitlement.featureId}
-              used={0}
-              limit={entitlement.allowance}
-              format={
-                entitlement.featureId === "storage.bytes"
-                  ? (n) => formatBytes(n)
-                  : (n) => formatNumber(n)
-              }
-              unit={entitlement.interval ? `per ${entitlement.interval}` : undefined}
-            />
-          ))}
-        </div>
-      )}
-
+      {/*
+       * ⚠ THE METER PANEL IS GONE, AND WITH IT THE ONLY REASON THIS STEP HAD
+       * TO BE TALL. It listed the current plan's allowances as five meters at
+       * zero used — the numbers are on the plan cards a few inches below, in
+       * the card for that same plan, so the screen said everything twice and
+       * gave the duplicate the more prominent half of the page.
+       *
+       * ⚠ WHAT IT WAS FOR IS NOT LOST. The original note is right that
+       * somebody should meet the limits before a 403 does the telling; the
+       * cards carry exactly those numbers, and the overview's usage rail is
+       * where they belong once there is usage to show.
+       */}
       {plans.length > 1 && (
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium">Change plan</h2>
+        /*
+         * ⚠ WIDER THAN THE FLOW IT SITS IN, DELIBERATELY. Every other step is
+         * a form at `max-w-2xl`, which is the right measure for reading and
+         * the wrong one for three cards side by side — at that width they
+         * stack into a column of tall boxes and the comparison, which is the
+         * entire job of this step, has to be done by scrolling. This breaks
+         * out to the middle of the viewport and stops at `max-w-4xl`.
+         */
+        <div className="relative left-1/2 w-[calc(100vw-3rem)] max-w-4xl -translate-x-1/2">
           <PlanCards
             plans={plans}
             currentPlanId={current?.id ?? null}
             hasSubscription={billing.subscription !== null}
+            /*
+             * ⚠ THE CURRENT PLAN'S CARD IS HOW THIS STEP ENDS, WHICH IS WHY
+             * "Finish set-up" IS NO LONGER UNDER IT. Staying on free was
+             * already the commonest way out of set-up and the card for it
+             * said "Current plan" and could not be pressed — so the actual
+             * exit was an unrelated button below, and the card that described
+             * the choice somebody was making was the one dead control on the
+             * screen.
+             */
+            onKeep={onDone}
           />
         </div>
       )}
-
-      <Button onClick={onDone}>Finish set-up</Button>
     </div>
   )
 }
 
-const LABELS: Record<string, string> = {
-  emails: "Emails",
-  "domains.sending": "Sending domains",
-  "domains.mailbox": "Mailbox domains",
-  mailboxes: "Mailboxes",
-  "storage.bytes": "Mailbox storage",
-}

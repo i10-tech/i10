@@ -65,6 +65,7 @@ export function PlanCards({
   plans,
   currentPlanId,
   hasSubscription,
+  onKeep,
   endingAt = null,
   scheduledPlanId = null,
   scheduledAt = null,
@@ -72,6 +73,23 @@ export function PlanCards({
   plans: PlanSummary[]
   currentPlanId: string | null
   hasSubscription: boolean
+  /**
+   * What pressing the CURRENT plan's card does, where staying on it is a real
+   * choice rather than a statement of fact.
+   *
+   * ⚠ IT EXISTS FOR THE LAST STEP OF ONBOARDING AND NOWHERE ELSE. On the
+   * billing page the current plan is a fact, so its card is a disabled
+   * "Current plan" and the only actions are the other two. At the end of
+   * set-up the same card is the answer to a question — "this one, thanks" —
+   * and leaving it inert meant the only way out of the flow was a separate
+   * "Finish set-up" button underneath, which is a second control for a
+   * decision the cards were already presenting.
+   *
+   * ⚠ AND IT IS NOT "CHOOSE THE FREE PLAN". It fires for whichever plan is
+   * current, including one just paid for during set-up, because the thing it
+   * means is "keep this and move on" — nothing is bought and nothing changes.
+   */
+  onKeep?: () => void
   /**
    * ⚠ SET WHEN THE SUBSCRIPTION IS ALREADY CANCELLING. Without it the free card
    * keeps offering "Cancel subscription" to somebody who has already cancelled,
@@ -383,15 +401,16 @@ export function PlanCards({
               // Polar treats as a no-op, which reads as the first one having
               // failed.
               disabled={
-                isCurrent ||
+                (isCurrent && onKeep === undefined) ||
                 pending !== null ||
                 (leaving && endingAt !== null) ||
                 scheduled
               }
-              onClick={() => choose(plan)}
+              onClick={() => (isCurrent && onKeep ? onKeep() : choose(plan))}
             >
               {pending === plan.id && <Spinner />}
               {label({
+                keepLabel: isCurrent && onKeep ? `Continue on ${plan.name}` : null,
                 isCurrent,
                 isUpgrade,
                 isDowngrade,
@@ -448,6 +467,12 @@ export function PlanCards({
  * nowhere to downgrade or cancel" — the path existed and did not say so.
  */
 function label(state: {
+  /**
+   * ⚠ FIRST, AND IT OUTRANKS EVERY OTHER STATE. Where staying put is an
+   * action — the end of onboarding — the card must say what pressing it does.
+   * "Current plan" is a label for a control nobody can press.
+   */
+  keepLabel: string | null
   isCurrent: boolean
   isUpgrade: boolean
   isDowngrade: boolean
@@ -456,6 +481,7 @@ function label(state: {
   scheduled: boolean
   confirming: boolean
 }): string {
+  if (state.keepLabel !== null) return state.keepLabel
   if (state.isCurrent) return "Current plan"
   // ⚠ BEFORE `leaving`, because a scheduled move to the free plan is both, and
   // "Cancel subscription" on a cancellation that has already been accepted is
