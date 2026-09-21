@@ -278,6 +278,35 @@ describe("deleting a domain whose cleanup fails", () => {
    * created, which is every domain added while that call was failing — so this
    * is not a hypothetical path.
    */
+  /**
+   * ⚠ AT `error`, NOT `warn`, AND THAT IS THE HALF THAT WAS MISSING. This line
+   * fired in production twice, saying precisely what had happened, while the
+   * leak was being reported as "deleting the domain does not remove it from
+   * SES" — because `warn` reaches the pod log and nothing else. An identity
+   * left behind is live, billable and still able to send for a domain nobody
+   * owns, which is not the same class of leak as a zone that stops answering
+   * when the delegation lapses.
+   */
+  it("shouts at error level when the SES identity is left behind", async () => {
+    const error = mock(() => {})
+    const warn = mock(() => {})
+
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [row()] }),
+      identity: identity({
+        remove: async () => {
+          throw new Error("AccessDeniedException: ses:DeleteEmailIdentity")
+        },
+      }),
+      log: { warn, error },
+    })
+
+    expect(await store.remove(TENANT, ID)).toBe(true)
+    expect(error).toHaveBeenCalledTimes(1)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it("reports success when SES refuses, and still deletes the row", async () => {
     let deleted = false
     const warn = mock(() => {})

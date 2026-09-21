@@ -351,7 +351,10 @@ const domains = secrets
        * flag now means what it says. See `offlineIdentity`.
        */
       identity: env.SES_ENABLED
-        ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }))
+        ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }), {
+            log,
+            region: env.AWS_REGION,
+          })
         : offlineIdentity(),
       capacity: postgresMeter(db),
       region: env.AWS_REGION,

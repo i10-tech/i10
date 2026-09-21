@@ -60,7 +60,35 @@ const STATUS: Readonly<Record<string, DomainStatus>> = {
 const toStatus = (dkim: string | undefined): DomainStatus =>
   (dkim && STATUS[dkim]) || "pending"
 
-export function sesIdentity(client: SESv2Client): DomainIdentity {
+/** The slice of the logger this adapter uses. Structurally satisfied by pino. */
+export interface IdentityLogger {
+  info: (o: object, m: string) => void
+}
+
+export interface SesIdentityOptions {
+  /** Given one, every status read writes down what SES ACTUALLY said. */
+  log?: IdentityLogger
+  /**
+   * The region this client talks to, for the log line only.
+   *
+   * ⚠ IT IS HERE BECAUSE A REGION MISMATCH EXPLAINS THIS FEATURE'S TWO MOST
+   * CONFUSING SYMPTOMS AT ONCE, and nothing in the product could say which
+   * region it had asked. An identity lives in ONE region: if the API talks to
+   * `eu-central-1` while somebody reads the console in `us-east-1`, then the
+   * verified domain they can see is not the one we registered. Verify reports
+   * `pending` — correctly, about a real and genuinely pending identity — and
+   * deleting the domain removes an identity that is not the one still sitting
+   * in the console they are looking at. Both read as "the product is broken"
+   * and neither is a bug in it.
+   */
+  region?: string
+}
+
+export function sesIdentity(
+  client: SESv2Client,
+  options: SesIdentityOptions = {},
+): DomainIdentity {
+  const { log, region } = options
   /**
    * ⚠ "NO SUCH IDENTITY" IS AN ANSWER, NOT A FAILURE, AND LETTING IT THROW WAS
    * A 500 ON THE ONE BUTTON THIS FEATURE HAS. `GetEmailIdentity` raises
@@ -84,6 +112,34 @@ export function sesIdentity(client: SESv2Client): DomainIdentity {
       const identity = await client.send(
         new GetEmailIdentityCommand({ EmailIdentity: domain }),
       )
+
+      /*
+       * ⚠ WHAT SES SAID, NOT WHAT WE MADE OF IT, AND THE DIFFERENCE IS THE
+       * ONLY THING THAT CAN SETTLE "THE CONSOLE SAYS VERIFIED AND YOU SAY
+       * PENDING". Three separate facts can each produce that sentence and they
+       * have three different fixes: DKIM genuinely still pending, an identity
+       * verified for sending by some other means while DKIM has not landed, or
+       * this client talking to a DIFFERENT REGION from the console somebody is
+       * looking at. Mapping to one word first and logging nothing left no way
+       * to tell them apart except guessing.
+       *
+       * ⚠ `info`, AND ONLY ON A READ. This is one line per verify press and
+       * per sweep tick, carries no customer content beyond a domain name we
+       * already log everywhere, and is the difference between a five-minute
+       * answer and another round trip through somebody's AWS console.
+       */
+      log?.info(
+        {
+          domain,
+          region: region ?? null,
+          dkim: identity.DkimAttributes?.Status ?? null,
+          dkimOrigin: identity.DkimAttributes?.SigningAttributesOrigin ?? null,
+          verifiedForSending: identity.VerifiedForSendingStatus ?? null,
+          mailFrom: identity.MailFromAttributes?.MailFromDomainStatus ?? null,
+        },
+        "ses identity status",
+      )
+
       return { status: toStatus(identity.DkimAttributes?.Status) }
     } catch (error) {
       if ((error as { name?: string }).name !== "NotFoundException") throw error

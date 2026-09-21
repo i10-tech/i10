@@ -344,6 +344,13 @@
       "when": 1789869353607,
       "tag": "0048_rename_tenant_by_org",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1789869354607,
+      "tag": "0049_domains_awaiting_provider",
+      "breakpoints": true
     }
   ]
 }
