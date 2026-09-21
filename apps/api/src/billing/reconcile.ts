@@ -79,6 +79,31 @@ export interface ReconcileReport {
    * a row of OURS with no Polar subscription, and this is the mirror image.
    */
   stranded: { subscriptionId: string; reason: string }[]
+  /**
+   * Polar subscriptions naming a tenant this database no longer holds.
+   *
+   * ⚠ THIS USED TO BE A FOREIGN KEY VIOLATION, EVERY THIRTY MINUTES, FOR EVER.
+   * Polar keeps `customer.external_id` after the workspace it names is deleted,
+   * so a live subscription can point at a tenant that no longer exists. The
+   * loop below read "no row for this tenant" as "a webhook we never received" —
+   * the one case it is built to repair — tried to repair it, and the insert died
+   * on `subscriptions_tenant_id_tenants_id_fk`. It counted as `failed`, exited
+   * non-zero, and took the Argo Application to Degraded with it. Three tenants
+   * were doing this in production.
+   *
+   * ⚠ IT IS NEITHER `orphaned` NOR `stranded`, WHICH IS WHY IT NEEDED ITS OWN
+   * NAME. `orphaned` is a row of ours with no Polar subscription. `stranded` is
+   * a Polar subscription with NO `external_id` — money from somebody we cannot
+   * identify. This is a Polar subscription whose `external_id` is perfectly
+   * well-formed and names a workspace that is gone: we know exactly who it was
+   * and there is no longer anybody to grant anything to.
+   *
+   * ⚠ AND IT IS A BILLING PROBLEM, NOT A SYNC ONE. Retrying cannot fix it —
+   * only revoking the subscription in Polar, or restoring the tenant, can. The
+   * deletion path is supposed to revoke immediately, so anything landing here
+   * is also evidence that it did not.
+   */
+  unknownTenant: { tenantId: string; subscriptionId: string; planId: string }[]
 }
 
 export async function reconcileSubscriptions(
@@ -96,6 +121,7 @@ export async function reconcileSubscriptions(
     orphaned: [],
     failed: [],
     stranded: [],
+    unknownTenant: [],
   }
 
   const byTenant = new Map(ours.map((row) => [row.tenantId, row]))
@@ -139,10 +165,43 @@ export async function reconcileSubscriptions(
     }
   }
 
+  /*
+   * ⚠ ASKED ONCE FOR THE WHOLE BATCH, AND ASKED BEFORE ANY WRITE. The question
+   * is "does this tenant still exist", and the only reason it has to be asked
+   * at all is that a `byTenant` miss means two completely different things — a
+   * lost webhook for a live tenant, which this job repairs, or a deleted
+   * workspace, which it cannot. One definer call for every id beats one failed
+   * INSERT per dead tenant per run.
+   */
+  const alive = await deps.subscriptions.knownTenants([...decidedByTenant.keys()])
+
   for (const state of decidedByTenant.values()) {
     report.checked += 1
 
     const row = byTenant.get(state.tenantId)
+
+    /*
+     * ⚠ BEFORE `outOfStep`, BECAUSE A DEAD TENANT IS ALWAYS "OUT OF STEP" AND
+     * REPAIRING IT IS THE THING THAT CRASHES. There is no row, so the check
+     * below would send it straight to `grants.apply` and the foreign key.
+     */
+    if (!alive.has(state.tenantId)) {
+      report.unknownTenant.push({
+        tenantId: state.tenantId,
+        subscriptionId: state.polarSubscriptionId,
+        planId: state.entitledPlanId,
+      })
+      deps.log.error(
+        {
+          tenantId: state.tenantId,
+          subscriptionId: state.polarSubscriptionId,
+          plan: state.entitledPlanId,
+        },
+        "Polar has a subscription for a workspace that no longer exists — " +
+          "nothing to grant, and the deletion should have revoked it",
+      )
+      continue
+    }
 
     // ⚠ THREE WAYS TO BE OUT OF STEP, AND THE THIRD IS THE ONE THAT MATTERS.
     // No row at all is a webhook we never received. An older `event_at` is one

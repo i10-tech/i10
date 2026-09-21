@@ -170,9 +170,7 @@ describe("sweeping orphans", () => {
 
   it("reports orphaned zones and removes them only when told", async () => {
     const zones = { remove: mock(async (_z: string) => {}) }
-    const orphan = [
-      { zone_id: 1, zone_name: "mail.gone.com", domain_name: "gone.com" },
-    ]
+    const orphan = [{ zone_id: 1, zone_name: "mail.gone.com", domain_name: "gone.com" }]
 
     const reported = await sweepOrphans({
       db: fakeDb({ known: [], zones: orphan }),
@@ -202,7 +200,10 @@ describe("sweeping orphans", () => {
    */
   it("skips the zone half entirely when there is no sink", async () => {
     const summary = await sweepOrphans({
-      db: fakeDb({ known: [], zones: [{ zone_id: 1, zone_name: "x", domain_name: "y" }] }),
+      db: fakeDb({
+        known: [],
+        zones: [{ zone_id: 1, zone_name: "x", domain_name: "y" }],
+      }),
       identity: identity() as never,
       remove: true,
       ...base,

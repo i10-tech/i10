@@ -105,10 +105,12 @@ describe("proving the domains that are waiting to be proved", () => {
   it("never contests a name, so a cron cannot move a domain between workspaces", async () => {
     const { db } = fakeDb(waiting(2))
     const seen: (boolean | undefined)[] = []
-    const verify = mock(async (_t: string, id: string, options?: { contest?: boolean }) => {
-      seen.push(options?.contest)
-      return notYet(id)
-    })
+    const verify = mock(
+      async (_t: string, id: string, options?: { contest?: boolean }) => {
+        seen.push(options?.contest)
+        return notYet(id)
+      },
+    )
 
     await proveWaitingDomains({ db, domains: store(verify as never), now: () => NOW })
 

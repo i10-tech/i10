@@ -17,7 +17,8 @@ const NS = ["ns1.i10.tech", "ns2.i10.tech"]
 const MINE = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 const OLD = "ffffffffffffffffffffffffffffffff"
 
-const delegatingTo = (claim: string): DelegationProbe =>
+const delegatingTo =
+  (claim: string): DelegationProbe =>
   async () => ({
     kind: "delegated" as const,
     nameservers: [`${claim}.ns1.i10.tech`, `${claim}.ns2.i10.tech`],

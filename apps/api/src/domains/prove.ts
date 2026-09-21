@@ -153,7 +153,11 @@ export async function proveWaitingDomains({
            */
           summary.registered += 1
           log?.info?.(
-            { domain: row.name, domainId: row.domain_id, status: outcome.domain.status },
+            {
+              domain: row.name,
+              domainId: row.domain_id,
+              status: outcome.domain.status,
+            },
             "proved a domain that nobody had proved yet, and registered its identity",
           )
           break

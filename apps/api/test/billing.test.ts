@@ -27,6 +27,14 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
   snapshot: async () => [],
+  /*
+   * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
+   * was written for. The reconciler now asks whether a tenant still exists
+   * before trying to repair it — a fake that answered "no" would send every one
+   * of these through the new unknown-tenant branch instead of the repair path
+   * they are actually about.
+   */
+  knownTenants: async (ids: readonly string[]) => new Set(ids),
   // ⚠ A NO-OP HERE, BUT NOT OPTIONAL ON THE PORT. `plan-change` calls it inside
   // the try that reports a refusal, so a fake missing it turns every
   // cancellation test into "Polar could not apply the change" — which is
@@ -250,6 +258,90 @@ describe("reconciling against Polar", () => {
     })
 
     expect(report.stranded).toEqual([])
+  })
+
+  /*
+   * ⚠ THE FOREIGN KEY VIOLATION THAT RAN EVERY THIRTY MINUTES FOR EVER. Polar
+   * keeps `customer.external_id` after the workspace it names is deleted, so a
+   * live subscription can point at a tenant that no longer exists. With no way
+   * to ask, the reconciler read the missing row as a lost webhook — the one
+   * case it repairs — tried to repair it, and the insert died on
+   * `subscriptions_tenant_id_tenants_id_fk`. Three tenants were doing this in
+   * production, the job exited non-zero every run, and the Argo Application sat
+   * Degraded because of it.
+   */
+  it("reports a subscription whose tenant no longer exists, and does not try to repair it", async () => {
+    const apply = mock()
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        resumeSubscription: async () => {},
+        revokeSubscription: async () => "revoked" as const,
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        listSubscriptions: async () => [polarSub()],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({
+        snapshot: async () => [],
+        // The workspace is gone: no subscription row AND no tenant row.
+        knownTenants: async () => new Set<string>(),
+      }),
+      grants: { apply },
+      options,
+      log,
+    })
+
+    expect(report.unknownTenant).toEqual([
+      { tenantId: "ten-1", subscriptionId: "sub_1", planId: "pro" },
+    ])
+    /*
+     * ⚠ THE ASSERTION THAT MATTERS. `apply` is what performed the INSERT that
+     * hit the foreign key; reaching it at all is the bug, whatever is reported
+     * afterwards.
+     */
+    expect(apply).not.toHaveBeenCalled()
+    expect(report.failed).toEqual([])
+  })
+
+  /*
+   * ⚠ AND A LIVE TENANT WITH NO ROW IS STILL REPAIRED, which is the case the
+   * whole job exists for. If the new check swallowed this one it would have
+   * turned a lost webhook into a silent permanent downgrade — strictly worse
+   * than the crash it replaces.
+   */
+  it("still repairs a live tenant that has no subscription row", async () => {
+    const apply = mock(async () => ({ status: "applied" as const, planId: "pro" }))
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        resumeSubscription: async () => {},
+        revokeSubscription: async () => "revoked" as const,
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        listSubscriptions: async () => [polarSub()],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({
+        snapshot: async () => [],
+        knownTenants: async (ids: readonly string[]) => new Set(ids),
+      }),
+      grants: { apply },
+      options,
+      log,
+    })
+
+    expect(report.unknownTenant).toEqual([])
+    expect(report.repaired).toBe(1)
+    expect(apply).toHaveBeenCalled()
   })
 
   it("leaves a tenant alone when our record already agrees", async () => {

@@ -57,11 +57,7 @@ export interface DomainStore {
   list(tenantId: string): Promise<DomainSummary[]>
   remove(tenantId: string, id: string): Promise<boolean>
   /** Re-reads the provider and stores what it says. */
-  verify(
-    tenantId: string,
-    id: string,
-    options?: VerifyOptions,
-  ): Promise<VerifyOutcome>
+  verify(tenantId: string, id: string, options?: VerifyOptions): Promise<VerifyOutcome>
   /**
    * The same question as `verify`, asked cheaply, for polling.
    *
