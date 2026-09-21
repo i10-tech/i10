@@ -99,13 +99,51 @@ export function MfaForm({
 
   const active = method ?? preferred
 
+  /*
+   * ⚠ THE "ALREADY SENT" FACT HAS TO SURVIVE A RELOAD, AND A REF DOES NOT. This
+   * guard used to be the ref alone, which is per component INSTANCE — so every
+   * refresh of this page got a fresh one, the effect below decided no code had
+   * been sent, and Clerk sent another. Each new code retires the one before it,
+   * so somebody who reloaded while reading the email was then typing a code
+   * that had just been invalidated by the reload itself.
+   *
+   * ⚠ KEYED TO THE ATTEMPT AND THE FACTOR, NOT TO THE PAGE. Switching from the
+   * emailed code to the texted one is a different code and must still send;
+   * starting a genuinely new sign-in must too, which is what the id does.
+   *
+   * ⚠ `sessionStorage`, SO IT DIES WITH THE TAB. The attempt it describes does
+   * too — this must not still be set tomorrow when somebody signs in again.
+   */
+  const sentKey = (factor: Method) => `i10:mfa-sent:${signIn?.id ?? "attempt"}:${factor}`
+
+  const alreadySent = (factor: Method): boolean => {
+    if (sent.current[factor]) return true
+    try {
+      return window.sessionStorage.getItem(sentKey(factor)) !== null
+    } catch {
+      // ⚠ BLOCKED STORAGE MEANS THE REF IS ALL THERE IS, which is the behaviour
+      // that shipped before this — a resend on reload rather than a screen that
+      // cannot send at all. Degrading to the lesser bug is the right direction.
+      return false
+    }
+  }
+
+  const markSent = (factor: Method) => {
+    sent.current[factor] = true
+    try {
+      window.sessionStorage.setItem(sentKey(factor), "1")
+    } catch {
+      /* see `alreadySent` */
+    }
+  }
+
   useEffect(() => {
     if (!signIn || !ready || !active) return
     if (active !== "phone_code" && active !== "email_code") return
-    if (sent.current[active]) return
+    if (alreadySent(active)) return
 
     // Marked before the await, not after: otherwise both renders see `false`.
-    sent.current[active] = true
+    markSent(active)
 
     const send =
       active === "phone_code" ? signIn.mfa.sendPhoneCode() : signIn.mfa.sendEmailCode()
