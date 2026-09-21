@@ -146,12 +146,27 @@ export function sesIdentity(
    * identical — nothing has been confirmed, and the next verify is what starts
    * it. Reporting `failed` would send somebody to fix DNS that is correct.
    */
-  async function read(domain: string) {
+  /**
+   * The identity as SES holds it, or `null` when there is none.
+   *
+   * ⚠ ONE PLACE THAT SWALLOWS `NotFoundException`, because two callers need it
+   * and they want opposite things from it — `read` turns it into a status,
+   * `create` treats it as "nothing to compare against". Duplicating the catch
+   * is how one of them ends up throwing on the ordinary case.
+   */
+  async function describe(domain: string) {
     try {
-      const identity = await client.send(
-        new GetEmailIdentityCommand({ EmailIdentity: domain }),
-      )
+      return await client.send(new GetEmailIdentityCommand({ EmailIdentity: domain }))
+    } catch (error) {
+      if ((error as { name?: string }).name !== "NotFoundException") throw error
+      return null
+    }
+  }
 
+  async function read(domain: string) {
+    const identity = await describe(domain)
+    if (identity === null) return { status: "not_started" as const }
+    {
       /*
        * ⚠ WHAT SES SAID, NOT WHAT WE MADE OF IT, AND THE DIFFERENCE IS THE
        * ONLY THING THAT CAN SETTLE "THE CONSOLE SAYS VERIFIED AND YOU SAY
@@ -180,9 +195,6 @@ export function sesIdentity(
       )
 
       return { status: toStatus(identity.DkimAttributes?.Status) }
-    } catch (error) {
-      if ((error as { name?: string }).name !== "NotFoundException") throw error
-      return { status: "not_started" as const }
     }
   }
 
@@ -191,6 +203,60 @@ export function sesIdentity(
       const signing = {
         DomainSigningSelector: selector,
         DomainSigningPrivateKey: privateKey,
+      }
+
+      /*
+       * ⚠ COMPARE BEFORE WRITING, BECAUSE RE-ASSERTING UN-VERIFIES A VERIFIED
+       * DOMAIN. `PutEmailIdentityDkimSigningAttributes` does not mean "confirm
+       * this key"; it means "here is a new signing configuration", and SES
+       * answers by throwing away the result of its DKIM check and starting
+       * again — `SUCCESS` drops to `PENDING` and `VerifiedForSendingStatus`
+       * goes false. `PutEmailIdentityMailFromAttributes` does the same to MAIL
+       * FROM.
+       *
+       * ⚠ AND THE SEND GATE READS THAT. So pressing Verify on a domain that was
+       * already working took it OUT of service for as long as Amazon took to
+       * re-check — observed in production: verified, pressed, pending, back to
+       * verified minutes later. A button that causes a sending outage.
+       *
+       * ⚠ WHAT IS NOT SAFE IS SKIPPING UNCONDITIONALLY. Re-asserting is
+       * genuinely correct when the identity carries somebody ELSE'S key: a
+       * domain that changed hands, or a rotation that half-applied, where
+       * leaving it means SES signs with a key the customer's DNS no longer
+       * publishes and every signature fails while the records look right. So
+       * the test is not "does an identity exist" but "does it already carry
+       * THIS ROW'S selector" — which is exactly the case where the write would
+       * change nothing and cost a verification.
+       */
+      const current = await describe(domain)
+      const keyIsAlreadyOurs =
+        current?.DkimAttributes?.SigningAttributesOrigin === "EXTERNAL" &&
+        (current.DkimAttributes?.Tokens ?? []).includes(selector)
+      const mailFromIsAlreadySet =
+        current?.MailFromAttributes?.MailFromDomain === mailFrom
+
+      if (keyIsAlreadyOurs && mailFromIsAlreadySet) {
+        log?.info(
+          { domain, region: region ?? null, selector },
+          "ses identity already carries this key and return path — left alone",
+        )
+        return { status: toStatus(current?.DkimAttributes?.Status) }
+      }
+
+      if (keyIsAlreadyOurs) {
+        /*
+         * ⚠ ONLY THE RETURN PATH MOVED, so only that is written. Re-asserting
+         * the key here would reset a DKIM verification that is already correct
+         * for a change that has nothing to do with it.
+         */
+        await client.send(
+          new PutEmailIdentityMailFromAttributesCommand({
+            EmailIdentity: domain,
+            MailFromDomain: mailFrom,
+            BehaviorOnMxFailure: "USE_DEFAULT_VALUE",
+          }),
+        )
+        return read(domain)
       }
 
       try {
