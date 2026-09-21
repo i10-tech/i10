@@ -67,7 +67,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: sweep
-              image: ghcr.io/i10-tech/i10-api:prod-2aa6939643f16c53b40e9e3ee98491868677cd70@sha256:9b27787cb75223867bf22278028dcf267a9f77cf646af939c3c9fa9ccfd0cf9c
+              image: ghcr.io/i10-tech/i10-api:prod-17b02ac86aafc83a3a4e8262479caf0dee86537b@sha256:951dfecfd82a514ec519e36b5368e82bc83fce0a2f1217ea9860ee9f6e89f396
               imagePullPolicy: Always
               command: ["bun", "dist/sweep.js"]
               envFrom:
