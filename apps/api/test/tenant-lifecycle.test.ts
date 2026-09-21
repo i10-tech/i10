@@ -25,7 +25,11 @@ const deps = (over: Record<string, unknown> = {}) => ({
     ownedBy: mock(async () => []),
     renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
   },
-  polar: { revokeSubscription: mock(async () => "revoked" as const) },
+  polar: {
+    revokeSubscription: mock(async () => "revoked" as const),
+    // Nothing to retire by default; the cases that care override it.
+    deleteCustomerByExternalId: mock(async () => "not_found" as const),
+  },
   domains: { releaseDomains: mock(async () => ({ released: 2, failed: 0 })) },
   organizations: {
     hasMembers: mock(async () => false),
@@ -173,6 +177,7 @@ describe("a deleted organization", () => {
         revokeSubscription: mock(async () => {
           throw new Error("polar subscription revoke failed: 409")
         }),
+        deleteCustomerByExternalId: mock(async () => "deleted" as const),
       },
     })
 
@@ -180,6 +185,79 @@ describe("a deleted organization", () => {
       tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" }),
     ).rejects.toThrow("409")
     expect(d.tenants.terminate).toHaveBeenCalled()
+
+    /*
+     * ⚠ AND THE CUSTOMER SURVIVES A REVOKE WE COULD NOT CONFIRM. Deleting it
+     * cancels its subscriptions on Polar's own terms — so doing that here would
+     * stop the billing by a route we never verified and destroy the customer id
+     * that is the only handle left on a subscription we just failed to revoke.
+     */
+    expect(d.polar.deleteCustomerByExternalId).not.toHaveBeenCalled()
+  })
+
+  /*
+   * ⚠ THE ROOT FIX FOR STALE ATTRIBUTION. Polar deduplicates customers by email
+   * and stamps `external_id` only at creation — and it is immutable, so a
+   * customer left standing is reused on the next signup still naming the
+   * workspace that was just deleted, for ever. Deleting it is the only way the
+   * next `external_id` is ever correct.
+   */
+  it("retires the Polar customer once the subscription is revoked", async () => {
+    const d = deps()
+
+    await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })
+
+    expect(d.polar.revokeSubscription).toHaveBeenCalled()
+    expect(d.polar.deleteCustomerByExternalId).toHaveBeenCalledWith("ten-1")
+  })
+
+  /*
+   * ⚠ A WORKSPACE THAT NEVER SUBSCRIBED STILL HAS A CUSTOMER TO RETIRE, and
+   * missing it would leave the commonest deletion of all planting the bug. A
+   * checkout that was started and abandoned creates the customer; no
+   * subscription row of ours ever follows it.
+   */
+  it("retires the customer even when there was no subscription", async () => {
+    const d = deps({
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => ({
+          tenantId: "ten-1",
+          polarSubscriptionId: null,
+          alreadyDead: false,
+        })),
+        ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
+      },
+    })
+
+    await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })
+
+    expect(d.polar.revokeSubscription).not.toHaveBeenCalled()
+    expect(d.polar.deleteCustomerByExternalId).toHaveBeenCalledWith("ten-1")
+  })
+
+  /*
+   * ⚠ AND A FAILED DELETE MUST NOT FAIL THE DELETION. The fallback is exactly
+   * today's behaviour — a stale `external_id` that `grants.apply` and the
+   * reconciler already resolve by deferring to the tenant holding the
+   * subscription — so throwing here would turn a handled situation into a
+   * webhook 500 and a Svix retry of a termination that already happened.
+   */
+  it("still finishes the termination when the customer cannot be retired", async () => {
+    const d = deps({
+      polar: {
+        revokeSubscription: mock(async () => "revoked" as const),
+        deleteCustomerByExternalId: mock(async () => {
+          throw new Error("polar customers.delete failed with 403")
+        }),
+      },
+    })
+
+    expect(await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })).toBe(
+      "terminated",
+    )
+    expect(d.domains.releaseDomains).toHaveBeenCalled()
   })
 
   // Svix redelivers. A second delivery must not read as a failure.
