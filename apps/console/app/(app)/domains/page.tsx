@@ -8,7 +8,6 @@ import {
   PageBody,
   PageDescription,
   PageHeader,
-  PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
 import { Status } from "@/components/status"
@@ -78,32 +77,47 @@ export default async function DomainsPage() {
 
   return (
     <Page>
-      <PageHeader>
-        <PageHeaderRow>
+      {/*
+       * ⚠ THE HEADER IS A ROW HERE, NOT THE USUAL TITLE-ROW-THEN-DESCRIPTION
+       * STACK, AND THAT IS THE ONLY WAY THE BUTTON CENTRES. `PageHeader`
+       * stacks a `PageHeaderRow` above the description, so an action inside
+       * that row lines up with the TITLE and sits visibly high against a
+       * two-line description beneath it. Laying the header out as one row puts
+       * the button on the centre line of the whole block — title and
+       * description together — which is where the eye expects it.
+       *
+       * ⚠ AND IT IS DONE AT THE CALL SITE RATHER THAN IN `PageHeader`. Every
+       * other screen in the console stacks, and changing the primitive would
+       * move all of their buttons at once for a preference expressed about
+       * this page.
+       */}
+      <PageHeader className="flex-row items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-1">
           <PageTitle>Domains</PageTitle>
-          {/*
-           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
-           * CARRIES THIS ACTION. Two buttons for one action, eight inches
-           * apart, reads as two different things — and the one in the header is
-           * the smaller and less explained of the two, so it wins attention it
-           * has not earned. The empty state's version says what will happen;
-           * this one just says a noun.
-           */}
-          {hasRows && (
-            <PageActions>
-              <Button size="sm" asChild>
-                <Link href="/domains/new">
-                  <Plus />
-                  Add domain
-                </Link>
-              </Button>
-            </PageActions>
-          )}
-        </PageHeaderRow>
-        <PageDescription>
-          Mail leaves from a domain you control. Publish the records we issue, or
-          delegate three subdomains to us and never think about them again.
-        </PageDescription>
+          <PageDescription>
+            Mail leaves from a domain you control. Publish the records we issue, or
+            delegate three subdomains to us and never think about them again.
+          </PageDescription>
+        </div>
+
+        {/*
+         * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
+         * CARRIES THIS ACTION. Two buttons for one action, eight inches apart,
+         * reads as two different things — and the one in the header is the
+         * smaller and less explained of the two, so it wins attention it has
+         * not earned. The empty state's version says what will happen; this
+         * one just says a noun.
+         */}
+        {hasRows && (
+          <PageActions>
+            <Button size="sm" asChild>
+              <Link href="/domains/new">
+                <Plus />
+                Add domain
+              </Link>
+            </Button>
+          </PageActions>
+        )}
       </PageHeader>
 
       <PageBody>
@@ -124,11 +138,20 @@ export default async function DomainsPage() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   {/*
-                   * ⚠ THE OUTER TWO COLUMNS CARRY THE EDGE PADDING, and the
-                   * heading has to carry the same as its cells or the two stop
-                   * lining up — which is the one thing centring cannot hide.
+                   * ⚠ THE NAME COLUMN STAYS LEFT WHILE THE REST ARE
+                   * CENTRED, and the asymmetry is the point rather than an
+                   * oversight. A domain name is the row's identity and the
+                   * thing somebody's eye runs down the list looking for;
+                   * centring it makes every name start at a different x and
+                   * turns scanning into reading. The four columns after it are
+                   * short fixed tokens, where a shared centre line is tidier
+                   * than a left edge stranded in a 9rem gap.
+                   *
+                   * ⚠ AND THE HEADING CARRIES THE SAME PADDING AS ITS CELLS or
+                   * the two stop lining up — the one thing alignment cannot
+                   * hide.
                    */}
-                  <TableHead className="pl-4 text-center">Domain</TableHead>
+                  <TableHead className="pl-4">Domain</TableHead>
                   <TableHead className="w-[11rem] text-center">Status</TableHead>
                   <TableHead className="w-[9rem] text-center">Setup</TableHead>
                   <TableHead className="hidden w-[9rem] text-center md:table-cell">
@@ -151,7 +174,7 @@ export default async function DomainsPage() {
                     <TableCell className="p-0">
                       <Link
                         href={`/domains/${domain.id}`}
-                        className="block py-2.5 pr-3 pl-4 text-center font-medium"
+                        className="block py-2.5 pr-3 pl-4 font-medium"
                       >
                         {domain.name}
                       </Link>
