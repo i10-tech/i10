@@ -27,6 +27,36 @@ that could be opened — a GitHub-hosted runner simply has no route to it. The j
 joins the tailnet first, as an **ephemeral** node created for that run and
 removed when it ends.
 
+> ⚠ THERE IS NO SSH KEY, AND THAT IS BECAUSE TAILSCALE SSH IS ON. `tailscaled`
+> intercepts port 22 on the tailnet address before sshd ever sees the
+> connection, and this host's sshd binds ONLY tailnet addresses — so Tailscale
+> SSH shadows OpenSSH completely. It authenticates by tailnet identity against
+> the ACL's `ssh` rules and NEVER reads `authorized_keys`.
+>
+> ⚠ AN EARLIER VERSION OF THIS FILE DESCRIBED A PRIVATE KEY WITH A FORCED
+> COMMAND, AND IT COULD NOT HAVE WORKED. The `restrict,command=` was inert, the
+> key authenticated nothing, and the symptom was a shell plus
+> `<sha>: command not found` — indistinguishable from a misconfigured key, and
+> it cost an afternoon. If you ever need to know which daemon answered:
+>
+> ```bash
+> ssh <host> 'p=$(ps -o ppid= -p $$ | tr -d " "); ps -o comm= -p $p'
+> ```
+>
+> `sshd` means OpenSSH; `tailscaled` means Tailscale SSH. Do NOT use
+> `tailscale status --json` for this — the `SSH_HostKeys` field is absent even
+> when it is running, and `ssh-keyscan` reports the banner `SSH-2.0-Tailscale`
+> while still returning sshd's REAL host key, so a matching host key proves
+> nothing either. Use `tailscale debug prefs | grep RunSSH`.
+>
+> ⚠ SO AUTHORISATION LIVES IN THE ACL, AND THE BLAST RADIUS IS THE USER'S RBAC.
+> Tailscale SSH has no forced-command concept, so `tag:ci` gets a SHELL as
+> `i10-deploy` rather than one pinned command. What bounds it is that user's
+> cluster role — get/list/watch on applications, deployments and pods, patch on
+> applications, and no sudo. A leaked OAuth secret reaches a read-only view of
+> one namespace, not the box. That is a real step down from a forced command,
+> and it is the trade that comes with Tailscale SSH being on.
+>
 > ⚠ JOINING A TAILNET IS NOT AN AUTHORISATION. The runner is tagged `tag:ci`,
 > and the tailnet ACL should grant that tag port 22 on this one host and nothing
 > else. Without that rule a CI credential is a route to every machine on the
@@ -62,8 +92,16 @@ sudo k3s kubectl create clusterrolebinding i10-deploy-refresh \
 ```
 
 …and a kubeconfig for that user. The simplest correct thing on k3s is a client
-certificate; copying root's kubeconfig would give CI the cluster, which is
-exactly what the forced command below is trying to prevent.
+certificate with `CN=i10-deploy`, matching the bindings above; copying root's
+kubeconfig would hand CI the whole cluster, which is the one thing the RBAC
+above exists to prevent.
+
+> ⚠ `KUBECONFIG` MUST BE SET, AND `verify-rollout.sh` SETS IT. k3s's `kubectl`
+> points itself at `/etc/rancher/k3s/k3s.yaml` — root-only — and ignores
+> `~/.kube/config` unless told otherwise. Without that line every kubectl in the
+> script fails with "permission denied", each one into `/dev/null`, and the
+> result is a rollout reported as never having come up when the real problem was
+> a credential never read.
 
 ### 2. Install the script
 
@@ -75,61 +113,62 @@ sudo install -m 755 infra/scripts/verify-rollout.sh /usr/local/bin/i10-verify-ro
 > — but the copy is **manual**. Editing the file here does not update the box.
 > Re-run this line when it changes.
 
-### 3. The key, pinned to that one command
+### 3. The ACL rule that authorises CI
 
-> ⚠ THE EXISTING DEPLOY KEY CANNOT BE REUSED, AND IT IS WORTH SAYING WHY. The
-> repository has one — `argocd-k3s`, read-only — and it is a **GitHub** deploy
-> key: it authenticates Argo _to GitHub_ so it can clone this repository. It
-> travels in the opposite direction to what is needed here and is not trusted by
-> the box's sshd at all. Reusing the human key in `~mo/.ssh/authorized_keys`
-> would work and is the thing not to do: it is a full shell on the machine that
-> runs the database, the mail server and every credential, and putting it in a
-> CI secret makes a workflow compromise a box compromise.
+There is no key to install — see the note above. What grants CI access is a
+tailnet `ssh` rule, and it is the whole of the authorisation:
 
-```bash
-ssh-keygen -t ed25519 -C "github-actions i10 rollout verify" -f /tmp/i10-deploy -N ""
+```json
+"tagOwners": { "tag:ci": ["autogroup:admin"] },
+"acls": [
+  { "action": "accept", "src": ["tag:ci"], "dst": ["tag:vps:22"] }
+],
+"ssh": [
+  {
+    "action": "accept",
+    "src":   ["tag:ci"],
+    "dst":   ["tag:vps"],
+    "users": ["i10-deploy"]
+  }
+]
 ```
 
-Append the public half to `/home/i10-deploy/.ssh/authorized_keys` with a forced
-command:
-
-```
-restrict,command="/usr/local/bin/i10-verify-rollout" ssh-ed25519 AAAA… github-actions i10 rollout verify
-```
-
-> ⚠ `command=` IS WHAT MAKES THIS SAFE, AND `restrict` IS WHAT KEEPS IT SAFE.
-> The forced command means the key cannot open a shell, read a secret or change
-> a workload whatever the client asks for — the requested command arrives in
-> `SSH_ORIGINAL_COMMAND`, and the script validates it down to a 40-character hex
-> sha and a comma-separated list of image names before using it. `restrict`
-> turns off port forwarding, agent forwarding, X11 and PTY allocation, each of
-> which would otherwise be a way around the first part.
+> ⚠ BOTH BLOCKS ARE REQUIRED AND THEY DO DIFFERENT JOBS. `acls` opens the TCP
+> path to port 22; `ssh` decides who may log in and as whom. With only the first
+> the connection is refused by Tailscale SSH; with only the second there is no
+> route for it to refuse.
 >
-> ⚠ A PLAIN DEPLOY KEY HERE WOULD BE THE MOST VALUABLE SECRET IN THE
-> ORGANISATION: shell access to the machine that runs the database, the mail
-> server and every credential. This one is worth a status report.
+> ⚠ `users` IS THE PART THAT BOUNDS THIS. Naming `i10-deploy` and nothing else
+> is what keeps CI off `mo`, which has sudo. An `ssh` rule with
+> `"users": ["autogroup:nonroot"]` would hand CI every non-root account on the
+> host, which on this box includes accounts that can read secrets.
+>
+> ⚠ AND `dst` MUST BE A TAG, NOT AN ADDRESS. Tailscale `ssh` rules do not accept
+> IPs — psl-vps carries `tag:vps`.
 
 ### 4. Repository secrets
 
-| Secret                      | Value                                                     |
-| --------------------------- | --------------------------------------------------------- |
-| `DEPLOY_SSH_KEY`            | the **private** half of the key above                     |
-| `DEPLOY_SSH_HOST`           | the box's **tailnet** address — `100.127.102.63`          |
-| `DEPLOY_SSH_USER`           | `i10-deploy` (the default; set it only if you renamed it) |
-| `DEPLOY_SSH_KNOWN_HOSTS`    | `ssh-keyscan -t ed25519 100.127.102.63`                   |
-| `TAILSCALE_OAUTH_CLIENT_ID` | an OAuth client with the `auth_keys` scope and `tag:ci`   |
-| `TAILSCALE_OAUTH_SECRET`    | its secret                                                |
+| Secret                      | Value                                                   |
+| --------------------------- | ------------------------------------------------------- |
+| `TAILSCALE_OAUTH_CLIENT_ID` | an OAuth client with the `auth_keys` scope and `tag:ci` |
+| `TAILSCALE_OAUTH_SECRET`    | its secret                                              |
 
-> ⚠ `DEPLOY_SSH_HOST` IS THE TAILNET ADDRESS, NOT THE PUBLIC ONE. Nothing
-> listens on port 22 publicly; pointing this at `178.105.164.132` produces a
-> connection timeout that reads like the box being down.
+And one variable, `DEPLOY_SSH_HOST` — the box's **tailnet** address,
+`100.127.102.63`. It is a variable rather than a secret because it is not one;
+a tailnet address is meaningless without a tailnet identity.
 
-> ⚠ `DEPLOY_SSH_KNOWN_HOSTS` IS NOT OPTIONAL AND MUST NOT BECOME
-> `StrictHostKeyChecking=no`. Turning the check off means the first machine to
-> answer on that address receives a CI credential and the commands it runs.
+> ⚠ IT IS THE TAILNET ADDRESS, NOT THE PUBLIC ONE. Nothing listens on port 22
+> publicly; pointing this at `178.105.164.132` produces a connection timeout
+> that reads like the box being down.
 
-Without `DEPLOY_SSH_KEY` or the Tailscale credentials the step **skips** and the
-workflow still passes, so a fork and a repository that has not set this up both
+> ⚠ TWO SECRETS, NOT FIVE, AND THAT IS THE POINT OF DOING IT THIS WAY. An
+> earlier version carried a private key and a pinned host key as well. Neither
+> did anything — Tailscale SSH never read them — so they were three secrets to
+> rotate, leak or misconfigure in exchange for no security property at all.
+
+Without the Tailscale credentials the step **skips** and the workflow still
+passes, so a fork and a repository that has not set this up both keep working.
+The job summary says which happened.
 keep working. The job summary says which happened.
 
 ## What it does and does not do
