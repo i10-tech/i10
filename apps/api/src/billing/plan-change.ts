@@ -1,6 +1,7 @@
 import { eq, and, isNull, or } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { plans } from "../db/core.js"
+import { PolarCallError } from "./polar.js"
 import type { PolarClient, ProrationBehavior } from "./polar.js"
 import type { SubscriptionOps } from "./db.js"
 import type { Logger } from "./grants.js"
@@ -190,18 +191,19 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
           })
         }
       } catch (error) {
-        // ⚠ FOR `invoice`, POLAR APPLIES THE CHANGE ONLY IF THE PAYMENT
-        // SUCCEEDS — so this is usually a declined card, and the subscription is
-        // untouched. Reporting it as an outage would send the customer to
-        // support instead of to their bank.
         deps.log.error(
-          { err: error, tenantId, planId, direction },
+          {
+            err: error,
+            tenantId,
+            planId,
+            direction,
+            ...(error instanceof PolarCallError
+              ? { polarStatus: error.status, polarDetail: error.detail.slice(0, 500) }
+              : {}),
+          },
           "plan change failed",
         )
-        return {
-          status: "failed",
-          reason: "Polar could not apply the change. Check the payment method.",
-        }
+        return { status: "failed", reason: reasonFor(error) }
       }
 
       deps.log.info(
@@ -210,5 +212,58 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       )
       return { status: "requested", direction, plan: planId }
     },
+  }
+}
+
+/**
+ * What to tell somebody whose plan change Polar refused.
+ *
+ * ⚠ EVERY FAILURE USED TO SAY "Check the payment method", AND FOR MOST OF
+ * THEM THAT IS A WILD GOOSE CHASE. For `invoice` and `prorate` Polar applies
+ * the change only if the payment succeeds, so a declined card really is the
+ * commonest cause in production — but it is nowhere near the commonest in a
+ * sandbox, where the same sentence appeared for a token from the wrong
+ * environment, a subscription belonging to another organisation, and a
+ * product id that is not ours. Somebody went to look at a card that was
+ * fine, three times.
+ *
+ * ⚠ AND THE MISCONFIGURATION CASES SAY THEY ARE OURS. A 401 or a 404 is not
+ * something a customer can act on at all, so the message stops giving them a
+ * job and points at the thing that can: our log, which carries the status and
+ * Polar's own words.
+ */
+function reasonFor(error: unknown): string {
+  if (!(error instanceof PolarCallError)) {
+    return "We could not reach Polar to apply the change. Try again in a moment."
+  }
+
+  switch (error.status) {
+    case 401:
+    case 403:
+      // ⚠ OUR CREDENTIAL, NOT THEIR CARD. Usually a token for the other
+      // environment — a sandbox token against api.polar.sh, or the reverse.
+      return "Billing is not configured correctly on our side. We have logged it."
+    case 404:
+      /*
+       * ⚠ THE SUBSCRIPTION IS UNKNOWN TO POLAR, WHICH IS ALMOST ALWAYS US
+       * HOLDING AN ID FROM ANOTHER ORGANISATION — a sandbox rebuilt, or a
+       * production id read with a sandbox token. Telling somebody to check
+       * their card for this is the least useful sentence in the product.
+       */
+      return "We could not find this subscription at Polar. We have logged it."
+    case 422:
+      // ⚠ THE PRODUCT IS THE THING POLAR IS REFUSING, and `POLAR_PRODUCTS`
+      // is where that mapping lives. Again ours, not theirs.
+      return "That plan is not available at Polar right now. We have logged it."
+    case 402:
+      return "Polar could not take the payment. Check the payment method."
+    default:
+      /*
+       * ⚠ THE ORIGINAL SENTENCE SURVIVES FOR THE ORIGINAL CASE. A 400 or a
+       * 409 from a plan change is the declined-payment shape the old comment
+       * described, and it remains the right thing to say for anything we have
+       * not separated out.
+       */
+      return "Polar could not apply the change. Check the payment method."
   }
 }

@@ -1,4 +1,5 @@
 import { PgDialect } from "drizzle-orm/pg-core"
+import { PolarCallError } from "../src/billing/polar.js"
 import type { SQL } from "drizzle-orm"
 import { describe, expect, it, mock } from "bun:test"
 import { directionOf, planChange, prorationFor } from "../src/billing/plan-change.js"
@@ -304,16 +305,62 @@ describe("changing a plan", () => {
    * customer's next step is their bank, not our support queue.
    */
   it("reports a refusal from Polar as a payment problem", async () => {
+    const outcome = await refusedWith(402, "card_declined")
+
+    expect(outcome).toMatchObject({ status: "failed" })
+    if (outcome.status !== "failed") return
+    expect(outcome.reason).toMatch(/payment method/i)
+  })
+
+  /**
+   * ⚠ AND EVERY OTHER REFUSAL IS NOT. This one sentence used to be shown for
+   * all of them, so a token from the wrong environment, a subscription
+   * belonging to another Polar organisation and a product id that is not ours
+   * all told somebody to go and look at a card that was fine. None of the
+   * three is theirs to fix and none of them is about money.
+   */
+  it.each([
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "subscription not found"],
+    [422, "product not found"],
+  ])("does not blame the card for a %i", async (status, detail) => {
+    const outcome = await refusedWith(status, detail)
+
+    expect(outcome).toMatchObject({ status: "failed" })
+    if (outcome.status !== "failed") return
+    expect(outcome.reason).not.toMatch(/payment method/i)
+    // ⚠ AND IT SAYS WHOSE PROBLEM IT IS, so nobody goes looking in their bank.
+    expect(outcome.reason).toMatch(/logged it/i)
+  })
+
+  /*
+   * ⚠ AN ERROR THAT IS NOT A REFUSAL AT ALL IS A REACHABILITY PROBLEM — a
+   * timeout, a DNS failure, the process being unable to make the call. "Try
+   * again" is the only honest instruction for it, and it is the wrong one for
+   * every status above.
+   */
+  it("tells somebody to retry when Polar could not be reached", async () => {
     const outcome = await change({
       polar: polar({
         updateSubscription: async () => {
-          throw new Error("402 card_declined")
+          throw new Error("fetch failed")
         },
       }),
     }).to(TENANT, "pro")
 
     expect(outcome).toMatchObject({ status: "failed" })
     if (outcome.status !== "failed") return
-    expect(outcome.reason).toMatch(/payment method/i)
+    expect(outcome.reason).toMatch(/try again/i)
   })
 })
+
+/** A plan change where Polar answered with `status`. */
+const refusedWith = (status: number, detail: string) =>
+  change({
+    polar: polar({
+      updateSubscription: async () => {
+        throw new PolarCallError(status, detail, `polar said ${status}`)
+      },
+    }),
+  }).to(TENANT, "pro")

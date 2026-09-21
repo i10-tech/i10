@@ -22,6 +22,29 @@ import type { PolarSubscription } from "./events.js"
  * ever moves.
  */
 
+/**
+ * A call Polar refused, with the status it refused it with.
+ *
+ * ⚠ IT EXISTS BECAUSE ONE SENTENCE WAS BEING SHOWN FOR EVERY FAILURE. A plan
+ * change reported "Polar could not apply the change. Check the payment
+ * method." for a 401 on a token from the wrong environment, a 404 on a
+ * subscription belonging to another organisation, and a 422 on a product id
+ * that is not ours — none of which a customer can fix by looking at their
+ * card, and all of which sent somebody to their bank instead of to the log
+ * line that says what happened. The status is the one fact that separates
+ * them, so it travels with the error.
+ */
+export class PolarCallError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = "PolarCallError"
+  }
+}
+
 const HOSTS = {
   sandbox: "https://sandbox-api.polar.sh",
   production: "https://api.polar.sh",
@@ -499,8 +522,11 @@ export function polarClient(opts: PolarOptions): PolarClient {
       // untouched — which is why this throws rather than reporting a partial
       // success the caller would have to reconcile.
       if (!response.ok) {
-        throw new Error(
-          `polar subscription update failed: ${response.status} ${await response.text()}`,
+        const detail = await response.text()
+        throw new PolarCallError(
+          response.status,
+          detail,
+          `polar subscription update failed: ${response.status} ${detail}`,
         )
       }
     },
@@ -522,8 +548,11 @@ export function polarClient(opts: PolarOptions): PolarClient {
       )
 
       if (!response.ok) {
-        throw new Error(
-          `polar subscription cancel failed: ${response.status} ${await response.text()}`,
+        const detail = await response.text()
+        throw new PolarCallError(
+          response.status,
+          detail,
+          `polar subscription cancel failed: ${response.status} ${detail}`,
         )
       }
     },
