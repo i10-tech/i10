@@ -200,6 +200,24 @@ const schema = z.object({
    * this variable is missing from a config — a deliverability change nobody
    * asked for, caused by a typo in a secret name.
    */
+  /**
+   * Whether the orphan sweep may actually delete what it finds.
+   *
+   * ⚠ IT DEFAULTS OFF, AND THAT IS NOT TIMIDITY. Every other sweep in this
+   * codebase writes idempotent status updates; that one issues irreversible
+   * deletes against a live mail account and a live nameserver. Its first run on
+   * any deployment is simultaneously the one with the most accumulated orphans
+   * and the one with the least evidence that its two ownership tests are
+   * calibrated for that account. So it reports what it would remove, somebody
+   * reads the log, and then this is turned on.
+   *
+   * ⚠ AND IT IS READ ONLY BY THAT JOB. Nothing on a request path consults it.
+   */
+  DOMAIN_ORPHANS_REMOVE: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1" || v === "yes" || v === "on"),
+
   SES_ENABLED: z
     .string()
     .optional()

@@ -1,0 +1,101 @@
+# Finds what we are still holding for domains that no longer exist, daily.
+#
+# ⚠ THE SAME IMAGE AND AN EIGHTH COMMAND. `bun dist/domain-orphans.js` runs one
+# pass and exits.
+#
+# ⚠ WHY THIS EXISTS: THE TIDY IS ALLOWED TO FAIL AND NOTHING COUNTED THE
+# FAILURES. `remove` deletes the domain row first and then cleans up the SES
+# identity and the three delegated zones, swallowing errors in both — which is
+# the right trade, because the row really is gone and a 500 the customer cannot
+# act on is worse than a leak. It is NOT the right trade against a failure that
+# happens every single time, and that is what was happening:
+# `ses:DeleteEmailIdentity` was missing from the IAM policy, so every identity
+# delete returned AccessDenied and every deleted domain left a live, billable,
+# still-sendable identity in the account.
+#
+# ⚠ AND THE ZONE HALF HAD ITS OWN VERSION OF IT. `holdsZones` read a missing
+# `core.delegations` row as "not mine" — true of every delegated domain created
+# before claims existed, which in this deployment is all of them.
+#
+# ⚠ DAILY, NOT PER-MINUTE, WHICH IS THE OPPOSITE OF ITS TWO SIBLINGS. Catch-up
+# and prove answer "is somebody's domain ready yet" for a person watching a
+# badge, so they run every minute. Nobody is waiting on this one, it cannot get
+# meaningfully worse in an afternoon, and it lists an entire SES account — which
+# is not something to do sixty times an hour.
+#
+# ⚠ AND IT REPORTS BEFORE IT REMOVES. `DOMAIN_ORPHANS_REMOVE` is absent here on
+# purpose, so the first runs write down exactly what they would delete and
+# delete nothing. Read a few days of that log, satisfy yourself the two
+# ownership tests are calibrated for this account, and only then add
+#
+#   - name: DOMAIN_ORPHANS_REMOVE
+#     value: "true"
+#
+# This is the only job in this directory whose mistakes cannot be undone: a
+# wrongly deleted sending identity stops a customer's mail with no warning.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-domain-orphans
+  namespace: i10-prod
+spec:
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/domain-orphans.ts, AND THEY MUST AGREE.
+  # ⚠ AND IT IS OFFSET FROM THE OTHER DAILY JOBS. domain-recheck runs at 03:17
+  # and the cert reload at 04:17; landing on the same minute as either would put
+  # two DNS-heavy passes on one small node at once for no reason.
+  schedule: "41 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # ⚠ KEPT LONGER THAN THE OTHERS. This job's output IS the artefact while it is
+  # in reporting mode — the list of what it would have removed — so a week of
+  # failed runs is a week of evidence somebody may want to read.
+  failedJobsHistoryLimit: 7
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      # One attempt. A retry would re-list the account and re-derive the same
+      # answer; if the pass failed for a reason that clears, tomorrow's run gets
+      # it, and nothing here is time-critical.
+      backoffLimit: 0
+      # ⚠ MINUTES, NOT SECONDS, UNLIKE THE PER-MINUTE JOBS. There is no next slot
+      # to protect — the next one is tomorrow — and a pass has to page an entire
+      # SES account and then make one `GetEmailIdentity` per candidate.
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: orphans
+              image: ghcr.io/i10-tech/i10-api:prod-3f659be1c927de41d1978de66af867457045724c@sha256:ac64e7714a8930ed9a939dd401d1c85f09e2daa38fdfa0411214f4c6637f8995
+              imagePullPolicy: Always
+              command: ["bun", "dist/domain-orphans.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER. This pass reaches across every
+                # tenant and does it through two narrow SECURITY DEFINER
+                # functions — `core.orphaned_zones` and `core.domains_known` —
+                # rather than by holding a role that can see everything. The
+                # second one is the dangerous read: it decides which SES
+                # identities have no owner, and getting it through row level
+                # security would mark every other workspace's live identity an
+                # orphan.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

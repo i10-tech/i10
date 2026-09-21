@@ -2,6 +2,7 @@ import {
   CreateEmailIdentityCommand,
   DeleteEmailIdentityCommand,
   GetEmailIdentityCommand,
+  ListEmailIdentitiesCommand,
   PutEmailIdentityDkimSigningAttributesCommand,
   PutEmailIdentityMailFromAttributesCommand,
   type SESv2Client,
@@ -35,6 +36,44 @@ export interface DomainIdentity {
 
   /** What the provider currently believes. */
   status(domain: string): Promise<{ status: DomainStatus }>
+
+  /**
+   * Every DOMAIN identity the account holds, oldest first is not promised.
+   *
+   * ⚠ IT EXISTS BECAUSE NOTHING COULD ANSWER "WHAT IS IN SES THAT SHOULD NOT
+   * BE". Every other call here is keyed on a domain we already have a row for,
+   * so an identity whose row is gone is unreachable through all of them — and
+   * identities whose row is gone are exactly what a delete that silently failed
+   * leaves behind. For most of this product's life `DeleteEmailIdentity` was
+   * missing from the IAM policy, so EVERY delete failed that way.
+   *
+   * ⚠ DOMAINS ONLY, NEVER EMAIL ADDRESSES. The account also holds verified
+   * sender addresses — people's own mailboxes, created by hand in the AWS
+   * console — which no row in this database has ever described and which
+   * nothing here may reason about, let alone remove.
+   */
+  list(): Promise<string[]>
+
+  /**
+   * How an identity is signed, so we can tell OURS from somebody's hand-made one.
+   *
+   * ⚠ "NO ROW POINTS AT IT" IS NOT ENOUGH TO DELETE SOMETHING, and this is the
+   * second half of the proof. The AWS account is not ours alone in practice —
+   * identities get created by hand in the console, for a test, for a one-off
+   * send — and an orphan sweep that reasoned only from our own database would
+   * delete every one of them the first time it ran. That is unrecoverable and
+   * would be entirely our fault.
+   *
+   * ⚠ BYODKIM IS THE SIGNATURE. Our `create` always supplies
+   * `DkimSigningAttributes`, which sets the origin to `EXTERNAL` and makes the
+   * token our own generated selector — `i10` followed by twelve hex characters,
+   * see `generateSelector`. An Easy DKIM identity, which is what the console
+   * makes by default, has origin `AWS_SES` and three CNAME tokens that look
+   * nothing like that. So the pair is a positive statement that this code
+   * created the identity, rather than an absence of evidence that anything else
+   * did.
+   */
+  signature(domain: string): Promise<{ origin: string | null; tokens: string[] }>
 
   remove(domain: string): Promise<void>
 }
@@ -200,6 +239,52 @@ export function sesIdentity(
 
     status: read,
 
+    async list() {
+      const names: string[] = []
+      let token: string | undefined
+
+      /*
+       * ⚠ PAGED, BECAUSE THE DEFAULT PAGE IS NOT THE WHOLE ACCOUNT. Reading one
+       * page and treating it as the full set would be harmless for the report
+       * and actively wrong for the sweep that consumes it — a second page is
+       * simply invisible, so those identities are never found and never
+       * cleaned up, for ever, with nothing to indicate they were missed.
+       */
+      do {
+        const page = await client.send(
+          new ListEmailIdentitiesCommand({ NextToken: token, PageSize: 1000 }),
+        )
+
+        for (const identity of page.EmailIdentities ?? []) {
+          // ⚠ DOMAINS ONLY. See the note on the port: the account also holds
+          // verified sender ADDRESSES that this database has never described.
+          if (identity.IdentityType !== "DOMAIN") continue
+          if (identity.IdentityName) names.push(identity.IdentityName)
+        }
+
+        token = page.NextToken
+      } while (token)
+
+      return names
+    },
+
+    async signature(domain) {
+      try {
+        const identity = await client.send(
+          new GetEmailIdentityCommand({ EmailIdentity: domain }),
+        )
+        return {
+          origin: identity.DkimAttributes?.SigningAttributesOrigin ?? null,
+          tokens: identity.DkimAttributes?.Tokens ?? [],
+        }
+      } catch (error) {
+        // ⚠ GONE IS NOT OURS. An identity that vanished between the listing and
+        // this read needs no decision made about it.
+        if ((error as { name?: string }).name !== "NotFoundException") throw error
+        return { origin: null, tokens: [] }
+      }
+    },
+
     async remove(domain) {
       try {
         await client.send(new DeleteEmailIdentityCommand({ EmailIdentity: domain }))
@@ -240,6 +325,17 @@ export function offlineIdentity(): DomainIdentity {
     },
     async status() {
       return { status: "pending" }
+    },
+    // ⚠ EMPTY, NOT A THROW. A deployment without SES has no identities, which
+    // is an answer — and the orphan sweep asking it should find nothing to do
+    // rather than fail its whole pass.
+    async list() {
+      return []
+    },
+    // ⚠ NOTHING IS OURS WHEN THERE IS NO PROVIDER, which makes the orphan sweep
+    // refuse to remove anything rather than reason from an empty answer.
+    async signature() {
+      return { origin: null, tokens: [] }
     },
     async remove() {},
   }

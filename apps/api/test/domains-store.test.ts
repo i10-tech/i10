@@ -58,6 +58,8 @@ function fakeDb(handlers: {
 const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
   create: async () => ({ dkimTokens: ["aaa"], status: "pending" }),
   status: async () => ({ dkimTokens: ["aaa"], status: "pending" }),
+  list: async () => [],
+  signature: async () => ({ origin: null, tokens: [] }),
   remove: async () => {},
   ...over,
 })
