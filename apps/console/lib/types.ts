@@ -405,6 +405,20 @@ export type ZoneFinding =
   | { zone: string; code: "ok" }
   | { zone: string; code: "not_published" }
   | { zone: string; code: "delegated_elsewhere"; observed: string[] }
+  /**
+   * Delegated to us AND to something else at once — usually a previous
+   * set-up's nameservers left published beside the current ones.
+   *
+   * ⚠ IT RESOLVES TODAY, WHICH IS WHAT MAKES IT WORTH A WARNING. Whichever
+   * nameserver a resolver happens to pick decides whether the mail records
+   * are found, so the domain works until the day it does not.
+   */
+  | {
+      zone: string
+      code: "extra_nameservers"
+      observed: string[]
+      unexpected: string[]
+    }
   | { zone: string; code: "nameserver_silent" }
   | { zone: string; code: "lookup_failed" }
 
@@ -460,4 +474,18 @@ export interface PublishOutcome {
   created: { name: string; type: string; value: string }[]
   unchanged: { name: string; type: string; value: string }[]
   removed: ConflictingRecord[]
+  /**
+   * Records of OUR OWN that this publish replaced — a previous set left in the
+   * customer's zone after the domain was deleted here and added again.
+   *
+   * ⚠ NOT THE SAME THING AS `removed`, AND THE CONSOLE MUST NOT REPORT THEM
+   * THE SAME WAY. `removed` is the customer's data, deleted because they
+   * agreed to it; this is our own litter, cleared without asking because
+   * leaving it behind is what breaks the new set. See the API's
+   * dns/superseded.ts.
+   *
+   * ⚠ OPTIONAL, BECAUSE AN OLDER API DOES NOT SEND IT. The console is
+   * deployed separately and can be a version ahead.
+   */
+  superseded?: ConflictingRecord[]
 }

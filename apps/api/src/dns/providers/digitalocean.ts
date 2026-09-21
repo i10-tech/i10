@@ -1,3 +1,4 @@
+import { supersededBy } from "../superseded.js"
 import {
   DnsWriteError,
   failureFor,
@@ -122,7 +123,12 @@ export function digitalOceanWriter(): ZoneWriter {
 
     async publish(credential, zone, records, options = {}) {
       const existing = await listRecords(credential, zone)
-      const outcome: PublishOutcome = { created: [], unchanged: [], removed: [] }
+      const outcome: PublishOutcome = {
+        created: [],
+        unchanged: [],
+        removed: [],
+        superseded: [],
+      }
 
       // Same ordering rule as every other adapter: decide, then write. A
       // half-published delegation resolves inconsistently.
@@ -138,7 +144,38 @@ export function digitalOceanWriter(): ZoneWriter {
         outcome.removed.push(describe(conflict, zone))
       }
 
-      const survived = existing.filter((r) => !conflicts.includes(r))
+      /*
+       * ⚠ OUR OWN LEFTOVERS GO AFTER THE CONFLICT DECISION AND BEFORE THE
+       * WRITES, for the reasons set out in the Cloudflare adapter and in
+       * dns/superseded.ts. After, so a refusal leaves the zone untouched;
+       * before, so the zone never holds both sets at once.
+       */
+      const stale = !options.clearSuperseded
+        ? []
+        : supersededBy(
+            records,
+            existing,
+            (record) => ({
+              name: absolute(record, zone),
+              type: record.type,
+              value: record.data,
+            }),
+            sameValue,
+          ).filter((record) => !conflicts.includes(record))
+
+      for (const record of stale) {
+        await call(credential, `/domains/${zone.id}/records/${record.id}`, {
+          method: "DELETE",
+        })
+        outcome.superseded!.push({
+          ...describe(record, zone),
+          reason: `A ${record.type} record we published previously was left at ${absolute(record, zone)}.`,
+        })
+      }
+
+      const survived = existing.filter(
+        (r) => !conflicts.includes(r) && !stale.includes(r),
+      )
 
       for (const record of records) {
         const relative = relativeName(record.name, zone.name)

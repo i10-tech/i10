@@ -135,6 +135,48 @@ export function DelegationNote({
     )
   }
 
+  /*
+   * ⚠ AFTER THE TWO FAILURES AND BEFORE "STILL WAITING", WHICH IS WHERE IT
+   * BELONGS IN BOTH DIRECTIONS. Nothing is broken — the zone resolves — so it
+   * must not outrank a silent nameserver or a delegation pointing entirely
+   * elsewhere; but it is a live hazard with a job attached, so it outranks a
+   * zone that is merely propagating.
+   */
+  const extra = report.zones.filter((z) => z.code === "extra_nameservers")
+  if (extra.length > 0) {
+    const leftovers = [
+      ...new Set(
+        extra.flatMap((z) => (z.code === "extra_nameservers" ? z.unexpected : [])),
+      ),
+    ]
+    return (
+      <Note
+        tone="warning"
+        icon={<AlertTriangle className="size-4 text-warning" />}
+        title="There are nameservers here that we did not ask for"
+        body={
+          <>
+            {list(extra.map((z) => z.zone))}{" "}
+            {extra.length === 1 ? "is" : "are"} delegated to us and also to{" "}
+            <span className="font-mono">{leftovers.join(", ")}</span>. It resolves
+            today, which is the problem: whichever nameserver a resolver happens to
+            ask decides whether your mail records are found, so this works until it
+            does not.
+            {/*
+             * ⚠ THE LIKELY CAUSE IS OURS AND IS NAMED AS SUCH. Deleting a
+             * domain here cannot reach into somebody's zone, so a domain that
+             * was removed and added again leaves the previous set-up's
+             * nameservers published. Where a provider is connected we clear
+             * them on the next publish; by hand, this note is all we have.
+             */}{" "}
+            If you removed this domain and added it again, those are the previous
+            set-up&rsquo;s — delete them and keep only the NS records listed above.
+          </>
+        }
+      />
+    )
+  }
+
   const waiting = report.zones.filter((z) => z.code === "not_published")
   if (waiting.length > 0) {
     return (

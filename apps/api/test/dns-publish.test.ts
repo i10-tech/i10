@@ -84,6 +84,110 @@ const publisherWith = (w: ZoneWriter, conn = connections()) => ({
   conn,
 })
 
+/**
+ * Who may clear a record that looks like ours.
+ *
+ * ⚠ THE CLEAN-UP IS THE ONLY DESTRUCTIVE THING THIS MODULE DOES WITHOUT
+ * ASKING, AND THIS IS THE GATE ON IT. A name can be held by more than one
+ * workspace — migration 0039 exists to allow exactly that — so a record in
+ * our shape at a name we publish to may be another workspace's LIVE
+ * delegation rather than litter from a domain that was deleted. Only
+ * `core.verified_holder` can tell the two apart, and every answer other than
+ * "nobody, or us" has to mean no.
+ */
+describe("clearing records of our own", () => {
+  const seen = () => {
+    const calls: { clearSuperseded?: boolean }[] = []
+    return {
+      calls,
+      writer: writer({
+        publish: async (_c, _z, _r, options = {}) => {
+          calls.push(options)
+          return outcome({ created: [] })
+        },
+      }),
+    }
+  }
+
+  it("is asked for when nobody has proven the name", async () => {
+    const { calls, writer: w } = seen()
+    const conn = connections()
+    await dnsPublisher({
+      connections: conn.store,
+      log,
+      writers: () => w,
+      claims: { verifiedHolder: async () => null },
+    }).publish({ tenantId: "t1", provider: "cloudflare", domain: domain(nsRecords) })
+
+    expect(calls[0]?.clearSuperseded).toBe(true)
+  })
+
+  it("is asked for when the holder is this very domain", async () => {
+    const { calls, writer: w } = seen()
+    const conn = connections()
+    const mine = domain(nsRecords)
+    await dnsPublisher({
+      connections: conn.store,
+      log,
+      writers: () => w,
+      claims: { verifiedHolder: async () => mine.id },
+    }).publish({ tenantId: "t1", provider: "cloudflare", domain: mine })
+
+    expect(calls[0]?.clearSuperseded).toBe(true)
+  })
+
+  /*
+   * ⚠ THE CASE THE GATE EXISTS FOR. Somebody else has proven this name, so
+   * the records in that zone that look like ours are theirs and working.
+   */
+  it("is refused when another domain holds the name verified", async () => {
+    const { calls, writer: w } = seen()
+    const conn = connections()
+    await dnsPublisher({
+      connections: conn.store,
+      log,
+      writers: () => w,
+      claims: { verifiedHolder: async () => "someone-elses-domain-id" },
+    }).publish({ tenantId: "t1", provider: "cloudflare", domain: domain(nsRecords) })
+
+    expect(calls[0]?.clearSuperseded).toBe(false)
+  })
+
+  // ⚠ AND AN UNREADABLE ANSWER IS A NO, not an assumption in either direction.
+  it("is refused when the question cannot be answered", async () => {
+    const { calls, writer: w } = seen()
+    const conn = connections()
+    const result = await dnsPublisher({
+      connections: conn.store,
+      log,
+      writers: () => w,
+      claims: {
+        verifiedHolder: async () => {
+          throw new Error("the database is down")
+        },
+      },
+    }).publish({ tenantId: "t1", provider: "cloudflare", domain: domain(nsRecords) })
+
+    expect(calls[0]?.clearSuperseded).toBe(false)
+    // ⚠ AND THE PUBLISH ITSELF STILL HAPPENS. The gate withholds a tidy-up,
+    // never the records the customer is waiting on.
+    expect(result.status).toBe("published")
+  })
+
+  // ⚠ A DEPLOYMENT THAT DOES NOT WIRE THE CHECK DOES NOT GET THE CLEAN-UP.
+  it("is refused when nothing can answer at all", async () => {
+    const { calls, writer: w } = seen()
+    const conn = connections()
+    await dnsPublisher({ connections: conn.store, log, writers: () => w }).publish({
+      tenantId: "t1",
+      provider: "cloudflare",
+      domain: domain(nsRecords),
+    })
+
+    expect(calls[0]?.clearSuperseded).toBe(false)
+  })
+})
+
 describe("before anything is written", () => {
   it("says so when we cannot write to that provider at all", async () => {
     const { store } = connections()

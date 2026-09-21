@@ -74,6 +74,20 @@ export default {
         // together often enough that filing them under one name would make the
         // release notes useless for exactly the question people ask of them.
         "send",
+        // apps/api/src/dns + packages/dns-providers — the customer's own DNS:
+        // the provider registry, the OAuth connect, the zone adapters and the
+        // publish path that writes records into somebody else's zone. Inside
+        // the API rather than beside it, so listed for the same reason
+        // `billing` and `send` are: a changelog reads better when "we can now
+        // write your records for you at Hetzner" is not filed under the same
+        // heading as a route handler.
+        //
+        // ⚠ NOT THE ZONES WE SERVE OURSELVES, WHICH ARE `infra`. PowerDNS, its
+        // hostPort and the firewall in front of it are deployment; this is the
+        // code that talks to a provider on a customer's behalf. The two get
+        // confused precisely because both are "DNS", and a reader looking for
+        // why their delegation broke needs to be able to tell them apart.
+        "dns",
         "stalwart",
         "bulwark",
         "infra",

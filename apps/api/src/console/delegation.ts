@@ -38,6 +38,25 @@ export type ZoneFinding =
    * delegation: the customer is finished and we are the ones failing.
    */
   | { zone: string; code: "nameserver_silent" }
+  /**
+   * Delegated to us AND to something else at the same time.
+   *
+   * ⚠ IT RESOLVES, WHICH IS WHY NOTHING CAUGHT IT. A parent that publishes
+   * our two nameservers alongside a third answers `some(ours)` and serves the
+   * zone perfectly whenever a resolver happens to pick one of ours — so the
+   * domain verifies, mail flows, and then one day a resolver picks the other
+   * and it does not. The usual cause is our own: the domain was deleted here,
+   * which cannot reach into the customer's zone, and added again with a new
+   * claim, so the previous set-up's nameservers are still published beside
+   * the current ones.
+   *
+   * ⚠ AND IT IS REPORTED RATHER THAN REPAIRED, BECAUSE NOBODY HOLDS A
+   * CREDENTIAL ON THIS PATH. The publisher clears our leftovers where a
+   * provider is connected — see dns/superseded.ts — and this is the same
+   * problem for everyone who publishes by hand, where the only thing we can
+   * do is name the records and say they must go.
+   */
+  | { zone: string; code: "extra_nameservers"; observed: string[]; unexpected: string[] }
   /** The lookup itself failed. Says nothing about the records. */
   | { zone: string; code: "lookup_failed" }
 
@@ -205,6 +224,18 @@ export function delegationChecker(
      */
     try {
       await dns.soaOf(zone)
+
+      /*
+       * ⚠ CHECKED AFTER THE SOA, NOT BEFORE, SO THE WORSE FINDING WINS. A
+       * zone that does not resolve at all is our failure and is what somebody
+       * needs to hear; extra nameservers beside working ones is a hazard they
+       * need to hear about second.
+       */
+      const unexpected = observed.filter((ns) => !ours.has(ns))
+      if (unexpected.length > 0) {
+        return { zone, code: "extra_nameservers", observed, unexpected }
+      }
+
       return { zone, code: "ok" }
     } catch {
       /*

@@ -118,6 +118,48 @@ describe("what each failure is called", () => {
   })
 
   /**
+   * ⚠ THE STATE A RE-ADDED DOMAIN LEAVES BEHIND, AND THE REASON IT WENT
+   * UNNOTICED FOR SO LONG: it resolves. Deleting a domain here cannot reach
+   * into the customer's zone, so the previous claim's nameservers are still
+   * published beside the new ones — `some(ours)` is true, the SOA answers,
+   * and the old code called that `ok`. Whichever nameserver a resolver picks
+   * decides whether the mail records are found.
+   */
+  it("spots a previous set-up still delegated beside the current one", async () => {
+    const report = await check({
+      referralTo: async () =>
+        delegated([...NS, "old-claim.ns1.i10.tech", "old-claim.ns2.i10.tech"]),
+    })
+
+    const first = report.zones[0]!
+    expect(first.code).toBe("extra_nameservers")
+    expect(first.code === "extra_nameservers" && first.unexpected).toEqual([
+      "old-claim.ns1.i10.tech",
+      "old-claim.ns2.i10.tech",
+    ])
+  })
+
+  /*
+   * ⚠ AND A SILENT NAMESERVER STILL OUTRANKS IT. Extra records beside a zone
+   * that does not resolve at all is not the thing to tell somebody about.
+   */
+  it("keeps blaming us when the zone does not resolve either", async () => {
+    const report = await check({
+      referralTo: async () => delegated([...NS, "old-claim.ns1.i10.tech"]),
+      soaOf: async () => {
+        throw servfail()
+      },
+    })
+    expect(report.zones.every((z) => z.code === "nameserver_silent")).toBe(true)
+  })
+
+  // ⚠ AND THE ORDINARY CASE IS UNCHANGED: exactly our nameservers is `ok`.
+  it("says nothing when only our own nameservers are there", async () => {
+    const report = await check()
+    expect(report.zones.every((z) => z.code === "ok")).toBe(true)
+  })
+
+  /**
    * ⚠ THE FINDING THIS MODULE WAS BUILT FOR. The NS records point at us and the
    * zone still does not resolve, which means the customer is finished and we
    * are not serving it. Nothing above DNS can see this: SES reports `pending`,

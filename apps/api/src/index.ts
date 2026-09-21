@@ -19,6 +19,7 @@ import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
+import { nameClaims } from "./domains/claims.js"
 import { domainStore } from "./domains/store.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
@@ -911,6 +912,16 @@ const app = createApp({
             dnsPublisher: dnsPublisher({
               connections,
               log,
+              /*
+               * ⚠ THE ONE QUESTION THAT DECIDES WHETHER WE MAY DELETE A RECORD
+               * THAT LOOKS LIKE OURS. A name can be held by more than one
+               * workspace — see migration 0039 — so "this record is in our
+               * shape at a name we publish to" does not establish that it is
+               * this domain's to remove. `core.verified_holder` is
+               * `SECURITY DEFINER` precisely so the answer can cross tenants,
+               * which is what makes it the right question here.
+               */
+              claims: nameClaims(db),
               /*
                * ⚠ WITHOUT THIS A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND
                * THEN DEAD. The grant was stored when somebody authorised us and
