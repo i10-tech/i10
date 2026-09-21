@@ -1,7 +1,8 @@
 # Letting CI check that a deploy actually landed
 
 `verify-rollout.sh` answers one question from the box: **is the commit CI just
-pushed synced, rolled out and healthy?** Until it existed, the Build workflow
+pushed synced, rolled out, and actually running the images it pinned?** Until it
+existed, the Build workflow
 went green the moment git accepted the deploy commit — while Argo had not yet
 polled, the image had not been pulled and nothing had started. An
 ImagePullBackOff, a missing secret or a container that crashlooped on a config
@@ -173,9 +174,27 @@ keep working. The job summary says which happened.
 
 ## What it does and does not do
 
-It waits for `i10-workloads` to report the pushed revision as `Synced` and
-`Healthy`, then waits for every deployment in `i10-prod` to finish rolling, then
-asserts that each image CI rebuilt is actually running at `prod-<sha>`.
+It waits for `i10-workloads` to report the pushed revision as `Synced`, then
+waits for every deployment in `i10-prod` to finish rolling, then asserts that
+each image CI rebuilt is actually running at `prod-<sha>`.
+
+> ⚠ IT DOES NOT REQUIRE `Healthy`, AND THAT IS DELIBERATE RATHER THAN AN
+> OVERSIGHT. Argo's app health is the worst health of everything the Application
+> owns, CronJobs included — so one Job that keeps failing holds it at `Degraded`
+> and fails every deploy after it. `i10-billing-reconcile` did exactly that,
+> every thirty minutes, over three Polar subscriptions no code change can
+> resolve. A check that is red on every run is not a check; people stop reading
+> it and the next real failure goes unread with it.
+>
+> ⚠ WHAT STILL FAILS A DEPLOY IS EVERYTHING SPECIFIC TO IT: the revision must be
+> the deploy commit, every Deployment must finish rolling — which is what
+> catches a crashloop, an ImagePullBackOff or a bad config — and the new tag
+> must be in a live pod spec. Both broken images shipped on 2026-09-21, whose
+> entrypoints had moved to `dist/src/`, were caught by those and not by
+> aggregate health.
+>
+> Health is still read, and a non-`Healthy` Application is printed as a WARNING
+> with the offending pods, so the fact stays visible without blocking.
 
 It **does not roll back.** Every app here has Argo `selfHeal` on, so
 `kubectl rollout undo` is reverted to git within about 35 seconds — the cluster

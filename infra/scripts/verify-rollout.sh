@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 #
-# Did the commit CI just pushed actually reach production, and is it healthy?
+# Did the commit CI just pushed actually reach production, and did it come up?
+#
+# ⚠ "DID IT COME UP" RATHER THAN "IS EVERYTHING HEALTHY", AND THE DIFFERENCE IS
+# LOAD-BEARING — see §2. This answers for the rollout it was given a sha for; it
+# does not answer for the Application as a whole, because Argo's aggregate
+# health folds in every failed CronJob Job and one of those blocked every deploy
+# for reasons no deploy could fix.
 #
 # ⚠ THIS EXISTS BECAUSE "PUSHED" AND "DEPLOYED" WERE THE SAME SENTENCE IN THE
 # WORKFLOW SUMMARY AND ARE NOT THE SAME EVENT. CI pinned the digests, pushed,
@@ -21,7 +27,11 @@
 # secret or change a workload — it can ask this one question and read the
 # answer. See infra/scripts/README.md.
 #
-# Usage:  verify-rollout.sh <40-hex-sha> [comma,separated,image,names]
+# Usage:  verify-rollout.sh <argo-revision-sha> [images] [image-tag-sha]
+#
+# `argo-revision-sha` is the DEPLOY commit Argo must reach; `image-tag-sha` is
+# the commit the images are TAGGED with. They differ — see the note by
+# IMAGE_SHA — and conflating them made §4 unpassable.
 
 set -uo pipefail
 
@@ -63,6 +73,23 @@ SAFE="$(printf '%s' "$RAW" | tr -dc '0-9a-z, -')"
 SHA="$(printf '%s' "$SAFE" | awk '{print $1}' | tr -dc '0-9a-f' | head -c 40)"
 IMAGES="$(printf '%s' "$SAFE" | awk '{print $2}' | tr -dc '0-9a-z,-')"
 
+# ⚠ A THIRD ARGUMENT, BECAUSE THE TWO SHAS ARE NOT THE SAME COMMIT AND §4 HAD
+# BEEN COMPARING THE WRONG ONE SINCE IT WAS WRITTEN. Argo syncs to the DEPLOY
+# commit — the one CI creates when it pins the digests — while the images are
+# tagged `prod-${GITHUB_SHA}`, the MERGE commit that triggered the build. The
+# deploy commit always comes after, so `prod-<deploy sha>` is a tag that does
+# not exist and never will.
+#
+# ⚠ THE EFFECT WAS A CHECK THAT COULD NOT PASS. §4 reported "stale images" on
+# every single deploy, including ones where exactly the right image was running
+# — which is indistinguishable, in the job summary, from a rollout that really
+# did not land. Two failing checks were hiding each other.
+#
+# ⚠ IT DEFAULTS TO `SHA` SO AN OLD CALLER STILL WORKS, and a deployment that
+# genuinely tags by the deploy commit needs no change.
+IMAGE_SHA="$(printf '%s' "$SAFE" | awk '{print $3}' | tr -dc '0-9a-f' | head -c 40)"
+IMAGE_SHA="${IMAGE_SHA:-$SHA}"
+
 if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "verify-rollout: expected a 40-character commit sha, got: ${RAW:0:60}" >&2
   exit 2
@@ -81,8 +108,31 @@ echo "verify-rollout: waiting for ${SHORT} in ${NAMESPACE}"
 kubectl annotate application "$APP" -n "$NAMESPACE" \
   argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1
 
-# ── 2. wait for the revision to be synced and healthy ────────────────────────
+# ── 2. wait for the revision to be synced ────────────────────────────────────
 
+# ⚠ THIS WAITS FOR `Synced`, NOT FOR `Healthy`, AND THAT NARROWING IS
+# DELIBERATE. Argo's app health is the WORST health of every resource it owns,
+# and that set includes the CronJobs — so one failed Job holds the whole
+# Application at `Degraded` until its history rolls over. `i10-billing-reconcile`
+# has been failing every thirty minutes on three Polar subscriptions that no
+# code change can fix, which made this check fail EVERY deploy, for a reason
+# that had nothing to do with the deploy.
+#
+# ⚠ AND A CHECK THAT IS RED ON EVERY RUN IS NOT A CHECK. It is the same failure
+# the tofu workflow records: people stop reading it, and the next real failure
+# goes with it. The protection has to be about THIS rollout to keep its meaning.
+#
+# ⚠ WHAT IS NOT GIVEN UP IS THE PART THAT CATCHES A BROKEN DEPLOY. Three checks
+# remain and each is specific to what just shipped: the revision below is the
+# deploy commit and nothing else; §3 waits for every Deployment to finish
+# rolling, which is what catches a crashloop, an ImagePullBackOff or a bad
+# config; and §4 asserts the new tag is in a live pod spec. Both of today's
+# broken images — the ones whose entrypoints had moved to `dist/src/` — were
+# caught by §3 and §4, not by aggregate health.
+#
+# ⚠ HEALTH IS STILL READ AND STILL REPORTED, one line below, because a Degraded
+# Application is worth knowing about even when it is not this deploy's fault.
+# It is a warning here and an error nowhere.
 deadline=$((SECONDS + SYNC_TIMEOUT))
 revision="" sync="" health="" synced=false
 
@@ -93,7 +143,7 @@ while (( SECONDS < deadline )); do
       2>/dev/null
   )
 
-  if [[ "$revision" == "$SHA" && "$sync" == "Synced" && "$health" == "Healthy" ]]; then
+  if [[ "$revision" == "$SHA" && "$sync" == "Synced" ]]; then
     synced=true
     break
   fi
@@ -112,7 +162,19 @@ if [[ "$synced" != true ]]; then
   exit 1
 fi
 
-echo "verify-rollout: Argo is synced to ${SHORT} and healthy"
+echo "verify-rollout: Argo is synced to ${SHORT}"
+
+if [[ "$health" != "Healthy" ]]; then
+  # ⚠ TO STDOUT AND NOT stderr, AND IT DOES NOT SET A FAILURE. This is the line
+  # that keeps the fact visible now that it no longer blocks: something in the
+  # Application is unwell, and it is somebody's job — just not this job's, and
+  # not this deploy's fault.
+  echo "verify-rollout: WARNING — the Application is ${health}, which this deploy"
+  echo "  did not necessarily cause. Not failing on it; the rollout checks below"
+  echo "  are what decide. Worth looking at:"
+  kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null \
+    | grep -vE 'Running|Completed' | head -10 | sed 's/^/    /'
+fi
 
 # ── 3. wait for every rollout ────────────────────────────────────────────────
 
@@ -164,10 +226,10 @@ if [[ -n "$IMAGES" ]]; then
     [[ -z "$image" ]] && continue
     if kubectl get pods -n "$NAMESPACE" \
         -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{end}' 2>/dev/null \
-        | grep -q "/${image}:prod-${SHA}@"; then
-      echo "  ok       ${image} is running prod-${SHORT}"
+        | grep -q "/${image}:prod-${IMAGE_SHA}@"; then
+      echo "  ok       ${image} is running prod-${IMAGE_SHA:0:7}"
     else
-      echo "  FAILED   ${image} is not running prod-${SHORT}" >&2
+      echo "  FAILED   ${image} is not running prod-${IMAGE_SHA:0:7}" >&2
       missing+=("$image")
     fi
   done
