@@ -387,6 +387,107 @@ describe("reconciling against Polar", () => {
   })
 
   /*
+   * ⚠ THE SAME RULE ON THE OTHER UNATTRIBUTABLE CASE. `stranded` means somebody
+   * PAID and nothing here will ever grant it — which an ended subscription is
+   * not. Polar never deletes a subscription, and deleting a customer stops its
+   * `external_id` resolving, so without this every cancelled subscription that
+   * customer ever had is reported on every run and the job can never go green.
+   * Measured after flushing the sandbox organisation: 31 cancelled, 31 stranded.
+   */
+  it("does not strand a subscription that has already ended", async () => {
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        resumeSubscription: async () => {},
+        revokeSubscription: async () => "revoked" as const,
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        listSubscriptions: async () => [
+          polarSub({ status: "canceled", customer: { external_id: null } }),
+        ],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({ snapshot: async () => [] }),
+      grants: { apply: mock() },
+      options,
+      log,
+    })
+
+    expect(report.stranded).toEqual([])
+  })
+
+  // ⚠ BUT A LIVE ONE STILL SHOUTS, because that IS money from somebody we
+  // cannot name — the case the whole `stranded` bucket exists for.
+  it("still strands a live subscription it cannot attribute", async () => {
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        resumeSubscription: async () => {},
+        revokeSubscription: async () => "revoked" as const,
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        listSubscriptions: async () => [
+          polarSub({ status: "active", customer: { external_id: null } }),
+        ],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({ snapshot: async () => [] }),
+      grants: { apply: mock() },
+      options,
+      log,
+    })
+
+    expect(report.stranded).toHaveLength(1)
+  })
+
+  /*
+   * ⚠ AND ONCE IT IS REVOKED IT IS NOT A FINDING AT ALL, which is the
+   * difference between an alert and a permanently red job. Polar never deletes
+   * a subscription, so a cancelled one naming a dead tenant stays in the list
+   * for ever — reporting it on every run means acting on the alert can never
+   * clear it, and everybody learns to ignore the job.
+   *
+   * Observed 2026-09-21 with a dev signup against the shared sandbox Polar
+   * organisation: revoking the subscription changed `entitledPlanId` to free
+   * and changed nothing about the alert.
+   */
+  it("stops reporting an unknown tenant once the subscription entitles nothing", async () => {
+    const report = await reconcileSubscriptions({
+      polar: {
+        getCheckout: mock(),
+        getCustomer: async () => null,
+        setCustomerExternalId: async () => true,
+        ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
+        updateSubscription: async () => {},
+        cancelSubscription: async () => {},
+        resumeSubscription: async () => {},
+        revokeSubscription: async () => "revoked" as const,
+        createCustomerSession: async () => ({ token: "polar_cst_test" }),
+        listSubscriptions: async () => [polarSub({ status: "canceled" })],
+        createCheckout: mock(),
+      },
+      subscriptions: ops({
+        snapshot: async () => [],
+        knownTenants: async () => new Set<string>(),
+      }),
+      grants: { apply: mock() },
+      options,
+      log,
+    })
+
+    expect(report.unknownTenant).toEqual([])
+    expect(report.failed).toEqual([])
+  })
+
+  /*
    * ⚠ THE SECOND CRASH, AND IT IS NOT THE SAME BUG AS THE ONE ABOVE. These two
    * arrived together in production and looked alike in the log — three tenants,
    * every run, all counted as `failed` — but one was a foreign key on a tenant

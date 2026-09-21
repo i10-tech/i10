@@ -255,6 +255,27 @@ export function toState(
      * So a tenant whose Polar customer was made any other way pays, subscribes,
      * and is dropped here on every event for ever.
      */
+    /*
+     * ⚠ AND IT IS ONLY `stranded` WHILE IT STILL ENTITLES SOMETHING. What makes
+     * this worth shouting about is that somebody has PAID and Polar shows them
+     * as active while nothing here will ever grant it. A subscription that has
+     * ended is none of that: no money is moving, and there is nothing to grant
+     * even if we could name the payer.
+     *
+     * ⚠ AND POLAR NEVER DELETES A SUBSCRIPTION, so without this the list only
+     * grows. Deleting a customer soft-deletes it and its `external_id` stops
+     * resolving — so every cancelled subscription it ever had becomes
+     * permanently unattributable, is reported on every run, and the job can
+     * never be green again. Measured after flushing the sandbox organisation:
+     * 31 cancelled subscriptions, 31 `stranded`, exit 1, for ever.
+     */
+    if (!ENTITLED_STATUSES.has(sub.status)) {
+      return {
+        kind: "ignore",
+        reason: `ended subscription ${sub.id} has no external customer id`,
+      }
+    }
+
     return {
       kind: "ignore",
       reason: `subscription ${sub.id} has no external customer id (customer ${sub.customer_id})`,

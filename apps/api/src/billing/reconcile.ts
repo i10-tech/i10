@@ -296,6 +296,37 @@ export async function reconcileSubscriptions(
      * below would send it straight to `grants.apply` and the foreign key.
      */
     if (!alive.has(state.tenantId)) {
+      /*
+       * ⚠ ONLY WHILE IT STILL ENTITLES SOMETHING, AND WITHOUT THAT THE JOB IS
+       * RED FOR EVER OVER A RESOLVED PROBLEM. What makes an unknown tenant
+       * worth waking somebody for is that Polar is BILLING for a workspace that
+       * does not exist. Revoke the subscription and that is no longer true —
+       * but Polar never deletes a subscription, so the cancelled one stays in
+       * the list permanently, and reporting it on every run means the only way
+       * to ever get a green run is to have never had the problem.
+       *
+       * ⚠ AND A PERMANENTLY RED JOB IS WORSE THAN NO JOB. This one exits
+       * non-zero to say "a human must act"; an alert that stays lit after the
+       * human acted is how everybody learns to ignore it — which is the exact
+       * failure `stranded` and `contested` are each written to avoid.
+       *
+       * Observed 2026-09-21: a dev-environment signup against the SHARED
+       * sandbox Polar organisation left a `pro` subscription naming a tenant
+       * production had never heard of. Revoking it in Polar changed
+       * `entitledPlanId` to free and changed nothing about the alert.
+       */
+      if (state.entitledPlanId === deps.options.freePlanId) {
+        deps.log.info(
+          {
+            tenantId: state.tenantId,
+            subscriptionId: state.polarSubscriptionId,
+          },
+          "an ended subscription names a workspace this database does not " +
+            "hold — nothing is being billed and there is nobody to grant to",
+        )
+        continue
+      }
+
       report.unknownTenant.push({
         tenantId: state.tenantId,
         subscriptionId: state.polarSubscriptionId,
@@ -307,8 +338,8 @@ export async function reconcileSubscriptions(
           subscriptionId: state.polarSubscriptionId,
           plan: state.entitledPlanId,
         },
-        "Polar has a subscription for a workspace that no longer exists — " +
-          "nothing to grant, and the deletion should have revoked it",
+        "Polar is BILLING for a workspace that no longer exists — revoke the " +
+          "subscription; the deletion path should have done it",
       )
       continue
     }
