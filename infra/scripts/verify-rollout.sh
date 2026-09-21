@@ -29,6 +29,18 @@ set -uo pipefail
 # information being gathered; exiting on the first non-zero would report one
 # slow rollout as a hard failure and skip every remaining check.
 
+# ⚠ SET EXPLICITLY, BECAUSE k3s's `kubectl` IGNORES `~/.kube/config` BY DEFAULT.
+# The binary at /usr/local/bin/kubectl is k3s, which points itself at
+# /etc/rancher/k3s/k3s.yaml unless KUBECONFIG says otherwise — and that file is
+# root-only. The CI user has its own client certificate and its own config, so
+# without this line every kubectl below fails with "permission denied", each one
+# into /dev/null, and the script reports a rollout that never came up rather than
+# a credential that was never read. An hour to find, one line to fix.
+#
+# ⚠ `${KUBECONFIG:-...}` RATHER THAN AN ASSIGNMENT, so running this by hand as a
+# human with a working kubeconfig still does what you expect.
+export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
 NAMESPACE="${I10_NAMESPACE:-i10-prod}"
 APP="${I10_APP:-i10-workloads}"
 
