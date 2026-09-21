@@ -89,14 +89,31 @@ export default async function AppLayout({
   const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
 
   return (
-    <div className="flex min-h-dvh">
+    /*
+     * ⚠ THE SHELL IS EXACTLY ONE VIEWPORT TALL AND DOES NOT SCROLL. The
+     * document scrollbar is gone on purpose: scrolling lives in the page pane
+     * (see `PageFrame`), so the rail, the workspace bar and the mobile header
+     * cannot travel with the content no matter how far somebody flings it.
+     *
+     * ⚠ THIS REPLACED A `sticky top-0` RAIL, WHICH IS A WEAKER VERSION OF THE
+     * SAME IDEA. Sticky still leaves the whole page on the document scroller,
+     * so the rail is only pinned for as long as nothing upstream introduces a
+     * scroll container, an overscroll bounce still slides it, and the rail is
+     * held in place by a rule that has to keep being true rather than by the
+     * box it lives in. A fixed-height shell makes it structural.
+     *
+     * ⚠ `overflow-hidden` HERE IS WHAT STOPS THE BOUNCE, not a style choice.
+     * Without it a flick past the end of the pane rubber-bands the document —
+     * the rail lifts off the top edge and drops back — which is precisely the
+     * movement this layout is meant to remove.
+     */
+    <div className="flex h-dvh overflow-hidden">
       {/*
-       * ⚠ `sticky` WITH `h-dvh`, NOT `fixed`. A fixed rail is removed from flow,
-       * so the main column needs a matching left margin — two numbers that have
-       * to agree, and do not, the first time somebody changes the width. Sticky
-       * keeps it in flow: the flexbox does the arithmetic.
+       * ⚠ NO HEIGHT OF ITS OWN: `h-full` DEFERS TO THE SHELL. A rail that
+       * declared `h-dvh` a second time would be two numbers that have to agree
+       * — and they stop agreeing the first time the shell grows a header.
        */}
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
+      <aside className="hidden h-full w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
         <div className="flex h-14 items-center px-4">
           <Link
             href="/"
@@ -147,7 +164,14 @@ export default async function AppLayout({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/*
+       * ⚠ `overflow-hidden` ON THE COLUMN, `overflow-y-auto` ON THE PANE
+       * INSIDE IT. The column has to refuse to grow before the pane can be
+       * asked to scroll: a flex child's default `min-height: auto` lets it
+       * stretch to its content instead, and then the shell overflows and
+       * nothing scrolls anywhere.
+       */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MobileNav
           tenant={me.data.tenant}
           plan={me.data.billing.plan}
