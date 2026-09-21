@@ -100,10 +100,18 @@ export function StepVerify({
             className="mt-0.5 size-5 shrink-0 text-success"
           />
           <div className="space-y-1">
+            {/*
+             * ⚠ THE COUNT IS DOMAINS, NOT RECORDS, AND THE OLD COPY SPENT IT
+             * AS THOUGH IT WERE RECORDS. One domain read "Your record was
+             * added" — singular, about the six records we had just written —
+             * and two domains read "Your 2 records were added", which names
+             * the wrong unit and a number a third of the real one. The
+             * sentence beneath it has always said "We wrote them".
+             */}
             <p className="text-sm font-medium">
               {justPublished === 1
-                ? "Your record was added"
-                : `Your ${justPublished} records were added`}
+                ? "Your records were added"
+                : `Your records were added for ${justPublished} domains`}
             </p>
             <p className="text-sm text-muted-foreground">
               We wrote them at your DNS provider and started checking. Nothing below

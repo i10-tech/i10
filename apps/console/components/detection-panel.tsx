@@ -57,7 +57,7 @@ export function DetectionPanel({
          * sixteen of them one footprint.
          */}
         {provider ? (
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
             <ProviderMark
               slug={provider.slug}
               name={provider.name}
@@ -68,11 +68,11 @@ export function DetectionPanel({
                * fourteen-pixel text and read as a smudge. The box is square;
                * what you see is the height.
                */
-              className="size-6"
+              className="size-7"
             />
           </span>
         ) : (
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
             <Info className="size-4 text-muted-foreground" />
           </span>
         )}

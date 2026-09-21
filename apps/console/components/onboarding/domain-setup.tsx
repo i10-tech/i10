@@ -106,58 +106,31 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     return () => clearTimeout(timer)
   }, [candidate, plausible])
 
-  /**
-   * How long "Setting it up…" stays once it has been shown, in milliseconds.
+  /*
+   * ⚠ THERE IS NO "SETTING IT UP" SCREEN ON THIS PATH ANY MORE, AND THE
+   * REASON IS THAT IT WAS NOT TRUE. Pressing Delegate for a provider we are
+   * not connected to does exactly one thing — create the row — and then asks
+   * the next question; nothing is published, so a screen reading "Publishing
+   * records for acme.com" described work that had not started and would not
+   * start here.
    *
-   * ⚠ THE SCREEN WAS APPEARING AND LEAVING INSIDE ONE ANIMATION FRAME, AND A
-   * FRAME OF "Setting it up…" IS WORSE THAN NO SCREEN AT ALL. Against a local
-   * API `createDomain` answers in tens of milliseconds, so pressing Delegate
-   * flashed a spinner and a sentence nobody could read on the way to the next
-   * question — which reads as a glitch, not as progress, and makes the step
-   * that follows feel like it arrived by accident.
+   * ⚠ IT WAS ALSO THE JUMP. Blank, then a spinner, then the next card
+   * arriving from nothing is three layouts for one press. Holding the
+   * question on screen with the pressed choice busy is one layout, and the
+   * next screen replaces it once there is something to show.
    *
-   * ⚠ 900ms IS A BEAT, NOT A WAIT. Long enough to read four words and register
-   * that something happened, short enough that nobody is sitting there. The
-   * alternative — suppressing the screen until the work is slow — hides the
-   * one moment in onboarding where the product is doing the work it just
-   * promised to do, and it is the promise that makes the next screen make
-   * sense.
-   *
-   * ⚠ IT IS A FLOOR, NOT A DELAY. Real work that takes longer is never
-   * padded: `settle` waits only for whatever is left of the beat, and for a
-   * slow provider that is nothing at all.
+   * ⚠ THE SCREEN SURVIVES FOR `attempt`, WHERE IT IS HONEST. That path really
+   * does write records at a provider and wait on Amazon, which takes seconds
+   * and needs saying.
    */
-  const SETTLE_MS = 900
-
-  /** When the working screen went up, or `null` when it is not showing. */
-  const workingSince = React.useRef<number | null>(null)
-
-  function startWorking() {
-    workingSince.current = Date.now()
-    setPhase("working")
-  }
-
-  /** Waits out the rest of the beat, if any of it is left. */
-  async function settle() {
-    const since = workingSince.current
-    workingSince.current = null
-    if (since === null) return
-    const left = SETTLE_MS - (Date.now() - since)
-    if (left > 0) await new Promise((resolve) => setTimeout(resolve, left))
-  }
+  const [busy, setBusy] = React.useState<"delegate" | "manual" | null>(null)
 
   async function begin(delegated: boolean) {
-    startWorking()
+    setBusy(delegated ? "delegate" : "manual")
 
     const created = await createDomain({ name: candidate, delegated })
     if (!created.ok) {
-      /*
-       * ⚠ THE BEAT IS WAITED OUT ON THE FAILURE PATH TOO. Bouncing straight
-       * back to the question with a toast makes it look as though the press
-       * did not register; arriving a moment later, with the toast, reads as
-       * an answer.
-       */
-      await settle()
+      setBusy(null)
       toastFailure(created)
       setPhase("mode")
       return
@@ -171,13 +144,13 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           ? `We cannot write records at ${provider.name} yet, so these are yours to publish.`
           : "Publish these at your DNS provider to finish.",
       )
-      await settle()
+      setBusy(null)
       setPhase("manual")
       return
     }
 
     if (!connections.includes(slug)) {
-      await settle()
+      setBusy(null)
       setPhase("connect")
       return
     }
@@ -193,16 +166,12 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
    * work having actually happened. See lib/domain-activation.ts.
    */
   async function attempt(target: Domain, slug: string) {
-    /*
-     * ⚠ ONLY IF IT IS NOT ALREADY UP. `begin` hands straight over to this, so
-     * restarting the clock here would charge the beat twice for one press.
-     */
-    if (workingSince.current === null) startWorking()
+    setBusy(null)
+    setPhase("working")
 
     const outcome = await activateDomain({ domainId: target.id, provider: slug })
 
     if (outcome.kind === "verified") {
-      await settle()
       setDomain(outcome.domain)
       setPhase("done")
       return
@@ -224,7 +193,6 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
        * records are published either way, so the fallback screen is the right
        * one — it shows them, says they are in place, and asks nothing further.
        */
-      await settle()
       if (!outcome.checked) {
         setFallbackReason(
           "The records are published, but the check that follows them did not " +
@@ -244,7 +212,6 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
      * during onboarding would be the most consequential question of the flow
      * asked at the moment somebody understands the least.
      */
-    await settle()
     setFallbackReason(
       outcome.kind === "conflicts"
         ? "Some records already at those names would have to be removed first, so these are yours to publish for now."
@@ -304,6 +271,22 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           busy={looking}
           adornment={looking ? <Spinner className="size-3.5" /> : undefined}
           hint="The apex, like acme.com — not a URL and not an address."
+          /*
+           * ⚠ ENTER CONTINUES, BECAUSE THE FIELD IS NOT IN A FORM. This step
+           * is a `div` with a button, so there is no implicit submit and
+           * Enter did nothing at all — in a one-field screen that reads as
+           * the key being broken rather than as the screen being picky.
+           *
+           * ⚠ AND IT OBEYS THE SAME TWO CONDITIONS AS THE BUTTON. A name that
+           * is not yet plausible, or a lookup still in flight, means Enter
+           * does nothing — the same answer the disabled button gives.
+           */
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return
+            event.preventDefault()
+            if (!plausible || looking) return
+            setPhase("mode")
+          }}
         />
 
         {current && (
@@ -345,6 +328,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
             recommended
             description="Point three names at us once. We keep SPF, DKIM, DMARC and MX correct forever, including when they change."
             onSelect={() => void begin(true)}
+            busy={busy === "delegate"}
+            disabled={busy !== null}
           />
         )}
         <Choice
@@ -352,6 +337,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           title="Keep the records in my zone"
           description="Six ordinary records that stay yours to maintain. Nothing is delegated."
           onSelect={() => void begin(false)}
+          busy={busy === "manual"}
+          disabled={busy !== null}
         />
       </Shell>
     )
@@ -359,10 +346,17 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
 
   if (phase === "working") {
     return (
+      /*
+       * ⚠ IT NO LONGER GUESSES BETWEEN TWO SENTENCES. This phase is entered
+       * from exactly one place — `attempt`, which is publishing at a
+       * connected provider — so "Publishing" is always the true one. The
+       * `Adding …` branch it used to fall back to was the copy that showed
+       * during the flash this screen no longer has.
+       */
       <Shell title="Setting it up…" blurb="This takes a few seconds.">
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner className="size-4" />
-          {domain ? `Publishing records for ${domain.name}` : `Adding ${candidate}`}
+          Publishing records for {domain?.name ?? candidate}
         </p>
       </Shell>
     )
@@ -498,30 +492,49 @@ function Shell({
  * that only highlights, followed by a button, is two actions for one decision;
  * at this point in the flow the choice IS the commitment.
  */
+/**
+ * ⚠ THE CARD CARRIES ITS OWN PRESS, WHICH IS WHAT REMOVED THE JUMP. The flow
+ * used to answer a press by replacing the whole question with a spinner
+ * screen, so the feedback for pressing a card appeared several hundred
+ * pixels away from the card. Swapping this card's own icon for a spinner
+ * says the same thing without moving anything.
+ *
+ * ⚠ AND BOTH CARDS GO INERT WHILE EITHER IS WORKING. Only one domain is
+ * being created; a second press on the other card would create a second.
+ */
 function Choice({
   icon,
   title,
   description,
   recommended,
   onSelect,
+  busy = false,
+  disabled = false,
 }: {
   icon: React.ReactNode
   title: string
   description: string
   recommended?: boolean
   onSelect: () => void
+  busy?: boolean
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
+      disabled={disabled || busy}
       className={cn(
         "flex w-full cursor-pointer items-start gap-3 rounded-lg border p-4 text-left",
         "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
         "hover:border-foreground/40 hover:bg-muted/40",
+        "disabled:cursor-default disabled:hover:border-border disabled:hover:bg-transparent",
+        disabled && !busy && "opacity-50",
       )}
     >
-      <span className="mt-0.5 shrink-0 text-muted-foreground">{icon}</span>
+      <span className="mt-0.5 shrink-0 text-muted-foreground">
+        {busy ? <Spinner className="size-4" /> : icon}
+      </span>
       <span className="min-w-0 flex-1 space-y-1">
         <span className="flex items-center gap-2">
           <span className="text-sm font-medium">{title}</span>
