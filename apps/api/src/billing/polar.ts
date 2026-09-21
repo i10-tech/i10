@@ -348,7 +348,22 @@ export function polarClient(opts: PolarOptions): PolarClient {
         method: "POST",
         body: JSON.stringify({
           products: [input.productId],
-          external_customer_id: input.tenantId,
+          /*
+           * ⚠ THE TENANT IS NO LONGER SENT AS `external_customer_id`, AND THAT
+           * REMOVAL IS THE FIX FOR A WHOLE CLASS OF BUG RATHER THAN A TIDY-UP.
+           * Polar stores that value on the CUSTOMER — a record it scopes to a
+           * person, deduplicates by EMAIL, stamps only at creation, and refuses
+           * to update ever after (`422 Customer external ID cannot be
+           * updated`). A workspace and a person do not share a lifetime: delete
+           * the workspace, sign up again, and Polar hands back the same
+           * customer still naming the workspace that is gone — permanently,
+           * repairable from neither side.
+           *
+           * Attribution now comes from `core.polar_checkouts`, written here by
+           * the caller before the customer is redirected, and read back through
+           * `subscription.checkout_id`. See billing/attribution.ts and
+           * migration 0055.
+           */
           ...(input.email ? { customer_email: input.email } : {}),
           ...(input.successUrl
             ? {
@@ -389,10 +404,13 @@ export function polarClient(opts: PolarOptions): PolarClient {
                 embed_origin: new URL(input.successUrl).origin,
               }
             : {}),
-          // ⚠ THE TENANT IS SENT TWICE ON PURPOSE. `external_customer_id` is
-          // what Polar promotes onto the customer and echoes on subscription
-          // events; `metadata` is what survives on the checkout object itself
-          // if we ever need to answer "who started this and never finished".
+          /*
+           * ⚠ KEPT, BUT NO LONGER LOAD-BEARING. `core.polar_checkouts` is the
+           * attribution of record; this stays so the checkout object itself
+           * still answers "who started this and never finished" in Polar's own
+           * dashboard, and so `getCheckout` keeps working for checkouts created
+           * before that table existed.
+           */
           metadata: { tenant_id: input.tenantId },
         }),
       })

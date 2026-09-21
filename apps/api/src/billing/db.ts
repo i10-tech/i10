@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm"
+import { sql, type SQL } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import type { SubscriptionState } from "./events.js"
 
@@ -108,6 +108,23 @@ export interface SubscriptionOps {
    * `null` means nobody holds it, which is the ordinary first-event case.
    */
   ownerOf(polarSubscriptionId: string): Promise<string | null>
+  /**
+   * Remembers which workspace a checkout was started for, before the customer
+   * is redirected to pay.
+   *
+   * ⚠ IT IS WRITTEN BEFORE THE MONEY MOVES AND READ LONG AFTERWARDS, which is
+   * what makes it the attribution of record. One checkout buys one subscription
+   * for one workspace; `subscription.checkout_id` is on every subscription
+   * Polar returns, so this row answers "whose is this" for every event that
+   * subscription will ever produce — without asking Polar to remember anything
+   * for us. See migration 0055.
+   */
+  recordCheckout(polarCheckoutId: string, tenantId: string): Promise<void>
+  /**
+   * The workspace a checkout was started for. `null` for a checkout we did not
+   * create, or one that predates the table.
+   */
+  checkoutTenant(polarCheckoutId: string): Promise<string | null>
   /**
    * Records that the entitlement now holds this plan.
    *
@@ -387,6 +404,30 @@ export function subscriptionOps(db: Database): SubscriptionOps {
       return rows[0]?.tenant_id ?? null
     },
 
+    async recordCheckout(polarCheckoutId, tenantId) {
+      await withTenant(db, tenantId, async (tx) => {
+        // ⚠ IDEMPOTENT, BECAUSE A RETRIED CHECKOUT CREATION IS NOT AN ERROR.
+        // The id is Polar's and unique per checkout, so a second write is
+        // either the same fact again or a caller that would be wrong to
+        // overwrite it — and the first one is the one that matched the redirect.
+        await tx.execute(sql`
+          insert into core.polar_checkouts (polar_checkout_id, tenant_id)
+          values (${polarCheckoutId}, ${tenantId}::uuid)
+          on conflict (polar_checkout_id) do nothing
+        `)
+      })
+    },
+
+    async checkoutTenant(polarCheckoutId) {
+      // Unscoped for the same reason `ownerOf` is: the caller is a webhook with
+      // no tenant, asking which tenant this is.
+      const rows = (await db.execute(sql`
+        select core.checkout_tenant(${polarCheckoutId}) as tenant_id
+      `)) as unknown as { tenant_id: string | null }[]
+
+      return rows[0]?.tenant_id ?? null
+    },
+
     async snapshot() {
       const rows = (await db.execute(sql`
         select tenant_id, polar_subscription_id, plan_id, status,
@@ -419,13 +460,56 @@ export function subscriptionOps(db: Database): SubscriptionOps {
        */
       if (ids.length === 0) return new Set<string>()
 
-      const rows = (await db.execute(
-        sql`select tenant_id from core.tenants_known(${[...ids]}::uuid[])`,
-      )) as unknown as { tenant_id: string }[]
+      const statement = knownTenantsStatement(ids)
+      if (!statement) return new Set<string>()
+
+      const rows = (await db.execute(statement)) as unknown as { tenant_id: string }[]
 
       return new Set(rows.map((r) => r.tenant_id))
     },
   }
+}
+
+/** A tenant id as this database stores them, and as `::uuid` will accept them. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Asking which of these tenant ids this database actually holds.
+ *
+ * ⚠ ONE PARAMETER CARRYING AN ARRAY LITERAL, NEVER A JS ARRAY INTERPOLATED
+ * DIRECTLY. ``sql`…tenants_known(${ids}::uuid[])` `` expands to
+ * `($1, $2, $3)::uuid[]`, and a parenthesised list of parameters is a ROW
+ * CONSTRUCTOR in Postgres rather than an array — so the query dies on
+ * `cannot cast type record to uuid[]`.
+ *
+ * ⚠ AND IT IS INVISIBLE UNTIL THERE ARE TWO, WHICH IS WHY IT SHIPPED GREEN.
+ * With a single id the expansion is `($1)`, a plain parenthesised expression
+ * that casts perfectly well. So it worked for exactly as long as one tenant had
+ * a subscription and began failing the moment a second one did — taking the
+ * WHOLE subscription leg with it, every half hour, silently, for 23 hours. That
+ * is the leg that downgrades people who have cancelled, which is how a revoked
+ * customer kept Pro. Measured against production 2026-09-21: the row form
+ * errors, this form answers.
+ *
+ * ⚠ IT IS A STATEMENT RATHER THAN AN INLINE QUERY SO THE SHAPE CAN BE ASSERTED.
+ * No fake could have caught this — the bug is in what Postgres receives, and
+ * every unit test in the suite passed throughout. See `billing-sql.test.ts`.
+ *
+ * ⚠ AND THE IDS ARE FILTERED TO WELL-FORMED UUIDS, because they reach here from
+ * `customer.external_id` — text that whoever set up the Polar customer chose. A
+ * stray `,` or `}` would corrupt the literal and throw, which is the exact
+ * failure being fixed. Dropping them is the RIGHT answer rather than a
+ * defensive one: an id this database cannot hold is not a known tenant, so it
+ * belongs in `unknownTenant` along with the rest.
+ *
+ * `null` when nothing survives the filter, so the caller can skip the round
+ * trip rather than ask about an empty array.
+ */
+export function knownTenantsStatement(ids: readonly string[]): SQL | null {
+  const wellFormed = [...ids].filter((id) => UUID.test(id))
+  if (wellFormed.length === 0) return null
+
+  return sql`select tenant_id from core.tenants_known(${`{${wellFormed.join(",")}}`}::uuid[])`
 }
 
 /** postgres-js hands back a Date for timestamptz; a mock or a JSON path may not. */

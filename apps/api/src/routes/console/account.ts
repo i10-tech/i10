@@ -143,6 +143,26 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       })
 
       /*
+       * ⚠ RECORDED BEFORE THE CUSTOMER IS SENT TO PAY, AND THIS ROW IS WHAT
+       * ATTRIBUTES THE PAYMENT. Every subscription Polar creates carries
+       * `checkout_id`, so this is how a webhook learns whose it is without
+       * asking Polar to remember a tenant for us — see billing/attribution.ts
+       * and migration 0055.
+       *
+       * ⚠ AND IT NEVER FAILS THE CHECKOUT. The customer has a working payment
+       * link either way, and attribution falls back to the subscription holder
+       * and then to `external_id`.
+       */
+      try {
+        await d.billing.subscriptions.recordCheckout(checkout.id, tenantId)
+      } catch (error) {
+        d.log.error(
+          { err: error, checkoutId: checkout.id, tenantId },
+          "could not record which workspace a checkout belongs to",
+        )
+      }
+
+      /*
        * ⚠ THE EMBED ORIGIN IS SENT, AND THE NOTE THAT USED TO SIT HERE SAYING
        * IT WAS UNNECESSARY WAS WRONG IN A WAY WORTH RECORDING. It reported a
        * real measurement — the checkout page answers `frame-ancestors *` with

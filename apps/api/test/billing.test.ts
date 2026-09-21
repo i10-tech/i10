@@ -10,6 +10,7 @@ const log = { info: () => {}, warn: () => {}, error: () => {} }
 const state = (over: Partial<SubscriptionState> = {}): SubscriptionState => ({
   tenantId: "ten-1",
   polarSubscriptionId: "sub_1",
+  checkoutId: null,
   polarCustomerId: "cus_1",
   polarProductId: "prod_pro",
   planId: "pro",
@@ -33,6 +34,13 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
    * re-attribution branch instead of the path they were written for.
    */
   ownerOf: async () => null,
+  /*
+   * ⚠ NO CHECKOUT ROW BY DEFAULT EITHER, so attribution falls through to
+   * `external_id` and every test written before `core.polar_checkouts`
+   * keeps the path it was written for.
+   */
+  recordCheckout: async () => {},
+  checkoutTenant: async () => null,
   snapshot: async () => [],
   /*
    * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
@@ -254,6 +262,7 @@ const options = {
 const row = (over: Record<string, unknown> = {}) => ({
   tenantId: "ten-1",
   polarSubscriptionId: "sub_1",
+  checkoutId: null,
   planId: "pro",
   status: "active",
   grantedPlanId: "pro",

@@ -251,11 +251,94 @@ describe("a change Polar has accepted but not yet applied", () => {
   })
 })
 
+/*
+ * ⚠ NOTHING OF OURS HOLDS IT AND NO CHECKOUT OF OURS MADE IT, so attribution
+ * falls through to `customer.external_id` — the legacy leg, and the path every
+ * test below was written against. See billing/attribution.ts for the order.
+ */
+const noAttribution = {
+  ownerOf: async () => null,
+  checkoutTenant: async () => null,
+}
+
 describe("POST /webhooks/polar", () => {
+  /*
+   * ⚠ THE WHOLE POINT OF `core.polar_checkouts`, END TO END. A returning
+   * customer's Polar record names the workspace they deleted — immutably, for
+   * ever — so this event arrives claiming a dead tenant. The checkout row we
+   * wrote before redirecting them is what says whose it really is.
+   *
+   * Before this, the same event bound the subscription to the dead tenant,
+   * collided with the UNIQUE on `polar_subscription_id`, answered 500, and was
+   * retried by Polar until it gave up. The customer kept Pro after revoking.
+   */
+  it("attributes by our checkout row, not by the customer Polar names", async () => {
+    const seen: string[] = []
+    const apply = mock(async (s: { tenantId: string }) => {
+      seen.push(s.tenantId)
+      return { status: "applied" as const, planId: "pro" }
+    })
+    const app = createApp({
+      polarWebhooks: {
+        secret: SECRET,
+        attribution: {
+          ownerOf: async () => null,
+          checkoutTenant: async () => "ten-live",
+        },
+        grants: { apply },
+        options,
+        log,
+      },
+    })
+
+    // ⚠ THE FIXTURE MUST CARRY ONE, because attribution deliberately does not
+    // look up a checkout that does not exist — see attribution.test.ts.
+    const res = await post(app, JSON.stringify(event({ checkout_id: "chk_1" })))
+
+    expect(res.status).toBe(202)
+    expect(seen).toEqual(["ten-live"])
+  })
+
+  // ⚠ AND THE HOLDER OUTRANKS EVEN THAT, so every event after the first costs
+  // one indexed lookup and cannot be talked out of the binding it already has.
+  it("attributes to the tenant already holding the subscription", async () => {
+    const seen: string[] = []
+    const apply = mock(async (s: { tenantId: string }) => {
+      seen.push(s.tenantId)
+      return { status: "applied" as const, planId: "free" }
+    })
+    const app = createApp({
+      polarWebhooks: {
+        secret: SECRET,
+        attribution: {
+          ownerOf: async () => "ten-holder",
+          checkoutTenant: async () => "ten-checkout",
+        },
+        grants: { apply },
+        options,
+        log,
+      },
+    })
+
+    const res = await post(
+      app,
+      JSON.stringify(event({ checkout_id: "chk_1" }, "subscription.revoked")),
+    )
+
+    expect(res.status).toBe(202)
+    expect(seen).toEqual(["ten-holder"])
+  })
+
   it("applies a verified subscription event", async () => {
     const apply = mock(async () => ({ status: "applied" as const, planId: "pro" }))
     const app = createApp({
-      polarWebhooks: { secret: SECRET, grants: { apply }, options, log },
+      polarWebhooks: {
+        secret: SECRET,
+        attribution: noAttribution,
+        grants: { apply },
+        options,
+        log,
+      },
     })
 
     const body = JSON.stringify(event())
@@ -272,7 +355,13 @@ describe("POST /webhooks/polar", () => {
   it("grants nothing when the signature does not verify", async () => {
     const apply = mock()
     const app = createApp({
-      polarWebhooks: { secret: SECRET, grants: { apply }, options, log },
+      polarWebhooks: {
+        secret: SECRET,
+        attribution: noAttribution,
+        grants: { apply },
+        options,
+        log,
+      },
     })
 
     const res = await post(app, JSON.stringify(event()), "v1,AAAA")
@@ -284,7 +373,13 @@ describe("POST /webhooks/polar", () => {
   it("answers 202 to a verified event that is not ours, so Polar stops retrying", async () => {
     const apply = mock()
     const app = createApp({
-      polarWebhooks: { secret: SECRET, grants: { apply }, options, log },
+      polarWebhooks: {
+        secret: SECRET,
+        attribution: noAttribution,
+        grants: { apply },
+        options,
+        log,
+      },
     })
 
     const res = await post(app, JSON.stringify(event({}, "order.paid")))
@@ -299,6 +394,10 @@ describe("POST /webhooks/polar", () => {
     const app = createApp({
       polarWebhooks: {
         secret: SECRET,
+        // Nothing of ours holds it and no checkout of ours made it, so
+        // attribution falls through to `customer.external_id` — the path
+        // these tests were written against.
+        attribution: { ownerOf: async () => null, checkoutTenant: async () => null },
         grants: {
           apply: async () => {
             throw new Error("autumn is down")
@@ -320,7 +419,13 @@ describe("POST /webhooks/polar", () => {
 
   it("does not 500 on a signed body that is not an object", async () => {
     const app = createApp({
-      polarWebhooks: { secret: SECRET, grants: { apply: mock() }, options, log },
+      polarWebhooks: {
+        secret: SECRET,
+        attribution: noAttribution,
+        grants: { apply: mock() },
+        options,
+        log,
+      },
     })
     const res = await post(app, "null")
     expect(res.status).toBe(202)

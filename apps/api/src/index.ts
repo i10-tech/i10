@@ -710,6 +710,10 @@ const app = createApp({
     ? {
         polarWebhooks: {
           secret: env.POLAR_WEBHOOK_SECRET,
+          // ⚠ THE SAME OPS THE RECONCILER AND THE CHECKOUT USE, so all three
+          // answer "whose subscription is this" from the same two rows. See
+          // billing/attribution.ts.
+          attribution: subscriptions,
           grants,
           options: planOptions,
           log,
@@ -953,6 +957,7 @@ const app = createApp({
           billing: {
             polar,
             products: env.POLAR_PRODUCTS,
+            subscriptions,
             successUrl: env.POLAR_SUCCESS_URL,
             planChange: planChange({
               db,

@@ -152,16 +152,40 @@ async function attribute(
         return "stranded"
       }
 
+      /*
+       * ⚠ THE ID CANNOT BE RECLAIMED, AND TRYING WAS WORSE THAN NOT TRYING.
+       * Polar's `external_id` is immutable ONCE SET — "Once set, it can't be
+       * updated" in their schema, `422` from the API — so this branch used to
+       * fall through to a PATCH that could never succeed, log "its subscription
+       * events remain unattributable", and return `stranded`. That put
+       * `detail: "unattributed"` on the confirmation page of somebody who had
+       * just paid and whose plan was, in fact, granted perfectly well.
+       *
+       * ⚠ BECAUSE THE BINDING THAT MATTERS IS OURS, NOT POLAR'S. The caller
+       * applies this checkout's subscription with `reassign`, which takes the
+       * id onto the live tenant from the checkout's own metadata; and every
+       * later event is attributed by the tenant HOLDING the subscription rather
+       * than by `external_id`. So the stale id is now a cosmetic wrong value in
+       * Polar rather than a broken entitlement.
+       *
+       * ⚠ AND IT STOPS HAPPENING AT ALL ONCE THE DELETION PATH HAS RUN ONCE.
+       * `tenants/lifecycle.ts` now deletes the Polar customer when a workspace
+       * is terminated, so the next signup gets a fresh customer whose id is
+       * stamped correctly at creation. This branch is the backlog, not the
+       * steady state.
+       */
       deps.log.warn(
         {
           checkoutId: checkout.id,
           tenantId: checkout.tenantId,
           polarCustomerId: checkout.customerId,
-          reclaimedFrom: held,
+          staleExternalId: held,
         },
-        "reclaiming a Polar customer from a deleted workspace — the same " +
-          "person has signed up again and Polar reused their customer record",
+        "a returning customer's Polar record still names a deleted workspace — " +
+          "it cannot be rewritten, and nothing depends on it: the subscription " +
+          "is bound to the live tenant by the checkout",
       )
+      return "ok"
     }
 
     const written = await deps.polar.setCustomerExternalId(

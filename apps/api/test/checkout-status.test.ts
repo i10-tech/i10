@@ -12,6 +12,13 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   // billing.test.ts. The checkout path passes `reassign`, which skips the
   // lookup entirely, so these tests never reach it.
   ownerOf: async () => null,
+  /*
+   * ⚠ NO CHECKOUT ROW BY DEFAULT EITHER, so attribution falls through to
+   * `external_id` and every test written before `core.polar_checkouts`
+   * keeps the path it was written for.
+   */
+  recordCheckout: async () => {},
+  checkoutTenant: async () => null,
   snapshot: async () => [],
   /*
    * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
@@ -362,7 +369,15 @@ describe("a Polar customer left behind by a deleted workspace", () => {
     freePlanId: "free",
   }
 
-  it("is reclaimed when the tenant holding it is gone", async () => {
+  /*
+   * ⚠ THIS USED TO ASSERT A RECLAIM POLAR DOES NOT PERMIT. `external_id` is
+   * immutable once set — "Once set, it can't be updated" in Polar's own schema,
+   * `422` from the API — so the PATCH this expected always failed, `attribute`
+   * returned `stranded`, and a returning customer who had just paid was told on
+   * the confirmation page that their payment was unattributed. Their plan was
+   * granted correctly the whole time, by `reassign`.
+   */
+  it("is left alone when the tenant holding it is gone, and does not alarm", async () => {
     const wrote = mock(async () => true)
     const app = createApp({
       checkoutStatus: {
@@ -381,8 +396,10 @@ describe("a Polar customer left behind by a deleted workspace", () => {
 
     const body = await (await ask(app)).json()
 
-    expect(wrote).toHaveBeenCalledWith("cus_1", "ten-1")
-    // Not `unattributed`: there is nothing for a human to do here.
+    // No doomed PATCH: the id cannot be moved, so asking is only a way to fail.
+    expect(wrote).not.toHaveBeenCalled()
+    // And emphatically not `unattributed` — the subscription is bound to the
+    // live tenant by the checkout, so there is nothing for a human to do.
     expect(body).not.toMatchObject({ detail: "unattributed" })
   })
 
