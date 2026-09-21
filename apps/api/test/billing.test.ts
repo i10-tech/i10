@@ -27,6 +27,11 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
   snapshot: async () => [],
+  // ⚠ A NO-OP HERE, BUT NOT OPTIONAL ON THE PORT. `plan-change` calls it inside
+  // the try that reports a refusal, so a fake missing it turns every
+  // cancellation test into "Polar could not apply the change" — which is
+  // exactly the message the missing WRITE produced in production.
+  noteCancelling: async () => {},
   current: async () => ({
     plan: null,
     status: null,

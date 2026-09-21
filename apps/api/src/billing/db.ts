@@ -101,6 +101,28 @@ export interface SubscriptionOps {
   /** Every tenant's current subscription. The reconciler's only read. */
   snapshot(): Promise<SubscriptionRow[]>
   /**
+   * Records that Polar has accepted a cancellation, now.
+   *
+   * ⚠ IT EXISTS BECAUSE THE WEBHOOK IS TOO LATE TO BE THE ONLY WRITER. Polar
+   * takes the cancellation synchronously and confirms it an event later, and
+   * `plan-change` wrote nothing in between — so the console refreshed onto a
+   * row that still said "active, not cancelling". The page went on showing Pro
+   * with no end date, the free card stayed enabled because it is disabled by
+   * exactly this flag, and pressing it again sent a second cancel that Polar
+   * refused with "check the payment method" about a card that was fine.
+   *
+   * ⚠ IT SETS THE FLAG AND NOTHING ELSE. The end date, the status and the plan
+   * are Polar's to state and already sit on the row from the last event;
+   * inventing a period end here would put a date on screen that Polar might not
+   * agree with, which is worse than the flag arriving a moment early.
+   *
+   * ⚠ AND THE WEBHOOK STILL OVERWRITES IT, WHICH IS THE POINT RATHER THAN A
+   * RACE. `record` is authoritative; this is a local note of something we just
+   * asked for and were told was accepted, correct for exactly as long as it
+   * takes the truth to arrive.
+   */
+  noteCancelling(tenantId: string): Promise<void>
+  /**
    * One tenant's plan, for the console.
    *
    * ⚠ IT REPORTS `granted_plan_id`, NOT `plan_id`. What the customer can
@@ -227,6 +249,23 @@ export function subscriptionOps(db: Database): SubscriptionOps {
                  updated_at      = now()
            where tenant_id = ${tenantId}::uuid
              and event_at  = ${eventAt.toISOString()}::timestamptz
+        `)
+      })
+    },
+
+    async noteCancelling(tenantId) {
+      await withTenant(db, tenantId, async (tx) => {
+        /*
+         * ⚠ ONLY WHILE THE ROW STILL READS AS LIVE. A subscription already
+         * marked has nothing to learn from this, and re-marking one would put
+         * "ending on" back on screen for somebody whose plan ended last month.
+         */
+        await tx.execute(sql`
+          update core.subscriptions
+             set cancel_at_period_end = true,
+                 updated_at = now()
+           where tenant_id = ${tenantId}::uuid
+             and cancel_at_period_end = false
         `)
       })
     },

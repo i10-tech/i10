@@ -52,6 +52,7 @@ export function Onboarding({
   billing,
   checkoutId,
   stepFromUrl,
+  justPublished,
 }: {
   state: OnboardingState
   workspaceName: string
@@ -71,6 +72,8 @@ export function Onboarding({
    * come back.
    */
   stepFromUrl: string | null
+  /** Records written by the DNS callback that sent the browser back here. */
+  justPublished: number
 }) {
   const router = useRouter()
 
@@ -188,7 +191,11 @@ export function Onboarding({
         )}
 
         {step === "verify" && (
-          <StepVerify domains={domains} onDone={() => go("send")} />
+          <StepVerify
+            domains={domains}
+            justPublished={justPublished}
+            onDone={() => go("send")}
+          />
         )}
 
         {step === "send" && (

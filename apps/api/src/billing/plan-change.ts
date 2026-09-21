@@ -166,6 +166,22 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       try {
         if (leaving) {
           await deps.polar.cancelSubscription(current.polarSubscriptionId)
+
+          /*
+           * ⚠ WRITTEN HERE, NOT LEFT TO THE WEBHOOK, AND THE GAP WAS VISIBLE TO
+           * CUSTOMERS. Polar accepts the cancellation synchronously and
+           * confirms it an event later; until this line existed the console
+           * refreshed onto a row that still said "active, not cancelling". So
+           * the page kept showing Pro with no end date, the free card stayed
+           * enabled — it is disabled by precisely this flag — and pressing it
+           * again produced "Polar could not apply the change. Check the
+           * payment method." about a card that was perfectly fine.
+           *
+           * ⚠ AND IT IS AFTER THE CALL, SO A REFUSAL RECORDS NOTHING. Marking
+           * first would leave a workspace believing it had cancelled because we
+           * asked, which is the one direction this must never be wrong in.
+           */
+          await deps.subscriptions.noteCancelling(tenantId)
         } else {
           await deps.polar.updateSubscription({
             subscriptionId: current.polarSubscriptionId,

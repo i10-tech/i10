@@ -46,9 +46,14 @@ export default async function OnboardingPage({
   // on the LAST step back on "Verify", because the fact it reads is that their
   // domain is not verified yet. Mirroring the step into the URL makes the
   // return exact instead of inferred.
-  searchParams: Promise<{ checkout_id?: string; step?: string }>
+  //
+  // ⚠ AND `published` IS THE CONFIRMATION THE DNS CALLBACK NO LONGER STOPS TO
+  // SHOW. It used to paint its own green tick and then navigate here a moment
+  // later, which read as a glitch; the news now arrives with the step that
+  // follows it. See the callback handler and `StepVerify`.
+  searchParams: Promise<{ checkout_id?: string; step?: string; published?: string }>
 }) {
-  const { checkout_id: checkoutId, step } = await searchParams
+  const { checkout_id: checkoutId, step, published } = await searchParams
 
   const [me, domains, plans] = await Promise.all([
     tryApi<Me>("/console/me"),
@@ -125,6 +130,7 @@ export default async function OnboardingPage({
         billing={billing}
         checkoutId={checkoutId ?? null}
         stepFromUrl={step ?? null}
+        justPublished={Number(published) || 0}
       />
     </main>
   )

@@ -9,6 +9,8 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
   snapshot: async () => [],
+  // Not reached here — this suite is about the checkout poll, not cancelling.
+  noteCancelling: async () => {},
   current: async () => ({
     plan: null,
     status: null,

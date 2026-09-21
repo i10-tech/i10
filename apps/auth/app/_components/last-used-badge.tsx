@@ -54,9 +54,10 @@ const PLACEMENT = {
    * ⚠ THE REAL FLOOR IS AROUND 8px, where the drop reaches the chip's own
    * bottom edge (~9px) and the border escapes underneath it — which is the
    * point at which this stops reading as a chip on a line and starts reading
-   * as a chip next to a curve. `end-4` keeps roughly half the corner in hand.
+   * as a chip next to a curve. `end-3` is 12px: still clear of that, and as far
+   * out as this can go before the corner starts showing through.
    */
-  button: "-top-2 end-4",
+  button: "-top-2 end-3",
   /**
    * On a floating field.
    *
@@ -68,7 +69,7 @@ const PLACEMENT = {
    * so moving it outward moves it away from the notch rather than towards it —
    * see the geometry note in @repo/ui/components/floating-field.
    */
-  field: "-top-2 end-5",
+  field: "-top-2 end-4",
 } as const
 
 export function LastUsedBadge({

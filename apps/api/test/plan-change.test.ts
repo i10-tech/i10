@@ -37,6 +37,14 @@ const fakeDb = () =>
 
 const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps =>
   ({
+    /*
+     * ⚠ PRESENT BY DEFAULT, BECAUSE A CANCELLATION NOW WRITES BEFORE IT
+     * RETURNS. `to()` calls this inside the try that reports a refusal, so a
+     * fake without it turns every cancellation into "Polar could not apply the
+     * change" — which is, exactly, the message the MISSING write produced in
+     * production before this existed.
+     */
+    noteCancelling: async () => {},
     current: async () => ({
       plan: "free",
       status: "active",
@@ -48,6 +56,17 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps =>
     }),
     ...over,
   }) as SubscriptionOps
+
+/** A tenant on a paid plan — the only state a cancellation is reachable from. */
+const onPro = async () => ({
+  plan: "pro",
+  status: "active",
+  cancelAtPeriodEnd: false,
+  currentPeriodEnd: null,
+  scheduledPlan: null,
+  scheduledAt: null,
+  polarSubscriptionId: "sub_1",
+})
 
 const polar = (over: Partial<PolarClient> = {}): PolarClient =>
   ({
@@ -179,6 +198,42 @@ describe("changing a plan", () => {
    * "Downgrade" button next to the free plan that answered that every time, so
    * a paying customer had no way off a plan they no longer wanted.
    */
+  /**
+   * ⚠ AND IT RECORDS THE CANCELLATION LOCALLY BEFORE IT RETURNS. Polar accepts
+   * synchronously and confirms by webhook a moment later; without this write
+   * the console refreshed onto a row that still read "active, not cancelling",
+   * kept showing the paid plan with no end date, and left the free card
+   * enabled — so the next press sent a second cancel and reported a payment
+   * problem about a card that was fine.
+   */
+  it("records the cancellation as soon as Polar accepts it", async () => {
+    const noteCancelling = mock(async () => {})
+
+    await change({ subscriptions: ops({ noteCancelling, current: onPro }) }).to(
+      TENANT,
+      "free",
+    )
+
+    expect(noteCancelling).toHaveBeenCalledWith(TENANT)
+  })
+
+  /** ⚠ AND NOT WHEN POLAR REFUSED, or a workspace believes it cancelled. */
+  it("records nothing when the cancellation is refused", async () => {
+    const noteCancelling = mock(async () => {})
+
+    const outcome = await change({
+      polar: polar({
+        cancelSubscription: async () => {
+          throw new Error("polar is unhappy")
+        },
+      }),
+      subscriptions: ops({ noteCancelling, current: onPro }),
+    }).to(TENANT, "free")
+
+    expect(outcome.status).toBe("failed")
+    expect(noteCancelling).not.toHaveBeenCalled()
+  })
+
   it("cancels at the period end when moving to the free plan", async () => {
     const updateSubscription = mock()
     const cancelSubscription = mock(async () => {})

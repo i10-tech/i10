@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ExternalLink } from "lucide-react"
+import { CheckCircle2, ExternalLink } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { Status } from "@/components/status"
 import { VerifyButton } from "@/components/verify-button"
@@ -25,9 +25,22 @@ import type { DomainSummary } from "@/lib/types"
  */
 export function StepVerify({
   domains,
+  justPublished = 0,
   onDone,
 }: {
   domains: DomainSummary[]
+  /**
+   * Records the DNS callback wrote immediately before sending the browser here.
+   *
+   * ⚠ IT IS A PROP RATHER THAN A SCREEN OF ITS OWN, AND THAT IS THE FIX FOR A
+   * BLIP. Connecting a provider used to end on the callback page's own
+   * "Connected and published" tick, which then navigated here a few hundred
+   * milliseconds later — so the confirmation appeared and was snatched away,
+   * which reads as the interface glitching rather than as a step finishing.
+   * The news arrives with the step instead: one screen, once, already carrying
+   * it.
+   */
+  justPublished?: number
   onDone: () => void
 }) {
   const router = useRouter()
@@ -69,12 +82,45 @@ export function StepVerify({
 
   return (
     <div className="space-y-6">
+      {/*
+       * ⚠ THE CONFIRMATION THE CALLBACK USED TO KEEP FOR ITSELF. It painted a
+       * green tick, waited a few hundred milliseconds and navigated here — so
+       * the one moment worth confirming was the one that flickered. It sits at
+       * the top of the screen it was going to send you to anyway.
+       *
+       * ⚠ AND THE HEADING BELOW CHANGES WITH IT, because "Publish your records"
+       * is instructions for work that has just been done for you. Telling
+       * somebody to publish records we published ninety milliseconds ago is the
+       * same wrongness as the blip, held still.
+       */}
+      {justPublished > 0 && (
+        <div className="flex items-start gap-3 rounded-xl border border-success/30 bg-success/5 p-4 duration-(--duration-instant) animate-in fade-in-0">
+          <CheckCircle2
+            aria-hidden="true"
+            className="mt-0.5 size-5 shrink-0 text-success"
+          />
+          <div className="space-y-1">
+            <p className="text-sm font-medium">
+              {justPublished === 1
+                ? "Your record was added"
+                : `Your ${justPublished} records were added`}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              We wrote them at your DNS provider and started checking. Nothing below
+              needs doing — this page updates itself as they resolve.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Publish your records</h1>
+        <h1 className="text-xl font-semibold tracking-tight">
+          {justPublished > 0 ? "Checking your records" : "Publish your records"}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Open each domain to copy its records. DNS usually propagates within minutes,
-          but providers are allowed up to 72 hours — a pending domain is not a broken
-          one.
+          {justPublished > 0
+            ? "DNS usually propagates within minutes, but providers are allowed up to 72 hours — a pending domain is not a broken one."
+            : "Open each domain to copy its records. DNS usually propagates within minutes, but providers are allowed up to 72 hours — a pending domain is not a broken one."}
         </p>
       </div>
 
