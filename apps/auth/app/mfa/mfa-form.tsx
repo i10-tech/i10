@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
@@ -114,29 +114,53 @@ export function MfaForm({
    * ⚠ `sessionStorage`, SO IT DIES WITH THE TAB. The attempt it describes does
    * too — this must not still be set tomorrow when somebody signs in again.
    */
-  const sentKey = (factor: Method) =>
-    `i10:mfa-sent:${signIn?.id ?? "attempt"}:${factor}`
+  /*
+   * ⚠ THE ATTEMPT ID, PULLED OUT SO THE CALLBACKS BELOW CAN DEPEND ON IT.
+   * `signIn` itself is a new object on most renders, so a callback keyed on
+   * it would be rebuilt every time and take the effect with it; the id is
+   * the part that actually decides whether this is the same attempt.
+   */
+  const attemptId = signIn?.id ?? "attempt"
 
-  const alreadySent = (factor: Method): boolean => {
-    if (sent.current[factor]) return true
-    try {
-      return window.sessionStorage.getItem(sentKey(factor)) !== null
-    } catch {
-      // ⚠ BLOCKED STORAGE MEANS THE REF IS ALL THERE IS, which is the behaviour
-      // that shipped before this — a resend on reload rather than a screen that
-      // cannot send at all. Degrading to the lesser bug is the right direction.
-      return false
-    }
-  }
+  /*
+   * ⚠ MEMOISED, AND NOT FOR SPEED. The effect below reads both of these, so
+   * `react-hooks/exhaustive-deps` wants them in its dependency array — and
+   * as plain functions they are new identities on every render, which would
+   * re-run the send effect on every render. `useCallback` makes the identity
+   * mean what the rule assumes it means: unchanged until the attempt does.
+   */
+  const sentKey = useCallback(
+    (factor: Method) => `i10:mfa-sent:${attemptId}:${factor}`,
+    [attemptId],
+  )
 
-  const markSent = (factor: Method) => {
-    sent.current[factor] = true
-    try {
-      window.sessionStorage.setItem(sentKey(factor), "1")
-    } catch {
-      /* see `alreadySent` */
-    }
-  }
+  const alreadySent = useCallback(
+    (factor: Method): boolean => {
+      if (sent.current[factor]) return true
+      try {
+        return window.sessionStorage.getItem(sentKey(factor)) !== null
+      } catch {
+        // ⚠ BLOCKED STORAGE MEANS THE REF IS ALL THERE IS, which is the
+        // behaviour that shipped before this — a resend on reload rather than
+        // a screen that cannot send at all. Degrading to the lesser bug is the
+        // right direction.
+        return false
+      }
+    },
+    [sentKey],
+  )
+
+  const markSent = useCallback(
+    (factor: Method) => {
+      sent.current[factor] = true
+      try {
+        window.sessionStorage.setItem(sentKey(factor), "1")
+      } catch {
+        /* see `alreadySent` */
+      }
+    },
+    [sentKey],
+  )
 
   useEffect(() => {
     if (!signIn || !ready || !active) return
@@ -162,7 +186,7 @@ export function MfaForm({
         )
       })
       .catch(() => toast.error(TRANSPORT_FAILURE))
-  }, [signIn, ready, active])
+  }, [signIn, ready, active, alreadySent, markSent])
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()

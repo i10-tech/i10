@@ -500,25 +500,30 @@ export function PlanCards({
          * change their mind, and it was the one saying "Current plan".
          */
         const resumable = isCurrent && endingAt !== null
-        // ⚠ ONLY THE CARD THAT WAS BOUGHT, not every current one. "Subscribed"
-        // is about something that just happened, and saying it on a page
-        // somebody opened a week later would be a claim about this visit.
         /*
-         * ⚠ "Subscribed" IS NOT ONLY ABOUT THIS VISIT, AND TREATING IT THAT
-         * WAY LEFT THE FLOW HALF-FINISHED. Somebody who paid last week and
-         * reopened set-up saw "Continue on Pro" on a plan they are already
-         * subscribed to, and the footer still offered to let them come back
-         * later — a step presented as outstanding when it was done. The state
-         * belongs to the workspace, not to the session that produced it.
+         * ⚠ "Subscribed" IS NOT ONLY ABOUT THIS VISIT. Somebody who paid last
+         * week and reopened set-up saw "Continue on Pro" on a plan they are
+         * already subscribed to, and the footer still offered to let them
+         * come back later — a step presented as outstanding when it was
+         * done. The state belongs to the workspace, not to the session that
+         * produced it.
          *
          * ⚠ AND ONLY WHERE STAYING PUT IS A STEP, WHICH IS WHAT `onKeep`
          * MARKS. On the billing page the same card is "Current plan" and
          * must stay that way: it is a fact about the account, not the end of
          * anything.
+         *
+         * ⚠ BUT NEVER WHILE A CANCELLATION IS IN FLIGHT, AND LEAVING THAT
+         * OUT BROKE THE WAY BACK. Polar keeps a cancelling subscription
+         * `active` until the period ends, so `onPaidPlan` is still true the
+         * moment after somebody cancels — and this card went on saying
+         * "Subscribed", disabled and green, over a subscription that was
+         * expiring. It hid the one control that undoes it.
          */
         const justBought =
-          subscribed === plan.id ||
-          (onKeep !== undefined && isCurrent && onPaidPlan(billing))
+          !resumable &&
+          (subscribed === plan.id ||
+            (onKeep !== undefined && isCurrent && onPaidPlan(billing)))
         const scheduled = scheduledPlanId !== null && plan.id === scheduledPlanId
 
         return (
