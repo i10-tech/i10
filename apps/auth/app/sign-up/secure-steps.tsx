@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { ShieldCheckIcon } from "lucide-react"
 import { toast } from "sonner"
 import { useReverification, useUser } from "@clerk/nextjs"
@@ -278,6 +278,22 @@ export function TwoFactorScanStep({
   const [code, setCode] = useState("")
   /** Why the last code was refused, shown under the boxes until it is retyped. */
   const [rejected, setRejected] = useState<string | null>(null)
+  /**
+   * ⚠ HELD FOR THE MOMENT BETWEEN ACCEPTANCE AND LEAVING. Two-factor is on by
+   * the time `onVerified` fires and this screen is replaced — so without this
+   * the six boxes simply vanish, which is the one outcome that looks identical
+   * to a page glitching.
+   */
+  const [accepted, setAccepted] = useState(false)
+
+  /*
+   * ⚠ THE SAME AUTO-SUBMIT THE EMAILED-CODE STEP HAS, AND ITS ABSENCE HERE WAS
+   * THE INCONSISTENCY SOMEBODY NOTICED. Typing or pasting six digits into the
+   * verification email's boxes submits by itself; doing the identical thing on
+   * this screen did nothing, so the same gesture worked on one OTP and not the
+   * one immediately after it.
+   */
+  const formRef = useRef<HTMLFormElement>(null)
 
   async function verify(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -286,6 +302,16 @@ export function TwoFactorScanStep({
 
     try {
       await user.verifyTOTP({ code })
+
+      /*
+       * ⚠ HERE, NOT AFTER THE BACKUP CODES, AND THE ORDER IS THE WHOLE
+       * DIFFERENCE BETWEEN A CONFIRMATION AND A DEAD PROP. Set after the fetch
+       * below it would land in the same tick as `onVerified`, which replaces
+       * this screen — the state would be true for no frames anybody sees.
+       * Here, the green is on screen for exactly as long as the round trip
+       * that follows it, which is the moment worth filling.
+       */
+      setAccepted(true)
 
       /*
        * ⚠ THE BACKUP CODES ARE FETCHED HERE AND THEIR FAILURE IS NOT FATAL.
@@ -319,7 +345,7 @@ export function TwoFactorScanStep({
   }
 
   return (
-    <form className="flex flex-col gap-6" onSubmit={verify} noValidate>
+    <form ref={formRef} className="flex flex-col gap-6" onSubmit={verify} noValidate>
       <FieldGroup>
         <StepHeading title="Scan this">
           Open your authenticator app, add an account, and scan the code. Then type the
@@ -349,9 +375,13 @@ export function TwoFactorScanStep({
             setRejected(null)
             setCode(next)
           }}
+          onComplete={() => {
+            if (!locked) formRef.current?.requestSubmit()
+          }}
           label="Code from your app"
           state={rejected ? "invalid" : "idle"}
           hint={rejected}
+          verified={accepted}
           autoFocus
         />
 

@@ -40,17 +40,36 @@
  */
 const PLACEMENT = {
   /**
-   * On a pill button. `end-5` clears the corner arc: a stadium's top edge is
-   * only horizontal from x = radius inward, and a chip parked before that is a
-   * chip sitting on a curve.
+   * On a pill button.
+   *
+   * ⚠ THE CORNER IS WHAT BOUNDS THIS, BUT NOT IN THE WAY THE OLD NOTE HERE
+   * CLAIMED. It said the chip had to stay inside the straight run of the top
+   * edge; on the `xl` button these pages use that run ends 28px in (`h-14`, so
+   * a stadium radius of 28), and BOTH the old `end-5` and this `end-4` are
+   * inside the arc. What actually matters is that the chip is opaque and tall
+   * enough to cover the border where it crosses it: at 16px from the edge the
+   * border has dropped 2.7px below the top, and the chip spans about 17px, so
+   * it hides it completely.
+   *
+   * ⚠ THE REAL FLOOR IS AROUND 8px, where the drop reaches the chip's own
+   * bottom edge (~9px) and the border escapes underneath it — which is the
+   * point at which this stops reading as a chip on a line and starts reading
+   * as a chip next to a curve. `end-3` is 12px: still clear of that, and as far
+   * out as this can go before the corner starts showing through.
    */
-  button: "-top-2 end-5",
+  button: "-top-2 end-3",
   /**
-   * On a floating field. Further in again, because that control's own label
-   * notch opens at 28px and two chips on one border need to not collide — see
-   * the geometry note in @repo/ui/components/floating-field.
+   * On a floating field.
+   *
+   * ⚠ ONE STEP FURTHER IN THAN THE BUTTON, AND ONLY SO THE TWO LOOK ALIGNED.
+   * A field's corner is much squarer than a stadium's, so the clearance
+   * argument above does not bind here at all — this number is chosen so that a
+   * field and a button stacked in the same column do not read as two different
+   * right edges. The label notch is at the START edge and this is at the END,
+   * so moving it outward moves it away from the notch rather than towards it —
+   * see the geometry note in @repo/ui/components/floating-field.
    */
-  field: "-top-2 end-6",
+  field: "-top-2 end-4",
 } as const
 
 export function LastUsedBadge({

@@ -1,4 +1,5 @@
 import type { DnsRecord, DomainStatus } from "@repo/contracts"
+import { RECORD_TTL } from "./zone.js"
 import { dkimRecordValue } from "./dkim.js"
 
 /**
@@ -92,7 +93,7 @@ export function dnsRecordsFor({
       record: "SPF",
       name: mailFrom,
       type: "MX",
-      ttl: "Auto",
+      ttl: String(RECORD_TTL),
       status,
       value: feedbackHost(region),
       priority: 10,
@@ -101,7 +102,7 @@ export function dnsRecordsFor({
       record: "SPF",
       name: mailFrom,
       type: "TXT",
-      ttl: "Auto",
+      ttl: String(RECORD_TTL),
       status,
       value: spfValue("include:amazonses.com"),
     },
@@ -116,7 +117,7 @@ export function dnsRecordsFor({
       record: "SPF",
       name: bounce,
       type: "MX",
-      ttl: "Auto",
+      ttl: String(RECORD_TTL),
       status,
       value: bounceHost,
       priority: 10,
@@ -125,7 +126,7 @@ export function dnsRecordsFor({
       record: "SPF",
       name: bounce,
       type: "TXT",
-      ttl: "Auto",
+      ttl: String(RECORD_TTL),
       status,
       value: spfValue(`include:${spfInclude}`),
     },
@@ -143,7 +144,7 @@ export function dnsRecordsFor({
             record: "DKIM",
             name: `${dkimSelector}._domainkey.${domain}`,
             type: "TXT" as const,
-            ttl: "Auto",
+            ttl: String(RECORD_TTL),
             status,
             value: dkimRecordValue(dkimPublicKey),
           },
@@ -161,7 +162,7 @@ export function dnsRecordsFor({
       record: "DMARC",
       name: `_dmarc.${domain}`,
       type: "TXT",
-      ttl: "Auto",
+      ttl: String(RECORD_TTL),
       status,
       value: "v=DMARC1; p=none;",
     },

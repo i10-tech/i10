@@ -290,14 +290,39 @@ something.
 
 ### Deliberately not built
 
-- **Writing records through a provider's API.** The registry
-  (`packages/dns-providers`) carries everything an adapter needs — endpoints,
-  auth method, scopes, OAuth URLs, and the `replacesZone` hazard flag — and the
-  "Connect <provider>" button is rendered and disabled with `· soon`. Build
-  order should be DNSimple (cleanest OAuth), then Cloudflare (largest share, and
-  its OAuth is now GA on every plan), then DigitalOcean, Vercel, Netlify and
-  Linode, which share the same authorization-code shape. Route 53 is its own
-  track: cross-account role assumption, never a pasted access key.
+- **Writing records through a provider's API, beyond the three that work.**
+  Cloudflare, DigitalOcean and Hetzner have live adapters
+  (`apps/api/src/dns/providers`) with OAuth, publish, conflict refusal and
+  clean-up of our own superseded records; every other provider still renders
+  "Connect <provider>" disabled. The registry (`packages/dns-providers`)
+  carries what the next adapter needs — endpoints, auth method, scopes, OAuth
+  URLs, and the `replacesZone` hazard flag. Build order from here: DNSimple
+  (cleanest OAuth), then Vercel, Netlify and Linode, which share the same
+  authorization-code shape. Route 53 is its own track: cross-account role
+  assumption, never a pasted access key.
+
+- **Domain Connect, for the providers we will never get OAuth with.** Raised
+  2026-09-21 after seeing Resend use it: the customer clicks once at
+  `dash.cloudflare.com/domainconnect/v2/domainTemplates/providers/resend.com/…/apply?…`
+  and the whole record set is applied. No OAuth, no stored credential, nothing
+  to refresh. It is [an open standard](https://www.domainconnect.org/) that
+  GoDaddy, IONOS, Cloudflare and others implement, and it is the only one-click
+  path that exists for the twenty-odd registrars whose APIs we cannot use.
+
+  What it costs: being onboarded as a service provider with each DNS host
+  SEPARATELY, each with its own submission and review; a JSON template per
+  service, hosted by them under our provider id; and a signing keypair, with
+  the public half published at `_dcpubkeyv1` in our own zone and a `sig`/`key`
+  pair on every URL we generate.
+
+  ⚠ AND IT IS NOT A REPLACEMENT FOR THE OAUTH PATH, WHICH IS THE THING TO
+  REMEMBER WHEN THIS IS PICKED UP. It applies once and hands nothing back: it
+  cannot re-publish after a key rotation, cannot clear the previous set-up's
+  records when a domain is deleted and re-added — the case `dns/superseded.ts`
+  exists for — and cannot read what the zone currently holds. Resend's own
+  dialog says so: "It does not grant Resend permission to make future
+  changes." So it belongs where we have no adapter, never in front of one.
+
 - **Sending a broadcast.** The editor, the segment targeting, the topic
   preference and the stats are all real; the fan-out that turns a broadcast into
   rows in `core.messages` on the bulk queue is not written. The button is not

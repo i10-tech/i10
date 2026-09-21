@@ -31,11 +31,22 @@ function ops(over: Partial<AcceptOps> = {}) {
     })),
   }))
   const suppressedFor = mock(async () => new Set<string>())
+  /*
+   * ⚠ PERMISSIVE HERE, AND EXPLICITLY SO. These tests are about quota,
+   * suppression, idempotency and scheduling; the verified-domain gate has its
+   * own file. Echoing back whatever was asked keeps it out of the way without
+   * hiding it — a fake that omitted this refused every send in the suite,
+   * which is how a fail-closed gate is supposed to behave.
+   */
+  const sendableFrom = mock(
+    async (_tenantId: string, domains: string[]) => new Set(domains),
+  )
   const log = { warn: mock(), error: mock() }
   return {
     deps: {
       persist,
       suppressedFor,
+      sendableFrom,
       enqueue,
       metering: unmetered,
       log,
@@ -44,6 +55,7 @@ function ops(over: Partial<AcceptOps> = {}) {
     persist,
     enqueue,
     suppressedFor,
+    sendableFrom,
     log,
   }
 }

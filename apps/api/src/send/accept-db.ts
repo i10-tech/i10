@@ -1,7 +1,13 @@
-import { and, eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm"
 import type { Queue } from "groupmq"
 import { withTenant, type Database } from "../db/client.js"
-import { idempotencyKeys, messageBodies, messages, suppressions } from "../db/core.js"
+import {
+  domains as domainsTable,
+  idempotencyKeys,
+  messageBodies,
+  messages,
+  suppressions,
+} from "../db/core.js"
 import { enqueueBatch, type SendClass, type SendJob } from "../queue/send-queue.js"
 import { addrSpec, asList, type AcceptOps } from "./accept.js"
 
@@ -30,6 +36,24 @@ export interface SendPathOptions {
   db: Database
   /** One queue per class. Both are constructed at boot; see queue/send-queue.ts. */
   queues: Record<SendClass, Queue<SendJob>>
+  /**
+   * Domains this particular ops object may send from without a verified row.
+   *
+   * ⚠ IT EXISTS FOR i10'S OWN MAIL AND FOR NOTHING ELSE. Authentication email
+   * leaves from `AUTH_EMAIL_FROM` on a domain we host ourselves — and
+   * `DomainStore.create` REFUSES to create a row for our own sending domains,
+   * deliberately, so there is no verified row for the gate to find and never
+   * will be. Without this, turning the gate on would have stopped every
+   * password reset and every verification code in the product.
+   *
+   * ⚠ AND IT IS SCOPED BY CONSTRUCTION RATHER THAN BY A FLAG ON THE REQUEST,
+   * WHICH IS THE WHOLE REASON IT IS SAFE. The auth-email path builds its own
+   * ops object with this set; the customer-facing `sendPath` builds one
+   * without it. A customer's request never reaches an object carrying the
+   * exemption, so there is no field for anybody to set, copy or guess — see
+   * where both are constructed in index.ts.
+   */
+  alwaysSendable?: readonly string[]
 }
 
 type Row = Record<string, unknown>
@@ -197,6 +221,54 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
 
         return new Set(rows.map((r) => r.address))
       })
+    },
+
+    /**
+     * ⚠ `verified_at IS NOT NULL` RATHER THAN `status = 'verified'`, WHICH IS
+     * WHAT THE COLUMN WAS WRITTEN FOR. `status` is SES's current opinion and
+     * moves both ways — a domain that has sent for months can read
+     * `temporary_failure` because one DKIM lookup timed out, and stopping that
+     * customer's mail over a transient is a far worse failure than the one this
+     * gate exists to prevent. `verified_at` is stamped once and never moved
+     * backwards, and `store.ts` already says the send path reads it as "has
+     * this ever been proven".
+     *
+     * ⚠ AND `status <> 'failed'` IS THE HALF THAT MAKES IT SAFE, because
+     * `core.displace_domain` sets `failed` and LEAVES `verified_at` ALONE. That
+     * function is how a domain is taken from a workspace that no longer proves
+     * it — a lapsed registration, a name that moved to somebody else, a proof
+     * missing past the grace period. On `verified_at` alone, every displaced
+     * domain would keep its ability to send, which is precisely backwards: the
+     * one case where we are most sure the sender is no longer the owner.
+     */
+    async sendableFrom(tenantId, domains) {
+      const wanted = [...new Set(domains.map((d) => d.trim().toLowerCase()))].filter(
+        Boolean,
+      )
+      if (wanted.length === 0) return new Set<string>()
+
+      const always = new Set(
+        (opts.alwaysSendable ?? []).map((d) => d.trim().toLowerCase()),
+      )
+      const toCheck = wanted.filter((d) => !always.has(d))
+      const allowed = new Set(wanted.filter((d) => always.has(d)))
+      if (toCheck.length === 0) return allowed
+
+      const rows = await withTenant(opts.db, tenantId, async (tx) =>
+        tx
+          .select({ name: domainsTable.name })
+          .from(domainsTable)
+          .where(
+            and(
+              inArray(domainsTable.name, toCheck),
+              isNotNull(domainsTable.verifiedAt),
+              ne(domainsTable.status, "failed"),
+            ),
+          ),
+      )
+
+      for (const row of rows) allowed.add(row.name.toLowerCase())
+      return allowed
     },
 
     async enqueue(queue, job, options) {

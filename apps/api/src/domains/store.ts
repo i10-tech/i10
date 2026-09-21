@@ -203,6 +203,15 @@ export interface DomainStoreDeps {
 /** The slice of the logger this module uses. Structurally satisfied by pino. */
 export interface Logger {
   warn: (o: object, m: string) => void
+  /**
+   * ⚠ OPTIONAL, AND ADDED BECAUSE ONE OF THESE TIDIES IS NOT A TIDY. A zone we
+   * failed to delete stops answering the moment the delegation lapses; an SES
+   * identity we failed to delete is a live, billable, still-sending resource
+   * for a domain nobody owns, and it is invisible unless somebody reads a warn
+   * line. That leak has now been reported twice from production while the log
+   * said so both times and nothing was watching `warn`.
+   */
+  error?: (o: object, m: string) => void
 }
 
 /**
@@ -901,7 +910,7 @@ export function domainStore({
       // that never registered one, or a name another workspace holds verified,
       // leaves it strictly alone.
       if (ownsIdentity) {
-        await tidy("ses identity", () => identity.remove(existing.name))
+        await tidy("ses identity", () => identity.remove(existing.name), "error")
       }
 
       // ⚠ THE ZONES GO TOO, OR THE DELEGATION OUTLIVES THE DOMAIN. The customer's
@@ -919,18 +928,32 @@ export function domainStore({
 
       return true
 
-      async function tidy(what: string, run: () => Promise<unknown>): Promise<void> {
+      async function tidy(
+        what: string,
+        run: () => Promise<unknown>,
+        severity: "warn" | "error" = "warn",
+      ): Promise<void> {
         try {
           await run()
         } catch (error) {
-          // ⚠ WARN, NOT ERROR, AND NOT SILENCE. Nothing is broken for the
-          // customer — their domain is deleted — but an identity or a zone we
-          // failed to remove is a real leak somebody has to reconcile, and it
-          // is invisible unless it is written down.
-          log?.warn(
-            { err: String(error), tenantId, domain: existing!.name, what },
-            `domain deleted, but its ${what} could not be removed — left behind`,
-          )
+          /*
+           * ⚠ NEVER SILENCE, AND NOT ALWAYS THE SAME VOLUME. Nothing is broken
+           * for the customer either way — their domain is deleted — but the two
+           * leaks are not equally serious. A zone left behind stops answering
+           * as soon as the delegation lapses; an SES identity left behind is
+           * live, billable and still able to send for a domain nobody owns.
+           *
+           * ⚠ AND THE LOUD ONE IS LOUD BECAUSE THE QUIET ONE WAS NOT READ. This
+           * exact line fired in production twice, saying exactly what had
+           * happened, while the leak was reported as "deleting the domain does
+           * not remove it from SES" — because `warn` reaches the pod log and
+           * nothing else. At `error` it reaches the reporter too.
+           */
+          const where = { err: String(error), tenantId, domain: existing!.name, what }
+          const message = `domain deleted, but its ${what} could not be removed — left behind`
+
+          if (severity === "error" && log?.error) log.error(where, message)
+          else log?.warn(where, message)
         }
       }
     },

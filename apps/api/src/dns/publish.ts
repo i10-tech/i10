@@ -55,6 +55,29 @@ export interface DnsPublisher {
   }): Promise<PublishResult>
 }
 
+/**
+ * Who, if anyone, has PROVEN this name — `core.verified_holder`, narrowed to
+ * the one question this module asks of it.
+ *
+ * ⚠ IT GATES THE CLEAN-UP AND NOTHING ELSE. Publishing into a zone the
+ * customer's own credential can reach is already proof of control over that
+ * zone; this is a different question — whether the records we are about to
+ * recognise as "ours, superseded" might be another workspace's LIVE set. A
+ * name can be held by several workspaces at once (migration 0039 exists to
+ * allow it, and `pslhq.app` was held by three in production), and two of them
+ * pointed at the same zone would each read the other's working delegation as
+ * litter left by a domain that was deleted.
+ *
+ * ⚠ AND IT FAILS CLOSED. Anything other than "nobody holds it, or we do"
+ * leaves the old records where they are — an unreadable answer, a database
+ * that is down, or a holder we cannot identify all mean the same thing here:
+ * do not delete.
+ */
+export interface NameHolder {
+  /** The domain id that holds this name verified, or `null` if nobody does. */
+  verifiedHolder(name: string): Promise<string | null>
+}
+
 export interface PublisherDeps {
   connections: DnsConnectionStore
   log: { warn: (o: object, m: string) => void }
@@ -67,6 +90,14 @@ export interface PublisherDeps {
    * the real registry.
    */
   writers?: (slug: string) => ZoneWriter | null
+  /**
+   * ⚠ OPTIONAL, AND ITS ABSENCE DISABLES THE CLEAN-UP RATHER THAN SKIPPING THE
+   * CHECK. A deployment that does not wire this keeps the old behaviour — a
+   * re-added domain accumulates a second set of records — which is a bug
+   * somebody can see and report. The alternative default deletes records
+   * without ever having asked who owns the name.
+   */
+  claims?: NameHolder
   /**
    * Renews an OAuth credential that is at or near its expiry.
    *
@@ -90,6 +121,7 @@ export interface PublisherDeps {
 export function dnsPublisher({
   connections,
   log,
+  claims,
   writers = writerFor,
   renew = async ({ credential }) => credential,
 }: PublisherDeps): DnsPublisher {
@@ -131,8 +163,40 @@ export function dnsPublisher({
           return { status: "zone_not_found", zones: zones.map((z) => z.name) }
         }
 
+        /*
+         * ⚠ ASKED BEFORE EVERY PUBLISH, NOT CACHED AND NOT INFERRED. The
+         * holder of a name changes when somebody else verifies it, and the
+         * whole point of the question is to be current at the moment we are
+         * about to delete something.
+         *
+         * ⚠ AND A FAILURE TO ANSWER IS A NO. See `NameHolder`: the clean-up
+         * is the only thing gated, so declining it costs a duplicate record
+         * set and nothing else.
+         */
+        let clearSuperseded = false
+        if (claims) {
+          try {
+            const holder = await claims.verifiedHolder(domain.name)
+            clearSuperseded = holder === null || holder === domain.id
+            if (!clearSuperseded) {
+              log.warn(
+                { tenantId, provider, domain: domain.name, holder },
+                "another workspace holds this name verified — leaving any records " +
+                  "of ours in the zone alone",
+              )
+            }
+          } catch (error) {
+            log.warn(
+              { tenantId, provider, domain: domain.name, err: String(error) },
+              "could not establish who holds this name — leaving any records of " +
+                "ours in the zone alone",
+            )
+          }
+        }
+
         const outcome = await writer.publish(credential, zone, desiredFor(domain), {
           replaceConflicts: replaceConflicts === true,
+          clearSuperseded,
         })
 
         /*
@@ -198,6 +262,11 @@ function desiredFor(domain: Domain): DesiredRecord[] {
     // number the zones we serve ourselves use, and writing it twice is how the
     // two halves of one delegation came to be able to disagree. See the note
     // on the constant for why it is sixty seconds.
+    //
+    // ⚠ THE "Auto" BRANCH IS NOW LEGACY TOLERANCE, NOT THE ORDINARY PATH.
+    // `dnsRecordsFor` issues the number itself; this stays for a record list
+    // built before that and held by a caller, where the alternative is
+    // `Number("Auto")` — NaN, falling to a TTL of zero at the provider.
     ttl: record.ttl === "Auto" ? RECORD_TTL : Number(record.ttl) || RECORD_TTL,
     ...(record.priority === undefined ? {} : { priority: record.priority }),
   }))

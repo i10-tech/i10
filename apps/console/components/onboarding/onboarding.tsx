@@ -12,6 +12,7 @@ import { StepSend } from "@/components/onboarding/step-send"
 import { StepVerify } from "@/components/onboarding/step-verify"
 import { StepWorkspace } from "@/components/onboarding/step-workspace"
 import { updateOnboarding } from "@/lib/actions"
+import { onPaidPlan } from "@/lib/billing"
 import type {
   BillingState,
   DomainSummary,
@@ -51,6 +52,8 @@ export function Onboarding({
   plans,
   billing,
   checkoutId,
+  stepFromUrl,
+  justPublished,
 }: {
   state: OnboardingState
   workspaceName: string
@@ -59,6 +62,19 @@ export function Onboarding({
   billing: BillingState
   /** From `?checkout_id=`, for the plan step's outcome banner. */
   checkoutId: string | null
+  /**
+   * From `?step=`, and it outranks everything below.
+   *
+   * ⚠ IT EXISTS BECAUSE PAYING THREW PEOPLE BACKWARDS. The step is local state;
+   * returning from Polar's checkout remounts this component, the initialiser
+   * below runs again, and the facts it reads say "has a domain, not verified" —
+   * so somebody who paid on step five was put back on step three. The facts
+   * were right and the conclusion was wrong: they had not gone back, they had
+   * come back.
+   */
+  stepFromUrl: string | null
+  /** Records written by the DNS callback that sent the browser back here. */
+  justPublished: number
 }) {
   const router = useRouter()
 
@@ -69,18 +85,79 @@ export function Onboarding({
    * add a domain that is already verified. The row is a hint; the world is the
    * truth.
    */
+  /*
+   * ⚠ ONE FACT THE SHELL KEEPS FOR THE PLAN STEP, BECAUSE THE FOOTER IS THE
+   * SHELL'S. Once a payment has landed, "You can come back to this at any
+   * time from Set-up" is advice about a flow that has just finished — and the
+   * step below it is offering a way to the dashboard.
+   */
+  const [paidNow, setPaidNow] = React.useState(false)
+
+  /*
+   * ⚠ THE SAME TEST THE PLAN STEP MAKES, because the footer and the step
+   * have to agree about whether set-up is finished. A subscription that was
+   * already there counts: the line is for somebody leaving a flow half done,
+   * and there is nothing half done about a workspace that is paying.
+   */
+  const paid = paidNow || onPaidPlan(billing)
+
   const [step, setStep] = React.useState<StepId>(() => {
+    /*
+     * ⚠ THE URL FIRST, BECAUSE IT IS THE ONLY SOURCE THAT SURVIVES A REMOUNT
+     * AND SAYS WHERE SOMEBODY *WAS* RATHER THAN WHERE THEY OUGHT TO BE. The
+     * derivation below is about a fresh arrival; this is about coming back.
+     */
+    if (stepFromUrl && STEPS.some((s) => s.id === stepFromUrl)) {
+      return stepFromUrl as StepId
+    }
     if (state.completed_at) return "plan"
     if (state.facts.has_verified_domain && state.facts.has_api_key) return "plan"
     if (state.facts.has_verified_domain) return "send"
     if (state.facts.has_domain) return "verify"
-    return (state.step as StepId) ?? "workspace"
+
+    /*
+     * ⚠ NO DOMAIN MEANS NO STEP PAST THE DOMAIN STEP, WHATEVER THE ROW SAYS.
+     * The stored step used to be returned as-is here, so somebody who reached
+     * "verify" and then deleted their only domain — or never finished adding
+     * one — reopened set-up on a Verify screen with nothing on it to verify,
+     * and no indication that the thing to do was one step back. The facts had
+     * already said `has_domain: false`; the row simply outranked them on this
+     * one line, which is the opposite of the rule the rest of this block
+     * follows.
+     *
+     * ⚠ AND "workspace" IS THE ONE STORED STEP THAT STILL WINS, because it is
+     * BEHIND the ceiling rather than past it. Somebody who has not yet named
+     * their workspace must not be skipped forward to a domain field; the
+     * clamp is against resuming too far along, not against resuming at all.
+     */
+    const stored = STEPS.some((s) => s.id === state.step)
+      ? (state.step as StepId)
+      : "workspace"
+    return stored === "workspace" ? "workspace" : "domain"
   })
 
   const index = STEPS.findIndex((s) => s.id === step)
 
   const go = React.useCallback((next: StepId) => {
     setStep(next)
+
+    /*
+     * ⚠ `history.replaceState`, NOT `router.replace`. Both put the step in the
+     * URL; only this one does it without a navigation, so the server components
+     * are not re-fetched and this tree is not re-rendered on every "Next".
+     * Next.js supports it explicitly and keeps `useSearchParams` in sync with
+     * it — see "Native History API" in the linking-and-navigating guide.
+     *
+     * ⚠ AND `replace` RATHER THAN `push`, so the browser's Back button still
+     * means "leave set-up" rather than walking back through five steps one
+     * entry at a time. The stepper above is how you go back.
+     */
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search)
+      params.set("step", next)
+      window.history.replaceState(null, "", `?${params.toString()}`)
+    }
+
     // ⚠ NOT AWAITED. The person is already looking at the next step; making
     // them wait for a write whose only purpose is resuming later would add
     // latency to every click for no visible benefit.
@@ -119,7 +196,7 @@ export function Onboarding({
               >
                 <span
                   className={cn(
-                    "grid size-4 shrink-0 place-items-center rounded-full border text-[9px]",
+                    "grid size-4 shrink-0 place-items-center rounded-full border text-[9px]/none tabular-nums",
                     done && "border-foreground bg-foreground text-background",
                     current && "border-foreground",
                   )}
@@ -150,7 +227,11 @@ export function Onboarding({
         )}
 
         {step === "verify" && (
-          <StepVerify domains={domains} onDone={() => go("send")} />
+          <StepVerify
+            domains={domains}
+            justPublished={justPublished}
+            onDone={() => go("send")}
+          />
         )}
 
         {step === "send" && (
@@ -167,6 +248,7 @@ export function Onboarding({
             billing={billing}
             checkoutId={checkoutId}
             onDone={finish}
+            onSubscribed={() => setPaidNow(true)}
           />
         )}
       </div>
@@ -205,13 +287,21 @@ export function Onboarding({
         )}
       </div>
 
-      <p className="mt-6 text-center text-xs text-muted-foreground">
-        You can come back to this at any time from{" "}
-        <Link href="/onboarding" className="underline underline-offset-4">
-          Set-up
-        </Link>{" "}
-        on the overview.
-      </p>
+      {/*
+       * ⚠ NOT AFTER A PAYMENT. The line exists to reassure somebody they can
+       * leave a half-finished set-up; offering it under a step that has just
+       * completed, beside a button to the dashboard, reads as a third way out
+       * of a screen that now has one.
+       */}
+      {!paid && (
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          You can come back to this at any time from{" "}
+          <Link href="/onboarding" className="underline underline-offset-4">
+            Set-up
+          </Link>{" "}
+          on the overview.
+        </p>
+      )}
     </div>
   )
 }

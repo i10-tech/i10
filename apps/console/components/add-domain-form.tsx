@@ -2,14 +2,13 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Check, ChevronDown, Pencil, Wand2 } from "lucide-react"
+import { Check, ChevronDown, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { Reveal } from "@repo/ui/components/reveal"
 import { Spinner } from "@repo/ui/components/spinner"
-import { StepStage } from "@repo/ui/components/step-stage"
 import { cn } from "cn"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { DetectionPanel } from "@/components/detection-panel"
@@ -59,7 +58,6 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
 
   const [name, setName] = React.useState("")
   const [chosenMode, setChosenMode] = React.useState<Mode>("delegate")
-  const [chosenDelivery, setChosenDelivery] = React.useState<Delivery>("automatic")
   /*
    * ⚠ FETCHED ONCE AND ALLOWED TO FAIL. Whether this workspace has already
    * connected the provider changes only what the automatic option SAYS, never
@@ -215,7 +213,15 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * has the preference they picked.
    */
   const canAutomate = provider?.canConnect === true
-  const delivery: Delivery = canAutomate ? chosenDelivery : "manual"
+  /*
+   * ⚠ NO LONGER A STORED ANSWER, BECAUSE IT IS NO LONGER A QUESTION. This was
+   * a two-card fieldset — "Add them for me at Cloudflare" against "I'll add
+   * them myself" — and the cards are gone: connecting is simply the offer,
+   * and declining it is a link under the button. So the intent is whatever
+   * the provider makes possible, and the control that gets pressed decides
+   * the rest. See the footer, and `submit`'s `override`.
+   */
+  const delivery: Delivery = canAutomate ? "automatic" : "manual"
   const connected =
     provider !== null && connections.some((c) => c.provider === provider.slug)
 
@@ -225,11 +231,23 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * domain" — which is correct rather than merely safe: a domain whose DNS we
    * cannot write to never shows a connect button at all.
    */
-  const needsConnection = canAutomate && !connected && delivery === "automatic"
+  const needsConnection = canAutomate && !connected
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
+  /**
+   * @param override how the records get there, when a control other than the
+   *   form's own submit decides it.
+   *
+   * ⚠ AN ARGUMENT RATHER THAN A `setState` BEFORE SUBMITTING. "I'll add them
+   * myself" is one press that both answers the question and creates the
+   * domain, and a state write would not be visible to the submit that runs in
+   * the same tick — so the domain would be created as `automatic` and the
+   * person would be sent to connect the provider they just declined.
+   */
+  async function submit(event?: React.FormEvent, override?: Delivery) {
+    event?.preventDefault()
     if (submitting) return
+
+    const howTheyGetThere = override ?? delivery
 
     /*
      * ⚠ NOTHING GUARDS THE SHAPE HERE ANY MORE. The field refuses its own
@@ -248,9 +266,21 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
       ...(returnPath.trim() ? { custom_return_path: returnPath.trim() } : {}),
     })
 
-    setSubmitting(false)
-
+    /*
+     * ⚠ STILL SUBMITTING. This used to clear here, the moment the domain row
+     * existed — and then went on to publish the records and navigate, which
+     * takes seconds. So the button un-spun and became pressable again while
+     * the work it started was still running, and a second press created a
+     * second domain. It reads as the press not having registered, which is
+     * exactly what invites the second press.
+     *
+     * ⚠ AND EVERY SUCCESSFUL PATH BELOW LEAVES THE PAGE, so nothing clears it
+     * again: the form unmounts on `router.push`, and `onCreated` swaps the
+     * onboarding step out. Only the failures come back to a live form, and
+     * each of them clears it as it returns.
+     */
     if (!result.ok) {
+      setSubmitting(false)
       /*
        * ⚠ A PLAN LIMIT GETS A BUTTON, NOT JUST A MESSAGE. It is the one refusal
        * on this surface that the person can resolve in ten seconds, and leaving
@@ -285,7 +315,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
      * Rebuilding it here would be two copies of the one flow that deletes a
      * customer's records.
      */
-    if (delivery === "automatic" && connected && provider) {
+    if (howTheyGetThere === "automatic" && connected && provider) {
       /*
        * ⚠ THE SHARED SEQUENCE, NOT THIS FORM'S OWN. Publishing and then
        * checking is the same job the onboarding flow and the OAuth callback
@@ -348,7 +378,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
 
     toast.success(`${created.name} added`, {
       description:
-        delivery === "automatic"
+        howTheyGetThere === "automatic"
           ? `Connect ${provider?.name ?? "your DNS provider"} to finish.`
           : mode === "delegate"
             ? "Publish the NS records to finish."
@@ -461,49 +491,6 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
       </fieldset>
 
       {/*
-       * ⚠ THE SECOND QUESTION, AND ONLY WHERE IT HAS TWO ANSWERS. For the
-       * twenty-two providers with no usable per-customer API there is nothing
-       * to choose between, and a fieldset with one selectable option is a
-       * question that reads as a decision somebody has to make.
-       */}
-      <Reveal show={canAutomate && provider !== null}>
-        {leavingProvider && (
-          <fieldset className="space-y-2">
-            <legend className="mb-2 text-sm font-medium">
-              How should they get there?
-            </legend>
-
-            <ModeCard
-              selected={delivery === "automatic"}
-              onSelect={() => setChosenDelivery("automatic")}
-              icon={<Wand2 className="size-4" />}
-              title={`Add them for me at ${leavingProvider.name}`}
-              recommended
-              description={
-                connected
-                  ? mode === "delegate"
-                    ? `We write the six NS records into ${leavingProvider.name} as soon as the domain is added. We only ever touch the three delegated names.`
-                    : `We write all six records into ${leavingProvider.name} as soon as the domain is added.`
-                  : `You will be asked to authorise ${leavingProvider.name} first. We only request permission to read your zones and edit DNS records.`
-              }
-            />
-
-            <ModeCard
-              selected={delivery === "manual"}
-              onSelect={() => setChosenDelivery("manual")}
-              icon={<Pencil className="size-4" />}
-              title="I'll add them myself"
-              description={
-                leavingProvider.manualPath
-                  ? `We show you the records and check them as they appear — ${leavingProvider.manualPath}.`
-                  : "We show you the records and check them as they appear, telling you which are still missing."
-              }
-            />
-          </fieldset>
-        )}
-      </Reveal>
-
-      {/*
        * ⚠ A BUTTON AND A `Reveal`, NOT `Collapsible`. Radix's collapsible is
        * correct and does nothing at all on its own: it toggles `data-state` and
        * expects a stylesheet to carry the height, and ours never did — so this
@@ -552,44 +539,48 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         </Reveal>
       </div>
 
-      <div className="flex items-center gap-2">
-        {/*
-         * ⚠ DISABLED WHILE THE LOOKUP IS IN FLIGHT, BECAUSE `mode` IS NOT
-         * DECIDED UNTIL IT LANDS. `delegationBlocked` comes from the detected
-         * provider, so submitting during the debounce sends `delegated: true`
-         * for a Wix or Shopify domain whose DNS editor has no NS row — a domain
-         * created in a configuration that can never verify, and one this form
-         * refuses to create a second later. The wait is bounded: a failed lookup
-         * still answers, so this cannot latch.
-         */}
-        {/*
-         * ⚠ ONE CONTROL THAT CHANGES, NOT TWO THAT COMPETE. Until the lookup
-         * lands we cannot know whether connecting is even possible, so the
-         * button says the thing that is always true — add the domain. Once the
-         * provider is known to be one we can write to, connecting IS the next
-         * step, and offering it beside "Add domain" would ask somebody to
-         * choose between two halves of the same job.
-         *
-         * ⚠ AND IT REVERTS ONCE CONNECTED. Coming back from the provider, the
-         * remaining step is the one it always was.
-         *
-         * ⚠ WHAT WAS TYPED IS NOT CARRIED ACROSS THE CONNECT, DELIBERATELY. It
-         * could be — session storage survives the round trip — but restoring it
-         * means writing React state from an effect on mount, which is a
-         * cascading render the compiler is right to refuse, and the alternative
-         * of a lazy initialiser reading storage produces a hydration mismatch
-         * on a controlled input. The prize is not retyping one domain name ONCE
-         * EVER: a connection is per workspace, so every domain after the first
-         * sees "Add domain" here and never leaves the page at all.
-         */}
-        {/*
-         * ⚠ THE SWAP IS ANIMATED FOR THE SAME REASON THE PANEL ABOVE IT IS. One
-         * control changing its mind is the entire idea here, and a control that
-         * changes by being replaced between two frames does not read as one
-         * control — it reads as the first button vanishing and a different one
-         * taking its place, which is the thing this design exists to avoid.
-         */}
-        <StepStage step={needsConnection ? "connect" : "add"} className="w-auto">
+      {/*
+       * ⚠ ONE PRIMARY CONTROL THAT DOES NOT CHANGE ITS MIND MID-FORM. This was
+       * a `StepStage` that morphed "Add domain" into "Connect Cloudflare" as
+       * the second fieldset was answered — and the morph was the defect: the
+       * two buttons are different widths and different colours, so the swap
+       * played as a smear between two shapes every time somebody changed their
+       * answer. The fieldset is gone and so is the swap. Where we can write
+       * the records, connecting IS the offer; where we cannot, adding is.
+       *
+       * ⚠ AND DECLINING IS A LINK UNDER IT, EXACTLY AS IN ONBOARDING. Giving
+       * "I'll add them myself" the weight of a card made it a decision between
+       * equals, twenty seconds after somebody typed their domain, when one of
+       * the two options is the one we recommend and the other is an afternoon
+       * of DNS. Same shape, same words, same hierarchy as the onboarding
+       * screen — see onboarding/domain-setup.tsx.
+       *
+       * ⚠ IT IS NOT A MODE TOGGLE. Pressing it creates the domain manually
+       * there and then, rather than re-arming the button it sits under, so
+       * there is never a moment where the form is showing one intent and the
+       * button another.
+       */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          {/*
+           * ⚠ DISABLED WHILE THE LOOKUP IS IN FLIGHT, BECAUSE `mode` IS NOT
+           * DECIDED UNTIL IT LANDS. `delegationBlocked` comes from the
+           * detected provider, so submitting during the debounce sends
+           * `delegated: true` for a Wix or Shopify domain whose DNS editor has
+           * no NS row — a domain created in a configuration that can never
+           * verify, and one this form refuses to create a second later. The
+           * wait is bounded: a failed lookup still answers, so this cannot
+           * latch.
+           *
+           * ⚠ WHAT WAS TYPED IS NOT CARRIED ACROSS THE CONNECT, DELIBERATELY.
+           * It could be — session storage survives the round trip — but
+           * restoring it means writing React state from an effect on mount,
+           * which is a cascading render the compiler is right to refuse, and a
+           * lazy initialiser reading storage produces a hydration mismatch on
+           * a controlled input. The prize is not retyping one domain name ONCE
+           * EVER: a connection is per workspace, so every domain after the
+           * first never leaves the page at all.
+           */}
           {needsConnection && leavingProvider ? (
             <ConnectProviderButton
               slug={leavingProvider.slug}
@@ -605,8 +596,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
                * CONTINUE. It is the half of "empty is not a mistake" that the
                * verdict alone cannot express: a button somebody can press with
                * nothing typed has to say SOMETHING when they do, and the only
-               * honest thing to say is a complaint about a box they had not got
-               * to yet.
+               * honest thing to say is a complaint about a box they had not
+               * got to yet.
                */
               disabled={submitting || looking || name.trim().length === 0}
             >
@@ -614,10 +605,26 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
               Add domain
             </Button>
           )}
-        </StepStage>
-        <Button type="button" variant="ghost" onClick={() => router.back()}>
-          Cancel
-        </Button>
+          <Button type="button" variant="ghost" onClick={() => router.back()}>
+            Cancel
+          </Button>
+        </div>
+
+        {/*
+         * ⚠ REVEALED RATHER THAN SWITCHED IN, so it arrives on the same spring
+         * as the detection panel above it instead of appearing between two
+         * frames under a button that has just changed.
+         */}
+        <Reveal show={needsConnection}>
+          <button
+            type="button"
+            onClick={() => void submit(undefined, "manual")}
+            disabled={submitting || looking || name.trim().length === 0}
+            className="cursor-pointer text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            I&rsquo;ll add them myself
+          </button>
+        </Reveal>
       </div>
     </form>
   )

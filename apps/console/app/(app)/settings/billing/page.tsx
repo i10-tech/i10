@@ -13,6 +13,7 @@ import { PanelError } from "@/components/panel-error"
 import { PaymentMethodButton } from "@/components/payment-method-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
+import { hasLiveSubscription } from "@/lib/billing"
 import type { BillingState, FeatureUsage, PlanSummary } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Billing" }
@@ -71,13 +72,20 @@ export default async function BillingPage({
 
   return (
     <div>
-      {checkoutId && (
-        <Section className="pt-0">
-          <CheckoutOutcome checkoutId={checkoutId} />
-        </Section>
-      )}
-
-      <Section className={checkoutId ? undefined : "pt-0"}>
+      {/*
+       * ⚠ THE OUTCOME USED TO BE A SECTION OF ITS OWN AND THAT SECTION WAS
+       * THE JUMP. `Section` carries `border-b py-6`, and it is rendered by
+       * the server the moment `?checkout_id=` is in the URL — so the page
+       * painted an empty bordered box with 24px of padding, and the banner
+       * only grew into it a second later when the poll answered. The
+       * separator arriving in one frame is what pushed everything down.
+       *
+       * ⚠ SO IT LIVES UNDER THE PLAN CARD INSTEAD, INSIDE THAT SECTION. It
+       * is news about the plan named directly above it, the whole block
+       * animates as one, and there is no rule of its own to appear before it
+       * has anything to say.
+       */}
+      <Section className="pt-0">
         <SectionTitle>Current plan</SectionTitle>
         <SectionContent>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
@@ -135,6 +143,9 @@ export default async function BillingPage({
               <Status status={billing.subscription.status} variant="pill" />
             )}
           </div>
+
+          {/* ⚠ `pt-3`, NOT `pb-6`: the gap it owns here is the one above it. */}
+          {checkoutId && <CheckoutOutcome checkoutId={checkoutId} spacing="pt-3" />}
         </SectionContent>
       </Section>
 
@@ -152,33 +163,7 @@ export default async function BillingPage({
               bare
             />
           ) : (
-            <PlanCards
-              plans={plans.data.data}
-              currentPlanId={billing.plan?.id ?? null}
-              hasSubscription={billing.subscription !== null}
-              // ⚠ ONLY WHEN IT IS ACTUALLY ENDING. `cancel_at_period_end` with no
-              // date is a subscription Polar has marked but not yet dated; the
-              // cards use the presence of a date to decide whether to disable
-              // the free plan, so an empty string would disable it with nothing
-              // to show.
-              endingAt={
-                billing.subscription?.cancel_at_period_end &&
-                billing.subscription.current_period_end
-                  ? formatExact(billing.subscription.current_period_end)
-                  : null
-              }
-              // ⚠ THE SAME RULE `endingAt` FOLLOWS, FOR THE OTHER DEFERRED
-              // CHANGE. A card whose plan is already scheduled must not offer
-              // "Downgrade" again: pressing it sends a second PATCH that
-              // supersedes an identical pending update, which changes nothing
-              // and reads as the first press having failed.
-              scheduledPlanId={billing.subscription?.scheduled_plan_id ?? null}
-              scheduledAt={
-                billing.subscription?.scheduled_at
-                  ? formatExact(billing.subscription.scheduled_at)
-                  : null
-              }
-            />
+            <PlanCards plans={plans.data.data} billing={billing} />
           )}
         </SectionContent>
       </Section>
@@ -199,7 +184,7 @@ export default async function BillingPage({
            * docs/decisions/console.md §7, which is why the sentence below stays
            * rather than becoming a second, dead button.
            */}
-          <PaymentMethodButton hasSubscription={billing.subscription !== null} />
+          <PaymentMethodButton hasSubscription={hasLiveSubscription(billing)} />
 
           {!billing.subscription && (
             /*

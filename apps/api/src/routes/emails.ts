@@ -68,6 +68,23 @@ function acceptError(outcome: AcceptOutcome) {
       status: 403 as const,
     }
   }
+  /*
+   * ⚠ 403 AND ITS OWN NAME, NOT `restricted_api_key`. Both are 403s and the
+   * remedies are opposite: a restricted key needs a different key, an
+   * unverified domain needs finishing. `domain_not_verified` has been in
+   * `errorNames` since that file was written and nothing ever emitted it —
+   * this is the case it was reserved for.
+   */
+  if (outcome.status === "unverified_domain") {
+    return {
+      body: {
+        statusCode: 403,
+        name: "domain_not_verified" as const,
+        message: outcome.message,
+      },
+      status: 403 as const,
+    }
+  }
   if (outcome.status === "quota_exceeded") {
     return {
       body: {

@@ -1,3 +1,4 @@
+import { supersededBy } from "../superseded.js"
 import {
   DnsWriteError,
   failureFor,
@@ -140,7 +141,12 @@ export function cloudflareWriter(): ZoneWriter {
 
     async publish(credential, zone, records, options = {}) {
       const existing = await listRecords(credential, zone)
-      const outcome: PublishOutcome = { created: [], unchanged: [], removed: [] }
+      const outcome: PublishOutcome = {
+        created: [],
+        unchanged: [],
+        removed: [],
+        superseded: [],
+      }
 
       /*
        * ⚠ CONFLICTS ARE COLLECTED BEFORE ANYTHING IS WRITTEN, so a refusal
@@ -161,7 +167,41 @@ export function cloudflareWriter(): ZoneWriter {
         outcome.removed.push(describe(conflict))
       }
 
-      const survived = existing.filter((r) => !conflicts.includes(r))
+      /*
+       * ⚠ OUR OWN LEFTOVERS GO AFTER THE CONFLICT DECISION AND BEFORE THE
+       * WRITES. After, because a refusal must leave the zone untouched —
+       * tidying up on a call that then declines to publish would delete a
+       * working set and put nothing in its place. Before, because creating
+       * the new record first is what briefly gives the zone two of them, and
+       * a failure between the two steps would leave exactly the state this
+       * exists to clear.
+       */
+      const stale = !options.clearSuperseded
+        ? []
+        : supersededBy(
+            records,
+            existing,
+            (record) => ({
+              name: record.name,
+              type: record.type,
+              value: record.content,
+            }),
+            sameValue,
+          ).filter((record) => !conflicts.includes(record))
+
+      for (const record of stale) {
+        await call(credential, `/zones/${zone.id}/dns_records/${record.id}`, {
+          method: "DELETE",
+        })
+        outcome.superseded!.push({
+          ...describe(record),
+          reason: `A ${record.type} record we published previously was left at ${record.name}.`,
+        })
+      }
+
+      const survived = existing.filter(
+        (r) => !conflicts.includes(r) && !stale.includes(r),
+      )
 
       for (const record of records) {
         const already = survived.find(

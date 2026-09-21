@@ -24,9 +24,12 @@ export const domainStatus = z.enum([
 /**
  * What the customer has to publish, and whether we have seen it yet.
  *
- * ⚠ `ttl` IS A STRING BECAUSE RESEND'S IS. It carries "Auto" as often as a
- * number, and a customer pasting it into a DNS provider needs the value they
- * were given rather than one we normalised.
+ * ⚠ `ttl` IS A STRING BECAUSE RESEND'S IS, AND OURS NOW ALWAYS CARRIES A
+ * NUMBER. It used to say "Auto", copying Resend literally — which told a
+ * customer nothing, did not match what we actually publish, and left the
+ * zone-file export inventing 3600 for it. It is `RECORD_TTL` seconds, the
+ * same value the publisher writes and the same one our own zones serve, so
+ * the table, the export and the record in the provider all agree.
  */
 export const dnsRecordSchema = z.object({
   /** `SPF`, `DKIM`, `DMARC` or `NS`. What the record is for, not its DNS type. */

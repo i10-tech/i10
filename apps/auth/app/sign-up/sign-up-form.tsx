@@ -165,6 +165,8 @@ export function SignUpForm({
   const [code, setCode] = useState("")
   /** Why the last code was refused, shown under the boxes until it is retyped. */
   const [rejected, setRejected] = useState<string | null>(null)
+  /** The emailed code was accepted, for the moment before the next step. */
+  const [accepted, setAccepted] = useState(false)
 
   /*
    * ⚠ THE PASSWORD IS CONTROLLED NOW, WHICH IT DELIBERATELY WAS NOT BEFORE. The
@@ -356,6 +358,9 @@ export function SignUpForm({
 
       // Already done when the instance does not verify email addresses.
       if (signUp.status === "complete") {
+        // ⚠ BEFORE `createSession`, which advances past this screen. See
+        // `verified` on OtpField for why the confirmation is worth the frame.
+        setAccepted(true)
         await createSession()
         return
       }
@@ -735,6 +740,7 @@ export function SignUpForm({
                 }}
                 state={rejected ? "invalid" : "idle"}
                 hint={rejected}
+                verified={accepted}
                 autoFocus
               />
               <Button

@@ -50,10 +50,19 @@
     "CONSOLE_ORIGINS",
     "CONSOLE_PREVIEW",
     "DATABASE_URL",
-    "DNS_OAUTH_APPS",
-    "DNS_OAUTH_BROKER_SECRET",
-    "DNS_OAUTH_BROKER_URL",
-    "DNS_OAUTH_REDIRECT_BASE",
+    // ⚠ A WILDCARD, BECAUSE THE PER-PROVIDER VARIABLES CANNOT BE ENUMERATED.
+    // `DNS_OAUTH_APPS` was one JSON blob and fitted an allowlist; it was
+    // replaced by discovery over `DNS_OAUTH_<PROVIDER>_CLIENT_ID` and its two
+    // siblings, and the list was never widened. So every provider anybody
+    // configured was stripped one layer below `doppler run --` and the API
+    // booted with no OAuth apps at all — the console then said "Connecting
+    // Cloudflare is not configured on this deployment", which is the API
+    // truthfully reporting an environment turbo had emptied.
+    //
+    // ⚠ AND IT HAS TO BE A PATTERN RATHER THAN THREE MORE LINES PER PROVIDER.
+    // The registry has sixteen; naming forty-eight variables here is the
+    // drift this file already suffered once.
+    "DNS_OAUTH_*",
     "I10_API_KEY",
     "I10_BASE_URL",
     "MAIL_BOUNCE_HOST",

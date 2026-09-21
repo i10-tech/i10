@@ -162,6 +162,120 @@ describe("refusing before destroying", () => {
     expect(seen.some((s) => s.method === "POST")).toBe(false)
   })
 
+  /**
+   * ⚠ OUR OWN LEFTOVERS ARE NOT A CONFLICT AND MUST NOT BECOME ONE. This is
+   * the re-added domain: deleted here, still published there, so the old NS
+   * pair is in the zone when the new one is written. Asking about it would
+   * put a confirmation dialog in front of somebody about records they have
+   * never seen and did not write; leaving it splits resolution between two
+   * nameserver sets. See dns/superseded.ts.
+   */
+  it("clears a previous set of ours without being asked, then publishes", async () => {
+    const seen = stub((url) =>
+      url.includes("dns_records?")
+        ? ok([
+            cf({
+              id: "old-1",
+              type: "NS",
+              name: "send.example.com",
+              content: "ns1.i10.tech",
+            }),
+            cf({
+              id: "old-2",
+              type: "NS",
+              name: "send.example.com",
+              content: "ns2.i10.tech",
+            }),
+          ])
+        : ok({}),
+    )
+
+    const outcome = await writer.publish(
+      token,
+      ZONE,
+      [want({ name: "send.example.com", type: "NS", value: "ns3.i10.tech" })],
+      { clearSuperseded: true },
+    )
+
+    expect(outcome.superseded).toHaveLength(2)
+    expect(outcome.removed).toEqual([])
+    expect(outcome.created).toHaveLength(1)
+
+    const deletes = seen.filter((s) => s.method === "DELETE").map((s) => s.url)
+    expect(deletes.some((url) => url.includes("/dns_records/old-1"))).toBe(true)
+    expect(deletes.some((url) => url.includes("/dns_records/old-2"))).toBe(true)
+
+    // ⚠ AND THE ORDER: everything of ours goes before the new record arrives,
+    // so the zone never holds both sets at once.
+    const firstPost = seen.findIndex((s) => s.method === "POST")
+    expect(seen.filter((s, i) => s.method === "DELETE" && i < firstPost)).toHaveLength(
+      2,
+    )
+  })
+
+  /**
+   * ⚠ AND NOT ON A CALL THAT IS ABOUT TO REFUSE. A refusal leaves the zone
+   * exactly as it was, which has to include our own leftovers: deleting the
+   * working set and then declining to publish a replacement is the one
+   * outcome worse than either half.
+   */
+  it("touches nothing of ours when the call refuses over a conflict", async () => {
+    const seen = stub((url) =>
+      url.includes("dns_records?")
+        ? ok([
+            cf({
+              id: "old-1",
+              type: "NS",
+              name: "send.example.com",
+              content: "ns1.i10.tech",
+            }),
+            cf({ id: "their-dmarc", type: "TXT", name: "send.example.com" }),
+          ])
+        : ok({}),
+    )
+
+    const outcome = await writer.publish(
+      token,
+      ZONE,
+      [want({ name: "send.example.com", type: "NS", value: "ns3.i10.tech" })],
+      { clearSuperseded: true },
+    )
+
+    expect(outcome.removed).toHaveLength(1)
+    expect(outcome.superseded ?? []).toEqual([])
+    expect(seen.every((s) => s.method === "GET")).toBe(true)
+  })
+
+  /**
+   * ⚠ AND NOT UNLESS IT IS ASKED FOR. Recognising a record as ours does not
+   * establish that it is THIS domain's to delete — the same name can be held
+   * by more than one workspace — so only the publisher, which knows who holds
+   * the name, may turn the clean-up on. An adapter that did it by default
+   * would delete another workspace's live delegation.
+   */
+  it("leaves our own leftovers alone when the caller has not asked", async () => {
+    const seen = stub((url) =>
+      url.includes("dns_records?")
+        ? ok([
+            cf({
+              id: "old-1",
+              type: "NS",
+              name: "send.example.com",
+              content: "ns1.i10.tech",
+            }),
+          ])
+        : ok({}),
+    )
+
+    const outcome = await writer.publish(token, ZONE, [
+      want({ name: "send.example.com", type: "NS", value: "ns3.i10.tech" }),
+    ])
+
+    expect(outcome.superseded ?? []).toEqual([])
+    expect(seen.some((s) => s.method === "DELETE")).toBe(false)
+    expect(outcome.created).toHaveLength(1)
+  })
+
   it("removes them only once the customer has agreed", async () => {
     const seen = stub((url) => (url.includes("dns_records?") ? ok([cf()]) : ok({})))
 

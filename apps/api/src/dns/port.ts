@@ -55,6 +55,23 @@ export interface PublishOutcome {
    * See `PublishOptions.replaceConflicts`.
    */
   removed: ConflictingRecord[]
+  /**
+   * Records of OUR OWN, at the names we are publishing to, that this call
+   * replaced — a previous set left in the zone after the domain was deleted
+   * here and added again. See dns/superseded.ts for why these go without
+   * being asked about, and why `removed` still does not.
+   *
+   * ⚠ A SEPARATE FIELD RATHER THAN MORE `removed`, BECAUSE THE TWO MEAN
+   * OPPOSITE THINGS TO THE CALLER. `removed` is the customer's data, deleted
+   * on their say-so, and `publish` reads "removed with nothing created" as the
+   * REFUSAL signal. Folding ours in would make a tidy-up look like a refusal
+   * and put a confirmation dialog in front of somebody about their own
+   * superseded records.
+   *
+   * ⚠ OPTIONAL, SO A TEST DOUBLE THAT RETURNS AN OUTCOME STAYS VALID. Every
+   * real adapter sets it.
+   */
+  superseded?: ConflictingRecord[]
 }
 
 export interface PublishOptions {
@@ -68,6 +85,19 @@ export interface PublishOptions {
    * the first call reports the conflicts and refuses, and the console asks.
    */
   replaceConflicts?: boolean
+  /**
+   * Whether to clear records of OUR OWN that this set supersedes. See
+   * dns/superseded.ts for what qualifies, and `PublishOutcome.superseded`.
+   *
+   * ⚠ OPT-IN, THE SAME WAY `replaceConflicts` IS, AND FOR A NARROWER REASON.
+   * Recognising a record as ours is not the same as establishing that it is
+   * THIS domain's to remove: the same name can be held by more than one
+   * workspace — `pslhq.app` was held by three in production — and two of them
+   * pointed at the same zone would each see the other's live delegation as
+   * litter. Only the publisher knows who holds the name, so only the
+   * publisher may turn this on.
+   */
+  clearSuperseded?: boolean
 }
 
 /** A zone as the provider knows it. `id` is whatever their API needs. */

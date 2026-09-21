@@ -30,6 +30,9 @@ function app(over: Partial<AcceptOps> = {}, metering: Metering = unmetered) {
       refs: input.messages.map((_, i) => ({ id: `id-${i}`, createdAt: new Date() })),
     })),
     suppressedFor: async () => new Set<string>(),
+    // ⚠ PERMISSIVE: the route tests are about status codes and shapes. The
+    // verified-domain gate has its own file, including its own 403.
+    sendableFrom: async (_t: string, domains: string[]) => new Set(domains),
     enqueue,
     metering,
     log: { warn: mock(), error: mock() },
@@ -125,6 +128,27 @@ describe("POST /emails", () => {
     const res = await post(a, "/emails", body, { "Idempotency-Key": "k-1" })
     expect(res.status).toBe(409)
     expect(await res.json()).toMatchObject({ name: "idempotency_conflict" })
+  })
+
+  /**
+   * ⚠ 403 AND `domain_not_verified`, WHICH IS A DIFFERENT ANSWER FROM
+   * `restricted_api_key` THOUGH BOTH ARE 403s. One means "use another key" and
+   * the other means "finish verifying the domain"; an SDK switching on the
+   * name is the only thing that can tell a caller which.
+   *
+   * ⚠ AND THE OLD BEHAVIOUR HERE WAS A 200. The send was accepted, written and
+   * queued, then refused by SES at delivery — so the caller got an id for mail
+   * that was never going anywhere, and the only trace was a `failed` row.
+   */
+  it("answers 403 when the from domain is not verified", async () => {
+    const { app: a } = app({
+      sendableFrom: async () => new Set<string>(),
+    })
+
+    const res = await post(a, "/emails", body)
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ name: "domain_not_verified" })
   })
 
   // ⚠ 429 with daily_quota_exceeded, which is what makes an SDK back off — and

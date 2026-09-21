@@ -1,10 +1,12 @@
 "use client"
 
-import { MeterRow } from "@repo/ui/components/meter"
+import * as React from "react"
+import { ArrowRight, CheckCircle2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
-import { CheckoutOutcome } from "@/components/checkout-outcome"
+import { Reveal } from "@repo/ui/components/reveal"
+import { BillingBanner, CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
-import { formatBytes, formatNumber } from "@/lib/format"
+import { onPaidPlan } from "@/lib/billing"
 import type { BillingState, PlanSummary } from "@/lib/types"
 
 /**
@@ -26,6 +28,7 @@ export function StepPlan({
   billing,
   checkoutId,
   onDone,
+  onSubscribed,
 }: {
   plans: PlanSummary[]
   billing: BillingState
@@ -38,13 +41,54 @@ export function StepPlan({
    */
   checkoutId: string | null
   onDone: () => void
+  /**
+   * ⚠ TOLD UPWARDS SO THE SHELL CAN CHANGE ITS FOOTER. Once somebody has
+   * paid, "You can come back to this at any time" is advice about a step
+   * that is finished — and the shell owns that line, not this step.
+   */
+  onSubscribed?: () => void
 }) {
-  const current = billing.plan
+  /*
+   * ⚠ LOCAL, AND SET FROM THE CHECKOUT RATHER THAN FROM `billing`. Nothing
+   * re-fetches after a payment any more — see the note on `subscribed` in
+   * PlanCards — so this step learns it the same way the cards do: from the
+   * success it was just handed.
+   */
+  const [paid, setPaid] = React.useState(false)
 
-  // ⚠ DERIVED FROM THE CATALOGUE, NOT FROM A METER READ. This step runs before
-  // anybody has sent anything, so a usage query would show five zeroes; what is
-  // useful here is what the plan GRANTS.
-  const entitlements = current?.entitlements ?? []
+  /*
+   * ⚠ THE BANNER'S ID LIVES HERE, NOT IN THE URL, ONCE A CHECKOUT HAS RUN IN
+   * THIS TAB. It arrives as a prop from `searchParams` for a reload or a
+   * redirect return; handed straight over by the cards, it needs no
+   * navigation to reach the banner — and the navigation was the blank frame
+   * that killed the toast.
+   */
+  const [liveCheckout, setLiveCheckout] = React.useState<string | null>(null)
+  const outcomeId = liveCheckout ?? checkoutId
+
+  /**
+   * What the banner above the cards is currently saying.
+   *
+   * ⚠ IT HAS TO BE ABLE TO STOP SAYING THINGS, WHICH IS WHY THIS IS A MODE
+   * AND NOT A FLAG. "You're on Pro" is true right up until somebody presses
+   * Downgrade, and then it is the loudest wrong thing on the screen — it sat
+   * there, green and confident, over a subscription that had just been set
+   * to end.
+   *
+   * ⚠ AND `null` IS A STATE THE BANNER IS TOLD ABOUT RATHER THAN REMOVED BY.
+   * Both banners keep their place in the tree and animate out; unmounting
+   * them would make the news vanish between two frames, which is the jump
+   * this whole screen has been chasing out.
+   */
+  const [news, setNews] = React.useState<"checkout" | "keeping" | null>("checkout")
+
+  /*
+   * ⚠ EITHER A PAYMENT IN THIS SESSION OR A SUBSCRIPTION THAT WAS ALREADY
+   * THERE. The step is finished in both cases, and reading only the first
+   * left somebody who paid last week looking at a step that still wanted
+   * something from them.
+   */
+  const done = paid || onPaidPlan(billing)
 
   return (
     <div className="space-y-6">
@@ -56,57 +100,124 @@ export function StepPlan({
        * upgraded mid-set-up got a toast and nothing else. Same component, same
        * row, same answer.
        */}
-      {checkoutId && <CheckoutOutcome checkoutId={checkoutId} />}
+      {outcomeId && (
+        <CheckoutOutcome checkoutId={outcomeId} show={news === "checkout"} />
+      )}
 
-      <div>
+      {/*
+       * ⚠ THE ANSWER TO "Keep subscription", IN THE PLACE THE LAST ANSWER
+       * WAS. Pressing it un-marks a subscription that was going to end, and
+       * without a word here the only evidence was a card quietly changing
+       * back — easy to miss, and the opposite of the cancellation, which
+       * announces itself.
+       */}
+      <BillingBanner
+        show={news === "keeping"}
+        tone="success"
+        icon={<CheckCircle2 className="size-5 text-success" />}
+        /*
+         * ⚠ "You're", NOT "You are", BECAUSE THE BANNER BESIDE IT SAYS
+         * "You're on Pro". These two appear in the same place, minutes
+         * apart, and one of them spelling the contraction out reads as a
+         * different voice — see `present` in lib/checkout-outcome.ts.
+         */
+        title={`You're keeping ${billing.plan?.name ?? "your plan"}`}
+        body="Nothing was charged and nothing changes — the cancellation is called off and your plan renews as usual."
+      />
+
+      {/*
+       * ⚠ THE HEADING ASKS FOR A DECISION NOW, RATHER THAN NARRATING ONE
+       * ALREADY MADE. This said "You are on Free" over a meter panel and a
+       * "Change plan" heading, which framed the last step of set-up as a
+       * receipt with an afterthought attached — so the cards read as optional
+       * detail and the only live control was "Finish set-up" at the bottom.
+       */}
+      <div className="text-center">
         <h1 className="text-xl font-semibold tracking-tight">
-          {current ? `You are on ${current.name}` : "Your plan"}
+          {outcomeId ? "You're all set" : "Pick a plan"}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Here is what that includes. You can change plan at any time — allowances move
-          the moment the payment clears.
+        <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+          {outcomeId
+            ? "Your plan is active. Carry on, or change it here — you can do either at any time."
+            : "Start free and change it whenever. Allowances move the moment a payment clears."}
         </p>
       </div>
 
-      {entitlements.length > 0 && (
-        <div className="max-w-xl space-y-5 rounded-lg border p-4">
-          {entitlements.map((entitlement) => (
-            <MeterRow
-              key={entitlement.featureId}
-              label={LABELS[entitlement.featureId] ?? entitlement.featureId}
-              used={0}
-              limit={entitlement.allowance}
-              format={
-                entitlement.featureId === "storage.bytes"
-                  ? (n) => formatBytes(n)
-                  : (n) => formatNumber(n)
-              }
-              unit={entitlement.interval ? `per ${entitlement.interval}` : undefined}
-            />
-          ))}
-        </div>
-      )}
-
+      {/*
+       * ⚠ THE METER PANEL IS GONE, AND WITH IT THE ONLY REASON THIS STEP HAD
+       * TO BE TALL. It listed the current plan's allowances as five meters at
+       * zero used — the numbers are on the plan cards a few inches below, in
+       * the card for that same plan, so the screen said everything twice and
+       * gave the duplicate the more prominent half of the page.
+       *
+       * ⚠ WHAT IT WAS FOR IS NOT LOST. The original note is right that
+       * somebody should meet the limits before a 403 does the telling; the
+       * cards carry exactly those numbers, and the overview's usage rail is
+       * where they belong once there is usage to show.
+       */}
       {plans.length > 1 && (
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium">Change plan</h2>
+        /*
+         * ⚠ WIDER THAN THE FLOW IT SITS IN, DELIBERATELY. Every other step is
+         * a form at `max-w-2xl`, which is the right measure for reading and
+         * the wrong one for three cards side by side — at that width they
+         * stack into a column of tall boxes and the comparison, which is the
+         * entire job of this step, has to be done by scrolling. This breaks
+         * out to the middle of the viewport and stops at `max-w-4xl`.
+         */
+        <div className="relative left-1/2 w-[calc(100vw-3rem)] max-w-4xl -translate-x-1/2">
           <PlanCards
             plans={plans}
-            currentPlanId={current?.id ?? null}
-            hasSubscription={billing.subscription !== null}
+            billing={billing}
+            /*
+             * ⚠ THE CURRENT PLAN'S CARD IS HOW THIS STEP ENDS, WHICH IS WHY
+             * "Finish set-up" IS NO LONGER UNDER IT. Staying on free was
+             * already the commonest way out of set-up and the card for it
+             * said "Current plan" and could not be pressed — so the actual
+             * exit was an unrelated button below, and the card that described
+             * the choice somebody was making was the one dead control on the
+             * screen.
+             */
+            onKeep={onDone}
+            onCheckout={(id) => {
+              setLiveCheckout(id)
+              setNews("checkout")
+            }}
+            onCancelled={() => setNews(null)}
+            onResumed={() => setNews("keeping")}
+            onSubscribed={() => {
+              setPaid(true)
+              onSubscribed?.()
+            }}
           />
         </div>
       )}
 
-      <Button onClick={onDone}>Finish set-up</Button>
+      {/*
+       * ⚠ THE WAY OUT ONLY EXISTS ONCE THERE IS SOMETHING TO LEAVE. Until a
+       * payment lands, staying on the current plan IS the exit and its card
+       * carries it; afterwards that card reads "Subscribed" and is inert, so
+       * without this the last step of set-up would have no forward control at
+       * all.
+       *
+       * ⚠ REVEALED, ON THE SAME SPRING AS EVERYTHING ELSE. It arrives a
+       * second after a checkout closes, which is exactly the moment a hard
+       * insert reads as the page glitching — the fault this whole change set
+       * out to remove.
+       */}
+      <Reveal show={done} spacing="pt-2">
+        <div className="flex justify-center">
+          {/*
+           * ⚠ `xl`, THE SAME SIZE AS "Continue" ON THE SIGN-IN PAGE. It is
+           * the same kind of control — the one thing to press on a screen
+           * that has finished asking — and for a new customer the two are
+           * three minutes apart.
+           */}
+          <Button size="xl" onClick={onDone}>
+            Continue to dashboard
+            <ArrowRight />
+          </Button>
+        </div>
+      </Reveal>
     </div>
   )
-}
-
-const LABELS: Record<string, string> = {
-  emails: "Emails",
-  "domains.sending": "Sending domains",
-  "domains.mailbox": "Mailbox domains",
-  mailboxes: "Mailboxes",
-  "storage.bytes": "Mailbox storage",
 }

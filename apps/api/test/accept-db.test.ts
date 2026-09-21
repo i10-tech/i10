@@ -4,6 +4,7 @@ import { describe, expect, it, mock } from "bun:test"
 import type { Database } from "../src/db/client.js"
 import {
   apiKeys,
+  domains as domainsTable,
   idempotencyKeys,
   messageBodies,
   messages,
@@ -32,6 +33,8 @@ interface Canned {
   /** The existing idempotency row, read after losing the insert. */
   priorKey?: { requestHash: string; messageIds: string[] | null }[]
   suppressed?: { address: string }[]
+  /** Rows `sendableFrom`'s query gives back — i.e. the verified domains. */
+  verified?: { name: string }[]
 }
 
 type Op = {
@@ -41,6 +44,14 @@ type Op = {
   params?: unknown[]
   values?: Record<string, unknown>[]
   set?: Record<string, unknown>
+  /**
+   * ⚠ RECORDED RATHER THAN DISCARDED, because on one of these queries the
+   * predicate IS the behaviour. `sendableFrom` decides whether a workspace may
+   * send as a domain at all, and the difference between `verified_at is not
+   * null` and that AND `status <> 'failed'` is whether a domain taken away
+   * from somebody can still send — see the note on the adapter.
+   */
+  where?: unknown
 }
 
 /**
@@ -68,7 +79,10 @@ function fakeDb(canned: Canned = {}) {
         op.table = table
         return self
       },
-      where: () => self,
+      where: (condition: unknown) => {
+        op.where = condition
+        return self
+      },
       onConflictDoNothing: () => self,
       returning: () => Promise.resolve(answer()),
       limit: () => Promise.resolve(answer()),
@@ -104,6 +118,7 @@ function fakeDb(canned: Canned = {}) {
         if (op.table === idempotencyKeys) return canned.priorKey ?? []
         if (op.table === suppressions) return canned.suppressed ?? []
         if (op.table === apiKeys) return [{ id: "key-uuid" }]
+        if (op.table === domainsTable) return canned.verified ?? []
         return []
       }) as never
     },
@@ -122,13 +137,14 @@ function fakeDb(canned: Canned = {}) {
   return { db, recorded }
 }
 
-function ops(canned: Canned = {}) {
+function ops(canned: Canned = {}, alwaysSendable?: readonly string[]) {
   const { db, recorded } = fakeDb(canned)
   const add = mock(async () => ({ id: "job-1" }))
   const queue = { add } as never
   const adapter: AcceptOps = acceptDatabaseOps({
     db,
     queues: { transactional: queue, bulk: queue },
+    ...(alwaysSendable ? { alwaysSendable } : {}),
   })
   return { ...adapter, recorded, add }
 }
@@ -345,5 +361,72 @@ describe("enqueue", () => {
     expect(o.add).toHaveBeenCalledWith(
       expect.objectContaining({ groupId: "ten-1", jobId: "batch:id-a" }),
     )
+  })
+})
+
+/**
+ * Which domains a workspace may send as.
+ *
+ * ⚠ THE PREDICATE IS THE BEHAVIOUR HERE, WHICH IS WHY IT IS ASSERTED AND NOT
+ * JUST THE ROWS. Two columns decide it and they disagree on purpose:
+ * `verified_at` is stamped once and never moved backwards, so a domain that
+ * has sent for months keeps sending through a `temporary_failure` caused by one
+ * slow DKIM lookup — and `core.displace_domain` sets `status = 'failed'` while
+ * LEAVING `verified_at` alone, which is how a name is taken from a workspace
+ * that no longer proves it. Drop the status half and every displaced domain
+ * keeps its ability to send; drop the `verified_at` half and a transient at
+ * Amazon stops a working customer's mail.
+ */
+describe("sendableFrom", () => {
+  it("returns the domains the query found", async () => {
+    const o = ops({ verified: [{ name: "acme.com" }] })
+
+    expect(await o.sendableFrom("ten-1", ["acme.com", "nope.com"])).toEqual(
+      new Set(["acme.com"]),
+    )
+  })
+
+  it("requires both a verification stamp and a status that is not failed", async () => {
+    const o = ops({ verified: [] })
+    await o.sendableFrom("ten-1", ["acme.com"])
+
+    const query = o.recorded.find((op) => op.kind === "select" && op.where)
+    const rendered = dialect.sqlToQuery(query?.where as never).sql
+
+    expect(rendered).toContain("verified_at")
+    expect(rendered).toContain("is not null")
+    expect(rendered).toContain("status")
+    expect(rendered).toMatch(/<>|!=/)
+  })
+
+  /**
+   * ⚠ i10'S OWN MAIL, AND THE ONLY EXEMPTION THERE IS. `DomainStore.create`
+   * refuses to create a row for our own sending domains, so `AUTH_EMAIL_FROM`
+   * can never be verified and the gate would otherwise refuse every password
+   * reset in the product.
+   */
+  it("allows a domain named in alwaysSendable without asking the database", async () => {
+    const o = ops({}, ["i10.tech"])
+
+    expect(await o.sendableFrom("ten-1", ["i10.tech"])).toEqual(new Set(["i10.tech"]))
+    // ⚠ AND IT DOES NOT OPEN A TRANSACTION FOR IT, which is the check that
+    // this is a short-circuit rather than a second source of the same answer.
+    expect(o.recorded).toHaveLength(0)
+  })
+
+  /** The exemption covers what it names and nothing beside it. */
+  it("still checks the database for anything not exempted", async () => {
+    const o = ops({ verified: [] }, ["i10.tech"])
+
+    expect(await o.sendableFrom("ten-1", ["i10.tech", "acme.com"])).toEqual(
+      new Set(["i10.tech"]),
+    )
+    expect(o.recorded.length).toBeGreaterThan(0)
+  })
+
+  it("does not open a transaction for an empty list", async () => {
+    const o = ops()
+    expect(await o.sendableFrom("ten-1", [])).toEqual(new Set())
+    expect(o.recorded).toHaveLength(0)
   })
 })

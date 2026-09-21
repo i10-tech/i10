@@ -635,13 +635,21 @@ export function SignInForm({
                 </Link>
               </div>
 
-              <Button
-                type="submit"
-                size="xl"
-                // See oauth-buttons: the chip below is positioned against this.
-                className="relative"
-                disabled={!signIn || locked}
-              >
+              {/*
+               * ⚠ NO "Last used" CHIP HERE, AND ITS ABSENCE IS THE POINT. The
+               * email box two steps back already carries it — see the note
+               * there — and by this screen the choice is made: the address is
+               * typed, the provider buttons are gone, and this is the only
+               * control on the page. A hint about which method to pick, shown
+               * after the method has been picked, annotates nothing.
+               *
+               * ⚠ AND SHOWING IT IN BOTH PLACES WAS WORSE THAN SHOWING IT IN
+               * THE WRONG ONE. One fact, announced twice on the way through a
+               * single flow, reads as two different facts — the second one
+               * arriving next to a password field invites "last used… what,
+               * this password?", which is not what it records.
+               */}
+              <Button type="submit" size="xl" disabled={!signIn || locked}>
                 {busy === "password" ? (
                   <>
                     {/*
@@ -654,10 +662,7 @@ export function SignInForm({
                     Signing in…
                   </>
                 ) : (
-                  <>
-                    Login
-                    {lastUsed === "password" && <LastUsedBadge />}
-                  </>
+                  "Login"
                 )}
               </Button>
             </FieldGroup>

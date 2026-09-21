@@ -141,7 +141,6 @@ export function CallbackHandler({
       setPublished(wrote)
       setBlocked(inTheWay)
       setUnchecked(notChecked)
-      setPhase("done")
       router.refresh()
 
       /*
@@ -154,10 +153,30 @@ export function CallbackHandler({
        * for them; navigating away from it would hide the one thing on this page
        * that is not automatic.
        */
+      /*
+       * ⚠ THE SUCCESS SCREEN IS SKIPPED ENTIRELY WHEN THERE IS SOMEWHERE TO GO
+       * BACK TO, AND SHOWING IT FIRST WAS THE BLIP. This used to set `done`,
+       * paint "Connected and published" with its green tick, and THEN navigate
+       * — so the reward for connecting was a confirmation that appeared for a
+       * few hundred milliseconds and was snatched away, which reads as the
+       * screen glitching rather than as the step completing.
+       *
+       * ⚠ THE CONFIRMATION IS NOT LOST, IT IS MOVED. `published` rides back on
+       * the URL and the step it lands on says it there — one screen, arrived at
+       * once, already carrying the news. See `StepVerify`.
+       */
       const returnTo = connected.data.return_to
       if (returnTo && inTheWay.length === 0 && notChecked.length === 0) {
-        router.replace(returnTo)
+        const [path, query] = returnTo.split("?")
+        const params = new URLSearchParams(query ?? "")
+        params.set("published", String(wrote))
+        router.replace(`${path}?${params.toString()}`)
+        return
       }
+
+      // Nothing to go back to, or something needs saying: this page is the
+      // place that says it.
+      setPhase("done")
     })()
   }, [code, state, provider, providerError, router])
 

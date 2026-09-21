@@ -40,34 +40,55 @@ export function DetectionPanel({
 
   return (
     <div className="rounded-lg border">
-      <div className="flex items-start gap-3 px-4 py-3">
+      {/*
+       * ⚠ `items-center`, SO THE MARK SITS AGAINST THE BLOCK RATHER THAN ITS
+       * FIRST LINE. This panel is one line for most providers and three for a
+       * split migration, and a top-aligned logo in the tall case reads as
+       * having slipped upwards — it is the only thing in the row with no text
+       * baseline to belong to.
+       */}
+      <div className="flex items-center gap-3 px-4 py-3">
+        {/*
+         * ⚠ THE MARK GETS A TILE, AND THE TILE IS WHAT MAKES THE ROW STEADY.
+         * These are other companies' assets at other companies' proportions —
+         * Cloudflare's is roughly 1.7:1, GoDaddy's is square — so a bare logo
+         * changes the row's height and its optical left edge with every
+         * provider. A fixed square with the logo centred inside gives all
+         * sixteen of them one footprint.
+         */}
         {provider ? (
-          <ProviderMark
-            slug={provider.slug}
-            name={provider.name}
-            /*
-             * ⚠ SIZED FOR A WIDE MARK, NOT A SQUARE ONE. An official asset
-             * keeps its own proportions and letterboxes inside this box —
-             * Cloudflare's is roughly 1.7:1, so a `size-4` slot rendered it
-             * nine pixels tall beside fourteen-pixel text and read as a
-             * smudge. The box is square; what you see is the height.
-             */
-            className="-mt-0.5 size-7"
-          />
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
+            <ProviderMark
+              slug={provider.slug}
+              name={provider.name}
+              /*
+               * ⚠ SIZED FOR A WIDE MARK, NOT A SQUARE ONE. An official asset
+               * keeps its own proportions and letterboxes inside this box, so
+               * a `size-4` slot rendered Cloudflare's nine pixels tall beside
+               * fourteen-pixel text and read as a smudge. The box is square;
+               * what you see is the height.
+               */
+              className="size-7"
+            />
+          </span>
         ) : (
-          <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
+            <Info className="size-4 text-muted-foreground" />
+          </span>
         )}
-        <div className="min-w-0 flex-1 space-y-1">
+        <div className="min-w-0 flex-1 space-y-1.5">
           {provider ? (
             <>
+              {/*
+               * ⚠ THE SENTENCE NO LONGER TRAILS "— though not all of your
+               * nameservers point there". The warning directly beneath it
+               * says exactly that, at greater length and in the colour that
+               * means it matters, so the panel was making the same point
+               * twice — and the quiet copy of it was the one that ran the
+               * headline onto a second line.
+               */}
               <p className="text-sm">
                 DNS hosted by <strong className="font-medium">{provider.name}</strong>
-                {current.confidence === "partial" && (
-                  <span className="text-muted-foreground">
-                    {" "}
-                    — though not all of your nameservers point there
-                  </span>
-                )}
               </p>
               {current.confidence === "partial" && (
                 /*
@@ -92,10 +113,26 @@ export function DetectionPanel({
             </p>
           )}
 
+          {/*
+           * ⚠ ONE CHIP PER NAMESERVER, NOT ONE RUN OF TEXT SEPARATED BY DOTS.
+           * These are three or four hostnames somebody compares against what
+           * their registrar shows them, and `break-all` was splitting them
+           * mid-label at the panel's edge — so `gina.ns.cloudflare.com` could
+           * arrive as `gina.ns.cloudfla` / `re.com`, which is unreadable for
+           * the one task the line exists for. A chip wraps between names
+           * instead of inside them.
+           */}
           {current.nameservers.length > 0 && (
-            <p className="font-mono text-2xs break-all text-muted-foreground">
-              {current.nameservers.join("  ·  ")}
-            </p>
+            <ul className="flex flex-wrap gap-1 pt-0.5">
+              {current.nameservers.map((ns) => (
+                <li
+                  key={ns}
+                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs text-muted-foreground"
+                >
+                  {ns}
+                </li>
+              ))}
+            </ul>
           )}
 
           {resolverConfusion && (

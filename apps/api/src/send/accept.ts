@@ -51,6 +51,25 @@ export type AcceptOutcome =
    * already refuses over-quota tenants for the same reason.
    */
   | { status: "forbidden"; message: string }
+  /**
+   * The `from` domain is not one this tenant has verified.
+   *
+   * ⚠ NOTHING ENFORCED THIS, AND THE FAILURE IT LEFT WAS THE WORST SHAPE THERE
+   * IS: the API answered 200, wrote the message, queued it — and SES refused it
+   * at delivery as "an identity that is not verified". The caller got an id and
+   * a success, the mail went nowhere, and the only trace was a `failed` row in
+   * a log they had no reason to open. Somebody following the onboarding snippet
+   * with a domain still waiting on Amazon saw the product work perfectly and
+   * deliver nothing.
+   *
+   * ⚠ IT IS SEPARATE FROM `forbidden` BECAUSE THE REMEDY IS DIFFERENT, and
+   * `domain_not_verified` has been sitting unused in `errorNames` since that
+   * file was written. `forbidden` means this KEY may not use that domain and
+   * the fix is a different key; this means NOBODY may send from it yet and the
+   * fix is to finish verifying it. One status for both would tell half the
+   * callers to go and look at the wrong thing.
+   */
+  | { status: "unverified_domain"; message: string }
 
 /**
  * A stable fingerprint of the request body.
@@ -210,6 +229,22 @@ export interface AcceptOps {
   suppressedFor: (tenantId: string, addresses: string[]) => Promise<Set<string>>
 
   /**
+   * Which of these domains this tenant may actually send from.
+   *
+   * ⚠ IT ASKS ABOUT THE REQUEST'S DOMAINS RATHER THAN LISTING THE TENANT'S, the
+   * same shape as `suppressedFor` above and for the same reason: a tenant with
+   * four hundred domains should not have four hundred rows crossing the wire
+   * so that one address can be checked against them.
+   *
+   * ⚠ AND THE ANSWER IS A SET OF WHAT IS ALLOWED, NOT OF WHAT IS REFUSED, so
+   * an adapter that returns nothing fails CLOSED. A port shaped the other way
+   * round would turn "the query errored and I returned an empty set" into
+   * "everything is permitted", which is the wrong way for this particular
+   * question to break.
+   */
+  sendableFrom: (tenantId: string, domains: string[]) => Promise<Set<string>>
+
+  /**
    * Pushes the batch. Called only after the transaction commits.
    *
    * `runAt` delays the job — see the scheduling note in `acceptSend`.
@@ -281,6 +316,41 @@ export async function acceptSend(
       message:
         `This key can only send from ${scopedDomains(input.scopes ?? []).join(", ")}. ` +
         `It cannot send from ${refused}.`,
+    }
+  }
+
+  /*
+   * ⚠ AFTER THE SCOPE CHECK AND BEFORE EVERYTHING ELSE, because it costs a
+   * query and the scope check does not. A key that may not touch this domain
+   * at all should be refused without asking the database whether the domain is
+   * verified — the answer would not change the outcome.
+   *
+   * ⚠ AND IT IS THE SAME PLACE FOR THE SAME REASON AS THE SCOPE CHECK: this
+   * function is the throat every send passes through. There are two send routes
+   * today and there will be more, and a gate that has to be remembered at each
+   * entry point is a gate that will be missed at one of them.
+   *
+   * ⚠ A `from` WITH NO PARSEABLE DOMAIN IS REFUSED HERE RATHER THAN WAVED
+   * THROUGH. It cannot be verified, by definition, and the alternative is
+   * accepting a message that SES will reject for a different reason later.
+   */
+  const wanted = [
+    ...new Set(input.payloads.map((p) => domainOf(p.from)?.toLowerCase() ?? "")),
+  ]
+  const sendable = await deps.sendableFrom(
+    input.tenantId,
+    wanted.filter((d) => d !== ""),
+  )
+
+  const unverified = wanted.find((domain) => !sendable.has(domain))
+  if (unverified !== undefined) {
+    return {
+      status: "unverified_domain",
+      message:
+        unverified === ""
+          ? "The `from` address has no domain we can check. Use an address on a domain you have verified."
+          : `${unverified} is not verified for this workspace, so mail cannot be sent from it yet. ` +
+            `Add it under Domains, publish the records, and verify it first.`,
     }
   }
 

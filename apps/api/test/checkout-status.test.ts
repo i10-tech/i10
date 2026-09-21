@@ -9,6 +9,9 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
   snapshot: async () => [],
+  // Not reached here — this suite is about the checkout poll, not cancelling.
+  noteCancelling: async () => {},
+  noteResuming: async () => {},
   current: async () => ({
     plan: null,
     status: null,
@@ -32,6 +35,7 @@ const polar = (
   ingestEvents: async () => ({ inserted: 0, duplicates: 0 }),
   updateSubscription: async () => {},
   cancelSubscription: async () => {},
+  resumeSubscription: async () => {},
   revokeSubscription: async () => "revoked" as const,
   createCustomerSession: async () => ({ token: "polar_cst_test" }),
   listSubscriptions: async () => [],

@@ -22,6 +22,29 @@ import type { PolarSubscription } from "./events.js"
  * ever moves.
  */
 
+/**
+ * A call Polar refused, with the status it refused it with.
+ *
+ * ⚠ IT EXISTS BECAUSE ONE SENTENCE WAS BEING SHOWN FOR EVERY FAILURE. A plan
+ * change reported "Polar could not apply the change. Check the payment
+ * method." for a 401 on a token from the wrong environment, a 404 on a
+ * subscription belonging to another organisation, and a 422 on a product id
+ * that is not ours — none of which a customer can fix by looking at their
+ * card, and all of which sent somebody to their bank instead of to the log
+ * line that says what happened. The status is the one fact that separates
+ * them, so it travels with the error.
+ */
+export class PolarCallError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = "PolarCallError"
+  }
+}
+
 const HOSTS = {
   sandbox: "https://sandbox-api.polar.sh",
   production: "https://api.polar.sh",
@@ -191,6 +214,24 @@ export interface PolarClient {
    * exactly this reason, and cancelling is the largest downgrade there is.
    */
   cancelSubscription(subscriptionId: string): Promise<void>
+
+  /**
+   * Calls off a cancellation that has not happened yet.
+   *
+   * ⚠ THE MISSING HALF OF `cancelSubscription`, AND ITS ABSENCE WAS A TRAP
+   * SOMEBODY COULD WALK INTO AND NOT WALK OUT OF. Cancelling is deferred to
+   * the period boundary — deliberately, they have paid for the rest of the
+   * month — so for up to a month the subscription is alive, billed for, and
+   * marked to end. Every control in the console read that state as "already
+   * decided": the free card said "Ending", the paid card said "Current plan",
+   * and there was no way to say "actually, keep it" short of waiting for the
+   * subscription to lapse and buying it again.
+   *
+   * ⚠ IT IS A `PATCH`, NOT A NEW SUBSCRIPTION. Nothing is bought and nothing
+   * is charged — the same subscription simply stops being marked, which is
+   * why this is safe to offer as an ordinary button rather than a checkout.
+   */
+  resumeSubscription(subscriptionId: string): Promise<void>
 
   /**
    * Ends a live subscription NOW — benefits revoked, billing stopped, no
@@ -499,8 +540,30 @@ export function polarClient(opts: PolarOptions): PolarClient {
       // untouched — which is why this throws rather than reporting a partial
       // success the caller would have to reconcile.
       if (!response.ok) {
-        throw new Error(
-          `polar subscription update failed: ${response.status} ${await response.text()}`,
+        const detail = await response.text()
+        throw new PolarCallError(
+          response.status,
+          detail,
+          `polar subscription update failed: ${response.status} ${detail}`,
+        )
+      }
+    },
+
+    async resumeSubscription(subscriptionId) {
+      const response = await call(
+        `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ cancel_at_period_end: false }),
+        },
+      )
+
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new PolarCallError(
+          response.status,
+          detail,
+          `polar subscription resume failed: ${response.status} ${detail}`,
         )
       }
     },
@@ -522,8 +585,11 @@ export function polarClient(opts: PolarOptions): PolarClient {
       )
 
       if (!response.ok) {
-        throw new Error(
-          `polar subscription cancel failed: ${response.status} ${await response.text()}`,
+        const detail = await response.text()
+        throw new PolarCallError(
+          response.status,
+          detail,
+          `polar subscription cancel failed: ${response.status} ${detail}`,
         )
       }
     },

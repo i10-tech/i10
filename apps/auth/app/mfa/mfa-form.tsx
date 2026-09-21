@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { useSignIn } from "@clerk/nextjs"
@@ -58,6 +58,8 @@ export function MfaForm({
   const [code, setCode] = useState("")
   /** Clerk's own sentence about the last code, shown under the boxes. */
   const [rejected, setRejected] = useState<string | null>(null)
+  /** The code was accepted, for the half-second before this screen leaves. */
+  const [accepted, setAccepted] = useState(false)
   const [pending, setPending] = useState(false)
   /**
    * Which strategies have already had a code dispatched.
@@ -97,13 +99,76 @@ export function MfaForm({
 
   const active = method ?? preferred
 
+  /*
+   * ⚠ THE "ALREADY SENT" FACT HAS TO SURVIVE A RELOAD, AND A REF DOES NOT. This
+   * guard used to be the ref alone, which is per component INSTANCE — so every
+   * refresh of this page got a fresh one, the effect below decided no code had
+   * been sent, and Clerk sent another. Each new code retires the one before it,
+   * so somebody who reloaded while reading the email was then typing a code
+   * that had just been invalidated by the reload itself.
+   *
+   * ⚠ KEYED TO THE ATTEMPT AND THE FACTOR, NOT TO THE PAGE. Switching from the
+   * emailed code to the texted one is a different code and must still send;
+   * starting a genuinely new sign-in must too, which is what the id does.
+   *
+   * ⚠ `sessionStorage`, SO IT DIES WITH THE TAB. The attempt it describes does
+   * too — this must not still be set tomorrow when somebody signs in again.
+   */
+  /*
+   * ⚠ THE ATTEMPT ID, PULLED OUT SO THE CALLBACKS BELOW CAN DEPEND ON IT.
+   * `signIn` itself is a new object on most renders, so a callback keyed on
+   * it would be rebuilt every time and take the effect with it; the id is
+   * the part that actually decides whether this is the same attempt.
+   */
+  const attemptId = signIn?.id ?? "attempt"
+
+  /*
+   * ⚠ MEMOISED, AND NOT FOR SPEED. The effect below reads both of these, so
+   * `react-hooks/exhaustive-deps` wants them in its dependency array — and
+   * as plain functions they are new identities on every render, which would
+   * re-run the send effect on every render. `useCallback` makes the identity
+   * mean what the rule assumes it means: unchanged until the attempt does.
+   */
+  const sentKey = useCallback(
+    (factor: Method) => `i10:mfa-sent:${attemptId}:${factor}`,
+    [attemptId],
+  )
+
+  const alreadySent = useCallback(
+    (factor: Method): boolean => {
+      if (sent.current[factor]) return true
+      try {
+        return window.sessionStorage.getItem(sentKey(factor)) !== null
+      } catch {
+        // ⚠ BLOCKED STORAGE MEANS THE REF IS ALL THERE IS, which is the
+        // behaviour that shipped before this — a resend on reload rather than
+        // a screen that cannot send at all. Degrading to the lesser bug is the
+        // right direction.
+        return false
+      }
+    },
+    [sentKey],
+  )
+
+  const markSent = useCallback(
+    (factor: Method) => {
+      sent.current[factor] = true
+      try {
+        window.sessionStorage.setItem(sentKey(factor), "1")
+      } catch {
+        /* see `alreadySent` */
+      }
+    },
+    [sentKey],
+  )
+
   useEffect(() => {
     if (!signIn || !ready || !active) return
     if (active !== "phone_code" && active !== "email_code") return
-    if (sent.current[active]) return
+    if (alreadySent(active)) return
 
     // Marked before the await, not after: otherwise both renders see `false`.
-    sent.current[active] = true
+    markSent(active)
 
     const send =
       active === "phone_code" ? signIn.mfa.sendPhoneCode() : signIn.mfa.sendEmailCode()
@@ -121,7 +186,7 @@ export function MfaForm({
         )
       })
       .catch(() => toast.error(TRANSPORT_FAILURE))
-  }, [signIn, ready, active])
+  }, [signIn, ready, active, alreadySent, markSent])
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -158,6 +223,9 @@ export function MfaForm({
       }
 
       if (signIn.status === "complete") {
+        // ⚠ BEFORE THE NAVIGATION, so the green lands while there is still a
+        // screen to land on. See `verified` on OtpField.
+        setAccepted(true)
         // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
         // see the sign-in form. `finalizeAndLeave` also replaces rather than
         // assigns, and navigates itself if Clerk's callback never runs: see
@@ -242,6 +310,7 @@ export function MfaForm({
             onComplete={() => {
               if (!pending) formRef.current?.requestSubmit()
             }}
+            verified={accepted}
             state={rejected ? "invalid" : "idle"}
             hint={rejected}
             autoFocus

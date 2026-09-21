@@ -306,13 +306,30 @@ export async function openPolarCheckout(
        * redirects when the checkout carries an EXTERNAL success URL, so
        * without this the modal sits over an already-upgraded console.
        *
-       * ⚠ OURS IS EXTERNAL, SO THEIR DEFAULT ALSO NAVIGATES THE PARENT to
-       * `/billing?checkout_id=…` — the confirmation page, which polls the same
-       * row with a ceiling and names the plan. We do not `preventDefault()`
-       * that: landing there is the better ending, and `onSuccess` covers the
-       * case where the poll got there first and the navigation never happens.
+       * ⚠ AND `preventDefault()` STOPS THEM NAVIGATING THE PARENT, WHICH IS
+       * THE LAST BLIP AND THE ONLY ONE THAT WAS NEVER OURS. Our success URL is
+       * external, so their default handler sends the whole window to
+       * `…?checkout_id=…` — a full page load a second after the modal closes.
+       * That is what survived every refresh we removed downstream: the toast
+       * about the payment died with the document, the banner and the tick came
+       * back animating from nothing because the tree was new, and the plan
+       * step re-derived itself from a fresh server render.
+       *
+       * ⚠ NOTHING IS LOST BY REFUSING IT. The navigation existed to reach a
+       * page that polls the checkout and names the plan, and every part of
+       * that now happens here without leaving: `onSuccess` shows the banner,
+       * marks the card and writes the same id into the address bar with
+       * `history.replaceState`, so a reload still lands on the same screen.
+       *
+       * ⚠ THE EVENT IS CANCELABLE AND THE SDK CHECKS `defaultPrevented`
+       * BEFORE ITS OWN HANDLER RUNS — read from @polar-sh/checkout's bundle,
+       * where every posted message becomes a `CustomEvent` with
+       * `cancelable: true`.
        */
-      instance.addEventListener("success", succeed)
+      instance.addEventListener("success", (event) => {
+        event.preventDefault()
+        succeed()
+      })
 
       /*
        * Their own `close` is real again now that `embed_origin` is sent, so

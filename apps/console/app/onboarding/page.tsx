@@ -35,12 +35,25 @@ export const dynamic = "force-dynamic"
 export default async function OnboardingPage({
   searchParams,
 }: {
-  // ⚠ POLAR APPENDS THIS ON THE WAY BACK, AND SO DOES OUR OWN EMBEDDED FLOW.
-  // Somebody who buys a plan on the last step of set-up lands back here; the
-  // plan step reports the outcome in place. See components/onboarding/step-plan.
-  searchParams: Promise<{ checkout_id?: string }>
+  // ⚠ POLAR APPENDS `checkout_id` ON THE WAY BACK, AND SO DOES OUR OWN EMBEDDED
+  // FLOW. Somebody who buys a plan on the last step of set-up lands back here;
+  // the plan step reports the outcome in place. See
+  // components/onboarding/step-plan.
+  //
+  // ⚠ AND `step` IS HOW THEY LAND ON THE STEP THEY LEFT FROM. The flow keeps
+  // its step in local state, which a return from checkout throws away — the
+  // component remounts, re-derives from the facts, and puts somebody who paid
+  // on the LAST step back on "Verify", because the fact it reads is that their
+  // domain is not verified yet. Mirroring the step into the URL makes the
+  // return exact instead of inferred.
+  //
+  // ⚠ AND `published` IS THE CONFIRMATION THE DNS CALLBACK NO LONGER STOPS TO
+  // SHOW. It used to paint its own green tick and then navigate here a moment
+  // later, which read as a glitch; the news now arrives with the step that
+  // follows it. See the callback handler and `StepVerify`.
+  searchParams: Promise<{ checkout_id?: string; step?: string; published?: string }>
 }) {
-  const { checkout_id: checkoutId } = await searchParams
+  const { checkout_id: checkoutId, step, published } = await searchParams
 
   const [me, domains, plans] = await Promise.all([
     tryApi<Me>("/console/me"),
@@ -116,6 +129,8 @@ export default async function OnboardingPage({
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
         checkoutId={checkoutId ?? null}
+        stepFromUrl={step ?? null}
+        justPublished={Number(published) || 0}
       />
     </main>
   )

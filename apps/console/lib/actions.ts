@@ -880,3 +880,18 @@ export async function changePlan(plan: string) {
     ["/settings/billing", "/settings/usage", "/"],
   )
 }
+
+/**
+ * Calls off a cancellation that has not taken effect yet.
+ *
+ * ⚠ THE SAME REVALIDATION LIST AS `changePlan`, because the same pages are
+ * wrong afterwards: the billing page stops saying "Ending", the usage page
+ * keeps the paid allowance it was about to lose, and the overview's rail
+ * follows both.
+ */
+export async function resumeSubscription() {
+  return run(
+    () => api<{ status: string }>("/console/billing/resume", { method: "POST" }),
+    ["/settings/billing", "/settings/usage", "/"],
+  )
+}

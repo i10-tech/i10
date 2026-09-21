@@ -1,6 +1,7 @@
 import { eq, and, isNull, or } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { plans } from "../db/core.js"
+import { PolarCallError } from "./polar.js"
 import type { PolarClient, ProrationBehavior } from "./polar.js"
 import type { SubscriptionOps } from "./db.js"
 import type { Logger } from "./grants.js"
@@ -89,6 +90,15 @@ export interface PlanChangeDeps {
 
 export interface PlanChange {
   to(tenantId: string, planId: string): Promise<ChangeOutcome>
+  /**
+   * Calls off a cancellation that has not taken effect yet.
+   *
+   * ⚠ NOT A PLAN CHANGE, WHICH IS WHY IT IS ITS OWN METHOD. Nothing is
+   * bought, no product moves and no proration is decided — the subscription
+   * simply stops being marked to end. Routing it through `to()` would mean
+   * inventing a plan id for "the one you already have".
+   */
+  resume(tenantId: string): Promise<ChangeOutcome>
 }
 
 /** Catalogue plans, and this tenant's own custom ones. Nobody else's. */
@@ -111,6 +121,18 @@ async function rankOf(
     return row ? row.rank : null
   })
 }
+
+/**
+ * The subscription states that can still be amended.
+ *
+ * ⚠ `trialing` COUNTS AND `past_due` COUNTS. A trial is a live subscription
+ * that Polar will happily move between products, and a past-due one is the
+ * case where changing plan is the most useful thing somebody can do — pushing
+ * them to a fresh checkout there would leave the failing one running beside
+ * it. Everything else — `canceled`, `incomplete`, `incomplete_expired`,
+ * `unpaid` — has nothing left to amend.
+ */
+const LIVE = new Set(["active", "trialing", "past_due"])
 
 export function planChange(deps: PlanChangeDeps): PlanChange {
   return {
@@ -135,7 +157,26 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       }
 
       const current = await deps.subscriptions.current(tenantId)
-      if (!current.polarSubscriptionId) {
+
+      /*
+       * ⚠ A DEAD SUBSCRIPTION IS THE SAME AS NO SUBSCRIPTION, AND READING THE
+       * ID ALONE MISSED THAT. The row survives a cancellation — it has to, it
+       * is the history — so `polar_subscription_id` is still populated for
+       * somebody whose subscription ended months ago. This went straight to
+       * `PATCH /v1/subscriptions/<canceled one>`, which Polar refuses, and the
+       * refusal came back to the customer as "check the payment method" about
+       * a subscription that no longer exists to charge anything to.
+       *
+       * ⚠ MEASURED, NOT IMAGINED. The local sandbox tenant held
+       * `22fe849a-…`, which Polar reports as `canceled`; every attempt to move
+       * plan from the console failed on it.
+       *
+       * ⚠ AND THE ANSWER IS A CHECKOUT, WHICH IS WHAT THE CONSOLE ALREADY
+       * DOES WITH THIS REJECTION. Buying again is the only way back onto a
+       * paid plan once a subscription has ended — there is nothing left to
+       * amend.
+       */
+      if (!current.polarSubscriptionId || !LIVE.has(current.status ?? "")) {
         // ⚠ NOTHING TO MOVE. A tenant with no subscription buys one through
         // checkout; `PATCH` on a subscription that does not exist is a 404 from
         // Polar and a confusing one to surface.
@@ -166,6 +207,22 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       try {
         if (leaving) {
           await deps.polar.cancelSubscription(current.polarSubscriptionId)
+
+          /*
+           * ⚠ WRITTEN HERE, NOT LEFT TO THE WEBHOOK, AND THE GAP WAS VISIBLE TO
+           * CUSTOMERS. Polar accepts the cancellation synchronously and
+           * confirms it an event later; until this line existed the console
+           * refreshed onto a row that still said "active, not cancelling". So
+           * the page kept showing Pro with no end date, the free card stayed
+           * enabled — it is disabled by precisely this flag — and pressing it
+           * again produced "Polar could not apply the change. Check the
+           * payment method." about a card that was perfectly fine.
+           *
+           * ⚠ AND IT IS AFTER THE CALL, SO A REFUSAL RECORDS NOTHING. Marking
+           * first would leave a workspace believing it had cancelled because we
+           * asked, which is the one direction this must never be wrong in.
+           */
+          await deps.subscriptions.noteCancelling(tenantId)
         } else {
           await deps.polar.updateSubscription({
             subscriptionId: current.polarSubscriptionId,
@@ -174,18 +231,19 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
           })
         }
       } catch (error) {
-        // ⚠ FOR `invoice`, POLAR APPLIES THE CHANGE ONLY IF THE PAYMENT
-        // SUCCEEDS — so this is usually a declined card, and the subscription is
-        // untouched. Reporting it as an outage would send the customer to
-        // support instead of to their bank.
         deps.log.error(
-          { err: error, tenantId, planId, direction },
+          {
+            err: error,
+            tenantId,
+            planId,
+            direction,
+            ...(error instanceof PolarCallError
+              ? { polarStatus: error.status, polarDetail: error.detail.slice(0, 500) }
+              : {}),
+          },
           "plan change failed",
         )
-        return {
-          status: "failed",
-          reason: "Polar could not apply the change. Check the payment method.",
-        }
+        return { status: "failed", reason: reasonFor(error) }
       }
 
       deps.log.info(
@@ -194,5 +252,114 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       )
       return { status: "requested", direction, plan: planId }
     },
+
+    async resume(tenantId) {
+      const current = await deps.subscriptions.current(tenantId)
+
+      if (!current.polarSubscriptionId || !LIVE.has(current.status ?? "")) {
+        /*
+         * ⚠ THE SUBSCRIPTION HAS TO STILL BE ALIVE. Once the period has
+         * passed there is nothing to un-mark — Polar has ended it — and the
+         * only way back is buying again. Saying so is better than a 404 from
+         * a `PATCH` on a closed subscription.
+         */
+        return {
+          status: "rejected",
+          reason: "That subscription has already ended. Start a checkout to subscribe.",
+        }
+      }
+
+      // ⚠ NOTHING TO CALL OFF. Not an error: two clicks on one button, or a
+      // page that had not caught up, and both should be quiet.
+      if (!current.cancelAtPeriodEnd) return { status: "unchanged" }
+
+      try {
+        await deps.polar.resumeSubscription(current.polarSubscriptionId)
+        // ⚠ AFTER THE CALL, SO A REFUSAL RECORDS NOTHING — the same ordering
+        // `noteCancelling` follows and for the same reason.
+        await deps.subscriptions.noteResuming(tenantId)
+      } catch (error) {
+        deps.log.error(
+          {
+            err: error,
+            tenantId,
+            ...(error instanceof PolarCallError
+              ? { polarStatus: error.status, polarDetail: error.detail.slice(0, 500) }
+              : {}),
+          },
+          "subscription resume failed",
+        )
+        return { status: "failed", reason: reasonFor(error) }
+      }
+
+      deps.log.info({ tenantId, plan: current.plan }, "subscription resumed")
+      return { status: "requested", direction: "upgrade", plan: current.plan ?? "" }
+    },
+  }
+}
+
+/**
+ * What to tell somebody whose plan change Polar refused.
+ *
+ * ⚠ EVERY FAILURE USED TO SAY "Check the payment method", AND FOR MOST OF
+ * THEM THAT IS A WILD GOOSE CHASE. For `invoice` and `prorate` Polar applies
+ * the change only if the payment succeeds, so a declined card really is the
+ * commonest cause in production — but it is nowhere near the commonest in a
+ * sandbox, where the same sentence appeared for a token from the wrong
+ * environment, a subscription belonging to another organisation, and a
+ * product id that is not ours. Somebody went to look at a card that was
+ * fine, three times.
+ *
+ * ⚠ AND THE MISCONFIGURATION CASES SAY THEY ARE OURS. A 401 or a 404 is not
+ * something a customer can act on at all, so the message stops giving them a
+ * job and points at the thing that can: our log, which carries the status and
+ * Polar's own words.
+ */
+function reasonFor(error: unknown): string {
+  if (!(error instanceof PolarCallError)) {
+    return "We could not reach Polar to apply the change. Try again in a moment."
+  }
+
+  switch (error.status) {
+    case 401:
+      // ⚠ OUR CREDENTIAL, NOT THEIR CARD. Usually a token for the other
+      // environment — a sandbox token against api.polar.sh, or the reverse.
+      return "Billing is not configured correctly on our side. We have logged it."
+    case 403:
+      /*
+       * ⚠ 403 IS TWO DIFFERENT FAILURES AND THE BODY IS WHAT SEPARATES THEM.
+       * Polar answers `insufficient_scope` when our token lacks a scope,
+       * which is ours to fix and nothing to do with the customer — but it
+       * also answers 403 for an operation it will not perform on THIS
+       * subscription, which is a fact about their subscription. Collapsing
+       * both into "configured incorrectly on our side" told somebody
+       * cancelling an already-cancelling subscription that our billing was
+       * broken.
+       */
+      return error.detail.includes("insufficient_scope")
+        ? "Billing is not configured correctly on our side. We have logged it."
+        : "Polar would not apply that change to this subscription."
+    case 404:
+      /*
+       * ⚠ THE SUBSCRIPTION IS UNKNOWN TO POLAR, WHICH IS ALMOST ALWAYS US
+       * HOLDING AN ID FROM ANOTHER ORGANISATION — a sandbox rebuilt, or a
+       * production id read with a sandbox token. Telling somebody to check
+       * their card for this is the least useful sentence in the product.
+       */
+      return "We could not find this subscription at Polar. We have logged it."
+    case 422:
+      // ⚠ THE PRODUCT IS THE THING POLAR IS REFUSING, and `POLAR_PRODUCTS`
+      // is where that mapping lives. Again ours, not theirs.
+      return "That plan is not available at Polar right now. We have logged it."
+    case 402:
+      return "Polar could not take the payment. Check the payment method."
+    default:
+      /*
+       * ⚠ THE ORIGINAL SENTENCE SURVIVES FOR THE ORIGINAL CASE. A 400 or a
+       * 409 from a plan change is the declined-payment shape the old comment
+       * described, and it remains the right thing to say for anything we have
+       * not separated out.
+       */
+      return "Polar could not apply the change. Check the payment method."
   }
 }

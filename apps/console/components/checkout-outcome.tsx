@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Reveal } from "@repo/ui/components/reveal"
 import { useRouter } from "next/navigation"
 import { CheckCircle2, Clock, XCircle } from "lucide-react"
 import { cn } from "cn"
@@ -43,10 +44,26 @@ const GIVE_UP_MS = 90_000
 export function CheckoutOutcome({
   checkoutId,
   className,
+  show = true,
+  spacing,
 }: {
   /** From `?checkout_id=`. Nothing renders without one. */
   checkoutId: string | null
   className?: string
+  /**
+   * ⚠ LETS A CALLER TAKE THE BANNER AWAY WITHOUT UNMOUNTING IT. The plan
+   * step hides the checkout's answer once a cancellation supersedes it —
+   * "You're on Pro" over a subscription that is ending is stale news — and
+   * an unmounted element cannot animate out.
+   */
+  show?: boolean
+  /**
+   * ⚠ THE GAP THIS BLOCK OWES ITS NEIGHBOURS, WHICH ONLY THE CALLER KNOWS.
+   * `Reveal` animates height, so the gap has to travel with it or the space
+   * appears in one frame while the banner grows in over several. Default is
+   * the bottom gap of a `space-y-6` stack; under a card it is the top one.
+   */
+  spacing?: string
 }) {
   const router = useRouter()
   const [result, setResult] = React.useState<Result | null>(null)
@@ -74,6 +91,24 @@ export function CheckoutOutcome({
    */
   React.useEffect(() => {
     if (result?.status !== "granted") return
+
+    /*
+     * ⚠ NOT WHEN THE CARDS HAVE ALREADY APPLIED IT THEMSELVES. A checkout
+     * completed in the embed hands `PlanCards` the plan that was bought, and
+     * it updates in place — so this refresh had nothing left to correct and
+     * everything to spoil: it fired a second after the modal closed, blanked
+     * and re-rendered the tree under a toast about the payment, and undid the
+     * point of applying it locally. `reportOutcome` marks the URL when it has
+     * done that.
+     *
+     * ⚠ AND IT STILL RUNS ON THE REDIRECT RETURN, WHICH IS THE CASE IT WAS
+     * WRITTEN FOR. Coming back from Polar's own page is a fresh load: no
+     * component saw the success, the server render is a second older than
+     * the grant, and without this the banner says "You're on Pro" over a card
+     * that still says "Upgrade". Reported from production 2026-09-20.
+     */
+    if (window.location.search.includes("applied=1")) return
+
     router.refresh()
   }, [result?.status, router])
 
@@ -142,18 +177,44 @@ export function CheckoutOutcome({
 
   const view = present(result, timedOut)
 
+  /*
+   * ⚠ NOTHING IS SHOWN WHILE THE ANSWER IS STILL BEING FETCHED, AND THAT IS A
+   * DELIBERATE REVERSAL. This used to render an amber "Checking your payment"
+   * the instant the page loaded, which meant the ordinary happy path — pay,
+   * come back, grant lands a second or two later — was a warning-coloured box
+   * that turned green. Two states for one event, the first of which says
+   * "something may be wrong" about something that is going fine.
+   *
+   * ⚠ AND THE PAGE UNDERNEATH WAS SAYING THE OPPOSITE AT THE SAME TIME. The
+   * plan step is server-rendered from a `/console/me` fetched BEFORE the grant
+   * landed, so for those seconds the screen held an amber "checking" banner
+   * above a card marked "Current: Free" for somebody who had just paid for Pro.
+   * Waiting quietly and then saying one thing once is the honest version.
+   *
+   * ⚠ THE TIMEOUT STILL SPEAKS, BECAUSE SILENCE IS ONLY HONEST WHILE SOMETHING
+   * IS ACTUALLY HAPPENING. Once the ceiling fires there is nothing in flight,
+   * and a customer who paid needs to be told that rather than shown nothing.
+   */
+  /*
+   * ⚠ REVEALED RATHER THAN INSERTED, BECAUSE THIS BANNER ARRIVES LATE BY
+   * DESIGN. It is not rendered until the poll answers, so it appears a second
+   * or two after the checkout closes and shoves the whole page down in one
+   * frame — under somebody who is at that moment reading a toast about the
+   * payment they just made. Growing into place on the same spring the rest of
+   * the console uses turns a jump into the page making room.
+   *
+   * ⚠ AND IT IS `show`, NOT AN EARLY RETURN, so the exit animates too: the
+   * banner that says "waiting" collapses rather than vanishing when the
+   * answer lands and replaces it.
+   */
+  const visible = show && !(view.tone === "waiting" && !timedOut)
+
   return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-xl border p-4",
-        view.tone === "success" && "border-success/30 bg-success/5",
-        view.tone === "waiting" && "border-warning/30 bg-warning/5",
-        view.tone === "failed" && "border-danger/30 bg-danger/5",
-        className,
-      )}
-    >
-      <span aria-hidden className="mt-0.5 shrink-0">
-        {view.tone === "success" ? (
+    <BillingBanner
+      show={visible}
+      tone={view.tone}
+      icon={
+        view.tone === "success" ? (
           <CheckCircle2 className="size-5 text-success" />
         ) : view.tone === "failed" ? (
           <XCircle className="size-5 text-danger" />
@@ -161,17 +222,72 @@ export function CheckoutOutcome({
           <Spinner className="size-5" />
         ) : (
           <Clock className="size-5 text-warning" />
-        )}
-      </span>
+        )
+      }
+      title={view.title}
+      body={view.body}
+      className={className}
+      {...(spacing === undefined ? {} : { spacing })}
+    />
+  )
+}
 
-      <div className="space-y-1">
-        {/* aria-live so the heading is announced when polling flips it, rather
-            than leaving a screen reader on "Payment received" for ever. */}
-        <p aria-live="polite" className="text-sm font-medium">
-          {view.title}
-        </p>
-        <p className="text-sm text-muted-foreground">{view.body}</p>
+/**
+ * One banner, shared by everything on this screen that has news.
+ *
+ * ⚠ EXTRACTED THE MOMENT THERE WAS A SECOND MESSAGE TO SHOW. The plan step
+ * needs to say "You're keeping Pro" after a cancellation is called off, in
+ * the same place and the same shape as the checkout's own answer — and a
+ * second copy of this markup is how the two would come to disagree about a
+ * border colour, an icon size, or which spring they grow on.
+ *
+ * ⚠ IT TAKES `show` RATHER THAN BEING CONDITIONALLY RENDERED. An element
+ * removed by its parent cannot animate out — `AnimatePresence` needs to
+ * still own it — so every caller that wants the banner to LEAVE has to hand
+ * the decision in rather than act on it.
+ */
+export function BillingBanner({
+  show,
+  tone,
+  icon,
+  title,
+  body,
+  className,
+  spacing = "pb-6",
+}: {
+  show: boolean
+  tone: "success" | "waiting" | "failed"
+  icon: React.ReactNode
+  title: React.ReactNode
+  body: React.ReactNode
+  className?: string
+  /** See `Reveal`: the gap this block owns, re-expressed as padding. */
+  spacing?: string
+}) {
+  return (
+    <Reveal show={show} spacing={spacing}>
+      <div
+        className={cn(
+          "flex items-start gap-3 rounded-xl border p-4",
+          tone === "success" && "border-success/30 bg-success/5",
+          tone === "waiting" && "border-warning/30 bg-warning/5",
+          tone === "failed" && "border-danger/30 bg-danger/5",
+          className,
+        )}
+      >
+        <span aria-hidden className="mt-0.5 shrink-0">
+          {icon}
+        </span>
+
+        <div className="space-y-1">
+          {/* aria-live so the heading is announced when polling flips it, rather
+              than leaving a screen reader on "Payment received" for ever. */}
+          <p aria-live="polite" className="text-sm font-medium">
+            {title}
+          </p>
+          <p className="text-sm text-muted-foreground">{body}</p>
+        </div>
       </div>
-    </div>
+    </Reveal>
   )
 }
