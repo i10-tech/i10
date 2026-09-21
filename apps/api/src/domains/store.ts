@@ -903,9 +903,36 @@ export function domainStore({
       const holdsZones =
         existing.delegated &&
         (await (async () => {
-          const rows = (await db.execute(
-            sql`select * from core.zone_owner(${existing.name})`,
-          )) as unknown as { claim_domain_id: string | null; holders: number }[]
+          /*
+           * ⚠ A FAILED LOOKUP MUST NOT FAIL THE DELETE, AND IT DID. This runs
+           * BEFORE the row is removed, so anything it throws comes out of the
+           * route as "Could not delete the domain — Something went wrong." and
+           * the customer cannot delete their domain at all. Observed the first
+           * time a deployment ran this code against a database that had not
+           * had migration 0051 applied: `core.zone_owner` did not exist, and a
+           * missing function turned into an undeletable domain.
+           *
+           * ⚠ SO IT FAILS IN THE CHEAP DIRECTION, the same rule the rest of
+           * this teardown follows: not knowing whose zones these are means
+           * leaving them, which costs an inert record that the next verify of
+           * the name republishes wholesale — and that the orphan sweep now
+           * finds. Blocking the delete costs the customer the one action they
+           * asked for.
+           */
+          let rows: { claim_domain_id: string | null; holders: number }[]
+          try {
+            rows = (await db.execute(
+              sql`select * from core.zone_owner(${existing.name})`,
+            )) as unknown as { claim_domain_id: string | null; holders: number }[]
+          } catch (error) {
+            log?.error?.(
+              { err: String(error), tenantId, domain: existing.name },
+              "could not read who owns this domain's zones — deleting the row " +
+                "anyway and leaving the zones behind",
+            )
+            return false
+          }
+
           const owner = rows[0]
 
           /*

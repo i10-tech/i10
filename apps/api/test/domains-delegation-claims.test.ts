@@ -540,6 +540,42 @@ describe("deleting a delegated domain", () => {
   })
 
   /**
+   * ⚠ AND A LOOKUP THAT THROWS MUST NOT FAIL THE DELETE. This read happens
+   * BEFORE the row is removed, so anything it raises comes out of the route as
+   * "Could not delete the domain — Something went wrong." and the customer
+   * cannot delete their domain at all. It happened the first time this code met
+   * a database without migration 0051: a missing function turned into an
+   * undeletable domain. Leaving the zones is the cheap failure; refusing the
+   * delete is not.
+   */
+  it("still deletes the row when the owner lookup throws", async () => {
+    const zones = spyZones()
+    let deleted = false
+    const db = fakeDb({
+      select: () => [row()],
+      claim: () => [],
+      del: () => {
+        deleted = true
+      },
+      zoneOwner: () => {
+        throw new Error("function core.zone_owner(text) does not exist")
+      },
+    })
+
+    const store = domainStore({
+      ...base,
+      db,
+      identity: identity(),
+      zones,
+      delegation: delegating(),
+    })
+
+    expect(await store.remove(OWNER, ID)).toBe(true)
+    expect(deleted).toBe(true)
+    expect(zones.remove).not.toHaveBeenCalled()
+  })
+
+  /**
    * ⚠ A FUNCTION THAT ANSWERED NOTHING MUST NOT READ AS "MINE". If the definer
    * call returns no row at all — a migration not yet applied, a permission lost
    * — the count falls back to zero, and zero must not satisfy "I am the only
