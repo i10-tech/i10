@@ -44,6 +44,23 @@ export function RenameWorkspace({
   // from the server — fine until somebody renames it in another tab, at which
   // point this field silently disagrees with the heading above it.
   const [name, setName] = useSyncedState(current)
+
+  /**
+   * The name as last SAVED, which stopped being the name as last RENDERED the
+   * moment this component stopped refreshing the page.
+   *
+   * ⚠ WITHOUT IT, A RENAME CANNOT BE UNDONE WITHOUT A RELOAD. The guard used
+   * to compare against `current`, which is a server prop — and with no
+   * refresh it still says "testing" after a save to "testing 2". So typing
+   * "testing" back matched the prop, the button disabled itself, and the form
+   * insisted that the name it was showing was already in place when it was
+   * not. Reported straight after the refresh came out.
+   *
+   * ⚠ IT IS STILL SYNCED TO THE SERVER, so a rename in another tab — or any
+   * navigation that re-renders this page — moves both this and the field
+   * together, which is what `current` was doing correctly before.
+   */
+  const [saved, setSaved] = useSyncedState(current)
   const [pending, setPending] = React.useState(false)
 
   /*
@@ -67,7 +84,7 @@ export function RenameWorkspace({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (pending || !name.trim() || name.trim() === current) return
+    if (pending || !name.trim() || name.trim() === saved) return
 
     setPending(true)
     const result = await renameWorkspace(name.trim())
@@ -83,6 +100,7 @@ export function RenameWorkspace({
      * the time the form looks finished. It is one request against Clerk's
      * client and it is the only thing left to do.
      */
+    setSaved(name.trim())
     await reloadOrganization.current?.()
     setPending(false)
 
@@ -108,7 +126,7 @@ export function RenameWorkspace({
         />
         <Button
           type="submit"
-          disabled={pending || !name.trim() || name.trim() === current}
+          disabled={pending || !name.trim() || name.trim() === saved}
         >
           {pending && <Spinner />}
           Save
