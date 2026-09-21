@@ -45,6 +45,9 @@ function ops() {
       persist,
       enqueue,
       suppressedFor: mock(async () => new Set<string>()),
+      // ⚠ PERMISSIVE: these are the KEY-scope tests. The verified-domain gate
+      // is a different question with its own file.
+      sendableFrom: mock(async (_t: string, domains: string[]) => new Set(domains)),
       metering: unmetered,
       log: { warn: mock(), error: mock() },
     } as unknown as AcceptOps & {

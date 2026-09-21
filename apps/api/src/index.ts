@@ -43,6 +43,7 @@ import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
 import { authEmailSender } from "./auth-email/sender.js"
+import { domainOf } from "./send/address.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
@@ -492,6 +493,35 @@ const depthSources = {
  * Clerk. Failing to boot over it would make the API refuse to start on exactly
  * the deployments that have no customers to email.
  */
+/**
+ * The domain i10's own authentication mail leaves from.
+ *
+ * ⚠ IT IS THE ONE DOMAIN THE SEND GATE EXEMPTS, and it has to be derived here
+ * rather than assumed, because `AUTH_EMAIL_FROM` is configuration and may be a
+ * subdomain. See `SendPathOptions.alwaysSendable` for why the exemption exists
+ * at all and why it is attached to an ops object rather than to a request.
+ */
+const authEmailDomain = env.AUTH_EMAIL_FROM
+  ? (domainOf(env.AUTH_EMAIL_FROM) ?? null)
+  : null
+
+/*
+ * ⚠ SET BUT UNPARSEABLE IS A MISCONFIGURATION THAT MUST NOT PASS QUIETLY.
+ * `AUTH_EMAIL_FROM` is only `z.string().min(1)`, so it accepts a value with no
+ * address in it at all — and without a domain there is no exemption, the send
+ * gate refuses our own mail, and the env's own note names that exact outcome:
+ * "it must never be the case that we stop Clerk sending and then fail to send
+ * ourselves, because that is a sign-up nobody can complete." So this says so
+ * loudly and the block below declines to take over, which leaves Clerk
+ * delivering — the safe default rather than the degraded one.
+ */
+if (env.AUTH_EMAIL_FROM && !authEmailDomain) {
+  log.error(
+    { from: env.AUTH_EMAIL_FROM },
+    "AUTH_EMAIL_FROM has no parseable domain — clerk keeps delivering its own",
+  )
+}
+
 const authEmailTenantId = await (async () => {
   if (!env.AUTH_EMAIL_FROM) return null
 
@@ -587,13 +617,26 @@ const app = createApp({
     // would have nowhere to send from and nothing to attribute it to, and the
     // webhook then acknowledges the event while Clerk keeps sending — which is
     // the state the product is in today, and a safe place to fail to.
-    ...(env.AUTH_EMAIL_FROM && authEmailTenantId
+    ...(env.AUTH_EMAIL_FROM && authEmailTenantId && authEmailDomain
       ? {
           authEmail: authEmailDelivery({
             sender: authEmailSender({
               tenantId: authEmailTenantId,
               from: env.AUTH_EMAIL_FROM,
-              ops: acceptDatabaseOps({ db, queues: sendQueues }),
+              /*
+               * ⚠ ITS OWN OPS OBJECT, CARRYING THE ONE EXEMPTION THE SEND GATE
+               * ALLOWS. `DomainStore.create` refuses to create a row for our
+               * own sending domains, so `AUTH_EMAIL_FROM` can never be a
+               * verified domain and the gate would refuse every password reset
+               * in the product. Scoping the exemption to the object the
+               * auth-email path builds — rather than to a flag on a request —
+               * is what keeps it unreachable from a customer's send.
+               */
+              ops: acceptDatabaseOps({
+                db,
+                queues: sendQueues,
+                alwaysSendable: [authEmailDomain],
+              }),
               metering,
               log,
             }),
