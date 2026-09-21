@@ -71,6 +71,8 @@ export function PlanCards({
   onKeep,
   onSubscribed,
   onCheckout,
+  onCancelled,
+  onResumed,
 }: {
   plans: PlanSummary[]
   /**
@@ -125,6 +127,14 @@ export function PlanCards({
    * address bar is updated behind it, for a reload.
    */
   onCheckout?: (checkoutId: string) => void
+  /**
+   * ⚠ SO THE NEWS ABOVE THE CARDS CAN STOP BEING TRUE. "You're on Pro" over
+   * a subscription that is now ending is stale the moment a downgrade is
+   * accepted, and the banner has no way of knowing on its own.
+   */
+  onCancelled?: () => void
+  /** The mirror of `onCancelled`, for a cancellation called off. */
+  onResumed?: () => void
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -154,6 +164,17 @@ export function PlanCards({
   const [subscribed, setSubscribed] = React.useState<string | null>(null)
 
   /*
+   * ⚠ WHETHER A CANCELLATION IS PENDING, OVERRIDING THE SERVER'S ANSWER
+   * WHILE THIS COMPONENT IS MOUNTED. Cancelling and un-cancelling both used
+   * to end in `router.refresh()`, which re-renders the tree — the same blank
+   * frame the checkout path had, on two more buttons. The only thing either
+   * action changes on this screen is this flag: the period end does not move
+   * when a subscription is marked to end, so the date the cards show is
+   * already in hand.
+   */
+  const [endsLocally, setEndsLocally] = React.useState<boolean | null>(null)
+
+  /*
    * ⚠ THE PLAN JUST BOUGHT OUTRANKS THE ONE THE SERVER LAST SENT, for as long
    * as this component is mounted. `billing` was rendered before the checkout
    * and cannot know about it; without this the card somebody just paid for
@@ -168,9 +189,10 @@ export function PlanCards({
    * presence of a date to decide whether to disable the free plan, so an
    * empty string would disable it with nothing to show.
    */
+  const cancelling = endsLocally ?? billing.subscription?.cancel_at_period_end ?? false
+
   const endingAt =
-    billing.subscription?.cancel_at_period_end &&
-    billing.subscription.current_period_end
+    cancelling && billing.subscription?.current_period_end
       ? formatExact(billing.subscription.current_period_end)
       : null
 
@@ -339,8 +361,9 @@ export function PlanCards({
       return
     }
 
+    setEndsLocally(false)
     toast.success("Your subscription will continue")
-    router.refresh()
+    onResumed?.()
   }
 
   async function choose(plan: PlanSummary) {
@@ -379,16 +402,26 @@ export function PlanCards({
        * no payment, and nothing moves until the period ends.
        */
       if (leavingPaidPlan(plan)) {
+        setEndsLocally(true)
         toast.success("Subscription ending", {
           description:
             "You keep your current plan until the end of the period you have " +
             "paid for, then move to the free allowance.",
         })
-      } else {
-        toast.success("Plan change requested", {
-          description: "Your allowances move as soon as the payment clears.",
-        })
+        onCancelled?.()
+        return
       }
+
+      toast.success("Plan change requested", {
+        description: "Your allowances move as soon as the payment clears.",
+      })
+      /*
+       * ⚠ A MOVE BETWEEN PAID PLANS STILL RE-READS, AND THE CANCELLATION
+       * ABOVE NO LONGER DOES. The difference is what each one changes: a
+       * cancellation flips one boolean whose date we already hold, while a
+       * scheduled downgrade produces a plan id and a date that only the
+       * server knows. Modelling the second locally would be inventing them.
+       */
       router.refresh()
       return
     }

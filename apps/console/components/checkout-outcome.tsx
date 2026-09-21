@@ -44,10 +44,18 @@ const GIVE_UP_MS = 90_000
 export function CheckoutOutcome({
   checkoutId,
   className,
+  show = true,
 }: {
   /** From `?checkout_id=`. Nothing renders without one. */
   checkoutId: string | null
   className?: string
+  /**
+   * ⚠ LETS A CALLER TAKE THE BANNER AWAY WITHOUT UNMOUNTING IT. The plan
+   * step hides the checkout's answer once a cancellation supersedes it —
+   * "You're on Pro" over a subscription that is ending is stale news — and
+   * an unmounted element cannot animate out.
+   */
+  show?: boolean
 }) {
   const router = useRouter()
   const [result, setResult] = React.useState<Result | null>(null)
@@ -191,38 +199,81 @@ export function CheckoutOutcome({
    * banner that says "waiting" collapses rather than vanishing when the
    * answer lands and replaces it.
    */
-  const visible = !(view.tone === "waiting" && !timedOut)
+  const visible = show && !(view.tone === "waiting" && !timedOut)
 
   return (
-    <Reveal show={visible} spacing="pb-6">
+    <BillingBanner
+      show={visible}
+      tone={view.tone}
+      icon={
+        view.tone === "success" ? (
+          <CheckCircle2 className="size-5 text-success" />
+        ) : view.tone === "failed" ? (
+          <XCircle className="size-5 text-danger" />
+        ) : result === null ? (
+          <Spinner className="size-5" />
+        ) : (
+          <Clock className="size-5 text-warning" />
+        )
+      }
+      title={view.title}
+      body={view.body}
+      className={className}
+    />
+  )
+}
+
+/**
+ * One banner, shared by everything on this screen that has news.
+ *
+ * ⚠ EXTRACTED THE MOMENT THERE WAS A SECOND MESSAGE TO SHOW. The plan step
+ * needs to say "You're keeping Pro" after a cancellation is called off, in
+ * the same place and the same shape as the checkout's own answer — and a
+ * second copy of this markup is how the two would come to disagree about a
+ * border colour, an icon size, or which spring they grow on.
+ *
+ * ⚠ IT TAKES `show` RATHER THAN BEING CONDITIONALLY RENDERED. An element
+ * removed by its parent cannot animate out — `AnimatePresence` needs to
+ * still own it — so every caller that wants the banner to LEAVE has to hand
+ * the decision in rather than act on it.
+ */
+export function BillingBanner({
+  show,
+  tone,
+  icon,
+  title,
+  body,
+  className,
+}: {
+  show: boolean
+  tone: "success" | "waiting" | "failed"
+  icon: React.ReactNode
+  title: React.ReactNode
+  body: React.ReactNode
+  className?: string
+}) {
+  return (
+    <Reveal show={show} spacing="pb-6">
       <div
         className={cn(
           "flex items-start gap-3 rounded-xl border p-4",
-          view.tone === "success" && "border-success/30 bg-success/5",
-          view.tone === "waiting" && "border-warning/30 bg-warning/5",
-          view.tone === "failed" && "border-danger/30 bg-danger/5",
+          tone === "success" && "border-success/30 bg-success/5",
+          tone === "waiting" && "border-warning/30 bg-warning/5",
+          tone === "failed" && "border-danger/30 bg-danger/5",
           className,
         )}
       >
         <span aria-hidden className="mt-0.5 shrink-0">
-          {view.tone === "success" ? (
-            <CheckCircle2 className="size-5 text-success" />
-          ) : view.tone === "failed" ? (
-            <XCircle className="size-5 text-danger" />
-          ) : result === null ? (
-            <Spinner className="size-5" />
-          ) : (
-            <Clock className="size-5 text-warning" />
-          )}
+          {icon}
         </span>
 
         <div className="space-y-1">
           {/* aria-live so the heading is announced when polling flips it, rather
-            than leaving a screen reader on "Payment received" for ever. */}
+              than leaving a screen reader on "Payment received" for ever. */}
           <p aria-live="polite" className="text-sm font-medium">
-            {view.title}
+            {title}
           </p>
-          <p className="text-sm text-muted-foreground">{view.body}</p>
+          <p className="text-sm text-muted-foreground">{body}</p>
         </div>
       </div>
     </Reveal>

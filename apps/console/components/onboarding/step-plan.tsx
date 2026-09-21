@@ -1,10 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, CheckCircle2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { Reveal } from "@repo/ui/components/reveal"
-import { CheckoutOutcome } from "@/components/checkout-outcome"
+import { BillingBanner, CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
 import { onPaidPlan } from "@/lib/billing"
 import type { BillingState, PlanSummary } from "@/lib/types"
@@ -66,6 +66,22 @@ export function StepPlan({
   const [liveCheckout, setLiveCheckout] = React.useState<string | null>(null)
   const outcomeId = liveCheckout ?? checkoutId
 
+  /**
+   * What the banner above the cards is currently saying.
+   *
+   * ⚠ IT HAS TO BE ABLE TO STOP SAYING THINGS, WHICH IS WHY THIS IS A MODE
+   * AND NOT A FLAG. "You're on Pro" is true right up until somebody presses
+   * Downgrade, and then it is the loudest wrong thing on the screen — it sat
+   * there, green and confident, over a subscription that had just been set
+   * to end.
+   *
+   * ⚠ AND `null` IS A STATE THE BANNER IS TOLD ABOUT RATHER THAN REMOVED BY.
+   * Both banners keep their place in the tree and animate out; unmounting
+   * them would make the news vanish between two frames, which is the jump
+   * this whole screen has been chasing out.
+   */
+  const [news, setNews] = React.useState<"checkout" | "keeping" | null>("checkout")
+
   /*
    * ⚠ EITHER A PAYMENT IN THIS SESSION OR A SUBSCRIPTION THAT WAS ALREADY
    * THERE. The step is finished in both cases, and reading only the first
@@ -84,7 +100,30 @@ export function StepPlan({
        * upgraded mid-set-up got a toast and nothing else. Same component, same
        * row, same answer.
        */}
-      {outcomeId && <CheckoutOutcome checkoutId={outcomeId} />}
+      {outcomeId && (
+        <CheckoutOutcome checkoutId={outcomeId} show={news === "checkout"} />
+      )}
+
+      {/*
+       * ⚠ THE ANSWER TO "Keep subscription", IN THE PLACE THE LAST ANSWER
+       * WAS. Pressing it un-marks a subscription that was going to end, and
+       * without a word here the only evidence was a card quietly changing
+       * back — easy to miss, and the opposite of the cancellation, which
+       * announces itself.
+       */}
+      <BillingBanner
+        show={news === "keeping"}
+        tone="success"
+        icon={<CheckCircle2 className="size-5 text-success" />}
+        /*
+         * ⚠ "You're", NOT "You are", BECAUSE THE BANNER BESIDE IT SAYS
+         * "You're on Pro". These two appear in the same place, minutes
+         * apart, and one of them spelling the contraction out reads as a
+         * different voice — see `present` in lib/checkout-outcome.ts.
+         */
+        title={`You're keeping ${billing.plan?.name ?? "your plan"}`}
+        body="Nothing was charged and nothing changes — the cancellation is called off and your plan renews as usual."
+      />
 
       {/*
        * ⚠ THE HEADING ASKS FOR A DECISION NOW, RATHER THAN NARRATING ONE
@@ -95,7 +134,7 @@ export function StepPlan({
        */}
       <div className="text-center">
         <h1 className="text-xl font-semibold tracking-tight">
-          {outcomeId ? "You are all set" : "Pick a plan"}
+          {outcomeId ? "You're all set" : "Pick a plan"}
         </h1>
         <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
           {outcomeId
@@ -139,7 +178,12 @@ export function StepPlan({
              * screen.
              */
             onKeep={onDone}
-            onCheckout={setLiveCheckout}
+            onCheckout={(id) => {
+              setLiveCheckout(id)
+              setNews("checkout")
+            }}
+            onCancelled={() => setNews(null)}
+            onResumed={() => setNews("keeping")}
             onSubscribed={() => {
               setPaid(true)
               onSubscribed?.()
