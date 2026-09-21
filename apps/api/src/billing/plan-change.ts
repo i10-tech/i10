@@ -113,6 +113,18 @@ async function rankOf(
   })
 }
 
+/**
+ * The subscription states that can still be amended.
+ *
+ * ⚠ `trialing` COUNTS AND `past_due` COUNTS. A trial is a live subscription
+ * that Polar will happily move between products, and a past-due one is the
+ * case where changing plan is the most useful thing somebody can do — pushing
+ * them to a fresh checkout there would leave the failing one running beside
+ * it. Everything else — `canceled`, `incomplete`, `incomplete_expired`,
+ * `unpaid` — has nothing left to amend.
+ */
+const LIVE = new Set(["active", "trialing", "past_due"])
+
 export function planChange(deps: PlanChangeDeps): PlanChange {
   return {
     async to(tenantId, planId) {
@@ -136,7 +148,26 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       }
 
       const current = await deps.subscriptions.current(tenantId)
-      if (!current.polarSubscriptionId) {
+
+      /*
+       * ⚠ A DEAD SUBSCRIPTION IS THE SAME AS NO SUBSCRIPTION, AND READING THE
+       * ID ALONE MISSED THAT. The row survives a cancellation — it has to, it
+       * is the history — so `polar_subscription_id` is still populated for
+       * somebody whose subscription ended months ago. This went straight to
+       * `PATCH /v1/subscriptions/<canceled one>`, which Polar refuses, and the
+       * refusal came back to the customer as "check the payment method" about
+       * a subscription that no longer exists to charge anything to.
+       *
+       * ⚠ MEASURED, NOT IMAGINED. The local sandbox tenant held
+       * `22fe849a-…`, which Polar reports as `canceled`; every attempt to move
+       * plan from the console failed on it.
+       *
+       * ⚠ AND THE ANSWER IS A CHECKOUT, WHICH IS WHAT THE CONSOLE ALREADY
+       * DOES WITH THIS REJECTION. Buying again is the only way back onto a
+       * paid plan once a subscription has ended — there is nothing left to
+       * amend.
+       */
+      if (!current.polarSubscriptionId || !LIVE.has(current.status ?? "")) {
         // ⚠ NOTHING TO MOVE. A tenant with no subscription buys one through
         // checkout; `PATCH` on a subscription that does not exist is a 404 from
         // Polar and a confusing one to surface.

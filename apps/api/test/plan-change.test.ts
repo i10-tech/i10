@@ -300,6 +300,70 @@ describe("changing a plan", () => {
   })
 
   /**
+   * ⚠ A SUBSCRIPTION THAT HAS ENDED IS NOT ONE THAT CAN BE AMENDED, AND THE
+   * ROW STILL HOLDS ITS ID. `core.subscriptions` keeps the row through a
+   * cancellation — it is the history — so reading `polar_subscription_id`
+   * alone said "there is something to change" about a subscription Polar
+   * closed months ago. The `PATCH` was refused and the refusal reached the
+   * customer as "check the payment method", about a subscription with nothing
+   * left to charge.
+   *
+   * ⚠ MEASURED AGAINST A REAL SANDBOX: the stored id was `canceled` at Polar
+   * and every plan change from the console failed on it.
+   */
+  it.each(["canceled", "incomplete", "incomplete_expired", "unpaid"])(
+    "sends a %s subscription to checkout instead of patching it",
+    async (status) => {
+      const updateSubscription = mock(async () => {})
+      const outcome = await change({
+        polar: polar({ updateSubscription }),
+        subscriptions: ops({
+          current: async () => ({
+            plan: "pro",
+            status,
+            cancelAtPeriodEnd: false,
+            currentPeriodEnd: null,
+            scheduledPlan: null,
+            scheduledAt: null,
+            polarSubscriptionId: "sub_dead",
+          }),
+        }),
+      }).to(TENANT, "pro")
+
+      expect(outcome).toMatchObject({ status: "rejected" })
+      // ⚠ AND POLAR IS NEVER CALLED. The point is not a better message for the
+      // refusal; it is not making the request.
+      expect(updateSubscription).not.toHaveBeenCalled()
+    },
+  )
+
+  /*
+   * ⚠ A TRIAL AND A PAST-DUE SUBSCRIPTION ARE BOTH STILL AMENDABLE, and
+   * past-due especially: changing plan is the most useful thing somebody in
+   * that state can do, and pushing them to a fresh checkout would leave the
+   * failing subscription running beside the new one.
+   */
+  it.each(["trialing", "past_due"])("still amends a %s subscription", async (status) => {
+    const updateSubscription = mock(async () => {})
+    await change({
+      polar: polar({ updateSubscription }),
+      subscriptions: ops({
+        current: async () => ({
+          plan: "starter",
+          status,
+          cancelAtPeriodEnd: false,
+          currentPeriodEnd: null,
+          scheduledPlan: null,
+          scheduledAt: null,
+          polarSubscriptionId: "sub_live",
+        }),
+      }),
+    }).to(TENANT, "pro")
+
+    expect(updateSubscription).toHaveBeenCalled()
+  })
+
+  /**
    * ⚠ A DECLINED CARD IS NOT AN OUTAGE. For `invoice`, Polar applies the change
    * only if the payment succeeds — so the subscription is untouched and the
    * customer's next step is their bank, not our support queue.

@@ -55,6 +55,54 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
   const { resolvedTheme } = useTheme()
   const [pending, setPending] = React.useState(false)
 
+  /*
+   * ⚠ NOT EVERY CARD IS SAVED WITHOUT LEAVING THE PAGE, AND THE ONES THAT ARE
+   * NOT HAD NOWHERE TO REPORT BACK TO. A method that needs the bank's own
+   * approval — 3-D Secure, iDEAL, Bancontact — takes the whole browser to the
+   * issuer and returns it to `embed_return_url`, which the SDK sets to this
+   * page. The `success` listener below is on an iframe that no longer exists
+   * by then, so somebody completing a 3-D Secure challenge came back to a
+   * billing page that said nothing, still showed the old card, and carried
+   * `?polar_payment_method_status=succeeded` in the address bar.
+   *
+   * ⚠ THE SDK STRIPS THE PARAMETER AS IT READS IT, which is why this must run
+   * exactly once and why the result cannot be recovered afterwards. See
+   * `getRedirectResult` in @polar-sh/checkout.
+   *
+   * ⚠ AND THE MODULE IS STILL ONLY LOADED WHEN THERE IS SOMETHING TO READ.
+   * The whole point of importing it on click is to keep it out of the billing
+   * page's bundle; importing it on mount to ask a question whose answer is
+   * almost always "no" would undo that, so the query string is checked first.
+   */
+  const read = React.useRef(false)
+  React.useEffect(() => {
+    if (read.current) return
+    read.current = true
+
+    if (!window.location.search.includes("polar_payment_method_status")) return
+
+    void (async () => {
+      const { PolarEmbedPaymentMethod } = await import(
+        "@polar-sh/checkout/payment-method"
+      )
+      const result = PolarEmbedPaymentMethod.getRedirectResult()
+      if (!result) return
+
+      if (result.status === "succeeded") {
+        toast.success("Card saved")
+        router.refresh()
+        return
+      }
+
+      // ⚠ THE BANK REFUSED, NOT US. There is nothing to retry automatically
+      // and no detail to show — Polar does not pass one back — so this says
+      // what happened and leaves the button where it was.
+      toast.error("That card was not saved", {
+        description: "Your bank did not approve it. Try again or use another card.",
+      })
+    })()
+  }, [router])
+
   async function open() {
     if (pending) return
     setPending(true)
