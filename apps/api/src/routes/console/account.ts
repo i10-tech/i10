@@ -317,6 +317,45 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     }
   })
 
+  /**
+   * Calling off a cancellation that has not taken effect yet.
+   *
+   * ⚠ ITS OWN ROUTE RATHER THAN A PLAN CHANGE TO THE PLAN THEY ARE ALREADY
+   * ON, which is what it would have to be otherwise — and which `to()`
+   * correctly answers "unchanged" to. Nothing is bought here and no product
+   * moves; the subscription stops being marked to end.
+   *
+   * ⚠ AND IT IS REACHABLE FOR THE WHOLE OF THE REMAINING PERIOD, which can be
+   * a month. Before it existed, cancelling was a decision somebody could not
+   * take back without waiting for their plan to lapse and buying it again.
+   */
+  app.post("/billing/resume", async (c) => {
+    if (!d.billing?.planChange) return c.json(notWired("Plan changes"), 501)
+    const { tenantId } = c.get("auth")
+
+    const outcome = await d.billing.planChange.resume(tenantId)
+
+    switch (outcome.status) {
+      case "requested":
+        // ⚠ 202 FOR THE SAME REASON THE PLAN ROUTE USES IT. Polar has taken
+        // it; their webhook is what makes it true everywhere else.
+        return c.json(outcome, 202)
+      case "unchanged":
+        return c.json({ status: "unchanged" })
+      case "rejected":
+        return c.json(validation(outcome.reason), 422)
+      default:
+        return c.json(
+          {
+            statusCode: 402,
+            name: "invalid_access" as const,
+            message: outcome.reason,
+          },
+          402,
+        )
+    }
+  })
+
   // ───────────────────────────────────────────────────────────────────────────
   // Onboarding
   // ───────────────────────────────────────────────────────────────────────────

@@ -90,6 +90,15 @@ export interface PlanChangeDeps {
 
 export interface PlanChange {
   to(tenantId: string, planId: string): Promise<ChangeOutcome>
+  /**
+   * Calls off a cancellation that has not taken effect yet.
+   *
+   * ⚠ NOT A PLAN CHANGE, WHICH IS WHY IT IS ITS OWN METHOD. Nothing is
+   * bought, no product moves and no proration is decided — the subscription
+   * simply stops being marked to end. Routing it through `to()` would mean
+   * inventing a plan id for "the one you already have".
+   */
+  resume(tenantId: string): Promise<ChangeOutcome>
 }
 
 /** Catalogue plans, and this tenant's own custom ones. Nobody else's. */
@@ -243,6 +252,49 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       )
       return { status: "requested", direction, plan: planId }
     },
+
+    async resume(tenantId) {
+      const current = await deps.subscriptions.current(tenantId)
+
+      if (!current.polarSubscriptionId || !LIVE.has(current.status ?? "")) {
+        /*
+         * ⚠ THE SUBSCRIPTION HAS TO STILL BE ALIVE. Once the period has
+         * passed there is nothing to un-mark — Polar has ended it — and the
+         * only way back is buying again. Saying so is better than a 404 from
+         * a `PATCH` on a closed subscription.
+         */
+        return {
+          status: "rejected",
+          reason: "That subscription has already ended. Start a checkout to subscribe.",
+        }
+      }
+
+      // ⚠ NOTHING TO CALL OFF. Not an error: two clicks on one button, or a
+      // page that had not caught up, and both should be quiet.
+      if (!current.cancelAtPeriodEnd) return { status: "unchanged" }
+
+      try {
+        await deps.polar.resumeSubscription(current.polarSubscriptionId)
+        // ⚠ AFTER THE CALL, SO A REFUSAL RECORDS NOTHING — the same ordering
+        // `noteCancelling` follows and for the same reason.
+        await deps.subscriptions.noteResuming(tenantId)
+      } catch (error) {
+        deps.log.error(
+          {
+            err: error,
+            tenantId,
+            ...(error instanceof PolarCallError
+              ? { polarStatus: error.status, polarDetail: error.detail.slice(0, 500) }
+              : {}),
+          },
+          "subscription resume failed",
+        )
+        return { status: "failed", reason: reasonFor(error) }
+      }
+
+      deps.log.info({ tenantId, plan: current.plan }, "subscription resumed")
+      return { status: "requested", direction: "upgrade", plan: current.plan ?? "" }
+    },
   }
 }
 
@@ -270,10 +322,23 @@ function reasonFor(error: unknown): string {
 
   switch (error.status) {
     case 401:
-    case 403:
       // ⚠ OUR CREDENTIAL, NOT THEIR CARD. Usually a token for the other
       // environment — a sandbox token against api.polar.sh, or the reverse.
       return "Billing is not configured correctly on our side. We have logged it."
+    case 403:
+      /*
+       * ⚠ 403 IS TWO DIFFERENT FAILURES AND THE BODY IS WHAT SEPARATES THEM.
+       * Polar answers `insufficient_scope` when our token lacks a scope,
+       * which is ours to fix and nothing to do with the customer — but it
+       * also answers 403 for an operation it will not perform on THIS
+       * subscription, which is a fact about their subscription. Collapsing
+       * both into "configured incorrectly on our side" told somebody
+       * cancelling an already-cancelling subscription that our billing was
+       * broken.
+       */
+      return error.detail.includes("insufficient_scope")
+        ? "Billing is not configured correctly on our side. We have logged it."
+        : "Polar would not apply that change to this subscription."
     case 404:
       /*
        * ⚠ THE SUBSCRIPTION IS UNKNOWN TO POLAR, WHICH IS ALMOST ALWAYS US

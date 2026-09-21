@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Reveal } from "@repo/ui/components/reveal"
 import { useRouter } from "next/navigation"
 import { CheckCircle2, Clock, XCircle } from "lucide-react"
 import { cn } from "cn"
@@ -160,38 +161,52 @@ export function CheckoutOutcome({
    * IS ACTUALLY HAPPENING. Once the ceiling fires there is nothing in flight,
    * and a customer who paid needs to be told that rather than shown nothing.
    */
-  if (view.tone === "waiting" && !timedOut) return null
+  /*
+   * ⚠ REVEALED RATHER THAN INSERTED, BECAUSE THIS BANNER ARRIVES LATE BY
+   * DESIGN. It is not rendered until the poll answers, so it appears a second
+   * or two after the checkout closes and shoves the whole page down in one
+   * frame — under somebody who is at that moment reading a toast about the
+   * payment they just made. Growing into place on the same spring the rest of
+   * the console uses turns a jump into the page making room.
+   *
+   * ⚠ AND IT IS `show`, NOT AN EARLY RETURN, so the exit animates too: the
+   * banner that says "waiting" collapses rather than vanishing when the
+   * answer lands and replaces it.
+   */
+  const visible = !(view.tone === "waiting" && !timedOut)
 
   return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-xl border p-4",
-        view.tone === "success" && "border-success/30 bg-success/5",
-        view.tone === "waiting" && "border-warning/30 bg-warning/5",
-        view.tone === "failed" && "border-danger/30 bg-danger/5",
-        className,
-      )}
-    >
-      <span aria-hidden className="mt-0.5 shrink-0">
-        {view.tone === "success" ? (
-          <CheckCircle2 className="size-5 text-success" />
-        ) : view.tone === "failed" ? (
-          <XCircle className="size-5 text-danger" />
-        ) : result === null ? (
-          <Spinner className="size-5" />
-        ) : (
-          <Clock className="size-5 text-warning" />
+    <Reveal show={visible} spacing="pb-6">
+      <div
+        className={cn(
+          "flex items-start gap-3 rounded-xl border p-4",
+          view.tone === "success" && "border-success/30 bg-success/5",
+          view.tone === "waiting" && "border-warning/30 bg-warning/5",
+          view.tone === "failed" && "border-danger/30 bg-danger/5",
+          className,
         )}
-      </span>
+      >
+        <span aria-hidden className="mt-0.5 shrink-0">
+          {view.tone === "success" ? (
+            <CheckCircle2 className="size-5 text-success" />
+          ) : view.tone === "failed" ? (
+            <XCircle className="size-5 text-danger" />
+          ) : result === null ? (
+            <Spinner className="size-5" />
+          ) : (
+            <Clock className="size-5 text-warning" />
+          )}
+        </span>
 
-      <div className="space-y-1">
-        {/* aria-live so the heading is announced when polling flips it, rather
+        <div className="space-y-1">
+          {/* aria-live so the heading is announced when polling flips it, rather
             than leaving a screen reader on "Payment received" for ever. */}
-        <p aria-live="polite" className="text-sm font-medium">
-          {view.title}
-        </p>
-        <p className="text-sm text-muted-foreground">{view.body}</p>
+          <p aria-live="polite" className="text-sm font-medium">
+            {view.title}
+          </p>
+          <p className="text-sm text-muted-foreground">{view.body}</p>
+        </div>
       </div>
-    </div>
+    </Reveal>
   )
 }

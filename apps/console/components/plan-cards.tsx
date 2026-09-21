@@ -8,10 +8,11 @@ import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
-import { changePlan, startCheckout } from "@/lib/actions"
+import { changePlan, resumeSubscription, startCheckout } from "@/lib/actions"
 import { openPolarCheckout } from "@/lib/polar-embed"
-import { formatBytes, formatNumber } from "@/lib/format"
-import type { PlanSummary } from "@/lib/types"
+import { hasLiveSubscription } from "@/lib/billing"
+import { formatBytes, formatExact, formatNumber } from "@/lib/format"
+import type { BillingState, PlanSummary } from "@/lib/types"
 
 /**
  * The plan picker.
@@ -61,18 +62,32 @@ function describeEntitlement(entitlement: PlanSummary["entitlements"][number]): 
   return `${amount} ${label}${period}`
 }
 
+/** `pending` while a cancellation is being called off. Not a plan id. */
+const RESUMING = "\u0000resuming"
+
 export function PlanCards({
   plans,
-  currentPlanId,
-  hasSubscription,
+  billing,
   onKeep,
-  endingAt = null,
-  scheduledPlanId = null,
-  scheduledAt = null,
 }: {
   plans: PlanSummary[]
-  currentPlanId: string | null
-  hasSubscription: boolean
+  /**
+   * The whole billing state, rather than five facts derived from it.
+   *
+   * ⚠ THE DERIVATION USED TO LIVE AT EACH CALL SITE AND THEY DRIFTED, WHICH
+   * IS A BUG A CUSTOMER SAW. The billing page worked out `endingAt` and
+   * `scheduledPlanId` from `billing.subscription`; the onboarding step passed
+   * neither. So somebody who cancelled on the billing page — where the free
+   * card correctly went to a disabled "Ending" — walked into set-up and found
+   * "Cancel subscription" live again, pressed it, and got a second
+   * cancellation refused by Polar and reported as our misconfiguration.
+   *
+   * ⚠ SO THE COMPONENT DERIVES ITS OWN, AND THERE IS ONE OF IT. Every prop
+   * these cards need is a function of the billing state and the catalogue;
+   * asking a caller to compute them was asking two callers to agree, forever,
+   * about a subscription's deferred states.
+   */
+  billing: BillingState
   /**
    * What pressing the CURRENT plan's card does, where staying on it is a real
    * choice rather than a statement of fact.
@@ -90,30 +105,44 @@ export function PlanCards({
    * means is "keep this and move on" — nothing is bought and nothing changes.
    */
   onKeep?: () => void
-  /**
-   * ⚠ SET WHEN THE SUBSCRIPTION IS ALREADY CANCELLING. Without it the free card
-   * keeps offering "Cancel subscription" to somebody who has already cancelled,
-   * and pressing it a second time looks like the first press did nothing.
-   */
-  endingAt?: string | null
-  /**
-   * The plan a deferred change is already moving to, and when.
-   *
-   * ⚠ THE SAME PROBLEM `endingAt` SOLVES, FOR THE OTHER KIND OF DEFERRED
-   * CHANGE. A downgrade is applied at the period boundary, so the card for the
-   * plan they are moving TO still reads "Downgrade" and is still pressable —
-   * and pressing it sends a second PATCH that supersedes an identical pending
-   * update. Nothing changes, no error appears, and the only reading available
-   * is that the button does not work.
-   */
-  scheduledPlanId?: string | null
-  scheduledAt?: string | null
 }) {
   const router = useRouter()
   const pathname = usePathname()
   const { resolvedTheme } = useTheme()
+  /*
+   * ⚠ A SENTINEL RATHER THAN A SECOND FLAG. `pending` holds the plan id being
+   * acted on; resuming is not about a plan, so it needs a value that cannot
+   * collide with one — and sharing the flag is what keeps every other card
+   * disabled while it runs.
+   */
   const [pending, setPending] = React.useState<string | null>(null)
   const [confirming, setConfirming] = React.useState<PlanSummary | null>(null)
+
+  const currentPlanId = billing.plan?.id ?? null
+  const hasSubscription = hasLiveSubscription(billing)
+
+  /*
+   * ⚠ ONLY WHEN IT IS ACTUALLY ENDING. `cancel_at_period_end` with no date is
+   * a subscription Polar has marked but not yet dated; the cards use the
+   * presence of a date to decide whether to disable the free plan, so an
+   * empty string would disable it with nothing to show.
+   */
+  const endingAt =
+    billing.subscription?.cancel_at_period_end &&
+    billing.subscription.current_period_end
+      ? formatExact(billing.subscription.current_period_end)
+      : null
+
+  /*
+   * ⚠ THE SAME RULE, FOR THE OTHER DEFERRED CHANGE. A card whose plan is
+   * already scheduled must not offer "Downgrade" again: pressing it sends a
+   * second PATCH that supersedes an identical pending update, which changes
+   * nothing and reads as the first press having failed.
+   */
+  const scheduledPlanId = billing.subscription?.scheduled_plan_id ?? null
+  const scheduledAt = billing.subscription?.scheduled_at
+    ? formatExact(billing.subscription.scheduled_at)
+    : null
 
   const current = plans.find((plan) => plan.id === currentPlanId) ?? null
 
@@ -183,6 +212,33 @@ export function PlanCards({
    */
   const leavingPaidPlan = (plan: PlanSummary) =>
     hasSubscription && current !== null && plan.rank === 0 && plan.rank < current.rank
+
+  /*
+   * ⚠ THE WAY BACK FROM A CANCELLATION, WHICH DID NOT EXIST. Cancelling is
+   * deferred to the period boundary — they have paid for the rest of the
+   * month — so for up to a month the subscription is alive, billed for, and
+   * marked to end, and every control on this screen read that as settled.
+   * The only route back was to wait for it to lapse and buy it again.
+   *
+   * ⚠ IT IS NOT A PURCHASE AND MUST NOT LOOK LIKE ONE. Nothing is charged;
+   * the mark is removed from a subscription that is already running, which is
+   * why this is a plain button and not a checkout.
+   */
+  async function resume() {
+    if (pending) return
+    setPending(RESUMING)
+
+    const result = await resumeSubscription()
+    setPending(null)
+
+    if (!result.ok) {
+      toast.error("Could not keep your subscription", { description: result.error })
+      return
+    }
+
+    toast.success("Your subscription will continue")
+    router.refresh()
+  }
 
   async function choose(plan: PlanSummary) {
     if (pending) return
@@ -294,8 +350,17 @@ export function PlanCards({
         // lib/polar-embed.ts for the checkout that succeeded in silence.
         checkoutId: result.data.id,
         onSuccess: () => {
+          /*
+           * ⚠ LONGER THAN THE DEFAULT, BECAUSE A NAVIGATION HAPPENS UNDER IT.
+           * `reportOutcome` replaces the URL and refreshes the tree a moment
+           * later, and at Sonner's default the toast was already fading while
+           * the page re-rendered — so the one acknowledgement somebody gets
+           * for a payment was gone before they could read it. It has to
+           * outlive the refresh it triggers.
+           */
           toast.success("Payment received", {
             description: "Setting up your plan — it appears here in a moment.",
+            duration: 8000,
           })
           // ⚠ THE BANNER IS THE ACTUAL ANSWER; THE TOAST IS ONLY THE FIRST
           // ACKNOWLEDGEMENT. It polls our own row and says "You're on Pro" when
@@ -348,6 +413,13 @@ export function PlanCards({
         const isUpgrade = current !== null && plan.rank > current.rank
         const isDowngrade = current !== null && plan.rank < current.rank
         const leaving = leavingPaidPlan(plan)
+        /*
+         * ⚠ THE PAID CARD THEY ARE LEAVING IS WHERE THE WAY BACK BELONGS.
+         * The free card already says "Ending" with the date; the card for the
+         * plan that is about to stop is the one somebody looks at when they
+         * change their mind, and it was the one saying "Current plan".
+         */
+        const resumable = isCurrent && endingAt !== null
         const scheduled = scheduledPlanId !== null && plan.id === scheduledPlanId
 
         return (
@@ -401,16 +473,32 @@ export function PlanCards({
               // Polar treats as a no-op, which reads as the first one having
               // failed.
               disabled={
-                (isCurrent && onKeep === undefined) ||
+                (isCurrent && onKeep === undefined && !resumable) ||
                 pending !== null ||
                 (leaving && endingAt !== null) ||
                 scheduled
               }
-              onClick={() => (isCurrent && onKeep ? onKeep() : choose(plan))}
+              onClick={() => {
+                if (resumable) return void resume()
+                if (isCurrent && onKeep) return onKeep()
+                return void choose(plan)
+              }}
             >
-              {pending === plan.id && <Spinner />}
+              {(pending === plan.id || (resumable && pending === RESUMING)) && (
+                <Spinner />
+              )}
               {label({
-                keepLabel: isCurrent && onKeep ? `Continue on ${plan.name}` : null,
+                /*
+                 * ⚠ RESUMING OUTRANKS "Continue on Pro", because the two say
+                 * opposite things about the same card. While a cancellation
+                 * is pending, "Continue on Pro" would be a button that ends
+                 * the plan anyway at the period boundary.
+                 */
+                keepLabel: resumable
+                  ? "Keep subscription"
+                  : isCurrent && onKeep
+                    ? `Continue on ${plan.name}`
+                    : null,
                 isCurrent,
                 isUpgrade,
                 isDowngrade,

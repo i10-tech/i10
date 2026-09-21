@@ -2,7 +2,6 @@
 
 import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
-import { hasLiveSubscription } from "@/lib/billing"
 import type { BillingState, PlanSummary } from "@/lib/types"
 
 /**
@@ -37,7 +36,6 @@ export function StepPlan({
   checkoutId: string | null
   onDone: () => void
 }) {
-  const current = billing.plan
 
 
   return (
@@ -94,8 +92,7 @@ export function StepPlan({
         <div className="relative left-1/2 w-[calc(100vw-3rem)] max-w-4xl -translate-x-1/2">
           <PlanCards
             plans={plans}
-            currentPlanId={current?.id ?? null}
-            hasSubscription={hasLiveSubscription(billing)}
+            billing={billing}
             /*
              * ⚠ THE CURRENT PLAN'S CARD IS HOW THIS STEP ENDS, WHICH IS WHY
              * "Finish set-up" IS NO LONGER UNDER IT. Staying on free was

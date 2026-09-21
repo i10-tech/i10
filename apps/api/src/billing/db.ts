@@ -123,6 +123,13 @@ export interface SubscriptionOps {
    */
   noteCancelling(tenantId: string): Promise<void>
   /**
+   * ⚠ THE MIRROR OF `noteCancelling`, AND IT EXISTS FOR THE SAME REASON: the
+   * webhook confirming it is an event away, and until it lands the console
+   * would keep showing "Ending" for a subscription Polar has already
+   * un-marked.
+   */
+  noteResuming(tenantId: string): Promise<void>
+  /**
    * One tenant's plan, for the console.
    *
    * ⚠ IT REPORTS `granted_plan_id`, NOT `plan_id`. What the customer can
@@ -249,6 +256,20 @@ export function subscriptionOps(db: Database): SubscriptionOps {
                  updated_at      = now()
            where tenant_id = ${tenantId}::uuid
              and event_at  = ${eventAt.toISOString()}::timestamptz
+        `)
+      })
+    },
+
+    async noteResuming(tenantId) {
+      await withTenant(db, tenantId, async (tx) => {
+        // ⚠ ONLY WHERE IT WAS MARKED. Clearing the flag on a row that never
+        // had it set is a write that says a change happened when none did.
+        await tx.execute(sql`
+          update core.subscriptions
+             set cancel_at_period_end = false,
+                 updated_at = now()
+           where tenant_id = ${tenantId}::uuid
+             and cancel_at_period_end = true
         `)
       })
     },

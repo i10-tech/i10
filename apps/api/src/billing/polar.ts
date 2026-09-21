@@ -216,6 +216,24 @@ export interface PolarClient {
   cancelSubscription(subscriptionId: string): Promise<void>
 
   /**
+   * Calls off a cancellation that has not happened yet.
+   *
+   * ⚠ THE MISSING HALF OF `cancelSubscription`, AND ITS ABSENCE WAS A TRAP
+   * SOMEBODY COULD WALK INTO AND NOT WALK OUT OF. Cancelling is deferred to
+   * the period boundary — deliberately, they have paid for the rest of the
+   * month — so for up to a month the subscription is alive, billed for, and
+   * marked to end. Every control in the console read that state as "already
+   * decided": the free card said "Ending", the paid card said "Current plan",
+   * and there was no way to say "actually, keep it" short of waiting for the
+   * subscription to lapse and buying it again.
+   *
+   * ⚠ IT IS A `PATCH`, NOT A NEW SUBSCRIPTION. Nothing is bought and nothing
+   * is charged — the same subscription simply stops being marked, which is
+   * why this is safe to offer as an ordinary button rather than a checkout.
+   */
+  resumeSubscription(subscriptionId: string): Promise<void>
+
+  /**
    * Ends a live subscription NOW — benefits revoked, billing stopped, no
    * remainder of the period.
    *
@@ -527,6 +545,25 @@ export function polarClient(opts: PolarOptions): PolarClient {
           response.status,
           detail,
           `polar subscription update failed: ${response.status} ${detail}`,
+        )
+      }
+    },
+
+    async resumeSubscription(subscriptionId) {
+      const response = await call(
+        `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ cancel_at_period_end: false }),
+        },
+      )
+
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new PolarCallError(
+          response.status,
+          detail,
+          `polar subscription resume failed: ${response.status} ${detail}`,
         )
       }
     },

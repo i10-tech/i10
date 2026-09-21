@@ -153,33 +153,7 @@ export default async function BillingPage({
               bare
             />
           ) : (
-            <PlanCards
-              plans={plans.data.data}
-              currentPlanId={billing.plan?.id ?? null}
-              hasSubscription={hasLiveSubscription(billing)}
-              // ⚠ ONLY WHEN IT IS ACTUALLY ENDING. `cancel_at_period_end` with no
-              // date is a subscription Polar has marked but not yet dated; the
-              // cards use the presence of a date to decide whether to disable
-              // the free plan, so an empty string would disable it with nothing
-              // to show.
-              endingAt={
-                billing.subscription?.cancel_at_period_end &&
-                billing.subscription.current_period_end
-                  ? formatExact(billing.subscription.current_period_end)
-                  : null
-              }
-              // ⚠ THE SAME RULE `endingAt` FOLLOWS, FOR THE OTHER DEFERRED
-              // CHANGE. A card whose plan is already scheduled must not offer
-              // "Downgrade" again: pressing it sends a second PATCH that
-              // supersedes an identical pending update, which changes nothing
-              // and reads as the first press having failed.
-              scheduledPlanId={billing.subscription?.scheduled_plan_id ?? null}
-              scheduledAt={
-                billing.subscription?.scheduled_at
-                  ? formatExact(billing.subscription.scheduled_at)
-                  : null
-              }
-            />
+            <PlanCards plans={plans.data.data} billing={billing} />
           )}
         </SectionContent>
       </Section>

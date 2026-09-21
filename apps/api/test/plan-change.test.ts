@@ -73,6 +73,7 @@ const polar = (over: Partial<PolarClient> = {}): PolarClient =>
   ({
     updateSubscription: async () => {},
     cancelSubscription: async () => {},
+    resumeSubscription: async () => {},
     revokeSubscription: async () => "revoked" as const,
     ...over,
   }) as PolarClient
@@ -385,7 +386,7 @@ describe("changing a plan", () => {
    */
   it.each([
     [401, "unauthorized"],
-    [403, "forbidden"],
+    [403, '{"error":"insufficient_scope"}'],
     [404, "subscription not found"],
     [422, "product not found"],
   ])("does not blame the card for a %i", async (status, detail) => {
@@ -396,6 +397,22 @@ describe("changing a plan", () => {
     expect(outcome.reason).not.toMatch(/payment method/i)
     // ⚠ AND IT SAYS WHOSE PROBLEM IT IS, so nobody goes looking in their bank.
     expect(outcome.reason).toMatch(/logged it/i)
+  })
+
+  /*
+   * ⚠ A 403 THAT IS NOT ABOUT OUR SCOPES IS ABOUT THEIR SUBSCRIPTION, and
+   * saying "our billing is misconfigured" for it sends somebody to support
+   * about something that is working. Polar answers this way for an operation
+   * it will not perform on that subscription — cancelling one that is
+   * already cancelling, for instance.
+   */
+  it("blames neither the card nor our config for a refused operation", async () => {
+    const outcome = await refusedWith(403, '{"detail":"Subscription is canceled"}')
+
+    expect(outcome).toMatchObject({ status: "failed" })
+    if (outcome.status !== "failed") return
+    expect(outcome.reason).toMatch(/would not apply that change/i)
+    expect(outcome.reason).not.toMatch(/our side/i)
   })
 
   /*
