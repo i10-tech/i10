@@ -57,6 +57,16 @@ export function StepPlan({
   const [paid, setPaid] = React.useState(false)
 
   /*
+   * ⚠ THE BANNER'S ID LIVES HERE, NOT IN THE URL, ONCE A CHECKOUT HAS RUN IN
+   * THIS TAB. It arrives as a prop from `searchParams` for a reload or a
+   * redirect return; handed straight over by the cards, it needs no
+   * navigation to reach the banner — and the navigation was the blank frame
+   * that killed the toast.
+   */
+  const [liveCheckout, setLiveCheckout] = React.useState<string | null>(null)
+  const outcomeId = liveCheckout ?? checkoutId
+
+  /*
    * ⚠ EITHER A PAYMENT IN THIS SESSION OR A SUBSCRIPTION THAT WAS ALREADY
    * THERE. The step is finished in both cases, and reading only the first
    * left somebody who paid last week looking at a step that still wanted
@@ -74,7 +84,7 @@ export function StepPlan({
        * upgraded mid-set-up got a toast and nothing else. Same component, same
        * row, same answer.
        */}
-      {checkoutId && <CheckoutOutcome checkoutId={checkoutId} />}
+      {outcomeId && <CheckoutOutcome checkoutId={outcomeId} />}
 
       {/*
        * ⚠ THE HEADING ASKS FOR A DECISION NOW, RATHER THAN NARRATING ONE
@@ -85,10 +95,10 @@ export function StepPlan({
        */}
       <div className="text-center">
         <h1 className="text-xl font-semibold tracking-tight">
-          {checkoutId ? "You are all set" : "Pick a plan"}
+          {outcomeId ? "You are all set" : "Pick a plan"}
         </h1>
         <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-          {checkoutId
+          {outcomeId
             ? "Your plan is active. Carry on, or change it here — you can do either at any time."
             : "Start free and change it whenever. Allowances move the moment a payment clears."}
         </p>
@@ -129,6 +139,7 @@ export function StepPlan({
              * screen.
              */
             onKeep={onDone}
+            onCheckout={setLiveCheckout}
             onSubscribed={() => {
               setPaid(true)
               onSubscribed?.()

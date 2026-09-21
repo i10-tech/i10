@@ -70,6 +70,7 @@ export function PlanCards({
   billing,
   onKeep,
   onSubscribed,
+  onCheckout,
 }: {
   plans: PlanSummary[]
   /**
@@ -115,6 +116,15 @@ export function PlanCards({
    * fact we were just handed — is the blip this whole change removes.
    */
   onSubscribed?: (planId: string) => void
+  /**
+   * The checkout that just ended, whatever its outcome.
+   *
+   * ⚠ HANDED OVER RATHER THAN PUT IN THE URL FOR THE SERVER TO PASS BACK.
+   * The banner needs the id to poll; routing it through a navigation is what
+   * made the page blink. The caller renders the banner from this and the
+   * address bar is updated behind it, for a reload.
+   */
+  onCheckout?: (checkoutId: string) => void
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -229,32 +239,46 @@ export function PlanCards({
        */
       const params = new URLSearchParams(window.location.search)
       params.set("checkout_id", checkoutId)
+
       /*
-       * ⚠ THE MARK THAT STOPS THE BANNER REFRESHING BEHIND US. It has its own
-       * `router.refresh()` for the redirect return, where nothing local saw
-       * the payment — here the cards have, so the refresh would only blank
-       * the page under the toast. The URL carries it because the two
-       * components are siblings with no state between them, and it survives
-       * the soft navigation this line performs.
-       */
-      params.set("applied", "1")
-      /*
-       * ⚠ `replace`, AND NO `refresh` BEHIND IT ANY MORE. The refresh was here
-       * to make the cards catch up — "Current plan" moving to the plan just
-       * bought — and it cost a re-render of the whole tree a second after the
-       * checkout closed: a black blip, the layout moving, and the toast about
-       * the payment gone before it could be read. The cards now apply that
-       * themselves from `subscribed`, which is the same fact without the
-       * round trip.
+       * ⚠ `history.replaceState`, NOT `router.replace`, AND THIS IS THE LAST
+       * OF THE BLIPS. Both put the id in the address bar; only this one does
+       * it WITHOUT a navigation. `router.replace` re-fetches the RSC payload
+       * for the new URL and re-renders the server tree — which is a blank
+       * frame a second after the checkout closes, the toast about the payment
+       * killed with it, and the banner and the green tick animating in from
+       * nothing as the tree remounts. Exactly what a refresh looked like,
+       * because it is one in everything but name.
        *
-       * ⚠ WHAT IS LEFT STALE IS EVERYTHING ELSE ON THE PAGE — the usage rail,
-       * the allowances — until the next navigation. That is the trade, and it
-       * is the right way round: those are numbers nobody is looking at in the
-       * two seconds after paying, and the next click re-renders them anyway.
+       * ⚠ THE SAME TECHNIQUE THE ONBOARDING STEPPER ALREADY USES, and for the
+       * same reason — see `go` in onboarding.tsx. Next supports it explicitly
+       * and keeps `useSearchParams` in sync with it.
+       *
+       * ⚠ THE URL IS STILL WRITTEN, THOUGH NOTHING READS IT NOW. A reload
+       * lands on a page that can recover the banner from the id, which is the
+       * only reason it was ever in the address bar; the live banner is handed
+       * the id directly through `onCheckout`.
        */
-      router.replace(`${here}?${params.toString()}`)
+      const url = `${here}?${params.toString()}`
+
+      if (!onCheckout) {
+        /*
+         * ⚠ THE CALLER CANNOT HOLD THE ID, SO THE URL HAS TO — and that costs
+         * a navigation. The billing settings page renders the banner at the
+         * top and these cards half a page below it, inside a server
+         * component, so there is nowhere between them to keep client state.
+         * It keeps the behaviour it has always had; onboarding, where the two
+         * are siblings under one client component, takes the quiet path
+         * above.
+         */
+        router.replace(url)
+        return
+      }
+
+      window.history.replaceState(null, "", url)
+      onCheckout(checkoutId)
     },
-    [pathname, router],
+    [pathname, router, onCheckout],
   )
 
   /*
@@ -698,7 +722,22 @@ function label(state: {
   if (state.scheduled) return "Scheduled"
   if (state.leaving) {
     if (state.ending) return "Ending"
-    return state.confirming ? "Confirm cancellation" : "Cancel subscription"
+    /*
+     * ⚠ "Downgrade", NOT "Cancel subscription", AND THAT IS A REVERSAL OF
+     * WHAT THE NOTE ABOVE THIS FUNCTION ARGUES FOR. The argument still
+     * stands on the facts — moving to free ENDS the subscription rather than
+     * moving between paid plans — but it was reversed deliberately: the free
+     * card sits in a row of three identical cards whose other two say
+     * "Upgrade" and "Downgrade", and the odd one out read as a different
+     * kind of control rather than the same control pointing down.
+     *
+     * ⚠ THE CONSEQUENCE IS STILL SPELLED OUT, JUST NOT ON THE BUTTON. The
+     * second press says "Confirm downgrade", the line beneath the card gives
+     * the date the plan actually changes, and the card goes to "Ending" with
+     * that date once it is accepted. Nothing about what happens is hidden;
+     * only the word on the button changed.
+     */
+    return state.confirming ? "Confirm downgrade" : "Downgrade"
   }
   if (state.isUpgrade) return "Upgrade"
   if (state.isDowngrade) return "Downgrade"
