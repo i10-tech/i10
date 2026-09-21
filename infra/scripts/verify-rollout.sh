@@ -54,6 +54,18 @@ export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 NAMESPACE="${I10_NAMESPACE:-i10-prod}"
 APP="${I10_APP:-i10-workloads}"
 
+# ⚠ EVERY APP THAT CAN CARRY A BUILT IMAGE, NOT JUST THE ONE WE WAIT ON. CI
+# rebuilds `i10-authd`, whose only deployment is a SIDECAR in the Stalwart
+# StatefulSet — which belongs to the `i10-stalwart` Application, not to
+# `i10-workloads`. So §4 asserted an image owned by an app this script never
+# refreshed and never waited for, and failed on a race it had no part in.
+#
+# ⚠ THEY ARE NUDGED BUT NOT GATED ON. Requiring every app to reach `Synced`
+# would re-couple this check to unrelated failures — exactly what §2 stopped
+# doing. Refreshing them costs nothing, removes the three-minute wait, and §3
+# then waits for the workloads themselves, which is the honest bar.
+APPS="${I10_APPS:-$APP i10-stalwart}"
+
 # ⚠ THE BUDGETS ARE SPLIT, BECAUSE THE TWO WAITS FAIL FOR DIFFERENT REASONS.
 # Argo not syncing is a control-plane problem; pods not becoming ready is an
 # application problem. One combined timeout would report whichever happened to
@@ -105,8 +117,10 @@ echo "verify-rollout: waiting for ${SHORT} in ${NAMESPACE}"
 # a queue nobody could see. The annotation asks for a reconcile immediately;
 # `hard` also drops the manifest cache, which matters because a commit that
 # changes only an image line can otherwise be served from it.
-kubectl annotate application "$APP" -n "$NAMESPACE" \
-  argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1
+for app in $APPS; do
+  kubectl annotate application "$app" -n "$NAMESPACE" \
+    argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1
+done
 
 # ── 2. wait for the revision to be synced ────────────────────────────────────
 
@@ -180,27 +194,39 @@ fi
 
 failed=()
 
-while read -r deploy; do
-  [[ -z "$deploy" ]] && continue
+# ⚠ STATEFULSETS AND DAEMONSETS TOO, NOT ONLY DEPLOYMENTS. The list used to be
+# `kubectl get deployments`, which silently skipped Stalwart — the StatefulSet
+# that carries the `i10-authd` sidecar. §4 then asserted that image was running
+# at the new tag having never waited for the thing that rolls it, so a deploy
+# that rebuilt authd failed on timing rather than on anything being wrong.
+#
+# ⚠ `kubectl rollout status` TAKES THE KIND IN THE ARGUMENT, so the loop reads
+# `kind/name` and passes it through unchanged. Hard-coding `deployment/` is what
+# made the omission invisible: the names came from one query and the kind from
+# somewhere else, and nothing connected them.
+while read -r target; do
+  [[ -z "$target" ]] && continue
+  name="${target#*/}"
 
-  if kubectl rollout status "deployment/${deploy}" -n "$NAMESPACE" \
+  if kubectl rollout status "$target" -n "$NAMESPACE" \
       --timeout="${ROLLOUT_TIMEOUT}s" >/dev/null 2>&1; then
-    echo "  ok       ${deploy}"
+    echo "  ok       ${target}"
     continue
   fi
 
-  echo "  FAILED   ${deploy}" >&2
+  echo "  FAILED   ${target}" >&2
   # ⚠ THE CONTAINER'S OWN STATE, NOT THE DEPLOYMENT'S. `ImagePullBackOff`,
   # `CreateContainerConfigError` and a crashloop are indistinguishable from the
   # deployment; the container status is the only place they differ, and they
   # have nothing in common as fixes.
   kubectl get pods -n "$NAMESPACE" \
-    -l "app.kubernetes.io/name=${deploy}" \
+    -l "app.kubernetes.io/name=${name}" \
     -o jsonpath='{range .items[*]}    {.metadata.name}  {range .status.containerStatuses[*]}{.state}{end}{"\n"}{end}' >&2 2>&1
-  failed+=("$deploy")
+  failed+=("$target")
 done < <(
-  kubectl get deployments -n "$NAMESPACE" \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null
+  kubectl get deployments,statefulsets,daemonsets -n "$NAMESPACE" \
+    -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | tr '[:upper:]' '[:lower:]'
 )
 
 if (( ${#failed[@]} > 0 )); then

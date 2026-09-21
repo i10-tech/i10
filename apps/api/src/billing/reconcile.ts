@@ -228,9 +228,67 @@ export async function reconcileSubscriptions(
    * workspace, which it cannot. One definer call for every id beats one failed
    * INSERT per dead tenant per run.
    */
-  const alive = await deps.subscriptions.knownTenants([...decidedByTenant.keys()])
+  /*
+   * ⚠ BEFORE `knownTenants`, BECAUSE RE-ATTRIBUTION CHANGES WHICH TENANTS THIS
+   * RUN IS ABOUT — and asking whether the wrong ones are alive answers a
+   * question nothing goes on to use. Done inside the loop instead, the holder
+   * was absent from `alive` and every re-attributed subscription fell straight
+   * into `unknownTenant`, which is the same skip under a different name.
+   *
+   * ⚠ A SUBSCRIPTION HELD BY SOMEBODY OTHER THAN THE TENANT POLAR NAMES USED TO
+   * BE REPORTED AND SKIPPED, which meant the backstop declined to repair the
+   * one customer shape it was most likely to be needed for, and failed the
+   * whole job on every run while doing it.
+   *
+   * ⚠ AND DEFERRING TO THE HOLDER MOVES NOTHING. `polar_subscription_id` is
+   * UNIQUE, so the holder is the tenant that checked out under it — bound from
+   * the checkout's own metadata, which OUR api wrote from an authenticated
+   * session. `customer.external_id` is the field Polar stamps once, at customer
+   * creation, and never maintains; it is also IMMUTABLE — verified against
+   * their API, which answers `422 Customer external ID cannot be updated` — so
+   * a returning customer names their old workspace for the rest of the
+   * account's life and no edit in Polar can correct it. See migration 0054.
+   *
+   * ⚠ THE OPPOSITE DIRECTION IS STILL THE CHECKOUT'S ALONE. Taking the id OFF
+   * the holder needs `reassign`, needs a succeeded checkout behind it, and does
+   * not happen here.
+   */
+  const attributed = new Map<string, SubscriptionState>()
+  for (const decided of decidedByTenant.values()) {
+    const heldBy = holderOf.get(decided.polarSubscriptionId)
+    const state =
+      heldBy && heldBy !== decided.tenantId ? { ...decided, tenantId: heldBy } : decided
 
-  for (const state of decidedByTenant.values()) {
+    if (heldBy && heldBy !== decided.tenantId) {
+      report.contested.push({
+        subscriptionId: decided.polarSubscriptionId,
+        claimedBy: decided.tenantId,
+        heldBy,
+      })
+      deps.log.warn(
+        {
+          subscriptionId: decided.polarSubscriptionId,
+          claimedBy: decided.tenantId,
+          heldBy,
+        },
+        "Polar's customer names a different tenant than the one holding this " +
+          "subscription — reconciling against the holder, because external_id " +
+          "goes stale on a re-signup and cannot be updated in Polar",
+      )
+    }
+
+    // ⚠ MERGED THE SAME WAY THE FIRST PASS MERGED, because re-attribution can
+    // land two of Polar's subscriptions on one tenant — a customer who bought,
+    // churned and bought again under the same reused customer record.
+    const already = attributed.get(state.tenantId)
+    if (!already || supersedes(state, already, deps.options.freePlanId)) {
+      attributed.set(state.tenantId, state)
+    }
+  }
+
+  const alive = await deps.subscriptions.knownTenants([...attributed.keys()])
+
+  for (const state of attributed.values()) {
     report.checked += 1
 
     const row = byTenant.get(state.tenantId)
@@ -254,31 +312,6 @@ export async function reconcileSubscriptions(
         },
         "Polar has a subscription for a workspace that no longer exists — " +
           "nothing to grant, and the deletion should have revoked it",
-      )
-      continue
-    }
-
-    /*
-     * ⚠ ALSO BEFORE `outOfStep`, AND FOR THE SAME REASON: a tenant whose
-     * subscription is held by somebody else has no row of its own, so the check
-     * below would send it to `grants.apply` and the unique constraint.
-     */
-    const heldBy = holderOf.get(state.polarSubscriptionId)
-    if (heldBy && heldBy !== state.tenantId) {
-      report.contested.push({
-        subscriptionId: state.polarSubscriptionId,
-        claimedBy: state.tenantId,
-        heldBy,
-      })
-      deps.log.error(
-        {
-          subscriptionId: state.polarSubscriptionId,
-          claimedBy: state.tenantId,
-          heldBy,
-        },
-        "Polar and our row disagree about who owns a subscription — not moved, " +
-          "because external_id goes stale on a re-signup and the checkout is the " +
-          "only thing that knows",
       )
       continue
     }

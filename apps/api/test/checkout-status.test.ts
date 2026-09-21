@@ -8,6 +8,10 @@ const log = { info: () => {}, warn: () => {}, error: () => {} }
 const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
+  // Nobody holds the id by default — see the note on the same field in
+  // billing.test.ts. The checkout path passes `reassign`, which skips the
+  // lookup entirely, so these tests never reach it.
+  ownerOf: async () => null,
   snapshot: async () => [],
   /*
    * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it

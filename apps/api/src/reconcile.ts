@@ -460,22 +460,24 @@ await withMonitor(
       }
 
       /*
-       * ⚠ ITS OWN ALERT TOO, AND DELIBERATELY NOT FOLDED IN WITH THE ONE ABOVE.
-       * They arrived together and look alike in a log — both are a subscription
-       * the reconciler declined to write — but the fix is opposite. An unknown
-       * tenant means the id names nobody; a contested one means it names the
-       * WRONG somebody while a live row holds it. Merging them would produce an
-       * alert whose remedy depends on which member you happened to read.
+       * ⚠ NO LONGER A FAILURE, BECAUSE IT IS NO LONGER UNRESOLVED. These used
+       * to be reported and skipped, on the reasoning that only the checkout
+       * knows who paid — but the holder IS what the checkout decided, and
+       * `external_id` is immutable, so "wait for a human to fix the customer in
+       * Polar" was waiting for something Polar does not permit. The run now
+       * reconciles against the holder and this is the record of having done so.
+       *
+       * ⚠ IT STAYS IN THE REPORT, AND IT STAYS LOGGED. A customer whose Polar
+       * record permanently names a dead workspace is worth being able to count
+       * — it is the signal that somebody re-signed up, and the population it
+       * describes is the one every future billing change has to keep working
+       * for.
        */
       if (report.contested.length > 0) {
-        process.exitCode = 1
-        captureError(
-          new Error(
-            `${report.contested.length} subscription(s) are claimed by one tenant ` +
-              "and held by another; nothing was moved — check the checkout metadata " +
-              "before changing either side",
-          ),
+        log.warn(
           { contested: report.contested.slice(0, 20) },
+          `${report.contested.length} subscription(s) are claimed by one tenant and ` +
+            "held by another; reconciled against the holder",
         )
       }
 

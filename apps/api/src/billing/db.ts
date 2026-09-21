@@ -90,6 +90,25 @@ export interface SubscriptionOps {
     },
   ): Promise<"applied" | "stale">
   /**
+   * The tenant that already holds this Polar subscription id, if any.
+   *
+   * ⚠ IT IS THE ANSWER TO "WHO ACTUALLY BOUGHT THIS", AND IT OUTRANKS
+   * `customer.external_id`. Our row is written by the post-checkout path from
+   * the checkout's own metadata — a field OUR api sets, from an authenticated
+   * session, which Polar echoes back unchanged. `external_id` is stamped once,
+   * when Polar CREATES a customer, and never maintained: a returning customer
+   * carries the tenant they had last time for the rest of the account's life.
+   *
+   * ⚠ AND IT CANNOT BE ANSWERED BY AN ORDINARY READ, WHICH IS THE WHOLE POINT.
+   * The caller is scoped to the tenant Polar names, and the row belongs to the
+   * tenant that bought — so under row level security it is invisible, and the
+   * only way the caller learns of the disagreement is by crashing into the
+   * unique index on `polar_subscription_id`. See migration 0054.
+   *
+   * `null` means nobody holds it, which is the ordinary first-event case.
+   */
+  ownerOf(polarSubscriptionId: string): Promise<string | null>
+  /**
    * Records that the entitlement now holds this plan.
    *
    * ⚠ SCOPED TO THE EXACT EVENT THAT WAS GRANTED FOR. If a newer event landed
@@ -353,6 +372,19 @@ export function subscriptionOps(db: Database): SubscriptionOps {
           polarSubscriptionId: row.polar_subscription_id,
         }
       })
+    },
+
+    async ownerOf(polarSubscriptionId) {
+      // ⚠ UNSCOPED, LIKE `snapshot` AND FOR THE SAME REASON. The question
+      // crosses a tenant boundary by construction — it is asked precisely when
+      // we suspect the row belongs to somebody other than the tenant we are
+      // scoped to — so it goes through the SECURITY DEFINER function rather
+      // than through a policy that is guaranteed to hide the answer.
+      const rows = (await db.execute(sql`
+        select core.subscription_owner(${polarSubscriptionId}) as tenant_id
+      `)) as unknown as { tenant_id: string | null }[]
+
+      return rows[0]?.tenant_id ?? null
     },
 
     async snapshot() {
