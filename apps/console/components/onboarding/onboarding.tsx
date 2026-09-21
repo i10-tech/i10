@@ -97,7 +97,26 @@ export function Onboarding({
     if (state.facts.has_verified_domain && state.facts.has_api_key) return "plan"
     if (state.facts.has_verified_domain) return "send"
     if (state.facts.has_domain) return "verify"
-    return (state.step as StepId) ?? "workspace"
+
+    /*
+     * ⚠ NO DOMAIN MEANS NO STEP PAST THE DOMAIN STEP, WHATEVER THE ROW SAYS.
+     * The stored step used to be returned as-is here, so somebody who reached
+     * "verify" and then deleted their only domain — or never finished adding
+     * one — reopened set-up on a Verify screen with nothing on it to verify,
+     * and no indication that the thing to do was one step back. The facts had
+     * already said `has_domain: false`; the row simply outranked them on this
+     * one line, which is the opposite of the rule the rest of this block
+     * follows.
+     *
+     * ⚠ AND "workspace" IS THE ONE STORED STEP THAT STILL WINS, because it is
+     * BEHIND the ceiling rather than past it. Somebody who has not yet named
+     * their workspace must not be skipped forward to a domain field; the
+     * clamp is against resuming too far along, not against resuming at all.
+     */
+    const stored = STEPS.some((s) => s.id === state.step)
+      ? (state.step as StepId)
+      : "workspace"
+    return stored === "workspace" ? "workspace" : "domain"
   })
 
   const index = STEPS.findIndex((s) => s.id === step)
