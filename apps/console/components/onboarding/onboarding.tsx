@@ -12,6 +12,7 @@ import { StepSend } from "@/components/onboarding/step-send"
 import { StepVerify } from "@/components/onboarding/step-verify"
 import { StepWorkspace } from "@/components/onboarding/step-workspace"
 import { updateOnboarding } from "@/lib/actions"
+import { onPaidPlan } from "@/lib/billing"
 import type {
   BillingState,
   DomainSummary,
@@ -90,7 +91,15 @@ export function Onboarding({
    * time from Set-up" is advice about a flow that has just finished — and the
    * step below it is offering a way to the dashboard.
    */
-  const [paid, setPaid] = React.useState(false)
+  const [paidNow, setPaidNow] = React.useState(false)
+
+  /*
+   * ⚠ THE SAME TEST THE PLAN STEP MAKES, because the footer and the step
+   * have to agree about whether set-up is finished. A subscription that was
+   * already there counts: the line is for somebody leaving a flow half done,
+   * and there is nothing half done about a workspace that is paying.
+   */
+  const paid = paidNow || onPaidPlan(billing)
 
   const [step, setStep] = React.useState<StepId>(() => {
     /*
@@ -239,7 +248,7 @@ export function Onboarding({
             billing={billing}
             checkoutId={checkoutId}
             onDone={finish}
-            onSubscribed={() => setPaid(true)}
+            onSubscribed={() => setPaidNow(true)}
           />
         )}
       </div>

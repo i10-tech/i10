@@ -75,6 +75,24 @@ export function CheckoutOutcome({
    */
   React.useEffect(() => {
     if (result?.status !== "granted") return
+
+    /*
+     * ⚠ NOT WHEN THE CARDS HAVE ALREADY APPLIED IT THEMSELVES. A checkout
+     * completed in the embed hands `PlanCards` the plan that was bought, and
+     * it updates in place — so this refresh had nothing left to correct and
+     * everything to spoil: it fired a second after the modal closed, blanked
+     * and re-rendered the tree under a toast about the payment, and undid the
+     * point of applying it locally. `reportOutcome` marks the URL when it has
+     * done that.
+     *
+     * ⚠ AND IT STILL RUNS ON THE REDIRECT RETURN, WHICH IS THE CASE IT WAS
+     * WRITTEN FOR. Coming back from Polar's own page is a fresh load: no
+     * component saw the success, the server render is a second older than
+     * the grant, and without this the banner says "You're on Pro" over a card
+     * that still says "Upgrade". Reported from production 2026-09-20.
+     */
+    if (window.location.search.includes("applied=1")) return
+
     router.refresh()
   }, [result?.status, router])
 

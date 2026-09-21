@@ -10,7 +10,7 @@ import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { changePlan, resumeSubscription, startCheckout } from "@/lib/actions"
 import { openPolarCheckout } from "@/lib/polar-embed"
-import { hasLiveSubscription } from "@/lib/billing"
+import { hasLiveSubscription, onPaidPlan } from "@/lib/billing"
 import { formatBytes, formatExact, formatNumber } from "@/lib/format"
 import type { BillingState, PlanSummary } from "@/lib/types"
 
@@ -230,6 +230,15 @@ export function PlanCards({
       const params = new URLSearchParams(window.location.search)
       params.set("checkout_id", checkoutId)
       /*
+       * ⚠ THE MARK THAT STOPS THE BANNER REFRESHING BEHIND US. It has its own
+       * `router.refresh()` for the redirect return, where nothing local saw
+       * the payment — here the cards have, so the refresh would only blank
+       * the page under the toast. The URL carries it because the two
+       * components are siblings with no state between them, and it survives
+       * the soft navigation this line performs.
+       */
+      params.set("applied", "1")
+      /*
        * ⚠ `replace`, AND NO `refresh` BEHIND IT ANY MORE. The refresh was here
        * to make the cards catch up — "Current plan" moving to the plan just
        * bought — and it cost a re-render of the whole tree a second after the
@@ -247,6 +256,30 @@ export function PlanCards({
     },
     [pathname, router],
   )
+
+  /*
+   * ⚠ ESCAPE BACKS OUT OF THE ARMED CANCELLATION, and without it there was no
+   * way out at all. Pressing "Cancel subscription" turns that card into
+   * "Confirm cancellation" and leaves it there: the only exits were pressing
+   * a different card or reloading, so somebody who pressed it to see what it
+   * said was stuck looking at a primed destructive button. Escape is what
+   * every dialog in the product already answers to, and this is a dialog in
+   * everything but markup.
+   *
+   * ⚠ BOUND ONLY WHILE SOMETHING IS ARMED. A permanent listener would swallow
+   * nothing and cost nothing, but it would also fire inside the checkout
+   * modal and the confirm dialogs that render over these cards — and an
+   * Escape meant for one of those is not meant for this.
+   */
+  React.useEffect(() => {
+    if (confirming === null) return
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConfirming(null)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [confirming])
 
   /*
    * ⚠ LEAVING A PAID PLAN IS A CONFIRMED ACTION, NOT A ONE-CLICK DOWNGRADE.
@@ -470,7 +503,22 @@ export function PlanCards({
         // ⚠ ONLY THE CARD THAT WAS BOUGHT, not every current one. "Subscribed"
         // is about something that just happened, and saying it on a page
         // somebody opened a week later would be a claim about this visit.
-        const justBought = subscribed === plan.id
+        /*
+         * ⚠ "Subscribed" IS NOT ONLY ABOUT THIS VISIT, AND TREATING IT THAT
+         * WAY LEFT THE FLOW HALF-FINISHED. Somebody who paid last week and
+         * reopened set-up saw "Continue on Pro" on a plan they are already
+         * subscribed to, and the footer still offered to let them come back
+         * later — a step presented as outstanding when it was done. The state
+         * belongs to the workspace, not to the session that produced it.
+         *
+         * ⚠ AND ONLY WHERE STAYING PUT IS A STEP, WHICH IS WHAT `onKeep`
+         * MARKS. On the billing page the same card is "Current plan" and
+         * must stay that way: it is a fact about the account, not the end of
+         * anything.
+         */
+        const justBought =
+          subscribed === plan.id ||
+          (onKeep !== undefined && isCurrent && onPaidPlan(billing))
         const scheduled = scheduledPlanId !== null && plan.id === scheduledPlanId
 
         return (
@@ -548,7 +596,6 @@ export function PlanCards({
                 return void choose(plan)
               }}
             >
-              {justBought && <Check className="text-success" />}
               {(pending === plan.id || (resumable && pending === RESUMING)) && (
                 <Spinner />
               )}
@@ -563,9 +610,9 @@ export function PlanCards({
                   ? "Subscribed"
                   : resumable
                     ? "Keep subscription"
-                  : isCurrent && onKeep
-                    ? `Continue on ${plan.name}`
-                    : null,
+                    : isCurrent && onKeep
+                      ? `Continue on ${plan.name}`
+                      : null,
                 isCurrent,
                 isUpgrade,
                 isDowngrade,
@@ -574,6 +621,8 @@ export function PlanCards({
                 scheduled,
                 confirming: confirming?.id === plan.id,
               })}
+              {/* ⚠ AFTER THE WORD AND CENTRED WITH IT, as one group. */}
+              {justBought && <Check className="text-success" />}
             </Button>
 
             {/*

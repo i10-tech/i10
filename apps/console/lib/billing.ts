@@ -29,3 +29,19 @@ const LIVE = new Set(["active", "trialing", "past_due"])
 export function hasLiveSubscription(billing: BillingState): boolean {
   return billing.subscription !== null && LIVE.has(billing.subscription.status)
 }
+
+/**
+ * Whether the workspace is on a PAID plan right now.
+ *
+ * ⚠ RANK, NOT THE PLAN ID. `free` is rank 0 by construction — see migration
+ * 0025, which added the column so an upgrade could be told from a downgrade
+ * without parsing ids — and hard-coding the string here would be a second
+ * definition of "free" that a renamed plan would silently break.
+ *
+ * ⚠ AND IT NEEDS THE SUBSCRIPTION TO BE LIVE, not merely present. A workspace
+ * whose Pro subscription lapsed is granted the free allowance and is not on a
+ * paid plan, however recently it was.
+ */
+export function onPaidPlan(billing: BillingState): boolean {
+  return hasLiveSubscription(billing) && (billing.plan?.rank ?? 0) > 0
+}

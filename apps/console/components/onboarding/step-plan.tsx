@@ -6,6 +6,7 @@ import { Button } from "@repo/ui/components/button"
 import { Reveal } from "@repo/ui/components/reveal"
 import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
+import { onPaidPlan } from "@/lib/billing"
 import type { BillingState, PlanSummary } from "@/lib/types"
 
 /**
@@ -56,6 +57,14 @@ export function StepPlan({
    * success it was just handed.
    */
   const [paid, setPaid] = React.useState(false)
+
+  /*
+   * ⚠ EITHER A PAYMENT IN THIS SESSION OR A SUBSCRIPTION THAT WAS ALREADY
+   * THERE. The step is finished in both cases, and reading only the first
+   * left somebody who paid last week looking at a step that still wanted
+   * something from them.
+   */
+  const done = paid || onPaidPlan(billing)
 
   return (
     <div className="space-y-6">
@@ -142,9 +151,15 @@ export function StepPlan({
        * insert reads as the page glitching — the fault this whole change set
        * out to remove.
        */}
-      <Reveal show={paid} spacing="pt-2">
+      <Reveal show={done} spacing="pt-2">
         <div className="flex justify-center">
-          <Button size="lg" onClick={onDone}>
+          {/*
+           * ⚠ `xl`, THE SAME SIZE AS "Continue" ON THE SIGN-IN PAGE. It is
+           * the same kind of control — the one thing to press on a screen
+           * that has finished asking — and for a new customer the two are
+           * three minutes apart.
+           */}
+          <Button size="xl" onClick={onDone}>
             Continue to dashboard
             <ArrowRight />
           </Button>
