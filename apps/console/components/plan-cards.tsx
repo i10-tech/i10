@@ -69,6 +69,7 @@ export function PlanCards({
   plans,
   billing,
   onKeep,
+  onSubscribed,
 }: {
   plans: PlanSummary[]
   /**
@@ -105,6 +106,15 @@ export function PlanCards({
    * means is "keep this and move on" — nothing is bought and nothing changes.
    */
   onKeep?: () => void
+  /**
+   * Told when a checkout on these cards succeeded.
+   *
+   * ⚠ IT EXISTS SO THE SCREEN AROUND THE CARDS CAN REACT WITHOUT A REFRESH
+   * EITHER. The last step of onboarding swaps its footer for a way out once
+   * somebody has paid, and the alternative — re-fetching the tree to learn a
+   * fact we were just handed — is the blip this whole change removes.
+   */
+  onSubscribed?: (planId: string) => void
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -117,8 +127,29 @@ export function PlanCards({
    */
   const [pending, setPending] = React.useState<string | null>(null)
   const [confirming, setConfirming] = React.useState<PlanSummary | null>(null)
+  /*
+   * ⚠ THE PLAN JUST BOUGHT, HELD HERE RATHER THAN RE-READ FROM THE SERVER.
+   * This used to be a `router.refresh()`: the checkout closed, a toast said
+   * "Payment received", and the whole tree re-rendered underneath it — a
+   * black blip, a layout that moved, and the toast gone before it could be
+   * read. Everything that actually changes on this screen is knowable from
+   * the success we were just handed, so it is applied here instead.
+   *
+   * ⚠ AND IT IS NOT A LIE ABOUT THE GRANT. Polar has taken the payment; the
+   * entitlement lands when their webhook does, a second or two later, which
+   * is exactly what the banner above these cards is polling for and saying.
+   * This changes what the CARDS say about a purchase that has happened, not
+   * what the workspace is entitled to.
+   */
+  const [subscribed, setSubscribed] = React.useState<string | null>(null)
 
-  const currentPlanId = billing.plan?.id ?? null
+  /*
+   * ⚠ THE PLAN JUST BOUGHT OUTRANKS THE ONE THE SERVER LAST SENT, for as long
+   * as this component is mounted. `billing` was rendered before the checkout
+   * and cannot know about it; without this the card somebody just paid for
+   * would keep offering "Upgrade" until something re-fetched.
+   */
+  const currentPlanId = subscribed ?? billing.plan?.id ?? null
   const hasSubscription = hasLiveSubscription(billing)
 
   /*
@@ -175,6 +206,10 @@ export function PlanCards({
       // exactly the behaviour that existed before rather than routing somebody
       // to `?checkout_id=null`.
       if (!checkoutId) {
+        // ⚠ NO BANNER AND NOTHING TO SHOW, SO THIS IS THE ONE PATH THAT STILL
+        // RE-READS. Without a checkout id there is no status to poll and no
+        // local fact to apply, so the server is the only thing that can say
+        // what happened.
         router.refresh()
         return
       }
@@ -194,10 +229,21 @@ export function PlanCards({
        */
       const params = new URLSearchParams(window.location.search)
       params.set("checkout_id", checkoutId)
+      /*
+       * ⚠ `replace`, AND NO `refresh` BEHIND IT ANY MORE. The refresh was here
+       * to make the cards catch up — "Current plan" moving to the plan just
+       * bought — and it cost a re-render of the whole tree a second after the
+       * checkout closed: a black blip, the layout moving, and the toast about
+       * the payment gone before it could be read. The cards now apply that
+       * themselves from `subscribed`, which is the same fact without the
+       * round trip.
+       *
+       * ⚠ WHAT IS LEFT STALE IS EVERYTHING ELSE ON THE PAGE — the usage rail,
+       * the allowances — until the next navigation. That is the trade, and it
+       * is the right way round: those are numbers nobody is looking at in the
+       * two seconds after paying, and the next click re-renders them anyway.
+       */
       router.replace(`${here}?${params.toString()}`)
-      // The banner is client-side, but the plan above it is not — this is what
-      // makes "Current plan" catch up once the grant lands.
-      router.refresh()
     },
     [pathname, router],
   )
@@ -360,8 +406,9 @@ export function PlanCards({
            */
           toast.success("Payment received", {
             description: "Setting up your plan — it appears here in a moment.",
-            duration: 8000,
           })
+          setSubscribed(plan.id)
+          onSubscribed?.(plan.id)
           // ⚠ THE BANNER IS THE ACTUAL ANSWER; THE TOAST IS ONLY THE FIRST
           // ACKNOWLEDGEMENT. It polls our own row and says "You're on Pro" when
           // the entitlement is really there — which a toast cannot, because it
@@ -420,6 +467,10 @@ export function PlanCards({
          * change their mind, and it was the one saying "Current plan".
          */
         const resumable = isCurrent && endingAt !== null
+        // ⚠ ONLY THE CARD THAT WAS BOUGHT, not every current one. "Subscribed"
+        // is about something that just happened, and saying it on a page
+        // somebody opened a week later would be a claim about this visit.
+        const justBought = subscribed === plan.id
         const scheduled = scheduledPlanId !== null && plan.id === scheduledPlanId
 
         return (
@@ -457,7 +508,19 @@ export function PlanCards({
             </ul>
 
             <Button
-              className="mt-4 w-full"
+              /*
+               * ⚠ "Subscribed" IS NOT DISABLED-LOOKING, THOUGH IT IS
+               * DISABLED. A confirmation at half opacity reads as a control
+               * that is unavailable rather than as a thing that happened —
+               * and this is the one moment in the flow somebody most wants
+               * to be told it worked. The opacity is restored and the
+               * surface takes the success colour the tick already carries.
+               */
+              className={cn(
+                "mt-4 w-full",
+                justBought &&
+                  "border-success/30 bg-success/10 text-success disabled:opacity-100",
+              )}
               variant={
                 isCurrent
                   ? "outline"
@@ -473,6 +536,7 @@ export function PlanCards({
               // Polar treats as a no-op, which reads as the first one having
               // failed.
               disabled={
+                justBought ||
                 (isCurrent && onKeep === undefined && !resumable) ||
                 pending !== null ||
                 (leaving && endingAt !== null) ||
@@ -484,6 +548,7 @@ export function PlanCards({
                 return void choose(plan)
               }}
             >
+              {justBought && <Check className="text-success" />}
               {(pending === plan.id || (resumable && pending === RESUMING)) && (
                 <Spinner />
               )}
@@ -494,8 +559,10 @@ export function PlanCards({
                  * is pending, "Continue on Pro" would be a button that ends
                  * the plan anyway at the period boundary.
                  */
-                keepLabel: resumable
-                  ? "Keep subscription"
+                keepLabel: justBought
+                  ? "Subscribed"
+                  : resumable
+                    ? "Keep subscription"
                   : isCurrent && onKeep
                     ? `Continue on ${plan.name}`
                     : null,

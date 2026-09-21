@@ -1,5 +1,9 @@
 "use client"
 
+import * as React from "react"
+import { ArrowRight } from "lucide-react"
+import { Button } from "@repo/ui/components/button"
+import { Reveal } from "@repo/ui/components/reveal"
 import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
 import type { BillingState, PlanSummary } from "@/lib/types"
@@ -23,6 +27,7 @@ export function StepPlan({
   billing,
   checkoutId,
   onDone,
+  onSubscribed,
 }: {
   plans: PlanSummary[]
   billing: BillingState
@@ -35,8 +40,22 @@ export function StepPlan({
    */
   checkoutId: string | null
   onDone: () => void
+  /**
+   * ⚠ TOLD UPWARDS SO THE SHELL CAN CHANGE ITS FOOTER. Once somebody has
+   * paid, "You can come back to this at any time" is advice about a step
+   * that is finished — and the shell owns that line, not this step.
+   */
+  onSubscribed?: () => void
 }) {
 
+
+  /*
+   * ⚠ LOCAL, AND SET FROM THE CHECKOUT RATHER THAN FROM `billing`. Nothing
+   * re-fetches after a payment any more — see the note on `subscribed` in
+   * PlanCards — so this step learns it the same way the cards do: from the
+   * success it was just handed.
+   */
+  const [paid, setPaid] = React.useState(false)
 
   return (
     <div className="space-y-6">
@@ -103,9 +122,34 @@ export function StepPlan({
              * screen.
              */
             onKeep={onDone}
+            onSubscribed={() => {
+              setPaid(true)
+              onSubscribed?.()
+            }}
           />
         </div>
       )}
+
+      {/*
+       * ⚠ THE WAY OUT ONLY EXISTS ONCE THERE IS SOMETHING TO LEAVE. Until a
+       * payment lands, staying on the current plan IS the exit and its card
+       * carries it; afterwards that card reads "Subscribed" and is inert, so
+       * without this the last step of set-up would have no forward control at
+       * all.
+       *
+       * ⚠ REVEALED, ON THE SAME SPRING AS EVERYTHING ELSE. It arrives a
+       * second after a checkout closes, which is exactly the moment a hard
+       * insert reads as the page glitching — the fault this whole change set
+       * out to remove.
+       */}
+      <Reveal show={paid} spacing="pt-2">
+        <div className="flex justify-center">
+          <Button size="lg" onClick={onDone}>
+            Continue to dashboard
+            <ArrowRight />
+          </Button>
+        </div>
+      </Reveal>
     </div>
   )
 }

@@ -84,6 +84,14 @@ export function Onboarding({
    * add a domain that is already verified. The row is a hint; the world is the
    * truth.
    */
+  /*
+   * ⚠ ONE FACT THE SHELL KEEPS FOR THE PLAN STEP, BECAUSE THE FOOTER IS THE
+   * SHELL'S. Once a payment has landed, "You can come back to this at any
+   * time from Set-up" is advice about a flow that has just finished — and the
+   * step below it is offering a way to the dashboard.
+   */
+  const [paid, setPaid] = React.useState(false)
+
   const [step, setStep] = React.useState<StepId>(() => {
     /*
      * ⚠ THE URL FIRST, BECAUSE IT IS THE ONLY SOURCE THAT SURVIVES A REMOUNT
@@ -231,6 +239,7 @@ export function Onboarding({
             billing={billing}
             checkoutId={checkoutId}
             onDone={finish}
+            onSubscribed={() => setPaid(true)}
           />
         )}
       </div>
@@ -269,13 +278,21 @@ export function Onboarding({
         )}
       </div>
 
-      <p className="mt-6 text-center text-xs text-muted-foreground">
-        You can come back to this at any time from{" "}
-        <Link href="/onboarding" className="underline underline-offset-4">
-          Set-up
-        </Link>{" "}
-        on the overview.
-      </p>
+      {/*
+       * ⚠ NOT AFTER A PAYMENT. The line exists to reassure somebody they can
+       * leave a half-finished set-up; offering it under a step that has just
+       * completed, beside a button to the dashboard, reads as a third way out
+       * of a screen that now has one.
+       */}
+      {!paid && (
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          You can come back to this at any time from{" "}
+          <Link href="/onboarding" className="underline underline-offset-4">
+            Set-up
+          </Link>{" "}
+          on the overview.
+        </p>
+      )}
     </div>
   )
 }
