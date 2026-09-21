@@ -379,6 +379,13 @@
       "when": 1789869358607,
       "tag": "0053_tenants_known",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1789869359607,
+      "tag": "0054_subscription_owner",
+      "breakpoints": true
     }
   ]
 }

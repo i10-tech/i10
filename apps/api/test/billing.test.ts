@@ -26,6 +26,13 @@ const state = (over: Partial<SubscriptionState> = {}): SubscriptionState => ({
 const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
+  /*
+   * ⚠ NOBODY HOLDS THE ID BY DEFAULT, which is the ordinary first-event case
+   * and leaves every existing test attributing exactly as it did before. A
+   * fake answering with a tenant would route them all through the
+   * re-attribution branch instead of the path they were written for.
+   */
+  ownerOf: async () => null,
   snapshot: async () => [],
   /*
    * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
@@ -115,6 +122,68 @@ describe("granting a plan", () => {
 
     await grants.apply(state({ status: "revoked", entitledPlanId: "free" }))
     expect(grantPlan).toHaveBeenCalledWith({ tenantId: "ten-1", planId: "free" })
+  })
+
+  /*
+   * ⚠ THE RETURNING CUSTOMER, WHICH USED TO BE A 500 FOR EVER. Polar stamps
+   * `external_id` once and deduplicates customers by email, so after a delete
+   * and re-signup every event names the DEAD tenant while the live one holds
+   * the subscription. `record` then died on the unique index and the customer
+   * kept Pro after revoking. Observed in production 2026-09-21; the customer's
+   * `external_id` cannot be repaired, because Polar refuses to update it.
+   */
+  it("applies to the tenant holding the subscription, not the one Polar names", async () => {
+    const grantPlan = mock(async () => {})
+    const recorded: string[] = []
+    const granted: string[] = []
+    const grants = subscriptionGrants({
+      subscriptions: ops({
+        ownerOf: async () => "ten-live",
+        record: async (s) => {
+          recorded.push(s.tenantId)
+          return "applied"
+        },
+        markGranted: async (tenantId) => {
+          granted.push(tenantId)
+        },
+      }),
+      entitlements: { ensureCustomer: async () => {}, grantPlan },
+      log,
+    })
+
+    const outcome = await grants.apply(
+      state({ tenantId: "ten-dead", status: "revoked", entitledPlanId: "free" }),
+    )
+
+    expect(outcome).toEqual({ status: "applied", planId: "free" })
+    expect(recorded).toEqual(["ten-live"])
+    expect(granted).toEqual(["ten-live"])
+    expect(grantPlan).toHaveBeenCalledWith({ tenantId: "ten-live", planId: "free" })
+  })
+
+  // ⚠ THE STRONGER CLAIM STILL BELONGS TO THE CHECKOUT. `reassign` takes the id
+  // OFF whoever holds it, on the evidence of a succeeded checkout — so asking
+  // who holds it first would answer with the very binding that path exists to
+  // correct.
+  it("leaves a reassigning checkout to decide the tenant for itself", async () => {
+    const recorded: string[] = []
+    const ownerOf = mock(async () => "ten-dead")
+    const grants = subscriptionGrants({
+      subscriptions: ops({
+        ownerOf,
+        record: async (s) => {
+          recorded.push(s.tenantId)
+          return "applied"
+        },
+      }),
+      entitlements: { ensureCustomer: async () => {}, grantPlan: async () => {} },
+      log,
+    })
+
+    await grants.apply(state({ tenantId: "ten-live" }), { reassign: true })
+
+    expect(ownerOf).not.toHaveBeenCalled()
+    expect(recorded).toEqual(["ten-live"])
   })
 
   // ⚠ THE OUT-OF-ORDER GUARD. A delayed `active` arriving after `revoked` must
@@ -316,8 +385,12 @@ describe("reconciling against Polar", () => {
    * `polar_subscription_id`, for tenants that exist perfectly well, because
    * somebody else's row already holds the subscription Polar attributes to them.
    */
-  it("reports a subscription held by another tenant instead of colliding with the unique constraint", async () => {
-    const apply = mock()
+  it("reconciles a subscription held by another tenant against the holder", async () => {
+    const applied: { tenantId: string; entitledPlanId: string }[] = []
+    const apply = mock(async (s: SubscriptionState) => {
+      applied.push({ tenantId: s.tenantId, entitledPlanId: s.entitledPlanId })
+      return { status: "applied" as const, planId: s.entitledPlanId }
+    })
     const report = await reconcileSubscriptions({
       polar: {
         getCheckout: mock(),
@@ -329,8 +402,14 @@ describe("reconciling against Polar", () => {
         resumeSubscription: async () => {},
         revokeSubscription: async () => "revoked" as const,
         createCustomerSession: async () => ({ token: "polar_cst_test" }),
-        // Polar's external_id names ten-1; our row binds sub_1 to ten-2.
-        listSubscriptions: async () => [polarSub()],
+        /*
+         * Polar's external_id names the dead tenant ten-1; our row binds sub_1
+         * to the live ten-2. The subscription has been revoked, so the holder
+         * is owed a downgrade that the webhook could not deliver.
+         */
+        listSubscriptions: async () => [
+          polarSub({ status: "canceled", modified_at: "2026-09-04T12:00:00Z" }),
+        ],
         createCheckout: mock(),
       },
       subscriptions: ops({
@@ -345,12 +424,16 @@ describe("reconciling against Polar", () => {
     expect(report.contested).toEqual([
       { subscriptionId: "sub_1", claimedBy: "ten-1", heldBy: "ten-2" },
     ])
+
     /*
-     * ⚠ NOTHING MOVED, WHICH IS THE POINT. `external_id` goes stale on a
-     * re-signup, so believing it here would take a live subscription off the
-     * workspace that actually paid for it.
+     * ⚠ REPAIRED, AND REPAIRED AGAINST THE HOLDER. This used to be reported and
+     * skipped, so the customer kept Pro after revoking and the job failed on
+     * every run for ever. Nothing is moved: `polar_subscription_id` is unique,
+     * so ten-2 is the tenant that checked out under it, and `external_id` is
+     * both stale and immutable.
      */
-    expect(apply).not.toHaveBeenCalled()
+    expect(applied).toEqual([{ tenantId: "ten-2", entitledPlanId: "free" }])
+    expect(report.repaired).toBe(1)
     expect(report.failed).toEqual([])
   })
 

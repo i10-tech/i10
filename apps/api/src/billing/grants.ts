@@ -83,6 +83,52 @@ export interface SubscriptionGrants {
 export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
   return {
     async apply(state, options) {
+      /*
+       * ⚠ THE TENANT THAT ALREADY HOLDS THE SUBSCRIPTION ID WINS OVER THE ONE
+       * POLAR NAMES, AND WITHOUT THIS EVERY EVENT FOR A RETURNING CUSTOMER IS A
+       * 500 FOR EVER. `customer.external_id` is stamped once, when Polar
+       * CREATES a customer, and Polar deduplicates customers by EMAIL — so
+       * somebody who deletes their workspace and signs up again keeps a
+       * customer naming the tenant they had LAST time. The post-checkout path
+       * corrects that for the purchase itself, with `reassign`; nothing
+       * corrected it for the cancellation that arrives weeks later.
+       *
+       * What happened instead: `record` tried to insert the subscription
+       * against the dead tenant, `polar_subscription_id` is UNIQUE and the live
+       * tenant already held it, and the insert died on the constraint. The
+       * route turned that into a 500, Polar retried until it gave up, and the
+       * customer stayed on Pro after revoking. Observed in production
+       * 2026-09-21.
+       *
+       * ⚠ AND IT IS NOT A GUESS ABOUT WHO PAID — IT IS A REFUSAL TO MOVE
+       * ANYTHING. The row stays exactly where the checkout put it; all this
+       * decides is whose entitlement this event updates, and the only tenant
+       * that can hold the id is the one that bought under it. The stronger
+       * claim — taking the id OFF a tenant — still requires `reassign`, still
+       * comes only from a succeeded checkout, and is untouched below.
+       *
+       * ⚠ SO IT IS DELIBERATELY SKIPPED WHEN `reassign` IS SET. That path is
+       * asserting the opposite direction on better evidence, and asking this
+       * question first would answer it with the very binding it is there to
+       * correct.
+       */
+      if (!options?.reassign) {
+        const owner = await deps.subscriptions.ownerOf(state.polarSubscriptionId)
+        if (owner && owner !== state.tenantId) {
+          deps.log.warn(
+            {
+              subscriptionId: state.polarSubscriptionId,
+              polarSaysTenant: state.tenantId,
+              heldBy: owner,
+            },
+            "Polar's customer names a different tenant than the one holding " +
+              "this subscription — applying to the holder, because external_id " +
+              "is stamped once and never maintained",
+          )
+          state = { ...state, tenantId: owner }
+        }
+      }
+
       // ⚠ THE ROW FIRST, ALWAYS. Polar is the state of record and this is our
       // durable copy of it; if the grant below throws, the truth is
       // already written and both the delivery retry and the reconciler can
