@@ -322,6 +322,7 @@ something.
   exists for — and cannot read what the zone currently holds. Resend's own
   dialog says so: "It does not grant Resend permission to make future
   changes." So it belongs where we have no adapter, never in front of one.
+
 - **Sending a broadcast.** The editor, the segment targeting, the topic
   preference and the stats are all real; the fan-out that turns a broadcast into
   rows in `core.messages` on the bulk queue is not written. The button is not

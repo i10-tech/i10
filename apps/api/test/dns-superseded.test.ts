@@ -156,7 +156,10 @@ describe("SPF, which is recognised by its include and nothing else", () => {
    */
   it("leaves an SPF that does not include us", () => {
     expect(
-      stale([desired], [at("v=spf1 include:_spf.google.com include:sendgrid.net ~all")]),
+      stale(
+        [desired],
+        [at("v=spf1 include:_spf.google.com include:sendgrid.net ~all")],
+      ),
     ).toEqual([])
   })
 })
@@ -174,9 +177,9 @@ describe("DMARC, where our shape and theirs are the same shape", () => {
   })
 
   it("finds one reporting to the same place we report to", () => {
-    expect(stale([desired], [at("v=DMARC1; p=quarantine; rua=mailto:x@i10.tech")])).toEqual(
-      ["v=DMARC1; p=quarantine; rua=mailto:x@i10.tech"],
-    )
+    expect(
+      stale([desired], [at("v=DMARC1; p=quarantine; rua=mailto:x@i10.tech")]),
+    ).toEqual(["v=DMARC1; p=quarantine; rua=mailto:x@i10.tech"])
   })
 
   /*

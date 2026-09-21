@@ -174,8 +174,18 @@ describe("refusing before destroying", () => {
     const seen = stub((url) =>
       url.includes("dns_records?")
         ? ok([
-            cf({ id: "old-1", type: "NS", name: "send.example.com", content: "ns1.i10.tech" }),
-            cf({ id: "old-2", type: "NS", name: "send.example.com", content: "ns2.i10.tech" }),
+            cf({
+              id: "old-1",
+              type: "NS",
+              name: "send.example.com",
+              content: "ns1.i10.tech",
+            }),
+            cf({
+              id: "old-2",
+              type: "NS",
+              name: "send.example.com",
+              content: "ns2.i10.tech",
+            }),
           ])
         : ok({}),
     )
@@ -198,7 +208,9 @@ describe("refusing before destroying", () => {
     // ⚠ AND THE ORDER: everything of ours goes before the new record arrives,
     // so the zone never holds both sets at once.
     const firstPost = seen.findIndex((s) => s.method === "POST")
-    expect(seen.filter((s, i) => s.method === "DELETE" && i < firstPost)).toHaveLength(2)
+    expect(seen.filter((s, i) => s.method === "DELETE" && i < firstPost)).toHaveLength(
+      2,
+    )
   })
 
   /**
@@ -211,7 +223,12 @@ describe("refusing before destroying", () => {
     const seen = stub((url) =>
       url.includes("dns_records?")
         ? ok([
-            cf({ id: "old-1", type: "NS", name: "send.example.com", content: "ns1.i10.tech" }),
+            cf({
+              id: "old-1",
+              type: "NS",
+              name: "send.example.com",
+              content: "ns1.i10.tech",
+            }),
             cf({ id: "their-dmarc", type: "TXT", name: "send.example.com" }),
           ])
         : ok({}),

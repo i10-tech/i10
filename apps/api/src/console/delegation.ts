@@ -56,7 +56,12 @@ export type ZoneFinding =
    * problem for everyone who publishes by hand, where the only thing we can
    * do is name the records and say they must go.
    */
-  | { zone: string; code: "extra_nameservers"; observed: string[]; unexpected: string[] }
+  | {
+      zone: string
+      code: "extra_nameservers"
+      observed: string[]
+      unexpected: string[]
+    }
   /** The lookup itself failed. Says nothing about the records. */
   | { zone: string; code: "lookup_failed" }
 

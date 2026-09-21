@@ -114,7 +114,8 @@ export function MfaForm({
    * ⚠ `sessionStorage`, SO IT DIES WITH THE TAB. The attempt it describes does
    * too — this must not still be set tomorrow when somebody signs in again.
    */
-  const sentKey = (factor: Method) => `i10:mfa-sent:${signIn?.id ?? "attempt"}:${factor}`
+  const sentKey = (factor: Method) =>
+    `i10:mfa-sent:${signIn?.id ?? "attempt"}:${factor}`
 
   const alreadySent = (factor: Method): boolean => {
     if (sent.current[factor]) return true

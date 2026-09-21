@@ -156,12 +156,12 @@ export function DelegationNote({
         title="There are nameservers here that we did not ask for"
         body={
           <>
-            {list(extra.map((z) => z.zone))}{" "}
-            {extra.length === 1 ? "is" : "are"} delegated to us and also to{" "}
+            {list(extra.map((z) => z.zone))} {extra.length === 1 ? "is" : "are"}{" "}
+            delegated to us and also to{" "}
             <span className="font-mono">{leftovers.join(", ")}</span>. It resolves
-            today, which is the problem: whichever nameserver a resolver happens to
-            ask decides whether your mail records are found, so this works until it
-            does not.
+            today, which is the problem: whichever nameserver a resolver happens to ask
+            decides whether your mail records are found, so this works until it does
+            not.
             {/*
              * ⚠ THE LIKELY CAUSE IS OURS AND IS NAMED AS SUCH. Deleting a
              * domain here cannot reach into somebody's zone, so a domain that

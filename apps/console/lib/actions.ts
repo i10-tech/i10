@@ -891,8 +891,7 @@ export async function changePlan(plan: string) {
  */
 export async function resumeSubscription() {
   return run(
-    () =>
-      api<{ status: string }>("/console/billing/resume", { method: "POST" }),
+    () => api<{ status: string }>("/console/billing/resume", { method: "POST" }),
     ["/settings/billing", "/settings/usage", "/"],
   )
 }

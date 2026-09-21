@@ -344,25 +344,28 @@ describe("changing a plan", () => {
    * that state can do, and pushing them to a fresh checkout would leave the
    * failing subscription running beside the new one.
    */
-  it.each(["trialing", "past_due"])("still amends a %s subscription", async (status) => {
-    const updateSubscription = mock(async () => {})
-    await change({
-      polar: polar({ updateSubscription }),
-      subscriptions: ops({
-        current: async () => ({
-          plan: "starter",
-          status,
-          cancelAtPeriodEnd: false,
-          currentPeriodEnd: null,
-          scheduledPlan: null,
-          scheduledAt: null,
-          polarSubscriptionId: "sub_live",
+  it.each(["trialing", "past_due"])(
+    "still amends a %s subscription",
+    async (status) => {
+      const updateSubscription = mock(async () => {})
+      await change({
+        polar: polar({ updateSubscription }),
+        subscriptions: ops({
+          current: async () => ({
+            plan: "starter",
+            status,
+            cancelAtPeriodEnd: false,
+            currentPeriodEnd: null,
+            scheduledPlan: null,
+            scheduledAt: null,
+            polarSubscriptionId: "sub_live",
+          }),
         }),
-      }),
-    }).to(TENANT, "pro")
+      }).to(TENANT, "pro")
 
-    expect(updateSubscription).toHaveBeenCalled()
-  })
+      expect(updateSubscription).toHaveBeenCalled()
+    },
+  )
 
   /**
    * ⚠ A DECLINED CARD IS NOT AN OUTAGE. For `invoice`, Polar applies the change

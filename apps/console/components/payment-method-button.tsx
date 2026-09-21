@@ -82,9 +82,8 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
     if (!window.location.search.includes("polar_payment_method_status")) return
 
     void (async () => {
-      const { PolarEmbedPaymentMethod } = await import(
-        "@polar-sh/checkout/payment-method"
-      )
+      const { PolarEmbedPaymentMethod } =
+        await import("@polar-sh/checkout/payment-method")
       const result = PolarEmbedPaymentMethod.getRedirectResult()
       if (!result) return
 

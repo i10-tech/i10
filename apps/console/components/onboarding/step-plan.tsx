@@ -48,8 +48,6 @@ export function StepPlan({
    */
   onSubscribed?: () => void
 }) {
-
-
   /*
    * ⚠ LOCAL, AND SET FROM THE CHECKOUT RATHER THAN FROM `billing`. Nothing
    * re-fetches after a payment any more — see the note on `subscribed` in
@@ -168,4 +166,3 @@ export function StepPlan({
     </div>
   )
 }
-
