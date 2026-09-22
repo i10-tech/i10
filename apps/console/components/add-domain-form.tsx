@@ -82,6 +82,25 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     inspection: DnsInspection | null
   } | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
+  /**
+   * A name the server refused, and what it said.
+   *
+   * ⚠ A REFUSAL ABOUT THE VALUE BELONGS NEXT TO THE VALUE, NOT IN A CORNER. The
+   * server owns rules this form cannot check — `i10.tech` is ours, and only the
+   * API knows what `MAIL_DOMAINS` holds — so those verdicts arrive after a round
+   * trip. Sending them to a toast put the sentence describing what is wrong with
+   * the box a long way from the box, on a timer, while the offending value sat
+   * there looking accepted.
+   *
+   * ⚠ IT IS KEYED BY THE NAME IT WAS ABOUT, WHICH IS WHAT MAKES IT CLEAR ITSELF.
+   * Feeding it back through `check` means the field forgets it the moment the
+   * value changes and remembers it if they type the same thing again — the same
+   * lifecycle every other verdict on this field has, rather than a second piece
+   * of error state with its own rules about when to disappear.
+   */
+  const [refused, setRefused] = React.useState<{ name: string; reason: string } | null>(
+    null,
+  )
   const [advanced, setAdvanced] = React.useState(false)
 
   /*
@@ -288,6 +307,18 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        * ticket. This used to be a red panel under the form with the button
        * inside it; the toast carries the same action.
        */
+      /*
+       * ⚠ A 422 IS ABOUT WHAT THEY TYPED, AND ONLY A 422. Every other refusal
+       * here is about something else — the plan is full, the name is already
+       * taken by another workspace, the API is down — and none of those are
+       * answered by looking at the box again, which is why they keep the toast
+       * and the plan limit keeps its button.
+       */
+      if (result.name === "validation_error") {
+        setRefused({ name: name.trim(), reason: result.error })
+        return
+      }
+
       toastFailure(result, {
         ...(result.name === "plan_limit_exceeded"
           ? {
@@ -418,7 +449,21 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         // creates a domain that can never verify.
         inputMode="url"
         className="font-mono"
-        check={domainProblem}
+        /*
+         * ⚠ THE SERVER'S VERDICT GOES THROUGH THE SAME DOOR AS THE LOCAL ONE,
+         * so it is painted, timed and cleared by the rules the field already
+         * has — red once they have stopped typing, gone the moment the value
+         * changes. The shape check runs first because it is the cheaper and
+         * more specific answer: `https://i10.tech` should be told about the
+         * `https://`, not that the domain is ours.
+         */
+        check={(value) => {
+          const malformed = domainProblem(value)
+          if (malformed) return malformed
+          return refused && value.trim().toLowerCase() === refused.name.toLowerCase()
+            ? refused.reason
+            : null
+        }}
         required="Enter the domain you send from."
         /*
          * ⚠ THE LOOKUP OUTRANKS THE VERDICT, AND THEY CANNOT BOTH BE TRUE. A
