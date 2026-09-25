@@ -636,24 +636,35 @@ describe("refusing a duplicate without touching SES", () => {
  */
 describe("refusal", () => {
   it("refuses our own domain and its subdomains", async () => {
-    const store = domainStore({ ...base, identity: identity(), db: fakeDb({ select: () => [] }) })
+    const store = domainStore({
+      ...base,
+      identity: identity(),
+      db: fakeDb({ select: () => [] }),
+    })
     expect(await store.refusal(TENANT, "i10.tech")).toContain("is ours")
     expect(await store.refusal(TENANT, "Mail.I10.tech")).toContain("is ours")
   })
 
   it("says what state an already-added domain is in", async () => {
     const at = (status: string) =>
-      domainStore({ ...base, identity: identity(), db: fakeDb({ select: () => [row({ status })] }) }).refusal(
-        TENANT,
-        "example.com",
-      )
-    expect(await at("verified")).toBe("You have already added example.com, and it is verified.")
+      domainStore({
+        ...base,
+        identity: identity(),
+        db: fakeDb({ select: () => [row({ status })] }),
+      }).refusal(TENANT, "example.com")
+    expect(await at("verified")).toBe(
+      "You have already added example.com, and it is verified.",
+    )
     expect(await at("not_started")).toContain("waiting for verification")
     expect(await at("failed")).toContain("failed verification")
   })
 
   it("matches what create says for a name verified elsewhere", async () => {
-    const store = domainStore({ ...base, identity: identity(), db: fakeDb({ select: () => [], taken: true }) })
+    const store = domainStore({
+      ...base,
+      identity: identity(),
+      db: fakeDb({ select: () => [], taken: true }),
+    })
     const created = await store.create(TENANT, { name: "example.com" })
     expect(created.status === "conflict" ? created.reason : null).toBe(
       await store.refusal(TENANT, "example.com"),
@@ -661,7 +672,11 @@ describe("refusal", () => {
   })
 
   it("has nothing to say about a free name", async () => {
-    const store = domainStore({ ...base, identity: identity(), db: fakeDb({ select: () => [] }) })
+    const store = domainStore({
+      ...base,
+      identity: identity(),
+      db: fakeDb({ select: () => [] }),
+    })
     expect(await store.refusal(TENANT, "example.com")).toBeNull()
   })
 })
