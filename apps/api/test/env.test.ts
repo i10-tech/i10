@@ -107,28 +107,22 @@ describe("production must name its environment", () => {
 })
 
 /**
- * ⚠ THE DEFAULT PORT IS A FACT ABOUT OUR SERVER, NOT A CONVENTION, AND IT WAS
- * WRONG. Stalwart's listeners are `smtp` on 25 and `submissions` on 465 —
- * checked on the running server 2026-09-17 — and nothing answers on 587. This
- * defaulted to 587 for as long as the direct route existed, so a deployment that
- * set the host, user and password and trusted the default would have had every
- * direct send refused at the socket: `deferred`, in the queue, behind an
- * ECONNREFUSED nobody reads.
- *
- * ⚠ AND 465 IS NOT A COMPROMISE. It is implicit TLS from the first byte; 587 is
- * cleartext until STARTTLS succeeds. RFC 8314 §3 prefers the former precisely
- * because there is no plaintext phase to strip. `submissionConfig` derives the
- * TLS mode from this number, so the port is the only thing that has to be right.
+ * ⚠ THE DEFAULT PORT IS A FACT ABOUT OUR SERVER, NOT A CONVENTION. The `relay`
+ * listener on 2525 is the only one that relays for a client presenting no
+ * credential — 25 is the public MX and 465 is authenticated submission for
+ * people. A worker pointed at either would have every direct send refused at
+ * `RCPT TO`, which the transport defers, so the symptom would be a backlog that
+ * never drains rather than an error anyone reads.
  */
-describe("the submission port", () => {
-  it("defaults to 465, the listener that exists", () => {
-    expect(loadEnv(base).STALWART_SUBMISSION_PORT).toBe(465)
+describe("the relay port", () => {
+  it("defaults to 2525, the relay listener", () => {
+    expect(loadEnv(base).STALWART_RELAY_PORT).toBe(2525)
   })
 
   it("is still overridable", () => {
-    expect(
-      loadEnv({ ...base, STALWART_SUBMISSION_PORT: "2525" }).STALWART_SUBMISSION_PORT,
-    ).toBe(2525)
+    expect(loadEnv({ ...base, STALWART_RELAY_PORT: "2526" }).STALWART_RELAY_PORT).toBe(
+      2526,
+    )
   })
 })
 

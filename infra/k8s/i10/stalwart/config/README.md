@@ -27,9 +27,9 @@ Mounted at `/etc/stalwart/config.json`, passed with `--config`.
 
 ## `plan.ndjson` — everything else
 
-The declarative configuration, applied with
-[`stalwart-cli apply`](https://stalw.art/docs/management/cli/apply). One
-operation per line; `upsert` matches an existing object by a natural key and
+The declarative configuration, in
+[`stalwart-cli apply`](https://stalw.art/docs/management/cli/apply)'s format.
+One operation per line; `upsert` matches an existing object by a natural key and
 updates it in place, so re-applying converges rather than duplicating.
 
 In practice you do not run that by hand. `../bootstrap.sh` does the whole
@@ -40,7 +40,18 @@ run after any edit to this file:
 ```sh
 ./infra/k8s/i10/stalwart/bootstrap.sh            # apply and roll
 ./infra/k8s/i10/stalwart/bootstrap.sh --verify   # check, change nothing
+./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # show what would change
+PLAN_FILE=path ./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # a branch's plan
 ```
+
+⚠ **IT SPEAKS STALWART'S MANAGEMENT API DIRECTLY, OVER A PORT-FORWARD.** It used
+to start one `stalwart-cli` pod per command — an image pull, a scheduling round
+and a NetworkPolicy race each, about a minute apiece. The plan engine is a port
+of the CLI's own `apply` rules (match on `matchOn`, update without immutable and
+server-set fields, `#name` resolved by the server through `createdIds`), and
+`--dry-run` proves it: against the deployed plan it reports every object
+`unchanged`. Only `upsert`, `update` and `create` are supported; a plan that
+needs `destroy` or `reconcile` fails loudly and wants the CLI.
 
 ⚠ **It reads the plan out of the DEPLOYED ConfigMap, not out of your working
 copy.** Argo carries this file into the pod under a content-hashed name; the
@@ -349,6 +360,58 @@ bootstraps only `i10`, so the `stalwart` database and its role are created by
 deliberately: it manages its own schema, migrates it on upgrade, and must never
 share a migration surface with the transactional product.
 
+## The internal relay
+
+The send worker hands direct-route mail to the `relay` listener on **2525**, with
+**no account and no credential**. The trust is where the connection comes from:
+
+- **No hostPort** (statefulset.yaml) — nothing on the node's public addresses
+  answers on 2525.
+- **Not in `allow-public-mail`** (networkpolicy.yaml) — traffic from outside the
+  namespace cannot reach it. `allow-same-namespace` is what lets the worker in.
+- **ClusterIP only** (service.yaml) — `i10-stalwart-mail:2525` is the name the
+  worker dials, set in worker.yaml because it is an address, not a secret.
+
+Everything that makes 2525 different is in `plan.ndjson`, keyed on
+`local_port == 2525`:
+
+| Object                  | On 2525                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `MtaStageAuth.require`  | no AUTH                                                |
+| `MtaStageRcpt`          | relays, but only for a `bounce+` envelope sender       |
+| `MtaStageData`          | no spam filter — this is our own outbound mail         |
+| `MtaInboundThrottle` ×2 | exempt — one pod IP sends everything, at 8-way fan-out |
+
+SPF, DMARC, reverse-IP checks and the added headers were already scoped to
+`local_port == 25`, and Stalwart only DKIM-signs for authenticated sessions, so
+none of them needed a rule — the worker signs before it hands over.
+
+⚠ **THIS REPLACED A SUBMISSION ACCOUNT THAT COULD NEVER HAVE WORKED.** The first
+design had the worker authenticate as `submission@i10.tech` on 465. Stalwart
+refuses to hold a password for any account while authd is the directory —
+`Cannot set credentials for accounts in an external directory` — and authd only
+answers binds for Clerk users and its one service DN. `AccountPassword`, which
+the bootstrap tried instead, is the _logged-in_ account's own password: pointed
+at the recovery admin, it would have changed that. The account was deleted on
+2026-09-26.
+
+⚠ **PLAINTEXT, DELIBERATELY.** upyo upgrades whenever STARTTLS is offered and
+verifies against the name it dialled; the certificate is `*.i10.tech` and the
+worker dials a `.svc.cluster.local` name, with no `servername` override to
+verify against instead. So the listener offers no TLS (`useTls: false`) and the
+client requires none. Nothing secret crosses the hop, and on one node it never
+leaves the host. A second node means encrypting pod traffic (flannel's WireGuard
+backend), not this connection.
+
+⚠ **A REFUSAL HERE IS OURS, AND THE WORKER DEFERS IT.** With no AUTH, a relay
+misconfiguration surfaces in the message phase — `550 5.1.2 Relay not allowed`
+at `RCPT TO`, `503 5.5.1` or `550 5.7.1` at `MAIL FROM` — and every message
+would get the same answer. `send/stalwart.ts` keeps those three in the queue
+instead of failing it; `5.1.1` and `5.3.4` are still about the message.
+
+⚠ **NEVER ADD 2525 TO A hostPort OR TO `allow-public-mail`.** Either makes this
+an open relay for the internet.
+
 ## `STALWART_WEBHOOK_SECRET` lives in two places, and must match
 
 The `WebHook` object in `plan.ndjson` reads its `signatureKey` from the
@@ -442,12 +505,13 @@ like a lever that is off. Check for `Eval(Error)` before trusting it.
 of this plan put the Postgres fields at the top level with a `description`, and
 the server refused it (`invalidPatch … description`) — which stopped every
 `bootstrap.sh` run at that line from 2026-09-17 until it was fixed, including
-the MtaOutboundStrategy line after it. `sw describe StoreLookup` shows the two
-fields; the Postgres variant's fields are the same as `DataStore`'s.
+the MtaOutboundStrategy line after it. The server's schema (`/api/schema`) shows
+the two fields; the Postgres variant's fields are the same as `DataStore`'s.
 
-⚠ **`apply --dry-run` WOULD NOT HAVE CAUGHT IT.** It fetches the schema and
-parses the plan but does not validate properties: the broken plan dry-runs
-clean. Only a real apply finds a wrong field.
+⚠ **`stalwart-cli apply --dry-run` WOULD NOT HAVE CAUGHT IT.** It parses the plan
+without asking the server about properties: the broken plan dry-runs clean.
+`./bootstrap.sh --dry-run` would — it checks every top-level property against
+the live schema and names the ones the object does not have.
 
 ⚠ **THE `stalwart` ROLE NEEDS USAGE ON `core`, NOT ONLY EXECUTE.** 0036 granted
 EXECUTE on the function; resolving `core.mailbox_route` checks the schema first,

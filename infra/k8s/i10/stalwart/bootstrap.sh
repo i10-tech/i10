@@ -15,12 +15,17 @@
 #   ./bootstrap.sh              apply, reload, restart, verify
 #   ./bootstrap.sh --verify     verify only, change nothing
 #   ./bootstrap.sh --no-restart apply and reload, skip the restart
+#   ./bootstrap.sh --dry-run    show what the plan would create or change, and
+#                               stop — reads only. `stalwart-cli apply --dry-run`
+#                               cannot do this: it never contacts the server, so
+#                               it passes plans the server will refuse.
+#   PLAN_FILE=path ./bootstrap.sh --dry-run
+#                               preview a plan that is not deployed yet — a
+#                               branch's, before merge. Dry-run only: a real
+#                               apply always reads what Argo deployed.
 #
-#   ./bootstrap.sh --set-submission-password
-#                               prompt for the send worker's SMTP password and
-#                               set it. Not part of a normal run: Stalwart keeps
-#                               a hash, so there is nothing to converge on and
-#                               re-setting it would invalidate Doppler's copy.
+# Runs anywhere `kubectl` reaches the cluster and `python3` exists — on psl-vps
+# as `mo` needs no sudo.
 #
 # ⚠ ON A GENUINELY FRESH INSTALL, READ config/README.md FIRST. The first
 # administrator comes from STALWART_RECOVERY_ADMIN, which must already be in the
@@ -31,20 +36,18 @@ set -euo pipefail
 NS="${NS:-i10-prod}"
 POD="${POD:-i10-stalwart-0}"
 SECRET="${SECRET:-i10-stalwart}"
-CLI_IMAGE="${CLI_IMAGE:-ghcr.io/stalwartlabs/cli}"
-SVC_URL="${SVC_URL:-http://i10-stalwart.${NS}.svc.cluster.local:8080}"
 CONFIGMAP_PREFIX="i10-stalwart-config"
 
 VERIFY_ONLY=false
+DRY_RUN=false
 RESTART=true
-SET_SUBMISSION_PASSWORD=false
 for arg in "$@"; do
   case "$arg" in
     --verify) VERIFY_ONLY=true ;;
     --no-restart) RESTART=false ;;
-    --set-submission-password) SET_SUBMISSION_PASSWORD=true ;;
+    --dry-run) DRY_RUN=true ;;
     -h | --help)
-      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -62,23 +65,57 @@ die() {
   exit 1
 }
 
+command -v python3 >/dev/null || die "python3 is required — it speaks to Stalwart's API"
+
+# ⚠ ASK THE CLUSTER BEFORE ASKING FOR THE POD. `kubectl get pod` fails the same
+# way when kubectl points at no cluster at all, and reporting that as "pod not
+# found" sent a laptop without a context looking for a StatefulSet problem that
+# did not exist.
+kubectl get namespace "$NS" >/dev/null 2>&1 ||
+  die "kubectl cannot reach namespace $NS (context: $(kubectl config current-context 2>/dev/null || echo none)) — run this on psl-vps, or point kubectl at the cluster"
 kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
   die "pod $POD not found in $NS — is the StatefulSet synced?"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Credentials
+# The API client
 #
-# ⚠ SPLIT ON THE BOX, NEVER PASSED AS AN ARGUMENT. The secret holds
-# "username:password" as one value; the CLI wants them separately. Both halves
-# go into the pod through a temporary Secret rather than through `args`, because
-# anything in argv is visible in `kubectl get pod -o yaml` to everyone with read
-# access to the namespace.
+# ⚠ STALWART'S MANAGEMENT API, DIRECTLY, THROUGH A PORT-FORWARD — NOT
+# stalwart-cli PODS. This used to start one throwaway pod per command: an image
+# pull, a scheduling round and a NetworkPolicy race (kube-router builds its
+# ipsets from a watch, so a new pod reaches nothing for a second or two) each
+# time, about a minute apiece. A JMAP call over a port-forward takes
+# milliseconds, needs nothing created in the namespace, and leaves nothing to
+# clean up.
+#
+# ⚠ AND THE PLAN ENGINE IS A PORT OF THE CLI'S, NOT AN INVENTION. `apply` below
+# follows stalwart-cli's src/commands/apply.rs rule for rule: upsert fetches
+# every object of the type and matches on `matchOn` (and `@type` for
+# multi-variant objects); a match is updated with the body minus `@type` and
+# every field the schema marks `immutable` or `serverSet`; no match is created
+# minus `serverSet`; two matches is an error. `#name` references are never
+# rewritten client-side — every request carries a `createdIds` map (RFC 8620
+# §3.3) and the server resolves them, exactly as the CLI does. Only the three
+# operations plan.ndjson uses are supported; anything else fails loudly.
+#
+# ⚠ THE CREDENTIAL NEVER REACHES argv OR A POD SPEC. It lives in a shell
+# variable and is handed to the helper through its environment for the length
+# of one process — not visible in `ps`, and there is no pod whose `-o yaml`
+# could show it.
 # ─────────────────────────────────────────────────────────────────────────────
-TMP_SECRET="stalwart-bootstrap-$$"
+HELPER=$(mktemp "${TMPDIR:-/tmp}/stalwart-api.XXXXXX")
+PF_PID=""
+PF_PORT=$((20000 + RANDOM % 20000))
+
+disconnect() {
+  if [ -n "$PF_PID" ]; then
+    kill "$PF_PID" 2>/dev/null || true
+    wait "$PF_PID" 2>/dev/null || true
+    PF_PID=""
+  fi
+}
 cleanup() {
-  kubectl delete secret -n "$NS" "$TMP_SECRET" --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete pod -n "$NS" -l "app.kubernetes.io/name=stalwart-bootstrap" \
-    --ignore-not-found >/dev/null 2>&1 || true
+  disconnect
+  rm -f "$HELPER"
 }
 trap cleanup EXIT
 
@@ -88,121 +125,394 @@ case "$raw" in
   *:*) ;;
   *) die "STALWART_RECOVERY_ADMIN is not in username:password form" ;;
 esac
-CLI_USER="${raw%%:*}"
-kubectl create secret generic "$TMP_SECRET" -n "$NS" \
-  --from-literal=password="${raw#*:}" --dry-run=client -o yaml |
-  kubectl apply -f - >/dev/null
-unset raw
 
-# ─────────────────────────────────────────────────────────────────────────────
-# sw — run one stalwart-cli command in a throwaway pod.
-#
-# ⚠ restartPolicy: OnFailure IS LOAD-BEARING, AND THE REASON IS NOT OBVIOUS.
-# The namespace runs a default-deny NetworkPolicy. kube-router builds its ipsets
-# from a watch, so a pod that starts within a second or two of being created can
-# reach nothing — the CLI fails with a bare connection error that looks like the
-# server being down. OnFailure lets the container retry until the policy catches
-# up, which takes one or two attempts. With `Never` this script fails
-# intermittently and blames Stalwart.
-#
-# ⚠ AND THE IMAGE HAS NO SHELL. ghcr.io/stalwartlabs/cli is distroless: `args`
-# must be the CLI's own arguments and nothing may be wrapped in `sh -c`.
-# ─────────────────────────────────────────────────────────────────────────────
-sw() {
-  local name="sw-$RANDOM-$RANDOM"
-  local args
-  args=$(printf '"%s",' "$@")
-  args="[${args%,}]"
-
-  kubectl apply -f - >/dev/null <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: $name
-  namespace: $NS
-  labels: { app.kubernetes.io/name: stalwart-bootstrap }
-spec:
-  restartPolicy: OnFailure
-  containers:
-    - name: cli
-      image: $CLI_IMAGE
-      args: $args
-      env:
-        - { name: STALWART_URL, value: "$SVC_URL" }
-        - { name: STALWART_USER, value: "$CLI_USER" }
-        - name: STALWART_PASSWORD
-          valueFrom: { secretKeyRef: { name: $TMP_SECRET, key: password } }
-EOF
-
-  local phase=""
-  for _ in $(seq 1 40); do
-    phase=$(kubectl get pod -n "$NS" "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-    [ "$phase" = "Succeeded" ] && break
-    sleep 3
-  done
-  kubectl logs -n "$NS" "$name" 2>&1 || true
-  kubectl delete pod -n "$NS" "$name" --ignore-not-found >/dev/null 2>&1 || true
-  [ "$phase" = "Succeeded" ] || return 1
+api() {
+  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" python3 "$HELPER" "$@"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# sw_file — like sw, but the JSON payload comes from a mounted Secret.
-#
-# ⚠ THIS EXISTS SO A CREDENTIAL NEVER TRAVELS IN `args`. A pod's arguments live
-# in its spec: readable by anything that can `get pod -o yaml`, logged by
-# admission webhooks, and retained in the API server until the pod is reaped.
-# `sw` builds its args from its parameters, so the moment a payload contains a
-# secret it must not use it.
-#
-#   sw_file <Object> <id> <secret-name>   # the Secret holds key `payload.json`
-# ─────────────────────────────────────────────────────────────────────────────
-sw_file() {
-  local object="$1" id="$2" secret="$3"
-  local name="swf-$RANDOM-$RANDOM"
-
-  kubectl apply -f - >/dev/null <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: $name
-  namespace: $NS
-  labels: { app.kubernetes.io/name: stalwart-bootstrap }
-spec:
-  restartPolicy: OnFailure
-  volumes:
-    - name: payload
-      secret: { secretName: $secret }
-  containers:
-    - name: cli
-      image: $CLI_IMAGE
-      args: ["update", "$object", "$id", "--file", "/payload/payload.json"]
-      volumeMounts:
-        - { name: payload, mountPath: /payload, readOnly: true }
-      env:
-        - { name: STALWART_URL, value: "$SVC_URL" }
-        - { name: STALWART_USER, value: "$CLI_USER" }
-        - name: STALWART_PASSWORD
-          valueFrom: { secretKeyRef: { name: $TMP_SECRET, key: password } }
-EOF
-
-  local phase=""
-  for _ in $(seq 1 40); do
-    phase=$(kubectl get pod -n "$NS" "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-    [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ] && break
-    sleep 3
-  done
-
-  # ⚠ THE LOG IS NOT PRINTED ON SUCCESS. `update` echoes the object back, and for
-  # a credential that means the value we just set — into a terminal, a CI log and
-  # whatever scrapes them. Only the failure path is shown, and Stalwart's errors
-  # name the property rather than quoting it.
-  if [ "$phase" != "Succeeded" ]; then
-    kubectl logs -n "$NS" "$name" 2>&1 | sed 's/^/   /'
-  fi
-  kubectl delete pod -n "$NS" "$name" --ignore-not-found >/dev/null 2>&1
-
-  [ "$phase" = "Succeeded" ]
+# ⚠ A PORT-FORWARD IS BOUND TO ONE POD, NOT TO THE SERVICE. It dies with the pod
+# it picked, so the restart below disconnects first and connects again after.
+connect() {
+  disconnect
+  kubectl port-forward -n "$NS" svc/i10-stalwart "$PF_PORT:8080" >/dev/null 2>&1 &
+  PF_PID=$!
+  api wait || die "Stalwart's API did not answer through a port-forward on $PF_PORT"
 }
+
+cat >"$HELPER" <<'PY'
+import base64, gzip, json, os, sys, time, urllib.error, urllib.request
+
+BASE = os.environ["STALWART_BASE"]
+AUTH = "Basic " + base64.b64encode(os.environ["STALWART_AUTH"].encode()).decode()
+USING = ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]
+
+
+def ok(msg):
+    print(f"   \033[32m✓\033[0m {msg}", flush=True)
+
+
+def fail(msg):
+    print(f"   \033[31m✗\033[0m {msg}", file=sys.stderr, flush=True)
+    sys.exit(1)
+
+
+def http(method, path, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(BASE + path, data=data, method=method)
+    req.add_header("Authorization", AUTH)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        # /api/schema answers with a redirect to a content-hashed path; urllib
+        # follows it and keeps the Authorization header on the same host.
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+            # ⚠ THE SCHEMA ARRIVES GZIPPED WHETHER OR NOT IT WAS ASKED FOR, AND
+            # SOMETIMES WITHOUT SAYING SO. Same rule as stalwart-cli's
+            # decode_schema_body: trust the header, else the gzip magic bytes.
+            encoding = (r.headers.get("Content-Encoding") or "").strip().lower()
+            if encoding in ("gzip", "x-gzip") or raw[:2] == b"\x1f\x8b":
+                raw = gzip.decompress(raw)
+            return json.loads(raw or b"null")
+    except urllib.error.HTTPError as e:
+        fail(f"{method} {path} answered {e.code}: {e.read()[:300].decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        fail(f"{method} {path} failed: {e.reason}")
+
+
+# Client id -> server id, for every object the plan has matched or created. The
+# ones a request references ride along as `createdIds`, and the server resolves
+# `#name` itself.
+created_ids = {}
+
+
+def refs_in(value, out):
+    if isinstance(value, str):
+        if value.startswith("#") and len(value) > 1:
+            out.add(value[1:])
+    elif isinstance(value, list):
+        for v in value:
+            refs_in(v, out)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if k.startswith("#") and len(k) > 1:
+                out.add(k[1:])
+            refs_in(v, out)
+    return out
+
+
+def jmap(calls, creating=()):
+    body = {"using": USING, "methodCalls": calls}
+    # Only the references this request uses, and never one it is creating —
+    # the same rule as stalwart-cli's request_created_ids.
+    known = {r: created_ids[r] for r in refs_in(calls, set()) - set(creating) if r in created_ids}
+    if known:
+        body["createdIds"] = known
+    resp = http("POST", "/jmap", body)
+    created_ids.update(resp.get("createdIds") or {})
+    out = []
+    for name, args, call_id in resp["methodResponses"]:
+        if name == "error":
+            fail(f"{call_id}: {args.get('type')}: {args.get('description', '')}")
+        out.append(args)
+    return out
+
+
+def describe(err):
+    text = f"{err.get('type')}: {err.get('description', '')}".rstrip(": ")
+    if err.get("properties"):
+        text += f" (properties: {', '.join(err['properties'])})"
+    return text
+
+
+_schema = None
+
+
+def schema():
+    global _schema
+    if _schema is None:
+        _schema = http("GET", "/api/schema")
+    return _schema
+
+
+def canonical(name):
+    c = name if name.startswith("x:") else "x:" + name
+    if c not in schema()["objects"]:
+        fail(f"unknown object `{name}`")
+    return c
+
+
+def is_singleton(c):
+    return schema()["objects"][c].get("type") == "singleton"
+
+
+def is_multi(c):
+    return (schema()["schemas"].get(c) or {}).get("type") == "multiple"
+
+
+def props_for(c, at_type):
+    sc = schema()["schemas"].get(c) or {}
+    if sc.get("type") == "multiple":
+        variant = next((v for v in sc.get("variants", []) if v.get("name") == at_type), {})
+        name = variant.get("schemaName")
+    else:
+        name = sc.get("schemaName")
+    return (schema()["fields"].get(name) or {}).get("properties", {}) if name else {}
+
+
+def update_kind(props, key):
+    return (props.get(key) or {}).get("update", "mutable")
+
+
+_limit = None
+
+
+def fetch_all(c):
+    global _limit
+    if _limit is None:
+        core = http("GET", "/jmap/session").get("capabilities", {})
+        core = core.get("urn:ietf:params:jmap:core", {})
+        _limit = max(1, min(int(core.get("maxObjectsInGet", 256)), 500))
+    objs, anchor = [], None
+    while True:
+        query = {"filter": {}, "limit": _limit}
+        if anchor:
+            query.update(anchor=anchor, anchorOffset=1)
+        ids_ref = {"resultOf": "q", "name": f"{c}/query", "path": "/ids"}
+        q, g = jmap([
+            [f"{c}/query", query, "q"],
+            [f"{c}/get", {"#ids": ids_ref, "properties": None}, "g"],
+        ])
+        ids = q.get("ids") or []
+        objs.extend(g.get("list") or [])
+        if len(ids) < _limit:
+            return objs
+        anchor = ids[-1]
+
+
+def resolve_ref(value):
+    if isinstance(value, str) and value.startswith("#") and value[1:] in created_ids:
+        return created_ids[value[1:]]
+    return value
+
+
+def same(a, b):
+    return (a is None and b is None) or a == b
+
+
+def create_objects(c, bodies, known):
+    (res,) = jmap([[f"{c}/set", {"create": bodies}, "c"]], creating=bodies.keys())
+    for cid, err in (res.get("notCreated") or {}).items():
+        fail(f"{c[2:]}: create failed for `{cid}`: {describe(err)}")
+    created = res.get("created") or {}
+    for cid, obj in created.items():
+        created_ids[cid] = obj["id"]
+        known.append({**bodies[cid], **obj})
+    return len(created)
+
+
+def update_object(c, sid, patch):
+    (res,) = jmap([[f"{c}/set", {"update": {sid: patch}}, "u"]])
+    for bad, err in (res.get("notUpdated") or {}).items():
+        fail(f"{c[2:]}: update failed for {bad}: {describe(err)}")
+    if sid not in (res.get("updated") or {}):
+        fail(f"{c[2:]}: the server did not confirm updating `{sid}` (the id may not exist)")
+
+
+def covers(current, wanted):
+    # ⚠ A TYPED SUB-OBJECT COMES BACK WITH THE SERVER'S DEFAULTS FILLED IN —
+    # `dkimManagement: {"@type": "Automatic"}` is stored with its algorithms,
+    # selector template and rotation periods — so exact equality reports a
+    # change on every run. Inside anything carrying `@type`, compare only what
+    # the plan sets. Plain maps (`bind`, `subjectAlternativeNames`) are sets and
+    # are written whole, so they stay exact: a removed entry must show.
+    wanted = resolve_ref(wanted)
+    if isinstance(wanted, dict) and "@type" in wanted and isinstance(current, dict):
+        return current.get("@type") == wanted["@type"] and all(
+            covers(current.get(k), v) for k, v in wanted.items() if k != "@type"
+        )
+    return same(current, wanted)
+
+
+def unknown_props(c, at_type, body):
+    # ⚠ THE CHECK THAT WOULD HAVE CAUGHT THE StoreLookup BUG ON THE FIRST RUN.
+    # Its first version put `description` and the Postgres fields at the top
+    # level; the object has only `namespace` and `store`. A create is never
+    # matched against anything, so without this a preview reads "would create"
+    # and says nothing about a body the server will refuse.
+    props = props_for(c, at_type)
+    return sorted(k for k in body if k != "@type" and k not in props) if props else []
+
+
+def changes(current, patch):
+    return sorted(k for k, v in patch.items() if not covers(current.get(k), v))
+
+
+def upsert(c, op, cache, dry=False):
+    label = c[2:]
+    match_on = op.get("matchOn")
+    if isinstance(match_on, str):
+        match_on = [match_on]
+    if not match_on:
+        fail(f"{label}: upsert without `matchOn` — name the properties that identify the object")
+    if c not in cache:
+        cache[c] = fetch_all(c)
+    known = cache[c]
+    multi = is_multi(c)
+    to_create, to_update = {}, []
+    for client_id, body in op["value"].items():
+        at_type = body.get("@type")
+        if multi and not at_type:
+            fail(f"{label}: `{client_id}` is missing `@type` (required to match a multi-variant object)")
+        wanted = []
+        for p in match_on:
+            if p not in body:
+                fail(f"{label}: match property `{p}` is missing from `{client_id}`")
+            wanted.append((p, resolve_ref(body[p])))
+        matches = [
+            o for o in known
+            if (not multi or o.get("@type") == at_type)
+            and all(same(o.get(p), w) for p, w in wanted)
+        ]
+        if len(matches) > 1:
+            fail(f"{label}: ambiguous upsert; {len(matches)} existing objects match on {', '.join(match_on)}")
+        props = props_for(c, at_type)
+        if matches:
+            sid = matches[0]["id"]
+            created_ids[client_id] = sid
+            patch = {
+                k: v for k, v in body.items()
+                if k != "@type" and update_kind(props, k) not in ("immutable", "serverSet")
+            }
+            if patch:
+                to_update.append((sid, patch))
+        else:
+            to_create[client_id] = {
+                k: v for k, v in body.items() if update_kind(props, k) != "serverSet"
+            }
+    if dry:
+        for cid, body in op["value"].items():
+            bad = unknown_props(c, body.get("@type"), body)
+            if bad:
+                fail(f"{label} `{cid}`: not properties of {label}: {', '.join(bad)}")
+        for cid in to_create:
+            print(f"   + would create {label} `{cid}`")
+        for sid, patch in to_update:
+            diff = changes(next(o for o in known if o.get("id") == sid), patch)
+            print(f"   ~ {label} {sid}: " + (f"would change {', '.join(diff)}" if diff else "unchanged"))
+        return 0, 0
+    created = create_objects(c, to_create, known) if to_create else 0
+    for sid, patch in to_update:
+        update_object(c, sid, patch)
+        next(o for o in known if o.get("id") == sid).update(patch)
+    return created, len(to_update)
+
+
+def update(c, op, dry=False):
+    if is_singleton(c):
+        if op.get("id") not in (None, "singleton"):
+            fail(f"{c[2:]}: a singleton's id must be 'singleton'")
+        sid = "singleton"
+    else:
+        sid = resolve_ref(op.get("id") or fail(f"{c[2:]}: update needs a top-level `id`"))
+    if dry:
+        bad = unknown_props(c, op["value"].get("@type"), op["value"])
+        if bad:
+            fail(f"{c[2:]}: not properties of {c[2:]}: {', '.join(bad)}")
+        (got,) = jmap([[f"{c}/get", {"ids": [sid], "properties": list(op["value"])}, "g"]])
+        current = (got.get("list") or [{}])[0]
+        diff = changes(current, op["value"])
+        print(f"   ~ {c[2:]} {sid}: " + (f"would change {', '.join(diff)}" if diff else "unchanged"))
+        return
+    update_object(c, sid, op["value"])
+
+
+def apply(text, dry=False):
+    ops = [json.loads(line) for line in text.splitlines() if line.strip()]
+    kinds = {}
+    for op in ops:
+        kinds[op.get("@type")] = kinds.get(op.get("@type"), 0) + 1
+    print("   Plan: " + ", ".join(f"{n} {k}" for k, n in kinds.items()) + f" ({len(ops)} operations)")
+    cache, total_created, total_updated = {}, 0, 0
+    for i, op in enumerate(ops, 1):
+        kind, c = op.get("@type"), canonical(op.get("object", ""))
+        if kind == "upsert":
+            created, updated = upsert(c, op, cache, dry)
+            if not dry:
+                ok(f"upserted {c[2:]} ({updated} updated, {created} created)")
+        elif kind == "update":
+            update(c, op, dry)
+            created, updated = 0, 0 if dry else 1
+            if not dry:
+                ok(f"updated {c[2:]}")
+        elif dry:
+            fail(f"operation #{i}: `{kind}` has no dry-run preview")
+        elif kind == "create":
+            created, updated = create_objects(c, op["value"], cache.setdefault(c, [])), 0
+            ok(f"created {c[2:]} ({created})")
+        else:
+            fail(f"operation #{i}: `{kind}` is not supported by bootstrap.sh — "
+                 "only upsert, update and create; use stalwart-cli for the rest")
+        total_created += created
+        total_updated += updated
+    if not dry:
+        ok(f"done: {total_updated} updated, {total_created} created")
+
+
+def main():
+    cmd, args = sys.argv[1], sys.argv[2:]
+    if cmd == "wait":
+        # The port-forward takes a moment to listen; anything but a refused
+        # connection means Stalwart itself is answering.
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(BASE + "/jmap/session", timeout=2)
+                return
+            except urllib.error.HTTPError:
+                return
+            except Exception:
+                time.sleep(0.2)
+        sys.exit(1)
+    elif cmd == "apply":
+        apply(sys.stdin.read(), dry="--dry-run" in args)
+    elif cmd == "listener":
+        names = {o.get("name") for o in fetch_all("x:NetworkListener")}
+        sys.exit(0 if args[0] in names else 1)
+    elif cmd == "tracer":
+        ensure_stdout_tracer()
+    elif cmd == "reload":
+        (res,) = jmap([["x:Action/set", {"create": {"r": {"@type": "ReloadSettings"}}}, "r"]])
+        if "r" not in (res.get("created") or {}):
+            fail(f"reload failed: {describe((res.get('notCreated') or {}).get('r', {}))}")
+    elif cmd == "zone":
+        domains = fetch_all("x:Domain")
+        print(domains[0].get("dnsZoneFile", "") if domains else "")
+    else:
+        fail(f"unknown helper command `{cmd}`")
+
+
+def ensure_stdout_tracer():
+    tracers = fetch_all("x:Tracer")
+    if any(t.get("@type") == "Stdout" for t in tracers):
+        ok("a Stdout tracer already exists")
+        return
+    create_objects("x:Tracer", {"stdout": {
+        "@type": "Stdout", "enable": True, "level": "info", "ansi": False,
+        "multiline": False, "buffered": False, "lossy": False,
+        "events": {}, "eventsPolicy": "exclude",
+    }}, tracers)
+    ok("created a Stdout tracer at level info")
+    # Disable the file tracer, which is writing into a directory that is not there.
+    for t in tracers:
+        if t.get("@type") == "Log" and t.get("enable", True):
+            update_object("x:Tracer", t["id"], {"enable": False})
+            ok(f"disabled the file tracer ({t['id']})")
+
+
+main()
+PY
+
+connect
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Verification — used at the end, and on its own with --verify.
@@ -270,24 +580,15 @@ verify() {
     warn "authd has not logged 'listening' recently"
   fi
 
-  # The direct route's whole dependency on this server, in one line. Without an
-  # account to authenticate as, every direct-routed message answers `deferred`
-  # and waits in the queue — the designed failure, but a silent one until the
-  # backlog is large enough to notice.
-  if sw query Account --json 2>/dev/null | grep -q '"emailAddress":"submission@i10.tech"'; then
-    ok "the submission account exists"
-  else
-    warn "no submission@i10.tech — the direct route cannot send"
-    failures=$((failures + 1))
-  fi
-
   # ⚠ THE LISTENER THE SEND WORKER DIALS, CHECKED BY NAME RATHER THAN ASSUMED.
-  # 587 has no listener on this server and does not need one; 465 is implicit
-  # TLS, which is what submission.ts configures from the port number.
-  if sw query NetworkListener --json 2>/dev/null | grep -q '"submissions"'; then
-    ok "the submissions listener (465, implicit TLS) is configured"
+  # The direct route's whole dependency on this server is one line: without
+  # `relay` on 2525, every direct-routed message answers `deferred` and waits in
+  # the queue — the designed failure, but a silent one until the backlog is
+  # large enough to notice. See config/README.md, "The internal relay".
+  if api listener relay; then
+    ok "the relay listener (2525, in-cluster only) is configured"
   else
-    warn "no submissions listener — nothing accepts authenticated mail"
+    warn "no relay listener — the direct route cannot send"
     failures=$((failures + 1))
   fi
 
@@ -310,6 +611,34 @@ if [ "$VERIFY_ONLY" = true ]; then
   exit 0
 fi
 
+# ⚠ TWO FUNCTIONS, BECAUSE ONLY THE PLAN MAY GO DOWN THE PIPE. The lookup
+# prints progress and can `die`; run inside a pipeline it would do both in a
+# subshell — its progress line parsed as a plan operation, its exit ignored.
+find_plan() {
+  CM=$(kubectl get configmap -n "$NS" -o name |
+    grep -o "${CONFIGMAP_PREFIX}-[a-z0-9]*" | head -1) ||
+    die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS — has Argo synced?"
+  [ -n "$CM" ] || die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS — has Argo synced?"
+  ok "using ConfigMap $CM"
+}
+plan_text() {
+  kubectl get configmap -n "$NS" "$CM" -o jsonpath='{.data.plan\.ndjson}'
+}
+
+if [ "$DRY_RUN" = true ]; then
+  say "Previewing plan.ndjson — nothing is written"
+  if [ -n "${PLAN_FILE:-}" ]; then
+    [ -r "$PLAN_FILE" ] || die "cannot read PLAN_FILE=$PLAN_FILE"
+    ok "using $PLAN_FILE (not deployed)"
+    api apply --dry-run <"$PLAN_FILE" || die "the plan cannot be applied as written"
+  else
+    find_plan
+    plan_text | api apply --dry-run || die "the plan cannot be applied as written"
+  fi
+  say "Dry run complete."
+  exit 0
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 say "Applying plan.ndjson"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -318,50 +647,8 @@ say "Applying plan.ndjson"
 # generated. Reading it from there rather than from the working copy is what
 # makes this reflect what is DEPLOYED — running it against an uncommitted local
 # edit would configure the server from something no one else can see.
-CM=$(kubectl get configmap -n "$NS" -o name |
-  grep -o "${CONFIGMAP_PREFIX}-[a-z0-9]*" | head -1) ||
-  die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS — has Argo synced?"
-[ -n "$CM" ] || die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS — has Argo synced?"
-ok "using ConfigMap $CM"
-
-kubectl create configmap "stalwart-bootstrap-plan" -n "$NS" \
-  --from-literal=plan.ndjson="$(kubectl get configmap -n "$NS" "$CM" -o jsonpath='{.data.plan\.ndjson}')" \
-  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-PLAN_POD="sw-plan-$$"
-kubectl apply -f - >/dev/null <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: $PLAN_POD
-  namespace: $NS
-  labels: { app.kubernetes.io/name: stalwart-bootstrap }
-spec:
-  restartPolicy: OnFailure
-  containers:
-    - name: cli
-      image: $CLI_IMAGE
-      args: ["apply", "--file", "/plan/plan.ndjson"]
-      env:
-        - { name: STALWART_URL, value: "$SVC_URL" }
-        - { name: STALWART_USER, value: "$CLI_USER" }
-        - name: STALWART_PASSWORD
-          valueFrom: { secretKeyRef: { name: $TMP_SECRET, key: password } }
-      volumeMounts: [{ name: plan, mountPath: /plan, readOnly: true }]
-  volumes:
-    - name: plan
-      configMap: { name: stalwart-bootstrap-plan }
-EOF
-phase=""
-for _ in $(seq 1 40); do
-  phase=$(kubectl get pod -n "$NS" "$PLAN_POD" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-  [ "$phase" = "Succeeded" ] && break
-  sleep 3
-done
-kubectl logs -n "$NS" "$PLAN_POD" 2>&1 | sed 's/^/   /'
-kubectl delete pod -n "$NS" "$PLAN_POD" --ignore-not-found >/dev/null 2>&1 || true
-kubectl delete configmap -n "$NS" stalwart-bootstrap-plan --ignore-not-found >/dev/null 2>&1 || true
-[ "$phase" = "Succeeded" ] || die "the plan did not apply cleanly"
+find_plan
+plan_text | api apply || die "the plan did not apply cleanly"
 
 # ─────────────────────────────────────────────────────────────────────────────
 say "Ensuring a Stdout tracer"
@@ -376,161 +663,7 @@ say "Ensuring a Stdout tracer"
 # /var/log/stalwart. That directory does not exist in the container and the root
 # filesystem is read-only, so it is enabled, at info, and discarding everything.
 # Between first boot and 2026-09-02 the server never logged a single line.
-tracers=$(sw query Tracer --json || die "could not query tracers")
-if printf '%s' "$tracers" | grep -q '"@type":"Stdout"'; then
-  ok "a Stdout tracer already exists"
-else
-  sw create Tracer --json '{"@type":"Stdout","enable":true,"level":"info","ansi":false,"multiline":false,"buffered":false,"lossy":false,"events":{},"eventsPolicy":"exclude"}' ||
-    die "could not create the Stdout tracer"
-  ok "created a Stdout tracer at level info"
-
-  # Disable the file tracer, which is writing into a directory that is not there.
-  log_id=$(printf '%s' "$tracers" | grep '"@type":"Log"' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
-  if [ -n "$log_id" ]; then
-    sw update Tracer "$log_id" --field enable=false >/dev/null && ok "disabled the file tracer ($log_id)"
-  fi
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-say "Ensuring the submission account"
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# The identity the send worker authenticates as to hand us transactional mail
-# for the direct route. See docs/decisions/mail-routing.md.
-#
-# ⚠ AN ACCOUNT IN STALWART'S OWN STORE, NOT IN authd, AND THAT IS THE WHOLE
-# POINT. Every principal authd knows is a Clerk user — `filterLogin` is
-# `(objectClass=inetOrgPerson)(mail=?)` against a projection of Clerk, and a bind
-# is a `verify_password` call against Clerk. Putting a machine in there would
-# mean inventing a person: a Clerk user with a password we rotate, visible to the
-# identity system that exists for customers, and one Clerk outage away from the
-# send worker being unable to send. `metering@i10.tech` established this pattern
-# on 2026-09-06 for the same reason; this is the second one.
-#
-# ⚠ THE ACCOUNT IS IDEMPOTENT; THE PASSWORD IS NOT AND CANNOT BE. Stalwart
-# stores a hash, so there is nothing to compare a desired value against — a
-# re-run that "ensured" the password would have to overwrite it every time,
-# invalidating whatever is in Doppler. So this creates the account when absent
-# and sets a password ONLY when explicitly asked:
-#
-#   ./bootstrap.sh --set-submission-password
-#
-# ⚠ AND THE SECRET IS NEVER PRINTED, WRITTEN TO A FILE, OR PASSED AS AN
-# ARGUMENT. A pod's `args` are readable by anyone who can `get pod -o yaml`, so
-# the payload travels as a mounted Secret instead. The value is read from your
-# terminal, sent to Stalwart, and put in a Secret for you to copy into Doppler.
-SUB_LOCAL="${SUB_LOCAL:-submission}"
-SUB_DOMAIN="${SUB_DOMAIN:-i10.tech}"
-SUB_EMAIL="$SUB_LOCAL@$SUB_DOMAIN"
-
-# ⚠ `emailAddress` IS SERVER-SET, DERIVED FROM `name` AND `domainId`. Sending it
-# is rejected outright, and the domain id is a registry id rather than the name —
-# so it has to be looked up rather than written down. Hardcoding the current `b`
-# would work today and break on any rebuild of this server.
-#
-# ⚠ THE `id` IS TAKEN FROM THE END OF THE LINE, WHICH IS MEASURED RATHER THAN
-# ASSUMED. These records nest — `{"name":"i10.tech",…,"certificateManagement":
-# {"@type":"Manual"},…,"id":"b"}` — so a `[^}]*` window stops at the FIRST inner
-# brace and never reaches the id, which is how the obvious version of this
-# silently extracts nothing. Anchoring on `"id":"…"` immediately before the
-# closing brace is what survives the nesting; the server puts it last in both
-# Domain and Account. If that ever changes, the `die` below is the alarm — an
-# empty id must never fall through into a create.
-sub_domain_id=$(sw query Domain --json 2>/dev/null |
-  grep "\"name\":\"$SUB_DOMAIN\"" |
-  sed -n 's/.*"id":"\([^"]*\)"[^"]*$/\1/p' | head -1)
-[ -n "$sub_domain_id" ] || die "no Domain named $SUB_DOMAIN — apply plan.ndjson first"
-
-if sw query Account --json 2>/dev/null | grep -q "\"emailAddress\":\"$SUB_EMAIL\""; then
-  ok "$SUB_EMAIL already exists"
-else
-  # ⚠ TWO PERMISSIONS OUT OF 660, AND `Replace` RATHER THAN `Inherit`. The
-  # default user role carries the whole mailbox surface — IMAP, JMAP, sieve,
-  # every folder — none of which a submission client has any use for.
-  # `authenticate` opens the session and `emailSend` submits; a credential that
-  # leaks can post mail and cannot read any.
-  #
-  # ⚠ AND NOTHING IS EVER DELIVERED HERE. The account exists to be authenticated
-  # as. The description says so for whoever finds it in the admin UI at three in
-  # the morning and wonders whose mailbox it is.
-  sw create Account/User --json "{
-    \"@type\": \"User\",
-    \"name\": \"$SUB_LOCAL\",
-    \"domainId\": \"$sub_domain_id\",
-    \"description\": \"i10 send worker - direct-route SMTP submission. Not a mailbox.\",
-    \"roles\": {\"@type\": \"User\"},
-    \"permissions\": {
-      \"@type\": \"Replace\",
-      \"enabledPermissions\": {\"authenticate\": true, \"emailSend\": true},
-      \"disabledPermissions\": {}
-    }
-  }" >/dev/null || die "could not create $SUB_EMAIL"
-  ok "created $SUB_EMAIL"
-fi
-
-if [ "$SET_SUBMISSION_PASSWORD" = true ]; then
-  say "Setting the submission password"
-  # ⚠ THE ACCOUNT'S OWN PASSWORD, NOT AN AppPassword, AND NOT FOR WANT OF
-  # TRYING. `AppPassword` carries `allowedIps` and its own permission set, which
-  # would both be worth having — but it is not creatable by an administrator:
-  # `create AppPassword` answers `notFound` with or without an account id,
-  # because an app password is minted by the account holder inside their own
-  # session. There is no holder here to log in as. `AccountPassword.secret` is
-  # mutable and is what is left.
-  #
-  # ⚠ THE NARROW GRANT IS THE CONTROL, THEN, RATHER THAN THE SOURCE ADDRESS.
-  # The account has two permissions and no mailbox, so the blast radius of this
-  # credential is "can post mail through our MTA" — which is the thing it is for.
-  # The table rather than the JSON: `query Account` prints `Id  Email Address …`,
-  # and two whitespace-separated columns are less to get wrong than a nested
-  # record. See the note on the domain lookup above for why the JSON is awkward.
-  sub_id=$(sw query Account 2>/dev/null | awk -v e="$SUB_EMAIL" '$2 == e { print $1; exit }')
-  [ -n "$sub_id" ] || die "could not resolve the id of $SUB_EMAIL"
-
-  printf '   Paste a password for %s (input hidden): ' "$SUB_EMAIL"
-  read -rs sub_pw
-  printf '\n'
-  [ -n "$sub_pw" ] || die "empty password"
-
-  # ⚠ THROUGH A MOUNTED Secret, NEVER THROUGH `args`. A pod's arguments are in
-  # its spec, readable by anything with `get pod`, and they persist in the API
-  # server until the pod is reaped.
-  kubectl create secret generic i10-stalwart-submission -n "$NS" \
-    --from-literal=STALWART_SUBMISSION_HOST="i10-stalwart-mail.$NS.svc.cluster.local" \
-    --from-literal=STALWART_SUBMISSION_PORT=465 \
-    --from-literal=STALWART_SUBMISSION_USER="$SUB_EMAIL" \
-    --from-literal=STALWART_SUBMISSION_PASSWORD="$sub_pw" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  kubectl create secret generic sw-password-payload -n "$NS" \
-    --from-literal=payload.json="{\"secret\":\"$sub_pw\"}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  unset sub_pw
-
-  sw_file AccountPassword "$sub_id" sw-password-payload ||
-    die "could not set the password for $SUB_EMAIL"
-  kubectl delete secret sw-password-payload -n "$NS" --ignore-not-found >/dev/null
-  ok "password set for $SUB_EMAIL"
-
-  cat <<DOPPLER
-
-   The four values are now in the Secret i10-stalwart-submission, for you to
-   copy into Doppler's prod_api config — which is what the i10-api Secret syncs
-   and what worker.yaml already mounts wholesale, so no manifest change is
-   needed. Exactly as with STALWART_API_TOKEN:
-
-     kubectl get secret i10-stalwart-submission -n $NS \\
-       -o go-template='{{range \$k,\$v := .data}}{{\$k}}={{\$v | base64decode}}{{"\\n"}}{{end}}'
-
-   ⚠ 465, NOT 587. There is no 587 listener on this server and no reason to add
-   one: 465 is implicit TLS from the first byte, which RFC 8314 §3 prefers over
-   STARTTLS precisely because it has no cleartext phase to strip.
-   apps/api/src/send/submission.ts derives the TLS mode from the port.
-
-   ⚠ AND DELETE i10-stalwart-submission ONCE IT IS IN DOPPLER. Two homes for one
-   credential is one that gets rotated and one that does not.
-
-DOPPLER
-fi
+api tracer || die "could not ensure the Stdout tracer"
 
 # ─────────────────────────────────────────────────────────────────────────────
 say "Reloading settings"
@@ -539,7 +672,7 @@ say "Reloading settings"
 # ⚠ APPLYING IS NOT ACTIVATING. Directory data takes effect immediately, but
 # listeners, MTA rules, directory backends and telemetry are parsed once into an
 # in-memory snapshot. Every object in plan.ndjson is in that category.
-sw create Action/ReloadSettings >/dev/null || die "reload failed"
+api reload || die "reload failed"
 ok "settings reloaded"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -556,6 +689,7 @@ if [ "$RESTART" = true ]; then
   #   3. The per-account permission set, cached as `accessToken`. Assigning
   #      defaultUserRoleIds appeared to do nothing for twenty minutes because
   #      the running server kept serving the old, empty token.
+  disconnect
   kubectl delete pod -n "$NS" "$POD" --wait=false >/dev/null
   kubectl wait --for=delete "pod/$POD" -n "$NS" --timeout=90s >/dev/null 2>&1 || true
   for _ in $(seq 1 60); do
@@ -566,6 +700,7 @@ if [ "$RESTART" = true ]; then
   [ "${ready:-}" = "true true" ] || die "the pod did not come back ready"
   ok "pod restarted and ready"
   sleep 3
+  connect
 else
   warn "skipping the restart — the certificate, tracer and cached permissions may be stale"
 fi
@@ -592,15 +727,9 @@ warn "  infra/tofu/stacks/dns is the authority. It deliberately differs:"
 warn "  DMARC stays p=none until the reports are clean (Stalwart proposes p=reject),"
 warn "  and the report addresses point at a mailbox that exists."
 warn "  What you DO need from here after a rebuild is the two _domainkey records."
-domain_id=$(sw query Domain --json | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
-if [ -n "$domain_id" ]; then
-  sw get Domain "$domain_id" --json |
-    python3 -c 'import sys,json
-raw = [l for l in sys.stdin.read().splitlines() if l.strip().startswith("{")]
-zone = json.loads(raw[-1]).get("dnsZoneFile", "") if raw else ""
-for line in zone.splitlines():
-    if " TLSA " not in line:
-        print("   " + line)'
+zone=$(api zone || true)
+if [ -n "$zone" ]; then
+  printf '%s\n' "$zone" | grep -v " TLSA " | sed 's/^/   /'
 else
   warn "no Domain object — plan.ndjson did not create one"
 fi

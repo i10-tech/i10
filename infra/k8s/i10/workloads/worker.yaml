@@ -83,6 +83,11 @@ spec:
             - name: HOSTNAME
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
+            # The direct route's hand-off: Stalwart's `relay` listener. HERE, NOT
+            # IN DOPPLER — it is an address, and there is no credential to go
+            # with it. The port defaults to 2525 in env.ts.
+            - name: STALWART_RELAY_HOST
+              value: i10-stalwart-mail.i10-prod.svc.cluster.local
           resources:
             requests: { cpu: 100m, memory: 192Mi }
             limits: { memory: 512Mi }

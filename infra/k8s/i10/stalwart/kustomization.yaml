@@ -16,7 +16,7 @@ resources:
 # where the fix is deployed and the symptom persists.
 #
 # ⚠ ROLLING THE POD IS NOT THE SAME AS APPLYING THE PLAN. config.json takes
-# effect on restart; plan.ndjson does nothing until `stalwart-cli apply` runs
+# effect on restart; plan.ndjson does nothing until bootstrap.sh applies it
 # against the server, and the objects in it need `Action/ReloadSettings` after
 # that. The ConfigMap carries the plan into the pod so it can be applied there;
 # it does not apply it. See config/README.md.

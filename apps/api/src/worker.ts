@@ -24,7 +24,7 @@ import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
 import { sesTransport } from "./send/ses.js"
 import { domainSendingLookup } from "./send/signing-key.js"
 import { stalwartTransport } from "./send/stalwart.js"
-import { submissionConfig } from "./send/submission.js"
+import { relayConfig } from "./send/relay.js"
 import type { Transport } from "./send/transport.js"
 import { webhookDeliveryOps } from "./webhooks/db.js"
 import { deliverWebhook } from "./webhooks/deliver.js"
@@ -110,13 +110,13 @@ const ses = sesTransport({
 
 /**
  * ⚠ HELD SO SHUTDOWN CAN CLOSE IT, WHICH THE PREVIOUS CLIENT'S POOL NEVER WAS.
- * A pooled submission client keeps idle TCP connections open; exiting without
+ * A pooled relay client keeps idle TCP connections open; exiting without
  * closing them leaves Stalwart to notice the sockets died, which on an ordinary
  * rolling deploy means a handful of half-open connections per pod per release.
  * Nothing breaks, and it is the kind of thing that only ever gets diagnosed
  * from the other end.
  */
-let submissionPool: SmtpTransport | null = null
+let relayPool: SmtpTransport | null = null
 
 /**
  * Our own MTA, when it is configured and the keys can be unsealed.
@@ -134,15 +134,11 @@ let submissionPool: SmtpTransport | null = null
  * message signed with nothing is one that fails DMARC at the recipient.
  */
 function directTransport(): Transport {
-  const host = env.STALWART_SUBMISSION_HOST
-  const user = env.STALWART_SUBMISSION_USER
-  const password = env.STALWART_SUBMISSION_PASSWORD
+  const host = env.STALWART_RELAY_HOST
 
-  if (!host || !user || !password || !env.WEBHOOK_SECRET_KEY) {
+  if (!host || !env.WEBHOOK_SECRET_KEY) {
     const missing = [
-      !host && "STALWART_SUBMISSION_HOST",
-      !user && "STALWART_SUBMISSION_USER",
-      !password && "STALWART_SUBMISSION_PASSWORD",
+      !host && "STALWART_RELAY_HOST",
       !env.WEBHOOK_SECRET_KEY && "WEBHOOK_SECRET_KEY",
     ].filter(Boolean)
 
@@ -157,19 +153,17 @@ function directTransport(): Transport {
     }
   }
 
-  submissionPool = new SmtpTransport(
-    submissionConfig({
+  relayPool = new SmtpTransport(
+    relayConfig({
       host,
-      port: env.STALWART_SUBMISSION_PORT,
-      user,
-      password,
+      port: env.STALWART_RELAY_PORT,
       localName: env.MAIL_BOUNCE_HOST,
       poolSize: env.WORKER_CONCURRENCY,
     }),
   )
 
   return stalwartTransport({
-    mailer: submissionPool,
+    mailer: relayPool,
     // ⚠ SMTP CAN TAKE A MESSAGE AND STILL REFUSE SOME OF ITS RECIPIENTS, and
     // before upyo we could not see it happen. `warn` rather than `error`: the
     // message was delivered to everyone else, so this is not a failed send — it
@@ -177,7 +171,7 @@ function directTransport(): Transport {
     onRejectedRecipients: ({ messageId, tenantId, recipients }) =>
       log.warn(
         { messageId, tenantId, recipients },
-        "submission accepted with rejected recipients",
+        "relay accepted with rejected recipients",
       ),
     // ⚠ THE BOUNCE LABEL COMES BACK ON THE SAME ROW AS THE KEY, because it is
     // per domain — `core.domains.bounce_subdomain` — and it is what the
@@ -399,8 +393,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
         Promise.allSettled([
           sql.end({ timeout: 10 }),
           queueRedis.quit(),
-          // Idle submission connections, closed politely rather than dropped.
-          submissionPool?.closeAllConnections() ?? Promise.resolve(),
+          // Idle relay connections, closed politely rather than dropped.
+          relayPool?.closeAllConnections() ?? Promise.resolve(),
         ]),
       )
       // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`

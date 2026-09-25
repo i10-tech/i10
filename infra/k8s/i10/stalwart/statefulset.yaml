@@ -93,6 +93,14 @@ spec:
             # a hang instead of a refusal.
             - { name: submission, containerPort: 587 }
             - { name: imaps, containerPort: 993, hostPort: 993 }
+            # ⚠ THE SEND WORKER'S RELAY, AND THE ABSENCE OF A hostPort IS THE
+            # SECURITY. `relay` on 2525 takes mail WITHOUT authentication — the
+            # trust is where the connection comes from, not what it presents. No
+            # hostPort means nothing on the node's public addresses answers here,
+            # and `allow-public-mail` does not list it, so only pods inside the
+            # cluster's own policy boundary reach it. Adding a hostPort would
+            # publish an open relay. See config/README.md, "The internal relay".
+            - { name: relay, containerPort: 2525 }
             # Deliberately NOT exposed on the host. The management API reaches
             # the internet through Traefik, which is where its TLS and its
             # per-host gating live.
