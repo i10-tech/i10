@@ -15,8 +15,8 @@ import {
 /**
  * Our own MTA as the relay.
  *
- * ⚠ SUBMISSION, NOT DELIVERY. This hands a finished message to Stalwart over
- * SMTP and stops there. Stalwart owns the queue, the retries, the MX lookups
+ * ⚠ HAND-OFF, NOT DELIVERY. This hands a finished message to Stalwart's
+ * internal `relay` listener over SMTP and stops there. Stalwart owns the queue, the retries, the MX lookups
  * and the DSN generation from that point — all of which it already does
  * properly, and none of which is worth rebuilding inside a worker. The same
  * argument in reverse is why mailbox mail does not go out through the SES API:
@@ -37,7 +37,7 @@ import {
  */
 
 /**
- * The submission client, narrowed to the one method this uses.
+ * The relay client, narrowed to the one method this uses.
  *
  * ⚠ STRUCTURAL RATHER THAN `SmtpTransport`, SO A TEST CAN BE A LITERAL. The
  * concrete class opens sockets in its constructor's shadow and owns a pool;
@@ -49,7 +49,7 @@ export interface RawMailer {
 }
 
 export interface StalwartTransportOptions {
-  /** A client pointed at Stalwart's submission port. */
+  /** A client pointed at Stalwart's `relay` listener. */
   mailer: RawMailer
   /**
    * The domain's signing key and published return path, or null if it has none.
@@ -239,7 +239,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
       // is near-unreachable — the id is derived rather than returned — but the
       // guard costs nothing and keeps the two transports the same shape.
       if (!id) {
-        return { status: "deferred", reason: "submission returned no message id" }
+        return { status: "deferred", reason: "relay returned no message id" }
       }
       return { status: "sent", providerMessageId: id }
     },
@@ -272,24 +272,34 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
  * guessed" — which is exactly the line we want to draw.
  */
 function classify(receipt: Extract<SmtpReceipt, { successful: false }>): SendOutcome {
-  const reason = receipt.errorMessages.join("; ") || "submission failed"
+  const reason = receipt.errorMessages.join("; ") || "relay failed"
   const error = receipt.errors?.[0]
   const code = error?.code ?? ""
 
   const reply = /^smtp\.(\d{3})$/.exec(code)
   if (reply) {
-    // ⚠ A 5xx ON `AUTH`, `EHLO`, `STARTTLS` OR THE GREETING IS NOT A VERDICT ON
-    // THE MESSAGE, AND TREATING IT AS ONE IS A QUEUE-WIDE EXTINCTION EVENT. A
-    // mistyped submission password answers `535` — a hard 5xx — for every
-    // message, so a permanent classification would burn the entire backlog to
-    // `failed` within one batch, with each row's reason naming the message
-    // rather than the credential. The session is ours to fix and the mail is
-    // still deliverable, so it waits.
+    // ⚠ A 5xx ON `EHLO`, `STARTTLS` OR THE GREETING IS NOT A VERDICT ON THE
+    // MESSAGE, AND TREATING IT AS ONE IS A QUEUE-WIDE EXTINCTION EVENT. The
+    // server is refusing us, so it answers the same for every message, and a
+    // permanent classification would burn the entire backlog to `failed` within
+    // one batch, with each row's reason naming the message rather than the
+    // cause. The session is ours to fix and the mail is still deliverable, so
+    // it waits.
     //
     // The message-phase commands — `MAIL FROM`, `RCPT TO`, `DATA` — are the
     // only ones whose 5xx is about this message.
     const command = commandOf(error?.providerDetails)
     if (command !== null && !MESSAGE_PHASE.has(command)) {
+      return { status: "deferred", reason }
+    }
+
+    // ⚠ AND THE SAME EVENT CAN ARRIVE IN THE MESSAGE PHASE, BECAUSE THE RELAY
+    // TAKES NO CREDENTIAL. What `535` on AUTH used to mean — "not you" — now
+    // comes back as a refusal of the envelope, and it is still about us: a
+    // rule in plan.ndjson not applied, a listener that still demands AUTH, a
+    // return path the sender rule refuses. Each answers identically for every
+    // message, so each waits for the fix rather than failing the queue.
+    if (command !== null && isRelayRefusal(command, error?.providerDetails)) {
       return { status: "deferred", reason }
     }
 
@@ -317,10 +327,35 @@ function classify(receipt: Extract<SmtpReceipt, { successful: false }>): SendOut
 const MESSAGE_PHASE = new Set(["MAIL FROM", "RCPT TO", "DATA"])
 
 /**
+ * Stalwart's refusals of the relay itself, as command and enhanced status.
+ *
+ * ⚠ READ FROM STALWART'S SOURCE (v0.16.19, `smtp/src/inbound`), NOT FROM THE
+ * RFCs, BECAUSE THE CODES ARE ITS CHOICES:
+ *
+ *   RCPT TO    550 5.1.2 Relay not allowed.          — `allowRelaying` said no
+ *   MAIL FROM  503 5.5.1 You must authenticate first. — the port demands AUTH
+ *   MAIL FROM  550 5.7.1 Sender address not allowed.  — `isSenderAllowed` said no
+ *
+ * ⚠ THE ENHANCED CODE AND NOT THE TEXT. Wording changes between releases; the
+ * status code is what the reply is classified by everywhere else. And it is
+ * narrow on purpose: `5.1.1` (no such local mailbox) and `5.3.4` (too big) are
+ * genuinely about the message and must still fail it.
+ */
+const RELAY_REFUSALS = new Set(["RCPT TO 5.1.2", "MAIL FROM 5.5.1", "MAIL FROM 5.7.1"])
+
+function isRelayRefusal(command: string, details: unknown): boolean {
+  if (typeof details !== "object" || details === null) return false
+  const enhanced = (details as { enhancedStatusCode?: unknown }).enhancedStatusCode
+  if (typeof enhanced !== "object" || enhanced === null) return false
+  const code = (enhanced as { code?: unknown }).code
+  return typeof code === "string" && RELAY_REFUSALS.has(`${command} ${code}`)
+}
+
+/**
  * ⚠ READ DEFENSIVELY, BECAUSE THE SHAPE IS THE LIBRARY'S AND THE DECISION IS
  * OURS. `providerDetails` is typed `unknown` on `ReceiptError`; a narrowing that
- * silently stopped matching would send every submission failure down the
- * message-phase branch and quietly reclassify a bad password as undeliverable
+ * silently stopped matching would send every relay failure down the
+ * message-phase branch and quietly reclassify a refusal of us as undeliverable
  * mail. Returning null when the shape is not what we expect keeps the caller on
  * the reply code alone, which is the conservative half.
  */

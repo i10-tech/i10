@@ -524,45 +524,40 @@ being a single point of failure — it has to increase on every write.
       prefers the former precisely because there is no plaintext phase to strip,
       so there is no reason to add a listener. `STALWART_SUBMISSION_PORT` now
       defaults to 465 and `submissionConfig` derives the TLS mode from it.
+      _(Superseded 2026-09-26: the worker now uses the `relay` listener on 2525
+      — `STALWART_RELAY_PORT`, `relayConfig`.)_
       ⚠ **THE OLD DEFAULT WAS 587, WHICH MEANS THE DEFAULT WAS UNUSABLE.** A
       deployment that set the host, user and password and trusted the rest would
       have had every direct send refused at the socket — `deferred`, in the
       queue, behind an ECONNREFUSED nobody reads.
-- [ ] **The submission account's password.** The account exists —
-      `submission@i10.tech`, created 2026-09-17 in Stalwart's own store — but it
-      has no credential yet, so the worker still cannot authenticate.
-      `./bootstrap.sh --set-submission-password` prompts for one, sets it, and
-      leaves the four values in the `i10-stalwart-submission` Secret to copy into
-      Doppler's `prod_api` config. That config is what `i10-api` syncs and what
-      `worker.yaml` already mounts wholesale, so **no manifest change is needed**
-      — the same route `STALWART_API_TOKEN` took.
-      ⚠ **AN ACCOUNT IN STALWART'S OWN STORE, NOT IN authd, AND THAT IS THE
-      POINT.** Every principal authd knows is a Clerk user: `filterLogin` is
-      `(objectClass=inetOrgPerson)(mail=?)` over a projection of Clerk, and a
-      bind is a `verify_password` call. A machine in there would be an invented
-      person — a Clerk user with a password we rotate, visible to the identity
-      system that exists for customers, and one Clerk outage away from the send
-      worker being unable to send. `metering@i10.tech` set this precedent on
-      2026-09-06.
-      ⚠ **TWO PERMISSIONS OUT OF 660**, as `Replace` rather than `Inherit`:
-      `authenticate` and `emailSend`. The default user role carries the whole
-      mailbox surface, none of which a submission client can use. A credential
-      that leaks can post mail and cannot read any.
-      ⚠ **AND IT IS THE ACCOUNT PASSWORD RATHER THAN AN `AppPassword`, WHICH WAS
-      NOT THE FIRST CHOICE.** `AppPassword` carries `allowedIps` and its own
-      permission set, both worth having — but an administrator cannot create
-      one: `create AppPassword` answers `notFound` with or without an account
-      id, because an app password is minted by the holder inside their own
-      session, and there is no holder here to log in as. Setting `credentials`
-      on the account directly is refused too ("Secondary credentials cannot be
-      set directly"). `AccountPassword.secret` is mutable and is what is left, so
-      the narrow grant is the control rather than the source address.
+- [x] ~~The submission account's password.~~ **Superseded 2026-09-26 by the
+      internal relay — the account could never have authenticated.** Stalwart
+      refuses to hold a password for ANY account while authd is the directory
+      (`Cannot set credentials for accounts in an external directory`), and
+      authd answers binds only for Clerk users and its one service DN. The
+      bootstrap's `AccountPassword` route was worse than a dead end: that object
+      is the LOGGED-IN account's own password, so pointed at the recovery admin
+      it would have changed the admin's. Behind both sat a third blocker:
+      `MtaStageAuth.mustMatchSender` is `true`, so even an authenticated
+      `submission@i10.tech` could not have sent as `bounce+…@bounce.<customer>`.
+      **Now:** the worker hands mail to the `relay` listener on 2525 with no
+      account and no credential. Trust is network position — no hostPort, not in
+      `allow-public-mail`, ClusterIP only — and Stalwart relays there only for a
+      `bounce+` envelope, with AUTH, the spam filter and the inbound throttles
+      off for that port. All of it is in `plan.ndjson`; nothing is in Doppler.
+      See infra/k8s/i10/stalwart/config/README.md, "The internal relay".
+      ⚠ **A RELAY REFUSAL IS OURS, SO THE WORKER DEFERS IT.** With no AUTH step,
+      a misconfiguration answers in the message phase — `550 5.1.2` at
+      `RCPT TO` — and would have failed the whole queue as undeliverable.
+      `send/stalwart.ts` defers exactly Stalwart's three relay refusals.
 - [x] ~~Sender validation would refuse arbitrary customer domains.~~ **Not a
       problem, checked 2026-09-17.** `MtaStageMail.isSenderAllowed` is
       `!is_empty(authenticated_as) || !key_exists('spam-block', sender_domain)`
       and `MtaStageRcpt.allowRelaying` is `!is_empty(authenticated_as)` — so an
       authenticated session may already send as any domain to any recipient. No
-      MTA rule changes are needed for the direct route.
+      MTA rule changes are needed for the direct route. _(2026-09-26: the direct
+      route no longer authenticates; `allowRelaying` now also admits
+      `local_port == 2525` for a `bounce+` sender. See the item above.)_
 - [x] ~~i10's own bounce domain for the direct route.~~ **Superseded
       2026-09-14** — the return path is the customer's `bounce.<domain>`, not a
       name on i10.tech, so that SPF aligns. See "Custom MAIL FROM stays".

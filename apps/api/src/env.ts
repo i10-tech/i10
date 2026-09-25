@@ -493,35 +493,33 @@ const schema = z.object({
   STALWART_WEBHOOK_SECRET: z.string().min(1).optional(),
 
   /**
-   * Stalwart's SMTP submission endpoint, for the direct route.
+   * Stalwart's internal relay, for the direct route.
    *
-   * ⚠ SUBMISSION, NOT PORT 25, AND NOT THE SAME THING AS `STALWART_URL`. That
-   * one is the management API, used to sample mailbox storage. This is where a
-   * finished message is handed over for queueing and delivery.
+   * ⚠ NOT THE SAME THING AS `STALWART_URL`. That one is the management API, used
+   * to sample mailbox storage. This is where a finished message is handed over
+   * for queueing and delivery.
    *
-   * ⚠ ALL THREE ARE OPTIONAL SO THE WORKER STARTS WITHOUT THEM, AND THE DIRECT
-   * TRANSPORT REFUSES TO SEND WHEN THEY ARE ABSENT. The alternative — requiring
-   * them — makes every deployment that only ever uses SES fail to boot over a
-   * route it does not take. The refusal is `deferred`, so the mail waits in the
-   * queue rather than being lost, and the backlog is the alarm.
+   * ⚠ AN ADDRESS AND NOTHING ELSE — THERE IS NO CREDENTIAL TO GO WITH IT. The
+   * `relay` listener accepts without AUTH because only the cluster can reach
+   * it; see infra/k8s/i10/stalwart/config/README.md, "The internal relay". So
+   * this is set in worker.yaml rather than Doppler, and nothing about the
+   * direct route is a secret except the DKIM keys `WEBHOOK_SECRET_KEY` unseals.
+   *
+   * ⚠ OPTIONAL SO THE WORKER STARTS WITHOUT IT, AND THE DIRECT TRANSPORT
+   * REFUSES TO SEND WHEN IT IS ABSENT. Requiring it would make every deployment
+   * that only ever uses SES — and every laptop — fail to boot over a route it
+   * does not take. The refusal is `deferred`, so the mail waits in the queue
+   * rather than being lost, and the backlog is the alarm.
    */
-  STALWART_SUBMISSION_HOST: z.string().min(1).optional(),
+  STALWART_RELAY_HOST: z.string().min(1).optional(),
   /**
-   * ⚠ 465, NOT 587, AND THE DEFAULT USED TO BE WRONG. There is no 587 listener
-   * on our Stalwart — `NetworkListener` has `smtp` on 25 and `submissions` on
-   * 465, and nothing else speaks SMTP. A worker pointed at 587 got no
-   * connection at all, which surfaces as `deferred` on every direct send with
-   * an ECONNREFUSED nobody reads.
-   *
-   * ⚠ AND THERE IS NO REASON TO ADD ONE. 465 is implicit TLS from the first
-   * byte; 587 is cleartext until STARTTLS succeeds. RFC 8314 §3 prefers the
-   * former for exactly that reason — there is no plaintext phase to strip.
-   * `submissionConfig` reads this number and picks the TLS mode from it, so the
-   * port is the only thing that has to be right.
+   * ⚠ 2525, THE `relay` LISTENER — NOT 25 AND NOT 465. 25 is the public MX, and
+   * 465 is authenticated submission for people's mail clients; neither relays
+   * for a client that presents no credential, so pointing the worker at either
+   * fails every direct send at `RCPT TO`. The rules that make 2525 different
+   * are in plan.ndjson and key on this number.
    */
-  STALWART_SUBMISSION_PORT: z.coerce.number().int().positive().default(465),
-  STALWART_SUBMISSION_USER: z.string().min(1).optional(),
-  STALWART_SUBMISSION_PASSWORD: z.string().min(1).optional(),
+  STALWART_RELAY_PORT: z.coerce.number().int().positive().default(2525),
 
   MAIL_NAMESERVERS: z
     .string()

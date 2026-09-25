@@ -286,7 +286,7 @@ describe("the direct transport", () => {
   /**
    * ⚠ THE ENVELOPE TAKES BARE ADDRESSES AND THE HEADER KEEPS THE NAME. `RCPT TO`
    * with `Bob <bob@x.test>` reads the local part as `Bob <bob` — a space and an
-   * angle bracket, which is not a valid address — so the submission client
+   * angle bracket, which is not a valid address — so the relay client
    * refuses the whole message. The previous client unwrapped this silently, so
    * every send with a display name in `to` depended on behaviour we no longer
    * have. Getting this wrong fails those sends permanently, on the direct route
@@ -421,7 +421,7 @@ describe("partial acceptance", () => {
   })
 })
 
-describe("classifying a submission failure", () => {
+describe("classifying a relay failure", () => {
   const sendWith = async (receipt: SmtpReceipt) => {
     const m = mailer(receipt)
     const t = stalwartTransport({
@@ -453,11 +453,11 @@ describe("classifying a submission failure", () => {
   })
 
   /**
-   * ⚠ THE REGRESSION THIS PREVENTS IS A QUEUE-WIDE EXTINCTION EVENT. A mistyped
-   * submission password answers `535` for EVERY message, and a hard 5xx read as
-   * a verdict on the message would burn the entire backlog to `failed` in one
-   * batch — each row blaming the message rather than the credential. The session
-   * is ours to fix and the mail is still deliverable, so it waits.
+   * ⚠ THE REGRESSION THIS PREVENTS IS A QUEUE-WIDE EXTINCTION EVENT. A server
+   * refusing the session answers the same 5xx for EVERY message, and a hard 5xx
+   * read as a verdict on the message would burn the entire backlog to `failed`
+   * in one batch — each row blaming the message rather than the cause. The
+   * session is ours to fix and the mail is still deliverable, so it waits.
    */
   it("defers a 5xx from the session rather than the message", async () => {
     for (const command of [
@@ -472,6 +472,48 @@ describe("classifying a submission failure", () => {
         failure("smtp.535", { command, response: "535 bad" }),
       )
       expect(outcome.status).toBe("deferred")
+    }
+  })
+
+  /**
+   * ⚠ THE SAME EXTINCTION EVENT, ARRIVING IN THE MESSAGE PHASE. The relay takes
+   * no credential, so what a bad password used to cause now shows up as a
+   * refusal of the envelope — and it is just as much about us. These are
+   * Stalwart's exact replies, from its source, for a relay rule that is not
+   * applied, a port that still demands AUTH, and a return path the sender rule
+   * refuses. Every message would get the same answer; none of it is the mail's
+   * fault.
+   */
+  it("defers Stalwart's refusals of the relay itself", async () => {
+    for (const [code, command, response, enhanced] of [
+      ["smtp.550", "RCPT TO", "5.1.2 Relay not allowed.", "5.1.2"],
+      ["smtp.503", "MAIL FROM", "5.5.1 You must authenticate first.", "5.5.1"],
+      ["smtp.550", "MAIL FROM", "5.7.1 Sender address not allowed.", "5.7.1"],
+    ] as const) {
+      const outcome = await sendWith(
+        failure(code, { command, response, enhancedStatusCode: { code: enhanced } }),
+      )
+      expect(outcome.status).toBe("deferred")
+    }
+  })
+
+  /**
+   * ⚠ AND NARROWLY, OR IT BECOMES A WAY TO RETRY MAIL THAT CAN NEVER GO. A
+   * local mailbox that does not exist and a message too big for the server are
+   * verdicts on this message, and retrying them only spends the attempt budget
+   * to be told again.
+   */
+  it("still rejects a refusal that is about the message", async () => {
+    for (const [code, command, response, enhanced] of [
+      ["smtp.550", "RCPT TO", "5.1.1 Mailbox does not exist.", "5.1.1"],
+      ["smtp.552", "MAIL FROM", "5.3.4 Message too big for system.", "5.3.4"],
+      // The relay code on the wrong command is not the relay refusal.
+      ["smtp.550", "DATA", "5.1.2 Relay not allowed.", "5.1.2"],
+    ] as const) {
+      const outcome = await sendWith(
+        failure(code, { command, response, enhancedStatusCode: { code: enhanced } }),
+      )
+      expect(outcome.status).toBe("rejected")
     }
   })
 
