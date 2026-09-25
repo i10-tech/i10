@@ -45,6 +45,18 @@ export interface Capacity {
 /** Every domain created through this API is a sending domain. See `create`. */
 export const SENDING_DOMAINS = "domains.sending"
 
+/** How an already-added domain is described back to the person adding it again. */
+const standing = (status: DomainStatus): string => {
+  switch (status) {
+    case "verified":
+      return "is verified"
+    case "failed":
+      return "failed verification — open it to fix the records"
+    default:
+      return "is waiting for verification"
+  }
+}
+
 export type CreateOutcome =
   | { status: "created"; domain: Domain }
   | { status: "rejected"; reason: string }
@@ -53,6 +65,14 @@ export type CreateOutcome =
 
 export interface DomainStore {
   create(tenantId: string, input: CreateDomain): Promise<CreateOutcome>
+  /**
+   * Why `create` would refuse this name, asked without creating anything.
+   *
+   * ⚠ ONLY THE REFUSALS ABOUT THE NAME ITSELF — ours, already in this
+   * workspace, verified by another. The plan limit is left out on purpose: it
+   * is not answered by editing the box, and it keeps its own button.
+   */
+  refusal(tenantId: string, name: string): Promise<string | null>
   get(tenantId: string, id: string): Promise<Domain | null>
   list(tenantId: string): Promise<DomainSummary[]>
   remove(tenantId: string, id: string): Promise<boolean>
@@ -588,7 +608,70 @@ export function domainStore({
     return "ready"
   }
 
+  /*
+   * ⚠ OURS, AND A SUBDOMAIN OF OURS. `mail.i10.tech` is a zone this server
+   * is authoritative for; letting somebody claim it would delegate our own
+   * return path to their tenant.
+   */
+  function oursRefusal(name: string): string | null {
+    if (!ownDomains.some((own) => name === own || name.endsWith(`.${own}`))) return null
+    /*
+     * ⚠ FUNNY, THEN USEFUL, IN THAT ORDER AND BOTH IN ONE SENTENCE. A
+     * joke that does not also say what to do next is a dead end with a
+     * smile on it — and this is somebody's first minute in the product,
+     * where the thing they need is the next step rather than a laugh.
+     */
+    return (
+      `${name} is ours — we are flattered, genuinely, but we are already ` +
+      `using it. Add the domain your own mail comes from.`
+    )
+  }
+
+  /**
+   * Whether a name is already held — by this workspace, or verified by another.
+   *
+   * ⚠ ONE FUNCTION FOR `create` AND FOR `refusal`, WHICH IS THE POINT. The
+   * console asks `refusal` as somebody types so the box can go red before the
+   * button is pressed; if that were a second copy of these reads, the day one
+   * of them changed the field would promise a name the create then refused.
+   */
+  async function heldRefusal(tenantId: string, name: string): Promise<string | null> {
+    return withTenant(db, tenantId, async (tx) => {
+      const [own] = await tx
+        .select({ status: domains.status })
+        .from(domains)
+        .where(and(eq(domains.tenantId, tenantId), eq(domains.name, name)))
+        .limit(1)
+      if (own) return `You have already added ${name}, and it ${standing(own.status)}.`
+
+      /*
+       * ⚠ THROUGH A SECURITY DEFINER FUNCTION, BECAUSE RLS MAKES THE HONEST
+       * QUERY IMPOSSIBLE. Another tenant's rows are invisible here by
+       * construction, so asking directly would always answer "free". The
+       * function returns a boolean and never the holder — see migration 0043,
+       * and the refusal below, which is deliberately careful not to name them.
+       */
+      const rows = (await tx.execute(
+        sql`select core.domain_verified_elsewhere(${name}, ${tenantId}::uuid) as taken`,
+      )) as unknown as { taken: boolean }[]
+
+      return rows[0]?.taken
+        ? `${name} is already verified by another workspace. If that is ` +
+            `yours, remove it there first; if you believe it is not, contact ` +
+            `support@i10.tech and we will check ownership.`
+        : null
+    })
+  }
+
   return {
+    async refusal(tenantId, input) {
+      const name = normaliseDomainName(input)
+      // A malformed name is the console's own check to report, and it words
+      // it better; `create` still refuses it if it arrives anyway.
+      if (name === null) return null
+      return oursRefusal(name) ?? (await heldRefusal(tenantId, name))
+    },
+
     async create(tenantId, input) {
       const name = normaliseDomainName(input.name)
       if (name === null) {
@@ -624,25 +707,8 @@ export function domainStore({
       // no domains — our misconfiguration, not their fault — and the policy
       // this codebase has already chosen for that is to allow and log.
 
-      /*
-       * ⚠ OURS, AND A SUBDOMAIN OF OURS. `mail.i10.tech` is a zone this server
-       * is authoritative for; letting somebody claim it would delegate our own
-       * return path to their tenant.
-       */
-      if (ownDomains.some((own) => name === own || name.endsWith(`.${own}`))) {
-        return {
-          status: "rejected",
-          /*
-           * ⚠ FUNNY, THEN USEFUL, IN THAT ORDER AND BOTH IN ONE SENTENCE. A
-           * joke that does not also say what to do next is a dead end with a
-           * smile on it — and this is somebody's first minute in the product,
-           * where the thing they need is the next step rather than a laugh.
-           */
-          reason:
-            `${name} is ours — we are flattered, genuinely, but we are already ` +
-            `using it. Add the domain your own mail comes from.`,
-        }
-      }
+      const ours = oursRefusal(name)
+      if (ours) return { status: "rejected", reason: ours }
 
       const delegated = input.delegated ?? false
       if (delegated && !zones) {
@@ -676,32 +742,7 @@ export function domainStore({
        * the catch below is what makes that safe. This exists to keep the
        * ordinary, non-racing refusal away from AWS entirely.
        */
-      const refusal = await withTenant(db, tenantId, async (tx) => {
-        const [own] = await tx
-          .select({ id: domains.id })
-          .from(domains)
-          .where(and(eq(domains.tenantId, tenantId), eq(domains.name, name)))
-          .limit(1)
-        if (own) return `You have already added ${name}.`
-
-        /*
-         * ⚠ THROUGH A SECURITY DEFINER FUNCTION, BECAUSE RLS MAKES THE HONEST
-         * QUERY IMPOSSIBLE. Another tenant's rows are invisible here by
-         * construction, so asking directly would always answer "free". The
-         * function returns a boolean and never the holder — see migration 0043,
-         * and the refusal below, which is deliberately careful not to name them.
-         */
-        const rows = (await tx.execute(
-          sql`select core.domain_verified_elsewhere(${name}, ${tenantId}::uuid) as taken`,
-        )) as unknown as { taken: boolean }[]
-
-        return rows[0]?.taken
-          ? `${name} is already verified by another workspace. If that is ` +
-              `yours, remove it there first; if you believe it is not, contact ` +
-              `support@i10.tech and we will check ownership.`
-          : null
-      })
-
+      const refusal = await heldRefusal(tenantId, name)
       if (refusal) return { status: "conflict", reason: refusal }
 
       /*

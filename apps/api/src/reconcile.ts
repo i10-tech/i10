@@ -120,7 +120,7 @@ await withMonitor(
     // removes the tenant boundary. This job writes entitlements, so it matters
     // here too.
     try {
-      await assertRlsSubject(sql)
+      await assertRlsSubject(sql, log)
     } catch (error) {
       log.fatal({ err: error }, "refusing to start")
       captureError(error)

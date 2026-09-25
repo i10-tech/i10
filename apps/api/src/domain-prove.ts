@@ -77,7 +77,7 @@ await withMonitor(
      * row level security applies to.
      */
     try {
-      await assertRlsSubject(sql)
+      await assertRlsSubject(sql, log)
     } catch (error) {
       log.fatal({ err: error }, "refusing to start")
       captureError(error, { phase: "boot" })

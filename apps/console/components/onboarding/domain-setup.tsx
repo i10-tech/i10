@@ -4,13 +4,13 @@ import * as React from "react"
 import { ArrowLeft, Check, Pencil, Wand2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
-import { domainProblem } from "@/lib/domain-check"
+import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { DnsRecords } from "@/components/dns-records"
 import { ProviderMark } from "@/components/provider-mark"
-import { createDomain, dnsConnections, lookupDns } from "@/lib/actions"
+import { checkDomain, createDomain, dnsConnections, lookupDns } from "@/lib/actions"
 import { activateDomain, watchUntilVerified } from "@/lib/domain-activation"
 import { toastFailure } from "@/lib/toast"
 import type { DnsInspection, Domain } from "@/lib/types"
@@ -52,6 +52,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
   const [answered, setAnswered] = React.useState<{
     domain: string
     inspection: DnsInspection | null
+    /** Why the API would refuse this name, asked alongside the lookup. */
+    refusal: string | null
   } | null>(null)
   const [connections, setConnections] = React.useState<string[]>([])
   const [domain, setDomain] = React.useState<Domain | null>(null)
@@ -67,10 +69,37 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
    */
   const [verified, setVerified] = React.useState(false)
 
+  /**
+   * A name the server refused, and what it said.
+   *
+   * ⚠ THE SAME TREATMENT `/domains/new` GIVES IT, AND IT USED TO BE A TOAST
+   * HERE ON THE ONE SCREEN A NEW CUSTOMER IS GUARANTEED TO SEE. The API owns
+   * rules the console cannot check — `i10.tech` is ours, `acme.com` is
+   * already in this workspace — and `answered.refusal` below catches those as
+   * they are typed. This is the backstop for the race that check cannot
+   * close: a name that became taken between the check and the press goes back
+   * to the name with the reason under it, not to a toast on the mode screen.
+   */
+  const [refused, setRefused] = React.useState<{ name: string; reason: string } | null>(
+    null,
+  )
+
   const candidate = name.trim().toLowerCase()
-  const plausible = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(candidate)
+  /*
+   * ⚠ THE SAME DEFINITION OF "IS THIS A DOMAIN" AS THE FIELD'S OWN VERDICT AND
+   * AS /domains/new. This was a loose regex of its own, so `acme.c` spent a
+   * nameserver lookup and lit Continue under a box about to call it malformed.
+   */
+  const plausible = candidate !== "" && !isDomainMalformed(candidate)
   const looking = plausible && answered?.domain !== candidate
   const current = answered?.domain === candidate ? answered.inspection : null
+  /*
+   * ⚠ ONLY WHILE THE BOX STILL HOLDS THE NAME IT WAS ABOUT — typed-time check
+   * first, the create's own refusal as the backstop. Editing clears the red.
+   */
+  const refusedHere =
+    (answered?.domain === candidate ? answered.refusal : null) ??
+    (refused && candidate === refused.name ? refused.reason : undefined)
   const provider = current?.provider ?? null
 
   // ⚠ DELEGATION IS DISABLED WHERE THE PROVIDER'S EDITOR HAS NO NS ROW — Wix and
@@ -97,11 +126,19 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     if (!plausible) return
     const token = ++request.current
     const timer = setTimeout(async () => {
-      const result = await lookupDns(candidate)
+      const [result, check] = await Promise.all([
+        lookupDns(candidate),
+        checkDomain(candidate),
+      ])
       if (token !== request.current) return
       // A failed lookup is an ANSWER, not an absence: detection is a
-      // convenience and must never block somebody adding their domain.
-      setAnswered({ domain: candidate, inspection: result.ok ? result.data : null })
+      // convenience and must never block somebody adding their domain. A
+      // failed check is "no objection" for the same reason — create decides.
+      setAnswered({
+        domain: candidate,
+        inspection: result.ok ? result.data : null,
+        refusal: check.ok ? check.data.refusal : null,
+      })
     }, 500)
     return () => clearTimeout(timer)
   }, [candidate, plausible])
@@ -131,6 +168,18 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     const created = await createDomain({ name: candidate, delegated })
     if (!created.ok) {
       setBusy(null)
+      /*
+       * ⚠ A REFUSAL OF THE NAME GOES BACK TO THE NAME. Leaving the
+       * person on the mode screen with a toast about the domain asked them to
+       * fix something that was no longer on screen. Every other refusal — the
+       * plan is full, the API is down — is not answered by editing the name,
+       * and keeps the toast and the mode screen.
+       */
+      if (refusesTheName(created.name)) {
+        setRefused({ name: candidate, reason: created.error })
+        setPhase("name")
+        return
+      }
       toastFailure(created)
       setPhase("mode")
       return
@@ -267,6 +316,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           inputMode="url"
           className="font-mono"
           check={domainProblem}
+          refused={refusedHere}
           required="Enter the domain you send from."
           busy={looking}
           adornment={looking ? <Spinner className="size-3.5" /> : undefined}
@@ -277,19 +327,20 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
            * Enter did nothing at all — in a one-field screen that reads as
            * the key being broken rather than as the screen being picky.
            *
-           * ⚠ AND IT OBEYS THE SAME TWO CONDITIONS AS THE BUTTON. A name that
-           * is not yet plausible, or a lookup still in flight, means Enter
-           * does nothing — the same answer the disabled button gives.
+           * ⚠ AND IT OBEYS THE SAME CONDITIONS AS THE BUTTON. A name that is
+           * not yet plausible, a lookup still in flight, or a name the server
+           * has already refused means Enter does nothing — the same answer the
+           * disabled button gives.
            */
           onKeyDown={(event) => {
             if (event.key !== "Enter") return
             event.preventDefault()
-            if (!plausible || looking) return
+            if (!plausible || looking || refusedHere) return
             setPhase("mode")
           }}
         />
 
-        {current && (
+        {current && !refusedHere && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             {provider ? (
               <>
@@ -304,7 +355,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
 
         <Button
           size="lg"
-          disabled={!plausible || looking}
+          disabled={!plausible || looking || refusedHere !== undefined}
           onClick={() => setPhase("mode")}
         >
           {looking && <Spinner />}

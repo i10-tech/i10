@@ -37,11 +37,13 @@ export function VerificationWatch({
   const [done, setDone] = React.useState(false)
 
   /*
-   * ⚠ `not_started` IS WATCHED TOO, THOUGH IT HAS NO IDENTITY AT SES YET. It is
-   * the state a domain sits in while the records are being published from
-   * another tab or from the OAuth callback, and the refresh answers harmlessly
-   * until the first verify creates the identity — see `DomainStore.refresh`,
-   * which returns the row untouched rather than starting anything.
+   * ⚠ `not_started` IS WATCHED TOO, AND IT IS THE CASE THAT MATTERS MOST. It is
+   * the state a domain sits in when the records are up but the one verify after
+   * publishing arrived before DNS was serving. This used to be watched with
+   * `refresh`, which writes nothing for a row with no identity, so the page said
+   * "checking your records" while nothing could ever change — until somebody
+   * pressed Verify. The watch now re-proves such a row itself; see
+   * `watchUntilVerified`.
    */
   const watching = status !== "verified" && !done
 

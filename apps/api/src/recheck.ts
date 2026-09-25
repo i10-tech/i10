@@ -62,7 +62,7 @@ await withMonitor(
     // functions rather than by holding a role that can see everything, so the
     // role still has to be the one row level security applies to.
     try {
-      await assertRlsSubject(sql)
+      await assertRlsSubject(sql, log)
     } catch (error) {
       log.fatal({ err: error }, "refusing to start")
       captureError(error, { phase: "boot" })

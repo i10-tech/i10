@@ -86,6 +86,62 @@ export async function withTenant<T>(
 }
 
 /**
+ * Waits until the database can actually be dialled.
+ *
+ * ⚠ A NEW POD'S FIRST CONNECTION TO A ClusterIP IS REFUSED while kube-proxy and
+ * the CNI finish programming rules for it, and postgres.js makes exactly one
+ * attempt. So a process that starts fast enough — every bun-built image here —
+ * dies with `ECONNREFUSED` on a database that is perfectly healthy, and
+ * Postgres logs nothing because the packet never arrived.
+ *
+ * ⚠ IT COST THE DOMAIN PROVER ITS RUNS. `domain-prove` starts a fresh pod every
+ * minute, and the runs that lost this race exited at "refusing to start"
+ * before selecting a single domain — which is how a freshly published domain
+ * could sit unregistered for minutes with a sweep scheduled every sixty
+ * seconds. `recheck`, `catch-up` and the reconciler failed the same way.
+ * `migrate.ts` has had this fix since the bun move; nothing else did.
+ *
+ * ⚠ `backoffLimit` CANNOT DO THIS. Each Job retry is a new pod with its own
+ * fresh, unready network. The wait has to be inside the process.
+ *
+ * ⚠ AND ONLY TRANSPORT FAILURES ARE RETRIED. A wrong password or a missing
+ * database is a configuration, and ten seconds of retrying it would only delay
+ * the error that says so.
+ */
+const TRANSPORT = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EAI_AGAIN",
+  "CONNECT_TIMEOUT",
+])
+
+export async function dialable(
+  sql_: Sql,
+  log?: { warn: (o: object, m: string) => void },
+  { attempts = 10, delayMs = 1_000 }: { attempts?: number; delayMs?: number } = {},
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await sql_`select 1`
+      return
+    } catch (err) {
+      const code = (err as { code?: unknown }).code
+      if (typeof code !== "string" || !TRANSPORT.has(code) || attempt >= attempts) {
+        throw err
+      }
+      log?.warn(
+        { attempt, of: attempts, code },
+        "database not reachable yet — a new pod's first connection is often refused",
+      )
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+}
+
+/**
  * Refuses to start if the connection would bypass row level security.
  *
  * ⚠ THIS EXISTS BECAUSE THE FAILURE IS SILENT. Policies do not apply to a
@@ -98,8 +154,19 @@ export async function withTenant<T>(
  * A connection string is the easiest thing in the system to get wrong and the
  * only one whose mistake is invisible, so it is checked once, at boot, where a
  * failure stops the rollout instead of reaching a customer.
+ *
+ * ⚠ AND BECAUSE IT IS THE FIRST QUERY EVERY PROCESS MAKES, IT IS ALSO WHERE THE
+ * FIRST CONNECTION HAPPENS — which is what makes it the place to wait for one.
+ * See `dialable` above. The role check itself is never retried: a role that
+ * bypasses RLS is a configuration, and it will be the same configuration in a
+ * second.
  */
-export async function assertRlsSubject(sql_: Sql): Promise<void> {
+export async function assertRlsSubject(
+  sql_: Sql,
+  log?: { warn: (o: object, m: string) => void },
+): Promise<void> {
+  await dialable(sql_, log)
+
   const [row] = await sql_<
     { role: string; superuser: boolean; bypassrls: boolean; owned: number }[]
   >`
