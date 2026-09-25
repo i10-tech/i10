@@ -35,6 +35,18 @@ async function writeToClipboard(text: string): Promise<boolean> {
     // through — the legacy path below often still works.
   }
 
+  /*
+   * ⚠ THE FALLBACK HAS TO SELECT A TEXTAREA, WHICH TAKES FOCUS, SO FOCUS IS PUT
+   * BACK — caret and selection included — before the browser can paint. Without
+   * this, copying the word in a type-to-confirm dialog left the field unfocused
+   * (or blinking out and back) whenever the async clipboard was refused.
+   */
+  const had = document.activeElement
+  const range =
+    had instanceof HTMLInputElement || had instanceof HTMLTextAreaElement
+      ? ([had.selectionStart, had.selectionEnd] as const)
+      : null
+
   try {
     const area = document.createElement("textarea")
     area.value = text
@@ -51,6 +63,13 @@ async function writeToClipboard(text: string): Promise<boolean> {
     return ok
   } catch {
     return false
+  } finally {
+    if (had instanceof HTMLElement && had !== document.body) {
+      had.focus({ preventScroll: true })
+      if (range && range[0] !== null && range[1] !== null) {
+        ;(had as HTMLInputElement).setSelectionRange(range[0], range[1])
+      }
+    }
   }
 }
 

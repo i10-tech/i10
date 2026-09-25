@@ -305,6 +305,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
          */}
         <ValidatedInput
           id="onboarding-domain"
+          // The only field on the step; it has the caret on arrival and reload.
+          autoFocus
           label="Domain"
           value={name}
           onChange={(event) => setName(event.target.value)}

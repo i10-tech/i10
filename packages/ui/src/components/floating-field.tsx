@@ -488,6 +488,26 @@ function Frame({
   )
 }
 
+/**
+ * `autoFocus` that also works on a page the server rendered.
+ *
+ * ⚠ REACT DOES NOT FOCUS AN `autoFocus` INPUT IT HYDRATES — only one it
+ * creates. So a one-field page reached by a client navigation had the caret,
+ * and the same page opened fresh or reloaded did not: `/domains/new` came up
+ * with focus on the body. This focuses it once hydrated, and only when nothing
+ * else has focus, so it never takes the caret from somebody already typing
+ * elsewhere, and does nothing where React has already focused it.
+ */
+function useHydratedAutoFocus(id: string, autoFocus: boolean | undefined) {
+  React.useEffect(() => {
+    if (!autoFocus) return
+    const active = document.activeElement
+    if (active && active !== document.body) return
+    document.getElementById(id)?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on mount only, like the attribute
+  }, [])
+}
+
 /** `pt-1.5` plus one `leading-4` line: what a one-line hint row measures. */
 const ONE_LINE = 22
 
@@ -575,6 +595,7 @@ export function FloatingInput({
   const generated = React.useId()
   const id = providedId ?? generated
   const tone = TONES[state]
+  useHydratedAutoFocus(id, props.autoFocus)
 
   return (
     <Frame

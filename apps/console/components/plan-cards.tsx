@@ -252,12 +252,10 @@ export function PlanCards({
       const here = pathname ?? window.location.pathname
 
       /*
-       * ⚠ THE QUERY THAT WAS ALREADY THERE IS KEPT, AND DROPPING IT PUT PEOPLE
-       * BACK ON THE WRONG STEP. This used to build the URL from the path alone,
-       * so `?step=plan` — which is how onboarding remembers where somebody is —
-       * was discarded by the very navigation that reports a successful payment.
-       * The flow then remounted, re-derived its step from the facts, and put
-       * somebody who had just paid on the last step back on "Verify".
+       * ⚠ THE QUERY THAT WAS ALREADY THERE IS KEPT. Onboarding's step no
+       * longer lives in it — that is a cookie now, see lib/onboarding-step.ts —
+       * but whatever else a page carries must survive the navigation that
+       * reports a successful payment.
        */
       const params = new URLSearchParams(window.location.search)
       params.set("checkout_id", checkoutId)

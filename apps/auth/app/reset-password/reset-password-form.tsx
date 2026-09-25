@@ -285,6 +285,8 @@ export function ResetPasswordForm({
         </div>
         <ValidatedInput
           id="email"
+          // The only field on the step: it is what somebody came here to fill.
+          autoFocus
           name="email"
           type="email"
           label="Email address"

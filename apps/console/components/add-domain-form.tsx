@@ -467,6 +467,9 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        */}
       <ValidatedInput
         id="domain"
+        // ⚠ THE ONE FIELD THIS PAGE EXISTS FOR, so it has the caret on arrival
+        // and on a reload — everything else on the form follows from it.
+        autoFocus
         label="Domain"
         value={name}
         onChange={(event) => setName(event.target.value)}
@@ -663,7 +666,10 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
                * got to yet.
                */
               disabled={
-                submitting || looking || refusedHere !== undefined || name.trim().length === 0
+                submitting ||
+                looking ||
+                refusedHere !== undefined ||
+                name.trim().length === 0
               }
             >
               {submitting && <Spinner />}
@@ -685,7 +691,10 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
             type="button"
             onClick={() => void submit(undefined, "manual")}
             disabled={
-              submitting || looking || refusedHere !== undefined || name.trim().length === 0
+              submitting ||
+              looking ||
+              refusedHere !== undefined ||
+              name.trim().length === 0
             }
             className="cursor-pointer text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50"
           >

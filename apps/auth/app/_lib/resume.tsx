@@ -121,17 +121,31 @@ export function ResumeRemount({ children }: { children: React.ReactNode }) {
   // straight after, with no effect setting state to get there.
   const live = React.useSyncExternalStore(noop, isClient, isServer)
 
-  React.useLayoutEffect(() => {
-    if (live) document.documentElement.removeAttribute("data-auth-resuming")
-  }, [live])
-
   return (
     <Live.Provider value={live}>
       <div key={live ? "live" : "static"} data-resume-boundary="">
+        {live && <Unhide />}
         {children}
       </div>
     </Live.Provider>
   )
+}
+
+/**
+ * Shows the flow again once the restored step is in place.
+ *
+ * ⚠ A FIRST CHILD, NOT AN EFFECT IN THE BOUNDARY, AND THE ORDER IS THE FIX.
+ * React runs layout effects — and focuses `autoFocus` inputs — in tree order,
+ * children before their parent. From the boundary this ran AFTER the restored
+ * step's input had tried to take focus while still `visibility: hidden`, which
+ * browsers refuse — so a reload on the name step left the caret nowhere. As the
+ * first child it runs before the inputs that follow it.
+ */
+function Unhide() {
+  React.useLayoutEffect(() => {
+    document.documentElement.removeAttribute("data-auth-resuming")
+  }, [])
+  return null
 }
 
 /**

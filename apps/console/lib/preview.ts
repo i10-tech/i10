@@ -530,7 +530,9 @@ const ROUTES: [
   [
     /^\/console\/domains\/check$/,
     (_m, query) => {
-      const name = String(query?.name ?? "").trim().toLowerCase()
+      const name = String(query?.name ?? "")
+        .trim()
+        .toLowerCase()
       const held = DOMAINS.find((d) => d.name === name)
       const refusal =
         name === "i10.tech" || name.endsWith(".i10.tech")
