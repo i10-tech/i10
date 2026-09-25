@@ -1,11 +1,10 @@
 import type { Metadata } from "next"
 import { headers } from "next/headers"
-import { auth } from "@clerk/nextjs/server"
 import { ssoProviders } from "../_lib/providers"
 import { passwordRules, signUpAbilities } from "../_lib/environment"
 import { afterAuthUrl } from "../_lib/redirect"
 import { AuthFlow } from "../_components/auth-flow"
-import { SignUpForm } from "../sign-up/sign-up-form"
+import { ResumeBoundary } from "../_components/resume-boundary"
 
 export const metadata: Metadata = { title: "Sign in · i10" }
 
@@ -27,25 +26,12 @@ export const metadata: Metadata = { title: "Sign in · i10" }
  */
 export const dynamic = "force-dynamic"
 
-/**
- * ⚠ THE STEPS THAT CAN BE RESUMED, AND ONLY THOSE. Coming back from a provider
- * means the account exists and there is a half-finished flow to re-enter —
- * which is the one case this page must NOT answer with an email box, because
- * that would be asking somebody to sign up twice.
- */
-const RESUMABLE = ["passkey", "totp-offer", "connect"] as const
-type Resumable = (typeof RESUMABLE)[number]
-
-function resumable(value: string | string[] | undefined): Resumable | undefined {
-  return RESUMABLE.find((step) => step === value)
-}
-
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect_url?: string | string[]; step?: string | string[] }>
+  searchParams: Promise<{ redirect_url?: string | string[] }>
 }) {
-  const { redirect_url: raw, step } = await searchParams
+  const { redirect_url: raw } = await searchParams
 
   // ⚠ VALIDATED HERE, ON THE SERVER, AND HANDED DOWN AS A PLAIN STRING. See
   // _lib/redirect.ts: the parameter is attacker-controllable, and the allowlist
@@ -57,8 +43,6 @@ export default async function Page({
   // arrived with, so they still land where they were originally going.
   const carry =
     typeof raw === "string" ? `?redirect_url=${encodeURIComponent(raw)}` : ""
-
-  const { userId } = await auth()
 
   /*
    * ⚠ ALL THREE READ THE SAME CLERK ENVIRONMENT DOCUMENT AND COST ONE REQUEST.
@@ -78,35 +62,16 @@ export default async function Page({
     passwordRules(),
   ])
 
-  /*
-   * ⚠ A STEP IS ONLY HONOURED WITH A SESSION AND WITH THE ABILITY BEHIND IT.
-   * `?step=totp-offer` from an instance with two-factor switched off would open
-   * a screen whose button Clerk refuses — so the allow-list is checked against
-   * what this instance can actually do, not just against the spelling.
-   */
-  const wanted = userId ? resumable(step) : undefined
-  const startAt =
-    (wanted === "passkey" && abilities.passkey) ||
-    (wanted === "totp-offer" && abilities.totp) ||
-    (wanted === "connect" && providers.length > 0)
-      ? wanted
-      : undefined
-
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
-        {startAt ? (
-          <SignUpForm
-            afterAuthUrl={after}
-            signInHref={`/sign-in${carry}`}
-            redirectRaw={typeof raw === "string" ? raw : undefined}
-            providers={providers}
-            abilities={abilities}
-            password={password}
-            startAt={startAt}
-            alreadySignedIn={false}
-          />
-        ) : (
+        {/*
+         * ⚠ RESUMED FROM THIS TAB'S OWN MEMORY, NOT FROM THE URL. This page used
+         * to read `?step=connect` to re-enter sign-up after a provider round
+         * trip; now every step of both flows survives a reload the same way,
+         * and the address bar only ever says /sign-in. See _lib/resume.tsx.
+         */}
+        <ResumeBoundary>
           <AuthFlow
             afterAuthUrl={after}
             resetHref={`/reset-password${carry}`}
@@ -116,7 +81,7 @@ export default async function Page({
             abilities={abilities}
             password={password}
           />
-        )}
+        </ResumeBoundary>
       </div>
     </main>
   )

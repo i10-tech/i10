@@ -2,6 +2,7 @@
 
 import type { SignInFlow } from "./clerk-types"
 import { confirmSignIn } from "./last-used"
+import { forgetFlow } from "./resume"
 
 /**
  * Leaving this app once a flow is done.
@@ -27,6 +28,9 @@ export function leaveFor(url: string) {
    * success rather than written on click.
    */
   confirmSignIn()
+  // ⚠ AND THE STORED STEPS GO WITH IT — a finished flow must not come back as
+  // a half-finished one the next time this tab opens the auth app.
+  forgetFlow()
   window.location.replace(url)
 }
 

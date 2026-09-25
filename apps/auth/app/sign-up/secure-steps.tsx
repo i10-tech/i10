@@ -108,7 +108,7 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
      * "we could not add a passkey on this device" with no prompt ever shown.
      *
      * ⚠ AND IT IS CALLED UNCONDITIONALLY, because this step is reachable two
-     * ways. A provider round trip lands on `?step=passkey` in a FRESH document
+     * ways. A reload or a provider round trip lands here in a FRESH document
      * where nothing is pending; asking which route brought somebody here would
      * be a second, forgettable copy of a fact `_lib/webauthn` already holds.
      */
@@ -527,11 +527,11 @@ export function ConnectStep({
          * parent would have the same problem one level up. A click is by
          * definition in the browser.
          *
-         * ⚠ AND IT COMES BACK TO `?step=connect`, WHICH IS WHAT MAKES THE
-         * ROUND TRIP SURVIVABLE. The provider's redirect is a full page load:
-         * every piece of React state in this flow is gone by the time the
-         * person returns. The parameter is the only thing that tells the
-         * remounted form it is resuming rather than starting.
+         * ⚠ AND IT COMES BACK TO PLAIN `/sign-in`, WITH NO STEP IN THE URL. The
+         * provider's redirect is a full page load, so every piece of React
+         * state is gone by the time the person returns — but this tab's
+         * `sessionStorage` is not, and the flow resumes from it exactly as it
+         * does after a reload. See _lib/resume.tsx.
          */
         redirectUrl: returnUrl(redirectRaw),
       })
@@ -649,7 +649,6 @@ function returnUrl(redirectRaw: string | undefined): string {
    * already been out to a third party and back.
    */
   const url = new URL("/sign-in", window.location.origin)
-  url.searchParams.set("step", "connect")
   if (redirectRaw) url.searchParams.set("redirect_url", redirectRaw)
   return url.toString()
 }

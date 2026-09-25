@@ -18,6 +18,7 @@ import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { installAbortableWebAuthn } from "../_lib/webauthn"
+import { useResumable } from "../_lib/resume"
 import { LastUsedBadge } from "../_components/last-used-badge"
 import { PasskeyCue } from "../_components/passkey-cue"
 import { PasskeyIcon } from "../_components/provider-icons"
@@ -100,8 +101,16 @@ export function SignInForm({
    * own hosted pages accept. It is a deliberate trade for a flow that can route
    * to the right factor, not an oversight.
    */
-  const [stage, setStage] = useState<"identifier" | "password">("identifier")
-  const [identifier, setIdentifier] = useState("")
+  /*
+   * ⚠ BOTH SURVIVE A RELOAD, SO A REFRESH ON THE PASSWORD STEP STAYS THERE.
+   * Nothing else needs to: the password call passes the identifier again (see
+   * `onSubmit`), so it lands whether or not Clerk still holds the attempt.
+   */
+  const [stage, setStage] = useResumable<"identifier" | "password">(
+    "signin.stage",
+    "identifier",
+  )
+  const [identifier, setIdentifier] = useResumable("signin.identifier", "")
   const [direction, setDirection] = useState<"forward" | "back">("forward")
 
   /*

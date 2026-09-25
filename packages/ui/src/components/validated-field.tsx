@@ -346,6 +346,7 @@ export function ValidatedInput({
       spellCheck={spellCheck ?? false}
       ref={mergeRefs(own, ref)}
       {...focus.props}
+      onKeyDown={(event) => submitOnEnter(event, props.onKeyDown)}
       state={busy && !refused ? "pending" : verdict.state}
       // ⚠ THE CALLER'S HINT IS THE RESTING STATE, NOT A COMPETITOR. Guidance
       // shows while there is nothing to complain about and steps aside for a
@@ -359,6 +360,52 @@ export function ValidatedInput({
       aria-required={required !== undefined || undefined}
     />
   )
+}
+
+/**
+ * Enter submits the field's form — done here, not left to the browser.
+ *
+ * ⚠ THE BROWSER'S OWN "ENTER SUBMITS" IS THE DEFAULT ACTION OF THE KEY, AND
+ * ANYTHING THAT CANCELS THE KEYDOWN CANCELS IT. The sign-in email box carries
+ * `autocomplete="email webauthn"`, which puts the passkey and password
+ * autofill UI on it — and password-manager extensions (iCloud Passwords is the
+ * one reported) listen on exactly that kind of field and cancel the keydown to
+ * drive their own menu. The key then did nothing at all: typed address,
+ * Enter, no Continue. Nothing in the product handled Enter, so nothing noticed
+ * it had been taken.
+ *
+ * ⚠ SO THE FIELD SUBMITS ITS OWN FORM, AND IGNORES A CANCEL IT DID NOT SEE
+ * BEING MADE. A cancel from before this ran is somebody else's; a cancel made
+ * by the caller's own `onKeyDown` is a decision, and wins. It cancels the key
+ * itself before submitting, so the browser's own submit cannot also fire and
+ * send the form twice.
+ *
+ * ⚠ AND IT KEEPS THE BROWSER'S RULES: not while an IME is composing (Enter
+ * there confirms a character), not with a modifier, not without a form, and
+ * not when the form's default button is disabled — the cases in which the
+ * browser itself would not have submitted either.
+ */
+function submitOnEnter(
+  event: React.KeyboardEvent<HTMLInputElement>,
+  own?: React.KeyboardEventHandler<HTMLInputElement>,
+) {
+  const cancelledElsewhere = event.defaultPrevented
+  own?.(event)
+  if (event.defaultPrevented && !cancelledElsewhere) return
+
+  if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229)
+    return
+  if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return
+
+  const form = event.currentTarget.form
+  if (!form) return
+  const button = form.querySelector<HTMLButtonElement | HTMLInputElement>(
+    'button[type="submit"], button:not([type]), input[type="submit"]',
+  )
+  if (button?.disabled) return
+
+  event.preventDefault()
+  form.requestSubmit(button ?? undefined)
 }
 
 type TextareaProps = Omit<
