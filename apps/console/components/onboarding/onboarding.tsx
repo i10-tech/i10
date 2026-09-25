@@ -13,6 +13,7 @@ import { StepVerify } from "@/components/onboarding/step-verify"
 import { StepWorkspace } from "@/components/onboarding/step-workspace"
 import { updateOnboarding } from "@/lib/actions"
 import { onPaidPlan } from "@/lib/billing"
+import { ARRIVAL, clearArrival } from "@/lib/arrival"
 import { rememberStep } from "@/lib/onboarding-step"
 import type {
   BillingState,
@@ -64,7 +65,7 @@ export function Onboarding({
   domains: DomainSummary[]
   plans: PlanSummary[]
   billing: BillingState
-  /** From `?checkout_id=`, for the plan step's outcome banner. */
+  /** From the checkout cookie (see lib/arrival.ts), for the plan step's outcome banner. */
   checkoutId: string | null
   /**
    * The step this browser was last on, from its cookie — it outranks
@@ -105,6 +106,13 @@ export function Onboarding({
    * and there is nothing half done about a workspace that is paying.
    */
   const paid = paidNow || onPaidPlan(billing)
+
+  // ⚠ THE "RECORDS ADDED" NEWS IS SHOWN ONCE. It arrived in a cookie from the
+  // DNS callback (see lib/arrival.ts); deleting it on sight means a later
+  // reload says "Publish your records" rather than announcing old news.
+  React.useEffect(() => {
+    if (justPublished > 0) clearArrival(ARRIVAL.published, "/onboarding")
+  }, [justPublished])
 
   const [step, setStep] = React.useState<StepId>(() => {
     /*

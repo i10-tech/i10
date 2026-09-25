@@ -7,6 +7,9 @@ import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
 import { ONBOARDING_STEP_COOKIE, stepFor } from "@/lib/onboarding-step"
 import type { BillingState, DomainSummary, Me, PlanSummary } from "@/lib/types"
+import { ArrivalQuery } from "@/components/arrival-query"
+import { ARRIVAL } from "@/lib/arrival"
+import { readArrival } from "@/lib/arrival-server"
 
 export const metadata: Metadata = { title: "Set up" }
 
@@ -37,10 +40,10 @@ export const dynamic = "force-dynamic"
 export default async function OnboardingPage({
   searchParams,
 }: {
-  // ⚠ POLAR APPENDS `checkout_id` ON THE WAY BACK, AND SO DOES OUR OWN EMBEDDED
-  // FLOW. Somebody who buys a plan on the last step of set-up lands back here;
-  // the plan step reports the outcome in place. See
-  // components/onboarding/step-plan.
+  // ⚠ ONLY POLAR'S FULL-PAGE REDIRECT STILL ARRIVES WITH `checkout_id` IN THE
+  // QUERY; our own embedded flow and the DNS callback write cookies instead —
+  // see lib/arrival.ts. Somebody who buys a plan on the last step of set-up
+  // lands back here and the plan step reports the outcome in place.
   //
   // ⚠ AND `published` IS THE CONFIRMATION THE DNS CALLBACK NO LONGER STOPS TO
   // SHOW. It used to paint its own green tick and then navigate here a moment
@@ -48,7 +51,11 @@ export default async function OnboardingPage({
   // follows it. See the callback handler and `StepVerify`.
   searchParams: Promise<{ checkout_id?: string; published?: string }>
 }) {
-  const { checkout_id: checkoutId, published } = await searchParams
+  const query = await searchParams
+  // ⚠ FROM COOKIES, NOT THE URL — the query is only read for a page reached by
+  // Polar's own redirect, and `ArrivalQuery` then clears it. See lib/arrival.ts.
+  const checkoutId = await readArrival(ARRIVAL.checkout, query.checkout_id)
+  const published = await readArrival(ARRIVAL.published, query.published)
 
   const [me, domains, plans] = await Promise.all([
     tryApi<Me>("/console/me"),
@@ -117,6 +124,7 @@ export default async function OnboardingPage({
         </Button>
       </header>
 
+      <ArrivalQuery names={[ARRIVAL.checkout, ARRIVAL.published]} />
       <Onboarding
         state={me.data.onboarding}
         workspaceName={me.data.tenant?.name ?? ""}
@@ -124,7 +132,7 @@ export default async function OnboardingPage({
         domains={domains.ok ? domains.data.data : []}
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
-        checkoutId={checkoutId ?? null}
+        checkoutId={checkoutId}
         // ⚠ HOW THEY LAND ON THE STEP THEY LEFT FROM — a reload, or a return
         // from checkout, would otherwise re-derive from the facts and put
         // somebody who paid on the last step back on "Verify". From a cookie,
