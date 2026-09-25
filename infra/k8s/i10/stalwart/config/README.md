@@ -430,6 +430,31 @@ for. The `hosts_mailboxes` join is what prevents it.
 `get_route_or_default` answers `MX_GATEWAY` for a name it cannot resolve and logs
 `Smtp(IdNotFound)`. So the worst case is mail leaving the way it does today.
 
+⚠ **SO DOES A QUERY THAT FAILS, AND THAT IS WHY A BROKEN LOOKUP IS SILENT.**
+Read from v0.16.19's source (`delivery.rs`, `expr/eval.rs`): any `sql_query`
+error — store missing, permission denied, Postgres unreachable — makes `eval_if`
+return nothing, the route becomes `"default"`, which is not a route, and that
+resolves to MX. Nothing is stalled or deferred; the only trace is an
+`Eval(Error)` event. The flip side: a lever that is wired wrong looks exactly
+like a lever that is off. Check for `Eval(Error)` before trusting it.
+
+⚠ **THE `StoreLookup` IS `namespace` PLUS A NESTED `store`.** The first version
+of this plan put the Postgres fields at the top level with a `description`, and
+the server refused it (`invalidPatch … description`) — which stopped every
+`bootstrap.sh` run at that line from 2026-09-17 until it was fixed, including
+the MtaOutboundStrategy line after it. `sw describe StoreLookup` shows the two
+fields; the Postgres variant's fields are the same as `DataStore`'s.
+
+⚠ **`apply --dry-run` WOULD NOT HAVE CAUGHT IT.** It fetches the schema and
+parses the plan but does not validate properties: the broken plan dry-runs
+clean. Only a real apply finds a wrong field.
+
+⚠ **THE `stalwart` ROLE NEEDS USAGE ON `core`, NOT ONLY EXECUTE.** 0036 granted
+EXECUTE on the function; resolving `core.mailbox_route` checks the schema first,
+so without 0056's `GRANT USAGE ON SCHEMA core` every lookup fails — silently,
+per the above. The password comes from CNPG's `i10-stalwart-db-role`, the same
+one Stalwart's own data store already uses, so there is nothing to add to Doppler.
+
 ### What is missing: `ses-relay`
 
 The `MtaRoute` is deliberately **not** in `plan.ndjson`, because it needs SES SMTP

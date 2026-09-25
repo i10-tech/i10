@@ -393,6 +393,13 @@
       "when": 1789869360607,
       "tag": "0055_polar_checkouts",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1790374474137,
+      "tag": "0056_stalwart_core_usage",
+      "breakpoints": true
     }
   ]
 }
