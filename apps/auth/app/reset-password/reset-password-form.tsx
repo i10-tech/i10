@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { useSignIn } from "@clerk/nextjs"
+import { useClerk, useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
@@ -15,6 +15,7 @@ import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { describeRules, passwordProblem } from "../_lib/validate"
 import type { PasswordRules } from "../_lib/environment"
 import { finalizeAndLeave } from "../_lib/finish"
+import { useResumable, useResumeLive } from "../_lib/resume"
 
 /*
  * Forgotten password, in Clerk's stable three-call shape.
@@ -47,7 +48,10 @@ export function ResetPasswordForm({
   passwordPolicy: PasswordRules
 }) {
   const { signIn } = useSignIn()
-  const [stage, setStage] = useState<"email" | "reset">("email")
+  const clerk = useClerk()
+  // ⚠ THE STEP AND THE ADDRESS SURVIVE A RELOAD; THE CODE AND THE NEW PASSWORD
+  // DO NOT. See _lib/resume.tsx.
+  const [stage, setStage] = useResumable<"email" | "reset">("reset.stage", "email")
   const [code, setCode] = useState("")
   /*
    * ⚠ CONTROLLED NOW, BECAUSE A FIELD CANNOT JUDGE A VALUE IT CANNOT SEE. This
@@ -55,7 +59,33 @@ export function ResetPasswordForm({
    * the one auth form with no validation at all: nothing on screen knew what
    * had been typed until the button was pressed.
    */
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useResumable("reset.email", "")
+
+  /*
+   * ⚠ A RESTORED CODE STEP IS CHECKED AGAINST CLERK ONCE IT HAS LOADED. The
+   * code box only means something while Clerk still holds a reset attempt for
+   * this address; an expired one goes back to the address, which is where
+   * "send me a code" lives. A listener rather than a check in the effect body,
+   * because the answer arrives after this mounts.
+   */
+  const live = useResumeLive()
+  useEffect(() => {
+    if (!live || stage !== "reset") return
+    let done = false
+    const unsubscribe = clerk.addListener(() => {
+      if (done || !clerk.loaded) return
+      done = true
+      const attempt = clerk.client?.signIn
+      const resetting =
+        attempt?.id != null &&
+        attempt.status === "needs_first_factor" &&
+        attempt.identifier === email.trim() &&
+        attempt.firstFactorVerification?.strategy === "reset_password_email_code"
+      if (!resetting) setStage("email")
+    })
+    return unsubscribe
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount, see above
+  }, [live, clerk])
   const [password, setPassword] = useState("")
   const [confirmation, setConfirmation] = useState("")
   const secretProblem = passwordProblem(passwordPolicy)
@@ -255,6 +285,8 @@ export function ResetPasswordForm({
         </div>
         <ValidatedInput
           id="email"
+          // The only field on the step: it is what somebody came here to fill.
+          autoFocus
           name="email"
           type="email"
           label="Email address"

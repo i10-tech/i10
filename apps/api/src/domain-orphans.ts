@@ -64,7 +64,7 @@ await withMonitor(
     const { sql, db } = createDb(env.DATABASE_URL)
 
     try {
-      await assertRlsSubject(sql)
+      await assertRlsSubject(sql, log)
     } catch (error) {
       log.fatal({ err: error }, "refusing to start")
       captureError(error, { phase: "boot" })

@@ -15,6 +15,9 @@ import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
 import { hasLiveSubscription } from "@/lib/billing"
 import type { BillingState, FeatureUsage, PlanSummary } from "@/lib/types"
+import { ArrivalQuery } from "@/components/arrival-query"
+import { ARRIVAL } from "@/lib/arrival"
+import { readArrival } from "@/lib/arrival-server"
 
 export const metadata: Metadata = { title: "Billing" }
 
@@ -42,7 +45,12 @@ export default async function BillingPage({
   // page started the checkout rather than at one confirmation screen for the
   // whole product, so the outcome is reported here, in place, above the plan
   // the customer just bought. See routes/console/account.ts.
-  const { checkout_id: checkoutId } = await searchParams
+  // ⚠ READ ONCE FROM THE QUERY, THEN FROM A COOKIE — `ArrivalQuery` below
+  // moves it out of the address bar on arrival. See lib/arrival.ts.
+  const checkoutId = await readArrival(
+    ARRIVAL.checkout,
+    (await searchParams).checkout_id,
+  )
 
   const [plans, usage] = await Promise.all([
     tryApi<{ data: PlanSummary[] }>("/console/plans"),
@@ -145,6 +153,7 @@ export default async function BillingPage({
           </div>
 
           {/* ⚠ `pt-3`, NOT `pb-6`: the gap it owns here is the one above it. */}
+          <ArrivalQuery names={[ARRIVAL.checkout]} />
           {checkoutId && <CheckoutOutcome checkoutId={checkoutId} spacing="pt-3" />}
         </SectionContent>
       </Section>

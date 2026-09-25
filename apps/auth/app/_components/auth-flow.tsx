@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
 import { StepStage } from "@repo/ui/components/step-stage"
 import type { SsoProvider } from "../_lib/providers"
+import { forgetFlow, useResumable } from "../_lib/resume"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
 import { SignInForm } from "../sign-in/sign-in-form"
 import { SignUpForm } from "../sign-up/sign-up-form"
@@ -55,7 +55,13 @@ export function AuthFlow({
    * mode flag beside the email would be two facts that can disagree; the
    * address IS the answer, so its presence is the mode.
    */
-  const [newAccount, setNewAccount] = useState<string | null>(null)
+  // ⚠ RESUMABLE, so a reload in the middle of sign-up stays in sign-up rather
+  // than dropping somebody back on the email box with half an account behind
+  // them. See _lib/resume.tsx.
+  const [newAccount, setNewAccount] = useResumable<string | null>(
+    "flow.new-account",
+    null,
+  )
 
   /*
    * ⚠ THE SAME MOVEMENT THE STEPS INSIDE EACH FORM ALREADY USE. Both forms
@@ -82,13 +88,18 @@ export function AuthFlow({
            * what somebody meant — a typo in the address lands here looking
            * exactly like a new customer.
            */
-          signInHref="/sign-in"
           redirectRaw={redirectRaw}
           providers={providers}
           abilities={abilities}
           password={password}
           initialEmail={newAccount}
-          alreadySignedIn={false}
+          // ⚠ BACK TO THE EMAIL BOX IN PLACE. The link used to point at
+          // /sign-in, which is this page — a soft navigation to the same route
+          // keeps this state, so pressing it did nothing at all.
+          onSignIn={() => {
+            forgetFlow()
+            setNewAccount(null)
+          }}
         />
       ) : (
         <SignInForm

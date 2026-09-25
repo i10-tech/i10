@@ -47,7 +47,7 @@ export function CheckoutOutcome({
   show = true,
   spacing,
 }: {
-  /** From `?checkout_id=`. Nothing renders without one. */
+  /** From the checkout cookie (see lib/arrival.ts). Nothing renders without one. */
   checkoutId: string | null
   className?: string
   /**

@@ -12,9 +12,9 @@ import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { DetectionPanel } from "@/components/detection-panel"
-import { createDomain, dnsConnections, lookupDns } from "@/lib/actions"
+import { checkDomain, createDomain, dnsConnections, lookupDns } from "@/lib/actions"
 import { activateDomain } from "@/lib/domain-activation"
-import { domainProblem, isDomainMalformed } from "@/lib/domain-check"
+import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
 import { toastFailure } from "@/lib/toast"
 import type { DnsConnection, DnsInspection } from "@/lib/types"
 
@@ -80,6 +80,12 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const [answered, setAnswered] = React.useState<{
     domain: string
     inspection: DnsInspection | null
+    /**
+     * Why the API would refuse this name — ours, already in this workspace,
+     * verified by another — asked in the same debounce as the lookup, so the
+     * box goes red once they stop typing rather than once they press Add.
+     */
+    refusal: string | null
   } | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
   /**
@@ -92,11 +98,15 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * the box a long way from the box, on a timer, while the offending value sat
    * there looking accepted.
    *
+   * ⚠ MOST OF THESE ARE CAUGHT AS THEY ARE TYPED NOW — see `answered.refusal`.
+   * This is the backstop for the race that check cannot close: a name taken
+   * between the check and the press.
+   *
    * ⚠ IT IS KEYED BY THE NAME IT WAS ABOUT, WHICH IS WHAT MAKES IT CLEAR ITSELF.
-   * Feeding it back through `check` means the field forgets it the moment the
-   * value changes and remembers it if they type the same thing again — the same
-   * lifecycle every other verdict on this field has, rather than a second piece
-   * of error state with its own rules about when to disappear.
+   * `refusedHere` below only answers while the box still holds that name, so the
+   * field forgets it the moment the value changes and remembers it if they type
+   * the same thing again. The onboarding step uses the same `refused` prop on
+   * the same field, so the two surfaces cannot drift apart on this.
    */
   const [refused, setRefused] = React.useState<{ name: string; reason: string } | null>(
     null,
@@ -113,6 +123,11 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    */
 
   const candidate = name.trim().toLowerCase()
+
+  // ⚠ COMPARED ON THE NORMALISED NAME, so `I10.tech ` is still the refused
+  // `i10.tech` — the field would otherwise go quiet over a capital letter.
+  const refusedLate =
+    refused && candidate === refused.name.toLowerCase() ? refused.reason : undefined
 
   /*
    * ⚠ THE LOOKUP GATE AND THE BORDER COLOUR ASK THE SAME FUNCTION, AND THEY
@@ -166,7 +181,10 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     const token = ++request.current
 
     const timer = setTimeout(async () => {
-      const result = await lookupDns(candidate)
+      const [result, check] = await Promise.all([
+        lookupDns(candidate),
+        checkDomain(candidate),
+      ])
       // ⚠ A STALE ANSWER IS DROPPED. The response for "acme.c" can land after
       // the response for "acme.com" and would otherwise overwrite it — showing
       // the provider for a domain that was never submitted.
@@ -174,7 +192,12 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
       // ⚠ A FAILURE IS RECORDED AS AN ANSWER, NOT AS AN ABSENCE. Detection is a
       // convenience; a resolver that times out must leave somebody able to add
       // their domain, which means the form has to know the attempt is over.
-      setAnswered({ domain: candidate, inspection: result.ok ? result.data : null })
+      // A failed check is "no objection" for the same reason: create decides.
+      setAnswered({
+        domain: candidate,
+        inspection: result.ok ? result.data : null,
+        refusal: check.ok ? check.data.refusal : null,
+      })
     }, 500)
 
     return () => clearTimeout(timer)
@@ -183,7 +206,14 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   // ⚠ ONLY TRUSTED WHEN IT IS THE ANSWER FOR WHAT IS CURRENTLY TYPED. Holding
   // the last successful inspection while somebody edits the field would leave
   // the previous domain's provider on screen next to the new name.
-  const current = answered?.domain === candidate ? answered.inspection : null
+  const answeredHere = answered?.domain === candidate ? answered : null
+  const refusedHere = answeredHere?.refusal ?? refusedLate
+  /*
+   * ⚠ A REFUSED NAME SHOWS NO DETECTION PANEL. "DNS hosted by Cloudflare"
+   * under `i10.tech is ours` is an answer to a question nobody can go on to
+   * ask, and it would offer to connect a provider for a domain we refuse.
+   */
+  const current = answeredHere && !refusedHere ? answeredHere.inspection : null
   const provider = current?.provider ?? null
 
   /*
@@ -308,13 +338,12 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        * inside it; the toast carries the same action.
        */
       /*
-       * ⚠ A 422 IS ABOUT WHAT THEY TYPED, AND ONLY A 422. Every other refusal
-       * here is about something else — the plan is full, the name is already
-       * taken by another workspace, the API is down — and none of those are
-       * answered by looking at the box again, which is why they keep the toast
-       * and the plan limit keeps its button.
+       * ⚠ A REFUSAL OF THE NAME GOES UNDER THE NAME — ours (422), or already
+       * held here or elsewhere (409). The rest — the plan is full, the API is
+       * down — are not answered by looking at the box again, which is why they
+       * keep the toast and the plan limit keeps its button.
        */
-      if (result.name === "validation_error") {
+      if (refusesTheName(result.name)) {
         setRefused({ name: name.trim(), reason: result.error })
         return
       }
@@ -438,6 +467,9 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        */}
       <ValidatedInput
         id="domain"
+        // ⚠ THE ONE FIELD THIS PAGE EXISTS FOR, so it has the caret on arrival
+        // and on a reload — everything else on the form follows from it.
+        autoFocus
         label="Domain"
         value={name}
         onChange={(event) => setName(event.target.value)}
@@ -449,21 +481,10 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         // creates a domain that can never verify.
         inputMode="url"
         className="font-mono"
-        /*
-         * ⚠ THE SERVER'S VERDICT GOES THROUGH THE SAME DOOR AS THE LOCAL ONE,
-         * so it is painted, timed and cleared by the rules the field already
-         * has — red once they have stopped typing, gone the moment the value
-         * changes. The shape check runs first because it is the cheaper and
-         * more specific answer: `https://i10.tech` should be told about the
-         * `https://`, not that the domain is ours.
-         */
-        check={(value) => {
-          const malformed = domainProblem(value)
-          if (malformed) return malformed
-          return refused && value.trim().toLowerCase() === refused.name.toLowerCase()
-            ? refused.reason
-            : null
-        }}
+        check={domainProblem}
+        // The server's refusal of exactly this name — see `refused` above. It
+        // clears itself because `refusedHere` stops matching once they edit.
+        refused={refusedHere}
         required="Enter the domain you send from."
         /*
          * ⚠ THE LOOKUP OUTRANKS THE VERDICT, AND THEY CANNOT BOTH BE TRUE. A
@@ -644,7 +665,12 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
                * honest thing to say is a complaint about a box they had not
                * got to yet.
                */
-              disabled={submitting || looking || name.trim().length === 0}
+              disabled={
+                submitting ||
+                looking ||
+                refusedHere !== undefined ||
+                name.trim().length === 0
+              }
             >
               {submitting && <Spinner />}
               Add domain
@@ -664,7 +690,12 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           <button
             type="button"
             onClick={() => void submit(undefined, "manual")}
-            disabled={submitting || looking || name.trim().length === 0}
+            disabled={
+              submitting ||
+              looking ||
+              refusedHere !== undefined ||
+              name.trim().length === 0
+            }
             className="cursor-pointer text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50"
           >
             I&rsquo;ll add them myself

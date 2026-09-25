@@ -32,7 +32,7 @@ import { useResetOnOpen } from "@/lib/react"
  * `pointer-events-none` — so a button in it would be unclickable on most
  * fields and announced again on every change of validity on the rest.
  */
-function ConfirmWord({ word }: { word: string }) {
+function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void }) {
   const { copied, copy } = useCopy()
 
   return (
@@ -40,7 +40,24 @@ function ConfirmWord({ word }: { word: string }) {
       Type{" "}
       <button
         type="button"
-        onClick={() => void copy(word)}
+        /*
+         * ⚠ FOCUS GOES BACK TO THE BOX AFTER A COPY. The only reason to copy
+         * the word is to paste it into the field below, and pressing this
+         * button had moved focus onto the button — so the paste went nowhere
+         * until somebody clicked the field again.
+         */
+        onClick={() => {
+          void copy(word)
+          onCopied()
+        }}
+        /*
+         * ⚠ AND WITH A POINTER, FOCUS NEVER LEAVES THE BOX AT ALL. Pressing a
+         * button focuses it on mousedown, so the field blurred and was then
+         * refocused on click — a visible blip of the border. Refusing the
+         * mousedown's focus keeps the field focused the whole way; a keyboard
+         * press still lands on the button, and `onCopied` hands focus back.
+         */
+        onMouseDown={(event) => event.preventDefault()}
         /*
          * ⚠ THE ACCESSIBLE NAME CHANGES WITH THE STATE, WHICH IS HOW A SCREEN
          * READER GETS THE CONFIRMATION SIGHTED USERS GET FROM THE TICK.
@@ -124,6 +141,16 @@ export function ConfirmDialog({
   children?: React.ReactNode
 }) {
   const [typed, setTyped] = React.useState("")
+  const field = React.useRef<HTMLInputElement>(null)
+
+  function focusField() {
+    const input = field.current
+    if (!input) return
+    input.focus()
+    // Caret at the end, so the paste lands after anything already typed.
+    const end = input.value.length
+    input.setSelectionRange(end, end)
+  }
   const [pending, setPending] = React.useState(false)
 
   // ⚠ RESET ON OPEN, NOT ON CLOSE. Resetting on close races the exit animation
@@ -215,7 +242,7 @@ export function ConfirmDialog({
          */}
         {confirmWord !== undefined && (
           <div className="space-y-5">
-            <ConfirmWord word={confirmWord} />
+            <ConfirmWord word={confirmWord} onCopied={focusField} />
             {/*
              * ⚠ THE LABEL IS THE NAME ITSELF, NOT AN INSTRUCTION. The line
              * above already says what to do with it, and a field labelled
@@ -234,6 +261,7 @@ export function ConfirmDialog({
              */}
             <FloatingInput
               id="confirm-word"
+              ref={field}
               label={confirmWord}
               value={typed}
               onChange={(event) => setTyped(event.target.value)}

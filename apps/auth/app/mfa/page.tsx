@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { afterAuthUrl } from "../_lib/redirect"
+import { ResumeBoundary } from "../_components/resume-boundary"
 import { MfaForm } from "./mfa-form"
 
 export const metadata: Metadata = { title: "Two-step verification · i10" }
@@ -29,7 +30,9 @@ export default async function Page({
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
-        <MfaForm afterAuthUrl={after} signInHref={`/sign-in${carry}`} />
+        <ResumeBoundary>
+          <MfaForm afterAuthUrl={after} signInHref={`/sign-in${carry}`} />
+        </ResumeBoundary>
       </div>
     </main>
   )

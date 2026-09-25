@@ -180,7 +180,40 @@ export async function watchUntilVerified({
     const waited = await sleep(delay, signal)
     if (!waited) return { verified: false, domain: last }
 
-    const result = await refreshDomain(domainId)
+    /*
+     * ⚠ RE-PROVE WHILE THERE IS NO IDENTITY, REFRESH ONCE THERE IS — AND THIS
+     * LOOP USED TO ONLY REFRESH, WHICH IS WHY DOMAINS SAT AT `not_started`
+     * UNTIL SOMEBODY PRESSED VERIFY.
+     *
+     * `verify` is the only thing in the product that creates the SES identity.
+     * `refresh` READS the identity's status and writes nothing at all for a row
+     * that has none — so a domain whose one verify attempt missed (DNS not
+     * serving yet, which is the ordinary case a second after publishing) was
+     * polled seven times by a call that could never change its state, and the
+     * loop then gave up reporting exactly the status it started with.
+     *
+     * ⚠ AND IT IS SAFE TO REPEAT, WHICH IS WHAT MAKES THIS THE FIX RATHER THAN A
+     * RETRY STORM. `verify` proves ownership from the customer's own
+     * nameservers and checks SES before registering, so calling it again is the
+     * same call the Verify button makes — the button is now just the manual
+     * spelling of what this already does.
+     *
+     * ⚠ AND `null` COUNTS AS "NO IDENTITY". The first tick has no answer yet,
+     * and the case that brings us here is precisely the one where the check
+     * inside `activateDomain` did not land.
+     */
+    const unregistered: boolean = last === null || last.status === "not_started"
+    /*
+     * ⚠ NARROWED TO `Domain` DELIBERATELY. `verifyDomain` answers with
+     * `VerifiedDomain` — the same row plus what DNS said — and this loop wants
+     * only the part both calls agree on. Letting the union through makes `last`
+     * depend on a type that depends on `last`, which TypeScript reports as a
+     * circular inference rather than as the design smell it is.
+     */
+    const answered: { ok: boolean; data?: Domain } = unregistered
+      ? await verifyDomain(domainId)
+      : await refreshDomain(domainId)
+    const result = answered
     /*
      * ⚠ THE PAYLOAD IS CHECKED, NOT ASSUMED, AND THAT IS NOT PARANOIA. `ok`
      * means the request did not throw; it does not promise a body of the shape

@@ -1,10 +1,15 @@
 import type { Metadata } from "next"
+import { cookies } from "next/headers"
 import Link from "next/link"
 import { Button } from "@repo/ui/components/button"
 import { Onboarding } from "@/components/onboarding/onboarding"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
+import { ONBOARDING_STEP_COOKIE, stepFor } from "@/lib/onboarding-step"
 import type { BillingState, DomainSummary, Me, PlanSummary } from "@/lib/types"
+import { ArrivalQuery } from "@/components/arrival-query"
+import { ARRIVAL } from "@/lib/arrival"
+import { readArrival } from "@/lib/arrival-server"
 
 export const metadata: Metadata = { title: "Set up" }
 
@@ -35,25 +40,22 @@ export const dynamic = "force-dynamic"
 export default async function OnboardingPage({
   searchParams,
 }: {
-  // ⚠ POLAR APPENDS `checkout_id` ON THE WAY BACK, AND SO DOES OUR OWN EMBEDDED
-  // FLOW. Somebody who buys a plan on the last step of set-up lands back here;
-  // the plan step reports the outcome in place. See
-  // components/onboarding/step-plan.
-  //
-  // ⚠ AND `step` IS HOW THEY LAND ON THE STEP THEY LEFT FROM. The flow keeps
-  // its step in local state, which a return from checkout throws away — the
-  // component remounts, re-derives from the facts, and puts somebody who paid
-  // on the LAST step back on "Verify", because the fact it reads is that their
-  // domain is not verified yet. Mirroring the step into the URL makes the
-  // return exact instead of inferred.
+  // ⚠ ONLY POLAR'S FULL-PAGE REDIRECT STILL ARRIVES WITH `checkout_id` IN THE
+  // QUERY; our own embedded flow and the DNS callback write cookies instead —
+  // see lib/arrival.ts. Somebody who buys a plan on the last step of set-up
+  // lands back here and the plan step reports the outcome in place.
   //
   // ⚠ AND `published` IS THE CONFIRMATION THE DNS CALLBACK NO LONGER STOPS TO
   // SHOW. It used to paint its own green tick and then navigate here a moment
   // later, which read as a glitch; the news now arrives with the step that
   // follows it. See the callback handler and `StepVerify`.
-  searchParams: Promise<{ checkout_id?: string; step?: string; published?: string }>
+  searchParams: Promise<{ checkout_id?: string; published?: string }>
 }) {
-  const { checkout_id: checkoutId, step, published } = await searchParams
+  const query = await searchParams
+  // ⚠ FROM COOKIES, NOT THE URL — the query is only read for a page reached by
+  // Polar's own redirect, and `ArrivalQuery` then clears it. See lib/arrival.ts.
+  const checkoutId = await readArrival(ARRIVAL.checkout, query.checkout_id)
+  const published = await readArrival(ARRIVAL.published, query.published)
 
   const [me, domains, plans] = await Promise.all([
     tryApi<Me>("/console/me"),
@@ -122,14 +124,23 @@ export default async function OnboardingPage({
         </Button>
       </header>
 
+      <ArrivalQuery names={[ARRIVAL.checkout, ARRIVAL.published]} />
       <Onboarding
         state={me.data.onboarding}
         workspaceName={me.data.tenant?.name ?? ""}
+        tenantId={me.data.tenant?.id ?? ""}
         domains={domains.ok ? domains.data.data : []}
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
-        checkoutId={checkoutId ?? null}
-        stepFromUrl={step ?? null}
+        checkoutId={checkoutId}
+        // ⚠ HOW THEY LAND ON THE STEP THEY LEFT FROM — a reload, or a return
+        // from checkout, would otherwise re-derive from the facts and put
+        // somebody who paid on the last step back on "Verify". From a cookie,
+        // not `?step=`; see lib/onboarding-step.ts.
+        resumeStep={stepFor(
+          (await cookies()).get(ONBOARDING_STEP_COOKIE)?.value,
+          me.data.tenant?.id ?? "",
+        )}
         justPublished={Number(published) || 0}
       />
     </main>

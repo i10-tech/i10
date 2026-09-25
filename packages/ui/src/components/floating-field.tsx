@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { motion, type Transition } from "motion/react"
 import { cn } from "cn"
 
 /**
@@ -397,52 +398,139 @@ function Frame({
   className?: string
   children: React.ReactNode
 }) {
-  return (
+  const row = React.useRef<HTMLDivElement>(null)
+  const height = useHeight(row)
+
+  /*
+   * ⚠ THE ROW'S HEIGHT IS ANIMATED, NOT ITS CONTENT, AND THAT IS WHAT STOPS THE
+   * JUMP. A message that wraps to a second line used to add sixteen pixels in
+   * one frame and shove every field and button under it down by sixteen in the
+   * same frame; fixing the value took them back up just as abruptly. The row is
+   * measured, and the box around it springs to that height — so what is below
+   * it slides, both ways, whatever the message says.
+   *
+   * ⚠ IN OVERLAY MODE ONLY THE OVERFLOW IS PAID FOR. One line still hangs in
+   * the gap below the field and costs nothing; a second line is what would
+   * land on top of the next field, so exactly that much is pushed — on the
+   * same spring.
+   */
+  const push = height === null ? 0 : Math.max(0, height - ONE_LINE)
+
+  const hintRow = (
     <div
-      className={cn("w-full", !reserveHint && "relative", className)}
-      data-slot="floating-field"
+      ref={row}
+      className={cn(
+        // ⚠ `px-6` MATCHES THE VALUE'S OWN INSET, so a validation message
+        // starts under the first character of what it is about. It moves with
+        // `CONTROL_INPUT`'s padding and has no independent opinion.
+        "px-6 pt-1.5 text-2xs leading-4",
+        "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
+        /*
+         * ⚠ `min-h-4` IS THE RESERVATION, AND IT IS THE WHOLE POINT OF THE
+         * FLOW VERSION. A message that appears on blur without it pushes every
+         * field below it down by twenty pixels — on a four-field form the
+         * submit button moves under the cursor between the mousedown and the
+         * click. Sixteen reserved pixels remove a class of misclick that is
+         * invisible until somebody hits the wrong button.
+         */
+        reserveHint
+          ? "min-h-4"
+          : /*
+             * ⚠ `pointer-events-none` BECAUSE IT NOW HANGS OVER SOMETHING
+             * ELSE. Out of flow, this strip sits in the gap above whatever
+             * comes next — on the last field of a form, that is the submit
+             * button. An invisible 22px band across it would swallow clicks
+             * along its top edge, which is the kind of defect nobody reports
+             * because it only bites near one border.
+             */
+            "pointer-events-none absolute inset-x-0 top-full",
+        TONES[state].hint,
+      )}
+      // ⚠ `polite`, AND ON THE ALWAYS-PRESENT ROW RATHER THAN ON THE MESSAGE.
+      // A live region has to exist before the text arrives for a screen reader
+      // to announce the change; one that is conditionally rendered is
+      // announced inconsistently across readers, which is the usual reason
+      // validation is silent for anyone not looking at it.
+      aria-live="polite"
+      id={`${id}-hint`}
     >
-      {children}
-      <div
-        className={cn(
-          // ⚠ `px-6` MATCHES THE VALUE'S OWN INSET, so a validation message
-          // starts under the first character of what it is about. It moves with
-          // `CONTROL_INPUT`'s padding and has no independent opinion.
-          "px-6 pt-1.5 text-2xs leading-4",
-          "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
-          /*
-           * ⚠ `min-h-4` IS THE RESERVATION, AND IT IS THE WHOLE POINT OF THE
-           * FLOW VERSION. A message that appears on blur without it pushes every
-           * field below it down by twenty pixels — on a four-field form the
-           * submit button moves under the cursor between the mousedown and the
-           * click. Sixteen reserved pixels remove a class of misclick that is
-           * invisible until somebody hits the wrong button.
-           */
-          reserveHint
-            ? "min-h-4"
-            : /*
-               * ⚠ `pointer-events-none` BECAUSE IT NOW HANGS OVER SOMETHING
-               * ELSE. Out of flow, this strip sits in the gap above whatever
-               * comes next — on the last field of a form, that is the submit
-               * button. An invisible 22px band across it would swallow clicks
-               * along its top edge, which is the kind of defect nobody reports
-               * because it only bites near one border.
-               */
-              "pointer-events-none absolute inset-x-0 top-full",
-          TONES[state].hint,
-        )}
-        // ⚠ `polite`, AND ON THE ALWAYS-PRESENT ROW RATHER THAN ON THE MESSAGE.
-        // A live region has to exist before the text arrives for a screen reader
-        // to announce the change; one that is conditionally rendered is
-        // announced inconsistently across readers, which is the usual reason
-        // validation is silent for anyone not looking at it.
-        aria-live="polite"
-        id={`${id}-hint`}
-      >
-        {hint}
-      </div>
+      {hint}
     </div>
   )
+
+  return (
+    <div className={cn("w-full", className)} data-slot="floating-field">
+      {reserveHint ? (
+        <>
+          {children}
+          <motion.div
+            className="overflow-hidden"
+            initial={false}
+            animate={{ height: height ?? "auto" }}
+            transition={GROW}
+          >
+            {hintRow}
+          </motion.div>
+        </>
+      ) : (
+        <>
+          {/* ⚠ THE ROW ANCHORS TO THE CONTROL, NOT TO THE WHOLE FIELD — the
+              whole field now includes the spacer below, and `top-full` of that
+              would move the message down by exactly the push. */}
+          <div className="relative">
+            {children}
+            {hintRow}
+          </div>
+          <motion.div initial={false} animate={{ height: push }} transition={GROW} />
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * `autoFocus` that also works on a page the server rendered.
+ *
+ * ⚠ REACT DOES NOT FOCUS AN `autoFocus` INPUT IT HYDRATES — only one it
+ * creates. So a one-field page reached by a client navigation had the caret,
+ * and the same page opened fresh or reloaded did not: `/domains/new` came up
+ * with focus on the body. This focuses it once hydrated, and only when nothing
+ * else has focus, so it never takes the caret from somebody already typing
+ * elsewhere, and does nothing where React has already focused it.
+ */
+function useHydratedAutoFocus(id: string, autoFocus: boolean | undefined) {
+  React.useEffect(() => {
+    if (!autoFocus) return
+    const active = document.activeElement
+    if (active && active !== document.body) return
+    document.getElementById(id)?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on mount only, like the attribute
+  }, [])
+}
+
+/** `pt-1.5` plus one `leading-4` line: what a one-line hint row measures. */
+const ONE_LINE = 22
+
+/** The spring `Reveal` and `StepStage` use, so the row moves like everything else. */
+const GROW: Transition = { type: "spring", stiffness: 420, damping: 38, mass: 1 }
+
+/**
+ * The element's rendered height, kept current as its content wraps and unwraps.
+ *
+ * ⚠ `null` UNTIL FIRST MEASURED, which the caller reads as "auto" — so the
+ * server render and the first client paint lay out naturally, and nothing
+ * animates on mount.
+ */
+function useHeight(ref: React.RefObject<HTMLElement | null>): number | null {
+  const [height, setHeight] = React.useState<number | null>(null)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(() => setHeight(el.offsetHeight))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref])
+  return height
 }
 
 /**
@@ -507,6 +595,7 @@ export function FloatingInput({
   const generated = React.useId()
   const id = providedId ?? generated
   const tone = TONES[state]
+  useHydratedAutoFocus(id, props.autoFocus)
 
   return (
     <Frame

@@ -107,3 +107,14 @@ export const isDomainMalformed = (value: string): boolean => {
   const trimmed = value.trim()
   return trimmed !== "" && malformed(trimmed) !== null
 }
+
+/**
+ * Whether a failed create was a refusal of the NAME — ours (422), or already
+ * held here or elsewhere (409) — rather than of anything else.
+ *
+ * ⚠ THOSE TWO GO UNDER THE BOX; EVERYTHING ELSE KEEPS ITS TOAST. A full plan
+ * or an API that is down is not answered by editing the domain, and the plan
+ * limit's toast carries the one button that does answer it.
+ */
+export const refusesTheName = (errorName: string): boolean =>
+  errorName === "validation_error" || errorName === "domain_already_exists"

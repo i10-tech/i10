@@ -1,1 +1,19 @@
 @import "@repo/ui/styles/tokens.css";
+
+/*
+ * ⚠ A TAB RESUMING A SIGN-IN HIDES THE FORM UNTIL THE RIGHT STEP IS ON SCREEN.
+ * The attribute is set by the inline script in _lib/resume.tsx before anything
+ * paints and removed once the stored step has been restored. The reveal after
+ * two seconds is the fallback for JavaScript that never arrives: a hidden sign-in
+ * page is worse than one that opens on the first step.
+ */
+html[data-auth-resuming] [data-resume-boundary] {
+  visibility: hidden;
+  animation: auth-resume-reveal 0s linear 2s forwards;
+}
+
+@keyframes auth-resume-reveal {
+  to {
+    visibility: visible;
+  }
+}

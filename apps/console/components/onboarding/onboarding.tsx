@@ -13,6 +13,8 @@ import { StepVerify } from "@/components/onboarding/step-verify"
 import { StepWorkspace } from "@/components/onboarding/step-workspace"
 import { updateOnboarding } from "@/lib/actions"
 import { onPaidPlan } from "@/lib/billing"
+import { ARRIVAL, clearArrival } from "@/lib/arrival"
+import { rememberStep } from "@/lib/onboarding-step"
 import type {
   BillingState,
   DomainSummary,
@@ -48,22 +50,26 @@ type StepId = (typeof STEPS)[number]["id"]
 export function Onboarding({
   state,
   workspaceName,
+  tenantId,
   domains,
   plans,
   billing,
   checkoutId,
-  stepFromUrl,
+  resumeStep,
   justPublished,
 }: {
   state: OnboardingState
   workspaceName: string
+  /** Keys the remembered step, so it never crosses workspaces. */
+  tenantId: string
   domains: DomainSummary[]
   plans: PlanSummary[]
   billing: BillingState
-  /** From `?checkout_id=`, for the plan step's outcome banner. */
+  /** From the checkout cookie (see lib/arrival.ts), for the plan step's outcome banner. */
   checkoutId: string | null
   /**
-   * From `?step=`, and it outranks everything below.
+   * The step this browser was last on, from its cookie — it outranks
+   * everything below. See lib/onboarding-step.ts.
    *
    * ⚠ IT EXISTS BECAUSE PAYING THREW PEOPLE BACKWARDS. The step is local state;
    * returning from Polar's checkout remounts this component, the initialiser
@@ -72,7 +78,7 @@ export function Onboarding({
    * were right and the conclusion was wrong: they had not gone back, they had
    * come back.
    */
-  stepFromUrl: string | null
+  resumeStep: string | null
   /** Records written by the DNS callback that sent the browser back here. */
   justPublished: number
 }) {
@@ -101,14 +107,21 @@ export function Onboarding({
    */
   const paid = paidNow || onPaidPlan(billing)
 
+  // ⚠ THE "RECORDS ADDED" NEWS IS SHOWN ONCE. It arrived in a cookie from the
+  // DNS callback (see lib/arrival.ts); deleting it on sight means a later
+  // reload says "Publish your records" rather than announcing old news.
+  React.useEffect(() => {
+    if (justPublished > 0) clearArrival(ARRIVAL.published, "/onboarding")
+  }, [justPublished])
+
   const [step, setStep] = React.useState<StepId>(() => {
     /*
-     * ⚠ THE URL FIRST, BECAUSE IT IS THE ONLY SOURCE THAT SURVIVES A REMOUNT
+     * ⚠ THE REMEMBERED STEP FIRST, BECAUSE IT IS THE ONLY SOURCE THAT SURVIVES A REMOUNT
      * AND SAYS WHERE SOMEBODY *WAS* RATHER THAN WHERE THEY OUGHT TO BE. The
      * derivation below is about a fresh arrival; this is about coming back.
      */
-    if (stepFromUrl && STEPS.some((s) => s.id === stepFromUrl)) {
-      return stepFromUrl as StepId
+    if (resumeStep && STEPS.some((s) => s.id === resumeStep)) {
+      return resumeStep as StepId
     }
     if (state.completed_at) return "plan"
     if (state.facts.has_verified_domain && state.facts.has_api_key) return "plan"
@@ -138,33 +151,29 @@ export function Onboarding({
 
   const index = STEPS.findIndex((s) => s.id === step)
 
-  const go = React.useCallback((next: StepId) => {
-    setStep(next)
+  const go = React.useCallback(
+    (next: StepId) => {
+      setStep(next)
 
-    /*
-     * ⚠ `history.replaceState`, NOT `router.replace`. Both put the step in the
-     * URL; only this one does it without a navigation, so the server components
-     * are not re-fetched and this tree is not re-rendered on every "Next".
-     * Next.js supports it explicitly and keeps `useSearchParams` in sync with
-     * it — see "Native History API" in the linking-and-navigating guide.
-     *
-     * ⚠ AND `replace` RATHER THAN `push`, so the browser's Back button still
-     * means "leave set-up" rather than walking back through five steps one
-     * entry at a time. The stepper above is how you go back.
-     */
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search)
-      params.set("step", next)
-      window.history.replaceState(null, "", `?${params.toString()}`)
-    }
+      /*
+       * ⚠ INTO A COOKIE, NOT THE URL. It used to be `?step=` via
+       * `history.replaceState`; the address bar now stays `/onboarding` from the
+       * first step to the last. The server reads the cookie on the way back in —
+       * see lib/onboarding-step.ts.
+       */
+      rememberStep(tenantId, next)
 
-    // ⚠ NOT AWAITED. The person is already looking at the next step; making
-    // them wait for a write whose only purpose is resuming later would add
-    // latency to every click for no visible benefit.
-    void updateOnboarding({ step: next })
-  }, [])
+      // ⚠ NOT AWAITED. The person is already looking at the next step; making
+      // them wait for a write whose only purpose is resuming later would add
+      // latency to every click for no visible benefit.
+      void updateOnboarding({ step: next })
+    },
+    [tenantId],
+  )
 
   async function finish() {
+    // Finished: the next visit to set-up starts from the facts, not from here.
+    rememberStep(tenantId, null)
     await updateOnboarding({ completed: true })
     router.push("/")
   }

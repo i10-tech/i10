@@ -8,6 +8,7 @@ import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { finishDnsConnect, listDomains } from "@/lib/actions"
 import { activateDomain } from "@/lib/domain-activation"
+import { ARRIVAL, setArrival } from "@/lib/arrival"
 
 /**
  * Finishing the whole job, not just the authorisation.
@@ -161,16 +162,17 @@ export function CallbackHandler({
        * few hundred milliseconds and was snatched away, which reads as the
        * screen glitching rather than as the step completing.
        *
-       * ⚠ THE CONFIRMATION IS NOT LOST, IT IS MOVED. `published` rides back on
-       * the URL and the step it lands on says it there — one screen, arrived at
+       * ⚠ THE CONFIRMATION IS NOT LOST, IT IS MOVED. `published` rides back in
+       * a cookie and the step it lands on says it there — one screen, arrived at
        * once, already carrying the news. See `StepVerify`.
        */
       const returnTo = connected.data.return_to
       if (returnTo && inTheWay.length === 0 && notChecked.length === 0) {
-        const [path, query] = returnTo.split("?")
-        const params = new URLSearchParams(query ?? "")
-        params.set("published", String(wrote))
-        router.replace(`${path}?${params.toString()}`)
+        // ⚠ THE COUNT GOES IN A COOKIE FOR THAT PAGE, NOT ON ITS URL; the
+        // page shows it once and deletes it. See lib/arrival.ts.
+        const [path = "/"] = returnTo.split("?")
+        setArrival(ARRIVAL.published, String(wrote), path)
+        router.replace(returnTo)
         return
       }
 

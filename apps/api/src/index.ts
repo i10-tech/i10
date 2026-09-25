@@ -76,7 +76,7 @@ const { sql, db } = createDb(env.DATABASE_URL)
 // boundary and everything keeps working. Checked here, it fails the rollout
 // while the previous pod is still serving.
 try {
-  await assertRlsSubject(sql)
+  await assertRlsSubject(sql, log)
 } catch (error) {
   log.fatal({ err: error }, "refusing to start")
   captureError(error, { phase: "boot" })

@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import Link from "next/link"
 import { ArrowLeftIcon } from "lucide-react"
 import { toast } from "sonner"
 import { useClerk, useSignUp } from "@clerk/nextjs"
@@ -20,6 +19,7 @@ import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeWithoutLeaving, leaveFor } from "../_lib/finish"
 import { markSignInAttempt } from "../_lib/last-used"
+import { useResumable, useResumeLive } from "../_lib/resume"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
 import { describeRules, passwordProblem } from "../_lib/validate"
 import type { SsoProvider } from "../_lib/providers"
@@ -103,17 +103,16 @@ const SEGMENT: Record<Stage, Stage> = {
 
 export function SignUpForm({
   afterAuthUrl,
-  signInHref,
+  onSignIn,
   redirectRaw,
   providers,
   abilities,
   password: passwordPolicy,
-  startAt,
   initialEmail,
-  alreadySignedIn,
 }: {
   afterAuthUrl: string
-  signInHref: string
+  /** "Already have an account? Sign in" — back to the email box, in place. */
+  onSignIn: () => void
   redirectRaw?: string
   providers: SsoProvider[]
   /** What this Clerk instance can actually finish. See _lib/environment.ts. */
@@ -129,17 +128,6 @@ export function SignUpForm({
    */
   password: PasswordRules
   /**
-   * The step to open on, when the browser is coming back from a provider.
-   *
-   * ⚠ RESOLVED ON THE SERVER RATHER THAN IN AN EFFECT HERE, AND THE REASON IS
-   * VISIBLE RATHER THAN THEORETICAL. Clerk does not know whether there is a
-   * session until it has loaded in the browser, so a client-side resume renders
-   * "What is your name?" first and corrects itself a frame later — meaning
-   * everybody returning from Google sees step one of a sign-up they have
-   * already completed. The server knows before it sends any markup.
-   */
-  startAt?: Stage
-  /**
    * The address the identifier step already collected.
    *
    * ⚠ THE SIGN-UP FLOW IS ENTERED FROM ONE SHARED BOX NOW, so by the time this
@@ -149,19 +137,23 @@ export function SignUpForm({
    * sign-up is itself a decent hint that the address might have a typo in it.
    */
   initialEmail?: string
-  /** There is already a session, and no step to resume onto. */
-  alreadySignedIn: boolean
 }) {
   const { signUp } = useSignUp()
   const clerk = useClerk()
 
-  const [stage, setStage] = useState<Stage>(startAt ?? "name")
+  /*
+   * ⚠ THE STEP AND WHAT WAS TYPED SURVIVE A RELOAD; THE PASSWORD AND THE CODE DO
+   * NOT. See _lib/resume.tsx for why nothing secret is stored — and the check
+   * below for what happens when the step stored no longer matches what Clerk
+   * holds.
+   */
+  const [stage, setStage] = useResumable<Stage>("signup.stage", "name")
   const [direction, setDirection] = useState<"forward" | "back">("forward")
   const [busy, setBusy] = useState<string | null>(null)
 
-  const [firstName, setFirstName] = useState("")
-  const [lastName, setLastName] = useState("")
-  const [email, setEmail] = useState(initialEmail ?? "")
+  const [firstName, setFirstName] = useResumable("signup.first-name", "")
+  const [lastName, setLastName] = useResumable("signup.last-name", "")
+  const [email, setEmail] = useResumable("signup.email", initialEmail ?? "")
   const [code, setCode] = useState("")
   /** Why the last code was refused, shown under the boxes until it is retyped. */
   const [rejected, setRejected] = useState<string | null>(null)
@@ -227,49 +219,102 @@ export function SignUpForm({
   const isLastStep = order.indexOf(segment) === order.length - 1
 
   /**
-   * Somebody who is already signed in, with no step to resume onto.
+   * A restored step, checked against what Clerk actually holds.
    *
-   * ⚠ AN EFFECT THAT ONLY NAVIGATES, AND SETS NO STATE. Which step to open on
-   * is decided by the server — see `startAt` above — so all that is left here
-   * is the side effect proper. That also covers a reload in the middle of the
-   * optional steps: the account is already made, they are already in, and the
-   * honest answer is to take them where they were going rather than to re-offer
-   * a passkey.
+   * ⚠ THE STEP IS OURS BUT THE STATE BEHIND IT IS CLERK'S, AND THEY CAN
+   * DISAGREE. A code box whose sign-up attempt has expired would collect six
+   * digits and then fail with something unrelated; a passkey step with nobody
+   * signed in would fail on the button. So once Clerk has loaded, a restored
+   * step that has nothing behind it moves to the nearest one that does —
+   * never forward past something the person has not done.
    *
-   * ⚠ IT CANNOT BE A SERVER REDIRECT, WHICH IS WHY IT SURVIVED THE MOVE ABOVE.
-   * The destination is a different subdomain, and in development Clerk carries
-   * the session across one by decorating the URL with `__clerk_db_jwt` — which
-   * only `clerk.buildUrlWithAuth` can add, in the browser. A server-side
-   * `redirect()` would land on the console with no session and bounce straight
-   * back here.
+   * ⚠ ONCE, ON THE FIRST LIVE RENDER. After that every step change is one the
+   * person made in this page load, and Clerk agrees with it by construction.
    */
-  /*
-   * ⚠ LATCHED AT FIRST RENDER, AND WITHOUT THIS THE WHOLE FLOW ENDS AT THE
-   * PASSKEY STEP. `alreadySignedIn` is a PROP computed from `auth()` on the
-   * server, and this page re-renders on the server DURING the flow: `finalize`
-   * calls `setActive`, and `@clerk/nextjs` installs
-   * `window.__internal_onAfterSetActive = () => router.refresh()`. That refresh
-   * re-runs the server component with the session this form just created, so
-   * the prop flips from false to true the instant the account exists — and the
-   * effect below reads that as "somebody wandered in already signed in" and
-   * leaves for the dashboard, skipping passkey, two-factor and the providers.
-   *
-   * ⚠ IT PRESENTS AS A PHONE BUG, WHICH IS THE TELL. Whether the refresh lands
-   * before or after the person presses the next button is a race, and the same
-   * race is already written up in _lib/finish.ts — on a laptop the flow usually
-   * wins, on a phone the refresh does. Same code, opposite outcome, entirely
-   * down to which finished first.
-   *
-   * `useState` with an initialiser captures the value from the FIRST render and
-   * ignores every later prop, which is exactly the question being asked: was
-   * there a session before this form did anything?
-   */
-  const [arrivedSignedIn] = useState(alreadySignedIn)
+  const live = useResumeLive()
 
+  function reconcile() {
+    const signedIn = clerk.user != null
+    const attempt = clerk.client?.signUp
+    const accountStage = (ACCOUNT_STAGES as readonly Stage[]).includes(stage)
+
+    if (!accountStage && !signedIn) {
+      // The account steps are behind them, but the session is not: nothing
+      // after this point can act. Start again rather than fail on a button.
+      setDirection("back")
+      setStage("name")
+      return
+    }
+
+    if (stage === "verify") {
+      if (signedIn) {
+        // The code was accepted and the reload beat the step change.
+        const next = optional[0]
+        if (next) setStage(next)
+        else finish()
+        return
+      }
+      const waitingForCode =
+        attempt?.id != null &&
+        attempt.unverifiedFields.includes("email_address") &&
+        attempt.emailAddress === email.trim()
+      if (!waitingForCode) {
+        setDirection("back")
+        setStage("credentials")
+      }
+      return
+    }
+
+    /*
+     * ⚠ THE TOTP SECRET IS NOT STORED, SO THE SCAN STEP CANNOT COME BACK. It
+     * goes back to the offer, which enrols afresh — a new secret, and the old
+     * unverified one is simply never confirmed.
+     */
+    if (stage === "totp-scan") setStage("totp-offer")
+  }
+
+  /*
+   * ⚠ A LISTENER, NOT A CHECK IN THE EFFECT BODY, because the answer arrives
+   * when Clerk has loaded — which is after this mounts. It fires once with the
+   * loaded client and is then dropped.
+   */
   useEffect(() => {
-    if (!arrivedSignedIn || !clerk.loaded) return
-    leaveFor(clerk.buildUrlWithAuth(afterAuthUrl))
-  }, [arrivedSignedIn, clerk, afterAuthUrl])
+    if (!live) return
+    let done = false
+    const unsubscribe = clerk.addListener(() => {
+      if (done || !clerk.loaded) return
+      done = true
+      reconcile()
+    })
+    return unsubscribe
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount, see above
+  }, [live, clerk])
+
+  /*
+   * ⚠ BACKUP CODES ARE NOT STORED EITHER, SO A RELOAD ON THAT STEP ISSUES A NEW
+   * SET. Clerk replaces the old ones when it does, which is the right outcome:
+   * the codes on screen are always the codes that work.
+   */
+  const reissuing = useRef(false)
+  useEffect(() => {
+    if (stage !== "totp-codes" || backupCodes.length > 0 || reissuing.current) return
+    const user = clerk.user
+    if (!clerk.loaded || !user) return
+    reissuing.current = true
+    user
+      .createBackupCode()
+      .then((created) => setBackupCodes(created.codes))
+      .catch(() => {
+        toast.error(
+          "We could not show your backup codes again. You can make new ones in settings.",
+        )
+        advance("totp-offer")
+      })
+      .finally(() => {
+        reissuing.current = false
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `advance` is recreated every render
+  }, [stage, backupCodes.length, clerk.loaded, clerk.user])
 
   /** The next step, or out. */
   function advance(from: Stage = stage) {
@@ -293,8 +338,8 @@ export function SignUpForm({
       leave()
       return
     }
-    // Resumed after a provider round trip: no finalize happened on this page
-    // load, so there is no decorated URL to reuse.
+    // Resumed after a reload or a provider round trip: no finalize happened on
+    // this page load, so there is no decorated URL to reuse.
     leaveFor(clerk.buildUrlWithAuth(afterAuthUrl))
   }
 
@@ -503,6 +548,15 @@ export function SignUpForm({
     credentials: "surname",
   }
   const back = backTo[stage]
+  /*
+   * ⚠ BACK FROM THE FIRST STEP LEAVES SIGN-UP, AND LEAVING IS DESTRUCTIVE.
+   * Stepping back inside sign-up keeps what was typed — last name to first name
+   * loses nothing. Stepping back out of it to the email box forgets the lot:
+   * names, address, the stored steps. Whoever continues from there may be a
+   * different person, or the same person with a different address, and a
+   * half-filled sign-up waiting behind the box would be answering for them.
+   */
+  const leaving = stage === "name"
 
   return (
     <div className="flex flex-col gap-6">
@@ -517,12 +571,12 @@ export function SignUpForm({
           type="button"
           variant="ghost"
           size="icon-sm"
-          onClick={() => back && goBack(back)}
-          disabled={!back || locked}
+          onClick={() => (leaving ? onSignIn() : back && goBack(back))}
+          disabled={(!back && !leaving) || locked}
           // ⚠ `invisible`, NOT UNMOUNTED. Removing the button would let the
           // progress bar jump left by 32px between step one and step two, which
           // is the one element on the page whose job is to not move.
-          className={back ? undefined : "invisible"}
+          className={back || leaving ? undefined : "invisible"}
           aria-label="Back"
         >
           <ArrowLeftIcon aria-hidden="true" />
@@ -575,16 +629,14 @@ export function SignUpForm({
               </Button>
               <FieldDescription className="text-center">
                 Already have an account?{" "}
-                <Link
-                  href={signInHref}
-                  aria-disabled={locked}
-                  tabIndex={locked ? -1 : undefined}
-                  className={`underline underline-offset-4 ${
-                    locked ? "pointer-events-none opacity-50" : ""
-                  }`}
+                <button
+                  type="button"
+                  onClick={onSignIn}
+                  disabled={locked}
+                  className="cursor-pointer underline underline-offset-4 disabled:pointer-events-none disabled:opacity-50"
                 >
                   Sign in
-                </Link>
+                </button>
               </FieldDescription>
             </FieldGroup>
           </form>

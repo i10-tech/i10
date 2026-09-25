@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import { passwordRules } from "../_lib/environment"
 import { afterAuthUrl } from "../_lib/redirect"
+import { ResumeBoundary } from "../_components/resume-boundary"
 import { ResetPasswordForm } from "./reset-password-form"
 
 export const metadata: Metadata = { title: "Reset your password · i10" }
@@ -29,11 +30,13 @@ export default async function Page({
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
-        <ResetPasswordForm
-          afterAuthUrl={after}
-          signInHref={`/sign-in${carry}`}
-          passwordPolicy={policy}
-        />
+        <ResumeBoundary>
+          <ResetPasswordForm
+            afterAuthUrl={after}
+            signInHref={`/sign-in${carry}`}
+            passwordPolicy={policy}
+          />
+        </ResumeBoundary>
       </div>
     </main>
   )

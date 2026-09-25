@@ -522,6 +522,28 @@ const ROUTES: [
 
   [/^\/console\/emails$/, () => ({ data: EMAILS, nextCursor: null })],
 
+  /*
+   * ⚠ ABOVE `/domains/:id`, THE SAME ORDER THE API USES, or `check` is read as
+   * an id. `i10.tech` is ours and every fixture domain is already added, which
+   * reaches both inline refusals the add forms can show.
+   */
+  [
+    /^\/console\/domains\/check$/,
+    (_m, query) => {
+      const name = String(query?.name ?? "")
+        .trim()
+        .toLowerCase()
+      const held = DOMAINS.find((d) => d.name === name)
+      const refusal =
+        name === "i10.tech" || name.endsWith(".i10.tech")
+          ? `${name} is ours — we are flattered, genuinely, but we are already using it. Add the domain your own mail comes from.`
+          : held
+            ? `You have already added ${name}, and it ${held.status === "verified" ? "is verified" : held.status === "failed" ? "failed verification — open it to fix the records" : "is waiting for verification"}.`
+            : null
+      return { name, refusal }
+    },
+  ],
+
   [
     /^\/console\/domains\/([^/]+)$/,
     (m) => {

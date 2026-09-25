@@ -13,6 +13,7 @@ import { openPolarCheckout } from "@/lib/polar-embed"
 import { hasLiveSubscription, onPaidPlan } from "@/lib/billing"
 import { formatBytes, formatExact, formatNumber } from "@/lib/format"
 import type { BillingState, PlanSummary } from "@/lib/types"
+import { ARRIVAL, setArrival } from "@/lib/arrival"
 
 /**
  * The plan picker.
@@ -252,52 +253,27 @@ export function PlanCards({
       const here = pathname ?? window.location.pathname
 
       /*
-       * ⚠ THE QUERY THAT WAS ALREADY THERE IS KEPT, AND DROPPING IT PUT PEOPLE
-       * BACK ON THE WRONG STEP. This used to build the URL from the path alone,
-       * so `?step=plan` — which is how onboarding remembers where somebody is —
-       * was discarded by the very navigation that reports a successful payment.
-       * The flow then remounted, re-derived its step from the facts, and put
-       * somebody who had just paid on the last step back on "Verify".
+       * ⚠ INTO A COOKIE FOR THIS PAGE, NOT INTO THE URL. It used to be
+       * `?checkout_id=` via `history.replaceState`; the address bar now never
+       * changes. What the id is for is unchanged: a reload lands on a page that
+       * can recover the banner from it. See lib/arrival.ts.
        */
-      const params = new URLSearchParams(window.location.search)
-      params.set("checkout_id", checkoutId)
-
-      /*
-       * ⚠ `history.replaceState`, NOT `router.replace`, AND THIS IS THE LAST
-       * OF THE BLIPS. Both put the id in the address bar; only this one does
-       * it WITHOUT a navigation. `router.replace` re-fetches the RSC payload
-       * for the new URL and re-renders the server tree — which is a blank
-       * frame a second after the checkout closes, the toast about the payment
-       * killed with it, and the banner and the green tick animating in from
-       * nothing as the tree remounts. Exactly what a refresh looked like,
-       * because it is one in everything but name.
-       *
-       * ⚠ THE SAME TECHNIQUE THE ONBOARDING STEPPER ALREADY USES, and for the
-       * same reason — see `go` in onboarding.tsx. Next supports it explicitly
-       * and keeps `useSearchParams` in sync with it.
-       *
-       * ⚠ THE URL IS STILL WRITTEN, THOUGH NOTHING READS IT NOW. A reload
-       * lands on a page that can recover the banner from the id, which is the
-       * only reason it was ever in the address bar; the live banner is handed
-       * the id directly through `onCheckout`.
-       */
-      const url = `${here}?${params.toString()}`
+      setArrival(ARRIVAL.checkout, checkoutId, here)
 
       if (!onCheckout) {
         /*
-         * ⚠ THE CALLER CANNOT HOLD THE ID, SO THE URL HAS TO — and that costs
-         * a navigation. The billing settings page renders the banner at the
-         * top and these cards half a page below it, inside a server
+         * ⚠ THE CALLER CANNOT HOLD THE ID, SO THE SERVER HAS TO — and that
+         * costs a re-render. The billing settings page renders the banner at
+         * the top and these cards half a page below it, inside a server
          * component, so there is nowhere between them to keep client state.
-         * It keeps the behaviour it has always had; onboarding, where the two
-         * are siblings under one client component, takes the quiet path
-         * above.
+         * `refresh` re-reads the page with the cookie now set; onboarding,
+         * where the two are siblings under one client component, is handed
+         * the id directly instead.
          */
-        router.replace(url)
+        router.refresh()
         return
       }
 
-      window.history.replaceState(null, "", url)
       onCheckout(checkoutId)
     },
     [pathname, router, onCheckout],

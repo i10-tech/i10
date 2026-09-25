@@ -194,6 +194,21 @@ export async function lookupDns(domain: string) {
   )
 }
 
+/**
+ * Why the API would refuse to add this name — ours, already in this workspace,
+ * or verified by another — asked while it is still being typed.
+ *
+ * ⚠ READ-ONLY, AND ITS FAILURE MEANS "NO OBJECTION". The create still decides;
+ * this only lets the box go red before the button is pressed.
+ */
+export async function checkDomain(name: string) {
+  return run(() =>
+    api<{ name: string; refusal: string | null }>("/console/domains/check", {
+      query: { name },
+    }),
+  )
+}
+
 // ── DNS connections ─────────────────────────────────────────────────────────
 
 /**

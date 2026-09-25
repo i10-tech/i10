@@ -78,7 +78,7 @@ const { sql, db } = createDb(env.DATABASE_URL)
 // keeps working — no error, no wrong answer, just a worker that can read every
 // tenant's mail.
 try {
-  await assertRlsSubject(sql)
+  await assertRlsSubject(sql, log)
 } catch (error) {
   log.fatal({ err: error }, "refusing to start")
   captureError(error, { phase: "boot" })

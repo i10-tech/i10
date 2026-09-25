@@ -11,6 +11,7 @@ import { OtpField } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave } from "../_lib/finish"
+import { useResumable } from "../_lib/resume"
 
 /*
  * The second factor.
@@ -22,8 +23,11 @@ import { finalizeAndLeave } from "../_lib/finish"
  * back to the beginning. `router.push` from the sign-in form, never
  * `window.location`.
  *
- * ⚠ AND A RELOAD IS TREATED AS A LOST ATTEMPT, DELIBERATELY. If the status is
- * not `needs_second_factor` there is nothing to verify against; showing the
+ * ⚠ A RELOAD IS NOT A LOST ATTEMPT — PROBED 2026-09-25. Clerk's client keeps
+ * the in-progress attempt server-side and hands it back on load, so this page
+ * resumes it after a refresh exactly as after the `router.push`. What IS lost
+ * is an attempt that expired or finished elsewhere: if the status is not
+ * `needs_second_factor` there is nothing to verify against, and showing the
  * code boxes anyway would collect six digits and then fail with something
  * unrelated to what the person did.
  */
@@ -54,7 +58,9 @@ export function MfaForm({
 }) {
   const { signIn } = useSignIn()
   const formRef = useRef<HTMLFormElement>(null)
-  const [method, setMethod] = useState<Method | null>(null)
+  // ⚠ REMEMBERED ACROSS A RELOAD, so somebody who switched to a backup code
+  // is not dropped back on the authenticator app. See _lib/resume.tsx.
+  const [method, setMethod] = useResumable<Method | null>("mfa.method", null)
   const [code, setCode] = useState("")
   /** Clerk's own sentence about the last code, shown under the boxes. */
   const [rejected, setRejected] = useState<string | null>(null)
@@ -256,7 +262,7 @@ export function MfaForm({
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-2xl font-bold">Start again</h1>
           <p className="text-sm text-balance text-muted-foreground">
-            This sign-in is no longer in progress. Reloading this page ends it.
+            This sign-in has expired or was finished somewhere else.
           </p>
         </div>
         <Link

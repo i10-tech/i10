@@ -67,6 +67,23 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
     }
   })
 
+  /**
+   * Whether `POST /domains` would refuse this name, asked while it is typed.
+   *
+   * ⚠ REGISTERED ABOVE `/domains/:id`, OR `check` IS READ AS AN ID.
+   *
+   * ⚠ 200 EITHER WAY. A refusal is the answer to the question, not a failure
+   * to ask it — and the console treats any error here as "no objection" so a
+   * slow check never blocks somebody adding a domain; `create` still decides.
+   */
+  app.get("/domains/check", async (c) => {
+    if (!d.domains) return c.json(notWired("Domains"), 501)
+    const { tenantId } = c.get("auth")
+    const name = (c.req.query("name") ?? "").trim()
+    if (!name) return c.json(validation("`name` is required."), 422)
+    return c.json({ name, refusal: await d.domains.refusal(tenantId, name) })
+  })
+
   app.get("/domains/:id", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
