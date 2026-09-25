@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { MoreHorizontal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
@@ -21,7 +20,6 @@ import { deleteSegment } from "@/lib/actions"
  * with an answer rather than to punish with ambiguity.
  */
 export function SegmentActions({ id, name }: { id: string; name: string }) {
-  const router = useRouter()
   const [confirming, setConfirming] = React.useState(false)
 
   return (
@@ -46,14 +44,13 @@ export function SegmentActions({ id, name }: { id: string; name: string }) {
         title={`Delete ${name}?`}
         description="The contacts in it are not deleted — only the grouping. Any broadcast already sent to this segment keeps its record."
         confirmLabel="Delete segment"
+        doneLabel="Deleted"
         onConfirm={async () => {
           const result = await deleteSegment(id)
           if (!result.ok) {
             toast.error("Could not delete the segment", { description: result.error })
             return false
           }
-          toast.success(`${name} deleted`)
-          router.refresh()
           return true
         }}
       />

@@ -54,7 +54,7 @@ export function NewContactButton() {
        * button that does nothing.
        */
       canSubmit={isEmailUsable(email)}
-      successMessage="Contact added"
+      doneLabel="Added"
       onSubmit={() =>
         createContact({
           email: email.trim(),

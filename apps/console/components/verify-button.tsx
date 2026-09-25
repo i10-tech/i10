@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
@@ -32,13 +31,14 @@ import { verifyDomain } from "@/lib/actions"
  * "failed" for either sends somebody to change DNS that was already correct,
  * which is the most expensive wrong answer this page can give.
  *
- * ⚠ AND IT REFRESHES THE SERVER COMPONENT RATHER THAN HOLDING THE RESULT. The
+ * ⚠ AND THE SERVER COMPONENT IS RE-RENDERED RATHER THAN THE RESULT HELD. The
  * page renders per-record status from the server; putting the verify result in
  * client state would leave the table showing the old statuses next to a toast
- * saying it worked.
+ * saying it worked. That re-render is `verifyDomain`'s own response (see `run`
+ * in lib/actions.ts) — it used to be a second `router.refresh()` from here,
+ * landing mid-toast — so the statuses have changed before the toast appears.
  */
 export function VerifyButton({ id, status }: { id: string; status: string }) {
-  const router = useRouter()
   const [pending, setPending] = React.useState(false)
 
   async function run() {
@@ -59,7 +59,6 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
           description: result.error,
           duration: 10_000,
         })
-        router.refresh()
         return
       }
 
@@ -119,7 +118,6 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
           duration: 8000,
         })
       }
-      router.refresh()
       return
     }
 
@@ -153,8 +151,6 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
             "Check each row against what your DNS provider shows. A trailing dot or a quoted value is the usual cause.",
         })
     }
-
-    router.refresh()
   }
 
   return (

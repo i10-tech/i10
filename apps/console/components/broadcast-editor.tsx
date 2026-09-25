@@ -1,10 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { Save } from "lucide-react"
 import { toast } from "sonner"
-import { Button } from "@repo/ui/components/button"
+import { ActionButton } from "@repo/ui/components/action-button"
 import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
 import {
@@ -14,10 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Swap } from "@repo/ui/components/swap"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { HtmlEditor } from "@/components/html-editor"
 import { updateBroadcast } from "@/lib/actions"
+import { useOutcome } from "@/lib/outcome"
 import type { BroadcastDetail, DomainSummary, SegmentRow, TopicRow } from "@/lib/types"
 
 /**
@@ -45,8 +45,6 @@ export function BroadcastEditor({
   topics: TopicRow[]
   domains: DomainSummary[]
 }) {
-  const router = useRouter()
-
   const editable = broadcast.status === "draft" || broadcast.status === "scheduled"
 
   const [name, setName] = React.useState(broadcast.name)
@@ -64,7 +62,7 @@ export function BroadcastEditor({
   const [topicId, setTopicId] = React.useState(broadcast.topic_id ?? "")
   const [html, setHtml] = React.useState(broadcast.html ?? "")
   const [text, setText] = React.useState(broadcast.text ?? "")
-  const [saving, setSaving] = React.useState(false)
+  const saving = useOutcome()
 
   const verified = domains.filter((d) => d.status === "verified")
 
@@ -85,29 +83,28 @@ export function BroadcastEditor({
     text !== (broadcast.text ?? "")
 
   async function save() {
-    if (saving || !editable) return
-    setSaving(true)
+    if (saving.state === "pending" || !editable) return
 
-    const result = await updateBroadcast(broadcast.id, {
-      name,
-      subject,
-      preview_text: previewText || null,
-      from: domain ? `${localPart}@${domain}` : "",
-      segment_id: segmentId || null,
-      topic_id: topicId || null,
-      html: html || null,
-      text: text || null,
+    // ⚠ ANSWERED IN THE BUTTON, AND THE LINE BESIDE IT CHANGES WITH IT: "Unsaved
+    // changes" goes as the tick arrives. A "Saved" toast restated both.
+    await saving.run(async () => {
+      const result = await updateBroadcast(broadcast.id, {
+        name,
+        subject,
+        preview_text: previewText || null,
+        from: domain ? `${localPart}@${domain}` : "",
+        segment_id: segmentId || null,
+        topic_id: topicId || null,
+        html: html || null,
+        text: text || null,
+      })
+
+      if (!result.ok) {
+        toast.error("Could not save", { description: result.error })
+        return false
+      }
+      return true
     })
-
-    setSaving(false)
-
-    if (!result.ok) {
-      toast.error("Could not save", { description: result.error })
-      return
-    }
-
-    toast.success("Saved")
-    router.refresh()
   }
 
   return (
@@ -270,13 +267,23 @@ export function BroadcastEditor({
 
       {editable && (
         <div className="sticky bottom-0 flex items-center gap-2 border-t bg-background py-3">
-          <Button onClick={save} disabled={saving || !dirty}>
-            {saving ? <Spinner /> : <Save />}
+          <ActionButton
+            onClick={save}
+            state={saving.state}
+            onReset={saving.reset}
+            pendingLabel="Save draft"
+            doneLabel="Saved"
+            disabled={saving.state === "idle" && !dirty}
+          >
+            <Save />
             Save draft
-          </Button>
-          {dirty && (
-            <span className="text-xs text-muted-foreground">Unsaved changes</span>
-          )}
+          </ActionButton>
+          <Swap
+            id={dirty ? "dirty" : "clean"}
+            className="text-xs text-muted-foreground"
+          >
+            {dirty ? "Unsaved changes" : null}
+          </Swap>
         </div>
       )}
     </div>

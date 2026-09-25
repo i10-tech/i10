@@ -4,7 +4,9 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, ArrowRight, Check } from "lucide-react"
+import { AutoHeight } from "@repo/ui/components/auto-height"
 import { Button } from "@repo/ui/components/button"
+import { StepStage } from "@repo/ui/components/step-stage"
 import { cn } from "cn"
 import { StepDomain } from "@/components/onboarding/step-domain"
 import { StepPlan } from "@/components/onboarding/step-plan"
@@ -151,8 +153,20 @@ export function Onboarding({
 
   const index = STEPS.findIndex((s) => s.id === step)
 
+  /*
+   * ⚠ WHICH WAY THE STEPS SLIDE, DECIDED AT THE MOMENT OF THE MOVE. Back, a
+   * click on an earlier dot, or Skip — the rail lets somebody go anywhere, so
+   * the direction is "is the new step before or after this one", not "was it
+   * the Back button". Set in the same batch as the step, so the pane that
+   * leaves and the one that arrives agree on it.
+   */
+  const [direction, setDirection] = React.useState<"forward" | "back">("forward")
+
   const go = React.useCallback(
     (next: StepId) => {
+      const from = STEPS.findIndex((s) => s.id === step)
+      const to = STEPS.findIndex((s) => s.id === next)
+      setDirection(to < from ? "back" : "forward")
       setStep(next)
 
       /*
@@ -168,7 +182,7 @@ export function Onboarding({
       // latency to every click for no visible benefit.
       void updateOnboarding({ step: next })
     },
-    [tenantId],
+    [tenantId, step],
   )
 
   async function finish() {
@@ -206,61 +220,100 @@ export function Onboarding({
                 <span
                   className={cn(
                     "grid size-4 shrink-0 place-items-center rounded-full border text-[9px]/none tabular-nums",
+                    "transition-colors duration-(--duration-dismiss) ease-(--ease-linear)",
                     done && "border-foreground bg-foreground text-background",
                     current && "border-foreground",
                   )}
                 >
-                  {done ? <Check className="size-2.5" /> : i + 1}
+                  {/* ⚠ THE TICK ARRIVES THE WAY EVERY OTHER TICK IN THE CONSOLE
+                      DOES — a small scale-in — so finishing a step reads as the
+                      same event as a form that worked. Keyed, so it only plays
+                      when a step becomes done, not on every render. */}
+                  {done ? (
+                    <Check
+                      key="done"
+                      className="size-2.5 animate-in zoom-in-50 fade-in-0 duration-(--duration-dismiss)"
+                    />
+                  ) : (
+                    i + 1
+                  )}
                 </span>
                 <span className="hidden sm:inline">{s.label}</span>
               </button>
               {i < STEPS.length - 1 && (
-                <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                /*
+                 * ⚠ THE CONNECTOR FILLS, LEFT TO RIGHT, AS THE STEP BEFORE IT
+                 * COMPLETES — and empties the other way on Back. It is the
+                 * rail's continuity: the line you just travelled is the one
+                 * that changes, in the direction you travelled it. A transform
+                 * on an inner bar, so it runs on the compositor.
+                 */
+                <span aria-hidden="true" className="relative h-px flex-1 bg-border">
+                  <span
+                    className={cn(
+                      "absolute inset-0 origin-left bg-foreground",
+                      "transition-transform duration-(--duration-move) ease-(--ease-quint-out)",
+                      done ? "scale-x-100" : "scale-x-0",
+                    )}
+                  />
+                </span>
               )}
             </React.Fragment>
           )
         })}
       </nav>
 
-      <div className="min-h-[24rem]">
-        {step === "workspace" && (
-          <StepWorkspace
-            name={workspaceName}
-            useCase={state.use_case}
-            onDone={() => go("domain")}
-          />
-        )}
+      {/*
+       * ⚠ THE STEPS SLIDE, AND THE FOOTER RIDES THE HEIGHT CHANGE. Each step
+       * was conditional JSX, so moving on was a hard cut to a screen of a
+       * different height and the Back/Skip row jumped with it. `StepStage`
+       * slides the panes 12px in the direction of travel — the same motion as
+       * the sign-in flow — and `AutoHeight` animates the real height so the
+       * row below glides to its new place rather than landing there first.
+       */}
+      <AutoHeight>
+        <StepStage morph={false} step={step} direction={direction}>
+          <div className="min-h-[24rem]">
+            {step === "workspace" && (
+              <StepWorkspace
+                name={workspaceName}
+                useCase={state.use_case}
+                onDone={() => go("domain")}
+              />
+            )}
 
-        {step === "domain" && (
-          <StepDomain domains={domains} onDone={() => go("verify")} />
-        )}
+            {step === "domain" && (
+              <StepDomain domains={domains} onDone={() => go("verify")} />
+            )}
 
-        {step === "verify" && (
-          <StepVerify
-            domains={domains}
-            justPublished={justPublished}
-            onDone={() => go("send")}
-          />
-        )}
+            {step === "verify" && (
+              <StepVerify
+                domains={domains}
+                justPublished={justPublished}
+                onDone={() => go("send")}
+              />
+            )}
 
-        {step === "send" && (
-          <StepSend
-            domains={domains}
-            hasApiKey={state.facts.has_api_key}
-            onDone={() => go("plan")}
-          />
-        )}
+            {step === "send" && (
+              <StepSend
+                domains={domains}
+                hasApiKey={state.facts.has_api_key}
+                onDone={() => go("plan")}
+              />
+            )}
 
-        {step === "plan" && (
-          <StepPlan
-            plans={plans}
-            billing={billing}
-            checkoutId={checkoutId}
-            onDone={finish}
-            onSubscribed={() => setPaidNow(true)}
-          />
-        )}
-      </div>
+            {step === "plan" && (
+              <StepPlan
+                plans={plans}
+                billing={billing}
+                checkoutId={checkoutId}
+                onDone={finish}
+                onSubscribed={() => setPaidNow(true)}
+              />
+            )}
+          </div>
+        </StepStage>
+      </AutoHeight>
 
       {/*
        * ⚠ THERE IS EXACTLY ONE WAY FORWARD FROM EACH STEP, AND IT IS THE STEP'S

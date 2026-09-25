@@ -5,6 +5,8 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { CheckCircle2, ExternalLink } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
+import { Reveal } from "@repo/ui/components/reveal"
+import { Swap } from "@repo/ui/components/swap"
 import { Status } from "@/components/status"
 import { VerifyButton } from "@/components/verify-button"
 import { EmptyState } from "@/components/empty-state"
@@ -173,23 +175,35 @@ export function StepVerify({
         ))}
       </ul>
 
-      {pending.length > 0 && polls < MAX_POLLS && (
-        <p className="text-xs text-muted-foreground">
-          Checking automatically every few seconds. You can carry on and come back —
-          verification continues without this page open.
-        </p>
-      )}
+      {/*
+       * ⚠ EVERYTHING BELOW THE LIST CHANGES WHILE SOMEBODY IS WATCHING IT, SO
+       * NONE OF IT MAY APPEAR IN ONE FRAME. This page polls: a domain verifies
+       * on its own, the "checking" line goes, and Continue arrives — each of
+       * which used to be conditional JSX that popped in and shoved the rest.
+       * Now the line changes its words in place and the button grows into the
+       * space it needs, on the same spring as every other reveal.
+       *
+       * ⚠ THE WRAPPER IS ALWAYS RENDERED, which is what keeps the gap above
+       * it constant: in a `space-y` stack the gap belongs to the element
+       * BEFORE, and it only has one while something follows it.
+       */}
+      <div>
+        <Reveal show={pending.length > 0} spacing="pb-6">
+          <p className="text-xs text-muted-foreground">
+            <Swap id={polls < MAX_POLLS ? "polling" : "waiting"}>
+              {polls < MAX_POLLS
+                ? "Checking automatically every few seconds. You can carry on and come back — verification continues without this page open."
+                : "Still waiting. That is normal — leave it with us and check back later, or press Verify to look again now."}
+            </Swap>
+          </p>
+        </Reveal>
 
-      {pending.length > 0 && polls >= MAX_POLLS && (
-        <p className="text-xs text-muted-foreground">
-          Still waiting. That is normal — leave it with us and check back later, or
-          press Verify to look again now.
-        </p>
-      )}
-
-      {verified.length > 0 && (
-        <Button onClick={onDone}>Continue with {verified[0]!.name}</Button>
-      )}
+        <Reveal show={verified.length > 0} spacing="">
+          {verified[0] && (
+            <Button onClick={onDone}>Continue with {verified[0].name}</Button>
+          )}
+        </Reveal>
+      </div>
     </div>
   )
 }

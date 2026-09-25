@@ -113,3 +113,24 @@ export function useMounted(): boolean {
     () => false,
   )
 }
+
+/**
+ * The last non-null value, kept while the real one has gone back to `null`.
+ *
+ * The case it exists for: a dialog opened ON something — "Revoke staging?" —
+ * whose open state IS that something. Closing sets it to `null`, and the
+ * dialog then spends its exit animation rendering "Revoke this key?", or
+ * unmounting the secret it was showing so the panel shrinks as it leaves.
+ * Reading the retained value for what is DISPLAYED, and the live one for what
+ * is DONE, keeps the words still until the panel has gone.
+ *
+ * Same render-phase rule as `useResetWhen`: it only sets its own state, and
+ * only when the value actually changes.
+ */
+export function useRetained<T>(value: T | null): T | null {
+  const [kept, setKept] = React.useState(value)
+
+  if (value !== null && value !== kept) setKept(value)
+
+  return value ?? kept
+}

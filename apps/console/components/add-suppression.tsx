@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { Plus } from "lucide-react"
 import { toast } from "sonner"
+import { ActionButton } from "@repo/ui/components/action-button"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -15,8 +15,9 @@ import {
 } from "@repo/ui/components/dialog"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { emailProblem } from "@repo/ui/checks"
-import { Spinner } from "@repo/ui/components/spinner"
 import { addSuppression } from "@/lib/actions"
+import { useOutcome } from "@/lib/outcome"
+import { useResetOnOpen } from "@/lib/react"
 
 /**
  * ⚠ ADDING BY HAND IS FOR THE ADDRESS THAT KEEPS BOUNCING SOFTLY, OR THE ONE
@@ -26,30 +27,37 @@ import { addSuppression } from "@/lib/actions"
  * quality problem upstream rather than a suppression problem here.
  */
 export function AddSuppressionButton() {
-  const router = useRouter()
   const [open, setOpen] = React.useState(false)
   const [address, setAddress] = React.useState("")
-  const [pending, setPending] = React.useState(false)
+  const outcome = useOutcome()
+
+  // On open, not on close: see `useResetOnOpen`.
+  useResetOnOpen(open, () => {
+    setAddress("")
+    outcome.reset()
+  })
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (pending) return
+    if (outcome.state !== "idle") return
 
-    setPending(true)
-    const result = await addSuppression(address.trim())
-    setPending(false)
-
-    if (!result.ok) {
-      toast.error("Could not suppress that address", { description: result.error })
-      return
-    }
-
-    toast.success("Address suppressed", {
-      description: "We will skip it on every future send.",
-    })
-    setAddress("")
-    setOpen(false)
-    router.refresh()
+    /*
+     * ⚠ NO SUCCESS TOAST. "We will skip it on every future send" is the
+     * dialog's own description, already read before pressing the button; the
+     * tick confirms it and the new row is in the table behind before the
+     * dialog closes. See lib/outcome.ts.
+     */
+    await outcome.run(
+      async () => {
+        const result = await addSuppression(address.trim())
+        if (!result.ok) {
+          toast.error("Could not suppress that address", { description: result.error })
+          return false
+        }
+        return true
+      },
+      () => setOpen(false),
+    )
   }
 
   return (
@@ -59,9 +67,12 @@ export function AddSuppressionButton() {
         Suppress an address
       </Button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={outcome.state === "pending" ? () => {} : setOpen}
+      >
         <DialogContent className="sm:max-w-md">
-          <form onSubmit={submit}>
+          <form onSubmit={submit} {...outcome.formProps}>
             <DialogHeader>
               <DialogTitle>Suppress an address</DialogTitle>
               <DialogDescription>
@@ -92,10 +103,15 @@ export function AddSuppressionButton() {
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={pending || !address.includes("@")}>
-                {pending && <Spinner />}
+              <ActionButton
+                type="submit"
+                state={outcome.state}
+                pendingLabel="Suppress"
+                doneLabel="Suppressed"
+                disabled={!address.includes("@")}
+              >
                 Suppress
-              </Button>
+              </ActionButton>
             </DialogFooter>
           </form>
         </DialogContent>

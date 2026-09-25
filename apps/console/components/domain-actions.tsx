@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { MoreHorizontal, Trash2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -42,7 +41,6 @@ export function DomainActions({
   /** The live keys that can ONLY send from this domain. Filtered by the page. */
   scopedKeys?: { id: string; name: string }[]
 }) {
-  const router = useRouter()
   const [confirming, setConfirming] = React.useState(false)
 
   return (
@@ -72,9 +70,9 @@ export function DomainActions({
         scopedKeys={scopedKeys}
         open={confirming}
         onOpenChange={setConfirming}
-        // ⚠ THE LIST STAYS PUT AND RE-READS ITSELF. Unlike the domain page,
-        // there is nowhere to go — the row simply stops being there.
-        onDeleted={() => router.refresh()}
+        // ⚠ NO `onDeleted`: THE LIST STAYS PUT. `deleteDomain` revalidates
+        // `/domains`, so the row is already gone behind the dialog by the time
+        // it closes — there is nowhere to go and nothing to re-read.
       />
     </>
   )

@@ -4,10 +4,10 @@ import * as React from "react"
 import { useOrganization } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Button } from "@repo/ui/components/button"
+import { ActionButton } from "@repo/ui/components/action-button"
 import { Input } from "@repo/ui/components/input"
-import { Spinner } from "@repo/ui/components/spinner"
 import { renameWorkspace } from "@/lib/actions"
+import { useOutcome } from "@/lib/outcome"
 import { useSyncedState } from "@/lib/react"
 
 /**
@@ -61,7 +61,7 @@ export function RenameWorkspace({
    * together, which is what `current` was doing correctly before.
    */
   const [saved, setSaved] = useSyncedState(current)
-  const [pending, setPending] = React.useState(false)
+  const outcome = useOutcome()
 
   /*
    * ⚠ A REF RATHER THAN STATE, BECAUSE NOTHING RENDERS DIFFERENTLY FOR IT.
@@ -84,53 +84,67 @@ export function RenameWorkspace({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (pending || !name.trim() || name.trim() === saved) return
-
-    setPending(true)
-    const result = await renameWorkspace(name.trim())
-
-    if (!result.ok) {
-      setPending(false)
-      toast.error("Could not rename the workspace", { description: result.error })
-      return
-    }
+    if (outcome.state === "pending" || !name.trim() || name.trim() === saved) return
 
     /*
-     * ⚠ AWAITED BEFORE THE BUTTON COMES BACK, so the rail has the new name by
-     * the time the form looks finished. It is one request against Clerk's
-     * client and it is the only thing left to do.
+     * ⚠ SAID IN PLACE: THE FIELD GOES GREEN AND SAVE BECOMES "SAVED". The
+     * toast this replaced ("Workspace renamed") was a notification about the
+     * box somebody was looking at, delivered to the corner they were not. The
+     * rail's name changes in the same beat, which is the rest of the answer.
      */
-    setSaved(name.trim())
-    await reloadOrganization.current?.()
-    setPending(false)
+    await outcome.run(async () => {
+      const result = await renameWorkspace(name.trim())
 
-    /*
-     * ⚠ THE FALLBACK STILL REFRESHES, BECAUSE NOTHING ELSE CAN UPDATE IT. With
-     * no Clerk key the rail renders `tenant.name` from the server, and that
-     * value only changes when the server renders again. It is the local
-     * review path, not a deployment anybody uses.
-     */
-    if (!clerkEnabled) router.refresh()
+      if (!result.ok) {
+        toast.error("Could not rename the workspace", { description: result.error })
+        return false
+      }
 
-    toast.success("Workspace renamed")
+      /*
+       * ⚠ AWAITED BEFORE THE BUTTON COMES BACK, so the rail has the new name by
+       * the time the form looks finished. It is one request against Clerk's
+       * client and it is the only thing left to do.
+       */
+      setSaved(name.trim())
+      await reloadOrganization.current?.()
+
+      /*
+       * ⚠ THE FALLBACK STILL REFRESHES, BECAUSE NOTHING ELSE CAN UPDATE IT. With
+       * no Clerk key the rail renders `tenant.name` from the server, and that
+       * value only changes when the server renders again. It is the local
+       * review path, not a deployment anybody uses.
+       */
+      if (!clerkEnabled) router.refresh()
+
+      return true
+    })
   }
 
   return (
     <>
-      <form onSubmit={submit} className="flex max-w-md items-center gap-2">
+      <form
+        onSubmit={submit}
+        className="flex max-w-md items-center gap-2"
+        {...outcome.formProps}
+      >
         <Input
           value={name}
           onChange={(event) => setName(event.target.value)}
           maxLength={120}
           aria-label="Workspace name"
         />
-        <Button
+        <ActionButton
           type="submit"
-          disabled={pending || !name.trim() || name.trim() === saved}
+          state={outcome.state}
+          onReset={outcome.reset}
+          pendingLabel="Save"
+          doneLabel="Saved"
+          // Only while idle: after a save `name === saved`, and the tick must
+          // not grey out under itself.
+          disabled={outcome.state === "idle" && (!name.trim() || name.trim() === saved)}
         >
-          {pending && <Spinner />}
           Save
-        </Button>
+        </ActionButton>
       </form>
 
       {clerkEnabled && <OrganizationReload onReady={holdReload} />}

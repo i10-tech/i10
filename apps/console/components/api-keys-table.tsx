@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { Globe, MoreHorizontal, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@repo/ui/components/badge"
@@ -34,6 +33,7 @@ import { useStepUp } from "@/lib/step-up"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import { revokeApiKey, rotateApiKey } from "@/lib/actions"
+import { useRetained } from "@/lib/react"
 import type { ApiKeyRow, CreatedApiKey } from "@/lib/types"
 import { Time } from "@/components/time"
 
@@ -58,10 +58,23 @@ export function ApiKeysTable({
 }) {
   const [scoping, setScoping] = React.useState<ApiKeyRow | null>(null)
   const stepUp = useStepUp()
-  const router = useRouter()
   const [revoking, setRevoking] = React.useState<ApiKeyRow | null>(null)
   const [rotating, setRotating] = React.useState<ApiKeyRow | null>(null)
   const [rotated, setRotated] = React.useState<CreatedApiKey | null>(null)
+
+  // What the dialogs DISPLAY while they animate out — see `useRetained`.
+  const shownRevoking = useRetained(revoking)
+  const shownRotating = useRetained(rotating)
+  const shownRotated = useRetained(rotated)
+
+  /*
+   * ⚠ THE NEW SECRET WAITS FOR THE CONFIRMATION TO LEAVE. It used to be set the
+   * instant the rotate returned, which opened the "Your new key" dialog on top
+   * of the rotate dialog still standing there — two modals, one over the other,
+   * for one click. It is held here and handed over when the first one closes,
+   * so the tick is seen, the panel goes, and the secret arrives in its own.
+   */
+  const issued = React.useRef<CreatedApiKey | null>(null)
 
   if (keys.length === 0) {
     return (
@@ -197,9 +210,10 @@ export function ApiKeysTable({
       <ConfirmDialog
         open={revoking !== null}
         onOpenChange={(open) => !open && setRevoking(null)}
-        title={`Revoke ${revoking?.name ?? "this key"}?`}
+        title={`Revoke ${shownRevoking?.name ?? "this key"}?`}
         description="Anything using it stops sending immediately — not at the end of a cache window. This cannot be undone; create a new key instead."
         confirmLabel="Revoke key"
+        doneLabel="Revoked"
         onConfirm={async () => {
           if (!revoking) return false
           /*
@@ -216,19 +230,24 @@ export function ApiKeysTable({
             toast.error("Could not revoke the key", { description: result.error })
             return false
           }
-          toast.success(`${revoking.name} revoked`)
-          setRevoking(null)
-          router.refresh()
           return true
         }}
       />
 
       <ConfirmDialog
         open={rotating !== null}
-        onOpenChange={(open) => !open && setRotating(null)}
-        title={`Rotate ${rotating?.name ?? "this key"}?`}
+        onOpenChange={(open) => {
+          if (open) return
+          setRotating(null)
+          if (issued.current) {
+            setRotated(issued.current)
+            issued.current = null
+          }
+        }}
+        title={`Rotate ${shownRotating?.name ?? "this key"}?`}
         description="A new key is issued and the old one stops working immediately. Deploy the new value before rotating, or sending will fail in the gap."
         confirmLabel="Rotate key"
+        doneLabel="Rotated"
         destructive={false}
         onConfirm={async () => {
           if (!rotating) return false
@@ -237,9 +256,7 @@ export function ApiKeysTable({
             toast.error("Could not rotate the key", { description: result.error })
             return false
           }
-          setRotated(result.data)
-          setRotating(null)
-          router.refresh()
+          issued.current = result.data
           return true
         }}
       />
@@ -269,7 +286,7 @@ export function ApiKeysTable({
               now — it will not be shown again.
             </DialogDescription>
           </DialogHeader>
-          {rotated && <CopyField value={rotated.secret} className="py-2" />}
+          {shownRotated && <CopyField value={shownRotated.secret} className="py-2" />}
           <DialogFooter>
             <Button onClick={() => setRotated(null)}>I have copied it</Button>
           </DialogFooter>

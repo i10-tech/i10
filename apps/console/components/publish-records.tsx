@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
@@ -16,6 +15,7 @@ import {
 } from "@repo/ui/components/dialog"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { publishDnsRecords } from "@/lib/actions"
+import { useRetained } from "@/lib/react"
 import type { ConflictingRecord, DnsConnection } from "@/lib/types"
 
 /**
@@ -47,9 +47,11 @@ export function PublishRecords({
   providerSlug: string
   providerName: string
 }) {
-  const router = useRouter()
   const [pending, setPending] = React.useState(false)
   const [conflicts, setConflicts] = React.useState<ConflictingRecord[] | null>(null)
+  // Kept while the dialog animates out, so the list does not empty and
+  // collapse the panel on its way out. See `useRetained`.
+  const shownConflicts = useRetained(conflicts)
 
   async function publish(replaceConflicts: boolean) {
     if (pending || !connection) return
@@ -96,7 +98,8 @@ export function PublishRecords({
             : "Verification usually follows within minutes.",
       },
     )
-    router.refresh()
+    // No refresh: `publishDnsRecords` re-renders this page in its own response,
+    // so the record statuses have already changed by the time this toast shows.
   }
 
   if (!connection) {
@@ -132,7 +135,7 @@ export function PublishRecords({
           </DialogHeader>
 
           <ul className="max-h-64 space-y-2 overflow-y-auto rounded-lg border p-3">
-            {(conflicts ?? []).map((conflict, index) => (
+            {(shownConflicts ?? []).map((conflict, index) => (
               <li key={`${conflict.name}-${index}`} className="text-xs">
                 <span className="font-mono font-medium">{conflict.type}</span>{" "}
                 <span className="font-mono">{conflict.name}</span>

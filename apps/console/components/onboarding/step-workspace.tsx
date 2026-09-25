@@ -2,11 +2,11 @@
 
 import * as React from "react"
 import { toast } from "sonner"
-import { Button } from "@repo/ui/components/button"
-import { Spinner } from "@repo/ui/components/spinner"
+import { ActionButton } from "@repo/ui/components/action-button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { cn } from "cn"
 import { renameWorkspace, updateOnboarding } from "@/lib/actions"
+import { useOutcome } from "@/lib/outcome"
 
 /**
  * ⚠ THE USE CASE IS PRODUCT RESEARCH AND NEVER LOGIC. Nothing branches on it,
@@ -33,35 +33,49 @@ export function StepWorkspace({
 }) {
   const [value, setValue] = React.useState(name)
   const [selected, setSelected] = React.useState(useCase ?? "")
-  const [pending, setPending] = React.useState(false)
+  const outcome = useOutcome()
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (pending) return
+    if (outcome.state !== "idle") return
 
-    setPending(true)
+    const renaming = value.trim() !== "" && value.trim() !== name
+    const choosing = selected !== "" && selected !== useCase
 
-    // ⚠ TWO INDEPENDENT WRITES, AND A FAILURE OF EITHER MUST NOT LOSE THE
-    // OTHER. Renaming is the one that matters; the use case is research.
-    if (value.trim() && value.trim() !== name) {
-      const renamed = await renameWorkspace(value.trim())
-      if (!renamed.ok) {
-        setPending(false)
-        toast.error("Could not save the name", { description: renamed.error })
-        return
+    /*
+     * ⚠ NOTHING CHANGED, NOTHING TO CONFIRM. Somebody returning to this step
+     * and pressing Continue past values that are already stored should move on
+     * at once; a "Saved" tick for a save that did not happen would be the
+     * console congratulating itself.
+     */
+    if (!renaming && !choosing) {
+      onDone()
+      return
+    }
+
+    // ⚠ OTHERWISE THE SAME BEAT AS EVERY FORM: tick and green field, then the
+    // step slides on. See lib/outcome.ts.
+    await outcome.run(async () => {
+      // ⚠ TWO INDEPENDENT WRITES, AND A FAILURE OF EITHER MUST NOT LOSE THE
+      // OTHER. Renaming is the one that matters; the use case is research.
+      if (renaming) {
+        const renamed = await renameWorkspace(value.trim())
+        if (!renamed.ok) {
+          toast.error("Could not save the name", { description: renamed.error })
+          return false
+        }
       }
-    }
 
-    if (selected && selected !== useCase) {
-      await updateOnboarding({ use_case: selected })
-    }
+      if (choosing) {
+        await updateOnboarding({ use_case: selected })
+      }
 
-    setPending(false)
-    onDone()
+      return true
+    }, onDone)
   }
 
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" {...outcome.formProps}>
       <div>
         <h1 className="text-xl font-semibold tracking-tight">
           Let&rsquo;s set up your workspace
@@ -109,10 +123,14 @@ export function StepWorkspace({
         </p>
       </fieldset>
 
-      <Button type="submit" disabled={pending}>
-        {pending && <Spinner />}
+      <ActionButton
+        type="submit"
+        state={outcome.state}
+        pendingLabel="Continue"
+        doneLabel="Saved"
+      >
         Continue
-      </Button>
+      </ActionButton>
     </form>
   )
 }

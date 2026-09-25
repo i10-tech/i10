@@ -36,7 +36,6 @@ export function NewSegmentButton() {
       title="Create a segment"
       description="An internal grouping. Recipients never see it — use a topic for anything they should be able to opt out of."
       canSubmit={name.trim().length > 0}
-      successMessage="Segment created"
       onSubmit={() =>
         createSegment({ name: name.trim(), description: description.trim() })
       }

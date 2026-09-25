@@ -51,7 +51,6 @@ export function NewTopicButton() {
       title="Create a topic"
       description="A choice your recipients get on their preference page."
       canSubmit={name.trim().length > 0}
-      successMessage="Topic created"
       onSubmit={() =>
         createTopic({
           name: name.trim(),

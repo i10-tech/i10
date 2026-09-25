@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { refresh, revalidatePath } from "next/cache"
 import { api, ApiRequestError } from "@/lib/api"
 import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
@@ -63,6 +63,7 @@ export type ActionResult<T = undefined> =
 async function run<T>(
   fn: () => Promise<T>,
   revalidate: string[] = [],
+  { refreshCaller = true }: { refreshCaller?: boolean } = {},
 ): Promise<ActionResult<T>> {
   try {
     const data = await fn()
@@ -73,6 +74,40 @@ async function run<T>(
       // render of every page the person has visited.
       revalidatePath(path, "page")
     }
+    /*
+     * ⚠ AND THE PAGE THAT CALLED US IS RE-RENDERED IN THIS SAME RESPONSE, SO NO
+     * CALLER EVER FOLLOWS AN ACTION WITH `router.refresh()`. That was the
+     * pattern everywhere: the action's response already carried the updated
+     * page (a Server Function that revalidates the path being viewed does that
+     * by itself), the component then fired a toast, and THEN asked for the page
+     * again — a second `GET ?_rsc` and a second render of the whole tree,
+     * landing a few hundred milliseconds into the toast. Measured on revoking a
+     * key: one POST, then one GET, for one click. That second render is the
+     * "refresh that cuts the toast" and the layout that twitches after a save.
+     *
+     * ⚠ `refresh()` RATHER THAN RELYING ON THE PATHS ABOVE, because the paths
+     * name where the data is SHOWN and not where the action was CALLED FROM.
+     * Onboarding creates an API key; `/api-keys` is revalidated and
+     * `/onboarding` — the page on screen — is not. `refresh()` is Next's
+     * Server-Function-only way to say "and the current page", whatever it is,
+     * so the rule is one line here instead of a judgement at thirty call sites.
+     *
+     * ⚠ ONLY FOR ACTIONS THAT REVALIDATE ANYTHING. A read (`lookupDns`,
+     * `checkDomain`) or a write that is deliberately silent (`renameWorkspace`,
+     * below) changes nothing on screen, and re-rendering for it would be the
+     * blink those were written to avoid.
+     *
+     * ⚠ AND NEVER FOR A DELETION (`refreshCaller: false`). The page a delete is
+     * called from is very often the page OF the thing being deleted — a domain,
+     * a template — and re-rendering it after the row is gone renders its 404
+     * behind the dialog that is still saying "Deleted". Deletions revalidate
+     * the LIST paths, which covers the list they were called from; a detail
+     * page navigates away on its own. Revoking a domain's keys inside the
+     * delete-domain flow is the other half: a refresh there would re-read the
+     * domain's scoped keys, find none, and pull the checkbox out of the open
+     * dialog while it is still answering.
+     */
+    if (revalidate.length > 0 && refreshCaller) refresh()
     return { ok: true, data }
   } catch (error) {
     if (error instanceof ApiRequestError) {
@@ -180,6 +215,7 @@ export async function deleteDomain(id: string) {
         method: "DELETE",
       }),
     ["/domains", "/"],
+    { refreshCaller: false },
   )
 }
 
@@ -293,6 +329,7 @@ export async function disconnectDns(provider: string) {
         { method: "DELETE" },
       ),
     ["/domains", "/settings"],
+    { refreshCaller: false },
   )
 }
 
@@ -392,6 +429,7 @@ export async function revokeApiKey(id: string) {
         method: "DELETE",
       }),
     ["/api-keys"],
+    { refreshCaller: false },
   )
 }
 
@@ -429,6 +467,7 @@ export async function deleteWebhook(id: string) {
         method: "DELETE",
       }),
     ["/webhooks"],
+    { refreshCaller: false },
   )
 }
 
@@ -470,6 +509,7 @@ export async function removeSuppression(address: string) {
         { method: "DELETE" },
       ),
     ["/suppressions"],
+    { refreshCaller: false },
   )
 }
 
@@ -541,6 +581,7 @@ export async function deleteContacts(ids: string[]) {
         body: { ids },
       }),
     ["/contacts"],
+    { refreshCaller: false },
   )
 }
 
@@ -576,6 +617,7 @@ export async function deleteProperty(id: string) {
         method: "DELETE",
       }),
     ["/contacts", "/contacts/properties"],
+    { refreshCaller: false },
   )
 }
 
@@ -609,6 +651,7 @@ export async function deleteSegment(id: string) {
         method: "DELETE",
       }),
     ["/segments"],
+    { refreshCaller: false },
   )
 }
 
@@ -675,6 +718,7 @@ export async function deleteTopic(id: string) {
         method: "DELETE",
       }),
     ["/topics"],
+    { refreshCaller: false },
   )
 }
 
@@ -751,6 +795,7 @@ export async function deleteBroadcast(id: string) {
         method: "DELETE",
       }),
     ["/broadcasts"],
+    { refreshCaller: false },
   )
 }
 
@@ -791,6 +836,7 @@ export async function deleteTemplate(id: string) {
         method: "DELETE",
       }),
     ["/templates"],
+    { refreshCaller: false },
   )
 }
 

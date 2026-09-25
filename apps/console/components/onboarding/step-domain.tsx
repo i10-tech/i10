@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
 import { Status } from "@/components/status"
 import { DomainSetup } from "@/components/onboarding/domain-setup"
+import { AutoHeight } from "@repo/ui/components/auto-height"
 import { Button } from "@repo/ui/components/button"
+import { StepStage } from "@repo/ui/components/step-stage"
 import type { DomainSummary } from "@/lib/types"
 
 /**
@@ -50,28 +52,34 @@ export function StepDomain({
         </ul>
       )}
 
-      {adding ? (
-        <DomainSetup
-          onDone={() => {
-            setAdding(false)
-            // ⚠ REFRESHED SO THE LIST ABOVE INCLUDES THE NEW DOMAIN BEFORE THE
-            // VERIFY STEP READS IT. Without this, "Next" lands on a verify step
-            // that says there is nothing to verify.
-            router.refresh()
-            onDone()
-          }}
-        />
-      ) : (
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setAdding(true)}>
-            Add another domain
-          </Button>
-          <Button onClick={onDone}>
-            <Check />
-            Continue
-          </Button>
-        </div>
-      )}
+      {/* The form and the button row swap in place and the step's height
+          follows — see `AutoHeight`. */}
+      <AutoHeight grow="animate">
+        <StepStage morph={false} step={adding ? "adding" : "added"}>
+          {adding ? (
+            <DomainSetup
+              onDone={() => {
+                setAdding(false)
+                // ⚠ REFRESHED SO THE LIST ABOVE INCLUDES THE NEW DOMAIN BEFORE THE
+                // VERIFY STEP READS IT. Without this, "Next" lands on a verify step
+                // that says there is nothing to verify.
+                router.refresh()
+                onDone()
+              }}
+            />
+          ) : (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setAdding(true)}>
+                Add another domain
+              </Button>
+              <Button onClick={onDone}>
+                <Check />
+                Continue
+              </Button>
+            </div>
+          )}
+        </StepStage>
+      </AutoHeight>
     </div>
   )
 }

@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { ActionButton } from "@repo/ui/components/action-button"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -20,9 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select"
-import { Spinner } from "@repo/ui/components/spinner"
 import { updateApiKeyScope } from "@/lib/actions"
-import { useResetOnOpen } from "@/lib/react"
+import { useOutcome } from "@/lib/outcome"
+import { useResetOnOpen, useRetained } from "@/lib/react"
 
 /**
  * Which domain a key may send from.
@@ -128,9 +128,11 @@ export function ApiKeyScopeDialog({
   domains: ScopeDomain[]
   onOpenChange: (open: boolean) => void
 }) {
-  const router = useRouter()
   const [domain, setDomain] = React.useState<string | null>(null)
-  const [pending, setPending] = React.useState(false)
+  const outcome = useOutcome()
+  const pending = outcome.state === "pending"
+  // What the dialog DISPLAYS while it animates out — see `useRetained`.
+  const shown = useRetained(apiKey)
 
   /*
    * ⚠ SEEDED FROM THE KEY EACH TIME THE DIALOG OPENS, NOT ONCE. The same
@@ -138,40 +140,46 @@ export function ApiKeyScopeDialog({
    * shows the first one's scope — and the Save button would then quietly apply
    * it.
    */
-  useResetOnOpen(apiKey !== null, () => setDomain(apiKey?.domain ?? null))
+  useResetOnOpen(apiKey !== null, () => {
+    setDomain(apiKey?.domain ?? null)
+    outcome.reset()
+  })
 
   async function save() {
-    if (!apiKey || pending) return
-    setPending(true)
-    const result = await updateApiKeyScope(apiKey.id, domain)
-    setPending(false)
+    if (!apiKey || outcome.state !== "idle") return
+    const target = apiKey
 
-    if (!result.ok) {
-      toast.error("Could not change the scope", { description: result.error })
-      return
-    }
-
-    toast.success(
-      domain
-        ? `${apiKey.name} can now only send from ${domain}`
-        : `${apiKey.name} can send from any domain`,
+    /*
+     * ⚠ NO SUCCESS TOAST: THE SENTENCE UNDER THE SELECT ALREADY SAYS IT. "This
+     * key can only send from mail.acme.dev" is on screen, under the value just
+     * chosen; the tick and the green field confirm it, and the table behind
+     * shows the new scope by the time the dialog closes. See lib/outcome.ts.
+     */
+    await outcome.run(
+      async () => {
+        const result = await updateApiKeyScope(target.id, domain)
+        if (!result.ok) {
+          toast.error("Could not change the scope", { description: result.error })
+          return false
+        }
+        return true
+      },
+      () => onOpenChange(false),
     )
-    onOpenChange(false)
-    router.refresh()
   }
 
   return (
     <Dialog open={apiKey !== null} onOpenChange={pending ? () => {} : onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Scope for {apiKey?.name}</DialogTitle>
+          <DialogTitle>Scope for {shown?.name}</DialogTitle>
           <DialogDescription>
             Restricting a key limits what a leak of it can do. The key itself does not
             change, so nothing needs redeploying.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-2">
+        <div className="py-2" {...outcome.formProps}>
           <ApiKeyScopeField
             id="scope-domain"
             value={domain}
@@ -190,16 +198,19 @@ export function ApiKeyScopeDialog({
           >
             Cancel
           </Button>
-          <Button
+          <ActionButton
             type="button"
             onClick={save}
+            state={outcome.state}
+            pendingLabel="Save scope"
+            doneLabel="Saved"
             // ⚠ DISABLED WHEN NOTHING CHANGED, so the button cannot be a
-            // no-op request that still fires a success toast.
-            disabled={pending || domain === (apiKey?.domain ?? null)}
+            // no-op request. Only while idle: once saved, `domain` equals the
+            // key's new scope and the tick must not grey out under itself.
+            disabled={outcome.state === "idle" && domain === (apiKey?.domain ?? null)}
           >
-            {pending && <Spinner />}
             Save scope
-          </Button>
+          </ActionButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>
