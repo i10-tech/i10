@@ -123,6 +123,18 @@ export function Onboarding({
     if (justPublished > 0) clearArrival(ARRIVAL.published, "/onboarding")
   }, [justPublished])
 
+  /*
+   * ⚠ BUT "ONCE" MEANS ONCE PER VISIT, NOT ONCE PER RENDER, AND DELETING THE
+   * COOKIE MADE IT THE SECOND. The very next server render — the verify step's
+   * own poll, or Next refreshing when the tab regains focus — reads no cookie
+   * and passes 0, so the green "Your records were added" vanished a few seconds
+   * after arriving, or the moment somebody glanced at another tab and came
+   * back. Held here, it stays for as long as this page does; a reload is still
+   * the fresh start the note above wants.
+   */
+  const [published, setPublished] = React.useState(justPublished)
+  if (justPublished > published) setPublished(justPublished)
+
   const [step, setStep] = React.useState<StepId>(() => {
     /*
      * ⚠ THE REMEMBERED STEP FIRST, BECAUSE IT IS THE ONLY SOURCE THAT SURVIVES A REMOUNT
@@ -300,7 +312,7 @@ export function Onboarding({
             {step === "verify" && (
               <StepVerify
                 domains={domains}
-                justPublished={justPublished}
+                justPublished={published}
                 onDone={() => go("send")}
               />
             )}

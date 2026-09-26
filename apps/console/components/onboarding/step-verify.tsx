@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { CheckCircle2, ExternalLink } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { Reveal } from "@repo/ui/components/reveal"
@@ -10,6 +9,7 @@ import { Swap } from "@repo/ui/components/swap"
 import { Status } from "@/components/status"
 import { VerifyButton } from "@/components/verify-button"
 import { EmptyState } from "@/components/empty-state"
+import { refreshDomain, verifyDomain } from "@/lib/actions"
 import type { DomainSummary } from "@/lib/types"
 
 /**
@@ -45,25 +45,51 @@ export function StepVerify({
   justPublished?: number
   onDone: () => void
 }) {
-  const router = useRouter()
   const pending = domains.filter((d) => d.status !== "verified")
   const verified = domains.filter((d) => d.status === "verified")
 
   const [polls, setPolls] = React.useState(0)
   const MAX_POLLS = 20
 
+  /*
+   * ⚠ EACH TICK ASKS THE QUESTION, NOT JUST THE PAGE. This used to be a bare
+   * `router.refresh()`, which re-reads our table — and a domain whose one
+   * verify after publishing arrived before DNS was serving sits at
+   * `not_started` in that table, with no SES identity, until somebody presses
+   * Verify or the minutely prover gets round to it. So a domain added through
+   * the Cloudflare hand-off reached SES a minute or more late, while the same
+   * domain added from /domains/new — whose page runs `VerificationWatch` —
+   * reached it within seconds. Now both ask the same way: `verify` while a
+   * domain is unregistered, `refresh` once SES has it. See
+   * `watchUntilVerified` for the rule, and lib/actions.ts for why neither needs
+   * a refresh afterwards — each re-renders this page in its own response.
+   *
+   * ⚠ THE FIRST TICK IS QUICK FOR THE SAME REASON. Ten seconds was a fine
+   * interval for re-reading a list; it is a long time for the moment
+   * somebody lands here straight from their DNS provider.
+   */
+  // ⚠ THE IDS AND STATUSES, NOT THE ARRAY, which is a new object on every
+  // render and would reset the timer each time the page re-renders.
+  const watched = pending.map((d) => `${d.id}:${d.status}`).join(",")
+
   React.useEffect(() => {
     if (pending.length === 0 || polls >= MAX_POLLS) return
-    const timer = setTimeout(() => {
-      setPolls((n) => n + 1)
-      // ⚠ `router.refresh()` RE-RUNS THE SERVER COMPONENT, which re-reads the
-      // domain list. It does NOT ask SES to re-check — that is what the Verify
-      // button does. Polling a verification endpoint every ten seconds would be
-      // a provider call per tab per person.
-      router.refresh()
-    }, 10_000)
+    const timer = setTimeout(
+      () => {
+        setPolls((n) => n + 1)
+        void Promise.all(
+          pending.map((domain) =>
+            domain.status === "not_started"
+              ? verifyDomain(domain.id)
+              : refreshDomain(domain.id),
+          ),
+        )
+      },
+      polls === 0 ? 2_000 : 10_000,
+    )
     return () => clearTimeout(timer)
-  }, [pending.length, polls, router])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `watched` is `pending`, keyed
+  }, [watched, polls])
 
   if (domains.length === 0) {
     return (

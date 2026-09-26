@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Clock, Info } from "lucide-react"
 import { cn } from "cn"
+import { HandoverSettling } from "@/components/handover-settling"
 import type { DelegationReport, ZoneFinding } from "@/lib/types"
 
 /**
@@ -87,18 +88,31 @@ export function DelegationNote({
       )
     }
 
+    /*
+     * ⚠ HELD BACK FOR TWO MINUTES, BECAUSE MOST OF THE TIME IT IS NOT TRUE
+     * YET. Right after a verify publishes the zones, our nameservers are still
+     * picking them up, and this note said "contact support" through the very
+     * seconds the page was re-rendering to watch the handover finish. See
+     * `HandoverSettling`.
+     */
     return (
-      <Note
-        tone="danger"
-        icon={<AlertTriangle className="size-4 text-danger" />}
-        title="Delegated to us, and we are not serving it"
-        body={
-          <>
-            You have published NS records for {list(broken.map((z) => z.zone))} and they
-            point at us, but we are not answering for{" "}
-            {broken.length === 1 ? "it" : "them"}. That is our side of the handover, not
-            yours — contact support@i10.tech.
-          </>
+      <HandoverSettling
+        zones={list(broken.map((z) => z.zone))}
+        plural={broken.length !== 1}
+        failure={
+          <Note
+            tone="danger"
+            icon={<AlertTriangle className="size-4 text-danger" />}
+            title="Delegated to us, and we are not serving it"
+            body={
+              <>
+                You have published NS records for {list(broken.map((z) => z.zone))} and
+                they point at us, but we are not answering for{" "}
+                {broken.length === 1 ? "it" : "them"}. That is our side of the handover,
+                not yours — contact support@i10.tech.
+              </>
+            }
+          />
         }
       />
     )
@@ -242,7 +256,7 @@ function list(items: string[]): React.ReactNode {
   return <span className="font-mono">{text}</span>
 }
 
-function Note({
+export function Note({
   tone,
   icon,
   title,
