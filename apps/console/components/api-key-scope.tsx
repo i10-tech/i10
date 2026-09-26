@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select"
+import { GrowHeight } from "@repo/ui/components/grow-height"
 import { Reveal } from "@repo/ui/components/reveal"
 import { Spinner } from "@repo/ui/components/spinner"
 import { updateApiKeyScope } from "@/lib/actions"
@@ -89,14 +90,23 @@ export function ApiKeyScopeField({
       <Select
         value={restricted ? "some" : "any"}
         onValueChange={(next) => onChange(next === "any" ? null : [...chosen])}
-        disabled={disabled || domains.length === 0}
+        disabled={disabled}
       >
         <SelectTrigger id={id} className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="any">Any domain</SelectItem>
-          <SelectItem value="some">{specific}</SelectItem>
+          {/*
+           * ⚠ GREYED RATHER THAN HIDDEN WHEN THERE IS NOTHING TO PICK. Hiding it
+           * would make the restriction look like a feature that does not exist;
+           * shown and disabled, it says what is missing.
+           */}
+          <SelectItem value="some" disabled={domains.length === 0}>
+            {domains.length === 0
+              ? "Specific domain — you have no domains added"
+              : specific}
+          </SelectItem>
         </SelectContent>
       </Select>
 
@@ -105,11 +115,20 @@ export function ApiKeyScopeField({
        * the choice that asked for it, so the eye follows the movement down; it
        * is not there at all otherwise. See `Reveal` for the spring.
        */}
-      <Reveal show={restricted} spacing="pt-1">
-        <ul className="divide-y overflow-hidden rounded-md border">
+      {/*
+       * ⚠ `pb-3` IS THE BREATHING ROOM BETWEEN THE LAST DOMAIN AND THE LINE
+       * UNDER IT, which otherwise sat tight against the pill like part of it.
+       */}
+      <Reveal show={restricted} spacing="pt-1 pb-3">
+        {/*
+         * ⚠ EACH DOMAIN IS ITS OWN PILL, THE SAME SHAPE AND INSET AS THE FIELDS
+         * ABOVE, so the options read as controls of the same family rather than
+         * a table dropped into a form.
+         */}
+        <ul className="space-y-2">
           {domains.map((domain) => (
             <li key={domain.id}>
-              <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-muted/30">
+              <label className="flex h-14 cursor-pointer items-center gap-3 rounded-pill border border-input px-6 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/30 dark:bg-input/25">
                 <Checkbox
                   checked={chosen.has(domain.name)}
                   onCheckedChange={(on) => toggle(domain.name, on === true)}
@@ -122,24 +141,31 @@ export function ApiKeyScopeField({
         </ul>
       </Reveal>
 
-      <p className="text-xs text-muted-foreground">
-        {/*
-         * ⚠ NO ERROR COLOUR FOR AN EMPTY PICK. Nothing has gone wrong while
-         * somebody is still choosing; the button stays off until one is ticked,
-         * and this line says why in the ordinary tone.
-         *
-         * ⚠ AND IT NAMES THE LIMIT OF THE LIMIT. A restricted key still reads
-         * everything the workspace can read, and cannot manage keys at all —
-         * which is what stops it widening itself.
-         */}
-        {domains.length === 0
-          ? "Add a domain first and you will be able to restrict a key to it."
-          : !restricted
-            ? "This key can send from any domain you have verified, now or later."
-            : chosen.size === 0
-              ? `Choose the ${domains.length > 1 ? "domains" : "domain"} this key may send from.`
-              : `This key can only send from ${[...chosen].join(", ")}. It can still read everything else in the workspace, and it cannot create or revoke keys.`}
-      </p>
+      {/*
+       * ⚠ THE LINE CHANGES LENGTH AS DOMAINS ARE TICKED — one short prompt, then
+       * a two-line sentence naming them — so it grows on a spring rather than
+       * pushing the buttons down in one frame.
+       */}
+      <GrowHeight>
+        <p className="text-xs text-muted-foreground">
+          {/*
+           * ⚠ NO ERROR COLOUR FOR AN EMPTY PICK. Nothing has gone wrong while
+           * somebody is still choosing; the button stays off until one is ticked,
+           * and this line says why in the ordinary tone.
+           *
+           * ⚠ AND IT NAMES THE LIMIT OF THE LIMIT. A restricted key still reads
+           * everything the workspace can read, and cannot manage keys at all —
+           * which is what stops it widening itself.
+           */}
+          {domains.length === 0
+            ? "Add a domain first and you will be able to restrict a key to it."
+            : !restricted
+              ? "This key can send from any domain you have verified, now or later."
+              : chosen.size === 0
+                ? `Choose the ${domains.length > 1 ? "domains" : "domain"} this key may send from.`
+                : `This key can only send from ${[...chosen].join(", ")}. It can still read everything else in the workspace, and it cannot create or revoke keys.`}
+        </p>
+      </GrowHeight>
     </div>
   )
 }
