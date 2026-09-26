@@ -61,11 +61,10 @@ export function HandoverSettling({
     if (expired) return
 
     const since = firstSeen(`${domainId}:${state}`)
-    const left = GRACE_MS - (Date.now() - since)
-    if (left <= 0) {
-      setExpired(true)
-      return
-    }
+    // ⚠ A GRACE ALREADY SPENT BEFORE A RELOAD STILL GOES THROUGH THE TIMER, at
+    // zero, rather than a `setExpired` here — state is set from a callback, never
+    // in the effect body, which would render twice for one mount.
+    const left = Math.max(0, GRACE_MS - (Date.now() - since))
 
     const recheck = setInterval(() => {
       firstSeen(`${domainId}:${state}`)

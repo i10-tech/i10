@@ -153,8 +153,26 @@ export default async function OnboardingPage({
           (await cookies()).get(ONBOARDING_STEP_COOKIE)?.value,
           me.data.tenant?.id ?? "",
         )}
-        justPublished={Number(published) || 0}
+        // ⚠ ONLY THIS WORKSPACE'S DOMAINS COUNT. The cookie is the browser's,
+        // not the account's, so it carries the ids the DNS callback published
+        // and the list above — scoped by the API to whoever is signed in — is
+        // what decides which of them are news here. See the callback handler.
+        justPublished={ownPublished(published, domains.ok ? domains.data.data : [])}
       />
     </main>
   )
+}
+
+/**
+ * How many of the domains the DNS callback just published belong to this
+ * workspace.
+ *
+ * ⚠ A BARE NUMBER — THE OLD COOKIE FORMAT — COUNTS AS NOTHING. It cannot say
+ * whose publish it was, and a missing green banner is a far smaller wrong
+ * than announcing another account's records.
+ */
+function ownPublished(raw: string | null, domains: DomainSummary[]): number {
+  if (!raw) return 0
+  const ours = new Set(domains.map((d) => d.id))
+  return raw.split(",").filter((id) => ours.has(id)).length
 }

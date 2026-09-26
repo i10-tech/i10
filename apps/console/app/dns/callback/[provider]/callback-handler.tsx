@@ -110,6 +110,7 @@ export function CallbackHandler({
         : []
 
       let wrote = 0
+      const wroteIds: string[] = []
       const inTheWay: string[] = []
       const notChecked: string[] = []
 
@@ -133,6 +134,7 @@ export function CallbackHandler({
         if (outcome.kind === "failed") continue
 
         wrote += 1
+        wroteIds.push(domain.id)
         // ⚠ PUBLISHED AND CHECKED ARE COUNTED SEPARATELY — see `unchecked`.
         if (outcome.kind === "published" && !outcome.checked) {
           notChecked.push(domain.name)
@@ -171,7 +173,17 @@ export function CallbackHandler({
         // ⚠ THE COUNT GOES IN A COOKIE FOR THAT PAGE, NOT ON ITS URL; the
         // page shows it once and deletes it. See lib/arrival.ts.
         const [path = "/"] = returnTo.split("?")
-        setArrival(ARRIVAL.published, String(wrote), path)
+        /*
+         * ⚠ THE DOMAIN IDS, NOT A COUNT, BECAUSE A COOKIE BELONGS TO THE
+         * BROWSER AND NOT TO WHOEVER IS SIGNED IN. A bare "2" was announced as
+         * "Your records were added" to any account that reached onboarding in
+         * this browser within ten minutes — the checkout-id bug again, where a
+         * second account was told about the first one's purchase. The page now
+         * counts only the ids that appear in its own workspace's domain list,
+         * which the API has already scoped, so somebody else's publish counts
+         * as nothing.
+         */
+        setArrival(ARRIVAL.published, wroteIds.join(","), path)
         router.replace(returnTo)
         return
       }
