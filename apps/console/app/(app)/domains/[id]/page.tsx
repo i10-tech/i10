@@ -31,6 +31,7 @@ import type {
   DnsConnection,
   DnsInspection,
   Domain,
+  Me,
   TransferOffer,
 } from "@/lib/types"
 
@@ -92,7 +93,7 @@ export default async function DomainDetailPage({
    * ⚠ AND A FAILURE IN ANY OF THEM HIDES THE BUTTON RATHER THAN THE PAGE. This
    * is an accelerator; the records table below is the thing somebody came for.
    */
-  const [inspection, providers, connections, keys, transfer] = await Promise.all([
+  const [inspection, providers, connections, keys, transfer, me] = await Promise.all([
     tryApi<DnsInspection>("/console/dns/lookup", { query: { domain: domain.name } }),
     tryApi<{ data: ConnectableProvider[] }>("/console/dns/providers"),
     tryApi<{ data: DnsConnection[] }>("/console/dns/connections"),
@@ -112,6 +113,8 @@ export default async function DomainDetailPage({
     tryApi<{ data: TransferOffer | null }>(
       `/console/domains/${encodeURIComponent(id)}/transfer`,
     ),
+    // For the transfer dialog, which refuses the person's own addresses.
+    tryApi<Me>("/console/me"),
   ])
 
   /*
@@ -170,6 +173,7 @@ export default async function DomainDetailPage({
             {connectable && domain.status !== "verified" && (
               <PublishRecords
                 domainId={domain.id}
+                domainName={domain.name}
                 connection={connection}
                 providerSlug={connectable.slug}
                 providerName={connectable.name}
@@ -284,6 +288,7 @@ export default async function DomainDetailPage({
               name={domain.name}
               scopedKeys={scopedKeys}
               keyImpact={keyImpact}
+              ownEmails={me.ok ? me.data.user.verified_emails : []}
               offer={transfer.ok ? transfer.data.data : null}
             />
           </SectionContent>

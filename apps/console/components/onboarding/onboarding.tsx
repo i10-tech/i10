@@ -54,6 +54,7 @@ export function Onboarding({
   tenantId,
   domains,
   offers = [],
+  userEmail = null,
   plans,
   billing,
   checkoutId,
@@ -67,6 +68,8 @@ export function Onboarding({
   domains: DomainSummary[]
   /** Domains offered to this person by email, shown on the domain step. */
   offers?: TransferOffer[]
+  /** The signed-in person's verified address — the test email goes to them. */
+  userEmail?: string | null
   plans: PlanSummary[]
   billing: BillingState
   /** From the checkout cookie (see lib/arrival.ts), for the plan step's outcome banner. */
@@ -251,6 +254,7 @@ export function Onboarding({
           <StepSend
             domains={domains}
             hasApiKey={state.facts.has_api_key}
+            recipient={userEmail}
             onDone={() => go("plan")}
           />
         )}

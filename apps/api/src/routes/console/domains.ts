@@ -414,6 +414,15 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       d.profile.get(tenantId),
     ])
 
+    // ⚠ NOT TO YOURSELF — any address verified on your own account. A transfer
+    // hands a domain to another person; colleagues in this workspace are fine.
+    if (person.verifiedEmails.includes(email.trim().toLowerCase())) {
+      return c.json(
+        validation("That is your own address. Offer it to someone else."),
+        422,
+      )
+    }
+
     const offered = await d.transfers.offer(tenantId, c.req.param("id"), {
       email,
       offeredBy: person.name,

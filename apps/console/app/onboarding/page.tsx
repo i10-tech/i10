@@ -141,6 +141,7 @@ export default async function OnboardingPage({
         tenantId={me.data.tenant?.id ?? ""}
         domains={domains.ok ? domains.data.data : []}
         offers={offers.ok ? offers.data.data : []}
+        userEmail={me.data.user.email}
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
         checkoutId={checkoutId}

@@ -73,7 +73,13 @@ export interface OnboardingState {
 }
 
 export interface Me {
-  user: { id: string }
+  user: {
+    id: string
+    /** Primary address, if verified. Prefills the onboarding test email. */
+    email: string | null
+    /** Every verified address — the transfer dialog refuses these. */
+    verified_emails: string[]
+  }
   tenant: TenantProfile | null
   billing: BillingState
   onboarding: OnboardingState

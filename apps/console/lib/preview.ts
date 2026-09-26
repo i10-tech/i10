@@ -410,7 +410,11 @@ const ROUTES: [
   [
     /^\/console\/me$/,
     () => ({
-      user: { id: "user_preview" },
+      user: {
+        id: "user_preview",
+        email: "you@acme.dev",
+        verified_emails: ["you@acme.dev"],
+      },
       tenant: TENANT,
       billing: BILLING,
       onboarding: {

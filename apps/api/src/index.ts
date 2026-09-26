@@ -930,7 +930,12 @@ const app = createApp({
           [user.firstName, user.lastName].filter(Boolean).join(" ") ||
           user.primaryEmailAddress?.emailAddress ||
           "Someone"
-        return { name, verifiedEmails }
+        const primary = user.primaryEmailAddress
+        const primaryEmail =
+          primary?.verification?.status === "verified"
+            ? primary.emailAddress.toLowerCase()
+            : null
+        return { name, primaryEmail, verifiedEmails }
       },
     },
     memberships: {
