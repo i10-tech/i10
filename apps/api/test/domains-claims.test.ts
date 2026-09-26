@@ -44,7 +44,6 @@ const row = (over: Record<string, unknown> = {}) => ({
 
 const dialect = new PgDialect()
 
-
 /** A Postgres unique violation, as the driver reports one. */
 const violation = (constraint: string) =>
   Object.assign(

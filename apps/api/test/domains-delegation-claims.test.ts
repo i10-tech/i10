@@ -56,7 +56,6 @@ const row = (over: Record<string, unknown> = {}) => ({
 
 const dialect = new PgDialect()
 
-
 const violation = (constraint: string) =>
   Object.assign(
     new Error(`duplicate key value violates unique constraint "${constraint}"`),
