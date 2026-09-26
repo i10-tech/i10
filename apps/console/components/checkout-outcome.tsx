@@ -207,7 +207,16 @@ export function CheckoutOutcome({
    * banner that says "waiting" collapses rather than vanishing when the
    * answer lands and replaces it.
    */
-  const visible = show && !(view.tone === "waiting" && !timedOut)
+  /*
+   * ⚠ `unknown` SAYS NOTHING, BECAUSE IT IS NOW MOSTLY SOMEBODY ELSE'S CHECKOUT.
+   * The id lives in a browser cookie, so a second account signed in within its
+   * ten minutes carries the first one's; the API answers `unknown` for it rather
+   * than the other workspace's plan. "We could not find that checkout — if you
+   * have paid, your plan is safe" is then a message about a payment this person
+   * never made. The page under the banner already shows their real plan.
+   */
+  const visible =
+    show && result?.status !== "unknown" && !(view.tone === "waiting" && !timedOut)
 
   return (
     <BillingBanner

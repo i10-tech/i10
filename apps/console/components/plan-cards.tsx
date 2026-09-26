@@ -9,7 +9,7 @@ import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { changePlan, resumeSubscription, startCheckout } from "@/lib/actions"
-import { openPolarCheckout } from "@/lib/polar-embed"
+import { openPolarCheckout, untilCheckoutReadable } from "@/lib/polar-embed"
 import { hasLiveSubscription, onPaidPlan } from "@/lib/billing"
 import { formatBytes, formatExact, formatNumber } from "@/lib/format"
 import type { BillingState, PlanSummary } from "@/lib/types"
@@ -423,6 +423,23 @@ export function PlanCards({
     if (!result.ok) {
       setPending(null)
       toast.error("Could not start checkout", { description: result.error })
+      return
+    }
+
+    /*
+     * ⚠ NOT OPENED UNTIL POLAR CAN SERVE IT. Polar returns a checkout id before
+     * its own page can read that checkout, and in the gap the iframe is a
+     * "refused to connect" error rather than a form. The button keeps its
+     * spinner meanwhile — usually well under a second. See
+     * `untilCheckoutReadable`.
+     */
+    if (result.data.id && !(await untilCheckoutReadable(result.data.id))) {
+      setPending(null)
+      toast.error("Checkout is taking a moment to open", {
+        description:
+          "Our payment provider has not finished preparing it. Nothing was " +
+          "charged — try again in a minute.",
+      })
       return
     }
 

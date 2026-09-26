@@ -6,11 +6,19 @@
  * it allows is a decision that outlives the reason for it. Going through this
  * route keeps the poll same-origin, so there is nothing to allow.
  *
- * ⚠ IT ADDS NO CREDENTIAL, AND MUST NOT. The upstream route is deliberately
+ * ⚠ IT ADDS NO API KEY, AND MUST NOT. The upstream route is deliberately
  * unauthenticated and grants nothing; attaching an API key here would turn a
  * page anyone may open into one holding a key that can send mail.
+ *
+ * ⚠ BUT IT DOES FORWARD THE SESSION, WHEN THERE IS ONE. The checkout id rides
+ * in a cookie that belongs to the browser, not to whoever is signed in, so
+ * without this a second account signed up in the same tab was told "You're on
+ * Pro" about the first account's purchase. With the session the API answers
+ * only about the caller's own workspace; with none — a session that lapsed on
+ * Polar's site — it answers as it always did. See the API route's note.
  */
 
+import { auth } from "@clerk/nextjs/server"
 import { PREVIEW, previewCheckoutStatus } from "@/lib/preview"
 
 const API = process.env.I10_BASE_URL ?? "https://api.i10.tech"
@@ -45,7 +53,9 @@ export async function GET(
   }
 
   try {
+    const token = await (await auth()).getToken()
     const upstream = await fetch(`${API}/checkout-status/${checkoutId}`, {
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
       // The whole point is to observe a row that changes; a cached answer would
       // show "setting up your plan" for as long as the cache lived.
       cache: "no-store",
