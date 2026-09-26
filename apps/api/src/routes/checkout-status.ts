@@ -4,6 +4,8 @@ import { pickForCheckout, type DecideOptions } from "../billing/events.js"
 import type { SubscriptionState } from "../billing/events.js"
 import type { Logger } from "../billing/grants.js"
 import type { PolarClient } from "../billing/polar.js"
+import type { AuthContext } from "../middleware/auth.js"
+import { requireTenant, type TenantAuthDeps } from "../middleware/tenant.js"
 
 /**
  * What the page Polar redirects to polls, and the only billing route a browser
@@ -37,6 +39,17 @@ import type { PolarClient } from "../billing/polar.js"
  * no tenant id. Enumeration is not feasible; guessing is the threat model, and
  * a random UUID is the answer to it.
  *
+ * ⚠ BUT A CHECKOUT ID IS HELD BY A BROWSER, NOT BY A PERSON, AND A SIGNED-IN
+ * CALLER ONLY EVER HEARS ABOUT ITS OWN WORKSPACE. The console keeps the id in a
+ * cookie for ten minutes, and nothing about a cookie knows who is signed in:
+ * somebody upgraded one account, signed up a second in the same browser, and
+ * the second account's onboarding said "You're on Pro" — the FIRST account's
+ * checkout, answered truthfully about the first account's workspace. Reported
+ * from production 2026-09-27. So when the console forwards a session, a
+ * checkout belonging to any other tenant is `unknown`, exactly as though it
+ * did not exist. Without a session the old rule stands: nobody is signed in,
+ * so there is no other workspace on screen for the answer to be confused with.
+ *
  * ⚠ AND IT IS OUTSIDE THE OPENAPI DOCUMENT, like the rest of billing. Buying a
  * plan is a console action rather than part of the product's API.
  */
@@ -68,6 +81,16 @@ export interface CheckoutStatusDeps {
    * CANNOT TELL AND HAS TO ASSUME THE WORST. See `attribute`.
    */
   tenants?: { isLive(tenantId: string): Promise<boolean> }
+  /**
+   * Resolves a forwarded console session to its tenant. See the note at the
+   * top on why a signed-in caller is held to its own workspace.
+   *
+   * ⚠ ONLY CONSULTED WHEN A SESSION IS SENT, and then with `requireTenant`'s
+   * own answers — 401 for a bad session, 503 when Clerk cannot say. A session
+   * that fails to verify is NOT downgraded to anonymous: that would hand the
+   * answer back to exactly the caller this exists to refuse.
+   */
+  tenantAuth?: TenantAuthDeps
 }
 
 /**
@@ -346,6 +369,12 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
    */
   const attempted = new Map<string, number>()
 
+  app.use("/:checkoutId", async (c, next) => {
+    if (!deps?.tenantAuth || !c.req.header("Authorization")) return next()
+    c.set("tenantAuth", deps.tenantAuth)
+    return requireTenant(c, next)
+  })
+
   app.get("/:checkoutId", async (c) => {
     if (!deps) {
       return c.json(
@@ -378,10 +407,11 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
       )
     }
 
-    // No such checkout, or one that is not ours to talk about. Answered
-    // identically on purpose: a caller probing ids learns nothing from the
-    // difference between "does not exist" and "exists but has no tenant".
-    if (!checkout?.tenantId) {
+    // No such checkout, one that is not ours to talk about, or one that belongs
+    // to a workspace other than the signed-in caller's. Answered identically on
+    // purpose: a caller probing ids learns nothing from the difference.
+    const caller = (c.get("auth") as AuthContext | undefined)?.tenantId
+    if (!checkout?.tenantId || (caller && checkout.tenantId !== caller)) {
       return c.json({ status: "unknown" satisfies CheckoutStatus, plan: null }, 200)
     }
 

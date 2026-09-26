@@ -305,6 +305,75 @@ describe("the post-checkout status page", () => {
     expect(await (await ask(app)).json()).toMatchObject({ status: "unknown" })
   })
 
+  /*
+   * ⚠ THE CHECKOUT ID LIVES IN A BROWSER COOKIE, NOT WITH A PERSON. Reported
+   * from production 2026-09-27: one account upgraded, a second was signed up in
+   * the same browser, and its onboarding said "You're on Pro" — the first
+   * account's checkout, answered about the first account's workspace. A
+   * forwarded session holds the answer to the caller's own tenant.
+   */
+  describe("with a signed-in caller", () => {
+    const granted = ops({
+      current: async () => ({
+        plan: "pro",
+        status: "active",
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: null,
+        scheduledPlan: null,
+        scheduledAt: null,
+        polarSubscriptionId: "sub_1",
+      }),
+    })
+
+    const signedIn = (tenantId: string | null, verify = "signed-in") =>
+      createApp({
+        checkoutStatus: {
+          polar: polar(succeeded),
+          subscriptions: granted,
+          log,
+          tenantAuth: {
+            sessions: {
+              verify: async () =>
+                verify === "signed-in"
+                  ? { status: "signed-in", userId: "user_1" }
+                  : ({ status: verify } as never),
+            },
+            tenants: { resolve: async () => tenantId },
+          },
+        },
+      })
+
+    const withSession = (app: ReturnType<typeof createApp>) =>
+      app.request("/checkout-status/c1", {
+        headers: { Authorization: "Bearer session" },
+      })
+
+    it("answers about its own workspace's checkout", async () => {
+      expect(await (await withSession(signedIn("ten-1"))).json()).toMatchObject({
+        status: "granted",
+        plan: "pro",
+      })
+    })
+
+    it("answers `unknown` for another workspace's checkout", async () => {
+      const body = await (await withSession(signedIn("ten-2"))).json()
+      expect(body).toEqual({ status: "unknown", plan: null })
+    })
+
+    // ⚠ A SESSION THAT FAILS IS NOT DOWNGRADED TO ANONYMOUS, which would hand
+    // the other workspace's answer straight back to the caller it refuses.
+    it("refuses a session that does not verify rather than answering anonymously", async () => {
+      const response = await withSession(signedIn("ten-2", "signed-out"))
+      expect(response.status).toBe(401)
+      expect(await response.json()).not.toHaveProperty("status")
+    })
+
+    it("still answers without a session, as before", async () => {
+      const body = await (await signedIn("ten-2").request("/checkout-status/c1")).json()
+      expect(body).toMatchObject({ status: "granted" })
+    })
+  })
+
   // ⚠ NEVER A VERDICT ON AN OUTAGE. Answering "unpaid" because Polar timed out
   // tells somebody who has just paid that they have not — the same reasoning
   // that makes authd answer `unavailable` rather than `invalidCredentials`.

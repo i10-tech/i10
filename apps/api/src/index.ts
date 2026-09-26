@@ -837,6 +837,9 @@ const app = createApp({
            * thing that knows the first tenant is gone.
            */
           tenants: tenantDeaths,
+          // The console's own session check, so a signed-in caller is held to
+          // its own workspace — see routes/checkout-status.ts.
+          tenantAuth: { sessions, tenants: tenantResolver(db), activeOrg },
           options: {
             planForProduct: (productId: string) =>
               Object.entries(env.POLAR_PRODUCTS).find(
