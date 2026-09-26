@@ -27,6 +27,16 @@ import { defineConfig } from "drizzle-kit"
  * read, so reconstructing four historical states would be invented precision.
  * The chain runs 0029 -> 0034; the gap is a scar, not a fault.
  *
+ * ⚠ AND IT HAPPENED AGAIN, THE SAME WAY. 0041-0056 were hand-written without
+ * refreshing the baseline, so by 2026-09-26 `generate` proposed re-creating
+ * `core.delegations`, `domains.delegation_token` and two `subscriptions`
+ * columns that production already had. Repaired identically: a full baseline
+ * regenerated into an empty directory, installed as `meta/0057_snapshot.json`
+ * and chained onto 0056's id — after checking production matched `schema.ts`
+ * for each of those objects. It did, except the `delegations` foreign keys,
+ * which 0041 named by hand; `schema.ts` now names them the same, or the
+ * snapshot would describe constraints that do not exist under those names.
+ *
  * So: prefer `bun run db:generate`. If a migration genuinely has to be
  * hand-written — a `SECURITY DEFINER` function, an RLS policy, a data backfill,
  * none of which Drizzle models — add the journal entry AND regenerate the

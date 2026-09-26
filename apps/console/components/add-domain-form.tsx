@@ -81,8 +81,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     domain: string
     inspection: DnsInspection | null
     /**
-     * Why the API would refuse this name — ours, already in this workspace,
-     * verified by another — asked in the same debounce as the lookup, so the
+     * Why the API would refuse this name — ours, or already in this
+     * workspace — asked in the same debounce as the lookup, so the
      * box goes red once they stop typing rather than once they press Add.
      */
     refusal: string | null
@@ -552,7 +552,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           onSelect={() => setChosenMode("manual")}
           icon={<Check className="size-4" />}
           title="Keep the records in my zone"
-          description="Six ordinary records — SPF, DKIM, DMARC and the two return paths. Nothing is delegated, and they stay yours to maintain."
+          description="Four ordinary records — the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
         />
       </fieldset>
 
@@ -597,8 +597,9 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
             spellCheck={false}
             hint={
               <>
-                Where bounces go. Defaults to <code className="font-mono">send</code>.
-                Changing it later means re-publishing records.
+                The envelope address every message uses, whichever way it leaves.
+                Defaults to <code className="font-mono">send</code>. Changing it later
+                means re-publishing records.
               </>
             }
           />

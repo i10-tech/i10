@@ -75,7 +75,7 @@ const transport = (over: Partial<Parameters<typeof stalwartTransport>[0]> = {}) 
       mailer: m,
       domainSending: async () => ({
         dkim: { selector: keypair.selector, privateKey: keypair.privateKey },
-        bounceSubdomain: "bounce",
+        returnPath: "send.example.com",
       }),
       ...over,
     }),
@@ -181,15 +181,19 @@ describe("the direct transport", () => {
 
   /**
    * ⚠ SPF ALIGNMENT IS THE WHOLE REASON THE ENVELOPE IS NOT ON i10.tech, and the
-   * message id in it is what makes a returning DSN attributable.
+   * message id in it is what Stalwart's delivery events are attributed by.
+   *
+   * ⚠ AND THE DOMAIN IS EXACTLY THE ONE THE LOOKUP RETURNS, NEVER REBUILT HERE.
+   * Rebuilding it from a label is how the envelope once named `bounce.<domain>`
+   * while the records sat under `bounce.mail.<domain>`.
    */
-  it("returns bounces to the customer's own domain, carrying the message id", async () => {
+  it("uses the domain's return path verbatim, carrying the message id", async () => {
     const { t, mailer: m } = transport()
     const msg = message()
 
     await t.send(msg)
 
-    expect(m.calls[0]?.envelope.from).toBe(`bounce+${msg.id}@bounce.example.com`)
+    expect(m.calls[0]?.envelope.from).toBe(`bounce+${msg.id}@send.example.com`)
   })
 
   /**
@@ -226,7 +230,7 @@ describe("the direct transport", () => {
         seen.push({ domain, tenantId })
         return {
           dkim: { selector: keypair.selector, privateKey: keypair.privateKey },
-          bounceSubdomain: "bounce",
+          returnPath: "send.example.com",
         }
       },
     })
@@ -350,7 +354,7 @@ describe("the direct transport", () => {
     const { t, mailer: m } = transport({
       domainSending: async () => ({
         dkim: { selector: "sel", privateKey: "not-a-key" },
-        bounceSubdomain: "bounce",
+        returnPath: "send.example.com",
       }),
     })
 
@@ -387,7 +391,7 @@ describe("partial acceptance", () => {
       mailer: m,
       domainSending: async () => ({
         dkim: { selector: keypair.selector, privateKey: keypair.privateKey },
-        bounceSubdomain: "bounce",
+        returnPath: "send.example.com",
       }),
       onRejectedRecipients: (e) => seen.push(e),
     })
@@ -428,7 +432,7 @@ describe("classifying a relay failure", () => {
       mailer: m,
       domainSending: async () => ({
         dkim: { selector: keypair.selector, privateKey: keypair.privateKey },
-        bounceSubdomain: "bounce",
+        returnPath: "send.example.com",
       }),
     })
     return t.send(message())

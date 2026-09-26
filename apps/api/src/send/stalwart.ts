@@ -161,13 +161,13 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
       try {
         receipt = await opts.mailer.sendRaw({
           envelope: {
-            // ⚠ VERP, AND THE CUSTOMER'S OWN DOMAIN. The label is theirs and is
-            // published with an MX and an SPF TXT (see domains/records.ts), so
-            // SPF aligns with the `From:` and a DSN has somewhere to land. The
-            // message id in the local part is what makes that DSN attributable
-            // without searching `Message-ID` headers an intermediate MTA is
-            // free to rewrite.
-            from: `bounce+${message.id}@${sending.bounceSubdomain}.${domain}`,
+            // ⚠ VERP, UNDER THE CUSTOMER'S OWN RETURN PATH — the same name SES
+            // uses, published with an SPF record that authorises us too (see
+            // `returnPathDomain`), so SPF passes and aligns with the `From:`.
+            // The message id in the local part is what Stalwart's delivery
+            // events are attributed by (webhooks/stalwart.ts `messageIdFrom`),
+            // and `bounce+` is what the relay's rule admits (plan.ndjson).
+            from: `bounce+${message.id}@${sending.returnPath}`,
             // ⚠ EVERY RECIPIENT, INCLUDING BCC, AND THIS IS WHAT KEEPS BCC
             // BLIND. `buildRawMessage` deliberately writes no `Bcc:` header, so
             // the envelope is the only thing that says who receives it — the

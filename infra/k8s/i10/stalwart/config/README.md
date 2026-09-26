@@ -460,10 +460,12 @@ the webhook serializer is built `.with_spans()`. Widening the include list to an
 event that is not emitted inside a delivery span would produce notifications with
 no `from`, which this ingest ignores.
 
-⚠ **Asynchronous bounces are still invisible.** A receiver that answers `250` and
-only later decides the mailbox is gone sends a DSN to the envelope sender, and we
-accept no inbound mail for customer `bounce.` domains. That is what the VERP
-envelope was originally built for and it remains the open half.
+⚠ **Asynchronous bounces are invisible, by design.** A receiver that answers
+`250` and only later decides the mailbox is gone sends a DSN to the envelope
+sender — the customer's `send.<domain>`, whose MX is Amazon's because SES
+requires it — and Amazon drops a DSN for mail it did not send. One return path
+for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
+return path".
 
 ## The mailbox lever, and the one piece that is not here yet
 
@@ -482,12 +484,11 @@ next message rather than the next deploy.
 
 ⚠ **`sender_domain` IS THE RETURN PATH, NOT THE `From:` HEADER.** For human mail
 that is the sender's own domain, which is what this wants. For our own
-transactional mail on the direct route it is `bounce.<domain>` — the VERP
-envelope — which matches no row, so it answers `mx` and the worker's decision
-stands. That is not incidental: this expression sees **every** message in the
-queue, and re-routing a transactional message onto SES here would give it a
-return path SES does not own and break the SPF alignment the direct route exists
-for. The `hosts_mailboxes` join is what prevents it.
+transactional mail on the direct route it is the return path, `send.<domain>` —
+which matches no row, so it answers `mx` and the worker's decision stands. That
+is not incidental: this expression sees **every** message in the queue, and
+re-routing a transactional message onto SES here would silently move it off the
+route its plan chose. The `hosts_mailboxes` join is what prevents it.
 
 ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX, WHICH IS WHY THIS SHIPS SAFELY.**
 `get_route_or_default` answers `MX_GATEWAY` for a name it cannot resolve and logs

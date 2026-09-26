@@ -12,44 +12,42 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
+import { Checkbox } from "@repo/ui/components/checkbox"
 import { Label } from "@repo/ui/components/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
+import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
+import { Reveal } from "@repo/ui/components/reveal"
+import { cn } from "cn"
 import { Spinner } from "@repo/ui/components/spinner"
 import { updateApiKeyScope } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
 
 /**
- * Which domain a key may send from.
+ * Which domains a key may send from.
  *
- * ⚠ THE ANSWER IS "EVERY DOMAIN" OR "ONE DOMAIN", AND THAT IS NOT A
- * SIMPLIFICATION OF A MULTI-SELECT. A key restricted to two of four domains is
- * a thing nobody asks for and everybody mis-reads in a list; two keys say the
- * same thing and can be revoked separately, which is the point of restricting
- * them at all. The column underneath holds an array anyway, so an operator can
- * do something cleverer by hand without this needing to grow a control for it.
+ * ⚠ "ANY DOMAIN" OR "ONLY THESE", AND "THESE" MAY BE SEVERAL. It used to be
+ * one domain, on the argument that two keys say the same thing as one key for
+ * two domains. That holds until a key is already deployed somewhere that sends
+ * for two products — then the only honest restriction is both, and forcing a
+ * choice of one leaves the key unrestricted instead.
  *
- * ⚠ AND IT IS A DOMAIN NAME RATHER THAN AN ID. The API validates the name
- * against the workspace's own domains, and a name survives being read aloud, put
- * in a runbook, or compared against an environment variable. An id survives
- * none of those.
+ * ⚠ AND IT IS DOMAIN NAMES RATHER THAN IDS. The API validates the names against
+ * the workspace's own domains, and a name survives being read aloud, put in a
+ * runbook, or compared against an environment variable. An id survives none of
+ * those.
  *
- * ⚠ `ALL` IS A SENTINEL BECAUSE RADIX REFUSES AN EMPTY `SelectItem` VALUE — it
- * uses the empty string internally to mean "nothing selected", so an item with
- * that value throws. It never leaves this file; the caller sees `null`.
+ * ⚠ `null` IS EVERY DOMAIN; AN EMPTY LIST IS "RESTRICTED, BUT TO NOTHING YET",
+ * which is not saveable. Collapsing the two would turn "I unticked the last
+ * box" into "this key can now send as anything".
  */
-
-const ALL = "__all__"
 
 export interface ScopeDomain {
   id: string
   name: string
 }
+
+/** Whether a scope value can be saved. */
+export const scopeComplete = (value: string[] | null): boolean =>
+  value === null || value.length > 0
 
 export function ApiKeyScopeField({
   id,
@@ -60,33 +58,83 @@ export function ApiKeyScopeField({
 }: {
   id: string
   /** `null` is every domain. */
-  value: string | null
-  onChange: (domain: string | null) => void
+  value: string[] | null
+  onChange: (domains: string[] | null) => void
   domains: ScopeDomain[]
   disabled?: boolean
 }) {
+  const restricted = value !== null
+  const chosen = new Set(value ?? [])
+
+  function toggle(name: string, on: boolean) {
+    const next = new Set(chosen)
+    if (on) next.add(name)
+    else next.delete(name)
+    // ⚠ IN THE WORKSPACE'S ORDER, not click order, so the saved list and the
+    // list on screen read the same way round.
+    onChange(domains.map((d) => d.name).filter((n) => next.has(n)))
+  }
+
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>Sending domain</Label>
-      <Select
-        value={value ?? ALL}
-        onValueChange={(next) => onChange(next === ALL ? null : next)}
+      <Label htmlFor={id}>Sending domains</Label>
+      <RadioGroup
+        id={id}
+        value={restricted ? "some" : "any"}
+        onValueChange={(next) => onChange(next === "any" ? null : [...chosen])}
         disabled={disabled || domains.length === 0}
+        className="gap-2"
       >
-        <SelectTrigger id={id} className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>All domains</SelectItem>
-          {domains.map((domain) => (
-            <SelectItem key={domain.id} value={domain.name} className="font-mono">
-              {domain.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30">
+          <RadioGroupItem value="any" className="mt-0.5" />
+          <span className="space-y-0.5">
+            <span className="block text-sm font-medium">Any domain</span>
+            <span className="block text-xs text-muted-foreground">
+              Every domain you have verified, now or later.
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30">
+          <RadioGroupItem value="some" className="mt-0.5" />
+          <span className="space-y-0.5">
+            <span className="block text-sm font-medium">Only these domains</span>
+            <span className="block text-xs text-muted-foreground">
+              Limits what a leak of this key can do.
+            </span>
+          </span>
+        </label>
+      </RadioGroup>
 
-      <p className="text-xs text-muted-foreground">
+      {/*
+       * ⚠ REVEALED, NOT SWAPPED IN. The list opens under the choice that asked
+       * for it, so the eye follows the movement down rather than hunting for
+       * what changed. See `Reveal` for the spring.
+       */}
+      <Reveal show={restricted} spacing="pt-1">
+        <ul className="divide-y overflow-hidden rounded-md border">
+          {domains.map((domain) => (
+            <li key={domain.id}>
+              <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-muted/30">
+                <Checkbox
+                  checked={chosen.has(domain.name)}
+                  onCheckedChange={(on) => toggle(domain.name, on === true)}
+                  disabled={disabled}
+                />
+                <span className="truncate font-mono text-sm">{domain.name}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </Reveal>
+
+      <p
+        className={cn(
+          "text-xs",
+          restricted && chosen.size === 0
+            ? "text-destructive"
+            : "text-muted-foreground",
+        )}
+      >
         {/*
          * ⚠ THE SENTENCE NAMES THE LIMIT OF THE LIMIT. A restricted key still
          * reads everything the workspace can read — messages, contacts, its own
@@ -96,9 +144,11 @@ export function ApiKeyScopeField({
          */}
         {domains.length === 0
           ? "Add a domain first and you will be able to restrict a key to it."
-          : value === null
+          : !restricted
             ? "This key can send from any domain you have verified, now or later."
-            : `This key can only send from ${value}. It can still read everything else in the workspace, and it cannot create or revoke keys.`}
+            : chosen.size === 0
+              ? "Choose at least one domain."
+              : `This key can only send from ${[...chosen].join(", ")}. It can still read everything else in the workspace, and it cannot create or revoke keys.`}
       </p>
     </div>
   )
@@ -124,12 +174,12 @@ export function ApiKeyScopeDialog({
   domains,
   onOpenChange,
 }: {
-  apiKey: { id: string; name: string; domain: string | null } | null
+  apiKey: { id: string; name: string; domains: string[] } | null
   domains: ScopeDomain[]
   onOpenChange: (open: boolean) => void
 }) {
   const router = useRouter()
-  const [domain, setDomain] = React.useState<string | null>(null)
+  const [scope, setScope] = React.useState<string[] | null>(null)
   const [pending, setPending] = React.useState(false)
 
   /*
@@ -138,12 +188,19 @@ export function ApiKeyScopeDialog({
    * shows the first one's scope — and the Save button would then quietly apply
    * it.
    */
-  useResetOnOpen(apiKey !== null, () => setDomain(apiKey?.domain ?? null))
+  useResetOnOpen(apiKey !== null, () =>
+    setScope(apiKey && apiKey.domains.length > 0 ? apiKey.domains : null),
+  )
+
+  const saved = apiKey && apiKey.domains.length > 0 ? apiKey.domains : null
+  const unchanged =
+    (scope === null && saved === null) ||
+    (scope !== null && saved !== null && scope.join(",") === saved.join(","))
 
   async function save() {
-    if (!apiKey || pending) return
+    if (!apiKey || pending || !scopeComplete(scope)) return
     setPending(true)
-    const result = await updateApiKeyScope(apiKey.id, domain)
+    const result = await updateApiKeyScope(apiKey.id, scope ?? [])
     setPending(false)
 
     if (!result.ok) {
@@ -152,8 +209,8 @@ export function ApiKeyScopeDialog({
     }
 
     toast.success(
-      domain
-        ? `${apiKey.name} can now only send from ${domain}`
+      scope
+        ? `${apiKey.name} can now only send from ${scope.join(", ")}`
         : `${apiKey.name} can send from any domain`,
     )
     onOpenChange(false)
@@ -174,8 +231,8 @@ export function ApiKeyScopeDialog({
         <div className="py-2">
           <ApiKeyScopeField
             id="scope-domain"
-            value={domain}
-            onChange={setDomain}
+            value={scope}
+            onChange={setScope}
             domains={domains}
             disabled={pending}
           />
@@ -195,7 +252,7 @@ export function ApiKeyScopeDialog({
             onClick={save}
             // ⚠ DISABLED WHEN NOTHING CHANGED, so the button cannot be a
             // no-op request that still fires a success toast.
-            disabled={pending || domain === (apiKey?.domain ?? null)}
+            disabled={pending || unchanged || !scopeComplete(scope)}
           >
             {pending && <Spinner />}
             Save scope

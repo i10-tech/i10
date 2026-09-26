@@ -1,12 +1,19 @@
-import { eq, and, desc, sql } from "drizzle-orm"
+import { eq, and, desc, isNotNull, sql } from "drizzle-orm"
 import type { CreateDomain, Domain, DomainStatus, DomainSummary } from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
 import { delegations, domains } from "../db/core.js"
 import { dnsRecordsFor } from "./records.js"
 import { generateDkimKeypair } from "./dkim.js"
-import { delegatedZoneNames, delegatedZones, delegationRecordsFor } from "./zone.js"
+import {
+  delegatedNameservers,
+  delegatedZones,
+  delegationRecordsFor,
+  ownershipZoneNames,
+  returnPathDomain,
+} from "./zone.js"
 import type { DnsZones } from "./zone.js"
 import {
+  dkimName,
   nodeTxtLookup,
   proveDomain,
   type DelegationProbe,
@@ -68,9 +75,14 @@ export interface DomainStore {
   /**
    * Why `create` would refuse this name, asked without creating anything.
    *
-   * ⚠ ONLY THE REFUSALS ABOUT THE NAME ITSELF — ours, already in this
-   * workspace, verified by another. The plan limit is left out on purpose: it
-   * is not answered by editing the box, and it keeps its own button.
+   * ⚠ ONLY THE REFUSALS ABOUT THE NAME ITSELF — ours, or already in this
+   * workspace. The plan limit is left out on purpose: it is not answered by
+   * editing the box, and it keeps its own button.
+   *
+   * ⚠ "VERIFIED BY ANOTHER WORKSPACE" IS NO LONGER ONE OF THEM. A name somebody
+   * else holds may be added and verified here, and proving it moves it — see
+   * `verify`. Refusing it at the door left an owner who lost the account their
+   * domain was in with no way to prove it from a new one.
    */
   refusal(tenantId: string, name: string): Promise<string | null>
   get(tenantId: string, id: string): Promise<Domain | null>
@@ -114,6 +126,30 @@ export interface DomainStore {
    * would be the third.
    */
   releaseDomains(tenantId: string): Promise<ReleaseSummary>
+  /**
+   * When each of this workspace's displaced domains was taken, by id.
+   *
+   * ⚠ A SEPARATE READ, NOT A FIELD ON `Domain`, because `Domain` is the public
+   * API's shape and which of our other customers took a name is not something
+   * that surface says anything about. The console asks for it alongside.
+   */
+  displaced(tenantId: string): Promise<Record<string, string>>
+}
+
+/**
+ * A record from a previous holder's setup that still proves the name for them.
+ *
+ * ⚠ REPORTED TO WHOEVER JUST TOOK THE NAME, BECAUSE IT IS HOW THEY KEEP IT.
+ * The latest proof wins, so while the old holder's records are still published
+ * the old holder can press Verify and take it straight back. The new holder
+ * controls the DNS and can already see these records; naming them says nothing
+ * about who the old holder is.
+ */
+export interface LeftoverRecord {
+  type: "TXT" | "NS"
+  name: string
+  /** For NS, the nameserver the stale record points at. */
+  value?: string
 }
 
 export interface ReleaseSummary {
@@ -162,7 +198,12 @@ export type UnprovenReason = "absent" | "unreachable" | "superseded"
  * that reason.
  */
 export type VerifyOutcome =
-  | { status: "ok"; domain: Domain }
+  | {
+      status: "ok"
+      domain: Domain
+      /** Only when this verify took the name from another workspace. */
+      leftover?: LeftoverRecord[]
+    }
   | { status: "missing" }
   | { status: "claimed"; domain: Domain }
   /**
@@ -194,7 +235,9 @@ export interface VerifyOptions {
    *
    * ⚠ FALSE DOES NOT MEAN "PRETEND IT VERIFIED". The contest is skipped and the
    * outcome is reported as `claimed`, unchanged — the next verify a person
-   * presses resolves it properly.
+   * presses resolves it properly. And it is decided BEFORE SES is touched: a
+   * sweep that registered the identity first would re-key the holder's signing
+   * without moving anything, which is a takeover by a cron.
    *
    * Defaults to true, so every existing caller keeps the behaviour it had.
    */
@@ -289,7 +332,6 @@ interface Row {
   id: string
   name: string
   mailFromSubdomain: string
-  bounceSubdomain: string
   delegated: boolean
   dkimSelector: string | null
   dkimPublicKey: string | null
@@ -297,37 +339,41 @@ interface Row {
   createdAt: Date
   /** Proves WHICH workspace published the delegation. See ownership.ts. */
   delegationToken: string
+  /** Set when another workspace proved the name and took it. See the column. */
+  displacedAt: Date | null
 }
+
+/** Another workspace's row for the same name, as the definer functions return it. */
+interface Rival {
+  domain_id: string
+  tenant_id: string
+  delegation_token: string
+  dkim_selector: string | null
+  dkim_public_key: string | null
+  delegated: boolean
+}
+
+type Cleared = { status: "clear"; leftover: LeftoverRecord[] } | { status: "taken" }
 
 const COLUMNS = {
   id: domains.id,
   name: domains.name,
   mailFromSubdomain: domains.mailFromSubdomain,
-  bounceSubdomain: domains.bounceSubdomain,
   delegated: domains.delegated,
   dkimSelector: domains.dkimSelector,
   dkimPublicKey: domains.dkimPublicKey,
   status: domains.status,
   createdAt: domains.createdAt,
   delegationToken: domains.delegationToken,
+  displacedAt: domains.displacedAt,
 }
 
 /**
- * The MAIL FROM name SES must be told about.
- *
- * ⚠ THE RETURN PATH MOVES UNDER `mail.` WHEN DELEGATED, and SES has to be told
- * the name it will actually see. Registering `send.example.com` while the zone
- * serves `send.mail.example.com` is a MAIL FROM that never verifies — with
- * records that look correct, because they are, under a different name.
+ * The MAIL FROM name SES must be told about — the one return path both routes
+ * write, from the one function that derives it. See `returnPathDomain`.
  */
-const mailFromFor = (row: {
-  name: string
-  mailFromSubdomain: string
-  delegated: boolean
-}): string =>
-  row.delegated
-    ? `${row.mailFromSubdomain}.${delegatedZoneNames(row.name).mail}`
-    : `${row.mailFromSubdomain}.${row.name}`
+const mailFromFor = (row: { name: string; mailFromSubdomain: string }): string =>
+  returnPathDomain(row.name, row.mailFromSubdomain)
 
 const summarise = (row: Row, region: string): DomainSummary => ({
   object: "domain",
@@ -342,15 +388,19 @@ const summarise = (row: Row, region: string): DomainSummary => ({
 const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
   ...summarise(row, region),
   // ⚠ THE SAME FIELD EITHER WAY. A delegating customer publishes NS records and
-  // a manual one publishes six; a client renders `records` and does not need to
+  // a manual one publishes four; a client renders `records` and does not need to
   // know which it is looking at.
   records: row.delegated
-    ? delegationRecordsFor(row.name, dns.nameservers, row.status, row.delegationToken)
+    ? delegationRecordsFor(
+        row.name,
+        row.mailFromSubdomain,
+        dns.nameservers,
+        row.status,
+        row.delegationToken,
+      )
     : dnsRecordsFor({
         domain: row.name,
         mailFromSubdomain: row.mailFromSubdomain,
-        bounceSubdomain: row.bounceSubdomain,
-        bounceHost: dns.bounceHost,
         region,
         dkimSelector: row.dkimSelector,
         dkimPublicKey: row.dkimPublicKey,
@@ -359,12 +409,10 @@ const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
       }),
 })
 
-/** The two names customers point at us. Configuration, not columns. */
+/** What customers point at us. Configuration, not columns. */
 export interface DnsSettings {
   /** The domain whose SPF record lists our own MTAs, e.g. `_spf.i10.tech`. */
   spfInclude: string
-  /** Our inbound host, which receives bounces for the direct route. */
-  bounceHost: string
   /** Our authoritative nameservers, for delegated domains. */
   nameservers: readonly string[]
 }
@@ -372,18 +420,6 @@ export interface DnsSettings {
 /** Postgres's unique violation. Which constraint fired decides what it means. */
 const isUniqueViolation = (error: unknown) =>
   (error as { code?: string }).code === "23505"
-
-/**
- * ⚠ MATCHED ON `constraint` FIRST AND THE MESSAGE ONLY AS A FALLBACK. Postgres
- * puts the constraint name in its own field on the error, which is exact;
- * driver wrappers do not all forward it, and the ones that do not still carry
- * the name inside the message text. Reading only the message would misclassify
- * a constraint whose name is a substring of another's.
- */
-const isViolationOf = (error: unknown, constraint: string) => {
-  const e = error as { constraint?: string; message?: string }
-  return e.constraint === constraint || (e.message?.includes(constraint) ?? false)
-}
 
 export function domainStore({
   db,
@@ -402,68 +438,109 @@ export function domainStore({
   const probes: DnsProbes = { txt, delegation }
 
   /**
-   * Whether the workspace standing in this one's way can still prove the name.
+   * Every OTHER row that holds this name — verified, or serving its delegation.
    *
-   * ⚠ PROOF WAS ONE-SHOT, AND DOMAINS CHANGE HANDS. A workspace that proved
-   * `example.com` in March keeps the claim and the verified badge for ever; the
-   * registration lapses, somebody else buys it, and nothing ever asks again.
-   * The new owner publishes everything correctly and is told the name belongs
-   * to another workspace — while the previous owner keeps a verified sending
-   * identity for a domain that is not theirs, which is the half that matters.
-   *
-   * ⚠ SO A CHALLENGER WHO HAS ALREADY PROVED IT CAUSES THE INCUMBENT TO BE
-   * RE-CHECKED, against the same public DNS, using the incumbent's OWN proof —
-   * their challenge token if they delegate, their DKIM selector if they do not.
-   * Ownership is decided by what DNS says today rather than by who got here
-   * first.
-   *
-   * ⚠ AND ONLY AN ABSENT PROOF DISPLACES ANYBODY. `unreachable` means we could
-   * not ask — a nameserver timed out, a resolver is having a bad afternoon —
-   * and treating that as "they no longer own it" would transfer live domains
-   * between customers during a DNS outage, which is the most damaging thing
-   * this file could possibly do. A failure to ask is never an answer.
+   * ⚠ THROUGH THE TWO SECURITY DEFINER FUNCTIONS, because row level security
+   * makes another workspace's rows invisible to this one by construction. They
+   * return the minimum: which row, which workspace, and its proof material, so
+   * the holder can be stood down under ITS OWN tenant context below.
    */
-  async function incumbentStillProvesIt(
-    name: string,
-    holder: "delegation" | "verified",
-  ): Promise<"displaced" | "held"> {
-    const rows = (await db.execute(
-      holder === "delegation"
-        ? sql`select * from core.delegation_holder(${name})`
-        : sql`select * from core.verified_holder(${name})`,
-    )) as unknown as {
-      domain_id: string
-      delegation_token: string
-      dkim_selector: string | null
-      dkim_public_key: string | null
-      delegated: boolean
-    }[]
+  async function rivalsFor(row: Row): Promise<Rival[]> {
+    const [verified, delegation] = await Promise.all([
+      db.execute(sql`select * from core.verified_holder(${row.name})`),
+      db.execute(sql`select * from core.delegation_holder(${row.name})`),
+    ])
 
-    const incumbent = rows[0]
-    // ⚠ NOBODY HOLDS IT ANY MORE — they deleted it between our write failing and
-    // this read. The blocker is gone, so the challenger may simply try again.
-    if (!incumbent) return "displaced"
+    const found = new Map<string, Rival>()
+    for (const r of [
+      ...(verified as unknown as Rival[]),
+      ...(delegation as unknown as Rival[]),
+    ]) {
+      if (r.domain_id !== row.id) found.set(r.domain_id, r)
+    }
+    return [...found.values()]
+  }
 
+  /**
+   * Take the name from whoever holds it, for a row that has JUST proved it.
+   *
+   * ⚠ THE LATEST PROOF WINS, AND THAT IS A DELIBERATE REVERSAL. It used to be a
+   * contest: the holder was re-checked, and if they still proved the name it
+   * was a tie and nothing moved. That left an owner who lost the account their
+   * domain was in with no way back — the old account's records are still in
+   * their DNS, so the old account "still proves it" for ever. Now proving the
+   * name is enough to take it; the old row is kept, set `failed` so it cannot
+   * send, and stamped `displaced_at` so its console can say what happened.
+   *
+   * ⚠ CALLED ONLY AFTER PROOF, AND BEFORE SES OR THE ZONES ARE TOUCHED. The SES
+   * identity and the zones are keyed on the name, so writing them first would
+   * hand this row the holder's signing while the holder still reads verified.
+   *
+   * ⚠ `contest: false` NEVER TAKES ANYTHING. A sweep proving a name somebody
+   * else holds reports `taken` and leaves it for a person to press Verify —
+   * two workspaces that both still publish their records would otherwise
+   * trade the domain back and forth on every run.
+   *
+   * ⚠ THE HOLDER IS WRITTEN UNDER THE HOLDER'S OWN TENANT, not through a
+   * definer. The tenant id comes from `rivalsFor`, never from the request, and
+   * row level security still confines the two statements to that one row.
+   */
+  async function clearTheWay(row: Row, contest: boolean): Promise<Cleared> {
+    const rivals = await rivalsFor(row)
+    if (rivals.length === 0) return { status: "clear", leftover: [] }
+    if (!contest) return { status: "taken" }
+
+    const leftover: LeftoverRecord[] = []
+    for (const rival of rivals) {
+      await withTenant(db, rival.tenant_id, async (tx) => {
+        await tx.delete(delegations).where(eq(delegations.domainId, rival.domain_id))
+        await tx
+          .update(domains)
+          .set({ status: "failed", displacedAt: now(), updatedAt: now() })
+          .where(
+            and(eq(domains.tenantId, rival.tenant_id), eq(domains.id, rival.domain_id)),
+          )
+      })
+      log?.warn(
+        { domain: row.name, displaced: rival.domain_id, by: row.id },
+        "domain moved: another workspace proved it",
+      )
+
+      leftover.push(...(await stillProvedBy(row.name, rival)))
+    }
+    return { status: "clear", leftover }
+  }
+
+  /**
+   * The records that would let a displaced holder take the name straight back.
+   *
+   * ⚠ `unreachable` REPORTS NOTHING, because it is not evidence either way and
+   * the move has already happened. Nothing here can undo it.
+   */
+  async function stillProvedBy(name: string, rival: Rival): Promise<LeftoverRecord[]> {
     const proof = await proveDomain(
       probes,
       {
         name,
-        delegated: incumbent.delegated,
-        delegationToken: incumbent.delegation_token,
-        dkimSelector: incumbent.dkim_selector,
-        dkimPublicKey: incumbent.dkim_public_key,
+        delegated: rival.delegated,
+        delegationToken: rival.delegation_token,
+        dkimSelector: rival.dkim_selector,
+        dkimPublicKey: rival.dkim_public_key,
       } satisfies Provable,
       dns.nameservers,
     )
+    if (!proof.proven) return []
 
-    if (proof.proven || proof.reason === "unreachable") return "held"
-
-    await db.execute(sql`select core.displace_domain(${incumbent.domain_id}::uuid)`)
-    log?.warn(
-      { domain: name, displaced: incumbent.domain_id },
-      "domain moved: the holder no longer proves ownership and a challenger does",
+    if (!rival.delegated && rival.dkim_selector) {
+      return [{ type: "TXT", name: dkimName(rival.dkim_selector, name) }]
+    }
+    return ownershipZoneNames(name).flatMap((zone) =>
+      delegatedNameservers(dns.nameservers, rival.delegation_token).map((value) => ({
+        type: "NS" as const,
+        name: zone,
+        value,
+      })),
     )
-    return "displaced"
   }
 
   /**
@@ -528,14 +605,18 @@ export function domainStore({
    * all, and the two only meet at the end — SES cannot see a DKIM record in a
    * zone we have not published.
    *
-   * ⚠ AND THE ORDER IS PROVE, THEN CLAIM, THEN PUBLISH. Every other order hands
-   * something over before the evidence arrives.
+   * ⚠ AND THE ORDER IS PROVE, THEN CLEAR THE WAY, THEN CLAIM, THEN PUBLISH.
+   * Every other order hands something over before the evidence arrives.
    */
   async function settleDelegation(
     tenantId: string,
     row: Row,
     sink: DnsZones,
-  ): Promise<"ready" | "taken" | UnprovenReason> {
+    contest: boolean,
+  ): Promise<
+    | { status: "ready"; leftover: LeftoverRecord[] }
+    | { status: "taken" | UnprovenReason }
+  > {
     const alreadyOurs = await withTenant(db, tenantId, async (tx) => {
       const [claim] = await tx
         .select({ domainId: delegations.domainId })
@@ -545,42 +626,31 @@ export function domainStore({
       return claim?.domainId === row.id
     })
 
-    if (!alreadyOurs) {
-      // ⚠ BEFORE THE CLAIM, NOT AFTER. A claim taken on arrival and checked
-      // later is a claim that was granted on nothing.
+    /*
+     * ⚠ BEFORE THE CLAIM, NOT AFTER. A claim taken on arrival and checked later
+     * is a claim that was granted on nothing. A row that already holds the
+     * claim proved it to get it, and is re-proved only if somebody else now
+     * holds the name verified — taking it from them needs today's evidence.
+     */
+    if (!alreadyOurs || (await rivalsFor(row)).length > 0) {
       const proof = await proveDomain(probes, row, dns.nameservers)
-      if (!proof.proven) return proof.reason
+      if (!proof.proven) return { status: proof.reason }
+    }
 
-      const claim = () =>
-        withTenant(db, tenantId, async (tx) =>
+    const cleared = await clearTheWay(row, contest)
+    if (cleared.status === "taken") return { status: "taken" }
+
+    if (!alreadyOurs) {
+      try {
+        await withTenant(db, tenantId, async (tx) =>
           tx.insert(delegations).values({ name: row.name, domainId: row.id, tenantId }),
         )
-
-      try {
-        await claim()
       } catch (error) {
-        /*
-         * ⚠ SOMEBODY ELSE HOLDS IT, WHICH IS NOT YET AN ANSWER. This tenant has
-         * just PROVED the name, so the only question left is whether the
-         * incumbent can still prove it too. If they can, it is a tie between
-         * two workspaces that both hold the DNS — the same company twice over —
-         * and a tie grants nothing. If they cannot, the domain has changed
-         * hands and the claim moves with it.
-         */
+        // ⚠ A THIRD PARTY CLAIMED IT BETWEEN `clearTheWay` AND HERE. Reported
+        // rather than retried — looping would race every other claimant at
+        // once, and the next Verify settles it.
         if (!isUniqueViolation(error)) throw error
-        if ((await incumbentStillProvesIt(row.name, "delegation")) === "held") {
-          return "taken"
-        }
-
-        try {
-          await claim()
-        } catch (again) {
-          // ⚠ A THIRD PARTY GOT IN BETWEEN. One retry, then report the
-          // conflict — looping here would be a race against every other
-          // claimant at once.
-          if (!isUniqueViolation(again)) throw again
-          return "taken"
-        }
+        return { status: "taken" }
       }
     }
 
@@ -593,8 +663,6 @@ export function domainStore({
     for (const zone of delegatedZones({
       domain: row.name,
       mailFromSubdomain: row.mailFromSubdomain,
-      bounceSubdomain: row.bounceSubdomain,
-      bounceHost: dns.bounceHost,
       region,
       dkimSelector: row.dkimSelector,
       dkimPublicKey: row.dkimPublicKey,
@@ -605,7 +673,7 @@ export function domainStore({
       await sink.put(zone)
     }
 
-    return "ready"
+    return { status: "ready", leftover: cleared.leftover }
   }
 
   /*
@@ -628,12 +696,16 @@ export function domainStore({
   }
 
   /**
-   * Whether a name is already held — by this workspace, or verified by another.
+   * Whether this workspace already holds the name.
    *
    * ⚠ ONE FUNCTION FOR `create` AND FOR `refusal`, WHICH IS THE POINT. The
    * console asks `refusal` as somebody types so the box can go red before the
-   * button is pressed; if that were a second copy of these reads, the day one
-   * of them changed the field would promise a name the create then refused.
+   * button is pressed; if that were a second copy of this read, the day one of
+   * them changed the field would promise a name the create then refused.
+   *
+   * ⚠ ANOTHER WORKSPACE HOLDING IT IS NOT A REFUSAL ANY MORE. Adding a name
+   * asserts nothing and touches nothing shared — no SES identity, no zone — so
+   * it cannot hurt whoever holds it. Proving it is what moves it, in `verify`.
    */
   async function heldRefusal(tenantId: string, name: string): Promise<string | null> {
     return withTenant(db, tenantId, async (tx) => {
@@ -642,23 +714,8 @@ export function domainStore({
         .from(domains)
         .where(and(eq(domains.tenantId, tenantId), eq(domains.name, name)))
         .limit(1)
-      if (own) return `You have already added ${name}, and it ${standing(own.status)}.`
-
-      /*
-       * ⚠ THROUGH A SECURITY DEFINER FUNCTION, BECAUSE RLS MAKES THE HONEST
-       * QUERY IMPOSSIBLE. Another tenant's rows are invisible here by
-       * construction, so asking directly would always answer "free". The
-       * function returns a boolean and never the holder — see migration 0043,
-       * and the refusal below, which is deliberately careful not to name them.
-       */
-      const rows = (await tx.execute(
-        sql`select core.domain_verified_elsewhere(${name}, ${tenantId}::uuid) as taken`,
-      )) as unknown as { taken: boolean }[]
-
-      return rows[0]?.taken
-        ? `${name} is already verified by another workspace. If that is ` +
-            `yours, remove it there first; if you believe it is not, contact ` +
-            `support@i10.tech and we will check ownership.`
+      return own
+        ? `You have already added ${name}, and it ${standing(own.status)}.`
         : null
     })
   }
@@ -727,20 +784,10 @@ export function domainStore({
       const keypair = generateDkimKeypair()
 
       /*
-       * ⚠ BOTH REFUSALS ARE DECIDED BEFORE SES IS TOUCHED, AND THAT ORDERING IS
-       * THE WHOLE POINT OF THIS BLOCK. The identity call below is not inert on
-       * a name somebody else already has: SES keys identities on the domain
-       * name within one AWS account, so `create` on an existing one raises
-       * `AlreadyExistsException` and the adapter recovers by REPLACING its DKIM
-       * signing key with ours. Refusing afterwards does not undo that — the
-       * other tenant is already signing with a key their DNS does not publish,
-       * and their working domain breaks because a stranger typed its name into
-       * a form and was told no.
-       *
-       * ⚠ THE CONSTRAINTS ARE STILL THE DECISION, NOT THESE READS. Two creates
-       * in flight at once both pass a check and only one survives the insert;
-       * the catch below is what makes that safe. This exists to keep the
-       * ordinary, non-racing refusal away from AWS entirely.
+       * ⚠ THE CONSTRAINT IS STILL THE DECISION, NOT THIS READ. Two creates in
+       * flight at once both pass it and only one survives the insert; the
+       * catch below is what makes that safe. This exists to word the ordinary
+       * case well.
        */
       const refusal = await heldRefusal(tenantId, name)
       if (refusal) return { status: "conflict", reason: refusal }
@@ -810,45 +857,32 @@ export function domainStore({
           domain: present(row as Row, region, dns),
         }
       } catch (error) {
+        /*
+         * ⚠ ONLY THIS WORKSPACE'S OWN DUPLICATE CAN REACH HERE. The row is
+         * inserted `not_started`, so `domains_verified_name_unique` cannot fire
+         * on it, and another workspace holding the name is not a conflict —
+         * which is why any unique violation is read as `domains_tenant_name_unique`
+         * rather than insisting on a constraint name some drivers drop.
+         */
         if (isUniqueViolation(error)) {
-          /*
-           * ⚠ TWO CONSTRAINTS REACH HERE AND THEY MEAN OPPOSITE THINGS, so the
-           * message is chosen by which one fired rather than by one sentence
-           * covering both. `domains_tenant_name_unique` is this tenant's own
-           * duplicate — say so plainly, they can see the other row.
-           * `domains_verified_name_unique` is somebody else having PROVED
-           * ownership, which is the only case worth refusing at all.
-           *
-           * ⚠ `delegations_name_unique` DOES NOT REACH HERE, and it used to.
-           * The zone is claimed by `verify` now, against a challenge record, so
-           * contention over a delegated name is reported there — as `claimed`,
-           * after both parties have had the chance to prove it — rather than
-           * refused here on arrival order.
-           */
-          if (isViolationOf(error, "domains_tenant_name_unique")) {
-            return {
-              status: "conflict",
-              reason: `You have already added ${name}.`,
-            }
-          }
-
-          /*
-           * ⚠ THE WORDING STILL DOES NOT NAME THE OTHER TENANT, and that has
-           * not changed. "Acme Ltd already has example.com" turns this endpoint
-           * into a way to ask which domains are customers of ours. It does now
-           * say what would resolve it, because for the person who genuinely
-           * owns the domain there IS something to do.
-           */
-          return {
-            status: "conflict",
-            reason:
-              `${name} is already verified by another workspace. If that is ` +
-              `yours, remove it there first; if you believe it is not, contact ` +
-              `support@i10.tech and we will check ownership.`,
-          }
+          return { status: "conflict", reason: `You have already added ${name}.` }
         }
         throw error
       }
+    },
+
+    async displaced(tenantId) {
+      const rows = await withTenant(db, tenantId, async (tx) =>
+        tx
+          .select({ id: domains.id, displacedAt: domains.displacedAt })
+          .from(domains)
+          .where(and(eq(domains.tenantId, tenantId), isNotNull(domains.displacedAt))),
+      )
+      return Object.fromEntries(
+        rows.flatMap((r) =>
+          r.displacedAt ? [[r.id, r.displacedAt.toISOString()]] : [],
+        ),
+      )
     },
 
     async get(tenantId, id) {
@@ -1070,7 +1104,11 @@ export function domainStore({
       // never won the claim has no zones to take away, and taking them anyway
       // is deleting somebody else's DNS.
       if (holdsZones && zones) {
-        for (const zone of Object.values(delegatedZoneNames(existing.name))) {
+        // The zones are the names this domain's NS records delegate — the
+        // record list the customer was shown — so a per-domain return-path
+        // label needs no second derivation here.
+        const delegated = existing.records.filter((r) => r.type === "NS")
+        for (const zone of new Set(delegated.map((r) => r.name))) {
           await tidy("delegated zone", () => zones.remove(zone))
         }
       }
@@ -1133,6 +1171,17 @@ export function domainStore({
        */
       if (existing.status === "not_started") {
         return { status: "not_registered", domain: present(existing, region, dns) }
+      }
+
+      /*
+       * ⚠ A DISPLACED ROW IS NEVER UPDATED FROM SES. The identity is keyed on
+       * the name and now belongs to the workspace that took it, so its status
+       * is THEIR status — copying `verified` here would hand the name back to
+       * the row that lost it, without a proof, on a poll. Only this row's own
+       * verify, which proves the name again, may move it.
+       */
+      if (existing.displacedAt) {
+        return { status: "ok", domain: present(existing, region, dns) }
       }
 
       const seen = await identity.status(existing.name)
@@ -1220,15 +1269,18 @@ export function domainStore({
        * yet. Asking first would return `failed` for a customer who has done
        * everything correctly and is simply waiting on us.
        */
+      let leftover: LeftoverRecord[] = []
+
       if (existing.delegated && zones) {
-        const settled = await settleDelegation(tenantId, existing, zones)
-        if (settled !== "ready") {
+        const settled = await settleDelegation(tenantId, existing, zones, contest)
+        if (settled.status !== "ready") {
           await noteChecked()
           const domain = present(existing, region, dns)
-          return settled === "taken"
+          return settled.status === "taken"
             ? { status: "claimed", domain }
-            : { status: "unproven", domain, reason: settled }
+            : { status: "unproven", domain, reason: settled.status }
         }
+        leftover = settled.leftover
       } else {
         /*
          * ⚠ A MANUAL DOMAIN IS PROVED TOO, AND IT NEEDS NO EXTRA RECORD TO DO
@@ -1253,9 +1305,19 @@ export function domainStore({
             reason: proof.reason,
           }
         }
+
+        // ⚠ PROVED, SO WHOEVER HOLDS THE NAME STANDS DOWN — before SES below
+        // is asked to sign with this row's key. See `clearTheWay`.
+        const cleared = await clearTheWay(existing, contest)
+        if (cleared.status === "taken") {
+          await noteChecked()
+          return { status: "claimed", domain: present(existing, region, dns) }
+        }
+        leftover = cleared.leftover
       }
 
-      // ⚠ ONLY NOW. Ownership has been proved by one route or the other.
+      // ⚠ ONLY NOW. Ownership has been proved by one route or the other, and
+      // nobody else holds the name.
       const registered = await registerIdentity(tenantId, id, existing)
 
       const read = await identity.status(existing.name)
@@ -1289,12 +1351,17 @@ export function domainStore({
       const verifiedAt =
         seen.status === "verified" && existing.status !== "verified" ? now() : undefined
 
+      /*
+       * ⚠ `displaced_at` IS CLEARED BY EVERY WRITE HERE, because reaching this
+       * line means this row has just proved the name and holds it again.
+       */
       const write = (status: DomainStatus, stamp?: Date) =>
         withTenant(db, tenantId, async (tx) =>
           tx
             .update(domains)
             .set({
               status,
+              displacedAt: null,
               dnsCheckedAt: now(),
               updatedAt: now(),
               ...(stamp ? { verifiedAt: stamp } : {}),
@@ -1303,58 +1370,52 @@ export function domainStore({
             .returning(COLUMNS),
         )
 
+      const done = (row: unknown): VerifyOutcome =>
+        row
+          ? {
+              status: "ok",
+              domain: present(row as Row, region, dns),
+              ...(leftover.length > 0 ? { leftover } : {}),
+            }
+          : { status: "missing" }
+
       try {
         const [row] = await write(seen.status, verifiedAt)
-        return row
-          ? { status: "ok", domain: present(row as Row, region, dns) }
-          : { status: "missing" }
+        return done(row)
       } catch (error) {
         /*
          * ⚠ THE ONLY WAY THIS UPDATE CAN VIOLATE A UNIQUE CONSTRAINT IS THE
-         * VERIFIED-NAME INDEX, and it means another tenant proved ownership of
-         * this name first. Rethrowing left the console pressing Verify against
-         * a 500 for ever, with no sentence anywhere saying why.
+         * VERIFIED-NAME INDEX, and after `clearTheWay` that means another
+         * workspace verified the name in the moments since. Rethrowing left the
+         * console pressing Verify against a 500 for ever.
          *
-         * ⚠ THE ROW IS LEFT UNVERIFIED AND THE CHECK IS STILL STAMPED. Marking
-         * it `failed` would tell somebody to go and fix DNS that is correct;
-         * marking it verified is what the index just refused. Pending is the
-         * honest state, and `claimed` is how the route says why.
+         * ⚠ ONE MORE ROUND, THEN THE CONFLICT. This row has proved the name, so
+         * it takes it from the newcomer exactly as it took it from the holder;
+         * a second collision is reported rather than chased.
          */
         if (!isUniqueViolation(error)) throw error
 
-        /*
-         * ⚠ BUT THIS TENANT HAS JUST PROVED THE NAME, so "somebody else got
-         * there first" is only half an answer. The domain may simply have
-         * changed hands — a registration lapsed, somebody else bought it — and
-         * the incumbent's records may no longer exist at all. Asking them to
-         * prove it again is the only way that resolves, and it resolves in the
-         * direction DNS actually points.
-         */
-        /*
-         * ⚠ A SWEEP STOPS HERE. Everything below this line can move a domain
-         * from one workspace to another, which is right when a person pressed
-         * Verify and is waiting, and is not something a cron may decide on its
-         * own. `contest: false` reports the conflict and leaves it for the next
-         * verify somebody actually asks for.
-         */
-        if (
-          contest &&
-          (await incumbentStillProvesIt(existing.name, "verified")) === "displaced"
-        ) {
-          try {
-            const [moved] = await write(seen.status, verifiedAt ?? now())
-            if (moved)
-              return { status: "ok", domain: present(moved as Row, region, dns) }
-          } catch (again) {
-            // Somebody else verified in the gap. Fall through and report it.
-            if (!isUniqueViolation(again)) throw again
+        if (contest) {
+          const again = await clearTheWay(existing, true)
+          if (again.status === "clear") {
+            leftover = [...leftover, ...again.leftover]
+            try {
+              const [moved] = await write(seen.status, verifiedAt ?? now())
+              return done(moved)
+            } catch (retry) {
+              if (!isUniqueViolation(retry)) throw retry
+            }
           }
         }
 
-        const [row] = await write(existing.status)
-        return row
-          ? { status: "claimed", domain: present(row as Row, region, dns) }
-          : { status: "missing" }
+        /*
+         * ⚠ THE ROW IS LEFT UNVERIFIED AND THE CHECK IS STILL STAMPED. Marking
+         * it `failed` would tell somebody to go and fix DNS that is correct;
+         * marking it verified is what the index just refused. And
+         * `displaced_at` stays as it was — this row does not hold the name.
+         */
+        await noteChecked()
+        return { status: "claimed", domain: present(existing, region, dns) }
       }
     },
   }

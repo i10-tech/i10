@@ -15,7 +15,7 @@ import type { NormalisedEvent, Suppression } from "./events.js"
  * ⚠ A WEBHOOK FROM OUR OWN MTA, NOT A PARSED DSN, AND THAT IS A BETTER DEAL
  * THAN THE ONE ORIGINALLY PLANNED. The VERP envelope was built so a bounce
  * message could be attributed, which assumed we would receive DSN mail: an MX
- * for every customer's `bounce.<domain>`, Stalwart configured to accept those
+ * for every customer's return path pointing at us, Stalwart configured to accept those
  * domains, a mailbox to read, and an RFC 3464 `multipart/report` parser. None of
  * that exists, and none of it is needed for the outcomes Stalwart itself
  * observes — it is the one attempting delivery, so it knows the answer before
@@ -24,10 +24,11 @@ import type { NormalisedEvent, Suppression } from "./events.js"
  *
  * ⚠ WHAT THIS DOES NOT COVER IS THE ASYNCHRONOUS BOUNCE. A receiver that
  * answers `250` and only later decides the mailbox is gone sends a DSN to the
- * envelope sender, and that is inbound mail we still do not accept. Those
- * bounces remain invisible. The VERP envelope keeps its purpose — it is what
- * will make those attributable — so this narrows the gap rather than closing it,
- * and says so rather than letting a half-covered case read as a whole one.
+ * envelope sender, and the return path's MX is Amazon's — SES requires it, and
+ * both routes share one return path (see `returnPathDomain`). So those bounces
+ * go to Amazon and are dropped, and stay invisible for mail we deliver
+ * ourselves. That is a decision, not a gap left open: the VERP local part still
+ * attributes every event Stalwart reports, which is what this handler reads.
  */
 
 /**
@@ -133,7 +134,7 @@ const TYPES: Record<string, WebhookEventName> = {
  */
 export function messageIdFrom(envelopeSender: unknown): string | null {
   if (typeof envelopeSender !== "string") return null
-  // `bounce+<uuid>@bounce.<domain>` — see stalwartTransport.
+  // `bounce+<uuid>@<return path>` — see stalwartTransport.
   const match =
     /\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i.exec(
       envelopeSender,

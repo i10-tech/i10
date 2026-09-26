@@ -127,8 +127,10 @@ export function ApiKeysTable({
                     </Badge>
                   </TableCell>
                   <TableCell className="hidden sm:table-cell">
-                    {key.domain ? (
-                      <span className="font-mono text-xs">{key.domain}</span>
+                    {key.domains.length > 0 ? (
+                      <span className="font-mono text-xs">
+                        {key.domains.join(", ")}
+                      </span>
                     ) : (
                       // ⚠ "Any domain" RATHER THAN A DASH. A dash reads as
                       // "not set", and the most important thing this column can

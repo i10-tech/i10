@@ -124,6 +124,8 @@ export function ConfirmDialog({
   description,
   confirmLabel = "Confirm",
   confirmWord,
+  ready = true,
+  initialFocus = "confirm-word",
   destructive = true,
   onConfirm,
   children,
@@ -135,6 +137,16 @@ export function ConfirmDialog({
   confirmLabel?: string
   /** When set, the button stays disabled until this exact string is typed. */
   confirmWord?: string
+  /**
+   * ⚠ FOR A DIALOG WHOSE CHILDREN HOLD A CHOICE THAT MUST BE MADE FIRST — a
+   * destination, say. False keeps the button disabled whatever is typed.
+   */
+  ready?: boolean
+  /**
+   * The id of the field to put the caret in on open. `confirm-word` unless a
+   * dialog asks for something first — a recipient, say — that belongs above it.
+   */
+  initialFocus?: string
   destructive?: boolean
   onConfirm: () => Promise<boolean>
   /** A second question, asked above the confirmation. See the note above. */
@@ -158,7 +170,14 @@ export function ConfirmDialog({
   // looks like the input being cleared out from under you.
   useResetOnOpen(open, () => setTyped(""))
 
-  const armed = confirmWord === undefined || typed.trim() === confirmWord
+  /*
+   * ⚠ TWO ANSWERS, KEPT APART. `matches` is about the typed name alone and is
+   * all the name field's colour may say; `armed` is whether the button can go,
+   * which also waits on `ready`. Colouring the name by `armed` turned a
+   * correctly typed domain red because the email above it was unfinished.
+   */
+  const matches = confirmWord === undefined || typed.trim() === confirmWord
+  const armed = ready && matches
 
   async function confirm() {
     if (!armed || pending) return
@@ -182,7 +201,7 @@ export function ConfirmDialog({
          * ring again, which is why this is pinned to the field by id.
          */
         onOpenAutoFocus={(event) => {
-          const field = document.getElementById("confirm-word")
+          const field = document.getElementById(initialFocus)
           if (!field) return
           event.preventDefault()
           /*
@@ -276,7 +295,7 @@ export function ConfirmDialog({
                * red here means "this is not the word", which is only true once
                * there is something to compare.
                */
-              state={typed.length === 0 ? "idle" : armed ? "valid" : "invalid"}
+              state={typed.length === 0 ? "idle" : matches ? "valid" : "invalid"}
             />
           </div>
         )}

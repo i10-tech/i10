@@ -10,7 +10,6 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb",
   name: "example.com",
   mailFromSubdomain: "send",
-  bounceSubdomain: "bounce",
   delegated: false,
   dkimSelector: "i10abc123",
   dkimPublicKey: "MIIBIjANBgkq",
@@ -51,6 +50,9 @@ function fakeDb(handlers: {
     }),
   }
   return {
+    // ⚠ NOBODY ELSE HOLDS THE NAME: `verify` asks the holder functions on
+    // every proven verify now, and an empty answer is "the way is clear".
+    execute: async () => [],
     transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   } as unknown as Database
 }
@@ -77,7 +79,6 @@ const deps = {
   ownDomains: ["i10.tech"],
   dns: {
     spfInclude: "_spf.i10.tech",
-    bounceHost: "mx.i10.tech",
     nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
   },
   secrets,
@@ -211,6 +212,7 @@ describe("creating", () => {
   it("never creates a mailbox domain", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -252,6 +254,7 @@ describe("verifying", () => {
   it("does not clear verified_at on a temporary failure", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -286,6 +289,7 @@ describe("verifying", () => {
   it("stamps verified_at the first time it passes", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -334,6 +338,7 @@ describe("verifying", () => {
   it("never writes not_started for an identity it has just registered", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -388,6 +393,7 @@ describe("verifying", () => {
   it("stamps the check even when ownership does not prove", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],

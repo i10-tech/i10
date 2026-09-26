@@ -194,7 +194,6 @@ export interface EmailRow {
   last_event: string
   scheduled_at: string | null
   sent_at: string | null
-  route: string | null
   last_error: string | null
 }
 
@@ -436,7 +435,6 @@ export function consoleQueries(db: Database): ConsoleQueries {
             status: messages.status,
             scheduledAt: messages.scheduledAt,
             sentAt: messages.sentAt,
-            sentRoute: messages.sentRoute,
             lastError: messages.lastError,
           })
           .from(messages)
@@ -497,7 +495,6 @@ export function consoleQueries(db: Database): ConsoleQueries {
           last_event: lastEvent(r.status, r.scheduledAt, byMessage.get(r.id) ?? []),
           scheduled_at: r.scheduledAt?.toISOString() ?? null,
           sent_at: r.sentAt?.toISOString() ?? null,
-          route: r.sentRoute,
           last_error: r.lastError,
         }))
 
@@ -622,7 +619,6 @@ export function consoleQueries(db: Database): ConsoleQueries {
           ),
           scheduled_at: message.scheduledAt?.toISOString() ?? null,
           sent_at: message.sentAt?.toISOString() ?? null,
-          route: message.sentRoute,
           last_error: message.lastError,
           html: body?.html ?? null,
           text: body?.text ?? null,
