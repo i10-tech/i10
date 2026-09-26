@@ -21,30 +21,37 @@ const GRACE_MS = 2 * 60_000
 const RECHECK_MS = 15_000
 
 /**
- * "Delegated to us, and we are not serving it" — but only once it has stayed
- * true for long enough to mean something.
+ * A note that only turns into a problem once it has stayed true long enough to
+ * be one — used for every delegation state that is ALSO the ordinary first
+ * minute of a healthy handover.
  *
- * ⚠ THE CLOCK IS THIS PAGE'S, NOT THE DOMAIN'S. Nothing we store says when the
+ * ⚠ THE CLOCK IS THIS TAB'S, NOT THE DOMAIN'S. Nothing we store says when the
  * zones were published — `updated_at` moves on every status check — and
  * `created_at` is wrong for a domain added an hour ago and verified now. So the
- * question asked is the one the customer is actually asking: has this page
- * watched it stay broken for two minutes?
+ * question asked is the one the customer is actually asking: has this tab
+ * watched it stay this way for two minutes? A reload keeps the count; see
+ * `firstSeen`.
  *
  * ⚠ IT RE-ASKS WHILE IT WAITS. The delegation report is server-rendered, and
  * the verification watch stops once SES has the domain — so without this the
- * neutral note could be looking at a report from the first second after verify
- * for the whole grace window, and turn red over a handover that finished long
- * ago. When the zones answer, the server renders "Delegation is working" and
- * this component is gone.
+ * waiting note could be looking at a report from the first second after verify
+ * for the whole grace window, and escalate over a handover that finished long
+ * ago. When the state clears, the server renders the next note and this one is
+ * gone.
  */
 export function HandoverSettling({
-  zones,
-  plural,
+  domainId,
+  state,
+  title,
+  body,
   failure,
 }: {
-  zones: React.ReactNode
-  plural: boolean
-  /** The red note, rendered by the caller so its copy stays in one file. */
+  domainId: string
+  /** Which waiting state this is; each has its own clock. */
+  state: string
+  title: string
+  body: React.ReactNode
+  /** What to say once the grace is spent, rendered by the caller so its copy stays in one file. */
   failure: React.ReactNode
 }) {
   const router = useRouter()
@@ -52,13 +59,24 @@ export function HandoverSettling({
 
   React.useEffect(() => {
     if (expired) return
-    const recheck = setInterval(() => router.refresh(), RECHECK_MS)
-    const grace = setTimeout(() => setExpired(true), GRACE_MS)
+
+    const since = firstSeen(`${domainId}:${state}`)
+    const left = GRACE_MS - (Date.now() - since)
+    if (left <= 0) {
+      setExpired(true)
+      return
+    }
+
+    const recheck = setInterval(() => {
+      firstSeen(`${domainId}:${state}`)
+      router.refresh()
+    }, RECHECK_MS)
+    const grace = setTimeout(() => setExpired(true), left)
     return () => {
       clearInterval(recheck)
       clearTimeout(grace)
     }
-  }, [expired, router])
+  }, [domainId, state, expired, router])
 
   if (expired) return <>{failure}</>
 
@@ -66,14 +84,46 @@ export function HandoverSettling({
     <Note
       tone="muted"
       icon={<Clock className="size-4 text-muted-foreground" />}
-      title="Finishing the handover"
-      body={
-        <>
-          {zones} {plural ? "point" : "points"} at us and we are starting to answer for{" "}
-          {plural ? "them" : "it"}. This usually takes a few seconds — this note updates
-          itself.
-        </>
-      }
+      title={title}
+      body={body}
     />
   )
+}
+
+/**
+ * When this tab first saw this domain in this state, carried across reloads.
+ *
+ * ⚠ WITHOUT IT A RELOAD RESTARTED THE GRACE, so pressing refresh during the two
+ * minutes bought another two, and somebody refreshing out of impatience would
+ * never be told about a real fault. `sessionStorage` is per tab and survives a
+ * reload, which is exactly the span "this page has been watching" means.
+ *
+ * ⚠ AND A GAP RESTARTS IT. The stamp is refreshed every time the state is seen;
+ * if it has not been seen for `FORGET_MS`, whatever was stored is about an
+ * earlier episode — the state cleared and came back — and must not turn a new
+ * wait red on arrival.
+ *
+ * ⚠ STORAGE CAN THROW (a private window, blocked site data), and then this is
+ * simply the page's own clock again — the behaviour before, not a failure.
+ */
+const FORGET_MS = 5 * 60_000
+
+function firstSeen(key: string): number {
+  const now = Date.now()
+  const storageKey = `i10:settling:${key}`
+  try {
+    const raw = window.sessionStorage.getItem(storageKey)
+    const stored = raw ? (JSON.parse(raw) as { since?: unknown; seen?: unknown }) : null
+    const since =
+      stored &&
+      typeof stored.since === "number" &&
+      typeof stored.seen === "number" &&
+      now - stored.seen < FORGET_MS
+        ? stored.since
+        : now
+    window.sessionStorage.setItem(storageKey, JSON.stringify({ since, seen: now }))
+    return since
+  } catch {
+    return now
+  }
 }
