@@ -22,10 +22,11 @@ import {
 } from "@repo/ui/components/table"
 import { DomainActions } from "@/components/domain-actions"
 import { EmptyState } from "@/components/empty-state"
+import { IncomingTransfers } from "@/components/incoming-transfers"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { formatRelative } from "@/lib/format"
-import type { ApiKeyRow, DomainSummary } from "@/lib/types"
+import type { ApiKeyRow, DomainSummary, TransferOffer } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Domains" }
 
@@ -53,9 +54,12 @@ export default async function DomainsPage() {
    * domain still deletes; what is lost is the offer to tidy up the keys that
    * only worked for it.
    */
-  const [result, keys] = await Promise.all([
+  const [result, keys, incoming] = await Promise.all([
     tryApi<{ data: DomainSummary[] }>("/console/domains"),
     tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
+    // ⚠ A FAILURE HIDES THE OFFERS, NOT THE PAGE. They are still in the email
+    // and still here on the next load.
+    tryApi<{ data: TransferOffer[] }>("/console/transfers"),
   ])
 
   const hasRows = result.ok && result.data.data.length > 0
@@ -69,10 +73,13 @@ export default async function DomainsPage() {
    */
   const scopedKeys = new Map<string, { id: string; name: string }[]>()
   for (const key of keys.ok ? keys.data.data : []) {
-    if (key.revoked_at !== null || !key.domain) continue
-    const held = scopedKeys.get(key.domain) ?? []
+    // ⚠ ONLY KEYS LIMITED TO EXACTLY ONE DOMAIN. Those are the ones deleting
+    // that domain leaves able to send from nothing; a key with others keeps them.
+    if (key.revoked_at !== null || key.domains.length !== 1) continue
+    const only = key.domains[0]!
+    const held = scopedKeys.get(only) ?? []
     held.push({ id: key.id, name: key.name })
-    scopedKeys.set(key.domain, held)
+    scopedKeys.set(only, held)
   }
 
   return (
@@ -121,6 +128,8 @@ export default async function DomainsPage() {
       </PageHeader>
 
       <PageBody>
+        <IncomingTransfers offers={incoming.ok ? incoming.data.data : []} />
+
         {!result.ok ? (
           <PanelError
             title="Could not load your domains"
@@ -184,7 +193,15 @@ export default async function DomainsPage() {
                         href={`/domains/${domain.id}`}
                         className="block px-3 py-2.5 text-center"
                       >
-                        <Status status={domain.status} />
+                        {/*
+                         * ⚠ "FAILED" IS THE WRONG WORD FOR A DISPLACED DOMAIN.
+                         * Nothing about its DNS failed; another workspace proved
+                         * it. The page explains; the list only has to not lie.
+                         */}
+                        <Status
+                          status={domain.status}
+                          label={domain.displaced_at ? "Verified elsewhere" : undefined}
+                        />
                       </Link>
                     </TableCell>
                     <TableCell className="p-0">

@@ -81,8 +81,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     domain: string
     inspection: DnsInspection | null
     /**
-     * Why the API would refuse this name — ours, already in this workspace,
-     * verified by another — asked in the same debounce as the lookup, so the
+     * Why the API would refuse this name — ours, or already in this
+     * workspace — asked in the same debounce as the lookup, so the
      * box goes red once they stop typing rather than once they press Add.
      */
     refusal: string | null

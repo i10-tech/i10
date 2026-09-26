@@ -79,7 +79,7 @@ export function StepSend({
     const result = await createApiKey({
       name: "onboarding",
       mode: "live",
-      domain: null,
+      domains: [],
     })
     setPending(false)
 

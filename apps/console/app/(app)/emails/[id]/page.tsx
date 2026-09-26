@@ -163,12 +163,6 @@ export default async function EmailDetailPage({
               {email.sent_at && (
                 <Field label="Sent" value={formatExact(email.sent_at)} />
               )}
-              {email.route && (
-                <Field
-                  label="Route"
-                  value={email.route === "ses" ? "Amazon SES" : "Direct"}
-                />
-              )}
               {email.attempts > 1 && (
                 <Field label="Attempts" value={String(email.attempts)} />
               )}

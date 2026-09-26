@@ -123,7 +123,6 @@ export interface EmailRow {
   last_event: string
   scheduled_at: string | null
   sent_at: string | null
-  route: string | null
   last_error: string | null
 }
 
@@ -162,6 +161,11 @@ export interface DomainSummary {
   created_at: string
   region: string
   delegated: boolean
+  /**
+   * When another workspace proved this name and took it. Console-only — the
+   * public API's domain says nothing about our other customers.
+   */
+  displaced_at?: string | null
 }
 
 export interface Domain extends DomainSummary {
@@ -195,6 +199,40 @@ export interface VerifiedDomain extends Domain {
   ownership?:
     | { proven: true }
     | { proven: false; reason: "absent" | "unreachable" | "superseded" }
+  /**
+   * Only when this verify took the name from another workspace AND that
+   * workspace's records still resolve. The latest proof wins, so while these
+   * are published the old holder can take it back — removing them keeps it.
+   */
+  leftover_records?: { type: "TXT" | "NS"; name: string; value?: string }[]
+}
+
+/** A workspace the signed-in person belongs to. The id is Clerk's. */
+export interface Workspace {
+  id: string
+  name: string
+}
+
+/** A domain offered to an email address, waiting for an answer. */
+export interface TransferOffer {
+  id: string
+  domain_id: string
+  domain_name: string
+  recipient_email: string
+  offered_by: string
+  from_workspace: string
+  created_at: string
+  expires_at: string
+}
+
+/**
+ * One offer as its recipient sees it, with where it could land.
+ *
+ * ⚠ THE WORKSPACE THE DOMAIN IS ALREADY IN IS LEFT OUT BY THE API, which is
+ * what lets somebody in the sender's own workspace take it into another.
+ */
+export interface IncomingTransfer extends TransferOffer {
+  workspaces: (Workspace & { current: boolean })[]
 }
 
 export interface DnsInspection {
@@ -226,7 +264,7 @@ export interface ApiKeyRow {
   mode: string
   scopes: string[]
   /**
-   * The one domain this key may send from, or `null` for every domain.
+   * The domains this key may send from; empty for every domain.
    *
    * ⚠ DERIVED BY THE API FROM `scopes`, AND THE CONSOLE DELIBERATELY DOES NOT
    * PARSE THAT ARRAY. The storage format is `domain:acme.com` and it is the
@@ -234,7 +272,7 @@ export interface ApiKeyRow {
    * prefix would be a second place to spell it, and the one that is wrong is
    * always the one nobody tested.
    */
-  domain: string | null
+  domains: string[]
   created_at: string
   last_used_at: string | null
   expires_at: string | null

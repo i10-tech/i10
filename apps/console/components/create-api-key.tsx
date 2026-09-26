@@ -18,7 +18,11 @@ import { Label } from "@repo/ui/components/label"
 import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
 import { Spinner } from "@repo/ui/components/spinner"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
-import { ApiKeyScopeField, type ScopeDomain } from "@/components/api-key-scope"
+import {
+  ApiKeyScopeField,
+  scopeComplete,
+  type ScopeDomain,
+} from "@/components/api-key-scope"
 import { createApiKey } from "@/lib/actions"
 import type { CreatedApiKey } from "@/lib/types"
 
@@ -59,23 +63,23 @@ export function CreateApiKeyButton({
    * would silently mint restricted keys for people who never read this field,
    * and they would find out when a send failed in production.
    */
-  const [domain, setDomain] = React.useState<string | null>(null)
+  const [scope, setScope] = React.useState<string[] | null>(null)
   const [pending, setPending] = React.useState(false)
   const [created, setCreated] = React.useState<CreatedApiKey | null>(null)
 
   function reset() {
     setName("")
     setMode("live")
-    setDomain(null)
+    setScope(null)
     setCreated(null)
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (pending || !name.trim()) return
+    if (pending || !name.trim() || !scopeComplete(scope)) return
 
     setPending(true)
-    const result = await createApiKey({ name: name.trim(), mode, domain })
+    const result = await createApiKey({ name: name.trim(), mode, domains: scope ?? [] })
     setPending(false)
 
     if (!result.ok) {
@@ -203,8 +207,8 @@ export function CreateApiKeyButton({
 
                 <ApiKeyScopeField
                   id="key-domain"
-                  value={domain}
-                  onChange={setDomain}
+                  value={scope}
+                  onChange={setScope}
                   domains={domains}
                   disabled={pending}
                 />

@@ -50,6 +50,9 @@ function fakeDb(handlers: {
     }),
   }
   return {
+    // ⚠ NOBODY ELSE HOLDS THE NAME: `verify` asks the holder functions on
+    // every proven verify now, and an empty answer is "the way is clear".
+    execute: async () => [],
     transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   } as unknown as Database
 }
@@ -209,6 +212,7 @@ describe("creating", () => {
   it("never creates a mailbox domain", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -250,6 +254,7 @@ describe("verifying", () => {
   it("does not clear verified_at on a temporary failure", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -284,6 +289,7 @@ describe("verifying", () => {
   it("stamps verified_at the first time it passes", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -332,6 +338,7 @@ describe("verifying", () => {
   it("never writes not_started for an identity it has just registered", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
@@ -386,6 +393,7 @@ describe("verifying", () => {
   it("stamps the check even when ownership does not prove", async () => {
     let written: Record<string, unknown> | undefined
     const db = {
+      execute: async () => [],
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],

@@ -27,6 +27,8 @@ const ID = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb"
 /** A second domain on the same workspace, for the bulk teardown. */
 const OTHER_ID = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60cc"
 const NOW = new Date("2026-09-05T12:00:00.000Z")
+/** The workspace holding the name when somebody else proves it. */
+const OTHER_TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6072"
 
 const row = (over: Record<string, unknown> = {}) => ({
   id: ID,
@@ -42,15 +44,6 @@ const row = (over: Record<string, unknown> = {}) => ({
 
 const dialect = new PgDialect()
 
-/**
- * ⚠ THE RAW-SQL CALLS ARE TOLD APART BY THEIR TEXT, because `store.ts` reaches
- * two different SECURITY DEFINER functions through `db.execute` and they mean
- * opposite things. `domain_verified_elsewhere` answers "may this workspace even
- * try"; `delegation_holder` / `verified_holder` answer "who is in the way, so we
- * can re-check whether they still own it". One handler for both would make a
- * test that means to describe an incumbent silently answer the other question.
- */
-const queryText = (q: unknown) => dialect.sqlToQuery(q as SQL).sql
 
 /** A Postgres unique violation, as the driver reports one. */
 const violation = (constraint: string) =>
@@ -78,7 +71,11 @@ function fakeDb(handlers: {
   claim?: () => unknown[]
   update?: () => unknown[]
   del?: () => void
-  /** `core.domain_verified_elsewhere`, which is reached through raw SQL. */
+  /**
+   * The answer to any other raw statement. The store no longer asks
+   * `domain_verified_elsewhere` (dropped in 0060); kept so a fixture that sets
+   * it still type-checks, and so an unexpected query gets a harmless row.
+   */
   taken?: boolean
   /** `core.verified_holder` — the workspace a challenger has to displace. */
   holder?: () => unknown[]
@@ -90,10 +87,17 @@ function fakeDb(handlers: {
    * holds two domains", which is the whole case worth testing.
    */
   many?: () => unknown[]
+  /** Every `update(...).set(values)`, so a displacement can be observed. */
+  onSet?: (values: Record<string, unknown>) => void
+  /** Every raw statement, with its parameters — `set_config` included. */
+  onExecute?: (text: string, params: unknown[]) => void
+  /** Every `insert(...).values(values)`. */
+  onInsert?: (values: Record<string, unknown>) => void
 }) {
   const tx = {
     execute: async (q: unknown) => {
-      const text = queryText(q)
+      const { sql: text, params } = dialect.sqlToQuery(q as SQL)
+      handlers.onExecute?.(text, params)
       /*
        * ⚠ `core.zone_owner` IS DERIVED FROM THE SAME `claim` HANDLER THESE
        * TESTS ALREADY SET, so each one keeps the intent it was written with.
@@ -112,7 +116,10 @@ function fakeDb(handlers: {
         : [{ taken: handlers.taken ?? false }]
     },
     insert: () => ({
-      values: () => ({ returning: async () => handlers.insert?.() ?? [] }),
+      values: (values: Record<string, unknown>) => {
+        handlers.onInsert?.(values)
+        return { returning: async () => handlers.insert?.() ?? [] }
+      },
     }),
     select: (projection?: Record<string, unknown>) => ({
       from: () => ({
@@ -126,9 +133,12 @@ function fakeDb(handlers: {
       }),
     }),
     update: () => ({
-      set: () => ({
-        where: () => ({ returning: async () => handlers.update?.() ?? [] }),
-      }),
+      set: (values: Record<string, unknown>) => {
+        handlers.onSet?.(values)
+        return {
+          where: () => ({ returning: async () => handlers.update?.() ?? [] }),
+        }
+      },
     }),
     delete: () => ({
       where: async () => {
@@ -175,13 +185,37 @@ const base = {
   txt: async () => ["v=DKIM1; k=rsa; p=MIIBIjANBgkq"],
 }
 
-describe("claiming a name somebody else has not proved", () => {
+describe("adding a name somebody else holds", () => {
   /**
-   * ⚠ THE CASE THAT WAS REPORTED FROM PRODUCTION. Somebody had already added
-   * the domain and never verified it; the owner could not add it at all.
+   * ⚠ ALLOWED, EVEN WHEN THEY HAVE VERIFIED IT. Refusing a name another
+   * workspace verified left an owner who lost the account their domain was in
+   * with no way to prove it from a new one. Adding asserts nothing and touches
+   * nothing shared, so it cannot hurt the holder; proving it is what moves it.
    */
-  it("tells the two violations apart", async () => {
-    const own = domainStore({
+  it("creates the row, and still does not touch SES", async () => {
+    const create = mock(async () => ({
+      dkimTokens: ["aaa"],
+      status: "pending" as const,
+    }))
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [],
+        taken: true,
+        holder: () => [{ domain_id: OTHER_ID, tenant_id: OTHER_TENANT }],
+        insert: () => [row({ status: "not_started" })],
+      }),
+      identity: identity({ create }),
+    })
+
+    const out = await store.create(TENANT, { name: "example.com" })
+
+    expect(out.status).toBe("created")
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it("reads any unique violation on insert as this workspace's own duplicate", async () => {
+    const store = domainStore({
       ...base,
       db: fakeDb({
         insert: () => {
@@ -191,36 +225,10 @@ describe("claiming a name somebody else has not proved", () => {
       identity: identity(),
     })
 
-    const theirs = domainStore({
-      ...base,
-      db: fakeDb({
-        insert: () => {
-          throw violation("domains_verified_name_unique")
-        },
-      }),
-      identity: identity(),
-    })
-
-    const mine = await own.create(TENANT, { name: "example.com" })
-    const other = await theirs.create(TENANT, { name: "example.com" })
-
-    expect(mine.status).toBe("conflict")
-    expect(other.status).toBe("conflict")
-
-    // ⚠ THE MESSAGES MUST DIFFER, because the remedies are opposite: one is
-    // "look in your own list", the other is "the name is spoken for".
-    const mineReason = mine.status === "conflict" ? mine.reason : ""
-    const otherReason = other.status === "conflict" ? other.reason : ""
-    expect(mineReason).toContain("already added")
-    expect(otherReason).toContain("another workspace")
-
-    /*
-     * ⚠ AND NEITHER NAMES THE OTHER TENANT. The rule in contracts/errors.ts has
-     * been relaxed about WHETHER we refuse, not about who we say is in the way
-     * — "Acme Ltd has example.com" would make this endpoint a way to ask which
-     * companies are customers.
-     */
-    expect(otherReason).not.toContain(TENANT)
+    const out = await store.create(TENANT, { name: "example.com" })
+    expect(out.status === "conflict" && out.reason).toBe(
+      "You have already added example.com.",
+    )
   })
 })
 
@@ -234,32 +242,17 @@ describe("losing the race to verify", () => {
    */
   it("reports a conflict instead of throwing, and does not mark it verified", async () => {
     let attempt = 0
+    const sets: Record<string, unknown>[] = []
     const store = domainStore({
       ...base,
       db: fakeDb({
         select: () => [row({ status: "pending" })],
-        /*
-         * ⚠ AND THE HOLDER STILL PROVES IT, which is what makes this a genuine
-         * tie rather than a domain that has changed hands. A challenger who has
-         * proved the name now causes the incumbent to be re-checked; with no
-         * incumbent described here the retry would simply succeed, and the test
-         * would be asserting the opposite of its own name.
-         */
-        holder: () => [
-          {
-            domain_id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60cc",
-            delegation_token: "not-this-tenants-token",
-            dkim_selector: "i10abc123",
-            dkim_public_key: "MIIBIjANBgkq",
-            delegated: false,
-          },
-        ],
+        onSet: (values) => sets.push(values),
         update: () => {
           attempt += 1
-          // The first write tries `verified` and is refused; the second writes
-          // the row back unchanged so the check is still stamped.
-          if (attempt === 1) throw violation("domains_verified_name_unique")
-          return [row({ status: "pending" })]
+          // ⚠ EVERY ATTEMPT COLLIDES: somebody else keeps verifying in the gap.
+          // One retry, then the conflict — never a loop.
+          throw violation("domains_verified_name_unique")
         },
       }),
       identity: identity({
@@ -274,6 +267,9 @@ describe("losing the race to verify", () => {
     // verification FAILED sends somebody to break DNS that is correct.
     expect(outcome.status === "claimed" && outcome.domain.status).toBe("pending")
     expect(attempt).toBe(2)
+    // ⚠ AND THE FINAL STAMP DOES NOT CLEAR `displaced_at` — this row does not
+    // hold the name.
+    expect(sets.at(-1)).not.toHaveProperty("displacedAt")
   })
 
   it("still reports a missing domain as missing", async () => {
@@ -602,29 +598,6 @@ describe("refusing a duplicate without touching SES", () => {
     )
     expect(create).not.toHaveBeenCalled()
   })
-
-  it("does not call SES when another workspace has verified the name", async () => {
-    const create = mock(async () => ({
-      dkimTokens: ["aaa"],
-      status: "pending" as const,
-    }))
-    const store = domainStore({
-      ...base,
-      // No row of our own, but `core.domain_verified_elsewhere` says yes.
-      db: fakeDb({ select: () => [], taken: true }),
-      identity: identity({ create }),
-    })
-
-    const out = await store.create(TENANT, { name: "example.com" })
-
-    expect(out.status).toBe("conflict")
-    expect(create).not.toHaveBeenCalled()
-    // ⚠ STILL DOES NOT NAME THE HOLDER. The function it asked returns a boolean
-    // precisely so that this message cannot start naming customers.
-    expect(out.status === "conflict" && out.reason).not.toMatch(
-      /tenant|customer|workspace ".*"/i,
-    )
-  })
 })
 
 /**
@@ -657,16 +630,13 @@ describe("refusal", () => {
     expect(await at("failed")).toContain("failed verification")
   })
 
-  it("matches what create says for a name verified elsewhere", async () => {
+  it("has nothing to say about a name another workspace has verified", async () => {
     const store = domainStore({
       ...base,
       identity: identity(),
       db: fakeDb({ select: () => [], taken: true }),
     })
-    const created = await store.create(TENANT, { name: "example.com" })
-    expect(created.status === "conflict" ? created.reason : null).toBe(
-      await store.refusal(TENANT, "example.com"),
-    )
+    expect(await store.refusal(TENANT, "example.com")).toBeNull()
   })
 
   it("has nothing to say about a free name", async () => {
@@ -676,5 +646,120 @@ describe("refusal", () => {
       db: fakeDb({ select: () => [] }),
     })
     expect(await store.refusal(TENANT, "example.com")).toBeNull()
+  })
+})
+
+describe("taking a manual domain from the workspace that holds it", () => {
+  const holder = (over: Record<string, unknown> = {}) => [
+    {
+      domain_id: OTHER_ID,
+      tenant_id: OTHER_TENANT,
+      delegation_token: "not-this-tenants-token",
+      dkim_selector: "i10old000",
+      dkim_public_key: "OLDKEY",
+      delegated: false,
+      ...over,
+    },
+  ]
+
+  it("stands the holder down under its own tenant, before SES is asked", async () => {
+    const order: string[] = []
+    const tenants: unknown[] = []
+    const store = domainStore({
+      ...base,
+      now: () => NOW,
+      db: fakeDb({
+        select: () => [row({ status: "pending", sealed: "sealed:key" })],
+        holder: () => holder(),
+        update: () => [row({ status: "pending" })],
+        onExecute: (text, params) => {
+          if (text.includes("set_config")) tenants.push(params[0])
+        },
+        onSet: (values) => {
+          if (values.displacedAt) order.push("displace")
+        },
+      }),
+      identity: identity({
+        create: async () => {
+          order.push("ses")
+          return { dkimTokens: ["aaa"], status: "pending" }
+        },
+      }),
+    })
+
+    const out = await store.verify(TENANT, ID)
+
+    expect(out.status).toBe("ok")
+    expect(tenants).toContain(OTHER_TENANT)
+    expect(order).toEqual(["displace", "ses"])
+  })
+
+  it("clears its own displacement when it proves the name again", async () => {
+    const sets: Record<string, unknown>[] = []
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row({ status: "failed", displacedAt: NOW })],
+        update: () => [row({ status: "pending" })],
+        onSet: (values) => sets.push(values),
+      }),
+      identity: identity(),
+    })
+
+    await store.verify(TENANT, ID)
+
+    expect(sets.at(-1)).toMatchObject({ displacedAt: null })
+  })
+
+  it("does not move anything on a sweep, and never reaches SES", async () => {
+    const create = mock(async () => ({
+      dkimTokens: ["aaa"],
+      status: "pending" as const,
+    }))
+    const sets: Record<string, unknown>[] = []
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row({ status: "not_started", sealed: "sealed:key" })],
+        holder: () => holder(),
+        onSet: (values) => sets.push(values),
+      }),
+      identity: identity({ create }),
+    })
+
+    const out = await store.verify(TENANT, ID, { contest: false })
+
+    expect(out.status).toBe("claimed")
+    expect(create).not.toHaveBeenCalled()
+    expect(sets.some((v) => v.displacedAt)).toBe(false)
+  })
+})
+
+describe("polling a displaced domain", () => {
+  /**
+   * ⚠ SES'S OPINION IS THE NEW HOLDER'S NOW. The identity is keyed on the name,
+   * so copying `verified` from it would hand the name back to the row that
+   * lost it, on a poll, with no proof.
+   */
+  it("does not ask SES and does not write", async () => {
+    const status = mock(async () => ({
+      dkimTokens: ["aaa"],
+      status: "verified" as const,
+    }))
+    const sets: Record<string, unknown>[] = []
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row({ status: "failed", displacedAt: NOW })],
+        onSet: (values) => sets.push(values),
+      }),
+      identity: identity({ status }),
+    })
+
+    const out = await store.refresh(TENANT, ID)
+
+    expect(out.status === "ok" && out.domain.status).toBe("failed")
+    expect(status).not.toHaveBeenCalled()
+    expect(sets).toHaveLength(0)
   })
 })

@@ -38,21 +38,16 @@ export const errorNames = [
    */
   "domain_already_exists",
   /**
-   * The name is held, verified, by a workspace that is not the caller's.
+   * Another workspace verified the name in the same moment as the caller.
    *
-   * ⚠ THIS DOES LEAK ONE BIT, AND THE LEAK IS INHERENT RATHER THAN A WORDING
-   * CHOICE. Two workspaces must not both hold a verified domain — the second
-   * could send as it and receive its mail — so SOME request has to be refused,
-   * and being refused is itself the signal that somebody proved ownership. No
-   * phrasing removes that; vague phrasing only costs the legitimate owner the
-   * sentence telling them what to do. Every domain provider has this property
-   * for the same reason.
+   * ⚠ ONLY A RACE NOW. It used to mean "somebody else holds this name
+   * verified, talk to us if it is yours" — but proving a name now takes it from
+   * whoever holds it, so the only way to meet this is two proofs landing at
+   * once. Verifying again settles it.
    *
-   * ⚠ IT IS SEPARATE FROM `domain_already_exists` BECAUSE THE REMEDIES ARE
-   * OPPOSITE. That one means "look in your own domain list"; this one means
-   * "the name is spoken for, talk to us if it is yours". A client that showed
-   * one message for both would send half the people who hit it to the wrong
-   * place.
+   * ⚠ STILL SEPARATE FROM `domain_already_exists`, BECAUSE THE REMEDIES
+   * DIFFER. That one means "look in your own domain list"; this one means
+   * "press verify again".
    */
   "domain_already_claimed",
   /**

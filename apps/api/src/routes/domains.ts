@@ -228,15 +228,16 @@ domains.openapi(verify, async (c) => {
     case "missing":
       return c.json(notFound, 404)
     default:
-      // ⚠ A CONFLICT OVER THE NAME, NOT A VERDICT ON THEIR DNS. See the console
-      // route for the long version; the records may be entirely correct.
+      // ⚠ A RACE OVER THE NAME, NOT A VERDICT ON THEIR DNS. Proving a name takes
+      // it from whoever holds it, so this is only ever two proofs landing at
+      // once — see the console route for the long version.
       return c.json(
         {
           statusCode: 409,
           name: "domain_already_claimed" as const,
           message:
-            `${outcome.domain.name} has already been verified by another ` +
-            `workspace. If it is also yours, remove it there first.`,
+            `${outcome.domain.name} was verified by another workspace at the ` +
+            `same moment. Verify it again to settle which one holds it.`,
         },
         409,
       )

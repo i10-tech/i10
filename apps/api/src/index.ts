@@ -44,6 +44,8 @@ import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
 import { authEmailSender } from "./auth-email/sender.js"
+import { renderDomainTransfer } from "@repo/emails"
+import { domainTransferStore } from "./domains/transfers.js"
 import { domainOf } from "./send/address.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
@@ -595,6 +597,85 @@ const freshAuth = clerkFreshAuth(clerk, {
   log,
 })
 
+/**
+ * The one sender for mail i10 sends as itself — Clerk's auth emails and our
+ * own notices alike, through our own send path as the system tenant.
+ */
+const systemSender =
+  env.AUTH_EMAIL_FROM && authEmailTenantId && authEmailDomain
+    ? authEmailSender({
+        tenantId: authEmailTenantId,
+        from: env.AUTH_EMAIL_FROM,
+        /*
+         * ⚠ ITS OWN OPS OBJECT, CARRYING THE ONE EXEMPTION THE SEND GATE
+         * ALLOWS. `DomainStore.create` refuses to create a row for our
+         * own sending domains, so `AUTH_EMAIL_FROM` can never be a
+         * verified domain and the gate would refuse every password reset
+         * in the product. Scoping the exemption to the object the
+         * auth-email path builds — rather than to a flag on a request —
+         * is what keeps it unreachable from a customer's send.
+         */
+        ops: acceptDatabaseOps({
+          db,
+          queues: sendQueues,
+          alwaysSendable: [authEmailDomain],
+        }),
+        metering,
+        log,
+      })
+    : null
+
+/**
+ * The email that tells somebody a domain has been offered to them.
+ *
+ * ⚠ BEST EFFORT, AND THE OFFER STANDS WITHOUT IT. An existing user sees the
+ * offer on their domains page whether or not this arrives; the email is the
+ * only route for somebody without an account, so a failure is logged at
+ * error rather than swallowed.
+ */
+const consoleUrl = env.CONSOLE_ORIGINS[0]
+const transferNotice =
+  systemSender && consoleUrl
+    ? {
+        async send(input: {
+          to: string
+          offerId: string
+          domain: string
+          offeredBy: string
+          fromWorkspace: string
+          expiresAt: Date
+        }) {
+          const existing = await clerk.users.getUserList({
+            emailAddress: [input.to],
+            limit: 1,
+          })
+          const hasAccount = existing.totalCount > 0
+          // ⚠ `?new=1` SENDS A SIGNED-OUT VISITOR TO SIGN-UP RATHER THAN
+          // SIGN-IN — see the console's middleware. Either way they land back
+          // on the offer once they are in.
+          const url = `${consoleUrl}/transfers/${input.offerId}${hasAccount ? "" : "?new=1"}`
+          const rendered = await renderDomainTransfer({
+            url,
+            domain: input.domain,
+            offeredBy: input.offeredBy,
+            fromWorkspace: input.fromWorkspace,
+            hasAccount,
+            expires: input.expiresAt.toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+              timeZone: "UTC",
+            }),
+          })
+          await systemSender.send({
+            to: input.to,
+            ...rendered,
+            idempotencyKey: `domain-transfer:${input.offerId}`,
+          })
+        },
+      }
+    : undefined
+
 const app = createApp({
   apiKeyAuth: {
     // ⚠ OUR OWN TABLE, NOT CLERK. See auth/api-key.ts for why, and note the
@@ -620,29 +701,10 @@ const app = createApp({
     // would have nowhere to send from and nothing to attribute it to, and the
     // webhook then acknowledges the event while Clerk keeps sending — which is
     // the state the product is in today, and a safe place to fail to.
-    ...(env.AUTH_EMAIL_FROM && authEmailTenantId && authEmailDomain
+    ...(systemSender
       ? {
           authEmail: authEmailDelivery({
-            sender: authEmailSender({
-              tenantId: authEmailTenantId,
-              from: env.AUTH_EMAIL_FROM,
-              /*
-               * ⚠ ITS OWN OPS OBJECT, CARRYING THE ONE EXEMPTION THE SEND GATE
-               * ALLOWS. `DomainStore.create` refuses to create a row for our
-               * own sending domains, so `AUTH_EMAIL_FROM` can never be a
-               * verified domain and the gate would refuse every password reset
-               * in the product. Scoping the exemption to the object the
-               * auth-email path builds — rather than to a flag on a request —
-               * is what keeps it unreachable from a customer's send.
-               */
-              ops: acceptDatabaseOps({
-                db,
-                queues: sendQueues,
-                alwaysSendable: [authEmailDomain],
-              }),
-              metering,
-              log,
-            }),
+            sender: systemSender,
             log,
           }),
         }
@@ -842,6 +904,42 @@ const app = createApp({
     organizations: {
       rename: async (clerkOrgId: string, name: string) => {
         await clerk.organizations.updateOrganization(clerkOrgId, { name })
+      },
+    },
+    /*
+     * ⚠ A HUNDRED IS THE CEILING, NOT A PAGE. Nobody belongs to that many
+     * workspaces; a person who somehow does is offered the first hundred as
+     * transfer targets rather than a paginated picker for a case that does not
+     * exist.
+     */
+    transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
+    transferNotice,
+    people: {
+      /*
+       * ⚠ VERIFIED ADDRESSES ONLY. An offer is accepted by whoever holds the
+       * address it names, and an unverified address on a Clerk account is a
+       * string somebody typed — accepting on it would let anybody claim any
+       * offer by adding the recipient's address to their own profile.
+       */
+      get: async (userId: string) => {
+        const user = await clerk.users.getUser(userId)
+        const verifiedEmails = user.emailAddresses
+          .filter((e) => e.verification?.status === "verified")
+          .map((e) => e.emailAddress.toLowerCase())
+        const name =
+          [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+          user.primaryEmailAddress?.emailAddress ||
+          "Someone"
+        return { name, verifiedEmails }
+      },
+    },
+    memberships: {
+      list: async (userId: string) => {
+        const { data } = await clerk.users.getOrganizationMembershipList({
+          userId,
+          limit: 100,
+        })
+        return data.map((m) => ({ id: m.organization.id, name: m.organization.name }))
       },
     },
     // ⚠ NO CREDENTIAL AND NO OUTBOUND HTTP BEYOND DNS-OVER-HTTPS TO TWO FIXED

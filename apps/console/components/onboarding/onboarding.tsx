@@ -20,6 +20,7 @@ import type {
   DomainSummary,
   OnboardingState,
   PlanSummary,
+  TransferOffer,
 } from "@/lib/types"
 
 /**
@@ -52,6 +53,7 @@ export function Onboarding({
   workspaceName,
   tenantId,
   domains,
+  offers = [],
   plans,
   billing,
   checkoutId,
@@ -63,6 +65,8 @@ export function Onboarding({
   /** Keys the remembered step, so it never crosses workspaces. */
   tenantId: string
   domains: DomainSummary[]
+  /** Domains offered to this person by email, shown on the domain step. */
+  offers?: TransferOffer[]
   plans: PlanSummary[]
   billing: BillingState
   /** From the checkout cookie (see lib/arrival.ts), for the plan step's outcome banner. */
@@ -232,7 +236,7 @@ export function Onboarding({
         )}
 
         {step === "domain" && (
-          <StepDomain domains={domains} onDone={() => go("verify")} />
+          <StepDomain domains={domains} offers={offers} onDone={() => go("verify")} />
         )}
 
         {step === "verify" && (

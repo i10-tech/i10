@@ -6,6 +6,7 @@ import {
   index,
   integer,
   jsonb,
+  pgPolicy,
   pgSchema,
   primaryKey,
   text,
@@ -410,6 +411,23 @@ export const domains = core.table(
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     dnsCheckedAt: timestamp("dns_checked_at", { withTimezone: true }),
 
+    /**
+     * When another workspace proved this name and took it from this row.
+     *
+     * ⚠ THE LATEST PROOF WINS, SO THIS IS HOW THE LOSER FINDS OUT. A workspace
+     * that verifies a name somebody else holds takes it — the case it exists
+     * for is an owner who lost the account the domain was in and has to prove
+     * it again from a new one. The old row is kept, set `failed` so it cannot
+     * send, and stamped here so the console can say WHY rather than showing a
+     * failure that reads like broken DNS.
+     *
+     * ⚠ AND WHILE IT IS SET, NOTHING BUT A PERSON'S VERIFY MAY MOVE THE ROW.
+     * The SES identity is keyed on the name, so after a move SES's opinion is
+     * the NEW holder's; a poll copying it here would re-verify the loser. See
+     * `refresh`. Cleared by this row's own successful verify.
+     */
+    displacedAt: timestamp("displaced_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -508,6 +526,110 @@ export const delegations = core.table(
       columns: [t.tenantId],
       foreignColumns: [tenants.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * An offer to move a domain to whoever holds an email address.
+ *
+ * ⚠ ADDRESSED TO AN EMAIL, NOT A WORKSPACE, because the person receiving it
+ * may not have an account yet. It is accepted by somebody signed in with that
+ * address VERIFIED at Clerk, into whichever workspace they are in when they
+ * press Accept — so a forwarded link is useless to anybody else, and there is
+ * no token to leak.
+ *
+ * ⚠ TWO AUDIENCES, SO TWO POLICIES, BOTH DECLARED HERE AND GENERATED. The
+ * sending workspace sees its own offers by `app.tenant_id`, exactly like every
+ * other table. The recipient cannot — the row belongs to somebody else's
+ * tenant — so a second policy admits rows whose `recipient_email` is one of
+ * `app.recipient_emails`, which the API sets only from Clerk's verified
+ * addresses for the signed-in person. Policies are permissive, so either one
+ * suffices; neither widens the other.
+ *
+ * ⚠ THE RECIPIENT POLICY READS ITS SETTING WITH `missing_ok`, THE ONE PLACE IN
+ * `core` THAT DOES. Every other policy raises when its setting is absent, so a
+ * forgotten `withTenant()` fails loudly; here the setting is absent on every
+ * ordinary query by design, and raising would break the sender's own reads.
+ * An unset or empty value matches nothing.
+ *
+ * ⚠ THE DOMAIN'S NAME AND THE SENDER ARE COPIED ONTO THE ROW. The recipient
+ * cannot read the sender's `domains` or `tenants` rows — RLS — so what they
+ * are being offered has to travel with the offer.
+ */
+export const domainTransfers = core.table(
+  "domain_transfers",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+
+    /** The sending workspace. */
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /**
+     * ⚠ NOT A FOREIGN KEY, AND A CASCADE WOULD BE THE BUG. Accepting moves the
+     * domain by deleting its row under the sender's tenant and inserting it
+     * under the recipient's — so `on delete cascade` would erase the very
+     * offer being accepted, mid-transaction, along with every earlier offer
+     * for that domain. A deleted domain leaves its offer pointing at nothing,
+     * and accepting it answers `missing`.
+     */
+    domainId: uuid("domain_id").notNull(),
+
+    domainName: text("domain_name").notNull(),
+
+    /** Stored lowercased; compared lowercased. */
+    recipientEmail: text("recipient_email").notNull(),
+
+    /** Who pressed Transfer, and from which workspace — shown to the recipient. */
+    offeredBy: text("offered_by").notNull(),
+    fromWorkspace: text("from_workspace").notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    /** The workspace it landed in. */
+    acceptedTenantId: uuid("accepted_tenant_id"),
+    declinedAt: timestamp("declined_at", { withTimezone: true }),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("domain_transfers_tenant_idx").on(t.tenantId),
+    index("domain_transfers_recipient_idx").on(t.recipientEmail),
+
+    /**
+     * ⚠ ONE OPEN OFFER PER DOMAIN. Two would let two people accept the same
+     * domain, and the second acceptance would find nothing to move. A new
+     * offer cancels the old one first; see `offer`.
+     */
+    uniqueIndex("domain_transfers_open_unique")
+      .on(t.domainId)
+      .where(
+        sql`${t.acceptedAt} is null and ${t.declinedAt} is null and ${t.canceledAt} is null`,
+      ),
+
+    pgPolicy("domain_transfers_sender", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("domain_transfers_recipient_read", {
+      for: "select",
+      using: sql`${t.recipientEmail} = any(string_to_array(nullif(current_setting('app.recipient_emails', true), ''), ','))`,
+    }),
+    /*
+     * ⚠ UPDATE ONLY, NEVER INSERT OR DELETE. A recipient answers an offer; they
+     * cannot make one or erase one. And the check keeps the row addressed to
+     * them, so an answer cannot re-address it to somebody else.
+     */
+    pgPolicy("domain_transfers_recipient_answer", {
+      for: "update",
+      using: sql`${t.recipientEmail} = any(string_to_array(nullif(current_setting('app.recipient_emails', true), ''), ','))`,
+      withCheck: sql`${t.recipientEmail} = any(string_to_array(nullif(current_setting('app.recipient_emails', true), ''), ','))`,
+    }),
   ],
 )
 
