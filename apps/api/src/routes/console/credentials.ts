@@ -46,27 +46,37 @@ async function resolveScope(
   tenantId: string,
   value: unknown,
 ): Promise<{ ok: true; scopes: string[] } | { ok: false; error: string }> {
-  if (value === undefined || value === null || value === "") {
-    return { ok: true, scopes: [] }
-  }
-  if (typeof value !== "string") {
+  // ⚠ ABSENT OR EMPTY IS EVERY DOMAIN — the same reading the send path gives
+  // an empty `scopes`, so the two can never disagree about an unrestricted key.
+  if (value === undefined || value === null) return { ok: true, scopes: [] }
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
     return {
       ok: false,
-      error: "`domain` must be a domain name, or null for every domain.",
+      error: "`domains` must be a list of domain names, or empty for every domain.",
     }
   }
 
-  const name = value.trim().toLowerCase()
+  const names = [
+    ...new Set((value as string[]).map((v) => v.trim().toLowerCase())),
+  ].filter(Boolean)
+  if (names.length === 0) return { ok: true, scopes: [] }
+
   if (!d.domains) {
     return { ok: false, error: "Domains are not configured on this deployment." }
   }
 
-  const domains = await d.domains.list(tenantId)
-  if (!domains.some((domain) => domain.name.toLowerCase() === name)) {
-    return { ok: false, error: `You do not have a domain called ${name}.` }
+  const held = new Set(
+    (await d.domains.list(tenantId)).map((x) => x.name.toLowerCase()),
+  )
+  const unknown = names.filter((name) => !held.has(name))
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      error: `You do not have a domain called ${unknown.join(", ")}.`,
+    }
   }
 
-  return { ok: true, scopes: [domainScope(name)] }
+  return { ok: true, scopes: names.map(domainScope) }
 }
 
 export function mountCredentials(app: Hono, d: ConsoleDeps): void {
@@ -89,14 +99,12 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
         mode: k.mode,
         scopes: k.scopes,
         /*
-         * ⚠ DERIVED, AND SINGULAR, THOUGH THE COLUMN HOLDS A LIST. The
-         * interface offers "every domain" or "one domain", because that is the
-         * choice people actually make and a multi-select is a worse version of
-         * two keys. The array stays plural so an operator can do something
-         * cleverer by hand without this needing a migration; the console shows
-         * the first and would show a second if one ever appeared.
+         * ⚠ DERIVED FROM `scopes`, AND PLURAL NOW. A key may be limited to
+         * several domains — two products sharing a deploy, say — and an empty
+         * list is every domain. The `domain:` encoding stays the API's business;
+         * the console only ever sees names.
          */
-        domain: scopedDomains(k.scopes)[0] ?? null,
+        domains: scopedDomains(k.scopes),
         created_at: k.createdAt.toISOString(),
         last_used_at: k.lastUsedAt?.toISOString() ?? null,
         expires_at: k.expiresAt?.toISOString() ?? null,
@@ -116,7 +124,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
 
     const mode = body?.mode === "test" ? "test" : "live"
 
-    const scope = await resolveScope(d, tenantId, body?.domain)
+    const scope = await resolveScope(d, tenantId, body?.domains)
     if (!scope.ok) return c.json(validation(scope.error), 422)
 
     try {
@@ -138,7 +146,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
           prefix: created.prefix,
           mode: created.mode,
           scopes: created.scopes,
-          domain: scopedDomains(created.scopes)[0] ?? null,
+          domains: scopedDomains(created.scopes),
           created_at: created.createdAt.toISOString(),
           /** ⚠ THE ONLY RESPONSE IN THE SYSTEM THAT EVER CARRIES THIS. */
           secret: created.secret,
@@ -178,7 +186,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     const { tenantId } = c.get("auth")
     const body = await readJson(c)
 
-    const scope = await resolveScope(d, tenantId, body?.domain)
+    const scope = await resolveScope(d, tenantId, body?.domains)
     if (!scope.ok) return c.json(validation(scope.error), 422)
 
     const updated = await d.keys.store.setScopes(
@@ -220,7 +228,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       prefix: updated.key.prefix,
       mode: updated.key.mode,
       scopes: updated.key.scopes,
-      domain: scopedDomains(updated.key.scopes)[0] ?? null,
+      domains: scopedDomains(updated.key.scopes),
     })
   })
 

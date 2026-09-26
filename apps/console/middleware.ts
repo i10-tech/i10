@@ -56,6 +56,8 @@ const isPublic = createRouteMatcher([
  * before reaching a page. Reviewing the interface must not require provisioning
  * an identity provider.
  */
+const isTransfer = createRouteMatcher(["/transfers/(.*)"])
+
 const PREVIEW =
   process.env.NODE_ENV !== "production" && process.env.CONSOLE_PREVIEW === "1"
 
@@ -78,6 +80,25 @@ export default PREVIEW
   : clerkMiddleware(
       async (auth, request) => {
         if (isPublic(request)) return
+
+        /*
+         * ⚠ A TRANSFER EMAIL SENT TO SOMEBODY WITHOUT AN ACCOUNT CARRIES
+         * `?new=1`, AND IT GOES TO SIGN-UP RATHER THAN SIGN-IN. They have to
+         * create the account with the address the offer names, so being shown
+         * a sign-in form first is a dead end. Once signed up they come back to the
+         * domain step of onboarding, where the offer is waiting.
+         */
+        if (isTransfer(request) && request.nextUrl.searchParams.get("new") === "1") {
+          const session = await auth()
+          if (!session.userId) {
+            // ⚠ BACK TO ONBOARDING, NOT THE OFFER PAGE. A new account sets up
+            // there, and its domain step lists offers addressed to it with an
+            // Accept button — so the domain they came for IS the first step.
+            return session.redirectToSignUp({
+              returnBackUrl: new URL("/onboarding", request.nextUrl).toString(),
+            })
+          }
+        }
 
         // Everything else. ⚠ A DENY-BY-DEFAULT LIST, NOT AN ALLOW ONE: a page added
         // to the console tomorrow is protected because nobody remembered to protect

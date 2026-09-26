@@ -30,10 +30,13 @@ import type { CreatedApiKey, DomainSummary } from "@/lib/types"
 export function StepSend({
   domains,
   hasApiKey,
+  recipient = null,
   onDone,
 }: {
   domains: DomainSummary[]
   hasApiKey: boolean
+  /** The person's own verified address, for the snippet's `to`. */
+  recipient?: string | null
   onDone: () => void
 }) {
   const [key, setKey] = React.useState<CreatedApiKey | null>(null)
@@ -85,7 +88,7 @@ export function StepSend({
         const result = await createApiKey({
           name: "onboarding",
           mode: "live",
-          domain: null,
+          domains: [],
         })
         if (!result.ok) {
           toast.error("Could not create a key", { description: result.error })
@@ -98,12 +101,16 @@ export function StepSend({
     )
   }
 
+  // ⚠ TO THEMSELVES, so running the snippet lands a real email in an inbox they
+  // can open — the proof that it works, not just a 200.
+  const to = recipient ?? "you@example.com"
+
   const curl = `curl -X POST https://api.i10.tech/emails \\
   -H "Authorization: Bearer ${secret}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "from": "${from}",
-    "to": ["you@example.com"],
+    "to": ["${to}"],
     "subject": "Hello from i10",
     "html": "<p>It works.</p>"
   }'`
@@ -114,7 +121,7 @@ const i10 = new I10("${secret}")
 
 await i10.emails.send({
   from: "${from}",
-  to: ["you@example.com"],
+  to: ["${to}"],
   subject: "Hello from i10",
   html: "<p>It works.</p>",
 })`
@@ -125,7 +132,7 @@ client = i10.Client(api_key="${secret}")
 
 client.emails.send({
     "from": "${from}",
-    "to": ["you@example.com"],
+    "to": ["${to}"],
     "subject": "Hello from i10",
     "html": "<p>It works.</p>",
 })`

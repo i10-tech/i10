@@ -14,6 +14,7 @@ import Invitation from "./templates/invitation.js"
 import OrganizationInvitation from "./templates/organization-invitation.js"
 import OrganizationMemberJoined from "./templates/organization-member-joined.js"
 import WaitlistConfirmation from "./templates/waitlist-confirmation.js"
+import DomainTransfer from "./templates/domain-transfer.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -281,4 +282,19 @@ export async function renderClerkEmail(
   }
 
   return null
+}
+
+/**
+ * The email offering a domain to somebody. Not a Clerk template — sent by the
+ * API when a workspace transfers a domain; see apps/api/src/domains/transfers.ts.
+ */
+export async function renderDomainTransfer(
+  props: React.ComponentProps<typeof DomainTransfer>,
+): Promise<RenderedEmail> {
+  const element = DomainTransfer(props)
+  return {
+    subject: `${props.offeredBy} wants to transfer ${props.domain} to you`,
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
 }

@@ -15,8 +15,6 @@ const records = (
   dnsRecordsFor({
     domain: "example.com",
     mailFromSubdomain: "send",
-    bounceSubdomain: "bounce",
-    bounceHost: "mx.i10.tech",
     region: "eu-central-1",
     dkimSelector,
     dkimPublicKey,
@@ -27,7 +25,7 @@ const records = (
 const find = (type: string, name: string) =>
   records().find((r) => r.type === type && r.name === name)
 
-describe("the MAIL FROM records", () => {
+describe("the return path records", () => {
   // ⚠ Without the MX, bounces go nowhere and SES refuses the identity.
   it("points the return path at the region's feedback host", () => {
     expect(find("MX", "send.example.com")).toMatchObject({
@@ -44,7 +42,7 @@ describe("the MAIL FROM records", () => {
    */
   it("uses a soft fail", () => {
     const spf = find("TXT", "send.example.com")
-    expect(spf?.value).toBe("v=spf1 include:amazonses.com ~all")
+    expect(spf?.value).toBe("v=spf1 include:_spf.i10.tech ~all")
     expect(spf?.value).not.toContain("-all")
   })
 
@@ -55,7 +53,7 @@ describe("the MAIL FROM records", () => {
    * with nothing to tell them why.
    */
   it("names our senders behind an include, not by address", () => {
-    const spf = find("TXT", "bounce.example.com")
+    const spf = find("TXT", "send.example.com")
     expect(spf?.value).toBe("v=spf1 include:_spf.i10.tech ~all")
     expect(spf?.value).not.toMatch(/ip4:|ip6:/)
   })
@@ -68,32 +66,20 @@ describe("the MAIL FROM records", () => {
   })
 
   /**
-   * ⚠ TWO RETURN PATHS, AND THIS IS WHAT MAKES DMARC PASS ON SPF WHATEVER SENT
-   * THE MAIL. A name has one MX target and the two routes need different ones —
-   * Amazon's feedback host for SES, ours for direct. Sharing one label would
-   * mean one of the two routes bounces into the other's mailbox.
+   * ⚠ ONE RETURN PATH FOR BOTH ROUTES, AND THIS IS WHAT MAKES DMARC PASS ON SPF
+   * WHATEVER SENT THE MAIL. `_spf.i10.tech` lists Amazon and our own MTA, so
+   * one TXT authorises both senders; the MX stays Amazon's because SES
+   * re-checks it. There is no second return path to publish.
    */
-  it("gives the direct route its own return path, pointed at us", () => {
-    expect(find("MX", "bounce.example.com")).toMatchObject({
-      value: "mx.i10.tech",
-      priority: 10,
-    })
-    expect(find("MX", "send.example.com")?.value).toContain("amazonses.com")
-  })
-
-  // ⚠ Each path authorises only the sender that uses it. Listing both on both
-  // lets each forge the other's bounces and spends SPF lookups for nothing.
-  it("does not cross-authorise the two senders", () => {
-    expect(find("TXT", "send.example.com")?.value).not.toContain("_spf.i10.tech")
-    expect(find("TXT", "bounce.example.com")?.value).not.toContain("amazonses.com")
+  it("authorises both senders on the one return path", () => {
+    expect(find("TXT", "send.example.com")?.value).toContain("include:_spf.i10.tech")
+    expect(records().some((r) => r.name.startsWith("bounce."))).toBe(false)
   })
 
   it("follows a custom return path", () => {
     const custom = dnsRecordsFor({
       domain: "example.com",
       mailFromSubdomain: "bounces",
-      bounceSubdomain: "bounce",
-      bounceHost: "mx.i10.tech",
       region: "eu-central-1",
       dkimSelector: null,
       dkimPublicKey: null,
@@ -171,19 +157,15 @@ describe("status", () => {
 })
 
 /**
- * ⚠ THE CUSTOM MAIL FROM STAYS. An earlier draft proposed dropping it so that
- * one MX could serve both routes; it is not ours to drop. SES needs its own
- * feedback host there to accept the return path, so the SES route keeps these
- * records unchanged and DIRECT sends use i10's own bounce domain as the
- * envelope sender instead — which needs no record in the customer's DNS at all.
- * DMARC still passes on both routes, because BYODKIM aligns on the customer's
- * domain either way.
+ * ⚠ FOUR RECORDS, BECAUSE THERE IS ONE RETURN PATH. There used to be six — a
+ * second return path, `bounce.<domain>`, with its MX pointed at us so late
+ * bounces for mail we delivered ourselves could come back. SES pins the return
+ * path's MX to Amazon, so the two could not share a name; they now do, and the
+ * price is those late bounces. See `returnPathDomain` in domains/zone.ts.
  */
 describe("what the customer publishes, in total", () => {
-  it("is six records and no more", () => {
+  it("is four records and no more", () => {
     expect(records().map((r) => `${r.record}:${r.type}`)).toEqual([
-      "SPF:MX",
-      "SPF:TXT",
       "SPF:MX",
       "SPF:TXT",
       "DKIM:TXT",
@@ -196,6 +178,6 @@ describe("what the customer publishes, in total", () => {
   // leaves through SES or through our own MTA.
   it("names amazon only where SES must be named", () => {
     const amazon = records().filter((r) => r.value.includes("amazonses.com"))
-    expect(amazon.map((r) => r.name)).toEqual(["send.example.com", "send.example.com"])
+    expect(amazon.map((r) => `${r.type}:${r.name}`)).toEqual(["MX:send.example.com"])
   })
 })

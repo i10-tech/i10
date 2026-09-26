@@ -1,0 +1,1 @@
+ALTER TABLE "core"."domains" ADD COLUMN "displaced_at" timestamp with time zone;

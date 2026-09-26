@@ -33,7 +33,7 @@ export interface Failure {
  */
 const TITLES: Record<string, string> = {
   domain_already_exists: "That domain is already here",
-  domain_already_claimed: "That domain belongs to another workspace",
+  domain_already_claimed: "Verified elsewhere at the same moment",
   plan_limit_exceeded: "Your plan does not cover that",
   tenant_not_ready: "Your workspace is still being set up",
   invalid_access: "Please sign in again",

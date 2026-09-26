@@ -21,17 +21,21 @@
 # Scoped to the Stalwart pod and to three ports. 587 is absent because nothing
 # listens there, and 8080 because the management API belongs behind Traefik.
 #
-# ⚠ THIS POLICY IS NOT WHAT LETS THE SEND WORKER SUBMIT, AND BELIEVING IT WAS
+# ⚠ THIS POLICY IS NOT WHAT LETS THE SEND WORKER RELAY, AND BELIEVING IT WAS
 # COST A ROUND OF LOOKING IN THE WRONG PLACE. NetworkPolicies are ADDITIVE: the
 # namespace also carries `allow-same-namespace`, whose `podSelector: {}` and
 # `from: namespaceSelector(i10-prod)` admit every pod in i10-prod to every other
-# pod on EVERY port. The worker is in i10-prod, so it already reaches 465, and
+# pod on EVERY port. The worker is in i10-prod, so it already reaches 2525, and
 # no rule here needs to change for it. Verified 2026-09-17 by probing 465 from a
 # throwaway pod in the namespace.
 #
 # What this rule governs is traffic from OUTSIDE the namespace — which is to say
 # the internet, since it has no `from`. The ports below are the ones the world
-# is allowed to reach, and a submission port does not belong in that list.
+# is allowed to reach.
+#
+# ⚠ 2525 MUST NEVER BE ADDED HERE. The `relay` listener takes mail without
+# authentication because only the cluster can reach it; listing it would make
+# this server an open relay for the whole internet.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

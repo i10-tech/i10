@@ -43,8 +43,9 @@ spec:
   # node as every client's address. The container claims the host ports directly
   # instead; see the note on `ports:` in statefulset.yaml.
   #
-  # The Service remains because in-cluster callers still need a stable name for
-  # SMTP submission, and because the ports document what the pod serves.
+  # The Service remains because in-cluster callers still need a stable name —
+  # the send worker dials `relay` through it — and because the ports document
+  # what the pod serves.
   #
   # ⚠ AND IT MUST NOT BECOME A LoadBalancer AGAIN while the hostPorts exist.
   # svclb would try to bind the same ports on the same node and its DaemonSet
@@ -59,3 +60,5 @@ spec:
     - { name: submissions, port: 465, targetPort: submissions }
     - { name: submission, port: 587, targetPort: submission }
     - { name: imaps, port: 993, targetPort: imaps }
+    # In-cluster only, like everything on a ClusterIP. See statefulset.yaml.
+    - { name: relay, port: 2525, targetPort: relay }

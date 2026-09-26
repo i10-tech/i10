@@ -132,12 +132,18 @@ export function StepPlan({
        * receipt with an afterthought attached — so the cards read as optional
        * detail and the only live control was "Finish set-up" at the bottom.
        */}
+      {/*
+       * ⚠ `done`, NOT "A CHECKOUT ID EXISTS". Keyed on the id, this said "Your
+       * plan is active" after a checkout that was closed, never loaded, or —
+       * via the browser-scoped cookie — belonged to a different account. It
+       * now waits for the same facts that reveal "Continue to dashboard".
+       */}
       <div className="text-center">
         <h1 className="text-xl font-semibold tracking-tight">
-          {outcomeId ? "You're all set" : "Pick a plan"}
+          {done ? "You're all set" : "Pick a plan"}
         </h1>
         <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-          {outcomeId
+          {done
             ? "Your plan is active. Carry on, or change it here — you can do either at any time."
             : "Start free and change it whenever. Allowances move the moment a payment clears."}
         </p>

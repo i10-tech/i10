@@ -93,6 +93,14 @@ spec:
             # a hang instead of a refusal.
             - { name: submission, containerPort: 587 }
             - { name: imaps, containerPort: 993, hostPort: 993 }
+            # ⚠ THE SEND WORKER'S RELAY, AND THE ABSENCE OF A hostPort IS THE
+            # SECURITY. `relay` on 2525 takes mail WITHOUT authentication — the
+            # trust is where the connection comes from, not what it presents. No
+            # hostPort means nothing on the node's public addresses answers here,
+            # and `allow-public-mail` does not list it, so only pods inside the
+            # cluster's own policy boundary reach it. Adding a hostPort would
+            # publish an open relay. See config/README.md, "The internal relay".
+            - { name: relay, containerPort: 2525 }
             # Deliberately NOT exposed on the host. The management API reaches
             # the internet through Traefik, which is where its TLS and its
             # per-host gating live.
@@ -164,7 +172,7 @@ spec:
           # Built from services/authd by .github/workflows/build.yml. `prod-latest`
           # matches every other i10 workload: the Build job tags prod-<sha> and
           # prod-latest only on main, so staging can never publish over it.
-          image: ghcr.io/i10-tech/i10-authd:prod-29ec70afd53f0f165a9d586af03e5da2c9eb4a8f@sha256:65c3d1b25952a42d0bf237e57257f1994a34db4562fa1b82b693a8e179a0ac74
+          image: ghcr.io/i10-tech/i10-authd:prod-97bbd9a7ae755a443b75baed68f7f3328111a73b@sha256:c07d156bab9af5902ffd9a340c7e887577d29bd07798ccf22b8b9eb58799665e
 
           securityContext:
             allowPrivilegeEscalation: false

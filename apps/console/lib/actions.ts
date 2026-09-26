@@ -14,7 +14,9 @@ import type {
   TemplateRow,
   TopicRow,
   VerifiedDomain,
+  TransferOffer,
   WebhookEndpoint,
+  Workspace,
 } from "@/lib/types"
 
 /**
@@ -219,6 +221,64 @@ export async function deleteDomain(id: string) {
   )
 }
 
+/**
+ * Offers a domain to whoever holds an email address. Moves nothing yet.
+ *
+ * ⚠ `emailed` IS FALSE WHEN THE NOTICE COULD NOT BE SENT. The offer still
+ * stands and an existing user will find it on their domains page; somebody
+ * without an account will not hear about it, and the sender is told so.
+ */
+export async function offerTransfer(id: string, email: string) {
+  return run(
+    () =>
+      api<TransferOffer & { emailed: boolean }>(
+        `/console/domains/${encodeURIComponent(id)}/transfer`,
+        { method: "POST", body: { email } },
+      ),
+    [`/domains/${encodeURIComponent(id)}`],
+  )
+}
+
+export async function cancelTransfer(id: string) {
+  return run(
+    () =>
+      api<{ canceled: true }>(`/console/domains/${encodeURIComponent(id)}/transfer`, {
+        method: "DELETE",
+      }),
+    [`/domains/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
+ * Takes an offered domain into one of this person's workspaces, or into the
+ * current one when none is named.
+ *
+ * ⚠ BY CLERK ORGANIZATION ID. The API checks it against the person's current
+ * memberships before resolving a tenant, so nothing here can point at a
+ * workspace they are not in.
+ */
+export async function acceptTransfer(id: string, workspace?: string) {
+  return run(
+    () =>
+      api<{ domain_id: string; domain_name: string; workspace: Workspace | null }>(
+        `/console/transfers/${encodeURIComponent(id)}/accept`,
+        // ⚠ NO WORKSPACE MEANS THE CURRENT ONE — onboarding's case.
+        { method: "POST", body: workspace ? { workspace } : {} },
+      ),
+    ["/domains", "/", "/onboarding"],
+  )
+}
+
+export async function declineTransfer(id: string) {
+  return run(
+    () =>
+      api<{ declined: true }>(`/console/transfers/${encodeURIComponent(id)}/decline`, {
+        method: "POST",
+      }),
+    ["/domains"],
+  )
+}
+
 export async function lookupDns(domain: string) {
   // ⚠ NO REVALIDATION: THIS IS A READ. It is an action rather than a loader
   // because it runs in response to typing, not to navigation — the onboarding
@@ -231,8 +291,8 @@ export async function lookupDns(domain: string) {
 }
 
 /**
- * Why the API would refuse to add this name — ours, already in this workspace,
- * or verified by another — asked while it is still being typed.
+ * Why the API would refuse to add this name — ours, or already in this
+ * workspace — asked while it is still being typed.
  *
  * ⚠ READ-ONLY, AND ITS FAILURE MEANS "NO OBJECTION". The create still decides;
  * this only lets the box go red before the button is pressed.
@@ -387,8 +447,8 @@ export async function stepUp() {
 export async function createApiKey(input: {
   name: string
   mode: "live" | "test"
-  /** A domain name to restrict it to, or `null` for every domain. */
-  domain: string | null
+  /** Domain names to restrict it to; empty for every domain. */
+  domains: string[]
 }) {
   /*
    * ⚠ THE SECRET IS IN THIS RETURN VALUE AND NOWHERE ELSE, EVER. Nothing stores
@@ -411,12 +471,13 @@ export async function createApiKey(input: {
  * redeploy the secret everywhere it lives — enough friction that nobody does
  * it, which leaves every key unrestricted and the feature decorative.
  */
-export async function updateApiKeyScope(id: string, domain: string | null) {
+/** Empty `domains` is every domain. */
+export async function updateApiKeyScope(id: string, domains: string[]) {
   return run(
     () =>
       api<ApiKeyRow>(`/console/api-keys/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        body: { domain },
+        body: { domains },
       }),
     ["/api-keys"],
   )

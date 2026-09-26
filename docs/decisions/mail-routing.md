@@ -55,32 +55,27 @@ old one and cut over when it resolves.
 
 ---
 
-## The six records
+## The four records
 
 | record | name                             | type                          |
 | ------ | -------------------------------- | ----------------------------- |
 | SPF    | `send.<domain>`                  | MX → SES feedback host        |
-| SPF    | `send.<domain>`                  | TXT → `include:amazonses.com` |
-| SPF    | `bounce.<domain>`                | MX → `MAIL_BOUNCE_HOST`       |
-| SPF    | `bounce.<domain>`                | TXT → `include:_spf.i10.tech` |
+| SPF    | `send.<domain>`                  | TXT → `include:_spf.i10.tech` |
 | DKIM   | `<selector>._domainkey.<domain>` | TXT                           |
 | DMARC  | `_dmarc.<domain>`                | TXT                           |
 
-⚠ **FOUR UNTIL 2026-09-14, AND THE TWO NEW ONES ARE THE DIRECT ROUTE'S RETURN
-PATH.** A delegating customer still publishes three NS record sets and nothing
-else, because both new names live under `mail.` — which makes delegation
-strictly more attractive than it was: three records either way, against six.
+⚠ **SIX FROM 2026-09-14 TO 2026-09-26.** There was a second return path,
+`bounce.<domain>`, for the direct route; see "One return path" below for why it
+went. A delegating customer publishes three NS record sets either way.
 
-⚠ **EACH SPF TXT CARRIES ONE INCLUDE, NOT BOTH.** A return path is only ever
-used by the route that owns it, so naming SES in `bounce.`'s record would
-authorise Amazon to send as a domain on a path Amazon never touches, and spend
-one of the ten lookups to do it.
+⚠ **ONE SPF TXT AUTHORISES BOTH SENDERS, BECAUSE THE INCLUDE IS OURS.**
+`_spf.i10.tech` is `v=spf1 include:amazonses.com a:mail.i10.tech -all`, so SES
+and our relay both pass on the one name both routes write.
 
 ### SPF names us with an `include:`, never an address
 
 ```
-send.<domain>    TXT   v=spf1 include:amazonses.com ~all
-bounce.<domain>  TXT   v=spf1 include:_spf.i10.tech ~all
+send.<domain>    TXT   v=spf1 include:_spf.i10.tech ~all
 ```
 
 ⚠ **An `ip4:` would pin our infrastructure into records we cannot edit.**
@@ -94,33 +89,42 @@ i10.tech. Conflating them means every customer's SPF inherits every include we
 ever add for our own mail, and the limit is reached by a change nobody
 connected to customer deliverability. `MAIL_SPF_INCLUDE` is the variable.
 
-### Custom MAIL FROM stays
+### One return path
 
-⚠ **An earlier draft proposed dropping it so one MX could serve both routes.
-That was wrong and it is not ours to drop** — it is what gives the SES route an
-aligned return path and somewhere for bounces to land.
+**Decided 2026-09-26, replacing "Custom MAIL FROM stays" (2026-09-14).** SES
+and the relay write the same envelope sender, `<label>.<domain>` — the
+`mail_from_subdomain` column, default `send`, Resend's `custom_return_path`.
+Every reader derives it from `returnPathDomain` in `src/domains/zone.ts`: the
+records we tell customers to publish, the zone we serve for a delegated domain,
+the MAIL FROM registered with SES, and the envelope the worker writes.
 
-The apparent conflict is that `send.<domain>`'s MX can only point at one host,
-and SES requires its own feedback host there. The answer is a **second return
-path**: `bounce.<domain>`, whose MX names our own inbound host and whose TXT
-includes `_spf.i10.tech`.
+⚠ **WHY THERE WERE TWO.** A name has one MX, and SES requires its own feedback
+host there — it re-checks, and on a mismatch silently falls back to its own
+return path, which keeps sending and loses SPF alignment. So the direct route
+had its own name, `bounce.<domain>`, with the MX pointed at us, so that bounces
+mailed back later for messages we delivered ourselves would reach Stalwart.
 
-⚠ **AN EARLIER VERSION OF THIS DOCUMENT SAID DIRECT SENDS USE I10'S OWN BOUNCE
-DOMAIN AND NEED NO CUSTOMER RECORD. That was true when it was written and the
-code has since moved past it** — `dnsRecordsFor` and `delegatedZones` both emit
-the `bounce.` pair today. Bouncing to a name on i10.tech would work and would
-save the customer two labels, but the envelope domain would then be ours, SPF
-would not align with their `From:`, and DMARC would be passing on DKIM alone.
-**Decided 2026-09-14: two labels is the price of both.**
+⚠ **WHY THERE IS ONE NOW.** Those late bounces were never read: nothing
+accepts inbound mail for a customer's return path, and the delivery events we
+do act on — in-session rejections, delivery, our own final failures — come from
+Stalwart's webhook, not from DSN mail. Against that, the second name cost two
+records per customer and, for delegated domains, a `mail.` container whose
+return paths sat at `bounce.mail.<domain>` — while the worker wrote
+`bounce.<domain>`. Every direct send arrived `SPF: none` until 2026-09-26.
 
-⚠ **DMARC therefore passes on SPF _and_ DKIM on both routes.** It needs only
-one, and BYODKIM aligns on the customer's domain either way — but a route with
-both degrades gracefully when a forwarder breaks one of them.
+⚠ **THE PRICE, STATED SO NOBODY RE-DERIVES IT.** A receiver that accepts a
+direct-route message and bounces it later sends the DSN to Amazon, which drops
+it. Late bounces on the direct route are invisible by design. Getting them back
+means a second return path again, with the naming bug it invited.
+
+⚠ **DMARC STILL PASSES ON SPF _and_ DKIM ON BOTH ROUTES.** One include
+authorises both senders; BYODKIM aligns on the customer's domain either way.
 
 ⚠ **AND THE ENVELOPE SENDER IS VERP, NOT A BARE ADDRESS** —
-`bounce+<messageId>@bounce.<domain>`. A DSN then arrives carrying the id of the
-message it is about, so correlating a bounce is a parse rather than a heuristic
-over `Message-ID` headers that intermediate MTAs are free to mangle.
+`bounce+<messageId>@send.<domain>`. Stalwart's delivery events carry the
+envelope, so attributing one to a message is a parse rather than a heuristic
+over `Message-ID` headers that intermediate MTAs are free to mangle — and the
+relay admits only a `bounce+` local part.
 
 ---
 
@@ -157,9 +161,9 @@ default.
 A delegating customer adds **three NS record sets and nothing else**:
 
 ```
-_domainkey.example.com.  NS  ns1.i10.tech.  ns2.i10.tech.
-mail.example.com.        NS  ns1.i10.tech.  ns2.i10.tech.
-_dmarc.example.com.      NS  ns1.i10.tech.  ns2.i10.tech.
+_domainkey.example.com.  NS  <claim>.ns1.i10.tech.  <claim>.ns2.i10.tech.
+send.example.com.        NS  <claim>.ns1.i10.tech.  <claim>.ns2.i10.tech.
+_dmarc.example.com.      NS  <claim>.ns1.i10.tech.  <claim>.ns2.i10.tech.
 ```
 
 We then serve every record that matters and can change any of them — rotate a
@@ -172,15 +176,11 @@ verification record: a bad day for our nameserver takes their marketing site
 down, not just their mail. It also asks a company to hand its most load-bearing
 infrastructure to a mail vendor, which established ones decline.
 
-⚠ **THE RETURN PATHS MOVE UNDER `mail.`** — `send.mail.example.com` and
-`bounce.mail.example.com`. Delegating `send.` and `bounce.` separately would be
-two more record sets to add and two more chances to add one wrong. SES accepts
-any subdomain as its MAIL FROM, so this costs nothing.
-
-⚠ **AND SES MUST BE TOLD THE NAME IT WILL ACTUALLY SEE.** Registering
-`send.example.com` while the zone serves `send.mail.example.com` is a MAIL FROM
-that never verifies, with records that look correct because they are — under a
-different name.
+⚠ **THE RETURN PATH IS DELEGATED BY ITS OWN NAME** — `send.example.com`,
+the same name a manual domain publishes. Until 2026-09-26 both return paths
+sat under a `mail.` container (`send.mail.` and `bounce.mail.`), which made the
+delegated name differ from the manual one; that difference is exactly how the
+worker came to write a name nobody published.
 
 ### PowerDNS on the box, over our own Postgres
 
@@ -199,15 +199,15 @@ grant on `core` or `authd`.
 
 ### What delegation actually grants us
 
-⚠ **THE SUBTREE, AND NOTHING ELSE.** `mail.example.com. NS ns1.i10.tech.` in the
-parent zone means resolvers are referred to us for `mail.example.com` and
+⚠ **THE SUBTREE, AND NOTHING ELSE.** `send.example.com. NS ns1.i10.tech.` in the
+parent zone means resolvers are referred to us for `send.example.com` and
 everything below it. Queries for the apex, `www.`, `app.`, or their inbound MX
 go to **their** nameservers; we are never consulted and cannot answer. Creating
 `app.example.com` on a customer's behalf is not something delegation makes
 possible.
 
 What it does grant is everything under the delegated names — we could serve
-`anything.mail.example.com`. That is inherent to NS delegation: the subtree is
+`anything.send.example.com`. That is inherent to NS delegation: the subtree is
 the smallest unit DNS has. Anything narrower means them keeping control and
 handing us an API credential to their whole zone instead, which is a strictly
 worse trust trade.
@@ -284,11 +284,10 @@ being a single point of failure — it has to increase on every write.
       THE TRAP.** `QueueEnvelope::resolve_variable` maps it to
       `return_path.domain_part()`. This expression sees EVERY message in the
       queue including our own transactional sends, whose envelope is
-      `bounce.<domain>` — so without a guard it could re-route a direct-routed
-      message onto SES, giving it a return path SES does not own and breaking the
-      SPF alignment the whole direct route was built for. The `hosts_mailboxes`
-      join is the guard: a `bounce.` subdomain matches no row, a send-only domain
-      is not a mailbox domain, and both answer `mx`.
+      `send.<domain>` — so without a guard it could re-route a direct-routed
+      message onto SES, silently moving it off the route its plan chose. The
+      `hosts_mailboxes` join is the guard: a return-path subdomain matches no
+      row, a send-only domain is not a mailbox domain, and both answer `mx`.
       ⚠ **TWO SWITCHES, NOT ONE.** The transactional route uses the SES API;
       mailbox mail can only use SES SMTP, because Stalwart's outbound has no HTTP
       hook. Different credentials, independently available, so
@@ -524,45 +523,40 @@ being a single point of failure — it has to increase on every write.
       prefers the former precisely because there is no plaintext phase to strip,
       so there is no reason to add a listener. `STALWART_SUBMISSION_PORT` now
       defaults to 465 and `submissionConfig` derives the TLS mode from it.
+      _(Superseded 2026-09-26: the worker now uses the `relay` listener on 2525
+      — `STALWART_RELAY_PORT`, `relayConfig`.)_
       ⚠ **THE OLD DEFAULT WAS 587, WHICH MEANS THE DEFAULT WAS UNUSABLE.** A
       deployment that set the host, user and password and trusted the rest would
       have had every direct send refused at the socket — `deferred`, in the
       queue, behind an ECONNREFUSED nobody reads.
-- [ ] **The submission account's password.** The account exists —
-      `submission@i10.tech`, created 2026-09-17 in Stalwart's own store — but it
-      has no credential yet, so the worker still cannot authenticate.
-      `./bootstrap.sh --set-submission-password` prompts for one, sets it, and
-      leaves the four values in the `i10-stalwart-submission` Secret to copy into
-      Doppler's `prod_api` config. That config is what `i10-api` syncs and what
-      `worker.yaml` already mounts wholesale, so **no manifest change is needed**
-      — the same route `STALWART_API_TOKEN` took.
-      ⚠ **AN ACCOUNT IN STALWART'S OWN STORE, NOT IN authd, AND THAT IS THE
-      POINT.** Every principal authd knows is a Clerk user: `filterLogin` is
-      `(objectClass=inetOrgPerson)(mail=?)` over a projection of Clerk, and a
-      bind is a `verify_password` call. A machine in there would be an invented
-      person — a Clerk user with a password we rotate, visible to the identity
-      system that exists for customers, and one Clerk outage away from the send
-      worker being unable to send. `metering@i10.tech` set this precedent on
-      2026-09-06.
-      ⚠ **TWO PERMISSIONS OUT OF 660**, as `Replace` rather than `Inherit`:
-      `authenticate` and `emailSend`. The default user role carries the whole
-      mailbox surface, none of which a submission client can use. A credential
-      that leaks can post mail and cannot read any.
-      ⚠ **AND IT IS THE ACCOUNT PASSWORD RATHER THAN AN `AppPassword`, WHICH WAS
-      NOT THE FIRST CHOICE.** `AppPassword` carries `allowedIps` and its own
-      permission set, both worth having — but an administrator cannot create
-      one: `create AppPassword` answers `notFound` with or without an account
-      id, because an app password is minted by the holder inside their own
-      session, and there is no holder here to log in as. Setting `credentials`
-      on the account directly is refused too ("Secondary credentials cannot be
-      set directly"). `AccountPassword.secret` is mutable and is what is left, so
-      the narrow grant is the control rather than the source address.
+- [x] ~~The submission account's password.~~ **Superseded 2026-09-26 by the
+      internal relay — the account could never have authenticated.** Stalwart
+      refuses to hold a password for ANY account while authd is the directory
+      (`Cannot set credentials for accounts in an external directory`), and
+      authd answers binds only for Clerk users and its one service DN. The
+      bootstrap's `AccountPassword` route was worse than a dead end: that object
+      is the LOGGED-IN account's own password, so pointed at the recovery admin
+      it would have changed the admin's. Behind both sat a third blocker:
+      `MtaStageAuth.mustMatchSender` is `true`, so even an authenticated
+      `submission@i10.tech` could not have sent as `bounce+…@bounce.<customer>`.
+      **Now:** the worker hands mail to the `relay` listener on 2525 with no
+      account and no credential. Trust is network position — no hostPort, not in
+      `allow-public-mail`, ClusterIP only — and Stalwart relays there only for a
+      `bounce+` envelope, with AUTH, the spam filter and the inbound throttles
+      off for that port. All of it is in `plan.ndjson`; nothing is in Doppler.
+      See infra/k8s/i10/stalwart/config/README.md, "The internal relay".
+      ⚠ **A RELAY REFUSAL IS OURS, SO THE WORKER DEFERS IT.** With no AUTH step,
+      a misconfiguration answers in the message phase — `550 5.1.2` at
+      `RCPT TO` — and would have failed the whole queue as undeliverable.
+      `send/stalwart.ts` defers exactly Stalwart's three relay refusals.
 - [x] ~~Sender validation would refuse arbitrary customer domains.~~ **Not a
       problem, checked 2026-09-17.** `MtaStageMail.isSenderAllowed` is
       `!is_empty(authenticated_as) || !key_exists('spam-block', sender_domain)`
       and `MtaStageRcpt.allowRelaying` is `!is_empty(authenticated_as)` — so an
       authenticated session may already send as any domain to any recipient. No
-      MTA rule changes are needed for the direct route.
+      MTA rule changes are needed for the direct route. _(2026-09-26: the direct
+      route no longer authenticates; `allowRelaying` now also admits
+      `local_port == 2525` for a `bounce+` sender. See the item above.)_
 - [x] ~~i10's own bounce domain for the direct route.~~ **Superseded
       2026-09-14** — the return path is the customer's `bounce.<domain>`, not a
       name on i10.tech, so that SPF aligns. See "Custom MAIL FROM stays".

@@ -58,7 +58,7 @@ spec:
       terminationGracePeriodSeconds: 90
       containers:
         - name: worker
-          image: ghcr.io/i10-tech/i10-api:prod-3f659be1c927de41d1978de66af867457045724c@sha256:ac64e7714a8930ed9a939dd401d1c85f09e2daa38fdfa0411214f4c6637f8995
+          image: ghcr.io/i10-tech/i10-api:prod-3469ce1157980589d0b704c96a5e6e0c246ba721@sha256:d6f27cdce20455b8351893d7ceb1c051a3f89b08a1fffe6bf81e4c83e4c66f43
           imagePullPolicy: Always
           command: ["bun", "dist/worker.js"]
           envFrom:
@@ -83,6 +83,11 @@ spec:
             - name: HOSTNAME
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
+            # The direct route's hand-off: Stalwart's `relay` listener. HERE, NOT
+            # IN DOPPLER — it is an address, and there is no credential to go
+            # with it. The port defaults to 2525 in env.ts.
+            - name: STALWART_RELAY_HOST
+              value: i10-stalwart-mail.i10-prod.svc.cluster.local
           resources:
             requests: { cpu: 100m, memory: 192Mi }
             limits: { memory: 512Mi }

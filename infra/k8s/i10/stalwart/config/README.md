@@ -27,9 +27,9 @@ Mounted at `/etc/stalwart/config.json`, passed with `--config`.
 
 ## `plan.ndjson` — everything else
 
-The declarative configuration, applied with
-[`stalwart-cli apply`](https://stalw.art/docs/management/cli/apply). One
-operation per line; `upsert` matches an existing object by a natural key and
+The declarative configuration, in
+[`stalwart-cli apply`](https://stalw.art/docs/management/cli/apply)'s format.
+One operation per line; `upsert` matches an existing object by a natural key and
 updates it in place, so re-applying converges rather than duplicating.
 
 In practice you do not run that by hand. `../bootstrap.sh` does the whole
@@ -40,7 +40,18 @@ run after any edit to this file:
 ```sh
 ./infra/k8s/i10/stalwart/bootstrap.sh            # apply and roll
 ./infra/k8s/i10/stalwart/bootstrap.sh --verify   # check, change nothing
+./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # show what would change
+PLAN_FILE=path ./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # a branch's plan
 ```
+
+⚠ **IT SPEAKS STALWART'S MANAGEMENT API DIRECTLY, OVER A PORT-FORWARD.** It used
+to start one `stalwart-cli` pod per command — an image pull, a scheduling round
+and a NetworkPolicy race each, about a minute apiece. The plan engine is a port
+of the CLI's own `apply` rules (match on `matchOn`, update without immutable and
+server-set fields, `#name` resolved by the server through `createdIds`), and
+`--dry-run` proves it: against the deployed plan it reports every object
+`unchanged`. Only `upsert`, `update` and `create` are supported; a plan that
+needs `destroy` or `reconcile` fails loudly and wants the CLI.
 
 ⚠ **It reads the plan out of the DEPLOYED ConfigMap, not out of your working
 copy.** Argo carries this file into the pod under a content-hashed name; the
@@ -349,6 +360,58 @@ bootstraps only `i10`, so the `stalwart` database and its role are created by
 deliberately: it manages its own schema, migrates it on upgrade, and must never
 share a migration surface with the transactional product.
 
+## The internal relay
+
+The send worker hands direct-route mail to the `relay` listener on **2525**, with
+**no account and no credential**. The trust is where the connection comes from:
+
+- **No hostPort** (statefulset.yaml) — nothing on the node's public addresses
+  answers on 2525.
+- **Not in `allow-public-mail`** (networkpolicy.yaml) — traffic from outside the
+  namespace cannot reach it. `allow-same-namespace` is what lets the worker in.
+- **ClusterIP only** (service.yaml) — `i10-stalwart-mail:2525` is the name the
+  worker dials, set in worker.yaml because it is an address, not a secret.
+
+Everything that makes 2525 different is in `plan.ndjson`, keyed on
+`local_port == 2525`:
+
+| Object                  | On 2525                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `MtaStageAuth.require`  | no AUTH                                                |
+| `MtaStageRcpt`          | relays, but only for a `bounce+` envelope sender       |
+| `MtaStageData`          | no spam filter — this is our own outbound mail         |
+| `MtaInboundThrottle` ×2 | exempt — one pod IP sends everything, at 8-way fan-out |
+
+SPF, DMARC, reverse-IP checks and the added headers were already scoped to
+`local_port == 25`, and Stalwart only DKIM-signs for authenticated sessions, so
+none of them needed a rule — the worker signs before it hands over.
+
+⚠ **THIS REPLACED A SUBMISSION ACCOUNT THAT COULD NEVER HAVE WORKED.** The first
+design had the worker authenticate as `submission@i10.tech` on 465. Stalwart
+refuses to hold a password for any account while authd is the directory —
+`Cannot set credentials for accounts in an external directory` — and authd only
+answers binds for Clerk users and its one service DN. `AccountPassword`, which
+the bootstrap tried instead, is the _logged-in_ account's own password: pointed
+at the recovery admin, it would have changed that. The account was deleted on
+2026-09-26.
+
+⚠ **PLAINTEXT, DELIBERATELY.** upyo upgrades whenever STARTTLS is offered and
+verifies against the name it dialled; the certificate is `*.i10.tech` and the
+worker dials a `.svc.cluster.local` name, with no `servername` override to
+verify against instead. So the listener offers no TLS (`useTls: false`) and the
+client requires none. Nothing secret crosses the hop, and on one node it never
+leaves the host. A second node means encrypting pod traffic (flannel's WireGuard
+backend), not this connection.
+
+⚠ **A REFUSAL HERE IS OURS, AND THE WORKER DEFERS IT.** With no AUTH, a relay
+misconfiguration surfaces in the message phase — `550 5.1.2 Relay not allowed`
+at `RCPT TO`, `503 5.5.1` or `550 5.7.1` at `MAIL FROM` — and every message
+would get the same answer. `send/stalwart.ts` keeps those three in the queue
+instead of failing it; `5.1.1` and `5.3.4` are still about the message.
+
+⚠ **NEVER ADD 2525 TO A hostPort OR TO `allow-public-mail`.** Either makes this
+an open relay for the internet.
+
 ## `STALWART_WEBHOOK_SECRET` lives in two places, and must match
 
 The `WebHook` object in `plan.ndjson` reads its `signatureKey` from the
@@ -397,10 +460,12 @@ the webhook serializer is built `.with_spans()`. Widening the include list to an
 event that is not emitted inside a delivery span would produce notifications with
 no `from`, which this ingest ignores.
 
-⚠ **Asynchronous bounces are still invisible.** A receiver that answers `250` and
-only later decides the mailbox is gone sends a DSN to the envelope sender, and we
-accept no inbound mail for customer `bounce.` domains. That is what the VERP
-envelope was originally built for and it remains the open half.
+⚠ **Asynchronous bounces are invisible, by design.** A receiver that answers
+`250` and only later decides the mailbox is gone sends a DSN to the envelope
+sender — the customer's `send.<domain>`, whose MX is Amazon's because SES
+requires it — and Amazon drops a DSN for mail it did not send. One return path
+for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
+return path".
 
 ## The mailbox lever, and the one piece that is not here yet
 
@@ -419,16 +484,41 @@ next message rather than the next deploy.
 
 ⚠ **`sender_domain` IS THE RETURN PATH, NOT THE `From:` HEADER.** For human mail
 that is the sender's own domain, which is what this wants. For our own
-transactional mail on the direct route it is `bounce.<domain>` — the VERP
-envelope — which matches no row, so it answers `mx` and the worker's decision
-stands. That is not incidental: this expression sees **every** message in the
-queue, and re-routing a transactional message onto SES here would give it a
-return path SES does not own and break the SPF alignment the direct route exists
-for. The `hosts_mailboxes` join is what prevents it.
+transactional mail on the direct route it is the return path, `send.<domain>` —
+which matches no row, so it answers `mx` and the worker's decision stands. That
+is not incidental: this expression sees **every** message in the queue, and
+re-routing a transactional message onto SES here would silently move it off the
+route its plan chose. The `hosts_mailboxes` join is what prevents it.
 
 ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX, WHICH IS WHY THIS SHIPS SAFELY.**
 `get_route_or_default` answers `MX_GATEWAY` for a name it cannot resolve and logs
 `Smtp(IdNotFound)`. So the worst case is mail leaving the way it does today.
+
+⚠ **SO DOES A QUERY THAT FAILS, AND THAT IS WHY A BROKEN LOOKUP IS SILENT.**
+Read from v0.16.19's source (`delivery.rs`, `expr/eval.rs`): any `sql_query`
+error — store missing, permission denied, Postgres unreachable — makes `eval_if`
+return nothing, the route becomes `"default"`, which is not a route, and that
+resolves to MX. Nothing is stalled or deferred; the only trace is an
+`Eval(Error)` event. The flip side: a lever that is wired wrong looks exactly
+like a lever that is off. Check for `Eval(Error)` before trusting it.
+
+⚠ **THE `StoreLookup` IS `namespace` PLUS A NESTED `store`.** The first version
+of this plan put the Postgres fields at the top level with a `description`, and
+the server refused it (`invalidPatch … description`) — which stopped every
+`bootstrap.sh` run at that line from 2026-09-17 until it was fixed, including
+the MtaOutboundStrategy line after it. The server's schema (`/api/schema`) shows
+the two fields; the Postgres variant's fields are the same as `DataStore`'s.
+
+⚠ **`stalwart-cli apply --dry-run` WOULD NOT HAVE CAUGHT IT.** It parses the plan
+without asking the server about properties: the broken plan dry-runs clean.
+`./bootstrap.sh --dry-run` would — it checks every top-level property against
+the live schema and names the ones the object does not have.
+
+⚠ **THE `stalwart` ROLE NEEDS USAGE ON `core`, NOT ONLY EXECUTE.** 0036 granted
+EXECUTE on the function; resolving `core.mailbox_route` checks the schema first,
+so without 0056's `GRANT USAGE ON SCHEMA core` every lookup fails — silently,
+per the above. The password comes from CNPG's `i10-stalwart-db-role`, the same
+one Stalwart's own data store already uses, so there is nothing to add to Doppler.
 
 ### What is missing: `ses-relay`
 

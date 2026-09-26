@@ -29,7 +29,7 @@ export interface ZoneRecord {
 }
 
 export interface Zone {
-  /** The delegated apex, e.g. `mail.example.com`. */
+  /** The delegated apex, e.g. `send.example.com`. */
   name: string
   records: ZoneRecord[]
 }
@@ -48,9 +48,8 @@ export interface DnsZones {
 
 export interface DelegationInput {
   domain: string
+  /** The return path's label, e.g. `send`. Not the FQDN. See `returnPathDomain`. */
   mailFromSubdomain: string
-  bounceSubdomain: string
-  bounceHost: string
   region: string
   dkimSelector: string | null
   dkimPublicKey: string | null
@@ -82,7 +81,7 @@ export interface DelegationInput {
  *
  * ⚠ GIVE THE CLAIM ITS OWN HOSTNAMES AND THE EXTRA RECORD DISAPPEARS. Only
  * somebody holding `example.com`'s DNS can publish
- * `mail.example.com NS <claim>.ns1.i10.tech`, and the label says whose claim it
+ * `send.example.com NS <claim>.ns1.i10.tech`, and the label says whose claim it
  * is — the same property the DKIM selector already gives a manual domain, which
  * is why a manual domain never needed a challenge record either. One fact, read
  * out of the parent's referral by domains/referral.ts.
@@ -96,12 +95,64 @@ export const delegatedNameservers = (
   claim: string,
 ): string[] => nameservers.map((ns) => `${claim}.${ns}`)
 
+/**
+ * The envelope sender's domain — the Return-Path — for BOTH routes.
+ *
+ * ⚠ ONE RETURN PATH, AND EVERY CALLER DERIVES IT HERE. The zone we publish, the
+ * MAIL FROM we register with SES and the envelope the direct route writes are
+ * three readers of one name, and the day they were three derivations they
+ * disagreed: delegated domains published under `bounce.mail.<domain>` while the
+ * worker wrote `bounce.<domain>`, and every direct send arrived `SPF: none`.
+ *
+ * ⚠ AND IT IS THE SAME NAME DELEGATED OR NOT. A delegated domain delegates this
+ * exact name to us instead of a `mail.` container, so there is nothing for the
+ * two setups to disagree about.
+ *
+ * ⚠ ITS MX IS AMAZON'S AND MUST STAY SO. SES re-checks the MX of a custom MAIL
+ * FROM and, finding anything else, silently falls back to its own return path —
+ * SES mail keeps sending and loses SPF alignment. So a bounce that a receiver
+ * mails back LATER for a message we delivered ourselves lands at Amazon and is
+ * dropped. That is the price of one name, and it buys little we had: in-session
+ * rejections and our own final failures reach us from Stalwart's webhook, not by
+ * mail. See docs/decisions/mail-routing.md, "One return path".
+ */
+export const returnPathDomain = (domain: string, label: string): string =>
+  `${label}.${domain}`
+
+/**
+ * The return path's SPF record, for both routes.
+ *
+ * ⚠ ONE INCLUDE COVERS BOTH SENDERS, BECAUSE IT IS OURS. `_spf.i10.tech` lists
+ * Amazon and our own MTA, so SES mail and relay mail both pass and both align
+ * with the customer's `From:`. It stays an `include:`, never an `ip4:` — a
+ * literal address in a customer's DNS is our infrastructure pinned into a
+ * record we cannot edit.
+ *
+ * ⚠ `~all`, NOT `-all`. A hard fail on a name the customer might also point
+ * something else at rejects that mail outright; theirs to tighten.
+ */
+export const returnPathSpf = (spfInclude: string): string =>
+  `v=spf1 include:${spfInclude} ~all`
+
+/**
+ * The delegated names that prove who holds a domain.
+ *
+ * ⚠ THE TWO THAT DO NOT DEPEND ON THE RETURN PATH'S LABEL. Any one of a
+ * domain's delegations carries its claim, so either proves ownership — and
+ * these two can be asked with nothing but the name, which is all the recheck
+ * and contest paths are handed. DKIM first: it is the one nothing sends without.
+ */
+export const ownershipZoneNames = (domain: string): string[] => [
+  `_domainkey.${domain}`,
+  `_dmarc.${domain}`,
+]
+
 /** The three names a delegating customer points at us. */
-export const delegatedZoneNames = (domain: string) => ({
+export const delegatedZoneNames = (domain: string, returnPathLabel: string) => ({
   /** Everything DKIM, so a key can be rotated without touching their DNS. */
   dkim: `_domainkey.${domain}`,
-  /** Both return paths. */
-  mail: `mail.${domain}`,
+  /** The return path itself, for both routes. */
+  returnPath: returnPathDomain(domain, returnPathLabel),
   dmarc: `_dmarc.${domain}`,
 })
 
@@ -152,17 +203,14 @@ const soa = (zone: string, primary: string, ttl: number): ZoneRecord => ({
 /**
  * The zones we serve for a delegated domain.
  *
- * ⚠ THE RETURN PATHS MOVE UNDER `mail.`, WHICH IS THE POINT. Delegating
- * `send.<domain>` and `bounce.<domain>` separately would be two more NS record
- * sets for the customer to add and two more chances to add one wrong. SES
- * accepts any subdomain as its MAIL FROM, so `send.mail.<domain>` costs
- * nothing — and it means changing a return path later is our edit, not theirs.
+ * ⚠ THE RETURN PATH IS DELEGATED BY ITS OWN NAME. There used to be a `mail.`
+ * container holding two return paths, one per route; with one return path the
+ * container buys nothing, and it made the delegated name differ from the manual
+ * one — which is how the worker came to write a name nobody published.
  */
 export function delegatedZones({
   domain,
   mailFromSubdomain,
-  bounceSubdomain,
-  bounceHost,
   region,
   dkimSelector,
   dkimPublicKey,
@@ -171,7 +219,7 @@ export function delegatedZones({
   claim,
   ttl = RECORD_TTL,
 }: DelegationInput): Zone[] {
-  const names = delegatedZoneNames(domain)
+  const names = delegatedZoneNames(domain, mailFromSubdomain)
   const ours = delegatedNameservers(nameservers, claim)
   const primary = ours[0] ?? "localhost"
 
@@ -185,32 +233,22 @@ export function delegatedZones({
     })),
   ]
 
-  const mailFrom = `${mailFromSubdomain}.${names.mail}`
-  const bounce = `${bounceSubdomain}.${names.mail}`
-
   return [
     {
-      name: names.mail,
+      name: names.returnPath,
       records: [
-        ...apex(names.mail),
+        ...apex(names.returnPath),
         {
-          name: mailFrom,
+          name: names.returnPath,
           type: "MX",
           content: `feedback-smtp.${region}.amazonses.com`,
           ttl,
           priority: 10,
         },
         {
-          name: mailFrom,
+          name: names.returnPath,
           type: "TXT",
-          content: "v=spf1 include:amazonses.com ~all",
-          ttl,
-        },
-        { name: bounce, type: "MX", content: bounceHost, ttl, priority: 10 },
-        {
-          name: bounce,
-          type: "TXT",
-          content: `v=spf1 include:${spfInclude} ~all`,
+          content: returnPathSpf(spfInclude),
           ttl,
         },
       ],
@@ -248,16 +286,17 @@ export function delegatedZones({
  * What a DELEGATING customer publishes: three NS record sets and nothing else.
  *
  * ⚠ SAME SHAPE AS THE MANUAL RECORDS, SO THE API DOES NOT FORK. A client
- * renders `records` and tells the customer to publish them; whether that is six
+ * renders `records` and tells the customer to publish them; whether that is four
  * records or three delegations is our business, not theirs.
  */
 export function delegationRecordsFor(
   domain: string,
+  returnPathLabel: string,
   nameservers: readonly string[],
   status: DomainStatus,
   claim: string,
 ): DnsRecord[] {
-  const names = delegatedZoneNames(domain)
+  const names = delegatedZoneNames(domain, returnPathLabel)
   const ours = delegatedNameservers(nameservers, claim)
   /*
    * ⚠ SIX NS RECORDS AND NOTHING ELSE — THE CHALLENGE TXT RECORD IS GONE, and

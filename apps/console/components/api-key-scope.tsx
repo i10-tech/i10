@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { toast } from "sonner"
-import { ActionButton } from "@repo/ui/components/action-button"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -12,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
+import { Checkbox } from "@repo/ui/components/checkbox"
 import { Label } from "@repo/ui/components/label"
 import {
   Select,
@@ -20,36 +20,39 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select"
+import { GrowHeight } from "@repo/ui/components/grow-height"
+import { Reveal } from "@repo/ui/components/reveal"
+import { Spinner } from "@repo/ui/components/spinner"
 import { updateApiKeyScope } from "@/lib/actions"
-import { useOutcome } from "@/lib/outcome"
-import { useResetOnOpen, useRetained } from "@/lib/react"
+import { useResetOnOpen } from "@/lib/react"
 
 /**
- * Which domain a key may send from.
+ * Which domains a key may send from.
  *
- * ⚠ THE ANSWER IS "EVERY DOMAIN" OR "ONE DOMAIN", AND THAT IS NOT A
- * SIMPLIFICATION OF A MULTI-SELECT. A key restricted to two of four domains is
- * a thing nobody asks for and everybody mis-reads in a list; two keys say the
- * same thing and can be revoked separately, which is the point of restricting
- * them at all. The column underneath holds an array anyway, so an operator can
- * do something cleverer by hand without this needing to grow a control for it.
+ * ⚠ "ANY DOMAIN" OR "SPECIFIC", AND SPECIFIC MAY BE SEVERAL. It used to be
+ * one domain, on the argument that two keys say the same thing as one key for
+ * two domains. That holds until a key is already deployed somewhere that sends
+ * for two products — then the only honest restriction is both, and forcing a
+ * choice of one leaves the key unrestricted instead.
  *
- * ⚠ AND IT IS A DOMAIN NAME RATHER THAN AN ID. The API validates the name
- * against the workspace's own domains, and a name survives being read aloud, put
- * in a runbook, or compared against an environment variable. An id survives
- * none of those.
+ * ⚠ AND IT IS DOMAIN NAMES RATHER THAN IDS. The API validates the names against
+ * the workspace's own domains, and a name survives being read aloud, put in a
+ * runbook, or compared against an environment variable. An id survives none of
+ * those.
  *
- * ⚠ `ALL` IS A SENTINEL BECAUSE RADIX REFUSES AN EMPTY `SelectItem` VALUE — it
- * uses the empty string internally to mean "nothing selected", so an item with
- * that value throws. It never leaves this file; the caller sees `null`.
+ * ⚠ `null` IS EVERY DOMAIN; AN EMPTY LIST IS "RESTRICTED, BUT TO NOTHING YET",
+ * which is not saveable. Collapsing the two would turn "I unticked the last
+ * box" into "this key can now send as anything".
  */
-
-const ALL = "__all__"
 
 export interface ScopeDomain {
   id: string
   name: string
 }
+
+/** Whether a scope value can be saved. */
+export const scopeComplete = (value: string[] | null): boolean =>
+  value === null || value.length > 0
 
 export function ApiKeyScopeField({
   id,
@@ -60,46 +63,108 @@ export function ApiKeyScopeField({
 }: {
   id: string
   /** `null` is every domain. */
-  value: string | null
-  onChange: (domain: string | null) => void
+  value: string[] | null
+  onChange: (domains: string[] | null) => void
   domains: ScopeDomain[]
   disabled?: boolean
 }) {
+  const restricted = value !== null
+  const chosen = new Set(value ?? [])
+  // ⚠ SINGULAR UNTIL THERE IS MORE THAN ONE TO CHOOSE FROM. "Specific domains"
+  // over a list of one reads like the list is missing something.
+  const specific = domains.length > 1 ? "Specific domains" : "Specific domain"
+
+  function toggle(name: string, on: boolean) {
+    const next = new Set(chosen)
+    if (on) next.add(name)
+    else next.delete(name)
+    // ⚠ IN THE WORKSPACE'S ORDER, not click order, so the saved list and the
+    // list on screen read the same way round.
+    onChange(domains.map((d) => d.name).filter((n) => next.has(n)))
+  }
+
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>Sending domain</Label>
+      <Label htmlFor={id}>Sending domains</Label>
       <Select
-        value={value ?? ALL}
-        onValueChange={(next) => onChange(next === ALL ? null : next)}
-        disabled={disabled || domains.length === 0}
+        value={restricted ? "some" : "any"}
+        onValueChange={(next) => onChange(next === "any" ? null : [...chosen])}
+        disabled={disabled}
       >
         <SelectTrigger id={id} className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>All domains</SelectItem>
-          {domains.map((domain) => (
-            <SelectItem key={domain.id} value={domain.name} className="font-mono">
-              {domain.name}
-            </SelectItem>
-          ))}
+          <SelectItem value="any">Any domain</SelectItem>
+          {/*
+           * ⚠ GREYED RATHER THAN HIDDEN WHEN THERE IS NOTHING TO PICK. Hiding it
+           * would make the restriction look like a feature that does not exist;
+           * shown and disabled, it says what is missing.
+           */}
+          <SelectItem value="some" disabled={domains.length === 0}>
+            {domains.length === 0
+              ? "Specific domain — you have no domains added"
+              : specific}
+          </SelectItem>
         </SelectContent>
       </Select>
 
-      <p className="text-xs text-muted-foreground">
+      {/*
+       * ⚠ REVEALED, NOT SWAPPED IN, AND ONLY FOR "SPECIFIC". The list opens under
+       * the choice that asked for it, so the eye follows the movement down; it
+       * is not there at all otherwise. See `Reveal` for the spring.
+       */}
+      {/*
+       * ⚠ `pb-3` IS THE BREATHING ROOM BETWEEN THE LAST DOMAIN AND THE LINE
+       * UNDER IT, which otherwise sat tight against the pill like part of it.
+       */}
+      <Reveal show={restricted} spacing="pt-1 pb-3">
         {/*
-         * ⚠ THE SENTENCE NAMES THE LIMIT OF THE LIMIT. A restricted key still
-         * reads everything the workspace can read — messages, contacts, its own
-         * list of keys — and somebody who believed otherwise would be handing it
-         * to a third party. What it cannot do is send as another domain, and it
-         * cannot manage keys at all, which is what stops it widening itself.
+         * ⚠ EACH DOMAIN IS ITS OWN PILL, THE SAME SHAPE AND INSET AS THE FIELDS
+         * ABOVE, so the options read as controls of the same family rather than
+         * a table dropped into a form.
          */}
-        {domains.length === 0
-          ? "Add a domain first and you will be able to restrict a key to it."
-          : value === null
-            ? "This key can send from any domain you have verified, now or later."
-            : `This key can only send from ${value}. It can still read everything else in the workspace, and it cannot create or revoke keys.`}
-      </p>
+        <ul className="space-y-2">
+          {domains.map((domain) => (
+            <li key={domain.id}>
+              <label className="flex h-14 cursor-pointer items-center gap-3 rounded-pill border border-input px-6 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/30 dark:bg-input/25">
+                <Checkbox
+                  checked={chosen.has(domain.name)}
+                  onCheckedChange={(on) => toggle(domain.name, on === true)}
+                  disabled={disabled}
+                />
+                <span className="truncate font-mono text-sm">{domain.name}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </Reveal>
+
+      {/*
+       * ⚠ THE LINE CHANGES LENGTH AS DOMAINS ARE TICKED — one short prompt, then
+       * a two-line sentence naming them — so it grows on a spring rather than
+       * pushing the buttons down in one frame.
+       */}
+      <GrowHeight>
+        <p className="text-xs text-muted-foreground">
+          {/*
+           * ⚠ NO ERROR COLOUR FOR AN EMPTY PICK. Nothing has gone wrong while
+           * somebody is still choosing; the button stays off until one is ticked,
+           * and this line says why in the ordinary tone.
+           *
+           * ⚠ AND IT NAMES THE LIMIT OF THE LIMIT. A restricted key still reads
+           * everything the workspace can read, and cannot manage keys at all —
+           * which is what stops it widening itself.
+           */}
+          {domains.length === 0
+            ? "Add a domain first and you will be able to restrict a key to it."
+            : !restricted
+              ? "This key can send from any domain you have verified, now or later."
+              : chosen.size === 0
+                ? `Choose the ${domains.length > 1 ? "domains" : "domain"} this key may send from.`
+                : `This key can only send from ${[...chosen].join(", ")}. It can still read everything else in the workspace, and it cannot create or revoke keys.`}
+        </p>
+      </GrowHeight>
     </div>
   )
 }
@@ -124,15 +189,12 @@ export function ApiKeyScopeDialog({
   domains,
   onOpenChange,
 }: {
-  apiKey: { id: string; name: string; domain: string | null } | null
+  apiKey: { id: string; name: string; domains: string[] } | null
   domains: ScopeDomain[]
   onOpenChange: (open: boolean) => void
 }) {
-  const [domain, setDomain] = React.useState<string | null>(null)
-  const outcome = useOutcome()
-  const pending = outcome.state === "pending"
-  // What the dialog DISPLAYS while it animates out — see `useRetained`.
-  const shown = useRetained(apiKey)
+  const [scope, setScope] = React.useState<string[] | null>(null)
+  const [pending, setPending] = React.useState(false)
 
   /*
    * ⚠ SEEDED FROM THE KEY EACH TIME THE DIALOG OPENS, NOT ONCE. The same
@@ -140,50 +202,50 @@ export function ApiKeyScopeDialog({
    * shows the first one's scope — and the Save button would then quietly apply
    * it.
    */
-  useResetOnOpen(apiKey !== null, () => {
-    setDomain(apiKey?.domain ?? null)
-    outcome.reset()
-  })
+  useResetOnOpen(apiKey !== null, () =>
+    setScope(apiKey && apiKey.domains.length > 0 ? apiKey.domains : null),
+  )
+
+  const saved = apiKey && apiKey.domains.length > 0 ? apiKey.domains : null
+  const unchanged =
+    (scope === null && saved === null) ||
+    (scope !== null && saved !== null && scope.join(",") === saved.join(","))
 
   async function save() {
-    if (!apiKey || outcome.state !== "idle") return
-    const target = apiKey
+    if (!apiKey || pending || !scopeComplete(scope)) return
+    setPending(true)
+    const result = await updateApiKeyScope(apiKey.id, scope ?? [])
+    setPending(false)
 
-    /*
-     * ⚠ NO SUCCESS TOAST: THE SENTENCE UNDER THE SELECT ALREADY SAYS IT. "This
-     * key can only send from mail.acme.dev" is on screen, under the value just
-     * chosen; the tick and the green field confirm it, and the table behind
-     * shows the new scope by the time the dialog closes. See lib/outcome.ts.
-     */
-    await outcome.run(
-      async () => {
-        const result = await updateApiKeyScope(target.id, domain)
-        if (!result.ok) {
-          toast.error("Could not change the scope", { description: result.error })
-          return false
-        }
-        return true
-      },
-      () => onOpenChange(false),
+    if (!result.ok) {
+      toast.error("Could not change the scope", { description: result.error })
+      return
+    }
+
+    toast.success(
+      scope
+        ? `${apiKey.name} can now only send from ${scope.join(", ")}`
+        : `${apiKey.name} can send from any domain`,
     )
+    onOpenChange(false)
   }
 
   return (
     <Dialog open={apiKey !== null} onOpenChange={pending ? () => {} : onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Scope for {shown?.name}</DialogTitle>
+          <DialogTitle>Scope for {apiKey?.name}</DialogTitle>
           <DialogDescription>
             Restricting a key limits what a leak of it can do. The key itself does not
             change, so nothing needs redeploying.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-2" {...outcome.formProps}>
+        <div className="py-2">
           <ApiKeyScopeField
             id="scope-domain"
-            value={domain}
-            onChange={setDomain}
+            value={scope}
+            onChange={setScope}
             domains={domains}
             disabled={pending}
           />
@@ -198,19 +260,16 @@ export function ApiKeyScopeDialog({
           >
             Cancel
           </Button>
-          <ActionButton
+          <Button
             type="button"
             onClick={save}
-            state={outcome.state}
-            pendingLabel="Save scope"
-            doneLabel="Saved"
             // ⚠ DISABLED WHEN NOTHING CHANGED, so the button cannot be a
-            // no-op request. Only while idle: once saved, `domain` equals the
-            // key's new scope and the tick must not grey out under itself.
-            disabled={outcome.state === "idle" && domain === (apiKey?.domain ?? null)}
+            // no-op request that still fires a success toast.
+            disabled={pending || unchanged || !scopeComplete(scope)}
           >
+            {pending && <Spinner />}
             Save scope
-          </ActionButton>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

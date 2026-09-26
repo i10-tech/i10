@@ -1,5 +1,5 @@
 import type { DnsRecord, DomainStatus } from "@repo/contracts"
-import { RECORD_TTL } from "./zone.js"
+import { RECORD_TTL, returnPathDomain, returnPathSpf } from "./zone.js"
 import { dkimRecordValue } from "./dkim.js"
 
 /**
@@ -18,34 +18,10 @@ import { dkimRecordValue } from "./dkim.js"
 /** SES's feedback host, per region. The MX for the custom MAIL FROM domain. */
 const feedbackHost = (region: string) => `feedback-smtp.${region}.amazonses.com`
 
-/**
- * ⚠ `~all`, NOT `-all`. A soft fail. A hard fail on a domain the customer also
- * sends from elsewhere — their own mail server, a CRM, a helpdesk — rejects
- * that mail outright the moment this record is published. The customer's SPF
- * record is theirs to tighten once they know what else sends as them.
- *
- * ⚠ AND OUR HALF IS AN `include:`, NEVER AN `ip4:`. A literal address in a
- * customer's DNS is our infrastructure pinned into records we cannot edit:
- * changing a relay, adding a second one or moving provider would mean asking
- * every customer to re-publish, and the ones who did not would silently start
- * failing SPF. Behind an include, the same change is one record we own.
- */
-/**
- * ⚠ EACH RETURN PATH NAMES ONLY THE SENDER THAT USES IT. The SES path is only
- * ever used by SES and the direct path only by us, so listing both on both
- * would authorise each sender to forge the other's bounces and would spend two
- * of SPF's ten DNS lookups for nothing.
- */
-const spfValue = (mechanism: string) => `v=spf1 ${mechanism} ~all`
-
 export interface RecordInput {
   domain: string
-  /** The SES route's MAIL FROM label, e.g. `send`. Not the FQDN. */
+  /** The return path's label for both routes, e.g. `send`. Not the FQDN. */
   mailFromSubdomain: string
-  /** The direct route's return path label, e.g. `bounce`. Not the FQDN. */
-  bounceSubdomain: string
-  /** Our inbound host, which receives bounces for the direct route. */
-  bounceHost: string
   region: string
   /** The DNS label the DKIM key is published under. */
   dkimSelector: string | null
@@ -74,24 +50,27 @@ export interface RecordInput {
 export function dnsRecordsFor({
   domain,
   mailFromSubdomain,
-  bounceSubdomain,
-  bounceHost,
   region,
   dkimSelector,
   dkimPublicKey,
   spfInclude,
   status,
 }: RecordInput): DnsRecord[] {
-  const mailFrom = `${mailFromSubdomain}.${domain}`
-  const bounce = `${bounceSubdomain}.${domain}`
+  const returnPath = returnPathDomain(domain, mailFromSubdomain)
 
   return [
-    // ⚠ BOTH HALVES OF MAIL FROM, AND NEITHER IS OPTIONAL. Without the MX,
-    // bounces go nowhere and SES refuses the identity; without the TXT, the
-    // return path fails SPF and receivers treat the mail as unauthenticated.
+    /**
+     * ⚠ ONE RETURN PATH FOR BOTH ROUTES, AND NEITHER HALF IS OPTIONAL. SES and
+     * our relay both write `<label>.<domain>` as the envelope sender, so SPF
+     * aligns with the customer's `From:` whichever way the mail leaves.
+     * Without the MX, SES refuses the MAIL FROM and falls back to its own —
+     * and it must be AMAZON'S MX, which is why there is only one: see
+     * `returnPathDomain` for what that costs. Without the TXT, the return path
+     * fails SPF on both routes.
+     */
     {
       record: "SPF",
-      name: mailFrom,
+      name: returnPath,
       type: "MX",
       ttl: String(RECORD_TTL),
       status,
@@ -100,35 +79,11 @@ export function dnsRecordsFor({
     },
     {
       record: "SPF",
-      name: mailFrom,
+      name: returnPath,
       type: "TXT",
       ttl: String(RECORD_TTL),
       status,
-      value: spfValue("include:amazonses.com"),
-    },
-    /**
-     * ⚠ THE SECOND RETURN PATH, AND IT IS WHAT MAKES DMARC PASS ON SPF WHEN WE
-     * DELIVER THE MAIL OURSELVES. Bouncing to i10's own domain instead would
-     * work and would need no record here — but the envelope domain would then
-     * be ours, SPF would not align with the customer's `From:`, and DMARC would
-     * be passing on DKIM alone. Two labels is the price of both.
-     */
-    {
-      record: "SPF",
-      name: bounce,
-      type: "MX",
-      ttl: String(RECORD_TTL),
-      status,
-      value: bounceHost,
-      priority: 10,
-    },
-    {
-      record: "SPF",
-      name: bounce,
-      type: "TXT",
-      ttl: String(RECORD_TTL),
-      status,
-      value: spfValue(`include:${spfInclude}`),
+      value: returnPathSpf(spfInclude),
     },
     /**
      * ⚠ ONE TXT HOLDING OUR OWN PUBLIC KEY — BYODKIM. Easy DKIM would be three

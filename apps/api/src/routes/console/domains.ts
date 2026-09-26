@@ -1,4 +1,5 @@
 import type { Hono } from "hono"
+import { cacheKeyFor } from "../../auth/api-key.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
@@ -16,10 +17,25 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   // Domains
   // ───────────────────────────────────────────────────────────────────────────
 
+  /*
+   * ⚠ `displaced_at` IS ADDED HERE AND NOWHERE ELSE. It says another workspace
+   * proved the name and took it; the console needs it to explain a domain that
+   * suddenly cannot send, and the public API's `Domain` has no business
+   * carrying anything about our other customers.
+   */
   app.get("/domains", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
-    return c.json({ data: await d.domains.list(tenantId) })
+    const [list, displaced] = await Promise.all([
+      d.domains.list(tenantId),
+      d.domains.displaced(tenantId),
+    ])
+    return c.json({
+      data: list.map((domain) => ({
+        ...domain,
+        displaced_at: displaced[domain.id] ?? null,
+      })),
+    })
   })
 
   app.post("/domains", async (c) => {
@@ -87,8 +103,13 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   app.get("/domains/:id", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
-    const domain = await d.domains.get(tenantId, c.req.param("id"))
-    return domain ? c.json(domain) : c.json(notFound("No domain with that id."), 404)
+    const [domain, displaced] = await Promise.all([
+      d.domains.get(tenantId, c.req.param("id")),
+      d.domains.displaced(tenantId),
+    ])
+    return domain
+      ? c.json({ ...domain, displaced_at: displaced[domain.id] ?? null })
+      : c.json(notFound("No domain with that id."), 404)
   })
 
   app.post("/domains/:id/verify", async (c) => {
@@ -122,8 +143,18 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
        * the result of this call, it is not stored, and putting it on the row
        * would imply a durability it does not have.
        */
+      /*
+       * ⚠ `leftover_records` ONLY WHEN THIS VERIFY TOOK THE NAME FROM ANOTHER
+       * WORKSPACE AND THEIR RECORDS STILL RESOLVE. The latest proof wins, so
+       * while those are published the old holder can take it straight back —
+       * removing them is how the person who just proved it keeps it.
+       */
       case "ok":
-        return c.json({ ...outcome.domain, ownership: { proven: true } })
+        return c.json({
+          ...outcome.domain,
+          ownership: { proven: true },
+          ...(outcome.leftover ? { leftover_records: outcome.leftover } : {}),
+        })
       case "unproven":
         return c.json({
           ...outcome.domain,
@@ -134,17 +165,17 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       default:
         /*
          * ⚠ 409, NOT 403 AND NOT A `failed` DOMAIN. Their records may well be
-         * perfect — they lost a race to prove ownership, which is a conflict
-         * over a name rather than a problem with their DNS or their permission.
+         * perfect. Proving a name takes it from whoever holds it, so this is
+         * only ever a race — another workspace proved it in the same moment —
+         * and pressing Verify again settles it.
          */
         return c.json(
           {
             statusCode: 409,
             name: "domain_already_claimed" as const,
             message:
-              `${outcome.domain.name} has just been verified by another ` +
-              `workspace, so it cannot be verified here as well. If that is ` +
-              `also yours, remove it there; otherwise contact support@i10.tech.`,
+              `${outcome.domain.name} was verified by another workspace at the ` +
+              `same moment. Press Verify again to settle which one holds it.`,
           },
           409,
         )
@@ -224,10 +255,12 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
      * records pointed at somebody else, and named our own nameserver as the
      * somebody else.
      */
-    const expected = domain.records.filter((r) => r.type === "NS").map((r) => r.value)
+    const delegation = domain.records.filter((r) => r.type === "NS")
+    const zones = [...new Set(delegation.map((r) => r.name))]
+    const expected = delegation.map((r) => r.value)
 
     try {
-      return c.json(await d.delegation.check(domain.name, expected))
+      return c.json(await d.delegation.check(domain.name, zones, expected))
     } catch (error) {
       // ⚠ A FAILED DIAGNOSIS IS NOT A FAILED PAGE. This is advisory; answering
       // 502 would replace a domain's records with a red box because a resolver
@@ -349,6 +382,259 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       ? c.json({ object: "domain", id: c.req.param("id"), deleted: true })
       : c.json(notFound("No domain with that id."), 404)
   })
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Transfers — offering a domain to an email address, and answering one
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** The open offer for this domain, if the workspace has made one. */
+  app.get("/domains/:id/transfer", async (c) => {
+    if (!d.transfers) return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    return c.json({ data: await d.transfers.outgoing(tenantId, c.req.param("id")) })
+  })
+
+  /*
+   * ⚠ STEP-UP, LIKE DELETE. An accepted offer takes the domain out of this
+   * workspace as surely as deleting it does, and a stolen session could
+   * otherwise offer a customer's domain to an address it controls.
+   *
+   * ⚠ THE OFFER MOVES NOTHING BY ITSELF. The domain keeps sending from here
+   * until the recipient accepts, and this workspace can withdraw it until then.
+   */
+  app.post("/domains/:id/transfer", requireFreshAuth, async (c) => {
+    if (!d.transfers || !d.people) return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    const body = await readJson(c)
+    const email = typeof body?.email === "string" ? body.email : ""
+    if (!email) return c.json(validation("`email` is required."), 422)
+
+    const [person, profile] = await Promise.all([
+      d.people.get(c.get("user").userId),
+      d.profile.get(tenantId),
+    ])
+
+    // ⚠ NOT TO YOURSELF — any address verified on your own account. A transfer
+    // hands a domain to another person; colleagues in this workspace are fine.
+    if (person.verifiedEmails.includes(email.trim().toLowerCase())) {
+      return c.json(
+        validation("That is your own address. Offer it to someone else."),
+        422,
+      )
+    }
+
+    const offered = await d.transfers.offer(tenantId, c.req.param("id"), {
+      email,
+      offeredBy: person.name,
+      fromWorkspace: profile?.name ?? "another",
+    })
+
+    if (offered.status === "missing")
+      return c.json(notFound("No domain with that id."), 404)
+    if (offered.status === "rejected") return c.json(validation(offered.reason), 422)
+
+    const { offer } = offered
+    let emailed = false
+    if (d.transferNotice) {
+      try {
+        await d.transferNotice.send({
+          to: offer.recipient_email,
+          offerId: offer.id,
+          domain: offer.domain_name,
+          offeredBy: offer.offered_by,
+          fromWorkspace: offer.from_workspace,
+          expiresAt: new Date(offer.expires_at),
+        })
+        emailed = true
+      } catch (error) {
+        // ⚠ THE OFFER STANDS. An existing user still finds it on their domains
+        // page; the sender is told the email did not go, rather than the whole
+        // offer failing over a mail problem.
+        d.log.error(
+          { err: String(error), offer: offer.id },
+          "domain transfer offered, but its email could not be sent",
+        )
+      }
+    }
+
+    return c.json({ ...offer, emailed }, 201)
+  })
+
+  app.delete("/domains/:id/transfer", async (c) => {
+    if (!d.transfers) return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    const canceled = await d.transfers.cancel(tenantId, c.req.param("id"))
+    return canceled
+      ? c.json({ canceled: true })
+      : c.json(notFound("There is no open transfer for that domain."), 404)
+  })
+
+  /**
+   * Offers addressed to the signed-in person, whichever workspace they are in.
+   *
+   * ⚠ MATCHED ON CLERK'S VERIFIED ADDRESSES, ASKED NOW. Never on anything in the
+   * request, and never on an unverified address — see `people`.
+   */
+  app.get("/transfers", async (c) => {
+    if (!d.transfers || !d.people) return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    const { verifiedEmails } = await d.people.get(c.get("user").userId)
+    return c.json({ data: await d.transfers.incoming(tenantId, verifiedEmails) })
+  })
+
+  /**
+   * One offer, and where it could land.
+   *
+   * ⚠ THE DESTINATIONS ARE EVERY WORKSPACE THIS PERSON BELONGS TO EXCEPT THE
+   * ONE THE DOMAIN IS ALREADY IN — which is what lets somebody in the SAME
+   * workspace as the sender take it into one of their others. The sender's
+   * tenant id is used to filter and never returned.
+   */
+  app.get("/transfers/:id", async (c) => {
+    if (!d.transfers || !d.people || !d.memberships)
+      return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    const userId = c.get("user").userId
+    const { verifiedEmails } = await d.people.get(userId)
+
+    const offer = await d.transfers.find(tenantId, verifiedEmails, c.req.param("id"))
+    if (!offer) {
+      return c.json(
+        notFound(
+          "This transfer is not addressed to an email verified on your account, " +
+            "or it has expired, been withdrawn or already been answered.",
+        ),
+        404,
+      )
+    }
+
+    const { fromTenantId, ...visible } = offer
+    const workspaces = (await workspacesOf(userId))
+      .filter((w) => w.tenantId !== fromTenantId)
+      .map((w) => ({ id: w.id, name: w.name, current: w.tenantId === tenantId }))
+
+    return c.json({ ...visible, workspaces })
+  })
+
+  app.post("/transfers/:id/accept", async (c) => {
+    if (!d.transfers || !d.people || !d.memberships)
+      return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    const userId = c.get("user").userId
+    const body = await readJson(c)
+    const workspace = typeof body?.workspace === "string" ? body.workspace : ""
+
+    /*
+     * ⚠ NO `workspace` MEANS THIS ONE — the workspace the session already
+     * resolved to, which needs no membership lookup. That is onboarding's case:
+     * a new account has one workspace and accepts into it.
+     *
+     * ⚠ A NAMED ONE IS RESOLVED FROM CLERK'S CURRENT MEMBERSHIP, NOT THE BODY.
+     * Only an organization this person belongs to right now is accepted, and
+     * its tenant comes from the same resolver a session there would use.
+     */
+    const target = workspace
+      ? d.memberships && (await workspacesOf(userId)).find((w) => w.id === workspace)
+      : { id: "", name: "", tenantId }
+    if (!target) {
+      return c.json(validation("You are not a member of that workspace."), 422)
+    }
+
+    const { verifiedEmails } = await d.people.get(userId)
+    const accepted = await d.transfers.accept({
+      tenantId,
+      emails: verifiedEmails,
+      id: c.req.param("id"),
+      toTenantId: target.tenantId,
+    })
+
+    switch (accepted.status) {
+      case "accepted":
+        /*
+         * ⚠ EVICTED AFTER THE COMMIT, AND A FAILURE IS LOGGED, NOT RETURNED.
+         * A verified key sits in Redis with its scopes baked in for the TTL, so
+         * a revoked or narrowed key could still send from the departed domain
+         * for up to a minute. The recipient has done nothing wrong and cannot
+         * retry the sender's cache, so this is the sender's error to see in
+         * the log rather than the recipient's to see on screen.
+         */
+        if (d.keys?.cache) {
+          for (const hash of accepted.keys.secretHashes) {
+            try {
+              await d.keys.cache.del(cacheKeyFor(hash))
+            } catch (error) {
+              d.log.error(
+                { err: String(error), domain: accepted.domainName },
+                "transferred a domain but could not evict a changed key from the cache",
+              )
+            }
+          }
+        }
+        return c.json({
+          domain_id: accepted.domainId,
+          domain_name: accepted.domainName,
+          workspace: target.id ? { id: target.id, name: target.name } : null,
+        })
+      case "missing":
+        return c.json(notFound("That transfer is no longer open."), 404)
+      case "rejected":
+        return c.json(validation(accepted.reason), 422)
+      case "conflict":
+        return c.json(
+          {
+            statusCode: 409,
+            name: "domain_already_exists" as const,
+            message: accepted.reason,
+          },
+          409,
+        )
+      default:
+        return c.json(
+          {
+            statusCode: 403,
+            name: "plan_limit_exceeded" as const,
+            message: accepted.reason,
+          },
+          403,
+        )
+    }
+  })
+
+  app.post("/transfers/:id/decline", async (c) => {
+    if (!d.transfers || !d.people) return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    const { verifiedEmails } = await d.people.get(c.get("user").userId)
+    const declined = await d.transfers.decline(
+      tenantId,
+      verifiedEmails,
+      c.req.param("id"),
+    )
+    return declined
+      ? c.json({ declined: true })
+      : c.json(notFound("That transfer is no longer open."), 404)
+  })
+
+  /**
+   * Every workspace this person belongs to, with the tenant behind each.
+   *
+   * ⚠ RESOLVED THROUGH `tenant_for_principal` WITH EACH ORGANIZATION, the same
+   * path a session in that workspace takes, so a domain lands on exactly the
+   * tenant switching to that workspace would show.
+   */
+  async function workspacesOf(
+    userId: string,
+  ): Promise<{ id: string; name: string; tenantId: string }[]> {
+    const orgs = await d.memberships!.list(userId)
+    const resolved = await Promise.all(
+      orgs.map(async (org) => ({
+        ...org,
+        tenantId: await d.tenants.resolve({ userId, orgId: org.id }),
+      })),
+    )
+    return resolved.flatMap((w) =>
+      w.tenantId ? [{ id: w.id, name: w.name, tenantId: w.tenantId }] : [],
+    )
+  }
 
   /**
    * Live DNS for a domain: who hosts it, and what we can currently see.

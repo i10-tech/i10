@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { delegationChecker, type DelegationLookups } from "../src/console/delegation.js"
 import type { ReferralResult } from "../src/domains/referral.js"
+import { delegatedZoneNames } from "../src/domains/zone.js"
 
 /**
  * Telling four indistinguishable failures apart.
@@ -29,6 +30,8 @@ import type { ReferralResult } from "../src/domains/referral.js"
  */
 const CLAIM = "7d1f4c2ab8e94f0f9c3d5e6a7b8c9d01"
 const NS = [`${CLAIM}.ns1.i10.tech`, `${CLAIM}.ns2.i10.tech`]
+// What the route hands the checker: the names off the domain's NS records.
+const ZONES = Object.values(delegatedZoneNames("example.com", "send"))
 
 const missing = () => Object.assign(new Error("not found"), { code: "ENOTFOUND" })
 const servfail = () => Object.assign(new Error("servfail"), { code: "ESERVFAIL" })
@@ -47,7 +50,7 @@ const lookups = (over: Partial<DelegationLookups> = {}): DelegationLookups => ({
 })
 
 const check = (over: Partial<DelegationLookups> = {}) =>
-  delegationChecker({ lookups: lookups(over) }).check("example.com", NS)
+  delegationChecker({ lookups: lookups(over) }).check("example.com", ZONES, NS)
 
 describe("the three zones", () => {
   it("checks the names the customer was actually told to publish", async () => {
@@ -64,12 +67,12 @@ describe("the three zones", () => {
     // ⚠ ASKED OF THE PARENT, WHICH IS THE ONLY PLACE THE DELEGATION EXISTS.
     expect([...new Set(parents)]).toEqual(["example.com"])
 
-    // ⚠ THE SAME NAMES `delegatedZoneNames` BUILDS THE RECORDS FROM. A check
+    // ⚠ THE NAMES IT IS HANDED, WHICH ARE THE ONES THE RECORDS NAME. A check
     // against a different set would report a correct delegation as missing.
     expect(asked.sort()).toEqual([
       "_dmarc.example.com",
       "_domainkey.example.com",
-      "mail.example.com",
+      "send.example.com",
     ])
   })
 

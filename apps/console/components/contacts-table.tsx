@@ -323,6 +323,9 @@ export function ContactsTable({
         description="They are removed from every segment and their topic preferences go with them. If any of them had unsubscribed, that record is lost — re-importing the same address would start sending to them again."
         confirmLabel="Delete"
         doneLabel="Deleted"
+        // ⚠ `DELETE` FOR EVERY BULK DELETE. There is no single name to type, and
+        // the count is already in the title where it is read.
+        confirmWord="DELETE"
         onConfirm={async () => {
           const result = await deleteContacts([...selected])
           if (!result.ok) {

@@ -6,6 +6,7 @@ import type { MarketingStore } from "../../console/marketing.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
 import type { UsageStore } from "../../console/usage.js"
 import type { DomainStore } from "../../domains/store.js"
+import type { DomainTransfers } from "../../domains/transfers.js"
 import type { KeyCache } from "../../auth/api-key.js"
 import type { KeyStore } from "../../auth/store.js"
 import type { WebhookEndpointStore } from "../../webhooks/store.js"
@@ -47,6 +48,43 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * complaint rather than a crash.
    */
   organizations?: { rename(clerkOrgId: string, name: string): Promise<void> }
+  /**
+   * The Clerk organizations a person belongs to — where an accepted domain may
+   * land.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE TURNS TRANSFERS OFF RATHER THAN OPENING THEM.
+   * Without it there is no way to know which workspaces a person may write to,
+   * and guessing is the one thing an authorisation check cannot do.
+   */
+  memberships?: { list(userId: string): Promise<{ id: string; name: string }[]> }
+  /**
+   * Who the signed-in person is: a name to sign an offer with, and the
+   * addresses Clerk has VERIFIED for them — the only thing an offer is ever
+   * matched against.
+   */
+  people?: {
+    get(
+      userId: string,
+    ): Promise<{ name: string; primaryEmail: string | null; verifiedEmails: string[] }>
+  }
+  transfers?: DomainTransfers
+  /**
+   * Emails the recipient of an offer.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE LEAVES THE OFFER IN-APP ONLY. Somebody with an
+   * account still sees it on their domains page; somebody without one does not
+   * hear about it at all, which the route reports back to the sender.
+   */
+  transferNotice?: {
+    send(input: {
+      to: string
+      offerId: string
+      domain: string
+      offeredBy: string
+      fromWorkspace: string
+      expiresAt: Date
+    }): Promise<void>
+  }
   /** Optional for the same reason `AppDeps.domains` is — see createApp. */
   domains?: DomainStore
   /**

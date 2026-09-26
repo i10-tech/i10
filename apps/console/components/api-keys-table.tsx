@@ -140,8 +140,10 @@ export function ApiKeysTable({
                     </Badge>
                   </TableCell>
                   <TableCell className="hidden sm:table-cell">
-                    {key.domain ? (
-                      <span className="font-mono text-xs">{key.domain}</span>
+                    {key.domains.length > 0 ? (
+                      <span className="font-mono text-xs">
+                        {key.domains.join(", ")}
+                      </span>
                     ) : (
                       // ⚠ "Any domain" RATHER THAN A DASH. A dash reads as
                       // "not set", and the most important thing this column can
@@ -214,6 +216,7 @@ export function ApiKeysTable({
         description="Anything using it stops sending immediately — not at the end of a cache window. This cannot be undone; create a new key instead."
         confirmLabel="Revoke key"
         doneLabel="Revoked"
+        confirmWord={revoking?.name}
         onConfirm={async () => {
           if (!revoking) return false
           /*
@@ -248,6 +251,8 @@ export function ApiKeysTable({
         description="A new key is issued and the old one stops working immediately. Deploy the new value before rotating, or sending will fail in the gap."
         confirmLabel="Rotate key"
         doneLabel="Rotated"
+        // ⚠ ROTATING KILLS THE OLD KEY IMMEDIATELY, so it asks like revoke does.
+        confirmWord={rotating?.name}
         destructive={false}
         onConfirm={async () => {
           if (!rotating) return false

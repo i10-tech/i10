@@ -383,3 +383,47 @@ export async function openPolarCheckout(
     },
   }
 }
+
+const READABLE_EVERY_MS = 750
+const READABLE_FOR_MS = 20_000
+
+/**
+ * Waits until Polar can read back a checkout it has just created.
+ *
+ * ⚠ POLAR HANDS BACK A CHECKOUT BEFORE IT CAN SERVE IT, AND THE GAP HAS BEEN
+ * MINUTES. Measured against the sandbox 2026-09-26: `b408fd81…` was created at
+ * 21:46:34, answered `404` to our own token at ~21:48, and `200 open` at ~21:50.
+ * Their checkout page reads it the same way, and its 404 is served with
+ * `frame-ancestors 'none'` — so an iframe opened in that window shows Chrome's
+ * "sandbox.polar.sh refused to connect", which looked like an embedding-host
+ * misconfiguration and was not one. Flaky by exactly as much as their lag is.
+ *
+ * ⚠ OUR STATUS ENDPOINT IS THE PROBE, BECAUSE IT ALREADY ASKS POLAR THE SAME
+ * QUESTION. It answers `unknown` while Polar 404s the id; anything else — `open`
+ * via `unpaid`, or any other status — means the page will render. A body with
+ * no status at all (a 503, our API restarting) is not an answer either way and
+ * keeps waiting.
+ *
+ * ⚠ FALSE AFTER THE CEILING, AND THE CALLER MUST NOT OPEN ANYTHING THEN. The
+ * hosted page is the same 404 without the frame, so the redirect fallback is
+ * no way round it; saying "try again in a minute" is the honest answer.
+ */
+export async function untilCheckoutReadable(checkoutId: string): Promise<boolean> {
+  const startedAt = Date.now()
+
+  for (;;) {
+    try {
+      const response = await fetch(
+        `/api/checkout-status/${encodeURIComponent(checkoutId)}`,
+        { cache: "no-store" },
+      )
+      const body = (await response.json()) as { status?: unknown }
+      if (typeof body.status === "string" && body.status !== "unknown") return true
+    } catch {
+      // Not an answer; ask again.
+    }
+
+    if (Date.now() - startedAt > READABLE_FOR_MS) return false
+    await new Promise((resolve) => setTimeout(resolve, READABLE_EVERY_MS))
+  }
+}

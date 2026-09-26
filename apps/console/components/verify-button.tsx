@@ -49,13 +49,12 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
 
     if (!result.ok) {
       /*
-       * ⚠ A CLAIMED NAME IS NOT A FAILED CHECK, AND MUST NOT SAY "try again".
-       * It is the one refusal on this button that will never clear by itself:
-       * another workspace has proved ownership, so pressing Verify for the next
-       * hour changes nothing. The message names what to do instead.
+       * ⚠ A CLAIMED NAME IS NOT A FAILED CHECK. Proving a name takes it from
+       * whoever holds it, so this is only two proofs landing in the same
+       * moment — the message says to press again, which settles it.
        */
       if (result.name === "domain_already_claimed") {
-        toast.error("This domain is spoken for", {
+        toast.error("Verified elsewhere at the same moment", {
           description: result.error,
           duration: 10_000,
         })
@@ -118,6 +117,28 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
           duration: 8000,
         })
       }
+      return
+    }
+
+    /*
+     * ⚠ THIS VERIFY TOOK THE NAME FROM ANOTHER WORKSPACE, AND THEIR RECORDS ARE
+     * STILL PUBLISHED. The latest proof wins, so they can take it straight
+     * back; naming the records is how this person keeps it. Shown in place of
+     * the status toast, because it is the one thing left to do.
+     */
+    const leftover = result.data.leftover_records ?? []
+    if (leftover.length > 0) {
+      const names = [...new Set(leftover.map((r) => r.name))]
+      toast.warning("Remove the previous workspace's records", {
+        description: `This domain is now in this workspace, but another workspace's ${
+          leftover[0]!.type === "TXT" ? "DKIM record" : "nameserver records"
+        } still resolve at ${names.join(", ")}${
+          leftover[0]!.value
+            ? ` (pointing at ${[...new Set(leftover.map((r) => r.value))].join(", ")})`
+            : ""
+        }. Delete ${leftover.length === 1 ? "it" : "them"} at your DNS provider, or that workspace can verify and take it back.`,
+        duration: 20_000,
+      })
       return
     }
 

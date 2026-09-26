@@ -31,6 +31,8 @@ import type {
   DnsConnection,
   DnsInspection,
   Domain,
+  Me,
+  TransferOffer,
 } from "@/lib/types"
 
 export async function generateMetadata({
@@ -91,7 +93,7 @@ export default async function DomainDetailPage({
    * ⚠ AND A FAILURE IN ANY OF THEM HIDES THE BUTTON RATHER THAN THE PAGE. This
    * is an accelerator; the records table below is the thing somebody came for.
    */
-  const [inspection, providers, connections, keys] = await Promise.all([
+  const [inspection, providers, connections, keys, transfer, me] = await Promise.all([
     tryApi<DnsInspection>("/console/dns/lookup", { query: { domain: domain.name } }),
     tryApi<{ data: ConnectableProvider[] }>("/console/dns/providers"),
     tryApi<{ data: DnsConnection[] }>("/console/dns/connections"),
@@ -106,6 +108,13 @@ export default async function DomainDetailPage({
      * up after it, which is worth less than the page.
      */
     tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
+    // ⚠ A FAILURE SHOWS THE TRANSFER BUTTON, not an error. The worst case is an
+    // offer made over one that was pending, which withdraws the old one.
+    tryApi<{ data: TransferOffer | null }>(
+      `/console/domains/${encodeURIComponent(id)}/transfer`,
+    ),
+    // For the transfer dialog, which refuses the person's own addresses.
+    tryApi<Me>("/console/me"),
   ])
 
   /*
@@ -115,9 +124,21 @@ export default async function DomainDetailPage({
    * is already dead and naming it would be noise in a dialog that has to be
    * read.
    */
-  const scopedKeys = (keys.ok ? keys.data.data : [])
-    .filter((key) => key.revoked_at === null && key.domain === domain.name)
+  const liveForThis = (keys.ok ? keys.data.data : []).filter(
+    (key) => key.revoked_at === null && key.domains.includes(domain.name),
+  )
+  // Keys that can send from nothing once this domain goes — the delete asks
+  // about these.
+  const scopedKeys = liveForThis
+    .filter((key) => key.domains.length === 1)
     .map((key) => ({ id: key.id, name: key.name }))
+  // Every key the domain leaving would change, and what each keeps — the
+  // transfer spells these out before the offer is sent.
+  const keyImpact = liveForThis.map((key) => ({
+    id: key.id,
+    name: key.name,
+    keeps: key.domains.filter((d) => d !== domain.name),
+  }))
 
   const hostedBy = inspection.ok ? inspection.data.provider?.slug : undefined
   const connectable =
@@ -152,6 +173,7 @@ export default async function DomainDetailPage({
             {connectable && domain.status !== "verified" && (
               <PublishRecords
                 domainId={domain.id}
+                domainName={domain.name}
                 connection={connection}
                 providerSlug={connectable.slug}
                 providerName={connectable.name}
@@ -170,6 +192,16 @@ export default async function DomainDetailPage({
          * retrying — and a customer who reads it as "failed" goes and changes
          * records that were correct.
          */}
+        {/*
+         * ⚠ IN PLACE OF THE STATUS NOTE, NOT BESIDE IT. A displaced domain is
+         * `failed`, and "we could not find the records" is the wrong story —
+         * the records were found, in another workspace's setup. Shown together,
+         * the failure note sends somebody to check DNS that has nothing wrong.
+         */}
+        {domain.displaced_at && (
+          <DisplacedNote name={domain.name} at={domain.displaced_at} />
+        )}
+
         <StatusNote
           status={domain.status}
           delegated={domain.delegated}
@@ -178,7 +210,7 @@ export default async function DomainDetailPage({
           // point somewhere else" note contradict each other, and the generic
           // one is the reassuring half — so shown together, it is the one people
           // believe.
-          quiet={delegation?.ok === true}
+          quiet={delegation?.ok === true || Boolean(domain.displaced_at)}
         />
 
         {/*
@@ -255,11 +287,36 @@ export default async function DomainDetailPage({
               id={domain.id}
               name={domain.name}
               scopedKeys={scopedKeys}
+              keyImpact={keyImpact}
+              ownEmails={me.ok ? me.data.user.verified_emails : []}
+              offer={transfer.ok ? transfer.data.data : null}
             />
           </SectionContent>
         </Section>
       </PageBody>
     </Page>
+  )
+}
+
+/**
+ * Why a domain that used to work cannot send any more.
+ *
+ * ⚠ IT NEVER SAYS WHICH WORKSPACE. "Acme has it now" would make this page a way
+ * to learn who else is a customer; what the person needs is what happened and
+ * the one thing that undoes it, and both are here without a name.
+ */
+function DisplacedNote({ name, at }: { name: string; at: string }) {
+  return (
+    <div className="rounded-lg border border-danger/25 bg-danger/5 px-4 py-3">
+      <p className="text-sm font-medium">Another workspace verified this domain</p>
+      <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+        On {formatExact(at)}, another i10 workspace proved it controls{" "}
+        <span className="font-mono text-foreground">{name}</span>, so the domain is now
+        in their account and you can no longer send from it here. If it belongs here,
+        make sure the records below are published at your DNS provider and press Verify
+        — proving it again moves it back to this workspace.
+      </p>
+    </div>
   )
 }
 

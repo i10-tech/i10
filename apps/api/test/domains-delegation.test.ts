@@ -4,6 +4,7 @@ import {
   delegatedZoneNames,
   delegatedZones,
   delegationRecordsFor,
+  returnPathDomain,
 } from "../src/domains/zone.js"
 import {
   clearRecordsStatement,
@@ -19,8 +20,6 @@ const zones = (dkim: [string, string] | null = ["i10abc", "PUBLICKEY"]) =>
   delegatedZones({
     domain: "example.com",
     mailFromSubdomain: "send",
-    bounceSubdomain: "bounce",
-    bounceHost: "mx.i10.tech",
     region: "eu-central-1",
     dkimSelector: dkim?.[0] ?? null,
     dkimPublicKey: dkim?.[1] ?? null,
@@ -38,16 +37,16 @@ describe("what the customer delegates", () => {
    * nameserver would take their marketing site down, not just their mail.
    */
   it("is three subdomains and nothing above them", () => {
-    expect(delegatedZoneNames("example.com")).toEqual({
+    expect(delegatedZoneNames("example.com", "send")).toEqual({
       dkim: "_domainkey.example.com",
-      mail: "mail.example.com",
+      returnPath: "send.example.com",
       dmarc: "_dmarc.example.com",
     })
     expect(zones().map((z) => z.name)).not.toContain("example.com")
   })
 
   it("asks for one NS record set per zone and nothing else", () => {
-    const records = delegationRecordsFor("example.com", NS, "pending", TOKEN)
+    const records = delegationRecordsFor("example.com", "send", NS, "pending", TOKEN)
     expect(records).toHaveLength(6)
     expect(records.every((r) => r.type === "NS")).toBe(true)
     expect(new Set(records.map((r) => r.name)).size).toBe(3)
@@ -67,7 +66,7 @@ describe("what the customer delegates", () => {
    * is why a manual domain never needed a challenge record either.
    */
   it("puts the claim in the nameserver names", () => {
-    const records = delegationRecordsFor("example.com", NS, "pending", TOKEN)
+    const records = delegationRecordsFor("example.com", "send", NS, "pending", TOKEN)
     expect(records.map((r) => r.value)).toEqual([
       `${TOKEN}.ns1.i10.tech`,
       `${TOKEN}.ns2.i10.tech`,
@@ -90,7 +89,9 @@ describe("what the customer delegates", () => {
    */
   it("serves the same nameserver names it asks the customer to publish", () => {
     const asked = new Set(
-      delegationRecordsFor("example.com", NS, "pending", TOKEN).map((r) => r.value),
+      delegationRecordsFor("example.com", "send", NS, "pending", TOKEN).map(
+        (r) => r.value,
+      ),
     )
     for (const z of zones()) {
       const served = z.records.filter((r) => r.type === "NS").map((r) => r.content)
@@ -111,32 +112,42 @@ describe("the zones we then serve", () => {
   })
 
   /**
-   * ⚠ THE RETURN PATHS MOVE UNDER `mail.`, WHICH IS WHY ONLY THREE NS SETS ARE
-   * NEEDED. Delegating `send.` and `bounce.` separately would be two more
-   * record sets for the customer to add and two more chances to add one wrong.
+   * ⚠ ONE RETURN PATH, DELEGATED BY ITS OWN NAME. Its MX must be Amazon's —
+   * SES re-checks it — and its SPF must authorise us as well, because the
+   * relay writes the same envelope sender SES does.
    */
-  it("serves both return paths inside the mail zone", () => {
-    const mail = zone("mail.example.com")!
-    expect(mail.records.find((r) => r.name === "send.mail.example.com")).toMatchObject({
-      type: "MX",
+  it("serves the return path at the top of its own zone", () => {
+    const rp = zone("send.example.com")!
+    expect(rp.records.find((r) => r.type === "MX")).toMatchObject({
+      name: "send.example.com",
       content: "feedback-smtp.eu-central-1.amazonses.com",
+      priority: 10,
     })
-    expect(
-      mail.records.find((r) => r.name === "bounce.mail.example.com" && r.type === "MX"),
-    ).toMatchObject({ content: "mx.i10.tech" })
+    expect(rp.records.find((r) => r.type === "TXT")).toMatchObject({
+      name: "send.example.com",
+      content: "v=spf1 include:_spf.i10.tech ~all",
+    })
   })
 
-  // ⚠ Still no cross-authorisation: each path names only its own sender.
-  it("keeps the two SPF records apart", () => {
-    const mail = zone("mail.example.com")!
-    const ses = mail.records.find(
-      (r) => r.name === "send.mail.example.com" && r.type === "TXT",
+  /**
+   * ⚠ THE REGRESSION: THE PUBLISHED NAME AND THE ENVELOPE'S ARE ONE FUNCTION.
+   * A delegated domain once published under `bounce.mail.<domain>` while the
+   * worker wrote `bounce.<domain>`, and every direct send arrived `SPF: none`.
+   */
+  it("publishes the return path at exactly the name the envelope uses", () => {
+    const published = zones()
+      .flatMap((z) => z.records)
+      .filter((r) => r.type === "MX")
+    expect(published.map((r) => r.name)).toEqual([
+      returnPathDomain("example.com", "send"),
+    ])
+  })
+
+  it("serves no `mail.` container and no second return path", () => {
+    const names = zones().flatMap((z) => z.records.map((r) => r.name))
+    expect(names.some((n) => n.startsWith("mail.") || n.startsWith("bounce."))).toBe(
+      false,
     )
-    const direct = mail.records.find(
-      (r) => r.name === "bounce.mail.example.com" && r.type === "TXT",
-    )
-    expect(ses?.content).toBe("v=spf1 include:amazonses.com ~all")
-    expect(direct?.content).toBe("v=spf1 include:_spf.i10.tech ~all")
   })
 
   it("puts the DKIM key in its own zone", () => {
@@ -155,8 +166,6 @@ describe("the zones we then serve", () => {
     const dkim = delegatedZones({
       domain: "example.com",
       mailFromSubdomain: "send",
-      bounceSubdomain: "bounce",
-      bounceHost: "mx.i10.tech",
       region: "eu-central-1",
       dkimSelector: null,
       dkimPublicKey: null,

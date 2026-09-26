@@ -6,7 +6,13 @@ import { Onboarding } from "@/components/onboarding/onboarding"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
 import { ONBOARDING_STEP_COOKIE, stepFor } from "@/lib/onboarding-step"
-import type { BillingState, DomainSummary, Me, PlanSummary } from "@/lib/types"
+import type {
+  BillingState,
+  DomainSummary,
+  Me,
+  PlanSummary,
+  TransferOffer,
+} from "@/lib/types"
 import { ArrivalQuery } from "@/components/arrival-query"
 import { ARRIVAL } from "@/lib/arrival"
 import { readArrival } from "@/lib/arrival-server"
@@ -57,10 +63,14 @@ export default async function OnboardingPage({
   const checkoutId = await readArrival(ARRIVAL.checkout, query.checkout_id)
   const published = await readArrival(ARRIVAL.published, query.published)
 
-  const [me, domains, plans] = await Promise.all([
+  const [me, domains, plans, offers] = await Promise.all([
     tryApi<Me>("/console/me"),
     tryApi<{ data: DomainSummary[] }>("/console/domains"),
     tryApi<{ data: PlanSummary[] }>("/console/plans"),
+    // ⚠ DOMAINS OFFERED TO THIS PERSON. Somebody who signed up from a transfer
+    // email arrives here, and the domain they came for belongs on the domain
+    // step. A failure hides the offers rather than the page.
+    tryApi<{ data: TransferOffer[] }>("/console/transfers"),
   ])
 
   if (!me.ok) {
@@ -130,6 +140,8 @@ export default async function OnboardingPage({
         workspaceName={me.data.tenant?.name ?? ""}
         tenantId={me.data.tenant?.id ?? ""}
         domains={domains.ok ? domains.data.data : []}
+        offers={offers.ok ? offers.data.data : []}
+        userEmail={me.data.user.email}
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
         checkoutId={checkoutId}

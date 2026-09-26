@@ -118,7 +118,6 @@ await withMonitor(
           ownDomains: env.MAIL_DOMAINS,
           dns: {
             spfInclude: env.MAIL_SPF_INCLUDE,
-            bounceHost: env.MAIL_BOUNCE_HOST,
             nameservers: env.MAIL_NAMESERVERS,
           },
           /*

@@ -273,6 +273,7 @@ export function SuppressionsTable({
             : "We will start sending to this address again. If it bounces again it is suppressed again automatically — removing it does not guarantee delivery."
         }
         confirmLabel="Remove"
+        confirmWord={removing?.address}
         destructive={false}
         onConfirm={async () => {
           if (!removing) return false
