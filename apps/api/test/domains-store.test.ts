@@ -10,7 +10,6 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb",
   name: "example.com",
   mailFromSubdomain: "send",
-  bounceSubdomain: "bounce",
   delegated: false,
   dkimSelector: "i10abc123",
   dkimPublicKey: "MIIBIjANBgkq",
@@ -77,7 +76,6 @@ const deps = {
   ownDomains: ["i10.tech"],
   dns: {
     spfInclude: "_spf.i10.tech",
-    bounceHost: "mx.i10.tech",
     nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
   },
   secrets,

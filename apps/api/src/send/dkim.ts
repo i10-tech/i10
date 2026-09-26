@@ -10,7 +10,7 @@ import { signMessage as signRaw } from "@upyo/mime/internal"
  * has no such arrangement — if we do not sign it here, nobody does.
  *
  * ⚠ AND UNSIGNED IS NOT A DEGRADED SEND, IT IS A FAILED ONE. The direct route's
- * envelope sender is `bounce.<domain>`, which aligns under DMARC's relaxed
+ * envelope sender is `send.<domain>`, which aligns under DMARC's relaxed
  * default — so SPF carries it too and one missing signature is survivable on
  * paper. It is still not something to ship quietly: a customer who tightens to
  * `aspf=s`, or a forwarder that breaks SPF, turns "DKIM was optional" into mail

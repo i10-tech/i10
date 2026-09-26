@@ -1,5 +1,5 @@
 import { Resolver } from "node:dns/promises"
-import { delegatedNameservers, delegatedZoneNames } from "./zone.js"
+import { delegatedNameservers, ownershipZoneNames } from "./zone.js"
 import type { ReferralResult } from "./referral.js"
 
 /**
@@ -106,12 +106,13 @@ export function nodeTxtLookup(timeoutMs: number = DEFAULT_TIMEOUT): TxtLookup {
 /**
  * The question asked of a delegated domain.
  *
- * ⚠ IT IS THE `mail.` ZONE THAT IS CHECKED FIRST, because it is the one that
- * carries the return paths and the one a half-finished setup is most likely to
- * have. The other two are tried only when it is absent, so the ordinary success
- * costs ONE query and only a failing domain pays for three — a customer who
- * published two of the three records is told they are proved rather than being
- * sent back to records that are already correct.
+ * ⚠ IT IS THE `_domainkey.` ZONE THAT IS CHECKED FIRST, because nothing sends
+ * without it and a working setup always has it. `_dmarc.` is tried only when it
+ * is absent, so the ordinary success costs ONE query — and a customer who
+ * published one of the two is told they are proved rather than being sent back
+ * to records that are already correct. The return path's zone is not asked:
+ * its name depends on a label the recheck and contest paths are not handed,
+ * and it proves nothing the other two do not. See `ownershipZoneNames`.
  */
 export type DelegationProbe = (parent: string, child: string) => Promise<ReferralResult>
 
@@ -152,7 +153,7 @@ export async function proveDelegation(
    * i10 under a different claim" apart from "delegated somewhere else entirely".
    */
   const oursSuffixes = nameservers.map((n) => `.${n.toLowerCase()}`)
-  const zones = Object.values(delegatedZoneNames(domain))
+  const zones = ownershipZoneNames(domain)
 
   let sawAnswer = false
   let sawOurs = false

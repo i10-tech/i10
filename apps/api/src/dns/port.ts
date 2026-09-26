@@ -170,8 +170,8 @@ export function failureFor(status: number): DnsWriteFailure {
 
 /**
  * ⚠ THE LONGEST ZONE THAT IS A SUFFIX OF THE RECORD NAME, NOT THE FIRST MATCH.
- * An account can hold both `example.com` and `mail.example.com` as separate
- * zones, and a record at `send.mail.example.com` belongs in the second. Picking
+ * An account can hold both `example.com` and `eu.example.com` as separate
+ * zones, and a record at `send.eu.example.com` belongs in the second. Picking
  * the first match writes it into the wrong zone, where it is inert and looks
  * published.
  */

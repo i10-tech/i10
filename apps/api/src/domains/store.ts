@@ -4,7 +4,7 @@ import { withTenant, type Database } from "../db/client.js"
 import { delegations, domains } from "../db/core.js"
 import { dnsRecordsFor } from "./records.js"
 import { generateDkimKeypair } from "./dkim.js"
-import { delegatedZoneNames, delegatedZones, delegationRecordsFor } from "./zone.js"
+import { delegatedZones, delegationRecordsFor, returnPathDomain } from "./zone.js"
 import type { DnsZones } from "./zone.js"
 import {
   nodeTxtLookup,
@@ -289,7 +289,6 @@ interface Row {
   id: string
   name: string
   mailFromSubdomain: string
-  bounceSubdomain: string
   delegated: boolean
   dkimSelector: string | null
   dkimPublicKey: string | null
@@ -303,7 +302,6 @@ const COLUMNS = {
   id: domains.id,
   name: domains.name,
   mailFromSubdomain: domains.mailFromSubdomain,
-  bounceSubdomain: domains.bounceSubdomain,
   delegated: domains.delegated,
   dkimSelector: domains.dkimSelector,
   dkimPublicKey: domains.dkimPublicKey,
@@ -313,21 +311,11 @@ const COLUMNS = {
 }
 
 /**
- * The MAIL FROM name SES must be told about.
- *
- * ⚠ THE RETURN PATH MOVES UNDER `mail.` WHEN DELEGATED, and SES has to be told
- * the name it will actually see. Registering `send.example.com` while the zone
- * serves `send.mail.example.com` is a MAIL FROM that never verifies — with
- * records that look correct, because they are, under a different name.
+ * The MAIL FROM name SES must be told about — the one return path both routes
+ * write, from the one function that derives it. See `returnPathDomain`.
  */
-const mailFromFor = (row: {
-  name: string
-  mailFromSubdomain: string
-  delegated: boolean
-}): string =>
-  row.delegated
-    ? `${row.mailFromSubdomain}.${delegatedZoneNames(row.name).mail}`
-    : `${row.mailFromSubdomain}.${row.name}`
+const mailFromFor = (row: { name: string; mailFromSubdomain: string }): string =>
+  returnPathDomain(row.name, row.mailFromSubdomain)
 
 const summarise = (row: Row, region: string): DomainSummary => ({
   object: "domain",
@@ -342,15 +330,19 @@ const summarise = (row: Row, region: string): DomainSummary => ({
 const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
   ...summarise(row, region),
   // ⚠ THE SAME FIELD EITHER WAY. A delegating customer publishes NS records and
-  // a manual one publishes six; a client renders `records` and does not need to
+  // a manual one publishes four; a client renders `records` and does not need to
   // know which it is looking at.
   records: row.delegated
-    ? delegationRecordsFor(row.name, dns.nameservers, row.status, row.delegationToken)
+    ? delegationRecordsFor(
+        row.name,
+        row.mailFromSubdomain,
+        dns.nameservers,
+        row.status,
+        row.delegationToken,
+      )
     : dnsRecordsFor({
         domain: row.name,
         mailFromSubdomain: row.mailFromSubdomain,
-        bounceSubdomain: row.bounceSubdomain,
-        bounceHost: dns.bounceHost,
         region,
         dkimSelector: row.dkimSelector,
         dkimPublicKey: row.dkimPublicKey,
@@ -359,12 +351,10 @@ const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
       }),
 })
 
-/** The two names customers point at us. Configuration, not columns. */
+/** What customers point at us. Configuration, not columns. */
 export interface DnsSettings {
   /** The domain whose SPF record lists our own MTAs, e.g. `_spf.i10.tech`. */
   spfInclude: string
-  /** Our inbound host, which receives bounces for the direct route. */
-  bounceHost: string
   /** Our authoritative nameservers, for delegated domains. */
   nameservers: readonly string[]
 }
@@ -593,8 +583,6 @@ export function domainStore({
     for (const zone of delegatedZones({
       domain: row.name,
       mailFromSubdomain: row.mailFromSubdomain,
-      bounceSubdomain: row.bounceSubdomain,
-      bounceHost: dns.bounceHost,
       region,
       dkimSelector: row.dkimSelector,
       dkimPublicKey: row.dkimPublicKey,
@@ -1070,7 +1058,11 @@ export function domainStore({
       // never won the claim has no zones to take away, and taking them anyway
       // is deleting somebody else's DNS.
       if (holdsZones && zones) {
-        for (const zone of Object.values(delegatedZoneNames(existing.name))) {
+        // The zones are the names this domain's NS records delegate — the
+        // record list the customer was shown — so a per-domain return-path
+        // label needs no second derivation here.
+        const delegated = existing.records.filter((r) => r.type === "NS")
+        for (const zone of new Set(delegated.map((r) => r.name))) {
           await tidy("delegated zone", () => zones.remove(zone))
         }
       }

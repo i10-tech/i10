@@ -1,6 +1,5 @@
 import { Resolver } from "node:dns/promises"
 import { readDelegation, type ReferralResult } from "../domains/referral.js"
-import { delegatedZoneNames } from "../domains/zone.js"
 
 /**
  * Why a delegated domain has not verified.
@@ -81,11 +80,18 @@ export interface DelegationReport {
 
 export interface DelegationChecker {
   /**
+   * @param zoneNames The delegated names THIS DOMAIN'S records name. They include
+   * the return path, whose label is per domain, so they come off the record
+   * list rather than being rebuilt from the domain name.
    * @param expected The nameserver names THIS DOMAIN'S records name, which is
    * `<claim>.ns1.i10.tech` and not `ns1.i10.tech`. See the note on the
    * parameter where it is read.
    */
-  check(domain: string, expected: readonly string[]): Promise<DelegationReport>
+  check(
+    domain: string,
+    zoneNames: readonly string[],
+    expected: readonly string[],
+  ): Promise<DelegationReport>
 }
 
 /**
@@ -162,8 +168,8 @@ export function delegationChecker(
      * second chance for the table and the check to disagree, and the disagreement
      * is invisible because both look right on their own.
      */
-    async check(domain, expected) {
-      const names = Object.values(delegatedZoneNames(domain))
+    async check(domain, zoneNames, expected) {
+      const names = [...zoneNames]
       const ours = new Set(expected.map(canonical))
 
       /*

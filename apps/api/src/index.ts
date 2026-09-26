@@ -364,7 +364,6 @@ const domains = secrets
       ownDomains: env.MAIL_DOMAINS,
       dns: {
         spfInclude: env.MAIL_SPF_INCLUDE,
-        bounceHost: env.MAIL_BOUNCE_HOST,
         nameservers: env.MAIL_NAMESERVERS,
       },
       // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write in

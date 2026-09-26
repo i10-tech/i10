@@ -32,7 +32,6 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: ID,
   name: "example.com",
   mailFromSubdomain: "send",
-  bounceSubdomain: "bounce",
   delegated: false,
   dkimSelector: "i10abc123",
   dkimPublicKey: "MIIBIjANBgkq",
@@ -162,7 +161,6 @@ const base = {
   ownDomains: ["i10.tech"],
   dns: {
     spfInclude: "_spf.i10.tech",
-    bounceHost: "mx.i10.tech",
     nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
   },
   secrets: { seal: (v: string) => `sealed:${v}`, open: (v: string) => v },

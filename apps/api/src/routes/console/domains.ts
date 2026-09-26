@@ -224,10 +224,12 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
      * records pointed at somebody else, and named our own nameserver as the
      * somebody else.
      */
-    const expected = domain.records.filter((r) => r.type === "NS").map((r) => r.value)
+    const delegation = domain.records.filter((r) => r.type === "NS")
+    const zones = [...new Set(delegation.map((r) => r.name))]
+    const expected = delegation.map((r) => r.value)
 
     try {
-      return c.json(await d.delegation.check(domain.name, expected))
+      return c.json(await d.delegation.check(domain.name, zones, expected))
     } catch (error) {
       // ⚠ A FAILED DIAGNOSIS IS NOT A FAILED PAGE. This is advisory; answering
       // 502 would replace a domain's records with a red box because a resolver

@@ -157,7 +157,7 @@ function directTransport(): Transport {
     relayConfig({
       host,
       port: env.STALWART_RELAY_PORT,
-      localName: env.MAIL_BOUNCE_HOST,
+      localName: env.MAIL_HOSTNAME,
       poolSize: env.WORKER_CONCURRENCY,
     }),
   )
@@ -173,10 +173,10 @@ function directTransport(): Transport {
         { messageId, tenantId, recipients },
         "relay accepted with rejected recipients",
       ),
-    // ⚠ THE BOUNCE LABEL COMES BACK ON THE SAME ROW AS THE KEY, because it is
-    // per domain — `core.domains.bounce_subdomain` — and it is what the
-    // customer actually published. The transport builds the VERP envelope from
-    // it; see docs/decisions/mail-routing.md.
+    // ⚠ THE RETURN PATH COMES BACK ON THE SAME ROW AS THE KEY, because its
+    // label is per domain (`core.domains.mail_from_subdomain`, which SES uses
+    // too). The transport builds the VERP envelope from it; see
+    // docs/decisions/mail-routing.md, "One return path".
     domainSending: domainSendingLookup({
       db,
       secrets: secretBox(env.WEBHOOK_SECRET_KEY),

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -252,32 +253,23 @@ export const domains = core.table(
     hostsMailboxes: boolean("hosts_mailboxes").notNull().default(false),
 
     /**
-     * The custom MAIL FROM subdomain, stored as the label only ("send"), not
-     * the FQDN — the FQDN is `${mailFromSubdomain}.${name}` and storing it
-     * twice invites the two to disagree.
+     * The return path's subdomain, stored as the label only ("send"), not the
+     * FQDN — derive the name with `returnPathDomain` rather than by hand.
      *
-     * ⚠ THIS ONE IS THE SES ROUTE'S RETURN PATH, AND ITS MX MUST BE AMAZON'S.
-     * That is why there is a second one below rather than one shared label: a
-     * name has one MX target, and the two routes need different ones.
-     */
-    mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
-
-    /**
-     * The return path for mail we deliver ourselves.
-     *
-     * ⚠ A SECOND SUBDOMAIN EXISTS SO THAT SPF ALIGNS ON BOTH ROUTES. Sending
-     * direct with a bounce address on i10's own domain works and DMARC still
-     * passes — on DKIM alone. Passing on SPF *as well* requires the envelope
-     * sender to be on the CUSTOMER'S domain, which means their DNS needs a
-     * return path pointing at us. Two labels, two MX records, published once.
+     * ⚠ ONE RETURN PATH FOR BOTH ROUTES. SES and our relay both write it as
+     * the envelope sender, and its SPF record authorises both, so SPF passes
+     * and aligns with the customer's `From:` whichever way the mail leaves.
+     * Its MX must be Amazon's — see `returnPathDomain` for what that costs.
+     * There used to be a second label, `bounce_subdomain`, with its MX pointed
+     * at us; migration 0057 dropped it.
      *
      * ⚠ RELAXED ALIGNMENT IS WHAT MAKES A SUBDOMAIN ENOUGH. DMARC's default
      * `aspf=r` aligns anything under the organizational domain, so
-     * `bounce.example.com` aligns with `From: someone@example.com`. Under
+     * `send.example.com` aligns with `From: someone@example.com`. Under
      * `aspf=s` it would not — which is a reason never to publish a DMARC record
      * for a customer with strict alignment on.
      */
-    bounceSubdomain: text("bounce_subdomain").notNull().default("bounce"),
+    mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
 
     /**
      * Which MTA this domain's API mail leaves through. `auto` asks the plan.
@@ -480,13 +472,9 @@ export const delegations = core.table(
      */
     name: text("name").notNull(),
 
-    domainId: uuid("domain_id")
-      .notNull()
-      .references(() => domains.id, { onDelete: "cascade" }),
+    domainId: uuid("domain_id").notNull(),
 
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id").notNull(),
 
     claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -503,6 +491,23 @@ export const delegations = core.table(
     unique("delegations_domain_unique").on(t.domainId),
 
     index("delegations_tenant_idx").on(t.tenantId),
+
+    /*
+     * ⚠ NAMED TO MATCH THE DATABASE, which got them from the hand-written 0041
+     * rather than from Drizzle's `<table>_<col>_<ref>_<col>_fk` default. Left to
+     * the default, the snapshot described constraints that do not exist under
+     * those names — invisible until a migration tries to drop one.
+     */
+    foreignKey({
+      name: "delegations_domain_fk",
+      columns: [t.domainId],
+      foreignColumns: [domains.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "delegations_tenant_fk",
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete("cascade"),
   ],
 )
 

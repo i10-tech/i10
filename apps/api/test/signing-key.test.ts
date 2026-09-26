@@ -23,7 +23,7 @@ const secrets: SecretBox = {
 const ROW = {
   selector: "sel1",
   sealed: "sealed:PRIVATE",
-  bounceSubdomain: "bounce",
+  mailFromSubdomain: "send",
 }
 
 /**
@@ -73,7 +73,7 @@ describe("the DKIM key lookup", () => {
     expect(tenants).toContain("ten-1")
   })
 
-  it("unseals the private key and carries the row's bounce label", async () => {
+  it("unseals the private key and carries the whole return path", async () => {
     const { db } = fakeDb()
     const lookup = domainSendingLookup({ db: db as never, secrets })
 
@@ -81,12 +81,14 @@ describe("the DKIM key lookup", () => {
 
     expect(got).toEqual({
       dkim: { selector: "sel1", privateKey: "PRIVATE" },
-      bounceSubdomain: "bounce",
+      // The full name, from `returnPathDomain` — never a label for the
+      // transport to assemble. See the regression note in domains/zone.ts.
+      returnPath: "send.example.com",
     })
   })
 
   it("answers null for a domain with no key, without throwing", async () => {
-    const { db } = fakeDb([{ selector: null, sealed: null, bounceSubdomain: "bounce" }])
+    const { db } = fakeDb([{ selector: null, sealed: null, mailFromSubdomain: "send" }])
     const lookup = domainSendingLookup({ db: db as never, secrets })
 
     expect(await lookup("example.com", "ten-1")).toBeNull()

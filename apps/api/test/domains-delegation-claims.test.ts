@@ -45,7 +45,6 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: ID,
   name: "example.com",
   mailFromSubdomain: "send",
-  bounceSubdomain: "bounce",
   delegated: true,
   dkimSelector: "i10abc123",
   dkimPublicKey: "MIIBIjANBgkq",
@@ -162,7 +161,6 @@ const base = {
   ownDomains: ["i10.tech"],
   dns: {
     spfInclude: "_spf.i10.tech",
-    bounceHost: "mx.i10.tech",
     nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
   },
   secrets: { seal: (v: string) => `sealed:${v}`, open: (v: string) => v },
@@ -307,7 +305,7 @@ describe("the squatter, verifying a domain they do not own", () => {
      *
      * ⚠ AND IT DISCLOSES NOTHING, which is the only reason this is acceptable.
      * The message tells them these nameservers are i10's — a fact anybody can
-     * read with `dig NS mail.example.com` — and never names the workspace
+     * read with `dig NS send.example.com` — and never names the workspace
      * holding it, the same restraint `create`'s conflict wording keeps. Acting
      * on the advice requires control of the domain's DNS, which a squatter by
      * definition does not have.
@@ -366,7 +364,7 @@ describe("the owner, verifying a domain they do own", () => {
     expect(zones.put.mock.calls.map(([z]) => z.name).sort()).toEqual([
       "_dmarc.example.com",
       "_domainkey.example.com",
-      "mail.example.com",
+      "send.example.com",
     ])
   })
 
@@ -455,7 +453,7 @@ describe("deleting a delegated domain", () => {
     expect(zones.remove.mock.calls.map(([name]) => name).sort()).toEqual([
       "_dmarc.example.com",
       "_domainkey.example.com",
-      "mail.example.com",
+      "send.example.com",
     ])
   })
 
@@ -510,7 +508,7 @@ describe("deleting a delegated domain", () => {
     expect(zones.remove.mock.calls.map(([name]) => name).sort()).toEqual([
       "_dmarc.example.com",
       "_domainkey.example.com",
-      "mail.example.com",
+      "send.example.com",
     ])
   })
 
