@@ -223,7 +223,11 @@ export default async function DomainDetailPage({
         <VerificationWatch id={domain.id} status={domain.status} />
 
         {delegation?.ok && (
-          <DelegationNote report={delegation.data} status={domain.status} />
+          <DelegationNote
+            domainId={domain.id}
+            report={delegation.data}
+            status={domain.status}
+          />
         )}
 
         <Section className="border-b-0 pt-0">

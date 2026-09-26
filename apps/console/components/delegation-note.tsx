@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Clock, Info } from "lucide-react"
 import { cn } from "cn"
+import { HandoverSettling } from "@/components/handover-settling"
 import type { DelegationReport, ZoneFinding } from "@/lib/types"
 
 /**
@@ -25,9 +26,12 @@ import type { DelegationReport, ZoneFinding } from "@/lib/types"
  * zones — see the note on the `nameserver_silent` branch.
  */
 export function DelegationNote({
+  domainId,
   report,
   status,
 }: {
+  /** Keys the grace clock, so a reload continues it — see `HandoverSettling`. */
+  domainId: string
   report: DelegationReport
   status: string
 }) {
@@ -69,36 +73,80 @@ export function DelegationNote({
      * ever got as far as publishing", which is exactly the question here.
      */
     if (status === "not_started") {
+      /*
+       * ⚠ AND IT NO LONGER ASKS FOR THE BUTTON STRAIGHT AWAY. The domain page
+       * presses Verify itself on a schedule (see `VerificationWatch`), so
+       * "press Verify" was an instruction for work already in flight. It is
+       * the right thing to say only once that has had time to finish and has
+       * not — which is when this falls back to it.
+       */
       return (
-        <Note
-          tone="warning"
-          icon={<Clock className="size-4 text-warning" />}
-          title="Your records are in place — press Verify"
+        <HandoverSettling
+          domainId={domainId}
+          state="unconfirmed"
+          title="Confirming the delegation"
           body={
             <>
               {list(broken.map((z) => z.zone))} {broken.length === 1 ? "is" : "are"}{" "}
-              delegated to us correctly. We start answering for{" "}
-              {broken.length === 1 ? "it" : "them"} once we have confirmed the
-              delegation is yours, which is what Verify does — nothing is wrong and
-              there is nothing else to change.
+              delegated to us correctly. We are confirming the delegation is yours and
+              start answering for {broken.length === 1 ? "it" : "them"} as soon as we
+              have — nothing needs doing, and this note updates itself.
             </>
+          }
+          failure={
+            <Note
+              tone="warning"
+              icon={<Clock className="size-4 text-warning" />}
+              title="Your records are in place — press Verify"
+              body={
+                <>
+                  {list(broken.map((z) => z.zone))} {broken.length === 1 ? "is" : "are"}{" "}
+                  delegated to us correctly. We start answering for{" "}
+                  {broken.length === 1 ? "it" : "them"} once we have confirmed the
+                  delegation is yours, which is what Verify does — nothing is wrong and
+                  there is nothing else to change.
+                </>
+              }
+            />
           }
         />
       )
     }
 
+    /*
+     * ⚠ HELD BACK FOR TWO MINUTES, BECAUSE MOST OF THE TIME IT IS NOT TRUE
+     * YET. Right after a verify publishes the zones, our nameservers are still
+     * picking them up, and this note said "contact support" through the very
+     * seconds the page was re-rendering to watch the handover finish. See
+     * `HandoverSettling`.
+     */
     return (
-      <Note
-        tone="danger"
-        icon={<AlertTriangle className="size-4 text-danger" />}
-        title="Delegated to us, and we are not serving it"
+      <HandoverSettling
+        domainId={domainId}
+        state="nameserver_silent"
+        title="Finishing the handover"
         body={
           <>
-            You have published NS records for {list(broken.map((z) => z.zone))} and they
-            point at us, but we are not answering for{" "}
-            {broken.length === 1 ? "it" : "them"}. That is our side of the handover, not
-            yours — contact support@i10.tech.
+            {list(broken.map((z) => z.zone))} {broken.length === 1 ? "points" : "point"}{" "}
+            at us and we are starting to answer for{" "}
+            {broken.length === 1 ? "it" : "them"}. This usually takes a few seconds —
+            this note updates itself.
           </>
+        }
+        failure={
+          <Note
+            tone="danger"
+            icon={<AlertTriangle className="size-4 text-danger" />}
+            title="Delegated to us, and we are not serving it"
+            body={
+              <>
+                You have published NS records for {list(broken.map((z) => z.zone))} and
+                they point at us, but we are not answering for{" "}
+                {broken.length === 1 ? "it" : "them"}. That is our side of the handover,
+                not yours — contact support@i10.tech.
+              </>
+            }
+          />
         }
       />
     )
@@ -179,24 +227,45 @@ export function DelegationNote({
 
   const waiting = report.zones.filter((z) => z.code === "not_published")
   if (waiting.length > 0) {
+    /*
+     * ⚠ THE FIRST MINUTE OF EVERY PROVIDER HAND-OFF LOOKS EXACTLY LIKE THIS. We
+     * write the NS records and ask for them a second later, before resolvers
+     * have seen them — so "we cannot see the NS records", with advice about
+     * mistyped hosts, arrived on the screen somebody reached by letting us add
+     * them. The advice is kept for when it has had time to be true.
+     */
     return (
-      <Note
-        tone="warning"
-        icon={<Clock className="size-4 text-warning" />}
-        title={
-          waiting.length === report.zones.length
-            ? "We cannot see the NS records yet"
-            : "Some of the NS records are not visible yet"
-        }
+      <HandoverSettling
+        domainId={domainId}
+        state="not_published"
+        title="Waiting for the NS records to appear"
         body={
           <>
-            Nothing is published at {list(waiting.map((z) => z.zone))} that we can see.
-            If you have just added the records this is normal — propagation is usually
-            minutes and can take up to 72 hours. If it has been longer, check that the
-            host is exactly the name in the table below: many providers append the
-            domain for you, so typing the full name produces{" "}
-            <span className="font-mono">mail.example.com.example.com</span>.
+            We are looking for the records at {list(waiting.map((z) => z.zone))}. They
+            usually show up within a minute or two of being added — this note updates
+            itself.
           </>
+        }
+        failure={
+          <Note
+            tone="warning"
+            icon={<Clock className="size-4 text-warning" />}
+            title={
+              waiting.length === report.zones.length
+                ? "We cannot see the NS records yet"
+                : "Some of the NS records are not visible yet"
+            }
+            body={
+              <>
+                Nothing is published at {list(waiting.map((z) => z.zone))} that we can
+                see. If you have just added the records this is normal — propagation is
+                usually minutes and can take up to 72 hours. If it has been longer,
+                check that the host is exactly the name in the table below: many
+                providers append the domain for you, so typing the full name produces{" "}
+                <span className="font-mono">mail.example.com.example.com</span>.
+              </>
+            }
+          />
         }
       />
     )
@@ -242,7 +311,7 @@ function list(items: string[]): React.ReactNode {
   return <span className="font-mono">{text}</span>
 }
 
-function Note({
+export function Note({
   tone,
   icon,
   title,

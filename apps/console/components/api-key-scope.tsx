@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -194,7 +193,6 @@ export function ApiKeyScopeDialog({
   domains: ScopeDomain[]
   onOpenChange: (open: boolean) => void
 }) {
-  const router = useRouter()
   const [scope, setScope] = React.useState<string[] | null>(null)
   const [pending, setPending] = React.useState(false)
 
@@ -230,7 +228,6 @@ export function ApiKeyScopeDialog({
         : `${apiKey.name} can send from any domain`,
     )
     onOpenChange(false)
-    router.refresh()
   }
 
   return (

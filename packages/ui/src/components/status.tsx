@@ -29,18 +29,23 @@ import { cn } from "cn"
 
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger"
 
-const dotVariants = cva("inline-block size-1.5 shrink-0 rounded-full", {
-  variants: {
-    tone: {
-      neutral: "bg-neutral",
-      info: "bg-info",
-      success: "bg-success",
-      warning: "bg-warning",
-      danger: "bg-danger",
+const dotVariants = cva(
+  // A state change (pending → verified) fades rather than snapping; colour
+  // only, so linear — see the motion table in styles/tokens.css.
+  "inline-block size-1.5 shrink-0 rounded-full transition-colors duration-(--duration-dismiss) ease-(--ease-linear)",
+  {
+    variants: {
+      tone: {
+        neutral: "bg-neutral",
+        info: "bg-info",
+        success: "bg-success",
+        warning: "bg-warning",
+        danger: "bg-danger",
+      },
     },
+    defaultVariants: { tone: "neutral" },
   },
-  defaultVariants: { tone: "neutral" },
-})
+)
 
 export function StatusDot({
   tone,

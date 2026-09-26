@@ -4,6 +4,7 @@ import * as React from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Layers, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "cn"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { Checkbox } from "@repo/ui/components/checkbox"
@@ -21,7 +22,7 @@ import { EmptyState } from "@/components/empty-state"
 import { LoadMore } from "@/components/load-more"
 import { addToSegment, deleteContacts } from "@/lib/actions"
 import type { ContactRow, SegmentRow } from "@/lib/types"
-import { useResetWhen, useSyncedState } from "@/lib/react"
+import { useResetWhen, useRetained, useSyncedState } from "@/lib/react"
 import { Time } from "@/components/time"
 
 /**
@@ -52,6 +53,8 @@ export function ContactsTable({
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [deleting, setDeleting] = React.useState(false)
+  const doneDeleting = React.useRef(false)
+  const shownCount = useRetained(selected.size || null) ?? 0
 
   const urlSearch = searchParams.get("search") ?? ""
   const segmentId = searchParams.get("segment_id")
@@ -94,48 +97,72 @@ export function ContactsTable({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search name or address"
-            className="h-8 pl-8 text-sm"
-            aria-label="Search contacts"
-          />
+      {/*
+       * ⚠ THE FILTERS AND THE SELECTION BAR SHARE ONE GRID CELL, AND THE CELL
+       * NEVER CHANGES HEIGHT. The bar used to be a block of its own between
+       * the filters and the table, inserted on the first tick: measured, the
+       * table moved 66px in one frame, so the row somebody had just ticked
+       * left the cursor and the next click landed on its neighbour. Now both
+       * are always rendered in the same cell — which is therefore always as
+       * tall as the taller of them — and ticking a row crossfades one for the
+       * other with a 4px rise. The table does not move at all.
+       *
+       * ⚠ `inert` ON WHICHEVER IS HIDDEN, NOT ONLY `opacity-0`. An invisible
+       * search box that can still take focus and Tab stops is a trap; `inert`
+       * removes it from the keyboard and the accessibility tree together.
+       */}
+      <div className="grid">
+        <div
+          className={cn(
+            "col-start-1 row-start-1 flex flex-wrap items-center gap-2",
+            "transition-[opacity,translate] duration-(--duration-dismiss) ease-(--ease-quint-out)",
+            selected.size > 0 && "pointer-events-none -translate-y-1 opacity-0",
+          )}
+          inert={selected.size > 0}
+        >
+          <div className="relative min-w-0 flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search name or address"
+              className="h-8 pl-8 text-sm"
+              aria-label="Search contacts"
+            />
+          </div>
+
+          {activeSegment && (
+            <Badge variant="secondary" className="gap-1">
+              <Layers className="size-3" />
+              {activeSegment.name}
+              <button
+                type="button"
+                aria-label="Clear segment filter"
+                className="cursor-pointer"
+                onClick={() => {
+                  const params = new URLSearchParams(searchParams.toString())
+                  params.delete("segment_id")
+                  params.delete("cursor")
+                  router.push(`${pathname}?${params.toString()}`, { scroll: false })
+                }}
+              >
+                <X className="size-3" />
+              </button>
+            </Badge>
+          )}
         </div>
 
-        {activeSegment && (
-          <Badge variant="secondary" className="gap-1">
-            <Layers className="size-3" />
-            {activeSegment.name}
-            <button
-              type="button"
-              aria-label="Clear segment filter"
-              className="cursor-pointer"
-              onClick={() => {
-                const params = new URLSearchParams(searchParams.toString())
-                params.delete("segment_id")
-                params.delete("cursor")
-                router.push(`${pathname}?${params.toString()}`, { scroll: false })
-              }}
-            >
-              <X className="size-3" />
-            </button>
-          </Badge>
-        )}
-      </div>
-
-      {selected.size > 0 && (
-        /*
-         * ⚠ THE ACTION BAR REPLACES NOTHING AND PUSHES NOTHING DOWN. It appears
-         * above the table in the space the filters already occupy, so selecting
-         * a row does not make the row you were aiming at move.
-         */
-        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+        <div
+          className={cn(
+            "col-start-1 row-start-1 flex flex-wrap items-center gap-2 rounded-md bg-muted/60 px-3",
+            "transition-[opacity,translate] duration-(--duration-dismiss) ease-(--ease-quint-out)",
+            selected.size === 0 && "pointer-events-none translate-y-1 opacity-0",
+          )}
+          inert={selected.size === 0}
+        >
           <span className="tabular text-sm">
-            {selected.size} selected{" "}
+            {/* Holds its last count while fading out — see `useRetained`. */}
+            {shownCount} selected{" "}
             <span className="text-muted-foreground">on this page</span>
           </span>
 
@@ -170,8 +197,9 @@ export function ContactsTable({
                               }
                             : undefined,
                         )
+                        // No refresh: `addToSegment` re-renders this page in
+                        // its own response. See `run` in lib/actions.ts.
                         setSelected(new Set())
-                        router.refresh()
                       }}
                     >
                       {segment.name}
@@ -190,7 +218,7 @@ export function ContactsTable({
             </Button>
           </div>
         </div>
-      )}
+      </div>
 
       {contacts.length === 0 ? (
         <EmptyState
@@ -280,10 +308,21 @@ export function ContactsTable({
 
       <ConfirmDialog
         open={deleting}
-        onOpenChange={setDeleting}
+        onOpenChange={(open) => {
+          setDeleting(open)
+          // ⚠ THE SELECTION IS CLEARED WHEN THE DIALOG CLOSES, NOT WHEN THE
+          // DELETE RETURNS. Clearing it inside `onConfirm` retitled the dialog
+          // "Delete 0 contacts?" under its own "Deleted" tick. The rows it
+          // named are already gone from the table behind it.
+          if (!open && doneDeleting.current) {
+            doneDeleting.current = false
+            setSelected(new Set())
+          }
+        }}
         title={`Delete ${selected.size} ${selected.size === 1 ? "contact" : "contacts"}?`}
         description="They are removed from every segment and their topic preferences go with them. If any of them had unsubscribed, that record is lost — re-importing the same address would start sending to them again."
         confirmLabel="Delete"
+        doneLabel="Deleted"
         // ⚠ `DELETE` FOR EVERY BULK DELETE. There is no single name to type, and
         // the count is already in the title where it is read.
         confirmWord="DELETE"
@@ -293,10 +332,7 @@ export function ContactsTable({
             toast.error("Could not delete them", { description: result.error })
             return false
           }
-          toast.success(`Deleted ${result.data.deleted}`)
-          setSelected(new Set())
-          setDeleting(false)
-          router.refresh()
+          doneDeleting.current = true
           return true
         }}
       />

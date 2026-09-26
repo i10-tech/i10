@@ -4,13 +4,15 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Save, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import { ActionButton } from "@repo/ui/components/action-button"
 import { Button } from "@repo/ui/components/button"
 import { Label } from "@repo/ui/components/label"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Swap } from "@repo/ui/components/swap"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { HtmlEditor } from "@/components/html-editor"
 import { deleteTemplate, publishTemplate, updateTemplate } from "@/lib/actions"
+import { OUTCOME_HOLD_MS, useOutcome } from "@/lib/outcome"
 import type { TemplateRow } from "@/lib/types"
 import { Time } from "@/components/time"
 
@@ -34,8 +36,8 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
   const [subject, setSubject] = React.useState(template.subject ?? "")
   const [html, setHtml] = React.useState(template.html ?? "")
   const [text, setText] = React.useState(template.text ?? "")
-  const [saving, setSaving] = React.useState(false)
-  const [publishing, setPublishing] = React.useState(false)
+  const saving = useOutcome()
+  const publishing = useOutcome()
   const [deleting, setDeleting] = React.useState(false)
 
   const dirty =
@@ -54,57 +56,55 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
     template.updated_at > template.published_at ||
     dirty
 
+  /*
+   * ⚠ BOTH ANSWER IN THE BUTTON, AND THE STATUS LINE BESIDE THEM SAYS THE REST.
+   * "Saved as draft — your live template has not changed yet" was a toast
+   * restating what the line next to the button already reads: "Unpublished
+   * changes — sends still use v3". Publishing is the same: the line flips to
+   * "v4 live since …" as the tick lands. See lib/outcome.ts.
+   */
   async function save() {
-    if (saving) return
-    setSaving(true)
-    const result = await updateTemplate(template.id, {
-      subject: subject || null,
-      html: html || null,
-      text: text || null,
-    })
-    setSaving(false)
-
-    if (!result.ok) {
-      toast.error("Could not save", { description: result.error })
-      return
-    }
-    toast.success("Saved as draft", {
-      description: "Your live template has not changed yet.",
-    })
-    router.refresh()
-  }
-
-  async function publish() {
-    if (publishing) return
-
-    // ⚠ SAVED FIRST, BECAUSE PUBLISH COPIES WHAT IS STORED. Publishing with
-    // unsaved edits in the textarea would push the PREVIOUS draft live and tell
-    // the person it worked — the worst kind of success.
-    if (dirty) {
-      const saved = await updateTemplate(template.id, {
+    if (saving.state === "pending") return
+    await saving.run(async () => {
+      const result = await updateTemplate(template.id, {
         subject: subject || null,
         html: html || null,
         text: text || null,
       })
-      if (!saved.ok) {
-        toast.error("Could not save before publishing", { description: saved.error })
-        return
+      if (!result.ok) {
+        toast.error("Could not save", { description: result.error })
+        return false
       }
-    }
-
-    setPublishing(true)
-    const result = await publishTemplate(template.id)
-    setPublishing(false)
-
-    if (!result.ok) {
-      toast.error("Could not publish", { description: result.error })
-      return
-    }
-
-    toast.success(`Published v${result.data.version}`, {
-      description: "Sends referencing this template now use the new content.",
+      return true
     })
-    router.refresh()
+  }
+
+  async function publish() {
+    if (publishing.state === "pending") return
+
+    // ⚠ SAVED FIRST, BECAUSE PUBLISH COPIES WHAT IS STORED. Publishing with
+    // unsaved edits in the textarea would push the PREVIOUS draft live and tell
+    // the person it worked — the worst kind of success.
+    await publishing.run(async () => {
+      if (dirty) {
+        const saved = await updateTemplate(template.id, {
+          subject: subject || null,
+          html: html || null,
+          text: text || null,
+        })
+        if (!saved.ok) {
+          toast.error("Could not save before publishing", { description: saved.error })
+          return false
+        }
+      }
+
+      const result = await publishTemplate(template.id)
+      if (!result.ok) {
+        toast.error("Could not publish", { description: result.error })
+        return false
+      }
+      return true
+    })
   }
 
   return (
@@ -128,17 +128,40 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
       </div>
 
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t bg-background py-3">
-        <Button variant="outline" onClick={save} disabled={saving || !dirty}>
-          {saving ? <Spinner /> : <Save />}
+        {/*
+         * ⚠ "DONE" OUTRANKS "NOTHING TO SAVE". The save lands, `dirty` goes
+         * false, and a button disabled by it would grey out underneath its
+         * own tick — the confirmation drawn as if it were unavailable.
+         */}
+        <ActionButton
+          variant="outline"
+          onClick={save}
+          state={saving.state}
+          onReset={saving.reset}
+          pendingLabel="Save draft"
+          doneLabel="Saved"
+          disabled={saving.state === "idle" && !dirty}
+        >
+          <Save />
           Save draft
-        </Button>
+        </ActionButton>
 
-        <Button onClick={publish} disabled={publishing || !unpublished}>
-          {publishing ? <Spinner /> : <Send />}
+        <ActionButton
+          onClick={publish}
+          state={publishing.state}
+          onReset={publishing.reset}
+          pendingLabel="Publish"
+          doneLabel="Published"
+          disabled={publishing.state === "idle" && !unpublished}
+        >
+          <Send />
           Publish
-        </Button>
+        </ActionButton>
 
-        <span className="text-xs text-muted-foreground">
+        <Swap
+          id={unpublished ? "draft" : `live-${template.version}`}
+          className="text-xs text-muted-foreground"
+        >
           {unpublished ? (
             <span className="text-warning">
               Unpublished changes — sends still use{" "}
@@ -150,7 +173,7 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
               <Time iso={template.published_at!} mode="exact" />
             </>
           )}
-        </span>
+        </Swap>
 
         <Button
           variant="ghost"
@@ -169,6 +192,7 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
         title={`Delete ${template.name}?`}
         description="Any send referencing this template id will start failing. Check your code before deleting it."
         confirmLabel="Delete template"
+        doneLabel="Deleted"
         confirmWord={template.name}
         onConfirm={async () => {
           const result = await deleteTemplate(template.id)
@@ -176,8 +200,10 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
             toast.error("Could not delete the template", { description: result.error })
             return false
           }
-          toast.success(`${template.name} deleted`)
-          router.push("/templates")
+          // ⚠ THE NAVIGATION IS THE CONFIRMATION'S EXIT, NOT A SECOND ONE. The
+          // tick holds, then this page — dialog and all — is replaced by the
+          // list without it. A toast on top would announce what the list shows.
+          setTimeout(() => router.push("/templates"), OUTCOME_HOLD_MS)
           return true
         }}
       />

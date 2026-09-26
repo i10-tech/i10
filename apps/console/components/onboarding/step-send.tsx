@@ -1,14 +1,16 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { AlertTriangle, KeyRound } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { CopyButton, CopyField } from "@repo/ui/components/copy"
-import { Spinner } from "@repo/ui/components/spinner"
+import { ActionButton } from "@repo/ui/components/action-button"
+import { AutoHeight } from "@repo/ui/components/auto-height"
+import { StepStage } from "@repo/ui/components/step-stage"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
 import { createApiKey } from "@/lib/actions"
+import { useOutcome } from "@/lib/outcome"
 import type { CreatedApiKey, DomainSummary } from "@/lib/types"
 
 /**
@@ -37,9 +39,8 @@ export function StepSend({
   recipient?: string | null
   onDone: () => void
 }) {
-  const router = useRouter()
   const [key, setKey] = React.useState<CreatedApiKey | null>(null)
-  const [pending, setPending] = React.useState(false)
+  const outcome = useOutcome()
 
   const verified = domains.filter((d) => d.status === "verified")
 
@@ -71,28 +72,33 @@ export function StepSend({
   const secret = key?.secret ?? "i10_live_xxxxxxxxxxxxxxxxxxxx"
 
   async function mint() {
-    if (pending) return
-    setPending(true)
+    if (outcome.state !== "idle") return
+    let created: CreatedApiKey | null = null
     /*
      * ⚠ UNRESTRICTED, DELIBERATELY. This is the first key a workspace ever has
      * and onboarding is not the moment to explain scopes — somebody is trying
      * to send one email. The keys page is where a scope is chosen, and this key
      * can be narrowed there without being replaced.
      */
-    const result = await createApiKey({
-      name: "onboarding",
-      mode: "live",
-      domains: [],
-    })
-    setPending(false)
-
-    if (!result.ok) {
-      toast.error("Could not create a key", { description: result.error })
-      return
-    }
-
-    setKey(result.data)
-    router.refresh()
+    // ⚠ TICK, HOLD, THEN THE ROW BECOMES THE KEY — the same beat as the keys
+    // page, so the first key anybody makes feels like every one after it. No
+    // refresh: `createApiKey` re-renders this page in its own response.
+    await outcome.run(
+      async () => {
+        const result = await createApiKey({
+          name: "onboarding",
+          mode: "live",
+          domains: [],
+        })
+        if (!result.ok) {
+          toast.error("Could not create a key", { description: result.error })
+          return false
+        }
+        created = result.data
+        return true
+      },
+      () => setKey(created),
+    )
   }
 
   // ⚠ TO THEMSELVES, so running the snippet lands a real email in an inbox they
@@ -150,29 +156,40 @@ client.emails.send({
         </p>
       )}
 
-      {key ? (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Your API key</p>
-          <CopyField value={key.secret} className="py-2" />
-          <p className="text-xs text-warning">
-            This is the only time it is shown. It is already in the snippet below — copy
-            that and you have both.
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
-          <KeyRound className="size-4 shrink-0 text-muted-foreground" />
-          <p className="min-w-0 flex-1 text-sm">
-            {hasApiKey
-              ? "You already have a key. Create another for this snippet, or paste one you have."
-              : "You will need a key to send."}
-          </p>
-          <Button size="sm" onClick={mint} disabled={pending}>
-            {pending && <Spinner />}
-            Create a key
-          </Button>
-        </div>
-      )}
+      {/* The row morphs into the key rather than being swapped for it: the
+          snippet below glides down instead of jumping. See `AutoHeight`. */}
+      <AutoHeight grow="animate">
+        <StepStage morph={false} step={key ? "key" : "create"}>
+          {key ? (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Your API key</p>
+              <CopyField value={key.secret} className="py-2" />
+              <p className="text-xs text-warning">
+                This is the only time it is shown. It is already in the snippet below —
+                copy that and you have both.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
+              <KeyRound className="size-4 shrink-0 text-muted-foreground" />
+              <p className="min-w-0 flex-1 text-sm">
+                {hasApiKey
+                  ? "You already have a key. Create another for this snippet, or paste one you have."
+                  : "You will need a key to send."}
+              </p>
+              <ActionButton
+                size="sm"
+                onClick={mint}
+                state={outcome.state}
+                pendingLabel="Create a key"
+                doneLabel="Created"
+              >
+                Create a key
+              </ActionButton>
+            </div>
+          )}
+        </StepStage>
+      </AutoHeight>
 
       <Tabs defaultValue="curl" className="overflow-hidden rounded-lg border">
         <div className="flex items-center justify-between border-b px-2 py-1.5">

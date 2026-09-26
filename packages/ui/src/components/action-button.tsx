@@ -51,6 +51,9 @@ const BOX: Transition = { type: "spring", stiffness: 500, damping: 42, mass: 1 }
  */
 const SWAP: Transition = { duration: 0.12, ease: "easeOut" }
 
+/** Under-damped by a few percent, like `--ease-spring`: weight, not bounce. */
+const TICK: Transition = { type: "spring", stiffness: 600, damping: 22, mass: 0.8 }
+
 const CONTENT = {
   initial: { opacity: 0, y: 4 },
   animate: { opacity: 1, y: 0 },
@@ -113,7 +116,27 @@ export function ActionButton({
       </>
     ) : state === "done" ? (
       <>
-        <CheckIcon aria-hidden="true" />
+        {/*
+         * ⚠ THE TICK IS THE ONE THING IN THE BUTTON THAT TAKES THE SUCCESS
+         * COLOUR, AND IT ARRIVES ON A SPRING. It is the same mark, in the same
+         * green, that a field shows when it has been accepted — see the
+         * `data-outcome` note in floating-field — so a form that worked reads as
+         * one event across the box and the button rather than two. The pop is a
+         * scale from 60% with `--ease-spring`'s few-percent overshoot: felt as a
+         * click landing, not watched as an animation.
+         */}
+        <motion.span
+          aria-hidden="true"
+          // ⚠ NOT ON A RED BUTTON. Green on the destructive fill is a clash
+          // that reads as an error of its own; there the tick keeps the
+          // button's own foreground and the word carries the outcome.
+          className={cn("inline-flex", variant !== "destructive" && "text-success")}
+          initial={{ scale: 0.6 }}
+          animate={{ scale: 1 }}
+          transition={TICK}
+        >
+          <CheckIcon />
+        </motion.span>
         {doneLabel}
       </>
     ) : state === "failed" ? (

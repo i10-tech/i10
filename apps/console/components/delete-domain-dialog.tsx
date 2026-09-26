@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Checkbox } from "@repo/ui/components/checkbox"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { deleteDomain, revokeApiKey } from "@/lib/actions"
+import { OUTCOME_HOLD_MS } from "@/lib/outcome"
 import { useStepUp } from "@/lib/step-up"
 
 /**
@@ -50,7 +51,11 @@ export function DeleteDomainDialog({
    * to leave — it is a page about a domain that no longer exists — and the
    * list only has to re-read itself.
    */
-  onDeleted: () => void
+  /**
+   * Called once the "Deleted" tick has been seen — see lib/outcome.ts. A list
+   * page passes nothing: the row is already gone behind the dialog.
+   */
+  onDeleted?: () => void
 }) {
   const stepUp = useStepUp()
   /*
@@ -69,6 +74,7 @@ export function DeleteDomainDialog({
       title={`Delete ${name}?`}
       description="Mail can no longer be sent from this domain, and its DNS records stop being served if it was delegated. Messages already sent keep their history."
       confirmLabel="Delete domain"
+      doneLabel="Deleted"
       /*
        * ⚠ DELETING A DOMAIN STOPS ITS MAIL, SO IT ASKS FOR THE NAME. This is
        * not ceremony: typing it is the difference between losing a staging
@@ -120,13 +126,10 @@ export function DeleteDomainDialog({
           return false
         }
 
-        toast.success(`${name} deleted`, {
-          description:
-            alsoRevoke && scopedKeys.length > 0
-              ? `${scopedKeys.length === 1 ? "Its key was" : `Its ${scopedKeys.length} keys were`} revoked.`
-              : undefined,
-        })
-        onDeleted()
+        // ⚠ AFTER THE HOLD, SO THE TICK IS SEEN BEFORE THE PAGE GOES. The
+        // detail page navigates away here; leaving at once would take the
+        // dialog with it mid-sentence.
+        if (onDeleted) setTimeout(onDeleted, OUTCOME_HOLD_MS)
         return true
       }}
     >

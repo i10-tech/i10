@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Check, Copy, Redo2 } from "lucide-react"
+import { ActionButton } from "@repo/ui/components/action-button"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -13,8 +14,8 @@ import {
 } from "@repo/ui/components/dialog"
 import { useCopy } from "@repo/ui/components/copy"
 import { Kbd } from "@repo/ui/components/kbd"
-import { Spinner } from "@repo/ui/components/spinner"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { useOutcome } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
 
 /**
@@ -123,6 +124,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = "Confirm",
+  doneLabel = "Done",
   confirmWord,
   ready = true,
   initialFocus = "confirm-word",
@@ -135,6 +137,12 @@ export function ConfirmDialog({
   title: string
   description: string
   confirmLabel?: string
+  /**
+   * What the button says once it worked — "Revoked", "Deleted". Past tense of
+   * `confirmLabel`, shown for a beat before the dialog closes. See
+   * lib/outcome.ts.
+   */
+  doneLabel?: string
   /** When set, the button stays disabled until this exact string is typed. */
   confirmWord?: string
   /**
@@ -163,12 +171,17 @@ export function ConfirmDialog({
     const end = input.value.length
     input.setSelectionRange(end, end)
   }
-  const [pending, setPending] = React.useState(false)
+  const outcome = useOutcome()
+  const pending = outcome.state === "pending"
 
   // ⚠ RESET ON OPEN, NOT ON CLOSE. Resetting on close races the exit animation
   // — the field visibly empties while the dialog is still fading out, which
-  // looks like the input being cleared out from under you.
-  useResetOnOpen(open, () => setTyped(""))
+  // looks like the input being cleared out from under you. The tick on the
+  // button is the same case.
+  useResetOnOpen(open, () => {
+    setTyped("")
+    outcome.reset()
+  })
 
   /*
    * ⚠ TWO ANSWERS, KEPT APART. `matches` is about the typed name alone and is
@@ -180,11 +193,8 @@ export function ConfirmDialog({
   const armed = ready && matches
 
   async function confirm() {
-    if (!armed || pending) return
-    setPending(true)
-    const ok = await onConfirm()
-    setPending(false)
-    if (ok) onOpenChange(false)
+    if (!armed || outcome.state !== "idle") return
+    await outcome.run(onConfirm, () => onOpenChange(false))
   }
 
   return (
@@ -315,12 +325,14 @@ export function ConfirmDialog({
             Cancel
             <Kbd>Esc</Kbd>
           </Button>
-          <Button
+          <ActionButton
             variant={destructive ? "destructive" : "default"}
             onClick={confirm}
-            disabled={!armed || pending}
+            state={outcome.state}
+            pendingLabel={confirmLabel}
+            doneLabel={doneLabel}
+            disabled={!armed}
           >
-            {pending && <Spinner />}
             {confirmLabel}
             {/*
              * ⚠ THE CHIP TAKES A SHADE OF THE BUTTON IT SITS ON rather than
@@ -349,7 +361,7 @@ export function ConfirmDialog({
             <Kbd className={KBD_ON_BUTTON[destructive ? "destructive" : "default"]}>
               <Redo2 aria-hidden="true" className="size-2.5 rotate-180" />
             </Kbd>
-          </Button>
+          </ActionButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

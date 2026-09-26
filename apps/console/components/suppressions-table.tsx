@@ -15,7 +15,7 @@ import { EmptyState } from "@/components/empty-state"
 import { LoadMore } from "@/components/load-more"
 import { removeSuppression } from "@/lib/actions"
 import type { SuppressionRow } from "@/lib/types"
-import { useResetWhen, useSyncedState } from "@/lib/react"
+import { useResetWhen, useRetained, useSyncedState } from "@/lib/react"
 import { Time } from "@/components/time"
 
 /**
@@ -121,6 +121,7 @@ export function SuppressionsTable({
    * hold the same address twice — so filtering by it is exact rather than a
    * guess at identity.
    */
+  const shownRemoving = useRetained(removing)
   const [hidden, setHidden] = React.useState<string[]>([])
   useResetWhen(rows, () => setHidden([]))
 
@@ -265,7 +266,9 @@ export function SuppressionsTable({
         onOpenChange={(open) => !open && setRemoving(null)}
         title="Remove this suppression?"
         description={
-          removing?.reason === "complaint"
+          // Retained: the dialog closes at once, and the text must not flip to
+          // the other sentence while it fades out. See `useRetained`.
+          shownRemoving?.reason === "complaint"
             ? "This recipient marked a message as spam. Sending to them again risks your reputation and, in some jurisdictions, breaks the law. If they bounce or complain again they are suppressed again automatically."
             : "We will start sending to this address again. If it bounces again it is suppressed again automatically — removing it does not guarantee delivery."
         }
@@ -299,11 +302,11 @@ export function SuppressionsTable({
               return
             }
 
-            toast.success(`${address} removed`)
-            // The new list arrives without the row, and `useResetWhen` above
-            // drops the guess in the same render — so there is no frame where
-            // both the optimistic filter and the real absence apply.
-            router.refresh()
+            // ⚠ NO TOAST AND NO REFRESH. The row already left on its own exit
+            // animation, which is the confirmation; `removeSuppression`
+            // revalidates this page, so the new list arrives in the action's
+            // own response and `useResetWhen` above drops the guess in that
+            // same render.
           })()
 
           return true

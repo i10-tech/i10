@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { KeyRound, MoreHorizontal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@repo/ui/components/badge"
@@ -25,6 +24,7 @@ import { Status } from "@/components/status"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import { deleteWebhook, rotateWebhookSecret } from "@/lib/actions"
+import { useRetained } from "@/lib/react"
 import type { WebhookEndpoint } from "@/lib/types"
 import { Time } from "@/components/time"
 
@@ -42,9 +42,9 @@ import { Time } from "@/components/time"
  * being called, with nothing to explain it. This badge is the explanation.
  */
 export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
-  const router = useRouter()
   const [deleting, setDeleting] = React.useState<WebhookEndpoint | null>(null)
   const [rotated, setRotated] = React.useState<WebhookEndpoint | null>(null)
+  const shownRotated = useRetained(rotated)
 
   if (endpoints.length === 0) {
     return (
@@ -96,8 +96,9 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
                         })
                         return
                       }
+                      // No refresh: `rotateWebhookSecret` re-renders this page
+                      // in its own response. See `run` in lib/actions.ts.
                       setRotated(result.data)
-                      router.refresh()
                     }}
                   >
                     <KeyRound />
@@ -140,6 +141,7 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
         title="Delete this endpoint?"
         description="Events stop being delivered to it immediately. Past delivery attempts stay in the log."
         confirmLabel="Delete endpoint"
+        doneLabel="Deleted"
         confirmWord={deleting?.url}
         onConfirm={async () => {
           if (!deleting) return false
@@ -148,9 +150,6 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
             toast.error("Could not delete the endpoint", { description: result.error })
             return false
           }
-          toast.success("Endpoint deleted")
-          setDeleting(null)
-          router.refresh()
           return true
         }}
       />
@@ -170,7 +169,9 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
               request.
             </DialogDescription>
           </DialogHeader>
-          {rotated?.secret && <CopyField value={rotated.secret} className="py-2" />}
+          {shownRotated?.secret && (
+            <CopyField value={shownRotated.secret} className="py-2" />
+          )}
           <DialogFooter>
             <Button onClick={() => setRotated(null)}>I have copied it</Button>
           </DialogFooter>

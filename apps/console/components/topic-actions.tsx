@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { MoreHorizontal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
@@ -23,7 +22,6 @@ import type { TopicRow } from "@/lib/types"
  * one delete in the marketing section with a compliance consequence.
  */
 export function TopicActions({ topic }: { topic: TopicRow }) {
-  const router = useRouter()
   const [confirming, setConfirming] = React.useState(false)
 
   return (
@@ -52,6 +50,7 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
         title={`Delete ${topic.name}?`}
         description="Every preference recorded against this topic is deleted with it — including the explicit opt-outs. You will have no record that those people asked not to receive it."
         confirmLabel="Delete topic"
+        doneLabel="Deleted"
         confirmWord={topic.name}
         onConfirm={async () => {
           const result = await deleteTopic(topic.id)
@@ -59,8 +58,6 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
             toast.error("Could not delete the topic", { description: result.error })
             return false
           }
-          toast.success(`${topic.name} deleted`)
-          router.refresh()
           return true
         }}
       />

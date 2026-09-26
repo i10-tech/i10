@@ -285,10 +285,35 @@ const LEGEND = cn(
  * into it — a red border that turns white the moment the caret lands removes
  * the message exactly when it is being acted on.
  */
+/*
+ * ⚠ AN IDLE FIELD INSIDE A FORM THAT HAS JUST WORKED GOES GREEN, AND THE FORM
+ * SAYS SO RATHER THAN EACH FIELD. `data-outcome="done"` on any ancestor — the
+ * console's forms set it from the same state that puts the tick in their submit
+ * button — reaches every field below it through Tailwind's `in-*` variant, so a
+ * dialog with four boxes confirms all four without one prop threaded to each.
+ * It is the language Clerk's code field speaks: the boxes you filled in are the
+ * thing that turns green, and the word under them is the thing that says why.
+ *
+ * ⚠ `!` BECAUSE `in-*` COMPILES TO `:where()`, WHICH HAS NO SPECIFICITY. The
+ * field is very often still focused when the answer lands — Enter submits
+ * without blurring — and `peer-focus:border-ring` would win, leaving the one box
+ * the person is looking at as the one that did not change.
+ *
+ * ⚠ ONLY A FIELD THAT WAS FILLED IN. An optional box left empty took no part
+ * in what just worked, and a green outline round nothing reads as the form
+ * claiming an answer nobody gave. `:placeholder-shown` is how this markup
+ * already tells empty from filled — see FRAME.
+ *
+ * ⚠ ONLY ON `idle`. A field showing a verdict of its own keeps it; a form cannot
+ * have succeeded with a red field in it, and a warning tone means something is
+ * still in flight.
+ */
 const TONES: Record<FieldState, { frame: string; label: string; hint: string }> = {
   idle: {
-    frame: "border-input peer-focus:border-ring",
-    label: "text-muted-foreground peer-focus:text-foreground",
+    frame:
+      "border-input peer-focus:border-ring in-data-[outcome=done]:peer-[:not(:placeholder-shown)]:border-success!",
+    label:
+      "text-muted-foreground peer-focus:text-foreground in-data-[outcome=done]:peer-[:not(:placeholder-shown)]:text-success!",
     hint: "text-muted-foreground",
   },
   pending: {

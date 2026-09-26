@@ -397,8 +397,11 @@ export function PlanCards({
        * cancellation flips one boolean whose date we already hold, while a
        * scheduled downgrade produces a plan id and a date that only the
        * server knows. Modelling the second locally would be inventing them.
+       *
+       * ⚠ AND THE RE-READ IS `changePlan`'S OWN RESPONSE, not a second
+       * request from here — see `run` in lib/actions.ts. By the time this toast
+       * shows, the cards already say what it says.
        */
-      router.refresh()
       return
     }
 

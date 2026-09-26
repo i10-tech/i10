@@ -270,6 +270,16 @@
  * on black is invisible; a grey canvas needs shadows to separate anything, and
  * then every card has a soft halo and the whole interface goes muddy.
  *
+ * ⚠ THE LIFTED SURFACES ARE #0f0f0f (card) AND #121212 (popover) — the pair
+ * Cloudflare's dashboard uses on its black. They were #060606 and #090909
+ * before, which on most panels could not be told apart from the page, so the
+ * hairline was doing all of the work alone.
+ *
+ * ⚠ AND EVERY FILL THAT LANDS ON THEM SITS ABOVE BOTH: muted #141414,
+ * secondary #161616, accent (hover, active nav) #1b1b1b. `bg-muted` is used
+ * inside cards and popovers all over the console — table heads, code, chips —
+ * and at the card's own value it vanishes. Raise the card, raise these with it.
+ *
  * ⚠ SO `--border` IS BRIGHTER HERE THAN SHADCN'S DEFAULT (12% rather than 10%)
  * AND IT IS LOAD-BEARING. It is the ONLY thing separating a card from the page.
  * Lowering it to taste makes tables lose their rows.
@@ -277,17 +287,17 @@
 .dark {
   --background: oklch(0 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.12 0 0);
+  --card: oklch(0.17 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.14 0 0);
+  --popover: oklch(0.18 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.985 0 0);
   --primary-foreground: oklch(0.12 0 0);
-  --secondary: oklch(0.18 0 0);
+  --secondary: oklch(0.2 0 0);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.17 0 0);
+  --muted: oklch(0.19 0 0);
   --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.2 0 0);
+  --accent: oklch(0.22 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
@@ -306,7 +316,7 @@
    *
    * ⚠ THE AMBIENT SHADOW IS KEPT ANYWAY ON THE UPPER STEPS, AND IT IS NOT
    * WASTED. A popover or a dialog floats over CARDS, not over the page, and
-   * `--card` is `oklch(0.12)` — light enough for a heavy, tightly-negative
+   * `--card` is `oklch(0.17)` — light enough for a heavy, tightly-negative
    * spread to darken. It does nothing over the black canvas and everything over
    * a table, which is exactly where the two are used.
    */
@@ -329,7 +339,7 @@
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.985 0 0);
   --sidebar-primary-foreground: oklch(0.12 0 0);
-  --sidebar-accent: oklch(0.2 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 12%);
   --sidebar-ring: oklch(0.985 0 0);

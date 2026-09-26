@@ -83,15 +83,29 @@ export function StepStage({
    * exactly when somebody has done something unusual.
    */
   direction = "forward",
+  /**
+   * Whether this box morphs its own size.
+   *
+   * ⚠ OFF INSIDE `AutoHeight`, WHICH ALREADY OWNS THE HEIGHT. Two animations
+   * on one box — Motion's layout transform here and a real height there —
+   * scale the same content twice, and the transform half distorts borders
+   * while it runs.
+   */
+  morph = true,
 }: {
   /** Changes when the visible pane should change. */
   step: string
   children: React.ReactNode
   className?: string
   direction?: Direction
+  morph?: boolean
 }) {
   return (
-    <motion.div layout className={cn("relative w-full", className)} transition={SPRING}>
+    <motion.div
+      layout={morph}
+      className={cn("relative w-full", className)}
+      transition={SPRING}
+    >
       <AnimatePresence mode="popLayout" initial={false} custom={direction}>
         <motion.div
           key={step}

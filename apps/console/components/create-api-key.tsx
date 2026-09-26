@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import { AlertTriangle, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
@@ -59,7 +58,6 @@ export function CreateApiKeyButton({
    */
   domains?: ScopeDomain[]
 }) {
-  const router = useRouter()
   const [open, setOpen] = React.useState(autoOpen)
   const [name, setName] = React.useState("")
   const [mode, setMode] = React.useState<"live" | "test">("live")
@@ -93,12 +91,10 @@ export function CreateApiKeyButton({
       return
     }
 
+    // ⚠ NO REFRESH: `createApiKey` re-renders this page in its own response, so
+    // the new row is already in the table behind the dialog while the secret
+    // is still on screen — which is when somebody glances at it to check.
     setCreated(result.data)
-    // ⚠ REFRESHED NOW, WHILE THE SECRET IS STILL ON SCREEN. Refreshing on close
-    // would leave the list one row short for as long as somebody spends copying
-    // the key — which is exactly when they glance at the table to check it
-    // worked.
-    router.refresh()
   }
 
   return (
