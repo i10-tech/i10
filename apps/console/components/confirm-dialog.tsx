@@ -170,7 +170,14 @@ export function ConfirmDialog({
   // looks like the input being cleared out from under you.
   useResetOnOpen(open, () => setTyped(""))
 
-  const armed = ready && (confirmWord === undefined || typed.trim() === confirmWord)
+  /*
+   * ⚠ TWO ANSWERS, KEPT APART. `matches` is about the typed name alone and is
+   * all the name field's colour may say; `armed` is whether the button can go,
+   * which also waits on `ready`. Colouring the name by `armed` turned a
+   * correctly typed domain red because the email above it was unfinished.
+   */
+  const matches = confirmWord === undefined || typed.trim() === confirmWord
+  const armed = ready && matches
 
   async function confirm() {
     if (!armed || pending) return
@@ -288,7 +295,7 @@ export function ConfirmDialog({
                * red here means "this is not the word", which is only true once
                * there is something to compare.
                */
-              state={typed.length === 0 ? "idle" : armed ? "valid" : "invalid"}
+              state={typed.length === 0 ? "idle" : matches ? "valid" : "invalid"}
             />
           </div>
         )}
