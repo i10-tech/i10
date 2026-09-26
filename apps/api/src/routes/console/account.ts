@@ -31,14 +31,24 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
      * onboarding read is the only thing that has to wait, and it waits on a
      * query that was already in flight.
      */
-    const [profile, billing] = await Promise.all([
+    /*
+     * ⚠ THE PERSON'S ADDRESSES ARE BEST EFFORT. They prefill a test email and
+     * stop somebody offering a domain to themselves; a Clerk hiccup must not
+     * take the whole console shell down with it, so a failure answers empty.
+     */
+    const [profile, billing, person] = await Promise.all([
       d.profile.get(tenantId),
       d.usage.billing(tenantId),
+      d.people?.get(userId).catch(() => null) ?? Promise.resolve(null),
     ])
     const onboardingState = await d.onboarding.get(tenantId, billing.plan?.id ?? null)
 
     return c.json({
-      user: { id: userId },
+      user: {
+        id: userId,
+        email: person?.primaryEmail ?? null,
+        verified_emails: person?.verifiedEmails ?? [],
+      },
       tenant: profile,
       billing,
       onboarding: onboardingState,

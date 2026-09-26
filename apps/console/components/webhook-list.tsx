@@ -140,6 +140,7 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
         title="Delete this endpoint?"
         description="Events stop being delivered to it immediately. Past delivery attempts stay in the log."
         confirmLabel="Delete endpoint"
+        confirmWord={deleting?.url}
         onConfirm={async () => {
           if (!deleting) return false
           const result = await deleteWebhook(deleting.id)

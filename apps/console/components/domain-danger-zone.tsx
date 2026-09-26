@@ -38,6 +38,7 @@ export function DomainDangerZone({
   name,
   scopedKeys = [],
   keyImpact = [],
+  ownEmails = [],
   offer = null,
 }: {
   id: string
@@ -46,6 +47,8 @@ export function DomainDangerZone({
   scopedKeys?: { id: string; name: string }[]
   /** Every live key whose scope includes this domain, and what it would keep. */
   keyImpact?: KeyImpact[]
+  /** The person's verified addresses, which the transfer dialog refuses. */
+  ownEmails?: string[]
   /** The open transfer offer for this domain, if one has been made. */
   offer?: TransferOffer | null
 }) {
@@ -160,6 +163,7 @@ export function DomainDangerZone({
         id={id}
         name={name}
         keys={keyImpact}
+        ownEmails={ownEmails}
         open={transferring}
         onOpenChange={setTransferring}
         // ⚠ THE PAGE STAYS. Nothing has moved yet; it re-reads to show the

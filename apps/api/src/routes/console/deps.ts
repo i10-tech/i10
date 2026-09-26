@@ -62,7 +62,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * addresses Clerk has VERIFIED for them — the only thing an offer is ever
    * matched against.
    */
-  people?: { get(userId: string): Promise<{ name: string; verifiedEmails: string[] }> }
+  people?: {
+    get(
+      userId: string,
+    ): Promise<{ name: string; primaryEmail: string | null; verifiedEmails: string[] }>
+  }
   transfers?: DomainTransfers
   /**
    * Emails the recipient of an offer.

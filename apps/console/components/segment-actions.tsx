@@ -46,6 +46,7 @@ export function SegmentActions({ id, name }: { id: string; name: string }) {
         title={`Delete ${name}?`}
         description="The contacts in it are not deleted — only the grouping. Any broadcast already sent to this segment keeps its record."
         confirmLabel="Delete segment"
+        confirmWord={name}
         onConfirm={async () => {
           const result = await deleteSegment(id)
           if (!result.ok) {

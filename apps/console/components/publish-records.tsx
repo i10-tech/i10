@@ -6,14 +6,7 @@ import { Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { publishDnsRecords } from "@/lib/actions"
 import type { ConflictingRecord, DnsConnection } from "@/lib/types"
@@ -36,11 +29,14 @@ import type { ConflictingRecord, DnsConnection } from "@/lib/types"
  */
 export function PublishRecords({
   domainId,
+  domainName,
   connection,
   providerSlug,
   providerName,
 }: {
   domainId: string
+  /** Typed to confirm removing the records in the way. */
+  domainName: string
   /** `null` when this workspace has not connected the provider yet. */
   connection: DnsConnection | null
   /** The registry slug. Required: it is what the API matches an adapter on. */
@@ -51,8 +47,9 @@ export function PublishRecords({
   const [pending, setPending] = React.useState(false)
   const [conflicts, setConflicts] = React.useState<ConflictingRecord[] | null>(null)
 
-  async function publish(replaceConflicts: boolean) {
-    if (pending || !connection) return
+  /** Whether it published. The confirm dialog closes only on `true`. */
+  async function publish(replaceConflicts: boolean): Promise<boolean> {
+    if (pending || !connection) return false
     setPending(true)
 
     const result = await publishDnsRecords({
@@ -74,11 +71,11 @@ export function PublishRecords({
         // ⚠ NARROWED, NOT CAST. `body` is the API's own JSON and is data.
         const listed = result.body?.conflicts
         setConflicts(Array.isArray(listed) ? (listed as ConflictingRecord[]) : [])
-        return
+        return false
       }
 
       toast.error("Could not publish the records", { description: result.error })
-      return
+      return false
     }
 
     setConflicts(null)
@@ -97,6 +94,7 @@ export function PublishRecords({
       },
     )
     router.refresh()
+    return true
   }
 
   if (!connection) {
@@ -110,54 +108,32 @@ export function PublishRecords({
         Publish these for me
       </Button>
 
-      <Dialog
+      {/*
+       * ⚠ THE SAME CONFIRMATION AS EVERY OTHER DESTRUCTIVE ACTION: THE NAME
+       * TYPED OUT. These are records in the customer's own DNS, and removing
+       * them is the one thing this button does that nobody can undo from here.
+       */}
+      <ConfirmDialog
         open={conflicts !== null}
         onOpenChange={(open) => !open && setConflicts(null)}
+        title="Some records are in the way"
+        description={`Publishing means removing these first. Once ${providerName} delegates these names to us they stop being used anyway, because a delegated name is answered by whoever holds the delegation.`}
+        confirmLabel="Remove them and publish"
+        confirmWord={domainName}
+        onConfirm={() => publish(true)}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Some records are in the way</DialogTitle>
-            <DialogDescription>
-              {/*
-               * ⚠ THE EXPLANATION IS WHY IT IS SAFE, NOT A WARNING. These
-               * records stop being used the moment the delegation exists —
-               * whatever is published at a delegated name in the parent zone is
-               * unreachable — so the honest framing is that they are already
-               * obsolete, not that we are about to break something.
-               */}
-              Publishing means removing these first. Once {providerName} delegates these
-              names to us they stop being used anyway, because a delegated name is
-              answered by whoever holds the delegation.
-            </DialogDescription>
-          </DialogHeader>
-
-          <ul className="max-h-64 space-y-2 overflow-y-auto rounded-lg border p-3">
-            {(conflicts ?? []).map((conflict, index) => (
-              <li key={`${conflict.name}-${index}`} className="text-xs">
-                <span className="font-mono font-medium">{conflict.type}</span>{" "}
-                <span className="font-mono">{conflict.name}</span>
-                <p className="mt-0.5 font-mono break-all text-muted-foreground">
-                  {conflict.value}
-                </p>
-              </li>
-            ))}
-          </ul>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConflicts(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => publish(true)}
-              disabled={pending}
-            >
-              {pending && <Spinner />}
-              Remove them and publish
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <ul className="max-h-64 space-y-2 overflow-y-auto rounded-lg border p-3">
+          {(conflicts ?? []).map((conflict, index) => (
+            <li key={`${conflict.name}-${index}`} className="text-xs">
+              <span className="font-mono font-medium">{conflict.type}</span>{" "}
+              <span className="font-mono">{conflict.name}</span>
+              <p className="mt-0.5 font-mono break-all text-muted-foreground">
+                {conflict.value}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </ConfirmDialog>
     </>
   )
 }

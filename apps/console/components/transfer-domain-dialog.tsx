@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { toast } from "sonner"
-import { emailProblem, isEmailUsable } from "@repo/ui/checks"
+import { emailProblem } from "@repo/ui/checks"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { offerTransfer } from "@/lib/actions"
@@ -40,6 +40,7 @@ export function TransferDomainDialog({
   id,
   name,
   keys = [],
+  ownEmails = [],
   open,
   onOpenChange,
   onOffered,
@@ -48,6 +49,8 @@ export function TransferDomainDialog({
   name: string
   /** Live keys whose scope includes this domain. Computed by the page. */
   keys?: KeyImpact[]
+  /** The person's own verified addresses, which a transfer may not go to. */
+  ownEmails?: string[]
   open: boolean
   onOpenChange: (open: boolean) => void
   onOffered: () => void
@@ -56,6 +59,19 @@ export function TransferDomainDialog({
   const [email, setEmail] = React.useState("")
 
   useResetOnOpen(open, () => setEmail(""))
+
+  /*
+   * ⚠ THE SHARED EMAIL CHECK, THEN ONE MORE RULE. A transfer is to another
+   * person; offering a domain to yourself would be accepting your own offer.
+   * The API refuses it as well — this is the early, friendly half.
+   */
+  const own = new Set(ownEmails.map((e) => e.toLowerCase()))
+  const recipientProblem = (value: string) =>
+    emailProblem(value) ??
+    (own.has(value.trim().toLowerCase())
+      ? "That is your own address. Offer it to someone else."
+      : null)
+  const recipientOk = recipientProblem(email) === null && email.trim() !== ""
 
   const revoked = keys.filter((k) => k.keeps.length === 0)
   const narrowed = keys.filter((k) => k.keeps.length > 0)
@@ -68,10 +84,10 @@ export function TransferDomainDialog({
       description="We will email them an offer. The domain moves with its records and verification, so nothing changes in your DNS — and it stops sending from this workspace once they accept."
       confirmLabel="Send offer"
       confirmWord={name}
-      ready={isEmailUsable(email.trim())}
+      ready={recipientOk}
       initialFocus="transfer-email"
       onConfirm={async () => {
-        if (!isEmailUsable(email.trim())) return false
+        if (!recipientOk) return false
         if (!(await stepUp())) return false
 
         const result = await offerTransfer(id, email.trim())
@@ -99,7 +115,7 @@ export function TransferDomainDialog({
         autoComplete="off"
         autoCapitalize="none"
         spellCheck={false}
-        check={emailProblem}
+        check={recipientProblem}
         required="Enter the address to offer it to."
         hint="They sign in with it — or sign up — to accept."
       />

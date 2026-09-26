@@ -202,6 +202,7 @@ export function ApiKeysTable({
         title={`Revoke ${revoking?.name ?? "this key"}?`}
         description="Anything using it stops sending immediately — not at the end of a cache window. This cannot be undone; create a new key instead."
         confirmLabel="Revoke key"
+        confirmWord={revoking?.name}
         onConfirm={async () => {
           if (!revoking) return false
           /*
@@ -231,6 +232,8 @@ export function ApiKeysTable({
         title={`Rotate ${rotating?.name ?? "this key"}?`}
         description="A new key is issued and the old one stops working immediately. Deploy the new value before rotating, or sending will fail in the gap."
         confirmLabel="Rotate key"
+        // ⚠ ROTATING KILLS THE OLD KEY IMMEDIATELY, so it asks like revoke does.
+        confirmWord={rotating?.name}
         destructive={false}
         onConfirm={async () => {
           if (!rotating) return false

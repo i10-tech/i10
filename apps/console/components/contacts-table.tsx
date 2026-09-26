@@ -284,6 +284,9 @@ export function ContactsTable({
         title={`Delete ${selected.size} ${selected.size === 1 ? "contact" : "contacts"}?`}
         description="They are removed from every segment and their topic preferences go with them. If any of them had unsubscribed, that record is lost — re-importing the same address would start sending to them again."
         confirmLabel="Delete"
+        // ⚠ A PHRASE WITH THE COUNT IN IT, because a bulk delete has no single
+        // name to type — and reading the number is the point of the pause.
+        confirmWord={`delete ${selected.size} ${selected.size === 1 ? "contact" : "contacts"}`}
         onConfirm={async () => {
           const result = await deleteContacts([...selected])
           if (!result.ok) {
