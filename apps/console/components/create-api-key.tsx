@@ -15,7 +15,13 @@ import {
   DialogTitle,
 } from "@repo/ui/components/dialog"
 import { Label } from "@repo/ui/components/label"
-import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@repo/ui/components/select"
 import { Spinner } from "@repo/ui/components/spinner"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import {
@@ -176,33 +182,38 @@ export function CreateApiKeyButton({
                 />
 
                 <div className="space-y-2">
-                  <Label>Mode</Label>
-                  <RadioGroup
+                  <Label htmlFor="key-mode">Mode</Label>
+                  <Select
                     value={mode}
                     onValueChange={(value) => setMode(value as "live" | "test")}
-                    className="gap-2"
+                    disabled={pending}
                   >
-                    <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30">
-                      <RadioGroupItem value="live" className="mt-0.5" />
-                      <span className="space-y-0.5">
-                        <span className="block text-sm font-medium">Live</span>
-                        <span className="block text-xs text-muted-foreground">
-                          Sends real mail and counts against your allowance. Prefixed{" "}
-                          <code className="font-mono">i10_live_</code>.
-                        </span>
-                      </span>
-                    </label>
-                    <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30">
-                      <RadioGroupItem value="test" className="mt-0.5" />
-                      <span className="space-y-0.5">
-                        <span className="block text-sm font-medium">Test</span>
-                        <span className="block text-xs text-muted-foreground">
-                          Prefixed <code className="font-mono">i10_test_</code> so it is
-                          greppable in a leak scan and obvious in your own logs.
-                        </span>
-                      </span>
-                    </label>
-                  </RadioGroup>
+                    <SelectTrigger id="key-mode" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="live">Live</SelectItem>
+                      <SelectItem value="test">Test</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {/*
+                   * ⚠ WHAT THE CHOICE MEANS, UNDER IT, FOR WHICHEVER IS PICKED.
+                   * The dropdown closes over its options, so the explanation
+                   * that used to sit beside each radio lives here instead.
+                   */}
+                  <p className="text-xs text-muted-foreground">
+                    {mode === "live" ? (
+                      <>
+                        Sends real mail and counts against your allowance. Prefixed{" "}
+                        <code className="font-mono">i10_live_</code>.
+                      </>
+                    ) : (
+                      <>
+                        Prefixed <code className="font-mono">i10_test_</code> so it is
+                        greppable in a leak scan and obvious in your own logs.
+                      </>
+                    )}
+                  </p>
                 </div>
 
                 <ApiKeyScopeField
@@ -223,7 +234,10 @@ export function CreateApiKeyButton({
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={pending || !name.trim()}>
+                <Button
+                  type="submit"
+                  disabled={pending || !name.trim() || !scopeComplete(scope)}
+                >
                   {pending && <Spinner />}
                   Create key
                 </Button>

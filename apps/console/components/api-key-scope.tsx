@@ -14,9 +14,14 @@ import {
 } from "@repo/ui/components/dialog"
 import { Checkbox } from "@repo/ui/components/checkbox"
 import { Label } from "@repo/ui/components/label"
-import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@repo/ui/components/select"
 import { Reveal } from "@repo/ui/components/reveal"
-import { cn } from "cn"
 import { Spinner } from "@repo/ui/components/spinner"
 import { updateApiKeyScope } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -24,7 +29,7 @@ import { useResetOnOpen } from "@/lib/react"
 /**
  * Which domains a key may send from.
  *
- * ⚠ "ANY DOMAIN" OR "ONLY THESE", AND "THESE" MAY BE SEVERAL. It used to be
+ * ⚠ "ANY DOMAIN" OR "SPECIFIC", AND SPECIFIC MAY BE SEVERAL. It used to be
  * one domain, on the argument that two keys say the same thing as one key for
  * two domains. That holds until a key is already deployed somewhere that sends
  * for two products — then the only honest restriction is both, and forcing a
@@ -65,6 +70,9 @@ export function ApiKeyScopeField({
 }) {
   const restricted = value !== null
   const chosen = new Set(value ?? [])
+  // ⚠ SINGULAR UNTIL THERE IS MORE THAN ONE TO CHOOSE FROM. "Specific domains"
+  // over a list of one reads like the list is missing something.
+  const specific = domains.length > 1 ? "Specific domains" : "Specific domain"
 
   function toggle(name: string, on: boolean) {
     const next = new Set(chosen)
@@ -78,37 +86,24 @@ export function ApiKeyScopeField({
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>Sending domains</Label>
-      <RadioGroup
-        id={id}
+      <Select
         value={restricted ? "some" : "any"}
         onValueChange={(next) => onChange(next === "any" ? null : [...chosen])}
         disabled={disabled || domains.length === 0}
-        className="gap-2"
       >
-        <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30">
-          <RadioGroupItem value="any" className="mt-0.5" />
-          <span className="space-y-0.5">
-            <span className="block text-sm font-medium">Any domain</span>
-            <span className="block text-xs text-muted-foreground">
-              Every domain you have verified, now or later.
-            </span>
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30">
-          <RadioGroupItem value="some" className="mt-0.5" />
-          <span className="space-y-0.5">
-            <span className="block text-sm font-medium">Only these domains</span>
-            <span className="block text-xs text-muted-foreground">
-              Limits what a leak of this key can do.
-            </span>
-          </span>
-        </label>
-      </RadioGroup>
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="any">Any domain</SelectItem>
+          <SelectItem value="some">{specific}</SelectItem>
+        </SelectContent>
+      </Select>
 
       {/*
-       * ⚠ REVEALED, NOT SWAPPED IN. The list opens under the choice that asked
-       * for it, so the eye follows the movement down rather than hunting for
-       * what changed. See `Reveal` for the spring.
+       * ⚠ REVEALED, NOT SWAPPED IN, AND ONLY FOR "SPECIFIC". The list opens under
+       * the choice that asked for it, so the eye follows the movement down; it
+       * is not there at all otherwise. See `Reveal` for the spring.
        */}
       <Reveal show={restricted} spacing="pt-1">
         <ul className="divide-y overflow-hidden rounded-md border">
@@ -127,27 +122,22 @@ export function ApiKeyScopeField({
         </ul>
       </Reveal>
 
-      <p
-        className={cn(
-          "text-xs",
-          restricted && chosen.size === 0
-            ? "text-destructive"
-            : "text-muted-foreground",
-        )}
-      >
+      <p className="text-xs text-muted-foreground">
         {/*
-         * ⚠ THE SENTENCE NAMES THE LIMIT OF THE LIMIT. A restricted key still
-         * reads everything the workspace can read — messages, contacts, its own
-         * list of keys — and somebody who believed otherwise would be handing it
-         * to a third party. What it cannot do is send as another domain, and it
-         * cannot manage keys at all, which is what stops it widening itself.
+         * ⚠ NO ERROR COLOUR FOR AN EMPTY PICK. Nothing has gone wrong while
+         * somebody is still choosing; the button stays off until one is ticked,
+         * and this line says why in the ordinary tone.
+         *
+         * ⚠ AND IT NAMES THE LIMIT OF THE LIMIT. A restricted key still reads
+         * everything the workspace can read, and cannot manage keys at all —
+         * which is what stops it widening itself.
          */}
         {domains.length === 0
           ? "Add a domain first and you will be able to restrict a key to it."
           : !restricted
             ? "This key can send from any domain you have verified, now or later."
             : chosen.size === 0
-              ? "Choose at least one domain."
+              ? `Choose the ${domains.length > 1 ? "domains" : "domain"} this key may send from.`
               : `This key can only send from ${[...chosen].join(", ")}. It can still read everything else in the workspace, and it cannot create or revoke keys.`}
       </p>
     </div>
