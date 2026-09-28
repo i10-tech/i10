@@ -373,8 +373,24 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The push below needs a token that can write; the default one can,
-          # and persist-credentials leaves it configured for git.
+          # ⚠ THE PUSH BELOW GOES OVER SSH WITH A DEPLOY KEY, NOT WITH
+          # GITHUB_TOKEN, BECAUSE main REQUIRES CI CHECKS AND THIS COMMIT HAS
+          # NONE. A ruleset rejects any push whose commit has not passed the
+          # required checks, and GitHub refuses the GitHub Actions app as a
+          # ruleset bypass actor ("must be part of the ruleset source or owner
+          # organization"). A deploy key CAN be a bypass actor, so the key is
+          # what lets this job land its commit and nothing else skip the checks.
+          #
+          # ⚠ A PRODUCTION ENVIRONMENT SECRET, NOT A REPOSITORY ONE. Only a job
+          # in the `production` environment - this one - can read it, and the
+          # key has write access to main past the required checks.
+          #
+          # ⚠ EMPTY FALLS BACK TO THE TOKEN, so this is safe to merge before the
+          # key exists: checkout uses GITHUB_TOKEN exactly as it did before, and
+          # only the ruleset makes the key necessary.
+          ssh-key: ${{ secrets.DEPLOY_PUSH_KEY }}
+          # persist-credentials leaves whichever credential it used configured
+          # for the `git push` below.
           persist-credentials: true
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -453,7 +469,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "chore(deploy): pin ${PINNED} at ${GITHUB_SHA:0:7}"
+          git commit -m "chore(deploy): pin ${PINNED} at ${GITHUB_SHA:0:7} [skip ci]"
 
           # ⚠ RETRY BY REBASE, NOT BY FORCE. Two merges landing close together
           # each produce a deploy commit, and the second finds main moved. The
