@@ -198,4 +198,48 @@ export async function assertRlsSubject(
         `be a no-op. Connect as the application role, not the schema owner.`,
     )
   }
+
+  /*
+   * ⚠ THE ROLE BEING SUBJECT TO RLS IS HALF OF IT; THE SCHEMA HAS TO HAVE IT
+   * TOO (#212). The 2026-09-28 audit found both halves of the tenant boundary
+   * open in ways no test could see: 182 message partitions with no RLS that
+   * this role could read directly - RLS on a partitioned table applies only
+   * through the parent - and every SECURITY DEFINER function executable by
+   * PUBLIC, which let the mail server's role terminate workspaces. Migration
+   * 0064 closed both; this is what stops the next table, partition or function
+   * reopening them, checked where a failure stops the rollout.
+   */
+  const [schema] = await sql_<
+    { unprotected: string[]; partitions: string[]; definers: string[] }[]
+  >`
+    select
+      (select coalesce(array_agg(c.relname::text order by c.relname), '{}')
+         from pg_class c join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'core' and c.relkind in ('r', 'p')
+          and not c.relrowsecurity)                                    as unprotected,
+      (select coalesce(array_agg(c.relname::text order by c.relname), '{}')
+         from pg_class c join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'core' and c.relispartition and c.relkind in ('r', 'p')
+          and has_table_privilege(current_user, c.oid, 'SELECT'))      as partitions,
+      (select coalesce(array_agg(p.proname::text order by p.proname), '{}')
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'core' and p.prosecdef
+          and has_function_privilege('public', p.oid, 'EXECUTE'))     as definers
+  `
+  const holes = [
+    schema?.unprotected.length &&
+      `tables without row level security: ${schema.unprotected.join(", ")}`,
+    schema?.partitions.length &&
+      `partitions this role can read around their parent's policy: ${schema.partitions.join(", ")}`,
+    schema?.definers.length &&
+      `SECURITY DEFINER functions any role can execute: ${schema.definers.join(", ")}`,
+  ].filter(Boolean)
+
+  if (holes.length > 0) {
+    throw new Error(
+      `Refusing to start: the tenant boundary in core has holes - ${holes.join("; ")}. ` +
+        `Give every table RLS and a tenant policy, revoke direct grants on partitions, ` +
+        `and REVOKE EXECUTE ... FROM PUBLIC on definer functions (see migration 0064).`,
+    )
+  }
 }
