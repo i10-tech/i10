@@ -22,10 +22,10 @@ import { timestampFromUuidV7 } from "../ids.js"
  * performs goes through the store that already owns it - `DomainStore` creates
  * domains, `KeyStore` mints keys, `WebhookEndpointStore` manages endpoints - so
  * there is exactly one implementation of each rule and the console cannot
- * accidentally bypass a plan limit by having its own path to the table. The two
- * exceptions are `suppressions` and `onboarding`, which have no other owner;
- * they are in this file because creating a store for a two-column table nobody
- * else touches would be ceremony.
+ * accidentally bypass a plan limit by having its own path to the table. The one
+ * exception is `onboarding`, which has no other owner. Suppressions used to be
+ * the second, until the public API and SES's own list gave them two more
+ * callers - see suppressions/store.ts.
  *
  * ⚠ AND EVERY QUERY IS INSIDE `withTenant`. `core` is under row level security
  * and a query without the setting RAISES rather than returning nothing - see
@@ -201,12 +201,6 @@ export interface ConsoleQueries {
   overview(tenantId: string, days: number): Promise<Overview>
   listEmails(tenantId: string, filters: EmailFilters): Promise<Page<EmailRow>>
   emailDetail(tenantId: string, id: string): Promise<EmailDetail | null>
-  listSuppressions(
-    tenantId: string,
-    opts: { search?: string; cursor?: string; limit?: number },
-  ): Promise<Page<SuppressionRow>>
-  addSuppression(tenantId: string, address: string): Promise<void>
-  removeSuppression(tenantId: string, address: string): Promise<boolean>
   listDeliveries(
     tenantId: string,
     opts: { endpointId?: string; cursor?: string; limit?: number },
@@ -645,82 +639,6 @@ export function consoleQueries(db: Database): ConsoleQueries {
       })
     },
 
-    async listSuppressions(tenantId, opts) {
-      const limit = clampLimit(opts.limit)
-      const cursor = decodeCursor(opts.cursor)
-
-      return withTenant(db, tenantId, async (tx) => {
-        const where: SQL[] = []
-        if (opts.search) {
-          where.push(
-            sql`${suppressions.address} ilike ${`%${escapeLike(opts.search)}%`}`,
-          )
-        }
-        if (cursor) {
-          where.push(
-            sql`(${suppressions.createdAt}, ${suppressions.address}) < (${cursor.at}::timestamptz, ${cursor.id})`,
-          )
-        }
-
-        const rows = await tx
-          .select({
-            address: suppressions.address,
-            reason: suppressions.reason,
-            messageId: suppressions.messageId,
-            createdAt: suppressions.createdAt,
-            createdAtRaw: rawTimestamp(suppressions.createdAt),
-          })
-          .from(suppressions)
-          .where(where.length ? and(...where) : undefined)
-          .orderBy(desc(suppressions.createdAt), desc(suppressions.address))
-          .limit(limit + 1)
-
-        const hasMore = rows.length > limit
-        const page = hasMore ? rows.slice(0, limit) : rows
-        const last = page[page.length - 1]
-
-        return {
-          data: page.map((r) => ({
-            address: r.address,
-            reason: r.reason,
-            message_id: r.messageId,
-            created_at: r.createdAt.toISOString(),
-          })),
-          nextCursor:
-            hasMore && last ? encodeCursor(last.createdAtRaw, last.address) : null,
-        }
-      })
-    },
-
-    async addSuppression(tenantId, address) {
-      await withTenant(db, tenantId, async (tx) => {
-        await tx
-          .insert(suppressions)
-          .values({
-            tenantId,
-            // ⚠ LOWERCASED HERE, BECAUSE THE SEND PATH LOOKS IT UP LOWERCASED.
-            // A suppression stored as `Bob@Acme.com` would silently never match
-            // and the customer would watch mail keep going to an address they
-            // blocked - the worst possible failure for this particular table.
-            address: address.trim().toLowerCase(),
-            reason: "manual",
-          })
-          // Adding an address that is already suppressed is not an error; it is
-          // somebody making sure.
-          .onConflictDoNothing()
-      })
-    },
-
-    async removeSuppression(tenantId, address) {
-      return withTenant(db, tenantId, async (tx) => {
-        const deleted = await tx
-          .delete(suppressions)
-          .where(eq(suppressions.address, address.trim().toLowerCase()))
-          .returning({ address: suppressions.address })
-        return deleted.length > 0
-      })
-    },
-
     async listDeliveries(tenantId, opts) {
       const limit = clampLimit(opts.limit)
       const cursor = decodeCursor(opts.cursor)
@@ -907,4 +825,4 @@ function summariseAttachments(
   })
 }
 
-export { encodeCursor, decodeCursor, escapeLike, clampLimit }
+export { encodeCursor, decodeCursor, escapeLike, clampLimit, rawTimestamp }

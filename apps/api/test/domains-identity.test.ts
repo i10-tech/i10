@@ -259,6 +259,14 @@ describe("SES tenants", () => {
       "CreateTenantResourceAssociationCommand",
       "ListResourceTenantsCommand",
     ])
+    // ⚠ #159: born with its own suppression list, never on the account's.
+    expect(sent[0]!.input).toEqual({
+      TenantName: "i10-ten",
+      SuppressionAttributes: {
+        SuppressionScope: "TENANT",
+        SuppressedReasons: ["BOUNCE", "COMPLAINT"],
+      },
+    })
     expect(sent[1]!.input).toEqual({
       TenantName: "i10-ten",
       ResourceArn: "arn:aws:ses:eu-central-1:123456789012:identity/example.com",
@@ -280,6 +288,33 @@ describe("SES tenants", () => {
       CreateTenantResourceAssociationCommand: exists("association"),
     })
     await sesIdentity(c, options).attach("example.com", "i10-ten")
+  })
+
+  /**
+   * ⚠ A TENANT MADE BEFORE #159 IS ON THE ACCOUNT LIST, and `CreateTenant` does
+   * not touch one that exists - so without this, every workspace attached
+   * before the change would keep sharing one suppression list for ever.
+   */
+  it("moves an existing tenant to its own suppression list", async () => {
+    const { client: c, sent } = tenantClient({ CreateTenantCommand: exists("tenant") })
+    await sesIdentity(c, options).attach("example.com", "i10-ten")
+
+    expect(sent[1]).toEqual({
+      name: "PutTenantSuppressionAttributesCommand",
+      input: {
+        TenantName: "i10-ten",
+        SuppressionScope: "TENANT",
+        SuppressedReasons: ["BOUNCE", "COMPLAINT"],
+      },
+    })
+  })
+
+  it("spends no call on suppression for a tenant it just created", async () => {
+    const { client: c, sent } = tenantClient()
+    await sesIdentity(c, options).attach("example.com", "i10-ten")
+    expect(sent.map((s) => s.name)).not.toContain(
+      "PutTenantSuppressionAttributesCommand",
+    )
   })
 
   it("takes the identity out of any other workspace's tenant, and leaves foreign tenants alone", async () => {

@@ -8,6 +8,8 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
+import { Download } from "lucide-react"
+import { Button } from "@repo/ui/components/button"
 import { AddSuppressionButton } from "@/components/add-suppression"
 import { SuppressionsTable } from "@/components/suppressions-table"
 import { PanelError } from "@/components/panel-error"
@@ -46,15 +48,30 @@ export default async function SuppressionsPage({
   return (
     <Page>
       <PageHeader>
-        <PageHeaderRow>
+        {/*
+         * ⚠ WRAPS, UNLIKE MOST HEADERS: two actions beside the title do not fit
+         * a 375px screen, and the second one went off the edge.
+         */}
+        <PageHeaderRow className="flex-wrap gap-y-2">
           <PageTitle>Suppressions</PageTitle>
           <PageActions>
+            {/*
+             * ⚠ A PLAIN ANCHOR, NOT A `Link`. The target is a file, and Next's
+             * client router would try to render a CSV as a page.
+             */}
+            <Button variant="outline" size="sm" asChild>
+              <a href="/suppressions/export" download>
+                <Download />
+                Export CSV
+              </a>
+            </Button>
             <AddSuppressionButton />
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
           Addresses that hard-bounced or complained, plus any you have added by hand. We
-          skip them rather than sending and damaging your reputation.
+          skip them rather than sending and damaging your reputation. This list is yours
+          alone: another workspace&apos;s bounces never land here.
         </PageDescription>
       </PageHeader>
 

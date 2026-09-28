@@ -16,6 +16,11 @@
  * All four publish to the same SNS topic, so ingestion cannot tell them apart
  * and does not need to. `<base>` is `SES_CONFIGURATION_SET`; the sets
  * themselves are created in SES, not by this code.
+ *
+ * ⚠ NONE OF THEM MAY CARRY `SuppressionOptions`. SES resolves suppression as
+ * configuration set, then tenant, then account, so a set that names a scope or
+ * reasons overrides every tenant's own list at once (#159) - and every message
+ * goes through one of these four. See `TENANT_SUPPRESSION`.
  */
 
 export interface Tracking {

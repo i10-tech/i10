@@ -277,7 +277,7 @@ export function SuppressionsTable({
         destructive={false}
         onConfirm={async () => {
           if (!removing) return false
-          const { address } = removing
+          const { address, reason } = removing
 
           /*
            * ⚠ THE DIALOG CLOSES FIRST AND THE CALL IS NOT AWAITED HERE. The
@@ -291,7 +291,9 @@ export function SuppressionsTable({
           setHidden((current) => [...current, address])
 
           void (async () => {
-            const result = await removeSuppression(address)
+            const result = await removeSuppression(address, {
+              complaint: reason === "complaint",
+            })
 
             if (!result.ok) {
               // ⚠ PUT BACK BY ADDRESS, NOT BY CLEARING THE WHOLE LIST. Somebody

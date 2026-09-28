@@ -374,8 +374,8 @@ export const domains = core.table(
      * ⚠ A NAME ALONE CANNOT SAY WHETHER THE ATTACH IS STILL ENOUGH. Adding a
      * configuration set (#154 added three) leaves every existing attach missing
      * it, and SES refuses a tenant send whose set the tenant does not hold. The
-     * worker names a tenant only at the current layout, and the re-check
-     * re-attaches anything older.
+     * worker names a tenant only from `SENDABLE_LAYOUT` up, and the re-check
+     * re-attaches anything older than `TENANT_LAYOUT`.
      */
     sesTenantLayout: integer("ses_tenant_layout"),
 
@@ -1176,7 +1176,17 @@ export const suppressions = core.table(
     messageId: uuid("message_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.address] })],
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.address] }),
+    /*
+     * ⚠ THE ORDER EVERY READ WANTS, AND THE ONE THE PRIMARY KEY CANNOT GIVE.
+     * The console, the API and the export all page newest first, and the
+     * suppression rate that feeds the risk score (#170) is a count over a time
+     * window per workspace. Without this both are a sort of the workspace's
+     * whole list.
+     */
+    index("suppressions_tenant_created_idx").on(t.tenantId, t.createdAt),
+  ],
 )
 
 /**

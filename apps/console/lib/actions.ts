@@ -576,7 +576,10 @@ export async function addSuppression(address: string) {
   )
 }
 
-export async function removeSuppression(address: string) {
+export async function removeSuppression(
+  address: string,
+  { complaint = false }: { complaint?: boolean } = {},
+) {
   return run(
     () =>
       api<{ deleted: true }>(
@@ -585,7 +588,13 @@ export async function removeSuppression(address: string) {
         // space, so the delete silently misses exactly the addresses most
         // likely to have been suppressed.
         `/console/suppressions/${encodeURIComponent(address)}`,
-        { method: "DELETE" },
+        {
+          method: "DELETE",
+          // ⚠ THE API REFUSES A COMPLAINT WITHOUT THIS (#159). It is sent only
+          // after the dialog has shown the complaint wording and the address
+          // was typed back - never by default, or the guard would be a formality.
+          query: { confirm: complaint ? "complaint" : undefined },
+        },
       ),
     ["/suppressions"],
     { refreshCaller: false },

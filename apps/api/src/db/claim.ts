@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm"
-import { TENANT_LAYOUT } from "../domains/identity.js"
+import { SENDABLE_LAYOUT } from "../domains/identity.js"
 
 /**
  * Claiming a message for delivery.
@@ -147,10 +147,12 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
                  from core.domains d
                 where d.id = m.domain_id) as transactional_route,
               -- The SES tenant the domain's identity is RECORDED as attached
-              -- to, and only at the current layout. Null until an attach has
-              -- succeeded with every association a send may need, and a null
-              -- names no tenant -- see domains/ses-tenant.ts.
-              (select case when d.ses_tenant_layout = ${TENANT_LAYOUT}
+              -- to, and only at a layout SES will accept a send from. Null
+              -- until an attach has succeeded with every association a send may
+              -- need, and a null names no tenant -- see domains/ses-tenant.ts.
+              -- ⚠ AT LEAST, NOT EQUAL: see SENDABLE_LAYOUT on why a newer
+              -- attach layout need not stop older ones naming their tenant.
+              (select case when d.ses_tenant_layout >= ${SENDABLE_LAYOUT}
                            then d.ses_tenant_name end
                  from core.domains d
                 where d.id = m.domain_id) as ses_tenant_name,

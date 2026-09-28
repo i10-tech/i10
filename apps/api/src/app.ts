@@ -20,6 +20,8 @@ import {
   type StalwartWebhookDeps,
 } from "./routes/stalwart-events.js"
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
+import { suppressionRoutes } from "./routes/suppressions.js"
+import type { SuppressionStore } from "./suppressions/store.js"
 import { domains } from "./routes/domains.js"
 import { mailboxes } from "./routes/mailboxes.js"
 import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
@@ -70,6 +72,11 @@ export interface AppDeps {
   emailLookup?: EmailLookup
   /** Customer-managed webhook destinations, for `/webhook-endpoints`. */
   webhookEndpoints?: WebhookEndpointStore
+  /**
+   * The suppression list, for `/suppressions`. The same store the console uses.
+   * Omitted in tests and in the OpenAPI generator, where the routes answer 501.
+   */
+  suppressions?: SuppressionStore
   /**
    * Minting, listing, revoking and rotating a tenant's own API keys.
    *
@@ -221,6 +228,7 @@ export function createApp(deps: AppDeps = {}) {
     deps.sendPath ||
     deps.emailLookup ||
     deps.webhookEndpoints ||
+    deps.suppressions ||
     deps.domains ||
     deps.sessionAuth ||
     deps.mailboxes
@@ -229,6 +237,7 @@ export function createApp(deps: AppDeps = {}) {
     const sendPath = deps.sendPath
     const lookup = deps.emailLookup
     const endpoints = deps.webhookEndpoints
+    const suppressionList = deps.suppressions
     const domainStore = deps.domains
     const sessions = deps.sessionAuth
     const mailboxStore = deps.mailboxes
@@ -237,6 +246,7 @@ export function createApp(deps: AppDeps = {}) {
       if (sendPath) c.set("sendPath", sendPath)
       if (lookup) c.set("emailLookup", lookup)
       if (endpoints) c.set("webhookEndpoints", endpoints)
+      if (suppressionList) c.set("suppressions", suppressionList)
       if (domainStore) c.set("domains", domainStore)
       if (sessions) c.set("sessionAuth", sessions)
       if (mailboxStore) c.set("mailboxes", mailboxStore)
@@ -367,6 +377,7 @@ export function createApp(deps: AppDeps = {}) {
   // `/webhooks`, which is the inbound router below: one prefix for two opposite
   // authentication models is how a middleware mistake exposes the wrong half.
   app.route("/webhook-endpoints", webhookEndpoints)
+  app.route("/suppressions", suppressionRoutes)
 
   // Resend's paths, verbs and body keys. See routes/domains.ts.
   app.route("/domains", domains)

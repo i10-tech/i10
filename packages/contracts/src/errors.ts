@@ -91,6 +91,16 @@ export const errorNames = [
    * fix is a different address or a wider scope.
    */
   "restricted_api_key",
+  /**
+   * The request is allowed and well formed, and does something that needs a
+   * second, explicit yes - repeated with the confirmation the message names.
+   *
+   * ⚠ FIRST USED FOR REMOVING A COMPLAINT FROM THE SUPPRESSION LIST (#159): a
+   * person pressed "this is spam", and mailing them again has legal weight in
+   * several jurisdictions. A 409 rather than a 403, because the caller has the
+   * permission - it is the state of the address that stands in the way.
+   */
+  "confirmation_required",
   "internal_server_error",
 ] as const
 
