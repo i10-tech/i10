@@ -72,6 +72,14 @@ const TONE: Record<string, { tone: Tone; label: string }> = {
   incomplete: { tone: "warning", label: "Incomplete" },
   unpaid: { tone: "danger", label: "Unpaid" },
 
+  // Sending health (#158): the console's three-word summary of SES's view.
+  healthy: { tone: "success", label: "Healthy" },
+  at_risk: { tone: "warning", label: "At risk" },
+  paused: { tone: "danger", label: "Paused" },
+  // A finding's impact. HIGH is what SES pauses on, so it reads red.
+  high: { tone: "danger", label: "Serious" },
+  low: { tone: "warning", label: "Minor" },
+
   // Tenancy.
   suspended: { tone: "danger", label: "Suspended" },
   deleted: { tone: "neutral", label: "Deleted" },

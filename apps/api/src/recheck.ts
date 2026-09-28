@@ -34,7 +34,12 @@ import { ensureSesTenant } from "./domains/ses-tenant.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
 import { readDelegation } from "./domains/referral.js"
 import { loadEnv } from "./env.js"
-import { captureError, initObservability, withMonitor } from "./observability.js"
+import {
+  captureError,
+  captureMessage,
+  initObservability,
+  withMonitor,
+} from "./observability.js"
 import { createClerkClient } from "@clerk/backend"
 import { systemSenderFor } from "./auth-email/system.js"
 import { createQueueClient } from "./cache/redis.js"
@@ -43,6 +48,9 @@ import { createSendQueue } from "./queue/send-queue.js"
 import { resilient } from "./send/metering.js"
 import { ownerNotice } from "./ses-status/notice.js"
 import { pollTenantStatuses, sesTenantStatusReader } from "./ses-status/poll.js"
+import { reputationService } from "./ses-status/reputation.js"
+import { pollReputation, sesReputationReader } from "./ses-status/reputation-poll.js"
+import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
 import { sesStatusStore } from "./ses-status/store.js"
 
@@ -150,7 +158,8 @@ await withMonitor(
 )
 
 /**
- * The daily re-read of every SES tenant's sending status (#157).
+ * The daily re-read of every SES tenant's sending status (#157) and
+ * reputation (#158).
  *
  * ⚠ HERE BECAUSE THIS JOB ALREADY RUNS ONCE A DAY ACROSS EVERY WORKSPACE, and
  * the poll is the net under the EventBridge events - see ses-status/poll.ts. A
@@ -190,15 +199,16 @@ async function pollSesStatuses(
     const consoleUrl = env.CONSOLE_ORIGINS[0]
     const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
     const store = sesStatusStore(db)
+    const ses = new SESv2Client({ region: env.AWS_REGION })
+    const notice =
+      sender && consoleUrl ? ownerNotice({ db, clerk, sender, consoleUrl }) : undefined
 
     const summary = await pollTenantStatuses({
-      reader: sesTenantStatusReader(new SESv2Client({ region: env.AWS_REGION })),
+      reader: sesTenantStatusReader(ses),
       store,
       service: sesStatusService({
         store,
-        ...(sender && consoleUrl
-          ? { notice: ownerNotice({ db, clerk, sender, consoleUrl }) }
-          : {}),
+        ...(notice ? { notice } : {}),
         log,
         alert: captureError,
       }),
@@ -211,6 +221,31 @@ async function pollSesStatuses(
         {
           phase: "recheck-ses-status",
         },
+      )
+    }
+
+    /*
+     * ⚠ REPUTATION AFTER STATUS, AND ITS OWN FAILURE COUNT (#158). A missing
+     * IAM grant for `ListRecommendations` must not stop the status poll that
+     * enforces pauses - so it runs second and reports separately.
+     */
+    const reputation = reputationStore(db)
+    const found = await pollReputation({
+      reader: sesReputationReader(ses),
+      store: reputation,
+      service: reputationService({
+        store: reputation,
+        ...(notice ? { notice } : {}),
+        log,
+        alert: (message, level, context) => captureMessage(message, level, context),
+      }),
+      log,
+    })
+    log.info(found, "SES reputation poll complete")
+    if (found.failed > 0) {
+      captureError(
+        new Error(`${found.failed} SES tenant reputation(s) could not be read`),
+        { phase: "recheck-ses-reputation" },
       )
     }
   } catch (error) {

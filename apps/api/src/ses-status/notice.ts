@@ -3,10 +3,12 @@ import { renderSendingStatus } from "@repo/emails"
 import type { AuthEmailSender } from "../auth-email/deliver.js"
 import { withTenant, type Database } from "../db/client.js"
 import { tenants } from "../db/core.js"
+import type { FindingNotice } from "./reputation.js"
 import type { OwnerNotice } from "./service.js"
 
 /**
- * Emails a workspace's owner that SES paused or resumed its sending (#157).
+ * Emails a workspace's owner that SES paused or resumed its sending (#157), or
+ * opened a HIGH reputation finding against it (#158).
  *
  * ⚠ THE OWNER, NOT EVERY MEMBER. `core.tenants.owner_clerk_user_id` is the one
  * person accountable for the workspace; mailing a whole organisation about its
@@ -33,31 +35,41 @@ export function ownerNotice({
   }
   sender: AuthEmailSender
   consoleUrl: string
-}): OwnerNotice {
+}): OwnerNotice & FindingNotice {
+  const deliver = async (
+    tenantId: string,
+    state: "paused" | "resumed" | "at_risk",
+    cause: string | null,
+    key: string,
+  ) => {
+    const [workspace] = await withTenant(db, tenantId, (tx) =>
+      tx
+        .select({ name: tenants.name, owner: tenants.ownerClerkUserId })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1),
+    )
+    if (!workspace) throw new Error(`no workspace ${tenantId}`)
+
+    const to = (await clerk.users.getUser(workspace.owner)).primaryEmailAddress
+      ?.emailAddress
+    if (!to) throw new Error(`the owner of ${tenantId} has no primary email address`)
+
+    const rendered = await renderSendingStatus({
+      state,
+      workspace: workspace.name,
+      cause,
+      url: consoleUrl,
+    })
+    // ⚠ THE KEY NAMES THE CHANGE, so the event and the poll reporting the
+    // same pause (or finding) send one email between them.
+    await sender.send({ to, ...rendered, idempotencyKey: key })
+  }
+
   return {
-    async send({ tenantId, paused, cause, key }) {
-      const [workspace] = await withTenant(db, tenantId, (tx) =>
-        tx
-          .select({ name: tenants.name, owner: tenants.ownerClerkUserId })
-          .from(tenants)
-          .where(eq(tenants.id, tenantId))
-          .limit(1),
-      )
-      if (!workspace) throw new Error(`no workspace ${tenantId}`)
-
-      const to = (await clerk.users.getUser(workspace.owner)).primaryEmailAddress
-        ?.emailAddress
-      if (!to) throw new Error(`the owner of ${tenantId} has no primary email address`)
-
-      const rendered = await renderSendingStatus({
-        paused,
-        workspace: workspace.name,
-        cause,
-        url: consoleUrl,
-      })
-      // ⚠ THE KEY NAMES THE CHANGE, so the event and the poll reporting the
-      // same pause send one email between them.
-      await sender.send({ to, ...rendered, idempotencyKey: key })
-    },
+    send: ({ tenantId, paused, cause, key }) =>
+      deliver(tenantId, paused ? "paused" : "resumed", cause, key),
+    sendFinding: ({ tenantId, description, key }) =>
+      deliver(tenantId, "at_risk", description, key),
   }
 }

@@ -762,13 +762,24 @@ const ROUTES: [
   ],
 
   [
-    // ⚠ PAUSED IN PREVIEW, so the banner can be reviewed; production reads SES.
+    // ⚠ AT RISK IN PREVIEW, so the amber banner, the rail pill and the
+    // overview's findings can be reviewed; production reads SES.
     /^\/console\/sending-status$/,
+    () => previewSendingStatus(),
+  ],
+
+  [
+    /^\/console\/sending-health$/,
     () => ({
-      status: "disabled",
-      cause:
-        "The bounce rate exceeded 15.0% based on a representative volume of 664 emails.",
-      changed_at: ago(1),
+      ...previewSendingStatus(),
+      window_days: 7,
+      sends: 4120,
+      hard_bounces: 181,
+      soft_bounces: 64,
+      complaints: 2,
+      bounce_rate: 181 / 4120,
+      soft_bounce_rate: 64 / 4120,
+      complaint_rate: 2 / 4120,
     }),
   ],
 
@@ -1248,5 +1259,23 @@ export function previewCheckoutStatus(checkoutId: string): {
       return { status: "paid", plan: null, detail: "unattributed" }
     default:
       return { status: "granted", plan: "Pro" }
+  }
+}
+
+function previewSendingStatus() {
+  return {
+    status: "enabled",
+    cause: null,
+    changed_at: null,
+    health: "at_risk",
+    findings: [
+      {
+        type: "bounce",
+        impact: "high",
+        description:
+          "The bounce rate exceeded 15.0% based on a representative volume of 664 emails.",
+        opened_at: ago(0, 3),
+      },
+    ],
   }
 }

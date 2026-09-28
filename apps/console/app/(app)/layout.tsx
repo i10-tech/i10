@@ -5,6 +5,7 @@ import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
 import { SendingStatusBanner } from "@/components/sending-status-banner"
+import { SendingHealthRail } from "@/components/sending-health"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { CommandMenu } from "@/components/command-menu"
 import { MobileNav } from "@/components/mobile-nav"
@@ -149,6 +150,9 @@ export default async function AppLayout({
          * the navigation. The rail renders, the number arrives.
          */}
         <div className="mt-auto space-y-1 border-t p-2">
+          <Suspense fallback={<Skeleton className="h-8 w-full rounded-md" />}>
+            <SendingHealthRail />
+          </Suspense>
           <Suspense fallback={<Skeleton className="h-16 w-full rounded-md" />}>
             <UsageRail />
           </Suspense>

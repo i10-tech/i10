@@ -1,13 +1,9 @@
 import Link from "next/link"
 import { AlertTriangle, ShieldCheck } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@repo/ui/components/alert"
+import { findingReason } from "@/components/sending-health"
 import { tryApi } from "@/lib/api"
-
-interface SendingStatus {
-  status: "enabled" | "disabled" | "reinstated"
-  cause: string | null
-  changed_at: string | null
-}
+import type { SendingStatus } from "@/lib/types"
 
 /**
  * What our email provider has done to this workspace's sending (#157).
@@ -21,14 +17,58 @@ interface SendingStatus {
  * broken status read must never paint a pause that did not happen, and must
  * never take the page down with it.
  *
+ * ⚠ AN OPEN REPUTATION FINDING IS AMBER, NOT RED (#158). Nothing has stopped;
+ * it is the warning before the pause, and the one moment the customer can
+ * still prevent it. The green "Healthy" lives in the sidebar and the overview,
+ * not here - a banner on every page for good news is a banner people learn to
+ * ignore before the bad news arrives.
+ *
  * ⚠ `reinstated` GETS ITS OWN, QUIETER NOTE. Sending works again, but the
  * workspace is on probation - new bounces weigh more until the old findings
  * clear - and that is worth one line, not an alarm.
  */
 export async function SendingStatusBanner() {
   const result = await tryApi<SendingStatus>("/console/sending-status")
-  if (!result.ok || result.data.status === "enabled") return null
-  const { status, cause } = result.data
+  if (!result.ok) return null
+  const { status, cause, health, findings } = result.data
+  if (status === "enabled" && health === "healthy") return null
+
+  if (status === "enabled" && health === "at_risk") {
+    const worst = findings[0]
+    return (
+      <div className="border-b px-4 py-3 sm:px-6">
+        <Alert variant="warning">
+          <AlertTriangle />
+          <AlertTitle>Sending is at risk of being paused</AlertTitle>
+          <AlertDescription>
+            <p>
+              {worst
+                ? findingReason(worst.type)
+                : "Our email provider flagged recent mail."}{" "}
+              Sending still works, but our email provider pauses it automatically if
+              this continues.
+            </p>
+            {worst?.description ? <p>What it found: {worst.description}</p> : null}
+            <p>
+              Look at{" "}
+              <Link
+                href="/emails?status=bounced"
+                className="underline underline-offset-4"
+              >
+                recent bounces
+              </Link>{" "}
+              and complaints, and stop sending to addresses that did not ask for your
+              mail. The{" "}
+              <Link href="/" className="underline underline-offset-4">
+                overview
+              </Link>{" "}
+              shows your rates.
+            </p>
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
 
   if (status === "reinstated") {
     return (

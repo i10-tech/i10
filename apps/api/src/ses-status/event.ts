@@ -105,3 +105,84 @@ export function parseTenantStatusEvent(payload: unknown): TenantStatusEvent | nu
     changedAt: timestampOf(record.lastUpdatedTimestamp, payload.time),
   }
 }
+
+export type FindingImpact = "high" | "low"
+
+/** A reputation finding opened or resolved (#158). */
+export interface FindingEvent {
+  sesTenant: string
+  /** SES's type, lowercased: `bounce`, `complaint`, `feedback_3p`, ... */
+  type: string
+  /**
+   * Null only on a resolve that did not say - which then closes every open
+   * finding of the type rather than guessing one.
+   */
+  impact: FindingImpact | null
+  status: "open" | "resolved"
+  description: string | null
+  at: Date
+}
+
+export const toImpact = (value: unknown): FindingImpact | null =>
+  value === "HIGH" || value === "high"
+    ? "high"
+    : value === "LOW" || value === "low"
+      ? "low"
+      : null
+
+/**
+ * An `Advisor Recommendation Status Open` / `Resolved` event, or null.
+ *
+ * Shape, from the SES tenants guide:
+ *
+ *   { "detail-type": "Advisor Recommendation Status Open", "source": "aws.ses",
+ *     "time": "2023-11-15T17:00:59Z",
+ *     "resources": ["arn:aws:ses:<region>:<account>:tenant/<name>/<id>"],
+ *     "detail": { "version": "1.0.0",
+ *       "data": "The bounce rate exceeded 15.0% based on ...",
+ *       "metadata": { "impact": "HIGH", "type": "BOUNCE" } } }
+ *
+ * ⚠ THE ONLY CLOCK IS THE ENVELOPE'S `time`. The finding's own
+ * `CreatedTimestamp` is not in the event, which is why a finding is identified
+ * by what it is (tenant, type, impact) and never by when - see
+ * `sesReputationFindings`.
+ *
+ * ⚠ `Resolved` HERE IS `FIXED` IN THE API. Both mean closed; the poll maps the
+ * other spelling.
+ */
+export function parseFindingEvent(payload: unknown): FindingEvent | null {
+  if (!isSesEventBridgeEvent(payload)) return null
+  const kind = payload["detail-type"] as string
+  const prefix = "Advisor Recommendation Status "
+  if (!kind.startsWith(prefix)) return null
+  const word = kind.slice(prefix.length).toLowerCase()
+  const status = word === "open" ? "open" : word === "resolved" ? "resolved" : null
+  if (!status) return null
+
+  const arn = Array.isArray(payload.resources) ? payload.resources[0] : undefined
+  const match = typeof arn === "string" ? /:tenant\/([^/]+)/.exec(arn) : null
+  if (!match) return null
+
+  const detail = (payload.detail ?? {}) as {
+    data?: unknown
+    metadata?: Record<string, unknown>
+  }
+  const type =
+    typeof detail.metadata?.type === "string"
+      ? detail.metadata.type.toLowerCase()
+      : null
+  if (!type) return null
+  const impact = toImpact(detail.metadata?.impact)
+  // An open finding with no impact cannot be keyed or shown; drop it and let
+  // the poll, which always has one, record it.
+  if (status === "open" && !impact) return null
+
+  return {
+    sesTenant: match[1]!,
+    type,
+    impact,
+    status,
+    description: typeof detail.data === "string" ? detail.data : null,
+    at: timestampOf(undefined, payload.time),
+  }
+}

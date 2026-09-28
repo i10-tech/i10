@@ -15,6 +15,7 @@ import { OverviewChart } from "@/components/overview-chart"
 import { RangePicker } from "@/components/range-picker"
 import { Stat, StatRow } from "@/components/stat"
 import { PanelError } from "@/components/panel-error"
+import { SendingHealthCard } from "@/components/sending-health"
 import { tryApi } from "@/lib/api"
 import { formatRate, formatRelative, bareAddress } from "@/lib/format"
 import type { EmailRow, Overview, Page as ApiPage } from "@/lib/types"
@@ -126,6 +127,13 @@ export default async function OverviewPage({
                 tone={overview.data.totals.failed > 0 ? "warning" : undefined}
               />
             </StatRow>
+
+            {/*
+             * ⚠ ALWAYS SHOWN, GREEN WHEN ALL IS WELL (#158). The seven-day
+             * window is SES's, not the range picker's: it is the window a
+             * pause is judged on, whatever range the chart is showing.
+             */}
+            <SendingHealthCard />
 
             <section className="rounded-lg border p-4">
               <h2 className="mb-3 text-sm font-medium">Delivery</h2>

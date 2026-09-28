@@ -14,7 +14,12 @@ import { keyLookup, keyStore } from "./auth/store.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { publishRoutingSettings } from "./domains/routing-settings.js"
 import { loadEnv } from "./env.js"
-import { captureError, flushObservability, initObservability } from "./observability.js"
+import {
+  captureError,
+  captureMessage,
+  flushObservability,
+  initObservability,
+} from "./observability.js"
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
@@ -46,6 +51,8 @@ import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
 import { systemSenderFor } from "./auth-email/system.js"
 import { ownerNotice } from "./ses-status/notice.js"
+import { reputationService } from "./ses-status/reputation.js"
+import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
 import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
@@ -600,13 +607,28 @@ const transferNotice =
  * daily re-check polls for the ones that went missing.
  */
 const sesStatus = sesStatusStore(db)
+const sesNotice =
+  systemSender && consoleUrl
+    ? ownerNotice({ db, clerk, sender: systemSender, consoleUrl })
+    : undefined
 const sesStatusChanges = sesStatusService({
   store: sesStatus,
-  ...(systemSender && consoleUrl
-    ? { notice: ownerNotice({ db, clerk, sender: systemSender, consoleUrl }) }
-    : {}),
+  ...(sesNotice ? { notice: sesNotice } : {}),
   log,
   alert: captureError,
+})
+
+/**
+ * SES reputation findings (#158): recorded per episode, shown in the console,
+ * HIGH ones emailed to the owner and reported to Sentry. Same two paths as the
+ * status above - the webhook, and the daily re-check.
+ */
+const sesReputation = reputationStore(db)
+const sesFindings = reputationService({
+  store: sesReputation,
+  ...(sesNotice ? { notice: sesNotice } : {}),
+  log,
+  alert: (message, level, context) => captureMessage(message, level, context),
 })
 
 /**
@@ -841,6 +863,7 @@ const app = createApp({
     freshAuth,
     queries: consoleQueries(db),
     sesStatus,
+    sesReputation,
     suppressions,
     usage: usageStore({ db, meter: postgresMeter(db), log }),
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
@@ -1046,6 +1069,7 @@ const app = createApp({
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,
           tenantStatus: sesStatusChanges,
+          reputation: sesFindings,
         },
         // ⚠ THE SAME OPS, A DIFFERENT INTERPRETER. Both routes write through
         // `ingestEvent`, so the dedupe, the suppression write and the customer

@@ -1,5 +1,10 @@
 import { Hono, type Context } from "hono"
-import { isSesEventBridgeEvent, parseTenantStatusEvent } from "../ses-status/event.js"
+import {
+  isSesEventBridgeEvent,
+  parseFindingEvent,
+  parseTenantStatusEvent,
+} from "../ses-status/event.js"
+import type { ReputationService } from "../ses-status/reputation.js"
 import type { StatusService } from "../ses-status/service.js"
 import { ingestSesEvent, type EventOps, type Logger } from "../webhooks/events.js"
 import {
@@ -52,6 +57,11 @@ export interface SesWebhookDeps {
    * and dropped, and the daily poll still catches the change.
    */
   tenantStatus?: StatusService
+  /**
+   * SES reputation findings (#158), forwarded by the same rule. Optional in
+   * the same way: without it they are acknowledged, and the poll records them.
+   */
+  reputation?: ReputationService
 }
 
 export function createSesWebhooks(deps?: SesWebhookDeps) {
@@ -125,10 +135,32 @@ export function createSesWebhooks(deps?: SesWebhookDeps) {
      * ⚠ AN EVENTBRIDGE ENVELOPE, NOT AN SES EVENT RECORD. Tenant status changes
      * (#157) share this topic and this signature check, and must never reach
      * `ingestSesEvent`, which would find no message id and drop them quietly.
-     * Reputation findings (`Advisor Recommendation …`) are #158's and are
-     * acknowledged here until then.
+     * Reputation findings (`Advisor Recommendation …`, #158) come the same way.
      */
     if (isSesEventBridgeEvent(payload)) {
+      const finding = parseFindingEvent(payload)
+      if (finding && deps.reputation) {
+        try {
+          const outcome = await deps.reputation.apply(finding, "event")
+          return c.json({ ok: true, outcome }, 200)
+        } catch (err) {
+          // ⚠ 500, SO SNS REDELIVERS. A finding we failed to write is a
+          // warning the owner does not get until the daily poll.
+          deps.log.error(
+            { err, snsMessageId: message.MessageId },
+            "failed to record a reputation finding",
+          )
+          return c.json(
+            {
+              statusCode: 500,
+              name: "internal_server_error",
+              message: "Could not record the finding.",
+            },
+            500,
+          )
+        }
+      }
+
       const change = parseTenantStatusEvent(payload)
       if (!change || !deps.tenantStatus) {
         deps.log.info(
