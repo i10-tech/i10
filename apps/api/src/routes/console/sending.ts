@@ -200,7 +200,7 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
  * policies and finding types are ours to act on; what the customer needs is
  * whether mail is flowing and what to fix.
  */
-async function sendingStatus(d: ConsoleDeps, tenantId: string) {
+export async function sendingStatus(d: ConsoleDeps, tenantId: string) {
   const [current, findings] = await Promise.all([
     d.sesStatus?.current(tenantId),
     d.sesReputation?.openFindings(tenantId),

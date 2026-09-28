@@ -575,3 +575,14 @@ export interface SendingHealth extends SendingStatus {
   soft_bounce_rate: number | null
   complaint_rate: number | null
 }
+
+/** `GET /console/attention`: what the sidebar's mark on Domains is counting. */
+export interface Attention {
+  domains: {
+    total: number
+    unverified: number
+    proof_missing: number
+    transfers: number
+    reputation: "healthy" | "at_risk" | "paused"
+  }
+}

@@ -16,7 +16,7 @@ import { TenantNotReady } from "@/components/tenant-not-ready"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
-import type { Me } from "@/lib/types"
+import type { Attention, Me } from "@/lib/types"
 
 /**
  * The console shell.
@@ -90,6 +90,12 @@ export default async function AppLayout({
   // is only mounted when a key exists.
   const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
 
+  // ⚠ NOT AWAITED. The rail renders now and the mark on "Domains" streams in -
+  // see AttentionMark. A failed read is null, which draws no mark.
+  const attention = tryApi<Attention>("/console/attention").then((r) =>
+    r.ok ? r.data.domains : null,
+  )
+
   return (
     /*
      * ⚠ THE SHELL IS EXACTLY ONE VIEWPORT TALL AND DOES NOT SCROLL. The
@@ -136,7 +142,7 @@ export default async function AppLayout({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-          <SidebarNav />
+          <SidebarNav attention={attention} />
         </div>
 
         {/*
@@ -181,6 +187,7 @@ export default async function AppLayout({
           tenant={me.data.tenant}
           plan={me.data.billing.plan}
           clerkEnabled={clerkEnabled}
+          attention={attention}
         />
         {/*
          * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,

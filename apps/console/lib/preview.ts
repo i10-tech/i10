@@ -769,6 +769,20 @@ const ROUTES: [
   ],
 
   [
+    // One domain pending and an offer waiting, so the rail's mark shows.
+    /^\/console\/attention$/,
+    () => ({
+      domains: {
+        total: 3,
+        unverified: 1,
+        proof_missing: 0,
+        transfers: 1,
+        reputation: previewSendingStatus().health,
+      },
+    }),
+  ],
+
+  [
     /^\/console\/sending-health$/,
     () => ({
       ...previewSendingStatus(),
