@@ -35,18 +35,46 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
   })
 
   /*
-   * SES's sending status for the workspace (#157), for the banner.
+   * SES's sending status for the workspace (#157) and its open reputation
+   * findings (#158), for the banner.
    *
    * ⚠ ALWAYS 200, AND `enabled` WHEN NOTHING IS KNOWN. The banner is advisory;
    * a missing store or no row must never paint a pause that did not happen.
    */
   app.get("/sending-status", async (c) => {
     const { tenantId } = c.get("auth")
-    const current = await d.sesStatus?.current(tenantId)
+    return c.json(await sendingStatus(d, tenantId))
+  })
+
+  /*
+   * The overview's sending-health card (#158): the status above plus the
+   * workspace's own seven-day rates.
+   *
+   * ⚠ A SEPARATE ROUTE FROM THE BANNER'S, BECAUSE THE BANNER IS ON EVERY PAGE.
+   * The rates are a scan of a week of `message_events`; paying for it on every
+   * navigation to show a card on one page would be the wrong trade.
+   *
+   * ⚠ RATES ARE NULL, NOT ZERO, WITH NOTHING SENT. 0% of nothing reads as a
+   * clean record the workspace has not earned.
+   */
+  app.get("/sending-health", async (c) => {
+    const { tenantId } = c.get("auth")
+    const [status, counts] = await Promise.all([
+      sendingStatus(d, tenantId),
+      d.sesReputation?.counts(tenantId, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+    ])
+    const sends = counts?.sends ?? 0
+    const rate = (n: number) => (sends > 0 ? n / sends : null)
     return c.json({
-      status: current?.status ?? "enabled",
-      cause: current?.cause ?? null,
-      changed_at: current?.changedAt.toISOString() ?? null,
+      ...status,
+      window_days: 7,
+      sends,
+      hard_bounces: counts?.hardBounces ?? 0,
+      soft_bounces: counts?.softBounces ?? 0,
+      complaints: counts?.complaints ?? 0,
+      bounce_rate: rate(counts?.hardBounces ?? 0),
+      soft_bounce_rate: rate(counts?.softBounces ?? 0),
+      complaint_rate: rate(counts?.complaints ?? 0),
     })
   })
 
@@ -162,4 +190,33 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
       }),
     )
   })
+}
+
+/**
+ * `paused` when SES stopped the workspace, `at_risk` while any reputation
+ * finding is open, `healthy` otherwise (#158).
+ *
+ * ⚠ THE CUSTOMER'S VIEW IS THREE WORDS AND SES'S OWN SENTENCE. Impact levels,
+ * policies and finding types are ours to act on; what the customer needs is
+ * whether mail is flowing and what to fix.
+ */
+async function sendingStatus(d: ConsoleDeps, tenantId: string) {
+  const [current, findings] = await Promise.all([
+    d.sesStatus?.current(tenantId),
+    d.sesReputation?.openFindings(tenantId),
+  ])
+  const status = current?.status ?? "enabled"
+  const open = findings ?? []
+  return {
+    status,
+    cause: current?.cause ?? null,
+    changed_at: current?.changedAt.toISOString() ?? null,
+    health: status === "disabled" ? "paused" : open.length > 0 ? "at_risk" : "healthy",
+    findings: open.map((f) => ({
+      type: f.type,
+      impact: f.impact,
+      description: f.description,
+      opened_at: f.openedAt.toISOString(),
+    })),
+  }
 }

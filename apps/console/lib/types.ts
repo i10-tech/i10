@@ -545,3 +545,33 @@ export interface PublishOutcome {
    */
   superseded?: ConflictingRecord[]
 }
+
+/** A reputation finding SES has open against the workspace (#158). */
+export interface SendingFinding {
+  /** SES's type, lowercased: `bounce`, `complaint`, `feedback_3p`, `ip_listing`. */
+  type: string
+  impact: "high" | "low"
+  description: string | null
+  opened_at: string
+}
+
+/** `GET /console/sending-status` (#157, #158). */
+export interface SendingStatus {
+  status: "enabled" | "disabled" | "reinstated"
+  cause: string | null
+  changed_at: string | null
+  health: "healthy" | "at_risk" | "paused"
+  findings: SendingFinding[]
+}
+
+/** `GET /console/sending-health`: the status plus seven days of our own counts. */
+export interface SendingHealth extends SendingStatus {
+  window_days: number
+  sends: number
+  hard_bounces: number
+  soft_bounces: number
+  complaints: number
+  bounce_rate: number | null
+  soft_bounce_rate: number | null
+  complaint_rate: number | null
+}

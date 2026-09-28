@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
+  date,
   foreignKey,
   index,
   integer,
@@ -1276,6 +1277,115 @@ export const sesTenantStatusEvents = core.table(
     ),
     index("ses_tenant_status_events_tenant_idx").on(t.tenantId, t.changedAt),
     pgPolicy("ses_tenant_status_events_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/** How bad SES says a reputation finding is (#158). `high` is what pauses. */
+export const sesFindingImpact = core.enum("ses_finding_impact", ["high", "low"])
+
+/**
+ * SES reputation findings against a workspace's tenant, one row per episode
+ * (#158) - opened, seen again, resolved.
+ *
+ * ⚠ SES GIVES A FINDING NO ID. `ListRecommendations` has type, impact and a
+ * `CreatedTimestamp`; the EventBridge event has type and impact and only the
+ * envelope's `time`, which is not the same instant. Keyed on either timestamp,
+ * the event and the poll would record one finding twice. So an episode is
+ * "the open row for (tenant, type, impact)", and the partial unique index makes
+ * a second open of the same thing - SNS redelivery, the nightly poll - an
+ * update rather than a new finding.
+ *
+ * ⚠ IMPACT IS PART OF THE KEY. A LOW bounce finding and a HIGH one can be open
+ * at once and resolve separately; merged, the LOW one resolving would close
+ * the HIGH one we still need to show and score.
+ *
+ * ⚠ RESOLVED ROWS ARE KEPT. This is the risk engine's (#170) memory of how often
+ * a workspace got close to a pause - worth more than the current state.
+ */
+export const sesReputationFindings = core.table(
+  "ses_reputation_findings",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * SES's type, lowercased: `bounce`, `complaint`, `feedback_3p`,
+     * `ip_listing`, ... Text, not an enum - a type SES adds must not make the
+     * webhook fail every delivery of it.
+     */
+    type: text("type").notNull(),
+    impact: sesFindingImpact("impact").notNull(),
+    /** SES's own words, e.g. "The bounce rate exceeded 15.0% ...". Shown. */
+    description: text("description"),
+    /** SES's `CreatedTimestamp` when the poll saw it first; the event time otherwise. */
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** Who opened it: `event` (EventBridge) or `poll`. */
+    source: text("source").notNull(),
+    /** When the owner was emailed about this episode - HIGH only, once. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ses_reputation_findings_open_unique")
+      .on(t.tenantId, t.type, t.impact)
+      .where(sql`${t.resolvedAt} is null`),
+    index("ses_reputation_findings_tenant_idx").on(t.tenantId, t.openedAt),
+    pgPolicy("ses_reputation_findings_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * One row per workspace per day: SES's view of its reputation, and the rates we
+ * count ourselves (#158).
+ *
+ * ⚠ THE RATES ARE OURS, NOT SES'S. No reputation API returns a tenant's bounce
+ * or complaint rate, so they are counted from `message_events` - the same SES
+ * notifications, per recipient, the numbers the console shows. Kept here
+ * because the events age out with their partitions and the risk score (#170)
+ * needs the trend for longer than that.
+ *
+ * ⚠ SOFT BOUNCES ARE COUNTED APART. SES's bounce rate is hard bounces only; a
+ * soft-bounce rate climbing is a list going stale before it shows up there.
+ */
+export const sesReputationSnapshots = core.table(
+  "ses_reputation_snapshots",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    /** SES's aggregate: both the customer- and the SES-managed status. */
+    sendingStatus: sesSendingStatus("sending_status"),
+    /** The worst open finding; null when there is none. */
+    impact: sesFindingImpact("impact"),
+    /** `standard`, `strict` or `none`, from the policy ARN. */
+    policy: text("policy"),
+    sends24h: integer("sends_24h").notNull(),
+    hardBounces24h: integer("hard_bounces_24h").notNull(),
+    softBounces24h: integer("soft_bounces_24h").notNull(),
+    complaints24h: integer("complaints_24h").notNull(),
+    sends7d: integer("sends_7d").notNull(),
+    hardBounces7d: integer("hard_bounces_7d").notNull(),
+    softBounces7d: integer("soft_bounces_7d").notNull(),
+    complaints7d: integer("complaints_7d").notNull(),
+    takenAt: timestamp("taken_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day] }),
+    pgPolicy("ses_reputation_snapshots_tenant", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
