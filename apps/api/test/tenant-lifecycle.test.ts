@@ -5,7 +5,7 @@ import { tenantLifecycle } from "../src/tenants/lifecycle.js"
  * Deleting an account used to leave the subscription running.
  *
  * ⚠ `organization.deleted` REACHED NOTHING AT ALL. `provision.ts` handled
- * `organization.created` and there was no other half — so deleting an account
+ * `organization.created` and there was no other half - so deleting an account
  * in Clerk removed the identity and left `core.tenants` saying `active`, the
  * plan assignment on Pro, and Polar charging a card every month for a workspace
  * nobody could sign in to. The only way to stop it was to find the subscription
@@ -41,7 +41,7 @@ const deps = (over: Record<string, unknown> = {}) => ({
  * Termination marks the tenant `deleted` rather than deleting the row, so the
  * `on delete cascade` on `domains.tenant_id` never fires and nothing tore
  * anything down: a verified SES identity per domain, and our own PowerDNS
- * still answering for every delegated name — serving DKIM keys and return
+ * still answering for every delegated name - serving DKIM keys and return
  * paths for an account that no longer exists, with no way to find them except
  * by reading the database.
  */
@@ -132,7 +132,7 @@ describe("what a terminated workspace gives back", () => {
 
   /*
    * ⚠ AND A DEPLOYMENT WITH NO RELEASER SAYS SO AT `error`, on the same rule as
-   * the missing Polar client. This is not an absent feature — it is our
+   * the missing Polar client. This is not an absent feature - it is our
    * nameservers going on answering for a deleted customer's domains.
    */
   it("shouts when it can delete the workspace but not its domains", async () => {
@@ -262,8 +262,8 @@ describe("a deleted organization", () => {
 /*
  * ⚠ THE SWEEP EXISTS BECAUSE CLERK'S CASCADE IS NOT SOMETHING WE CAN ASSERT.
  * Deleting an account from the profile panel is a `user.deleted`; whether the
- * personal organization behind the workspace goes with it — and fires its own
- * webhook — is not stated anywhere citable. Guessing either way is dangerous,
+ * personal organization behind the workspace goes with it - and fires its own
+ * webhook - is not stated anywhere citable. Guessing either way is dangerous,
  * so this asks Clerk.
  */
 describe("a deleted user who owned workspaces", () => {
@@ -281,7 +281,7 @@ describe("a deleted user who owned workspaces", () => {
         ownedBy: mock(async () => owned),
         renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
       },
-      // Nobody is left in it — which is what Clerk actually reports for a
+      // Nobody is left in it - which is what Clerk actually reports for a
       // personal organization whose only member deleted their account.
       organizations: {
         hasMembers: mock(async () => false),
@@ -350,7 +350,7 @@ describe("a deleted user who owned workspaces", () => {
 /*
  * ⚠ WE CREATE THE ORGANIZATION, SO WE HAVE TO REMOVE IT. `onUserCreated` makes
  * a personal organization for anybody who signs up without one, and nothing
- * ever took it away again — so a deleted account left an organization with zero
+ * ever took it away again - so a deleted account left an organization with zero
  * members standing in Clerk for ever. Measured in production 2026-09-20: two of
  * them, both answering 200 with `total_count: 0`.
  */
@@ -383,7 +383,7 @@ describe("the empty organization left behind by a deleted account", () => {
   })
 
   // ⚠ THE ONE THAT IS STILL IN USE IS NOT TOUCHED, and the check that decides
-  // is membership rather than existence — see the note on the port.
+  // is membership rather than existence - see the note on the port.
   it("is left alone while somebody is still a member", async () => {
     const d = abandoned({
       organizations: {
@@ -398,7 +398,7 @@ describe("the empty organization left behind by a deleted account", () => {
   /*
    * ⚠ THE ORDER IS CHOSEN FOR THE FAILURE. Deleting the organization first and
    * then failing to terminate would destroy the identity while leaving the
-   * tenant active and the card being charged — with the one handle that could
+   * tenant active and the card being charged - with the one handle that could
    * find it gone.
    */
   it("stops the billing before it destroys the identity", async () => {
@@ -465,7 +465,7 @@ describe("the empty organization left behind by a deleted account", () => {
 
   /*
    * ⚠ NOTHING IS DELETED FOR AN ORGANIZATION WE NEVER PROVISIONED A TENANT FOR.
-   * `no_tenant` means this is not ours to tidy — an organization from another
+   * `no_tenant` means this is not ours to tidy - an organization from another
    * instance, or one removed before its webhook ever landed.
    */
   it("does not delete an organization that was never ours", async () => {
@@ -495,8 +495,8 @@ describe("the empty organization left behind by a deleted account", () => {
 
 /*
  * ⚠ THE WORKSPACE NAME AND THE CLERK ORGANIZATION NAME ARE ONE NAME NOW. They
- * were deliberately two, for a sound reason — syncing them must not put a write
- * to Clerk inside a rename transaction — but the result was an organization
+ * were deliberately two, for a sound reason - syncing them must not put a write
+ * to Clerk inside a rename transaction - but the result was an organization
  * still called "Mohamed" in the switcher long after the workspace became
  * "i10 testing", reported from production. The console renames ours and asks
  * Clerk to match; this is the other direction, for the rename field inside
@@ -551,7 +551,7 @@ describe("a Clerk organization that has been renamed", () => {
   })
 
   // ⚠ AN UPDATE THAT IS NOT A RENAME ARRIVES HERE TOO. Clerk fires this event
-  // for logo changes, metadata, slug — anything. A blank name is not one.
+  // for logo changes, metadata, slug - anything. A blank name is not one.
   it.each([
     ["no name at all", { id: "org_1" }],
     ["a blank name", { id: "org_1", name: "   " }],

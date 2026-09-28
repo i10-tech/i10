@@ -2,7 +2,7 @@
  * What i10 knows about the places a customer's DNS can live.
  *
  * ⚠ THE REGISTRY IS DATA, AND THE THING THAT MAKES IT USEFUL IS THE DETECTION
- * MAP. A person adding `acme.com` does not know or care who hosts their DNS —
+ * MAP. A person adding `acme.com` does not know or care who hosts their DNS -
  * they know the name of a company they pay. We resolve the apex's NS records
  * live, match the hostnames against the patterns here, and put that company's
  * name and mark on the screen next to the records they have to publish. That
@@ -52,7 +52,7 @@ export interface ProviderApi {
    * GoDaddy's `PUT /records`, Namecheap's `setHosts`, Gandi's `PUT /records`,
    * Dynadot's `set_dns2`, Enom's `SetHosts` and OpenSRS's `set_dns_zone` all
    * REPLACE EVERYTHING. A naive "add a DKIM record" against any of them deletes
-   * the customer's MX records — their mail stops, and it stops because of us.
+   * the customer's MX records - their mail stops, and it stops because of us.
    * An adapter for a provider marked here must read, merge and write back under
    * a lock, or use the scoped per-record endpoint where one exists.
    */
@@ -122,7 +122,7 @@ export interface DnsProvider {
    * For the providers a suffix cannot express.
    *
    * ⚠ IT EXISTS FOR ROUTE 53 AND SHOULD STAY RARE. Its nameservers look like
-   * `ns-264.awsdns-33.com` — the distinguishing part is a label PREFIX
+   * `ns-264.awsdns-33.com` - the distinguishing part is a label PREFIX
    * (`awsdns-`) inside a hostname whose suffix is a bare `.com`, and a suffix
    * pattern therefore either matches nothing (`awsdns.com`) or matches every
    * `.com` nameserver on the internet. A suffix match would have silently
@@ -179,7 +179,7 @@ export interface DnsProvider {
    * ⚠ IT EXISTS FOR NS1, WHICH SERVES NETLIFY, WIX AND SQUARESPACE. A Netlify
    * zone answers with BOTH `ns01.netlifydns.com` and `dns1.p04.nsone.net`, so a
    * naive longest-match would report NS1 for a large share of Netlify customers
-   * — and send them to the wrong dashboard. `detectProvider` resolves it by
+   * - and send them to the wrong dashboard. `detectProvider` resolves it by
    * preferring any provider that is not somebody else's backend when both
    * appear in the same set. Declaring the relationship here keeps the rule out
    * of the matching code.
@@ -212,9 +212,9 @@ export interface DetectionResult {
   /** The nameservers the lookup actually returned. Shown either way. */
   nameservers: string[]
   /**
-   * `exact` — one provider matched every nameserver.
-   * `partial` — one matched some of them. Usually mid-migration.
-   * `none` — nothing matched; we show the raw nameservers and the manual path.
+   * `exact` - one provider matched every nameserver.
+   * `partial` - one matched some of them. Usually mid-migration.
+   * `none` - nothing matched; we show the raw nameservers and the manual path.
    */
   confidence: "exact" | "partial" | "none"
 }

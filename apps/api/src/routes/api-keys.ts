@@ -11,19 +11,19 @@ import { isRestricted } from "../auth/scope.js"
  * RATHER THAN AN OVERSIGHT. They authenticate with `requireApiKey`, so reaching
  * them requires a key already. Closing it needs the console to authenticate
  * with a Clerk SESSION rather than an API key, and no session middleware exists
- * in this API yet — so today the first key of a new tenant is an operator
+ * in this API yet - so today the first key of a new tenant is an operator
  * action. Nothing here should be read as the bootstrap being solved.
  *
  * ⚠ A RESTRICTED KEY MAY READ THIS LIST AND CHANGE NOTHING, WHICH IS WHAT
  * MAKES A SCOPE A BOUNDARY RATHER THAN A SUGGESTION. These routes authenticate
- * with any valid key and take whatever `scopes` they are given — so without the
+ * with any valid key and take whatever `scopes` they are given - so without the
  * guard below, a key limited to `staging.acme.com` could mint itself one
  * limited to nothing, and every restriction in the product would be exactly one
  * request wide. It could also revoke the keys that are not leaked.
  *
  * ⚠ THE CONSOLE IS NOT AFFECTED, AND THAT IS THE POINT OF THE SPLIT. Key
- * management there is session-authenticated — a person who signed in and holds
- * the workspace — rather than key-authenticated. Somebody with the dashboard
+ * management there is session-authenticated - a person who signed in and holds
+ * the workspace - rather than key-authenticated. Somebody with the dashboard
  * can always widen a key; a credential sitting in a deploy environment cannot.
  *
  * ⚠ AND THE SECRET IS RETURNED EXACTLY ONCE, ON THE RESPONSE THAT CREATES IT.
@@ -75,7 +75,7 @@ const presentCreated = (k: CreatedKey) => ({
 /**
  * ⚠ STRUCTURAL, NOT `req: Request`, AND THE REASON IS A TYPES COLLISION RATHER
  * THAN A STYLE PREFERENCE. Under @types/bun the global `Request` is the merged
- * declaration — Bun's members and Node's — but `clone()` comes from Node's
+ * declaration - Bun's members and Node's - but `clone()` comes from Node's
  * half and is declared as returning undici's `Request`, which lacks the members
  * Bun's half adds. So `readJson(c.req.raw.clone())` failed to typecheck against
  * a nominal `Request` while being, at runtime, exactly the object this wants.
@@ -116,7 +116,7 @@ export function createApiKeyRoutes(deps?: ApiKeyRouteDeps) {
   /*
    * ⚠ ON EVERY METHOD THAT IS NOT A READ, RATHER THAN ON EACH ROUTE. A guard
    * repeated four times is a guard that will be missing from the fifth route
-   * somebody adds — and the fifth route is the one nobody thinks to test.
+   * somebody adds - and the fifth route is the one nobody thinks to test.
    * `GET` is deliberately allowed: listing prefixes tells a restricted key
    * nothing it does not already have, and it is what makes a key usable for
    * its own diagnostics.
@@ -197,7 +197,7 @@ export function createApiKeyRoutes(deps?: ApiKeyRouteDeps) {
    * system stopped asking Clerk.
    *
    * ⚠ AND THE EVICTION FAILING IS A 500, NOT A QUIET SUCCESS. Reporting success
-   * while a leaked credential is still live is the worst possible answer here —
+   * while a leaked credential is still live is the worst possible answer here -
    * the customer stops looking. The row stays revoked, so a retry converges.
    */
   app.delete("/:id", async (c) => {
@@ -242,7 +242,7 @@ export function createApiKeyRoutes(deps?: ApiKeyRouteDeps) {
    * it alive is precisely what the customer is trying to stop.
    *
    * ⚠ ITS VALUE IS NOT THE ROTATION. It is not having to compose a replacement
-   * by hand — same scopes, same mode, same tenant — while under pressure.
+   * by hand - same scopes, same mode, same tenant - while under pressure.
    * Nobody reads a scopes checklist during an incident.
    */
   app.post("/:id/rotate", async (c) => {
@@ -266,7 +266,7 @@ export function createApiKeyRoutes(deps?: ApiKeyRouteDeps) {
         "rotated a key but could not evict the old cache entry",
       )
       // ⚠ 200 WITH THE NEW KEY, NOT A 500. The replacement exists and the
-      // caller must receive it — losing it would leave them with a revoked key
+      // caller must receive it - losing it would leave them with a revoked key
       // and no successor. The stale entry expires on its own within the TTL.
     }
 

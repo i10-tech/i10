@@ -3,9 +3,9 @@
 -- ⚠ A NEW TABLE IN `core` IS NOT PROTECTED UNTIL THIS RUNS, AND NOTHING FAILS
 -- WHILE IT IS NOT. `0002_tenancy` enabled RLS on the tables that existed then;
 -- a table added later starts life readable by every tenant, and the only symptom
--- is one customer seeing another's endpoints. Grants come for free — the
+-- is one customer seeing another's endpoints. Grants come for free - the
 -- `ALTER DEFAULT PRIVILEGES` in 0002 covers tables the owner creates from then
--- on — but policies do not, so every migration that adds a table to `core` must
+-- on - but policies do not, so every migration that adds a table to `core` must
 -- add its policy in the same migration.
 DO $$
 DECLARE
@@ -26,14 +26,14 @@ END $$;
 -- Who owns the message an SES event is about.
 --
 -- ⚠ A CHICKEN-AND-EGG THAT ONLY THE OWNER CAN BREAK. Every policy in `core`
--- reads `app.tenant_id`, and an SES notification does not carry one — it
+-- reads `app.tenant_id`, and an SES notification does not carry one - it
 -- carries our message id, in a tag, and nothing else that identifies a tenant.
 -- So the ingestion path cannot set the tenant before it knows it, and cannot
 -- know it without a query that the tenant setting gates.
 --
 -- The same shape as `sweep_stuck_messages`, and treated the same way: one
 -- narrow question, answered by the owner, returning the minimum. It takes an id
--- and returns a tenant — it cannot be turned into "show me another tenant's
+-- and returns a tenant - it cannot be turned into "show me another tenant's
 -- mail", because the caller must already hold a message id that SES echoed back
 -- to us.
 --
@@ -43,7 +43,7 @@ END $$;
 --
 -- ⚠ AND IT TAKES A RANGE, FOR THE SAME REASON THE STATUS ENDPOINT DERIVES ONE.
 -- A lookup by bare id has to touch every partition that has ever existed, and
--- this runs several times per email sent — once per SES event. The caller knows
+-- this runs several times per email sent - once per SES event. The caller knows
 -- the window without a query: the id is a UUIDv7 and carries its own creation
 -- millisecond, so a range around it prunes to a single partition. The bounds
 -- are the caller's, and a caller that cannot date an id passes the widest range

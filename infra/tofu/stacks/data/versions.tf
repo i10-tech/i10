@@ -8,7 +8,7 @@ terraform {
     }
   }
 
-  # Partial config — the rest comes from backend.hcl, because a backend block
+  # Partial config - the rest comes from backend.hcl, because a backend block
   # cannot take variables and the account id is environment-specific.
   #   tofu init -backend-config=backend.hcl
   backend "s3" {}

@@ -8,13 +8,13 @@ import type { DnsZones } from "./zone.js"
  *
  * ⚠ EVERY DELETE THIS PRODUCT HAS EVER DONE LEAKED, AND NOTHING COUNTED IT.
  * `remove` tidies the SES identity and the three zones behind a deleted domain,
- * and is deliberately allowed to fail doing either — the row is already gone,
+ * and is deliberately allowed to fail doing either - the row is already gone,
  * and a 500 the customer cannot act on is worse than a leak. That was a sound
  * trade against an occasional failure. It was not a trade against a CONSTANT
  * one: `ses:DeleteEmailIdentity` was missing from the IAM policy for most of
  * this product's life, so every identity delete returned AccessDenied and every
  * deleted domain left a live, billable, still-sendable identity behind. The
- * zone half had its own version — `holdsZones` read a missing claim row as "not
+ * zone half had its own version - `holdsZones` read a missing claim row as "not
  * mine", which was true of every domain created before claims existed.
  *
  * ⚠ SO THE TIDY IS NOT ENOUGH ON ITS OWN, AND NEVER WAS. Anything allowed to
@@ -25,8 +25,8 @@ import type { DnsZones } from "./zone.js"
  * ⚠ IT IS THE MOST DANGEROUS JOB IN THIS CODEBASE, and it is written to be
  * boring about it. Deleting a live sending identity stops a customer's mail
  * with no warning and no undo, so every removal here has to clear TWO
- * independent tests — our database does not know the name, AND the thing itself
- * carries our own fingerprint — and anything it cannot prove twice it leaves
+ * independent tests - our database does not know the name, AND the thing itself
+ * carries our own fingerprint - and anything it cannot prove twice it leaves
  * alone and reports. Leaving an orphan costs a few cents and a log line.
  */
 
@@ -42,7 +42,7 @@ export interface OrphanDeps {
   /**
    * The domains i10 itself sends from. `MAIL_DOMAINS`.
    *
-   * ⚠ THEY HAVE ROWS, SO THEY WOULD SURVIVE THE FIRST TEST ANYWAY — and they are
+   * ⚠ THEY HAVE ROWS, SO THEY WOULD SURVIVE THE FIRST TEST ANYWAY - and they are
    * named here regardless, because the cost of being wrong about them is our own
    * mail stopping, including every password reset and receipt this product
    * sends. A guard that is redundant today and catastrophic to be missing
@@ -80,7 +80,7 @@ export interface OrphanSummary {
    *
    * ⚠ REPORTED RATHER THAN REMOVED, AND COUNTED SEPARATELY SO IT CAN BE READ.
    * Somebody made these by hand in the AWS console. They are not ours to delete
-   * and they are also not nothing — a growing number here means people are
+   * and they are also not nothing - a growing number here means people are
    * working around the product.
    */
   identitiesForeign: number
@@ -156,7 +156,7 @@ export async function sweepOrphans({
         summary.identitiesForeign += 1
         log?.info?.(
           { domain: name, origin: signed.origin },
-          "an SES identity nothing in this database knows about, and not one we created — left alone",
+          "an SES identity nothing in this database knows about, and not one we created - left alone",
         )
         continue
       }
@@ -166,7 +166,7 @@ export async function sweepOrphans({
       if (!remove) {
         log?.warn(
           { domain: name },
-          "orphaned SES identity: no domain row, our DKIM selector — would remove",
+          "orphaned SES identity: no domain row, our DKIM selector - would remove",
         )
         continue
       }
@@ -208,7 +208,7 @@ export async function sweepOrphans({
       if (!remove) {
         log?.warn(
           { zone: zone.zone_name, domain: zone.domain_name },
-          "orphaned zone: no domain row holds this name — would remove",
+          "orphaned zone: no domain row holds this name - would remove",
         )
         continue
       }

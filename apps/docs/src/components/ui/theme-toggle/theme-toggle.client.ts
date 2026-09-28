@@ -1,5 +1,5 @@
 /**
- * theme-toggle.client.ts — light/dark toggle. Writes pref to localStorage
+ * theme-toggle.client.ts - light/dark toggle. Writes pref to localStorage
  * ("ui-mode"); BaseLayout's pre-paint script owns DOM application so view
  * transitions, OS changes, and cross-tab edits stay in sync.
  */

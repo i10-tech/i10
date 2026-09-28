@@ -25,7 +25,7 @@ const polarKey = Buffer.from(SECRET, "utf8")
 const specKey = Buffer.from(SECRET.slice("whsec_".length), "base64")
 
 describe("verifyPolarWebhook", () => {
-  it("accepts Polar's own key derivation — the whole secret as UTF-8 bytes", () => {
+  it("accepts Polar's own key derivation - the whole secret as UTF-8 bytes", () => {
     const result = verifyPolarWebhook(
       BODY,
       { id: ID, timestamp: TS, signature: sign(polarKey) },
@@ -36,7 +36,7 @@ describe("verifyPolarWebhook", () => {
   })
 
   // The migration Polar has said is coming. It must not be an outage.
-  it("also accepts the Standard Webhooks key — base64 after the prefix", () => {
+  it("also accepts the Standard Webhooks key - base64 after the prefix", () => {
     const result = verifyPolarWebhook(
       BODY,
       { id: ID, timestamp: TS, signature: sign(specKey) },
@@ -68,7 +68,7 @@ describe("verifyPolarWebhook", () => {
   })
 
   // ⚠ THE ID AND THE TIMESTAMP ARE SIGNED MATERIAL. If they were not, whoever
-  // relays the request could edit either — which is what makes the replay
+  // relays the request could edit either - which is what makes the replay
   // window below enforceable at all.
   it("rejects a body, id or timestamp that was changed after signing", () => {
     const signature = sign(polarKey)

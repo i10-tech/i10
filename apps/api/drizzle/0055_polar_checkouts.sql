@@ -2,7 +2,7 @@
 --
 -- ⚠ THIS EXISTS TO GET WORKSPACE IDENTITY OUT OF POLAR ENTIRELY, which is the
 -- root of every attribution bug this system has had. `external_customer_id` put
--- a TENANT id into a field Polar scopes to a PERSON and deduplicates by EMAIL —
+-- a TENANT id into a field Polar scopes to a PERSON and deduplicates by EMAIL -
 -- and those have different lifetimes. A workspace is deleted; the person is not.
 -- So the customer is reused on their next signup still naming the workspace they
 -- deleted, and because the field is IMMUTABLE once set (verified: `422 Customer
@@ -10,7 +10,7 @@
 --
 -- ⚠ THE CHECKOUT IS THE RIGHT CARRIER BECAUSE WE CREATE IT AND IT IS PER
 -- PURCHASE. One checkout buys one subscription for one workspace, and
--- `subscription.checkout_id` is on every subscription Polar returns — so the
+-- `subscription.checkout_id` is on every subscription Polar returns - so the
 -- whole question "whose is this" is answered by a row we wrote ourselves,
 -- before the customer was redirected, from an authenticated session.
 --
@@ -26,7 +26,7 @@ CREATE TABLE "core"."polar_checkouts" (
     CONSTRAINT "polar_checkouts_pkey" PRIMARY KEY ("polar_checkout_id"),
     -- ⚠ NO CASCADE TO A DELETED WORKSPACE, BECAUSE TERMINATION DOES NOT DELETE
     -- THE ROW. `terminate_tenant` marks the tenant dead and leaves it standing,
-    -- so this keeps pointing at a tenant that exists and is closed — which is
+    -- so this keeps pointing at a tenant that exists and is closed - which is
     -- exactly what a later event for that subscription needs to resolve to.
     CONSTRAINT "polar_checkouts_tenant_id_tenants_id_fk"
       FOREIGN KEY ("tenant_id") REFERENCES "core"."tenants"("id") ON DELETE CASCADE
@@ -48,7 +48,7 @@ END $$;
 -- The read, which is the half no policy can serve.
 --
 -- ⚠ SECURITY DEFINER BECAUSE THE READER HAS NO TENANT. A Polar webhook arrives
--- unauthenticated and is asking precisely "whose is this" — there is no
+-- unauthenticated and is asking precisely "whose is this" - there is no
 -- `app.tenant_id` to set, and setting the one the payload claims would be
 -- assuming the answer. Same shape as `subscription_owner` and `tenants_known`:
 -- one narrow question, answered by the owner, returning the minimum.

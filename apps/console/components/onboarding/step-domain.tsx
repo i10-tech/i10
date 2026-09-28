@@ -17,7 +17,7 @@ import type { DomainSummary, TransferOffer } from "@/lib/types"
  * ⚠ THIS USED TO MOUNT THE FULL ADD-DOMAIN FORM, and the comment here defended
  * that on drift grounds: a wizard version would be a second implementation of
  * detection, the delegate-or-manual decision and the plan limit. The argument
- * was right about the risk and wrong about the cost — what it bought was
+ * was right about the risk and wrong about the cost - what it bought was
  * somebody's first five minutes spent on a page carrying a name field, a
  * detection panel, two fieldsets and an advanced section, which is four
  * decisions presented as one wall.
@@ -65,7 +65,7 @@ export function StepDomain({
       )}
 
       {/* The form and the button row swap in place and the step's height
-          follows — see `AutoHeight`. */}
+          follows - see `AutoHeight`. */}
       <AutoHeight grow="animate">
         <StepStage morph={false} step={adding ? "adding" : "added"}>
           {adding ? (
@@ -102,7 +102,7 @@ export function StepDomain({
  *
  * ⚠ THIS IS WHERE SOMEBODY WHO SIGNED UP FROM A TRANSFER EMAIL LANDS. The
  * domain they came for is the obvious first domain, and it arrives already
- * verified — so accepting it here is the whole of this step for them.
+ * verified - so accepting it here is the whole of this step for them.
  *
  * ⚠ INTO THIS WORKSPACE, WITH NO PICKER. A new account has one; somebody with
  * several can answer from the domains page, which offers the choice.

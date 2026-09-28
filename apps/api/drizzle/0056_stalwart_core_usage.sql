@@ -9,7 +9,7 @@
 --
 -- ⚠ THAT FAILURE IS SILENT, WHICH IS WHY IT MATTERS. Stalwart turns an
 -- expression error into no result, looks up a route named "default", finds
--- none, and delivers by MX — so mail keeps leaving exactly as it did before the
+-- none, and delivers by MX - so mail keeps leaving exactly as it did before the
 -- lever existed, and the only trace is an `Eval(Error)` event.
 --
 -- ⚠ STILL NO TABLE GRANTS. USAGE lets the role name objects in `core`; it

@@ -1253,7 +1253,7 @@
     "/webhook-endpoints": {
       "post": {
         "summary": "Create a webhook endpoint",
-        "description": "Registers an https URL to receive events. The signing secret is returned here and never again — store it before you discard the response.",
+        "description": "Registers an https URL to receive events. The signing secret is returned here and never again - store it before you discard the response.",
         "tags": [
           "Webhooks"
         ],
@@ -1452,7 +1452,7 @@
     "/webhook-endpoints/{id}/rotate-secret": {
       "post": {
         "summary": "Rotate a webhook signing secret",
-        "description": "Issues a new signing secret and returns it once. ⚠ The old secret stops working immediately — deliveries in flight are signed with whichever secret was current when they were signed, so update your receiver first or accept a short window of rejected deliveries.",
+        "description": "Issues a new signing secret and returns it once. ⚠ The old secret stops working immediately - deliveries in flight are signed with whichever secret was current when they were signed, so update your receiver first or accept a short window of rejected deliveries.",
         "tags": [
           "Webhooks"
         ],
@@ -1780,7 +1780,7 @@
     "/domains/{id}/verify": {
       "post": {
         "summary": "Verify a domain",
-        "description": "Asks the provider to re-check the DNS records. Verification is not instant: a `pending` answer means the records have not propagated yet, and `temporary_failure` means the lookup itself failed and is worth retrying — neither means the records are wrong.",
+        "description": "Asks the provider to re-check the DNS records. Verification is not instant: a `pending` answer means the records have not propagated yet, and `temporary_failure` means the lookup itself failed and is worth retrying - neither means the records are wrong.",
         "tags": [
           "Domains"
         ],

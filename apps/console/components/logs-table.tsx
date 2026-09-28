@@ -149,7 +149,7 @@ export function LogsTable({
                         className="block truncate text-xs text-muted-foreground"
                         title={row.user_agent ?? undefined}
                       >
-                        {row.user_agent ?? "—"}
+                        {row.user_agent ?? "-"}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right text-xs whitespace-nowrap text-muted-foreground">

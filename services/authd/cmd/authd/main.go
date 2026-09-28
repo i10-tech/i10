@@ -7,7 +7,7 @@
 // asking Clerk. i10 stores no password material anywhere.
 //
 // The product rule this exists to serve: a user has one identity they know of
-// — one email, one password — and it opens both the dashboard and the mailbox.
+// - one email, one password - and it opens both the dashboard and the mailbox.
 package main
 
 import (

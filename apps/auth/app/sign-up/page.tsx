@@ -16,7 +16,7 @@ import { permanentRedirect } from "next/navigation"
  *
  * ⚠ EVERY QUERY PARAMETER IS CARRIED, WHICH IS NOT COSMETIC. `redirect_url` is
  * how somebody lands back where they were going, and `step` is how a browser
- * returning from a provider re-enters a half-finished flow — dropping either
+ * returning from a provider re-enters a half-finished flow - dropping either
  * turns a resumable journey into a restart. The parameters are forwarded
  * verbatim and validated by the page that receives them, which is the only
  * place that has the allowlist.
@@ -38,7 +38,7 @@ export default async function Page({
   for (const [key, value] of Object.entries(params)) {
     if (typeof value === "string") query.set(key, value)
     // ⚠ A REPEATED PARAMETER KEEPS ONLY ITS FIRST VALUE, matching how the
-    // receiving page reads it — it takes `typeof raw === "string"` and ignores
+    // receiving page reads it - it takes `typeof raw === "string"` and ignores
     // an array, so forwarding every copy would carry values it will discard.
     else if (Array.isArray(value) && value[0] !== undefined) query.set(key, value[0])
   }

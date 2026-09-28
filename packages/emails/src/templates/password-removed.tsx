@@ -3,7 +3,7 @@ import { Layout, styles } from "../layout.js"
 
 /**
  * ⚠ THIS ONE MATTERS MORE THAN IT LOOKS. A mailbox holder signs in to IMAP with
- * this password — authd delegates the bind to Clerk — so removing it does not
+ * this password - authd delegates the bind to Clerk - so removing it does not
  * merely change how they log in to the dashboard, it stops their mail client
  * working. The copy says so, because the generic Clerk wording does not.
  */
@@ -35,7 +35,7 @@ export default function PasswordRemoved({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

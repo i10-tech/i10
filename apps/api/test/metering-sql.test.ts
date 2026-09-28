@@ -15,7 +15,7 @@ import type { MeterKey } from "@repo/metering"
  *
  * Every property below is one whose regression bills a customer twice, hands
  * them an allowance they did not buy, or moves a boundary that was supposed to
- * be fixed forever — and none of them are visible in a return value. They live
+ * be fixed forever - and none of them are visible in a return value. They live
  * in the statement text.
  */
 const dialect = new PgDialect()
@@ -31,8 +31,8 @@ const WINDOW = {
 describe("assigning a plan", () => {
   /**
    * ⚠ THE ASSERTION THIS FILE EXISTS FOR. An anchor that moves on every
-   * assignment hands every customer a free reset — exhaust the allowance,
-   * change plan, start a fresh window — and makes the old and new windows
+   * assignment hands every customer a free reset - exhaust the allowance,
+   * change plan, start a fresh window - and makes the old and new windows
    * overlap, so the ledger's buckets stop partitioning time.
    */
   it("never updates the anchor", () => {
@@ -62,7 +62,7 @@ describe("reading a window", () => {
   /**
    * ⚠ HALF-OPEN, MATCHING `windowFor`. With both ends inclusive an event on the
    * boundary is billed in two periods at once, and the two sides of the
-   * reconciler disagree by however many landed on the tick — forever, because
+   * reconciler disagree by however many landed on the tick - forever, because
    * a closed period cannot be corrected.
    */
   it("is inclusive at the start and exclusive at the end", () => {
@@ -84,7 +84,7 @@ describe("reading a window", () => {
 
   /**
    * ⚠ THE BOUNDS GO AS STRINGS, AND EVERY TEST IN THIS FILE USED TO ASSERT THE
-   * SQL AND NOTHING ELSE — WHICH IS PRECISELY HOW THIS SHIPPED. `usedInStatement`
+   * SQL AND NOTHING ELSE - WHICH IS PRECISELY HOW THIS SHIPPED. `usedInStatement`
    * was the one statement in the file passing a `Date` straight through, the
    * driver cannot serialise one ("The `string` argument must be of type string
    * or an instance of Buffer or ArrayBuffer. Received an instance of Date"), and
@@ -187,7 +187,7 @@ describe("recording usage", () => {
  * has to be told it is a timestamp, or it resolves the column against `text`
  * and fails further along for an unrelated-looking reason.
  *
- * The same defect and the same fix as send/reconcile.ts — see the matching
+ * The same defect and the same fix as send/reconcile.ts - see the matching
  * guard in reconcile.test.ts. Any new statement binding a timestamp belongs
  * here too.
  */

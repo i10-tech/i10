@@ -94,7 +94,7 @@ export async function applyClerkEvent(
  * Projects one Clerk user immediately, outside the webhook path.
  *
  * ⚠ IT CLAIMS NO EVENT ID, AND THAT IS THE DIFFERENCE FROM `applyClerkEvent`.
- * There is no Svix message here to be delivered twice — the caller has just
+ * There is no Svix message here to be delivered twice - the caller has just
  * made the change in Clerk and is reading its own write. Borrowing the
  * deduplication table would mean inventing an id that no redelivery will ever
  * match, which buys nothing and puts a junk row in it.
@@ -103,7 +103,7 @@ export async function applyClerkEvent(
  * Clerk fires `user.updated` for the same change moments later; it re-derives
  * the identical rows, and the `clerk_updated_at` guard means an older delivery
  * cannot undo this one. Provisioning is synchronous so the endpoint can return
- * a mailbox that exists — waiting on the webhook would make `POST /mailboxes`
+ * a mailbox that exists - waiting on the webhook would make `POST /mailboxes`
  * answer 201 for something the user cannot yet log in to.
  */
 export async function projectClerkUser(
@@ -119,8 +119,8 @@ type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 /**
  * Brings one user's rows in line with Clerk.
  *
- * ⚠ `active` IS NEVER WRITTEN HERE. It is the subscription gate — whether the
- * mailbox accepts mail — and a Clerk identity event says nothing about whether
+ * ⚠ `active` IS NEVER WRITTEN HERE. It is the subscription gate - whether the
+ * mailbox accepts mail - and a Clerk identity event says nothing about whether
  * an invoice cleared. New rows land inactive by column default and only billing
  * flips them. Adding `active` to the update clause would silently switch every
  * suspended mailbox back on the next time its owner edited their profile.
@@ -131,13 +131,13 @@ async function applyUser(
   hostedDomains: readonly string[],
 ): Promise<ApplyResult> {
   // ⚠ TWO SOURCES OF HOSTED DOMAINS, AND THEY MEAN DIFFERENT THINGS.
-  // `MAIL_DOMAINS` is the env list — domains i10 hosts mail for regardless of
+  // `MAIL_DOMAINS` is the env list - domains i10 hosts mail for regardless of
   // ownership. The table is every domain a TENANT owns, verified. A domain in
   // neither does not project at all, which is what stops an address the user
   // merely claimed becoming a local recipient.
   //
   // ⚠ i10.tech IS NOW IN BOTH, AND THAT IS THE POINT RATHER THAN A DUPLICATE.
-  // It used to be env-only, so its mailboxes were attributed to nobody — which
+  // It used to be env-only, so its mailboxes were attributed to nobody - which
   // meant every meter read zero for the one deployment we can actually watch,
   // and a storage sampler that worked was indistinguishable from one that did
   // not. 0029 gives it a `core.domains` row owned by the `i10` tenant. The
@@ -176,8 +176,8 @@ async function applyUser(
         email: sql`excluded.email`,
         displayName: sql`excluded.display_name`,
         clerkUpdatedAt: sql`excluded.clerk_updated_at`,
-        // Re-derived on every write, so a domain that changed hands — or was
-        // verified after the mailbox existed — is corrected by the next event
+        // Re-derived on every write, so a domain that changed hands - or was
+        // verified after the mailbox existed - is corrected by the next event
         // rather than needing a backfill.
         tenantId: sql`excluded.tenant_id`,
         updatedAt: sql`now()`,

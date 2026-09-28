@@ -75,8 +75,8 @@ describe("I10", () => {
     // ⚠ CAUGHT BY HAND RATHER THAN `.rejects.toSatisfy(…)`. bun's `rejects`
     // does not unwrap for `toSatisfy`: the matcher receives the pending
     // promise, the predicate is never called, and the assertion fails on a
-    // shape nobody wrote. Catching the error makes what is being asserted —
-    // the `retryable` flag on a 429 — the visible thing anyway.
+    // shape nobody wrote. Catching the error makes what is being asserted -
+    // the `retryable` flag on a 429 - the visible thing anyway.
     const thrownBy = async (name: string) => {
       const i10 = new I10("k", { fetch: fail(name, 429) as never })
       try {

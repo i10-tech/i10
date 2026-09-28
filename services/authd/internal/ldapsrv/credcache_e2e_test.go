@@ -30,7 +30,7 @@ func TestCacheCollapsesRepeatedBindsToOneClerkCall(t *testing.T) {
 }
 
 // ⚠ THE ORDERING PROPERTY. The limiter protects the Clerk request budget, so a
-// bind that spends none of that budget must spend none of its tokens either —
+// bind that spends none of that budget must spend none of its tokens either -
 // otherwise a mail client opening six connections at once is throttled for
 // calls it never made.
 func TestCacheHitDoesNotSpendThrottleTokens(t *testing.T) {
@@ -48,7 +48,7 @@ func TestCacheHitDoesNotSpendThrottleTokens(t *testing.T) {
 }
 
 // ⚠ THE PROPERTY THE CACHE MUST NOT WEAKEN. Deactivation is checked by the
-// projection lookup, which runs BEFORE the cache — so suspending an account
+// projection lookup, which runs BEFORE the cache - so suspending an account
 // takes effect on the very next bind, cached password or not.
 func TestDeactivationBeatsAWarmCache(t *testing.T) {
 	store := defaultStore()
@@ -83,7 +83,7 @@ func TestClerkUpdatedAtChangeForcesRevalidation(t *testing.T) {
 		t.Fatalf("verifier called %d times, want 1", v.calls)
 	}
 
-	// The user changed something in Clerk — possibly the password.
+	// The user changed something in Clerk - possibly the password.
 	moved := time.Date(2026, 9, 2, 11, 0, 0, 0, time.UTC)
 	store.accounts[0].ClerkUpdatedAt = &moved
 
@@ -91,7 +91,7 @@ func TestClerkUpdatedAtChangeForcesRevalidation(t *testing.T) {
 		t.Fatalf("second bind: %v", err)
 	}
 	if v.calls != 2 {
-		t.Fatalf("verifier called %d times, want 2 — the cache did not revalidate", v.calls)
+		t.Fatalf("verifier called %d times, want 2 - the cache did not revalidate", v.calls)
 	}
 }
 
@@ -107,7 +107,7 @@ func TestRejectionIsNeverCached(t *testing.T) {
 		}
 	}
 	if v.calls != 3 {
-		t.Fatalf("verifier called %d times, want 3 — a rejection was cached", v.calls)
+		t.Fatalf("verifier called %d times, want 3 - a rejection was cached", v.calls)
 	}
 }
 
@@ -127,7 +127,7 @@ func TestUnavailableIsNeverCached(t *testing.T) {
 }
 
 // A wrong password must miss even while a correct one is cached for the same
-// account — the cache keys on the credential, not merely on the user.
+// account - the cache keys on the credential, not merely on the user.
 func TestWrongPasswordMissesAWarmEntry(t *testing.T) {
 	v := &fakeVerifier{outcome: clerkauth.Verified}
 	addr := newFixtureWith(t, defaultStore(), v, 60, credcache.New(time.Minute))
@@ -141,7 +141,7 @@ func TestWrongPasswordMissesAWarmEntry(t *testing.T) {
 		t.Fatalf("result = %d, want invalidCredentials", got)
 	}
 	if v.calls != 2 {
-		t.Fatalf("verifier called %d times, want 2 — the wrong password was served from cache", v.calls)
+		t.Fatalf("verifier called %d times, want 2 - the wrong password was served from cache", v.calls)
 	}
 }
 

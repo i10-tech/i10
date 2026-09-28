@@ -8,14 +8,14 @@ import { offlineIdentity, sesIdentity } from "../src/domains/identity.js"
  * ⚠ `GetEmailIdentity` RAISES `NotFoundException` FOR A NAME SES HAS NEVER
  * HEARD OF, WHICH IS THE ORDINARY STATE OF EVERY DOMAIN UNTIL `create`
  * SUCCEEDS. Nothing caught it, so it came out of `verify` as an unhandled
- * throw, the API answered its generic 500 — "Something went wrong." — and the
+ * throw, the API answered its generic 500 - "Something went wrong." - and the
  * console said "Could not check the records" about a domain whose delegation
  * was working and whose records we had published ourselves. It never cleared,
  * because nothing about pressing Verify again changed the condition.
  *
  * ⚠ AND THERE ARE TWO WAYS TO REACH THAT CALL WITHOUT AN IDENTITY EXISTING.
  * `registerIdentity` returns early for a row with no DKIM selector or no
- * sealed private key, and `DomainStore.refresh` — which the console polls —
+ * sealed private key, and `DomainStore.refresh` - which the console polls -
  * asks about any domain past `not_started` without registering anything.
  */
 
@@ -41,7 +41,7 @@ describe("asking SES about an identity that is not there", () => {
   /**
    * ⚠ EVERY OTHER FAILURE STILL THROWS, AND THAT IS THE HALF WORTH GUARDING.
    * Swallowing an AccessDenied would turn a broken IAM policy into a domain
-   * that is permanently, quietly `not_started` — which reads as "the customer
+   * that is permanently, quietly `not_started` - which reads as "the customer
    * has not finished" and sends nobody to look at the thing that is wrong.
    */
   it("still throws for anything that is not a missing identity", async () => {
@@ -95,7 +95,7 @@ describe("the offline identity", () => {
  * ⚠ IT TOOK THE DOMAIN OUT OF SERVICE, AND IT WAS OBSERVED IN PRODUCTION.
  * `verify` always calls `registerIdentity`, which called `create`, which hit
  * `AlreadyExistsException` and re-asserted the signing attributes. That is not
- * a confirmation to SES — it is a NEW signing configuration, so SES discards
+ * a confirmation to SES - it is a NEW signing configuration, so SES discards
  * the result of its DKIM check and starts again: `SUCCESS` drops to `PENDING`
  * and `VerifiedForSendingStatus` goes false. The send gate reads exactly that,
  * so a verified domain stopped being able to send until Amazon re-checked.
@@ -160,7 +160,7 @@ describe("re-registering an identity that is already ours", () => {
    * ⚠ AND A DIFFERENT KEY MUST STILL BE RE-ASSERTED, which is the whole reason
    * the old code did this unconditionally. A domain that changed hands, or a
    * rotation that half-applied, leaves SES signing with a key the customer's
-   * DNS no longer publishes — every signature fails while the records look
+   * DNS no longer publishes - every signature fails while the records look
    * perfectly correct. Skipping that case to protect the verified one would
    * trade a visible outage for an invisible one.
    */
@@ -185,7 +185,7 @@ describe("re-registering an identity that is already ours", () => {
 
   /**
    * ⚠ A MOVED RETURN PATH IS NOT A REASON TO RESET DKIM. Turning delegation on
-   * moves MAIL FROM under `mail.`, which is a change to one attribute — and
+   * moves MAIL FROM under `mail.`, which is a change to one attribute - and
    * re-asserting the key alongside it would un-verify a domain for a reason
    * that has nothing to do with the key.
    */
@@ -218,7 +218,7 @@ describe("re-registering an identity that is already ours", () => {
  * SES tenants (#156): one per workspace, the identity in exactly one of ours.
  *
  * ⚠ AND A DELETE MUST DETACH FIRST. SES refuses to delete an identity a tenant
- * still holds, and the store's `tidy` swallows that refusal by design — so a
+ * still holds, and the store's `tidy` swallows that refusal by design - so a
  * delete that did not detach would leak a live identity silently, the same way
  * the missing IAM permission once did.
  */

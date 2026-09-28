@@ -4,7 +4,7 @@ Transactional **and** human email. Stalwart as the mail engine, SES for
 outbound relay, a Resend-compatible API, and an interface that is the point
 rather than the polish.
 
-Pronounced _i-ten_ — `i` + 10 letters = **integration**.
+Pronounced _i-ten_ - `i` + 10 letters = **integration**.
 
 > **Keep your code, change one import.** `resend/node` → `@i10/node`.
 
@@ -18,32 +18,32 @@ error semantics. Only the key _format_ is ours: `i10_live_…`.
 
 |                   |                                                  |
 | ----------------- | ------------------------------------------------ |
-| `i10.tech`, `www` | marketing — `apps/web`, not being built yet      |
+| `i10.tech`, `www` | marketing - `apps/web`, not being built yet      |
 | `dash.i10.tech`   | the console                                      |
-| `auth.i10.tech`   | `apps/auth` — Clerk, prebuilt components for now |
+| `auth.i10.tech`   | `apps/auth` - Clerk, prebuilt components for now |
 | `api.i10.tech`    | the send API                                     |
 | `docs.i10.tech`   | the docs                                         |
-| `mail.i10.tech`   | Stalwart — grey-cloud, the one unproxied name    |
+| `mail.i10.tech`   | Stalwart - grey-cloud, the one unproxied name    |
 | `_spf.i10.tech`   | the SPF include customers point at               |
 
 ## Layout
 
 ```
 apps/
-  api        Hono — the send API. Not Next: it returns a message id in
+  api        Hono - the send API. Not Next: it returns a message id in
              single-digit ms, holds long-lived Postgres and Redis pools, runs
              BullMQ workers from the same code, and receives SES webhooks.
-  console    Next — dash.i10.tech. Domains, DNS onboarding, keys, message log.
-  web        Next — i10.tech. Scaffold only; the marketing site is not being
+  console    Next - dash.i10.tech. Domains, DNS onboarding, keys, message log.
+  web        Next - i10.tech. Scaffold only; the marketing site is not being
              built yet.
-  docs       Nimbus (Astro) — docs.i10.tech. Pagefind search, Scalar for the
+  docs       Nimbus (Astro) - docs.i10.tech. Pagefind search, Scalar for the
              API reference, markdown twins and llms.txt built in.
 
 packages/
-  node       @i10/node — the published SDK. ZERO runtime dependencies.
-  next       @i10/next — server client and a signed webhook route handler.
-  contracts  @repo/contracts — the zod wire contract. Server-side only.
-  ui         @repo/ui — shadcn/ui foundation and design tokens.
+  node       @i10/node - the published SDK. ZERO runtime dependencies.
+  next       @i10/next - server client and a signed webhook route handler.
+  contracts  @repo/contracts - the zod wire contract. Server-side only.
+  ui         @repo/ui - shadcn/ui foundation and design tokens.
   eslint-config, typescript-config
 
 infra/
@@ -60,9 +60,9 @@ bun dev
 
 |            |                                                             |
 | ---------- | ----------------------------------------------------------- |
-| Bun        | 1.4.2 — runtime, package manager and test runner. No Node.¹ |
+| Bun        | 1.4.2 - runtime, package manager and test runner. No Node.¹ |
 | TypeScript | 6.0.3                                                       |
-| Go         | 1.26.5 — `services/authd` only, outside the workspace       |
+| Go         | 1.26.5 - `services/authd` only, outside the workspace       |
 
 `bun run build` · `bun run lint` · `bun run check-types` · `bun run test` · `bun run format`
 
@@ -70,7 +70,7 @@ bun dev
 `.githooks/`. There are two.
 
 `commit-msg` runs commitlint on the message you just wrote. The scope list is
-closed — `fix(docker):` reads perfectly and is not a scope this repository has —
+closed - `fix(docker):` reads perfectly and is not a scope this repository has -
 and `.github/scripts/next-version.mjs` derives release versions from these
 messages, skipping a malformed one silently rather than failing. So a bad
 message does not break a release; it quietly produces the wrong version. Caught
@@ -78,7 +78,7 @@ at commit time it costs nothing to fix, which is why it is not a `pre-push`
 step: by then the fix is an amend or a rebase and a force-push.
 
 `pre-push` runs `check-images`,
-`format:check`, `lint` and `check-types` — fastest first, each one stopping the
+`format:check`, `lint` and `check-types` - fastest first, each one stopping the
 push on its own, quiet unless something fails. About four seconds warm.
 `test` and `build` are deliberately left out: they are the slow ones, and a
 pre-push that takes a minute is a pre-push that gets bypassed. Skip it with
@@ -88,7 +88,7 @@ pre-push that takes a minute is a pre-push that gets bypassed. Skip it with
 copies a hand-maintained list of workspace `package.json` files before
 `bun install --frozen-lockfile`, so that editing source does not invalidate the
 dependency layer. Add a package, have an app depend on it, forget the COPY line,
-and `lint`, `check-types`, `test` and `build` all still pass — they run against
+and `lint`, `check-types`, `test` and `build` all still pass - they run against
 the real repository, where the package is on disk. Only the image build fails,
 and only on a push to `main`, which is after the merge. This reads the
 Dockerfiles and the manifests and says which COPY line is missing, in about
@@ -101,20 +101,20 @@ CI toolchain action asserts the version it actually got, so a drift fails the
 run rather than quietly building against something else.
 
 **`tsc` is still here, and is not a leftover.** Bun strips types, it does not
-check them — so `check-types` is TypeScript's own compiler, and the packages
+check them - so `check-types` is TypeScript's own compiler, and the packages
 that publish a `.d.ts` (`@repo/contracts`, `@repo/emails`, `@repo/metering`)
 still emit with `tsc` because `bun build` has no declaration output. What went
 away is `tsx`: bun runs a `.ts` file directly.
 
 **1.4.2 is a floor, not just a pin.** Next's standalone `server.js` does not run
-on bun 1.3.x — it boots, answers the connection, then fails every render with
+on bun 1.3.x - it boots, answers the connection, then fails every render with
 _"Expected CommonJS module to have a function wrapper"_ while loading Next's
 precompiled server runtime ([oven-sh/bun#25609], fixed in 1.3.14). `next dev`
 and `next start` were fine throughout and a `--webpack` build failed
 identically, so the bundler was never the variable. Do not move the base image
 in `apps/{console,auth,web}/Dockerfile` backwards.
 
-¹ `command -v node` inside an i10 image answers with a path anyway — `oven/bun`
+¹ `command -v node` inside an i10 image answers with a path anyway - `oven/bun`
 ships `/usr/local/bun-node-fallback-bin/node` as a symlink to bun so tooling
 that shells out to `node` keeps working. It is not a Node runtime.
 
@@ -142,7 +142,7 @@ make the envelope theirs before volume matters.
 **⚠ The region is baked into every customer's DNS.** The bounce MX must point at
 `feedback-smtp.<region>.amazonses.com`; SES re-verifies it continuously, and
 RFC 2181 forbids an MX target that is a CNAME, so it cannot hide behind an i10
-hostname. Leaving SES — or merely changing AWS region — means every customer
+hostname. Leaving SES - or merely changing AWS region - means every customer
 edits DNS. It is **eu-central-1**, chosen once.
 
 `include:_spf.i10.tech` buys the other half: adding a second relay, or swapping
@@ -165,7 +165,7 @@ own R2 buckets, its own Argo `AppProject`, this repository.
 Nothing in the repo consumes a version number, so there is no version file, no
 bump commit and no release PR. `.github/scripts/next-version.mjs` derives the
 next version from conventional commits and `release.yml` tags it. Pre-1.0, both
-`feat:` and a breaking change take the minor — going 1.0 is a product decision,
+`feat:` and a breaking change take the minor - going 1.0 is a product decision,
 not something a commit message triggers.
 
 **Commit messages are load-bearing, not style.** A non-conventional subject is
@@ -184,7 +184,7 @@ Scopes are enumerated in `commitlint.config.mjs`.
 ## Deploying
 
 Argo CD watches `main`. The image tag in `infra/k8s/i10/workloads/` is updated
-**by a commit** — so `git log infra/` is the deployment history and a rollback
+**by a commit** - so `git log infra/` is the deployment history and a rollback
 is a revert. One image serves both environments; a promotion re-tags the
 staging artifact rather than rebuilding it.
 
@@ -199,7 +199,7 @@ two-secret Doppler pattern, and what deliberately lives in the PSL repo.
   `infra/k8s/i10/bulwark/bulwark.yaml`.
 - **Stalwart is pre-1.0** and its schema is still moving. Pinned one release
   behind latest; read every migration note.
-- **ESLint is held at 9.x** — every plugin supports 10 except
+- **ESLint is held at 9.x** - every plugin supports 10 except
   `eslint-plugin-react`.
 - **`mail.i10.tech` must stay grey-cloud.** Cloudflare's proxy carries only
   HTTP/HTTPS. Publishing that record also publishes the origin IP, which is

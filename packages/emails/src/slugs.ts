@@ -3,12 +3,12 @@
  *
  * ⚠ VERIFIED AGAINST THE INSTANCE with `npx clerk@latest api templates/email`,
  * not guessed. Clerk publishes the template HTML in its dashboard but the slugs
- * appear only in that API — re-run it after any Clerk release that adds
+ * appear only in that API - re-run it after any Clerk release that adds
  * templates, because a new one falls through to Clerk's own styling rather than
  * failing, which is easy not to notice.
  *
  * ⚠ A WRONG SLUG IS COSMETIC, NOT FATAL. An unrecognised slug falls through to
- * Clerk's own rendered body — see `renderClerkEmail` — so the worst case is an
+ * Clerk's own rendered body - see `renderClerkEmail` - so the worst case is an
  * email that looks like Clerk's rather than a customer who never receives one.
  */
 export const SLUG = {
@@ -44,8 +44,8 @@ export type KnownSlug = (typeof SLUG)[keyof typeof SLUG]
  * Templates that are Clerk's to send and will never be ours.
  *
  * ⚠ LISTED SO THEY PASS THROUGH QUIETLY RATHER THAN AS "SOMEBODY SHOULD STYLE
- * THIS". Two groups: Clerk's own BILLING product, which i10 does not use —
- * Polar takes the money — and Clerk's operational mail to us as their customer,
+ * THIS". Two groups: Clerk's own BILLING product, which i10 does not use -
+ * Polar takes the money - and Clerk's operational mail to us as their customer,
  * about API usage and Stripe. Styling either would mean adopting a system we
  * deliberately did not buy, or rewriting a supplier's message to ourselves.
  *

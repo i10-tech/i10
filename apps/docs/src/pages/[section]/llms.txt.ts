@@ -1,11 +1,11 @@
 /**
- * Per-section /<section>/llms.txt — sub-index files that drill down
+ * Per-section /<section>/llms.txt - sub-index files that drill down
  * from the root `/llms.txt` into a named slice of the site's docs.
  *
  * A "section" is one of two things:
  *   1. A folder inside the primary `docs` collection with more than
  *      one page (e.g. `src/content/docs/<folder>/*` → `/<folder>/llms.txt`).
- *   2. A whole non-primary collection — `api`, `blog`, etc. — which
+ *   2. A whole non-primary collection - `api`, `blog`, etc. - which
  *      becomes a single section mounted at `/<collection>/llms.txt`.
  *
  * Both cases produce the same shape at the same URL pattern, so
@@ -52,7 +52,7 @@ export async function GET({ props }: { props: SectionProps }) {
   const lines = [`# ${label}`, "", "## Pages", ""]
 
   for (const item of members) {
-    const description = item.description ? ` — ${item.description}` : ""
+    const description = item.description ? ` - ${item.description}` : ""
     lines.push(
       `- [${item.title}](${new URL(item.markdownUrl, config.site).href})${description}`,
     )

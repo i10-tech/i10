@@ -17,7 +17,7 @@ export default async function Page({
   /*
    * ⚠ THE SAME NUMBERS THE SIGN-UP PAGE READS, AND THIS FORM HAD NONE. It said
    * "At least 8 characters." in a hint typed by hand, while the instance was
-   * configured to require fifteen — so somebody resetting their password was
+   * configured to require fifteen - so somebody resetting their password was
    * invited to choose one Clerk would then refuse, two seconds later, from a
    * server. That is the exact failure `passwordRules` exists to prevent, and
    * the page that fixed it was not the only page asking for a password.

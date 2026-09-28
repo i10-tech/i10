@@ -14,7 +14,7 @@ import { errorResponse, notWired as notWiredFor } from "./shared.js"
  * ⚠ SEPARATE FROM `/webhooks`, WHICH IS INBOUND AND UNAUTHENTICATED. That
  * router receives Clerk's and Amazon's requests and is guarded by signatures;
  * this one is a customer API guarded by an API key. Putting both under one
- * prefix would mean one middleware mistake exposes the wrong half — and the
+ * prefix would mean one middleware mistake exposes the wrong half - and the
  * halves fail in opposite directions, so the mistake would not look like one.
  */
 export const webhookEndpoints = new OpenAPIHono()
@@ -45,7 +45,7 @@ const create = createRoute({
   summary: "Create a webhook endpoint",
   description:
     "Registers an https URL to receive events. The signing secret is returned " +
-    "here and never again — store it before you discard the response.",
+    "here and never again - store it before you discard the response.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
   middleware: [requireApiKey] as const,
@@ -179,7 +179,7 @@ const rotate = createRoute({
   summary: "Rotate a webhook signing secret",
   description:
     "Issues a new signing secret and returns it once. ⚠ The old secret stops " +
-    "working immediately — deliveries in flight are signed with whichever " +
+    "working immediately - deliveries in flight are signed with whichever " +
     "secret was current when they were signed, so update your receiver first " +
     "or accept a short window of rejected deliveries.",
   tags: ["Webhooks"],

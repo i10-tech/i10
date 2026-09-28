@@ -31,7 +31,7 @@ export const config = [
       // already reports every undefined identifier, with the whole type graph
       // to reason from. ESLint's version reasons from a hardcoded globals
       // list, so it flags `process` in a Node package and misses genuinely
-      // undefined names behind a type assertion — worse on both sides.
+      // undefined names behind a type assertion - worse on both sides.
       // typescript-eslint recommends disabling it for this reason.
       "no-undef": "off",
     },
@@ -44,7 +44,7 @@ export const config = [
   },
   {
     // ⚠ `.next*` RATHER THAN `.next`, because the console's preview server
-    // builds into `.next-preview` so it can run beside a live `next dev` — see
+    // builds into `.next-preview` so it can run beside a live `next dev` - see
     // apps/console/next.config.ts. Linting a Next build output is thousands of
     // warnings about `require()` in generated chunks, and it takes the gate red
     // for a directory nobody wrote.
@@ -54,7 +54,7 @@ export const config = [
 
 // ⚠ HELD ON ESLINT 9, ON PURPOSE. ESLint 10 is out and every plugin here
 // supports it EXCEPT eslint-plugin-react, whose peer range stops at ^9.7.
-// Moving to 10 means either dropping that plugin — losing jsx-key and the
-// rest — or installing it against an unsupported ESLint and finding out at
+// Moving to 10 means either dropping that plugin - losing jsx-key and the
+// rest - or installing it against an unsupported ESLint and finding out at
 // runtime. Revisit when eslint-plugin-react ships a v10 range; it is a
 // one-line change here and in every package's devDependencies.

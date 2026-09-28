@@ -14,13 +14,13 @@ import { cn } from "cn"
  *
  * ⚠ IT COUNTS SEGMENTS RATHER THAN DRAWING A PERCENTAGE, because the steps are
  * not the same size and a smooth bar implies they are. Four ticks of which two
- * are filled is an honest claim — "two done, two left" — where a bar at 50%
+ * are filled is an honest claim - "two done, two left" - where a bar at 50%
  * claims the remaining half will take as long as the first, which for "add a
  * passkey" versus "type your email" is simply false.
  *
  * ⚠ AND THE COUNT IS A PROP RATHER THAN DERIVED FROM CHILDREN. The sign-up flow
  * decides at render time how many optional steps this Clerk instance can
- * actually offer — see _lib/environment.ts — so the total is genuinely dynamic,
+ * actually offer - see _lib/environment.ts - so the total is genuinely dynamic,
  * and a component that inferred it would make the bar re-segment mid-flow.
  */
 
@@ -71,8 +71,8 @@ export function StepProgress({
         >
           {/*
            * ⚠ `scaleX` WITH A LEFT ORIGIN, NOT `width`. Width is a layout
-           * property — animating it runs layout and paint on every frame of
-           * every segment — where a transform is handed straight to the
+           * property - animating it runs layout and paint on every frame of
+           * every segment - where a transform is handed straight to the
            * compositor. On a bar this thin nobody would see the difference in
            * smoothness; they would see it in the battery.
            */}

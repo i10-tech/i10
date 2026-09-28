@@ -8,7 +8,7 @@
  * is how the same number ends up different in two places on one screen.
  *
  * ⚠ AND NONE OF THEM PASS A LOCALE. `toLocaleString()` with no argument uses
- * the runtime's locale — which on the SERVER is the container's (always
+ * the runtime's locale - which on the SERVER is the container's (always
  * `en-US`, because that is what the base image sets) and in the BROWSER is the
  * person's. A date rendered on the server and re-rendered on the client can
  * therefore differ, and React calls that a hydration mismatch. Everything that
@@ -22,7 +22,7 @@ export function formatNumber(value: number): string {
 }
 
 /**
- * 1.2K · 45K · 1.2M — for places where the exact figure does not fit.
+ * 1.2K · 45K · 1.2M - for places where the exact figure does not fit.
  *
  * ⚠ USED IN THE RAIL AND IN STAT TILES, NEVER IN A TABLE CELL OR AN INVOICE.
  * "45K" is fine as a sense of scale and useless as a number somebody is
@@ -59,11 +59,11 @@ export function formatBytes(bytes: number): string {
 /** A percentage of a total, guarding the zero denominator. */
 export function formatRate(part: number, total: number): string {
   // ⚠ `0%` RATHER THAN `NaN%` OR A DASH. A tenant who has sent nothing has a
-  // 0% bounce rate, which is true and is what they expect to see; `—` reads as
+  // 0% bounce rate, which is true and is what they expect to see; `-` reads as
   // "we could not work it out".
   if (total === 0) return "0%"
   const rate = (part / total) * 100
-  // Two decimals below 1% because a complaint rate is judged against 0.08% —
+  // Two decimals below 1% because a complaint rate is judged against 0.08% -
   // rounding that to "0%" hides the one number deliverability depends on.
   return rate < 1 ? `${rate.toFixed(2)}%` : `${rate.toFixed(1)}%`
 }
@@ -124,14 +124,14 @@ export function formatRelative(iso: string): string {
 }
 
 /**
- * `17 Sep 2026, 14:32:05` — the precise form, for a detail page.
+ * `17 Sep 2026, 14:32:05` - the precise form, for a detail page.
  *
  * ⚠ IT FORMATS IN THE RUNTIME'S TIME ZONE, SO IT MUST NOT BE CALLED DURING THE
  * FIRST RENDER OF A CLIENT COMPONENT. The server container is UTC and the
  * reader is not, so the two passes disagree by hours and React discards the
  * server HTML for that subtree. In a client component, render it through
  * `<Time>`, which holds `formatUtc` until mounted. In a server component it is
- * fine — that output is never re-rendered in the browser.
+ * fine - that output is never re-rendered in the browser.
  */
 export function formatExact(iso: string): string {
   const date = new Date(iso)
@@ -178,13 +178,13 @@ export function bareAddress(value: string): string {
  *
  * ⚠ EXPLICIT `timeZone: "UTC"` AND AN EXPLICIT LOCALE, WHICH IS THE WHOLE POINT
  * OF THE FUNCTION. It is what a client component renders BEFORE hydration, so
- * the server pass and the browser's first pass have to agree exactly — and they
+ * the server pass and the browser's first pass have to agree exactly - and they
  * only do if neither of them is allowed to consult the machine it is running
  * on. `formatExact` and `formatRelative` both do, which is why they cannot be
  * used until after mount. See components/time.tsx.
  *
  * ⚠ AND IT SAYS "UTC" OUT LOUD. A timestamp shown in a zone that is not the
- * reader's, without saying so, is worse than one they have to convert — they
+ * reader's, without saying so, is worse than one they have to convert - they
  * will read it as local and be wrong by hours. It is on screen for one frame,
  * but a slow hydration makes that frame visible.
  */

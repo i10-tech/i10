@@ -1,7 +1,7 @@
 # cp terraform.tfvars.example terraform.tfvars && edit
 #
 # Reconciled against the live zone on 2026-09-02. Every value below was read
-# back from the Cloudflare API, not written from intent — so a first
+# back from the Cloudflare API, not written from intent - so a first
 # `tofu plan` against an untouched zone should be EMPTY. If it is not, read the
 # diff before applying: either somebody edited the zone by hand, or main.tf has
 # gone stale.
@@ -38,15 +38,15 @@ record_ids = {
   apex_spf = "f5a80e2e705bc81a812e47a9a3f7b267"
   send_spf = "2e109aa40da9ee0770495990e065a408"
 
-  # dkim — i10's own dual-signing pair, then the key SES signs with
+  # dkim - i10's own dual-signing pair, then the key SES signs with
   dkim_rsa     = "853579773560c8391e9149a48432a988"
   dkim_ed25519 = "8e11e2e7d67d20e4e39c26dfc09cd560"
   # Captured 2026-09-16. It was created by hand during the Easy DKIM → BYODKIM
   # migration, so unlike every other entry here its id had to be read back from
-  # the API afterwards — see the curl in variables.tf.
+  # the API afterwards - see the curl in variables.tf.
   ses_byodkim  = "307fb5a4051f088c1499562424f5aebc"
 
-  # dmarc — exactly one, see main.tf
+  # dmarc - exactly one, see main.tf
   dmarc = "77ac80353991d2cd56850b1197aa0e2f"
 
   # rfc 6186 client provisioning

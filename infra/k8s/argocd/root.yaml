@@ -9,7 +9,7 @@
 #
 # That is not a style choice. An app-of-apps root creates its child Application
 # objects somewhere, and `argocd` does not match the `i10-*` destination the
-# i10 AppProject allows — so a root in `argocd` is rejected by the very
+# i10 AppProject allows - so a root in `argocd` is rejected by the very
 # boundary that makes i10 extractable. Argo's apps-in-any-namespace feature is
 # the way through, and it is the only one where the boundary actually holds:
 # Argo refuses to let an Application outside `argocd` claim a project that does
@@ -19,7 +19,7 @@
 # ⚠ IT DEPENDS ON TWO PLATFORM SETTINGS, BOTH IN THE PSL REPO:
 #     argocd-cmd-params-cm   application.namespaces: i10-prod
 #     AppProject i10         sourceNamespaces: [i10-prod]
-# With only one of the two, Applications here are SILENTLY IGNORED — no error,
+# With only one of the two, Applications here are SILENTLY IGNORED - no error,
 # no event, they simply never reconcile. The application controller and server
 # must be restarted after the ConfigMap changes.
 #
@@ -44,7 +44,7 @@ spec:
       recurse: true
   destination:
     server: https://kubernetes.default.svc
-    # Where the CHILD Application objects are created — not where the workloads
+    # Where the CHILD Application objects are created - not where the workloads
     # land. Each child names its own destination.
     namespace: i10-prod
   syncPolicy:

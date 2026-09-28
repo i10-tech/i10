@@ -37,7 +37,7 @@ CREATE INDEX "plans_tenant_idx" ON "core"."plans" USING btree ("tenant_id");--> 
 
 -- ⚠ THE TWO WAYS A PLAN CAN BE MISFILED ARE BOTH SILENT, SO THE DATABASE
 -- REFUSES THEM. A `custom` plan with no owner is invisible to the tenant it was
--- built for — it fails the policy below and reads as "no such plan". A
+-- built for - it fails the policy below and reads as "no such plan". A
 -- `catalog` plan with an owner is a price list only one customer can see. The
 -- discriminator and the owner column have to agree, and neither is a comment.
 ALTER TABLE "core"."plans" ADD CONSTRAINT "plans_source_owner_ck"
@@ -48,7 +48,7 @@ ALTER TABLE "core"."plans" ADD CONSTRAINT "plans_source_owner_ck"
 --
 -- ⚠ A NEW TABLE IN `core` IS NOT PROTECTED UNTIL THIS RUNS, AND NOTHING FAILS
 -- WHILE IT IS NOT. Grants arrive free from the ALTER DEFAULT PRIVILEGES in
--- 0002; policies do not. Without these, every tenant can read — and write —
+-- 0002; policies do not. Without these, every tenant can read - and write -
 -- every other tenant's usage, and the only symptom is a number that is too big.
 ALTER TABLE "core"."meter_events" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 CREATE POLICY tenant_isolation ON "core"."meter_events"
@@ -65,21 +65,21 @@ CREATE POLICY tenant_isolation ON "core"."plan_assignments"
 -- ⚠ THE ONLY POLICY IN `core` THAT IS NOT A PLAIN EQUALITY, AND THE ASYMMETRY
 -- IS THE WHOLE DESIGN.
 --
--- READ: a catalogue plan has `tenant_id IS NULL` and is visible to everyone —
+-- READ: a catalogue plan has `tenant_id IS NULL` and is visible to everyone -
 -- it is the price list, and it is on the website. A custom plan is visible only
 -- to the tenant it was built for, because NULL never equals anything and the
 -- equality does the rest.
 --
 -- WRITE: the WITH CHECK deliberately OMITS the NULL branch. `i10_api` can
 -- therefore create and edit a bespoke plan for the tenant it is scoped to, and
--- can NEVER create or alter a catalogue one — those belong to the owner role,
+-- can NEVER create or alter a catalogue one - those belong to the owner role,
 -- which is what runs migrations and the config push. That is the position
 -- already taken in infra/autumn/autumn.config.ts ("the dashboard is not the
 -- source of truth, this file is"), enforced by the database instead of by
 -- reviewers.
 --
 -- ⚠ AND IT IS STILL STRICT `current_setting`, WITHOUT missing_ok. The function
--- is STABLE, so it is evaluated once per query before any row is examined —
+-- is STABLE, so it is evaluated once per query before any row is examined -
 -- an unset tenant context raises here exactly as it does everywhere else in
 -- `core`, rather than quietly degrading to "catalogue only" and looking like a
 -- tenant with no custom plan.
@@ -93,7 +93,7 @@ CREATE POLICY tenant_isolation ON "core"."plans"
 --
 -- ⚠ THE FREE PLAN HAS TO EXIST BEFORE THE FIRST SIGNUP, AND THAT IS THE WHOLE
 -- REASON THIS IS IN THE MIGRATION RATHER THAN IN A JOB. A tenant assigned a
--- plan id that is not here has no entitlement at all — which reads to the
+-- plan id that is not here has no entitlement at all - which reads to the
 -- customer as an outage and to us as a misconfiguration nobody notices until a
 -- send is refused. The same warning is written on Autumn's config file.
 --
@@ -118,8 +118,8 @@ ON CONFLICT (id) DO NOTHING;
 -- `unentitled`. There is no row to find, so no allowance resolves, and the
 -- correct-looking answer is the wrong one for every customer at once.
 --
--- The plan comes from `subscriptions.granted_plan_id` — what we last actually
--- entitled them to, rather than what they bought — falling back to `free` for
+-- The plan comes from `subscriptions.granted_plan_id` - what we last actually
+-- entitled them to, rather than what they bought - falling back to `free` for
 -- tenants with no subscription row, which is all of them until somebody pays.
 --
 -- ⚠ THE ANCHOR IS `tenants.created_at`, WHICH IS THE HONEST ANSWER AND NOT A

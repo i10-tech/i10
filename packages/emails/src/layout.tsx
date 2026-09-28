@@ -19,7 +19,7 @@ import {
  * ⚠ EVERY STYLE IS AN INLINE OBJECT, NOT A CLASS. Gmail strips <style> blocks
  * from the head, Outlook's rendering engine is Word, and neither supports the
  * cascade in any form worth relying on. This is the one place in the repo where
- * inline styles are correct rather than a shortcut — the token sheet and
+ * inline styles are correct rather than a shortcut - the token sheet and
  * Tailwind do not reach here at all.
  *
  * ⚠ AND IT IS LIGHT, WHILE THE PRODUCT IS DARK. That is deliberate: Gmail and
@@ -29,7 +29,7 @@ import {
  * that survives every client, and it is why the app's palette is not reused.
  *
  * ⚠ NO BRAND ACCENT. `--brand` is deliberately unset in the token sheet, and an
- * email is the worst place to invent one — it is the artifact a customer keeps,
+ * email is the worst place to invent one - it is the artifact a customer keeps,
  * forwards and screenshots. Neutrals only until somebody chooses.
  */
 
@@ -96,7 +96,7 @@ export function Layout({
    * The line a mail client shows beside the subject.
    *
    * ⚠ NOT OPTIONAL, AND NOT THE SUBJECT REPEATED. Left out, clients fill it
-   * with whatever text comes first — which for a code email is the code itself,
+   * with whatever text comes first - which for a code email is the code itself,
    * printed in the inbox list next to the subject where anyone glancing at the
    * screen can read it.
    */
@@ -115,7 +115,7 @@ export function Layout({
           <Section>
             <Text style={styles.footer}>
               This message was sent by i10. If you were not expecting it, you can ignore
-              it — no action is taken unless you act on it.
+              it - no action is taken unless you act on it.
             </Text>
           </Section>
         </Container>
@@ -129,7 +129,7 @@ export function Layout({
  *
  * ⚠ SELECTABLE TEXT, NEVER AN IMAGE. A code rendered as an image cannot be
  * copied, cannot be read by a screen reader, and is hidden entirely by the
- * image blocking most clients apply by default — which would make the mail
+ * image blocking most clients apply by default - which would make the mail
  * arrive apparently empty.
  */
 export function Code({ code }: { code: string }) {
@@ -178,7 +178,7 @@ export function ActionButton({ href, children }: { href: string; children: strin
 /**
  * ⚠ EVERY BUTTON GETS THIS UNDERNEATH. Corporate mail clients and link scanners
  * routinely mangle or strip the button's href, and a person who cannot click it
- * has no other way through — the plain link is the fallback that keeps the mail
+ * has no other way through - the plain link is the fallback that keeps the mail
  * usable rather than a courtesy.
  */
 export function FallbackLink({ href }: { href: string }) {
@@ -208,7 +208,7 @@ export function Detail({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * "Didn't request this?" — the provenance footer on anything actionable.
+ * "Didn't request this?" - the provenance footer on anything actionable.
  *
  * ⚠ IT NAMES THE DEVICE AND THE TIME, WHICH IS THE ONLY PART OF A PHISHING
  * DEFENCE A CUSTOMER CAN ACTUALLY USE. A code email that says nothing about

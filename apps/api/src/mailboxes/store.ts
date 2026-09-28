@@ -9,8 +9,8 @@ import type { MailboxDirectory } from "./provision.js"
  * The projection's rows, read and gated for provisioning.
  *
  * ⚠ NO `withTenant` ANYWHERE IN THIS FILE, AND THAT IS NOT AN OVERSIGHT. The
- * `authd` schema has no row level security — no migration ever enabled it,
- * unlike every table in `core` — so wrapping these in a tenant context would
+ * `authd` schema has no row level security - no migration ever enabled it,
+ * unlike every table in `core` - so wrapping these in a tenant context would
  * set a variable no policy reads and buy nothing but the appearance of safety.
  * Isolation here is `domainOwner`: a caller may only ever reach an address on a
  * domain some tenant has verified, and the seat is charged to that tenant. The
@@ -21,7 +21,7 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
     /**
      * ⚠ THROUGH THE FUNCTION, NEVER THE TABLE. `core.mailbox_domains()` is
      * `SECURITY DEFINER` and carries the two predicates that make a domain safe
-     * to host mail on — verified, and marked as hosting mailboxes. Querying
+     * to host mail on - verified, and marked as hosting mailboxes. Querying
      * `core.domains` here would be a second copy of a security boundary, free
      * to drift from the one the projection uses.
      *
@@ -30,8 +30,8 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
      * schema to type it against. `projection/writer.ts` reaches for the same
      * function the same way; the typed alternative would be declaring a fake
      * table over it, which types the columns by asserting them and hides that
-     * the shape is unchecked. Everything with a real table behind it —
-     * `accounts`, `aliases` — goes through the query builder.
+     * the shape is unchecked. Everything with a real table behind it -
+     * `accounts`, `aliases` - goes through the query builder.
      */
     async domainOwner(domain) {
       const rows = (await db.execute(
@@ -82,8 +82,8 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
 
     /**
      * ⚠ THE ONE PLACE `active` IS EVER SET TRUE. It is the subscription gate:
-     * authd's every query filters on it, so a mailbox is invisible — no bind,
-     * no delivery — until this runs. It is deliberately not part of the
+     * authd's every query filters on it, so a mailbox is invisible - no bind,
+     * no delivery - until this runs. It is deliberately not part of the
      * projection's upsert, which must never touch it.
      */
     async activate(userId) {

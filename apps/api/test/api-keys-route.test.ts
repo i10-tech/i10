@@ -72,7 +72,7 @@ function harness(
 }
 
 describe("authentication", () => {
-  // These routes cannot mint a tenant's FIRST key — reaching them needs one.
+  // These routes cannot mint a tenant's FIRST key - reaching them needs one.
   // See routes/api-keys.ts; closing that needs console session auth.
   it("refuses an unauthenticated caller", async () => {
     const { call } = harness()
@@ -84,7 +84,7 @@ describe("authentication", () => {
 describe("creating", () => {
   /**
    * ⚠ THE ONLY RESPONSE IN THE API THAT CARRIES A CREDENTIAL, AND THE ONLY TIME
-   * IT IS EVER RETURNED. Nothing stores the plaintext — only its SHA-256 — so
+   * IT IS EVER RETURNED. Nothing stores the plaintext - only its SHA-256 - so
    * there is deliberately no endpoint that reads one back. A customer who loses
    * a key rotates it.
    */
@@ -156,7 +156,7 @@ describe("revoking", () => {
   /**
    * ⚠ THE ROW IS ONLY HALF OF A REVOCATION. A verified key lives in Redis for
    * the TTL, so without evicting that entry the key keeps working for up to a
-   * minute after the customer was told it was dead — which is the exact floor
+   * minute after the customer was told it was dead - which is the exact floor
    * that self-issuing these keys existed to remove.
    */
   it("evicts the cache entry, keyed by the stored hash", async () => {
@@ -210,7 +210,7 @@ describe("rotating", () => {
   })
 
   /**
-   * ⚠ UNLIKE REVOKE, A FAILED EVICTION HERE STILL RETURNS 200 — AND THE
+   * ⚠ UNLIKE REVOKE, A FAILED EVICTION HERE STILL RETURNS 200 - AND THE
    * ASYMMETRY IS DELIBERATE. The replacement exists and the caller must receive
    * it; a 500 would leave them holding a revoked key with no successor, because
    * the secret is not recoverable afterwards. The stale entry expires on its own.
@@ -239,7 +239,7 @@ describe("rotating", () => {
 
 /**
  * ⚠ THE HOLE A SCOPE WOULD HAVE WITHOUT THIS. These routes authenticate with
- * any valid key and take whatever `scopes` they are given — so a key limited
+ * any valid key and take whatever `scopes` they are given - so a key limited
  * to staging could mint itself one limited to nothing, and every restriction
  * in the product would be exactly one request wide. It could also revoke the
  * keys that had NOT leaked.

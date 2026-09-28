@@ -8,8 +8,8 @@ export const metadata: Metadata = { title: "Not found" }
  * The 404 for a URL that matches no route at all.
  *
  * ⚠ THIS IS A DIFFERENT PAGE FROM `(app)/not-found.tsx`, AND BOTH ARE NEEDED.
- * That one is rendered by `notFound()` inside the dashboard shell — a domain id
- * that does not exist — so it keeps the sidebar and reads as "this record is
+ * That one is rendered by `notFound()` inside the dashboard shell - a domain id
+ * that does not exist - so it keeps the sidebar and reads as "this record is
  * missing". This one catches a URL that matched nothing in the route tree, when
  * there may be no session and no workspace to put a sidebar around. Without it
  * Next serves its own built-in 404: unstyled Times New Roman on white, in dark

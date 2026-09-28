@@ -18,7 +18,7 @@ import type { ReferralResult } from "./referral.js"
  *
  * ⚠ AND THE PROOF CANNOT LIVE UNDER THE DELEGATED NAMES. The moment the
  * delegation exists WE answer for `mail.`, `_domainkey.` and `_dmarc.`, so a
- * token in any of them is a token we wrote — it proves our own zone answers,
+ * token in any of them is a token we wrote - it proves our own zone answers,
  * which was never in question. The challenge therefore sits one label to the
  * side, at `_i10-challenge.<domain>`, which is still served by the CUSTOMER'S
  * nameservers and which only somebody holding those nameservers can write.
@@ -27,7 +27,7 @@ import type { ReferralResult } from "./referral.js"
  * every customer published the same two nameservers, so the delegation said
  * that SOMEBODY had delegated the name and nothing about who, and a challenge
  * TXT record beside it carried the identity the delegation could not. Giving
- * each claim its own nameserver hostnames — `<claim>.ns1.i10.tech` — collapses
+ * each claim its own nameserver hostnames - `<claim>.ns1.i10.tech` - collapses
  * the two into one fact, because only the holder of the domain's DNS can
  * publish it and the label says whose claim it is. Reading it back means
  * reading the PARENT's referral, which is domains/referral.ts.
@@ -46,14 +46,14 @@ export type Ownership =
    * ⚠ `superseded` IS THE THIRD DISTINCT ANSWER AND IT WAS BEING REPORTED AS
    * `absent`, WHICH IS THE MOST EXPENSIVE WRONG ANSWER THIS CHECK CAN GIVE. A
    * `delegation_token` is generated per ROW, so deleting a domain and adding it
-   * again issues a NEW claim — and every NS record the customer already
+   * again issues a NEW claim - and every NS record the customer already
    * published names the OLD one. Those records resolve, they point at our
    * nameservers, and they look exactly right in their DNS panel. Telling that
    * person their records are missing sends them to re-check DNS that is
    * present, correct, and simply no longer ours to answer for.
    *
    * ⚠ IT IS DETECTED POSITIVELY, not inferred from a failure. The parent must
-   * actually be delegating to OUR nameservers under some other claim — anything
+   * actually be delegating to OUR nameservers under some other claim - anything
    * else is genuinely absent.
    */
   | { proven: false; reason: "absent" | "unreachable" | "superseded" }
@@ -65,7 +65,7 @@ export type TxtLookup = (name: string) => Promise<string[]>
  * ⚠ THE CHUNKS ARE JOINED WITH NOTHING BETWEEN THEM, which is what the wire
  * format means. A TXT record longer than 255 bytes is carried as several
  * strings that a reader concatenates; `resolveTxt` hands them over unjoined,
- * and joining them with a space — the obvious guess — corrupts every long
+ * and joining them with a space - the obvious guess - corrupts every long
  * record. A 2048-bit DKIM key is always several chunks.
  */
 const NOT_PUBLISHED = new Set(["ENOTFOUND", "ENODATA", "NXDOMAIN"])
@@ -79,7 +79,7 @@ const NOT_PUBLISHED = new Set(["ENOTFOUND", "ENODATA", "NXDOMAIN"])
 const DEFAULT_TIMEOUT = 3000
 
 /**
- * ⚠ A DEDICATED `Resolver` PER CALL, NEVER `dns.resolveTxt` — the convention
+ * ⚠ A DEDICATED `Resolver` PER CALL, NEVER `dns.resolveTxt` - the convention
  * this codebase already holds in `console/delegation.ts` and `console/dns.ts`.
  * The module-level functions share ONE global resolver whose timeout is
  * process-wide, so setting a bound here would quietly change it for everything
@@ -108,7 +108,7 @@ export function nodeTxtLookup(timeoutMs: number = DEFAULT_TIMEOUT): TxtLookup {
  *
  * ⚠ IT IS THE `_domainkey.` ZONE THAT IS CHECKED FIRST, because nothing sends
  * without it and a working setup always has it. `_dmarc.` is tried only when it
- * is absent, so the ordinary success costs ONE query — and a customer who
+ * is absent, so the ordinary success costs ONE query - and a customer who
  * published one of the two is told they are proved rather than being sent back
  * to records that are already correct. The return path's zone is not asked:
  * its name depends on a label the recheck and contest paths are not handed,
@@ -128,7 +128,7 @@ export interface DnsProbes {
  *
  * ⚠ THE COMPARISON IS AGAINST THIS CLAIM'S NAMESERVER NAMES, NOT AGAINST OURS
  * IN GENERAL. `mail.example.com NS ns1.i10.tech` proves that somebody delegated
- * the name to i10 and says nothing about which workspace — which is exactly the
+ * the name to i10 and says nothing about which workspace - which is exactly the
  * hole this design closes. Only `<claim>.ns1.i10.tech` identifies the account,
  * so a bare nameserver name must NOT be accepted, however much it looks like
  * ours.
@@ -175,7 +175,7 @@ export async function proveDelegation(
       return { proven: true }
     }
 
-    // ⚠ POINTED AT US, UNDER SOMEBODY ELSE'S CLAIM — almost always this row's
+    // ⚠ POINTED AT US, UNDER SOMEBODY ELSE'S CLAIM - almost always this row's
     // own predecessor, after a delete and re-add issued a fresh token.
     if (
       result.nameservers.some((ns) => {
@@ -208,7 +208,7 @@ export const dkimName = (selector: string, domain: string) =>
  *
  * ⚠ A STRUCTURAL SLICE, NOT THE ROW. The contest path re-proves ANOTHER
  * tenant's domain, which it reads through a SECURITY DEFINER function returning
- * only these fields — so the shape the prover accepts has to be the small one,
+ * only these fields - so the shape the prover accepts has to be the small one,
  * or the two callers could not share it.
  */
 export interface Provable {
@@ -234,8 +234,8 @@ const bare = (value: string) => value.replace(/["\s]/g, "")
  * Proving a MANUAL domain, using the record it already publishes.
  *
  * ⚠ IT ASKS FOR NOTHING NEW, WHICH IS WHY MANUAL DOMAINS NEED NO CHALLENGE
- * RECORD. The DKIM selector is generated per DOMAIN ROW — `generateSelector`
- * makes a fresh random one for every create — so `<selector>._domainkey.<domain>`
+ * RECORD. The DKIM selector is generated per DOMAIN ROW - `generateSelector`
+ * makes a fresh random one for every create - so `<selector>._domainkey.<domain>`
  * carrying OUR public key is already an account-specific fact that only
  * somebody holding the domain's DNS can publish. It is the same proof the
  * challenge record provides for a delegated domain; a delegated domain simply
@@ -268,7 +268,7 @@ export async function proveDkim(
  * re-proves an INCUMBENT who may be delegated where the challenger is manual or
  * the other way round. Two functions would mean every caller choosing between
  * them, and the caller that chose wrong would return `absent` for a domain that
- * is perfectly well proved — handing somebody else's live domain away.
+ * is perfectly well proved - handing somebody else's live domain away.
  */
 export async function proveDomain(
   probes: DnsProbes,

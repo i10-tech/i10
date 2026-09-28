@@ -1,5 +1,5 @@
 # authd is a sidecar in the Stalwart pod. It is built static and shipped on
-# distroless: the image contains the binary and nothing else — no shell, no
+# distroless: the image contains the binary and nothing else - no shell, no
 # package manager, no libc to link against.
 #
 # That matters more here than for a typical service. authd parses
@@ -22,7 +22,7 @@ COPY . .
 #
 # ⚠ THE ARG NAME MUST MATCH THE ONE build.yml PASSES. A build-arg the Dockerfile
 # does not declare is silently ignored, and `-X` against a symbol that does not
-# exist is silently ignored too — so a mismatch here produces an image that
+# exist is silently ignored too - so a mismatch here produces an image that
 # builds, runs, and reports its version as "dev" forever.
 ARG GIT_SHA=dev
 RUN CGO_ENABLED=0 go build \
@@ -35,7 +35,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/authd /usr/local/bin/authd
 
 # Loopback only. The pod spec must not publish this port, and the Service must
-# not select it — Stalwart reaches authd over localhost inside the same pod.
+# not select it - Stalwart reaches authd over localhost inside the same pod.
 EXPOSE 3893
 
 USER nonroot:nonroot

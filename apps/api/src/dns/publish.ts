@@ -18,8 +18,8 @@ import { writerFor } from "./writers.js"
  * ⚠ THIS IS THE ANSWER TO "WHAT IS THE POINT OF STILL ADDING SIX RECORDS BY
  * HAND". Delegation already reduced six records to three delegated names; this
  * removes the hand entirely where we hold a credential. It publishes whichever
- * set the domain actually needs — the NS records for a delegated domain, the
- * six SPF/DKIM/DMARC/MX records for a manual one — because `Domain.records` is
+ * set the domain actually needs - the NS records for a delegated domain, the
+ * six SPF/DKIM/DMARC/MX records for a manual one - because `Domain.records` is
  * already exactly that list and the API has never needed to care which it is.
  *
  * ⚠ IT REFUSES BEFORE IT DESTROYS. A domain that already has DMARC configured
@@ -56,12 +56,12 @@ export interface DnsPublisher {
 }
 
 /**
- * Who, if anyone, has PROVEN this name — `core.verified_holder`, narrowed to
+ * Who, if anyone, has PROVEN this name - `core.verified_holder`, narrowed to
  * the one question this module asks of it.
  *
  * ⚠ IT GATES THE CLEAN-UP AND NOTHING ELSE. Publishing into a zone the
  * customer's own credential can reach is already proof of control over that
- * zone; this is a different question — whether the records we are about to
+ * zone; this is a different question - whether the records we are about to
  * recognise as "ours, superseded" might be another workspace's LIVE set. A
  * name can be held by several workspaces at once (migration 0039 exists to
  * allow it, and `pslhq.app` was held by three in production), and two of them
@@ -69,7 +69,7 @@ export interface DnsPublisher {
  * litter left by a domain that was deleted.
  *
  * ⚠ AND IT FAILS CLOSED. Anything other than "nobody holds it, or we do"
- * leaves the old records where they are — an unreadable answer, a database
+ * leaves the old records where they are - an unreadable answer, a database
  * that is down, or a holder we cannot identify all mean the same thing here:
  * do not delete.
  */
@@ -83,17 +83,17 @@ export interface PublisherDeps {
   log: { warn: (o: object, m: string) => void }
   /**
    * ⚠ INJECTED FOR THE SAME REASON `connections` IS, AND IT WAS THE ONE SEAM
-   * THIS MODULE DID NOT HAVE. Every decision here — which zone, whether a
+   * THIS MODULE DID NOT HAVE. Every decision here - which zone, whether a
    * blocked publish is a refusal or a success, what gets written onto the
-   * connection — is worth testing, and none of it could be reached while the
+   * connection - is worth testing, and none of it could be reached while the
    * adapter arrived through a direct import. Production passes nothing and gets
    * the real registry.
    */
   writers?: (slug: string) => ZoneWriter | null
   /**
    * ⚠ OPTIONAL, AND ITS ABSENCE DISABLES THE CLEAN-UP RATHER THAN SKIPPING THE
-   * CHECK. A deployment that does not wire this keeps the old behaviour — a
-   * re-added domain accumulates a second set of records — which is a bug
+   * CHECK. A deployment that does not wire this keeps the old behaviour - a
+   * re-added domain accumulates a second set of records - which is a bug
    * somebody can see and report. The alternative default deletes records
    * without ever having asked who owns the name.
    */
@@ -104,7 +104,7 @@ export interface PublisherDeps {
    * ⚠ WITHOUT IT A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND THEN DEAD. The
    * grant was stored the moment somebody authorised us and never looked at
    * again, so the first publish after the token expired failed `unauthorized`
-   * — and the console correctly told the customer to reconnect, asking them to
+   * - and the console correctly told the customer to reconnect, asking them to
    * redo an authorisation that had not actually lapsed.
    *
    * ⚠ IT DEFAULTS TO A NO-OP, WHICH IS THE RIGHT BEHAVIOUR FOR A PASTED API
@@ -181,14 +181,14 @@ export function dnsPublisher({
             if (!clearSuperseded) {
               log.warn(
                 { tenantId, provider, domain: domain.name, holder },
-                "another workspace holds this name verified — leaving any records " +
+                "another workspace holds this name verified - leaving any records " +
                   "of ours in the zone alone",
               )
             }
           } catch (error) {
             log.warn(
               { tenantId, provider, domain: domain.name, err: String(error) },
-              "could not establish who holds this name — leaving any records of " +
+              "could not establish who holds this name - leaving any records of " +
                 "ours in the zone alone",
             )
           }
@@ -202,7 +202,7 @@ export function dnsPublisher({
         /*
          * ⚠ "NOTHING CREATED AND SOMETHING REMOVED" IS THE REFUSAL, NOT A
          * SUCCESS. The adapters signal a blocked publish by returning the
-         * conflicts in `removed` with nothing created or unchanged — see the
+         * conflicts in `removed` with nothing created or unchanged - see the
          * note in each of them on deciding before writing. Reading that shape
          * here keeps the decision in one place rather than in three adapters.
          */
@@ -249,7 +249,7 @@ export function dnsPublisher({
 
 /**
  * ⚠ TRANSLATED FROM THE RECORDS THE CUSTOMER IS ALREADY LOOKING AT. `Domain`
- * carries the display shape — a `ttl` of `"Auto"`, a `status` per row — and a
+ * carries the display shape - a `ttl` of `"Auto"`, a `status` per row - and a
  * provider API wants numbers. Deriving both from one source is what stops the
  * table and the thing we publish from disagreeing.
  */
@@ -266,7 +266,7 @@ function desiredFor(domain: Domain): DesiredRecord[] {
     // ⚠ THE "Auto" BRANCH IS NOW LEGACY TOLERANCE, NOT THE ORDINARY PATH.
     // `dnsRecordsFor` issues the number itself; this stays for a record list
     // built before that and held by a caller, where the alternative is
-    // `Number("Auto")` — NaN, falling to a TTL of zero at the provider.
+    // `Number("Auto")` - NaN, falling to a TTL of zero at the provider.
     ttl: record.ttl === "Auto" ? RECORD_TTL : Number(record.ttl) || RECORD_TTL,
     ...(record.priority === undefined ? {} : { priority: record.priority }),
   }))

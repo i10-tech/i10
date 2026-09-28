@@ -17,7 +17,7 @@ import type { OutboundMessage, SendOutcome, Transport } from "../send/transport.
  *   4. METER   after the fact, and unable to affect any of the above.
  *
  * ⚠ CLAIM BEFORE SEND, ALWAYS, AND NEVER THE OTHER WAY ROUND. groupmq's lease
- * is liveness — it guarantees the job is picked up again, not that it runs
+ * is liveness - it guarantees the job is picked up again, not that it runs
  * once. Two workers can legitimately hold the same job when a lease expires
  * under load, and the claim is the only thing that decides between them.
  *
@@ -39,7 +39,7 @@ export interface Logger {
  *
  * ⚠ PARAMETERISED ON THE MESSAGE TYPE SO THE CLAIM CAN CARRY MORE THAN THE
  * TRANSPORT SEES. The database adapter returns a `ClaimedMessage`, which adds
- * the `created_at` that `core.messages`'s partition key needs — recording the
+ * the `created_at` that `core.messages`'s partition key needs - recording the
  * result requires it, and it must be the value the database returned rather
  * than one re-derived from the id. Typing it here is what stops that field
  * being dropped on the way through.
@@ -54,7 +54,7 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
    * Records one message as sent, and returns the `sent_at` it stored.
    *
    * ⚠ THE RETURNED TIMESTAMP IS WHAT THE METER IS BILLED ON, so it has to be
-   * the database's value rather than the worker's clock — see send/metering.ts.
+   * the database's value rather than the worker's clock - see send/metering.ts.
    * Null means the write did not happen: the claim had moved on, and nothing
    * about this message is ours to bill.
    */
@@ -71,7 +71,7 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
    *
    * ⚠ PER MESSAGE, NOT PER BATCH, BECAUSE A BATCH IS PER TENANT AND A ROUTE IS
    * PER DOMAIN. One tenant can hold a warmed domain pinned to SES and a new one
-   * sending direct, and both can appear in the same job — so resolving once for
+   * sending direct, and both can appear in the same job - so resolving once for
    * the batch would send some of it the wrong way.
    */
   route: (message: M) => DeliveryRoute
@@ -80,8 +80,8 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
    * The transport for a resolved route.
    *
    * ⚠ A LOOKUP RATHER THAN A SINGLE `transport`, AND THAT IS THE WHOLE OF THE
-   * ROUTING CHANGE ON THIS SIDE. Everything else here — the claim, the
-   * concurrency, the metering, the stranded-write handling — is written against
+   * ROUTING CHANGE ON THIS SIDE. Everything else here - the claim, the
+   * concurrency, the metering, the stranded-write handling - is written against
    * three outcomes and does not care who produced them.
    */
   transportFor: (route: DeliveryRoute) => Transport
@@ -100,7 +100,7 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
    *
    * ⚠ IT IS A THROUGHPUT KNOB AND A QUOTA KNOB AT THE SAME TIME. SES caps a
    * send RATE in messages per second, and every worker replica spends from the
-   * same budget — so this is per replica and the product of the two is what
+   * same budget - so this is per replica and the product of the two is what
    * SES sees. Set it from the account's rate divided by the replica count, not
    * from what one process can manage.
    */
@@ -116,8 +116,8 @@ export interface BatchResult {
    * Messages whose OUTCOME could not be written down.
    *
    * ⚠ THESE ARE THE EXPENSIVE ONES AND THEY USED TO BE INVISIBLE. Reaching here
-   * means the send itself returned but recording it threw — Postgres, in
-   * practice — so the row is still `sending`, the mail may well have gone, and
+   * means the send itself returned but recording it threw - Postgres, in
+   * practice - so the row is still `sending`, the mail may well have gone, and
    * nothing has been billed. Counted separately from `deferred` because a
    * deferral is the provider saying "not now" and this is us failing to keep
    * our own books.
@@ -132,7 +132,7 @@ export async function handleBatch<M extends OutboundMessage>(
   const messages = await deps.claim(job)
 
   // ⚠ NOT AN ERROR, AND NOT A REASON TO RETRY. Losing the claim means another
-  // worker owns these — which is the mechanism working. Throwing here would
+  // worker owns these - which is the mechanism working. Throwing here would
   // make groupmq retry the job and race that worker again, turning a clean
   // hand-off into a duplicate.
   if (messages.length === 0) {
@@ -165,7 +165,7 @@ export async function handleBatch<M extends OutboundMessage>(
         outcome = await deps.transportFor(route).send(message)
       } catch (err) {
         // ⚠ A THROW IS `deferred`, NEVER `rejected`. An exception is the transport
-        // failing to give an answer — a socket, a timeout, a bug — and that is not
+        // failing to give an answer - a socket, a timeout, a bug - and that is not
         // evidence the message is undeliverable. Treating it as permanent drops
         // real mail on the first network blip.
         outcome = { status: "deferred", reason: describeError(err) }
@@ -177,7 +177,7 @@ export async function handleBatch<M extends OutboundMessage>(
           // at-least-once window.
           const at = await deps.markSent(message, outcome.providerMessageId, route)
           // ⚠ ONLY BILLED IF THE ROW WAS ACTUALLY OURS TO RECORD. A null means
-          // another worker owns it and will record — and bill — it itself.
+          // another worker owns it and will record - and bill - it itself.
           if (at) sent.push({ id: message.id, sentAt: at })
           result.sent++
           return
@@ -204,7 +204,7 @@ export async function handleBatch<M extends OutboundMessage>(
     },
     // ⚠ THE ONE FAILURE THIS FILE COULD NOT HANDLE, AND IT USED TO BE DISCARDED
     // WITHOUT A WORD. `transport.send` has its own try/catch above, so what
-    // reaches here is `markSent`, `markFailed` or the log call throwing —
+    // reaches here is `markSent`, `markFailed` or the log call throwing -
     // Postgres, in practice. The mail may already have gone: the row is left
     // `sending`, nothing is billed, and until now there was no log line, no
     // Sentry event and no count to notice it by. The stale sweep is what
@@ -221,7 +221,7 @@ export async function handleBatch<M extends OutboundMessage>(
 
   // ⚠ LAST, OUTSIDE THE PER-MESSAGE PATH, AND GUARDED HERE AS WELL AS IN
   // `resilient()`. The mail has gone. If a billing failure could propagate, the
-  // job would fail, groupmq would retry it, and the rows — already `sent` — would
+  // job would fail, groupmq would retry it, and the rows - already `sent` - would
   // be re-sent to fix a billing record.
   //
   // send/metering.ts already swallows, so this catch is redundant when the
@@ -234,7 +234,7 @@ export async function handleBatch<M extends OutboundMessage>(
     } catch (err) {
       deps.log.error(
         { err, tenantId: job.tenantId, count: sent.length },
-        "usage not recorded — the reconciler will close the gap",
+        "usage not recorded - the reconciler will close the gap",
       )
     }
   }
@@ -248,7 +248,7 @@ export async function handleBatch<M extends OutboundMessage>(
  *
  * ⚠ NOT `Promise.all` OVER THE WHOLE BATCH. A batch may be five hundred
  * messages; five hundred simultaneous provider calls would blow through the
- * send rate, collect a wall of 429s, and defer most of the batch — converting a
+ * send rate, collect a wall of 429s, and defer most of the batch - converting a
  * throughput problem into a retry storm. Bounded concurrency is the only reason
  * batching helps rather than hurts.
  *
@@ -257,8 +257,8 @@ export async function handleBatch<M extends OutboundMessage>(
  * until the stale sweep.
  *
  * ⚠ BUT IT NO LONGER DISCARDS WHAT IT CAUGHT. `.catch(() => {})` was doing two
- * jobs — keeping the batch running, and throwing away the only evidence that a
- * message's outcome was never written down — and only the first was intended.
+ * jobs - keeping the batch running, and throwing away the only evidence that a
+ * message's outcome was never written down - and only the first was intended.
  * `onError` is what separates them: the batch still finishes, and the failure
  * is still reported.
  */
@@ -279,7 +279,7 @@ async function inBatches<T>(
       } catch (error) {
         // ⚠ THE REPORT ITSELF MUST NOT BE ABLE TO STOP THE BATCH. It logs and
         // calls out to Sentry, and a logger that throws here would take the
-        // remaining messages with it — the exact failure the catch exists to
+        // remaining messages with it - the exact failure the catch exists to
         // prevent, arriving through the handler for it.
         try {
           onError(error, item)

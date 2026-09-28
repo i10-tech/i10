@@ -20,7 +20,7 @@ describe("relay config", () => {
   /**
    * ⚠ NO CREDENTIAL, AND A TEST SO ONE IS NOT QUIETLY ADDED BACK. The relay's
    * trust is the network boundary; an `auth` block here would mean somebody
-   * reintroduced a secret the design exists to not have — and upyo refuses AUTH
+   * reintroduced a secret the design exists to not have - and upyo refuses AUTH
    * over plaintext to a non-loopback host, so it would also fail every send.
    */
   it("presents no credential", () => {
@@ -30,7 +30,7 @@ describe("relay config", () => {
   /**
    * ⚠ BOTH FLAGS, BECAUSE upyo UPGRADES WHENEVER IT IS OFFERED. `secure: false`
    * alone still lets a STARTTLS advertisement pull the client into a handshake
-   * it cannot verify — `*.i10.tech` against a `.svc.cluster.local` name. The
+   * it cannot verify - `*.i10.tech` against a `.svc.cluster.local` name. The
    * listener offers none; this says the client does not require one either.
    */
   it("speaks plaintext to the in-cluster listener", () => {
@@ -46,8 +46,8 @@ describe("relay config", () => {
   /**
    * ⚠ upyo DEFAULTS THE POOL TO FIVE AND THE WORKER FANS OUT TO EIGHT. Left
    * alone, three of every eight direct sends wait for a connection with nothing
-   * in the logs naming the ceiling, and `WORKER_CONCURRENCY` — which env.ts
-   * documents as the throughput control — is not the thing deciding throughput.
+   * in the logs naming the ceiling, and `WORKER_CONCURRENCY` - which env.ts
+   * documents as the throughput control - is not the thing deciding throughput.
    */
   it("matches the pool to the worker's fan-out", () => {
     expect(relayConfig({ ...base, poolSize: 8 }).poolSize).toBe(8)

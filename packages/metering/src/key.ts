@@ -2,8 +2,8 @@
  * How a meter is addressed.
  *
  * ⚠ THE SHARD IS IN THE KEY FROM THE FIRST DAY, AND THAT IS THE ENTIRE REASON
- * THIS FILE EXISTS. Nothing shards yet — every caller passes 0 and the Postgres
- * adapter stores 0 — but the shape of an identifier is the one thing that
+ * THIS FILE EXISTS. Nothing shards yet - every caller passes 0 and the Postgres
+ * adapter stores 0 - but the shape of an identifier is the one thing that
  * cannot be changed quietly later. A key minted as `tenant:feature` and widened
  * to `tenant:feature:shard` afterwards means every stored row, every Durable
  * Object name and every dashboard query has to be migrated at once, on the day
@@ -26,7 +26,7 @@ export interface MeterKey {
    * its own fraction of the budget and its own count; it never reads its
    * siblings, because a read across shards is the coordination the split was
    * bought to avoid. That makes the gate slightly wrong near the limit when
-   * traffic lands unevenly — which is the trade already committed to in
+   * traffic lands unevenly - which is the trade already committed to in
    * docs/decisions/metering.md, and the reason the ledger is a separate tier.
    */
   shard: number
@@ -34,8 +34,8 @@ export interface MeterKey {
 
 /**
  * ⚠ `:` IS RESERVED, AND THAT IS CHECKED RATHER THAN DOCUMENTED. A feature id
- * containing a separator produces a key that parses back to something else —
- * `emails:eu` on tenant `t` reads as feature `emails` on shard `eu` — and the
+ * containing a separator produces a key that parses back to something else -
+ * `emails:eu` on tenant `t` reads as feature `emails` on shard `eu` - and the
  * failure is silent: usage lands under a meter nobody queries.
  */
 const SEPARATOR = ":"

@@ -7,20 +7,20 @@ import type { MessageRef } from "../db/claim.js"
  *
  * ⚠ groupmq RATHER THAN BullMQ, AND THE GROUP KEY IS THE WHOLE DESIGN.
  * groupmq's guarantee is per-group FIFO with **one active job per group** at a
- * time. Used naively — group = tenant, job = one message — that is a disaster:
+ * time. Used naively - group = tenant, job = one message - that is a disaster:
  * a tenant sending ten thousand emails would send them one at a time, capped
  * near five a second by SES round-trip latency alone, far under what SES allows.
  *
  * So a job is a BATCH. One job carries many messages for one tenant, and the
  * worker sends them with internal concurrency. Per-group serialisation then
  * costs nothing, because a group's single active job is already doing N sends
- * in parallel — and what the serialisation buys is fairness: no tenant can have
+ * in parallel - and what the serialisation buys is fairness: no tenant can have
  * two batches in flight, so a bulk run cannot starve another tenant.
  *
  * ⚠ AND BATCHING HERE IS THE ONLY BATCHING AVAILABLE. SES has no bulk API for
  * arbitrary messages: `SendBulkEmail`'s `DefaultContent` accepts a Template and
  * nothing else, so a product where customers send their own MIME must call
- * `SendEmail` once per message. It would not help anyway — SES's quota counts
+ * `SendEmail` once per message. It would not help anyway - SES's quota counts
  * MESSAGES, not API calls, so fifty in one request would still spend fifty of
  * the send rate. Throughput comes from concurrency and connection reuse, and
  * batching here is about queue overhead and fairness, not about SES.
@@ -46,21 +46,21 @@ export interface SendJob {
  *
  * ⚠ `SendJob` DESCRIBES WHAT WE PUT IN, NOT WHAT WE GET OUT, AND THE TYPE
  * CANNOT TELL YOU THAT. groupmq stores the payload as JSON, and `JSON.stringify`
- * turns a `Date` into a string with no inverse — so `messages[].createdAt` is
+ * turns a `Date` into a string with no inverse - so `messages[].createdAt` is
  * typed `Date`, is a `Date` at enqueue, and is a `string` by the time the worker
  * reads it. TypeScript sees `job.data` as `SendJob` on both sides of a boundary
  * that quietly changes it, so nothing anywhere complains.
  *
  * ⚠ AND IT FAILED AT THE FIRST STATEMENT OF THE CLAIM, WHICH IS THE WORST PLACE
  * FOR IT. `claimStatement` calls `r.createdAt.toISOString()`, so every send
- * threw `toISOString is not a function` before touching Postgres — the message
+ * threw `toISOString is not a function` before touching Postgres - the message
  * stayed `queued`, the job retried forever, and nothing was ever marked failed
  * because the failure happened before the row was claimed. Observed on the very
  * first mail this system ever tried to send.
  *
  * Restored here rather than defended against in `claim.ts`, because the pair
  * `(id, created_at)` is the primary key of a partitioned table and three
- * separate statements depend on it — a coercion at each call site is three
+ * separate statements depend on it - a coercion at each call site is three
  * chances to forget, and this is one boundary with one owner.
  */
 export function reviveSendJob(data: SendJob): SendJob {
@@ -75,7 +75,7 @@ export function reviveSendJob(data: SendJob): SendJob {
   }
 }
 
-/** The two priority classes. One queue each — see core.ts. */
+/** The two priority classes. One queue each - see core.ts. */
 export type SendClass = "transactional" | "bulk"
 
 export interface SendQueueOptions {
@@ -96,7 +96,7 @@ export interface SendQueueOptions {
 
 /**
  * ⚠ THE NAMESPACE IS PART OF THE CONTRACT WITH PSL. i10's Redis is its own
- * instance, never PSL's under a prefix — but the prefix stays explicit anyway,
+ * instance, never PSL's under a prefix - but the prefix stays explicit anyway,
  * because the failure if that ever changed is two products draining each
  * other's queues, and it would look like messages vanishing.
  */
@@ -131,7 +131,7 @@ export function createSendQueue(opts: SendQueueOptions): Queue<SendJob> {
  * They guard three different races.
  *
  * The first message's id names the batch because the batch is minted in one
- * transaction — the ids exist exactly once, so re-enqueueing the same batch
+ * transaction - the ids exist exactly once, so re-enqueueing the same batch
  * produces the same name, and a different batch cannot collide with it.
  */
 export function batchJobId(job: SendJob): string {
@@ -147,7 +147,7 @@ export interface EnqueueOptions {
    * ⚠ groupmq's SCHEDULER IS WHAT PROMOTES IT, AND ONLY A RUNNING WORKER HAS
    * ONE. Delayed jobs sit in a sorted set until `runSchedulerOnce` moves them
    * to the ready queue, which the Worker does on `schedulerIntervalMs`. With
-   * every worker replica down, a due message is not merely late to be sent — it
+   * every worker replica down, a due message is not merely late to be sent - it
    * is not even queued, and what recovers it is the stale-message sweep rather
    * than Redis.
    */
@@ -156,7 +156,7 @@ export interface EnqueueOptions {
    * A name other than `batchJobId`. Only the sweep passes this.
    *
    * ⚠ AND IT HAS TO BE ABLE TO. `batchJobId` is stable by design, and
-   * `enqueue.lua` treats a name it has seen before as a duplicate — with
+   * `enqueue.lua` treats a name it has seen before as a duplicate - with
    * `keepCompleted: 1000` the job hash of a completed batch is still present,
    * so re-adding its id returns that id and enqueues NOTHING. Re-enqueueing a
    * batch that already ran therefore has to say so with a different name; see
@@ -172,7 +172,7 @@ export interface EnqueueOptions {
  * record and the queue is a prompt to look at it: a job whose rows do not exist
  * yet is a worker that claims nothing and drops it, and the message is then
  * lost with no error anywhere. Committing first means the worst case is a row
- * that no job points at, which the stale sweep picks up — late, but never lost.
+ * that no job points at, which the stale sweep picks up - late, but never lost.
  */
 export async function enqueueBatch(
   queue: Queue<SendJob>,

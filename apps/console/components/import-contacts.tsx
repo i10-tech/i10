@@ -26,7 +26,7 @@ const MAX_BYTES = 20 * 1024 * 1024
  *
  * ⚠ THE FILE IS READ IN THE BROWSER AND POSTED AS TEXT, NOT AS MULTIPART. The
  * server action takes a string, which means no upload endpoint, no temp file
- * and no multipart parser — and the parser on the API is already a string
+ * and no multipart parser - and the parser on the API is already a string
  * parser. The cost is that the whole file is in memory twice, which is why the
  * size cap is enforced HERE as well as on the API: refusing a 400 MB file
  * before reading it is the difference between a message and a dead tab.
@@ -37,7 +37,7 @@ const MAX_BYTES = 20 * 1024 * 1024
  * successful first run; "0 created, 1,000 updated" is immediately obvious.
  *
  * ⚠ RE-IMPORTING NEVER RESUBSCRIBES ANYONE. The upsert on the API deliberately
- * leaves `unsubscribed` alone — see `upsertContact` — because somebody's choice
+ * leaves `unsubscribed` alone - see `upsertContact` - because somebody's choice
  * to opt out has to outlive our spreadsheets. The dialog says so, because the
  * opposite is what most people assume.
  */
@@ -85,7 +85,7 @@ export function ImportContactsButton() {
      * OCCASIONALLY NOT. A CSV exported from a Windows tool may be
      * windows-1252, and a name with an accent then arrives mangled. Detecting
      * the encoding properly needs a library and a heuristic; the address column
-     * — the only one that must be exact — is ASCII in every real case, so the
+     * - the only one that must be exact - is ASCII in every real case, so the
      * damage is limited to a display name. Worth knowing, not worth a
      * dependency yet.
      */
@@ -198,7 +198,7 @@ export function ImportContactsButton() {
                     <>
                       <span className="text-sm font-medium">{file.name}</span>
                       <span className="text-xs text-muted-foreground">
-                        {(file.size / 1024).toFixed(0)} KB — choose another to replace
+                        {(file.size / 1024).toFixed(0)} KB - choose another to replace
                       </span>
                     </>
                   ) : (

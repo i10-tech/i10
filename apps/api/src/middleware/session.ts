@@ -10,7 +10,7 @@ import { reverificationError } from "@clerk/backend/internal"
  * transactional mail; a session belongs to a human sitting in the console. The
  * routes that create a HUMAN mailbox take the session only. Accepting a key
  * there would mean a leaked sending key could mint mailboxes on the customer's
- * domain — a credential whose whole advertised blast radius is "can send mail"
+ * domain - a credential whose whole advertised blast radius is "can send mail"
  * would quietly also be "can read mail", and key rotation would not undo it.
  *
  * ⚠ AND A SESSION IS NEVER ACCEPTED ON THE SENDING ROUTES EITHER. Those are
@@ -40,8 +40,8 @@ export interface ClerkSessionOptions {
    *
    * ⚠ WITHOUT IT A MISCONFIGURATION IS INDISTINGUISHABLE FROM A CLERK OUTAGE,
    * and that cost a production debugging session. `authenticateRequest` throws
-   * for reasons that are OURS as often as theirs — a missing publishable key,
-   * a malformed secret, a key from the wrong instance — and this catch turns
+   * for reasons that are OURS as often as theirs - a missing publishable key,
+   * a malformed secret, a key from the wrong instance - and this catch turns
    * every one of them into the same `unavailable`, which `requireTenant`
    * renders as "Could not verify your session right now. Retry shortly." That
    * message is correct for an outage and actively misleading for a variable
@@ -83,7 +83,7 @@ export function clerkSessions(
       } catch (error) {
         /*
          * ⚠ REPORTED BEFORE IT IS FLATTENED. The outcome stays `unavailable`,
-         * because the CALLER's decision is the same either way — never answer
+         * because the CALLER's decision is the same either way - never answer
          * 401 when we do not know whether the session is good. What changes is
          * that the reason survives: "Publishable key is missing" in a log line
          * is a five-minute fix, and the same condition with no log is an
@@ -94,7 +94,7 @@ export function clerkSessions(
          */
         options.log?.error(
           { err: String(error) },
-          "clerk could not verify a session — check CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY",
+          "clerk could not verify a session - check CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY",
         )
         return { status: "unavailable" }
       }
@@ -158,32 +158,32 @@ export const requireUser: MiddlewareHandler = async (c, next) => {
  *
  * ⚠ A SECOND, SEPARATE READER RATHER THAN A WIDER `SessionOutcome`, AND THE
  * SEPARATION IS THE POINT. `SessionVerifier` was built for `/mailboxes`, where
- * the organization is irrelevant — and a field on that interface is a field
+ * the organization is irrelevant - and a field on that interface is a field
  * every existing caller can suddenly authorise against. Keeping the org behind
  * its own function means only `requireTenant` can see it, which is the only
  * thing that should.
  *
  * ⚠ IT RE-AUTHENTICATES RATHER THAN THREADING STATE THROUGH, WHICH COSTS
  * NOTHING. `authenticateRequest` verifies a JWT locally against Clerk's cached
- * JWKS — there is no network call on the common path — so calling it twice on
+ * JWKS - there is no network call on the common path - so calling it twice on
  * one request is two signature checks, not two round trips. Threading the state
  * object out of `verify()` would mean widening the interface, which is the
  * thing this exists to avoid.
  *
  * ⚠ AND THE ANSWER IS THREE-STATE, BECAUSE "NO ORGANIZATION" AND "WE COULD NOT
  * TELL" ARE DIFFERENT FACTS WITH DIFFERENT CONSEQUENCES. `tenant_for_principal`
- * reads a null org as "use the personal tenant" — see 0038 — so collapsing a
+ * reads a null org as "use the personal tenant" - see 0038 - so collapsing a
  * failure into null does not degrade gracefully, it SILENTLY SWITCHES WORKSPACE.
  * Somebody working in their company account would, for the duration of a Clerk
  * hiccup, mint an API key into their personal tenant, rename the wrong
- * workspace, or start a checkout billing the wrong one — and every page would
+ * workspace, or start a checkout billing the wrong one - and every page would
  * look plausible, because the personal tenant is a real tenant with real data.
  * `unknown` lets `requireTenant` answer 503 and refuse to guess.
  */
 export type ActiveOrgOutcome =
   /** A session with an organization activated. */
   | { status: "org"; orgId: string }
-  /** A verified session with no organization activated — the personal tenant. */
+  /** A verified session with no organization activated - the personal tenant. */
   | { status: "personal" }
   /** Clerk did not answer, or contradicted the verification. Do NOT guess. */
   | { status: "unknown" }
@@ -212,13 +212,13 @@ export function clerkActiveOrg(
       const auth = state.toAuth()
       // `orgId` is present only on a session that has ACTIVATED an organization.
       // A user who belongs to three and has activated none has none here, and
-      // that is the correct input to `tenant_for_principal` — see 0038.
+      // that is the correct input to `tenant_for_principal` - see 0038.
       const orgId = (auth as { orgId?: string | null }).orgId
       return typeof orgId === "string" && orgId
         ? { status: "org", orgId }
         : { status: "personal" }
     } catch (error) {
-      // ⚠ THE SAME REPORTING, FOR THE SAME REASON — see `clerkSessions`. This
+      // ⚠ THE SAME REPORTING, FOR THE SAME REASON - see `clerkSessions`. This
       // one answers 503 too, so an unset variable would otherwise present as an
       // intermittent Clerk problem rather than as our own configuration.
       options.log?.error(
@@ -235,7 +235,7 @@ export function clerkActiveOrg(
  *
  * ⚠ A SESSION COOKIE IS A BEARER TOKEN THAT LIVES FOR DAYS, AND THAT IS FINE
  * FOR READING A DASHBOARD AND WRONG FOR DELETING A DOMAIN. An unlocked laptop,
- * a borrowed browser, a token lifted from a machine somebody already owns —
+ * a borrowed browser, a token lifted from a machine somebody already owns -
  * none of those are things a long-lived session can tell apart from the
  * customer. Asking for a factor again, immediately before the irreversible
  * thing, is the only check that distinguishes them.
@@ -246,8 +246,8 @@ export function clerkActiveOrg(
  * with curl. The prompt belongs in the interface; the REFUSAL has to live on
  * this side of the wire.
  *
- * ⚠ `strict` IS CLERK'S OWN PRESET FOR THIS — second factor within ten
- * minutes — AND IT DEGRADES CORRECTLY FOR PEOPLE WITHOUT ONE. Read
+ * ⚠ `strict` IS CLERK'S OWN PRESET FOR THIS - second factor within ten
+ * minutes - AND IT DEGRADES CORRECTLY FOR PEOPLE WITHOUT ONE. Read
  * `checkReverificationAuthorization` in @clerk/shared: when the second factor
  * age is `-1`, meaning the account has none, it falls back to the FIRST factor.
  * So somebody with TOTP re-does TOTP, somebody with only a passkey re-does the
@@ -267,7 +267,7 @@ export type FreshAuthOutcome =
   | { status: "fresh" }
   /** Signed in, but not recently enough for this. Ask again. */
   | { status: "stale" }
-  /** Clerk did not answer. Do NOT guess — see the 503 below. */
+  /** Clerk did not answer. Do NOT guess - see the 503 below. */
   | { status: "unknown" }
 
 export type FreshAuthReader = (request: Request) => Promise<FreshAuthOutcome>
@@ -290,7 +290,7 @@ export function clerkFreshAuth(
     try {
       const state = await clerk.authenticateRequest(request, { authorizedParties })
       /*
-       * ⚠ NOT-AUTHENTICATED HERE IS A CONTRADICTION, NOT A SIGN-OUT — the same
+       * ⚠ NOT-AUTHENTICATED HERE IS A CONTRADICTION, NOT A SIGN-OUT - the same
        * request was verified moments ago by `requireTenant`. If the second
        * check disagrees, something is wrong with Clerk rather than with the
        * caller, and `unknown` makes the request fail loudly instead of
@@ -326,14 +326,14 @@ export function clerkFreshAuth(
  * MAKES THE PROMPT APPEAR. `useReverification` in the browser inspects the
  * value it gets back for `clerk_error.reason === "reverification-error"`; when
  * it finds one it opens the verification dialog, waits, and REPLAYS the
- * original call. Inventing our own 403 body would mean building that dialog —
- * passkey, then TOTP, then an emailed code, each with its own failure states —
+ * original call. Inventing our own 403 body would mean building that dialog -
+ * passkey, then TOTP, then an emailed code, each with its own failure states -
  * by hand, against Clerk's API, in our own app.
  *
  * ⚠ OUR FIELDS RIDE ALONGSIDE IT RATHER THAN INSTEAD OF IT. Everything in the
  * console renders `{ statusCode, name, message }`, and a body carrying only
  * `clerk_error` would surface as an empty toast anywhere the hint was not
- * handled — which is every call site that has not been converted yet.
+ * handled - which is every call site that has not been converted yet.
  */
 export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
   const reader = c.get("freshAuth")

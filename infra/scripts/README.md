@@ -3,7 +3,7 @@
 `verify-rollout.sh` answers one question from the box: **is the commit CI just
 pushed synced, rolled out, and actually running the images it pinned?** Until it
 existed, the Build workflow
-went green the moment git accepted the deploy commit — while Argo had not yet
+went green the moment git accepted the deploy commit - while Argo had not yet
 polled, the image had not been pulled and nothing had started. An
 ImagePullBackOff, a missing secret or a container that crashlooped on a config
 error were all invisible to the pipeline.
@@ -24,20 +24,20 @@ LISTEN  [fd7a:115c:a1e0::9932:663f]:22
 ```
 
 There is nothing listening on the public address, so this is not a firewall rule
-that could be opened — a GitHub-hosted runner simply has no route to it. The job
+that could be opened - a GitHub-hosted runner simply has no route to it. The job
 joins the tailnet first, as an **ephemeral** node created for that run and
 removed when it ends.
 
 > ⚠ THERE IS NO SSH KEY, AND THAT IS BECAUSE TAILSCALE SSH IS ON. `tailscaled`
 > intercepts port 22 on the tailnet address before sshd ever sees the
-> connection, and this host's sshd binds ONLY tailnet addresses — so Tailscale
+> connection, and this host's sshd binds ONLY tailnet addresses - so Tailscale
 > SSH shadows OpenSSH completely. It authenticates by tailnet identity against
 > the ACL's `ssh` rules and NEVER reads `authorized_keys`.
 >
 > ⚠ AN EARLIER VERSION OF THIS FILE DESCRIBED A PRIVATE KEY WITH A FORCED
 > COMMAND, AND IT COULD NOT HAVE WORKED. The `restrict,command=` was inert, the
 > key authenticated nothing, and the symptom was a shell plus
-> `<sha>: command not found` — indistinguishable from a misconfigured key, and
+> `<sha>: command not found` - indistinguishable from a misconfigured key, and
 > it cost an afternoon. If you ever need to know which daemon answered:
 >
 > ```bash
@@ -45,7 +45,7 @@ removed when it ends.
 > ```
 >
 > `sshd` means OpenSSH; `tailscaled` means Tailscale SSH. Do NOT use
-> `tailscale status --json` for this — the `SSH_HostKeys` field is absent even
+> `tailscale status --json` for this - the `SSH_HostKeys` field is absent even
 > when it is running, and `ssh-keyscan` reports the banner `SSH-2.0-Tailscale`
 > while still returning sshd's REAL host key, so a matching host key proves
 > nothing either. Use `tailscale debug prefs | grep RunSSH`.
@@ -53,7 +53,7 @@ removed when it ends.
 > ⚠ SO AUTHORISATION LIVES IN THE ACL, AND THE BLAST RADIUS IS THE USER'S RBAC.
 > Tailscale SSH has no forced-command concept, so `tag:ci` gets a SHELL as
 > `i10-deploy` rather than one pinned command. What bounds it is that user's
-> cluster role — get/list/watch on applications, deployments and pods, patch on
+> cluster role - get/list/watch on applications, deployments and pods, patch on
 > applications, and no sudo. A leaked OAuth secret reaches a read-only view of
 > one namespace, not the box. That is a real step down from a forced command,
 > and it is the trade that comes with Tailscale SSH being on.
@@ -72,7 +72,7 @@ sudo useradd --create-home --shell /bin/bash i10-deploy
 sudo install -d -m 700 -o i10-deploy -g i10-deploy /home/i10-deploy/.ssh
 ```
 
-Give it read access to the cluster. It needs no write verbs at all — the script
+Give it read access to the cluster. It needs no write verbs at all - the script
 annotates one Application to trigger a refresh, and reads:
 
 ```bash
@@ -82,7 +82,7 @@ sudo k3s kubectl create clusterrole i10-deploy-verify \
 
 # ⚠ `patch` ON APPLICATIONS ONLY, AND ONLY SO THE REFRESH ANNOTATION CAN BE
 # SET. Without it the script still works and every deploy waits out Argo's
-# three-minute poll — which is most of what this was built to remove.
+# three-minute poll - which is most of what this was built to remove.
 sudo k3s kubectl create clusterrole i10-deploy-refresh \
   --verb=patch --resource=applications.argoproj.io
 
@@ -98,7 +98,7 @@ kubeconfig would hand CI the whole cluster, which is the one thing the RBAC
 above exists to prevent.
 
 > ⚠ `KUBECONFIG` MUST BE SET, AND `verify-rollout.sh` SETS IT. k3s's `kubectl`
-> points itself at `/etc/rancher/k3s/k3s.yaml` — root-only — and ignores
+> points itself at `/etc/rancher/k3s/k3s.yaml` - root-only - and ignores
 > `~/.kube/config` unless told otherwise. Without that line every kubectl in the
 > script fails with "permission denied", each one into `/dev/null`, and the
 > result is a rollout reported as never having come up when the real problem was
@@ -110,13 +110,13 @@ above exists to prevent.
 sudo install -m 755 infra/scripts/verify-rollout.sh /usr/local/bin/i10-verify-rollout
 ```
 
-> ⚠ IT LIVES IN THE REPO AND IS COPIED TO THE BOX, so a change to it is a commit
-> — but the copy is **manual**. Editing the file here does not update the box.
+> ⚠ IT LIVES IN THE REPO AND IS COPIED TO THE BOX, so a change to it is a commit -
+> but the copy is **manual**. Editing the file here does not update the box.
 > Re-run this line when it changes.
 
 ### 3. The ACL rule that authorises CI
 
-There is no key to install — see the note above. What grants CI access is a
+There is no key to install - see the note above. What grants CI access is a
 tailnet `ssh` rule, and it is the whole of the authorisation:
 
 ```json
@@ -145,7 +145,7 @@ tailnet `ssh` rule, and it is the whole of the authorisation:
 > host, which on this box includes accounts that can read secrets.
 >
 > ⚠ AND `dst` MUST BE A TAG, NOT AN ADDRESS. Tailscale `ssh` rules do not accept
-> IPs — psl-vps carries `tag:vps`.
+> IPs - psl-vps carries `tag:vps`.
 
 ### 4. Repository secrets
 
@@ -154,7 +154,7 @@ tailnet `ssh` rule, and it is the whole of the authorisation:
 | `TAILSCALE_OAUTH_CLIENT_ID` | an OAuth client with the `auth_keys` scope and `tag:ci` |
 | `TAILSCALE_OAUTH_SECRET`    | its secret                                              |
 
-And one variable, `DEPLOY_SSH_HOST` — the box's **tailnet** address,
+And one variable, `DEPLOY_SSH_HOST` - the box's **tailnet** address,
 `100.127.102.63`. It is a variable rather than a secret because it is not one;
 a tailnet address is meaningless without a tailnet identity.
 
@@ -164,7 +164,7 @@ a tailnet address is meaningless without a tailnet identity.
 
 > ⚠ TWO SECRETS, NOT FIVE, AND THAT IS THE POINT OF DOING IT THIS WAY. An
 > earlier version carried a private key and a pinned host key as well. Neither
-> did anything — Tailscale SSH never read them — so they were three secrets to
+> did anything - Tailscale SSH never read them - so they were three secrets to
 > rotate, leak or misconfigure in exchange for no security property at all.
 
 Without the Tailscale credentials the step **skips** and the workflow still
@@ -180,15 +180,15 @@ each image CI rebuilt is actually running at `prod-<sha>`.
 
 > ⚠ IT DOES NOT REQUIRE `Healthy`, AND THAT IS DELIBERATE RATHER THAN AN
 > OVERSIGHT. Argo's app health is the worst health of everything the Application
-> owns, CronJobs included — so one Job that keeps failing holds it at `Degraded`
+> owns, CronJobs included - so one Job that keeps failing holds it at `Degraded`
 > and fails every deploy after it. `i10-billing-reconcile` did exactly that,
 > every thirty minutes, over three Polar subscriptions no code change can
 > resolve. A check that is red on every run is not a check; people stop reading
 > it and the next real failure goes unread with it.
 >
 > ⚠ WHAT STILL FAILS A DEPLOY IS EVERYTHING SPECIFIC TO IT: the revision must be
-> the deploy commit, every Deployment must finish rolling — which is what
-> catches a crashloop, an ImagePullBackOff or a bad config — and the new tag
+> the deploy commit, every Deployment must finish rolling - which is what
+> catches a crashloop, an ImagePullBackOff or a bad config - and the new tag
 > must be in a live pod spec. Both broken images shipped on 2026-09-21, whose
 > entrypoints had moved to `dist/src/`, were caught by those and not by
 > aggregate health.
@@ -197,7 +197,7 @@ each image CI rebuilt is actually running at `prod-<sha>`.
 > with the offending pods, so the fact stays visible without blocking.
 
 It **does not roll back.** Every app here has Argo `selfHeal` on, so
-`kubectl rollout undo` is reverted to git within about 35 seconds — the cluster
+`kubectl rollout undo` is reverted to git within about 35 seconds - the cluster
 is not the source of truth and cannot be edited into one. The rollback is
 `git revert` of the deploy commit, and the job summary prints that command with
 the sha already filled in.
@@ -219,7 +219,7 @@ the font is absent.
 ## Before the first run: the licence
 
 **Check the grant before checking the pipeline.** Serving a font from a public
-CDN is redistribution in the plain sense — anyone can fetch the file. Most
+CDN is redistribution in the plain sense - anyone can fetch the file. Most
 _webfont_ licences permit exactly that from a domain you own, usually capped by
 pageviews. Most _desktop_ licences do not permit it at all, and the difference is
 not visible from the file on disk.
@@ -228,20 +228,20 @@ Amazon Ember specifically is Amazon's corporate typeface, offered through the
 Amazon developer portal for building and marketing **on Amazon's platforms**.
 Hosting it as i10's brand face is outside that. If it is the look that is wanted
 rather than the name, the closest freely-licensable faces are Ember's own
-relatives — it was drawn by Dalton Maag, whose Aktiv Grotesk is commercially
+relatives - it was drawn by Dalton Maag, whose Aktiv Grotesk is commercially
 licensable, and Inter, Public Sans or Geist itself sit in the same humanist-grotesk
 territory at no cost and no risk.
 
 ## One-time: pointing the name at the bucket
 
-`cdn.i10.tech` is not in the Tofu DNS stack, on purpose — that stack owns the
+`cdn.i10.tech` is not in the Tofu DNS stack, on purpose - that stack owns the
 mail half of the zone and nothing else (see `infra/tofu/stacks/dns/main.tf`). The
 web surface is hand-managed, and this is part of it.
 
 1. Cloudflare → R2 → the `i10` bucket → **Settings** → **Public access** →
    **Custom domains** → connect `cdn.i10.tech`.
 2. Cloudflare writes the CNAME itself. It **beats the proxied `*.i10.tech`
-   wildcard**, because a specific record always wins over a wildcard — that is
+   wildcard**, because a specific record always wins over a wildcard - that is
    what stops `cdn` resolving to the cluster ingress like every other name.
 3. Leave the bucket's `r2.dev` URL disabled. It is rate-limited, uncacheable and
    permanently public regardless of what the custom domain does later.
@@ -266,7 +266,7 @@ web surface is hand-managed, and this is part of it.
    ```
 
    ⚠ **The origins are listed rather than `*`, and the reason is the licence
-   rather than security.** The file is public either way — anyone can fetch it
+   rather than security.** The file is public either way - anyone can fetch it
    with curl, and an origin allow-list stops none of that. What it does stop is
    another site embedding our licensed face from our CDN and billing its
    pageviews to our licence. Add a name here when a new surface starts using
@@ -284,7 +284,7 @@ has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is pres
 
 …which reads as a CORS misconfiguration and is actually "that file is not
 there". Observed on 2026-09-18: `cdn.i10.tech` resolved to the same two
-addresses as `dash.i10.tech` — the proxied `*.i10.tech` wildcard — so the
+addresses as `dash.i10.tech` - the proxied `*.i10.tech` wildcard - so the
 request reached the cluster ingress, which has no route for it, and Traefik
 answered `404 page not found`. **Check the status code with curl before
 believing the console.**
@@ -312,14 +312,14 @@ curl -sI https://cdn.i10.tech/fonts/i10-display-400.woff2
 
 Expect `200`, `content-type: font/woff2` and a year-long `immutable`
 `cache-control`. **That cache header means a replacement at the same path will
-not reach anybody who has already loaded it** — to change the cut, publish a new
+not reach anybody who has already loaded it** - to change the cut, publish a new
 filename and change the `src` in `fonts.css` with it.
 
 ## The follow-up worth doing: metric overrides
 
 `font-display: swap` paints headings in Geist and then swaps. Without metric
 overrides that swap **moves the text**, because the two faces have different cap
-heights and advance widths — a visible reflow on every cold load.
+heights and advance widths - a visible reflow on every cold load.
 
 Once the real file exists, measure it and add the overrides to the `@font-face`
 blocks:

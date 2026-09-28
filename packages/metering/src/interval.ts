@@ -14,13 +14,13 @@
  * failure mode is silent. Autumn's `resetCustomerEntitlement` advances by
  * exactly one period regardless of how overdue the row is, so a cron that
  * missed three months restores one month of allowance and leaves `next_reset_at`
- * still in the past — a customer who is somehow both due for a reset and never
+ * still in the past - a customer who is somehow both due for a reset and never
  * getting one.
  *
  * Deriving the window from a fixed anchor has no such state to corrupt. A
  * process that has been down for a year computes the same answer as one that
  * has been up the whole time, because the answer is a pure function of the
- * anchor and the clock. It also means a reset is not an event that must happen —
+ * anchor and the clock. It also means a reset is not an event that must happen -
  * it is simply the moment the computed window changes, so `alarm()` in a Durable
  * Object schedules a convenience (flushing, notifications) rather than the
  * correctness of the balance itself.
@@ -30,7 +30,7 @@
  * How often an allowance refills.
  *
  * ⚠ `lifetime` IS NOT "VERY LONG", IT IS "NEVER". A lifetime allowance is a
- * total that is consumed once — credits bought as a pack, a trial's cap. It has
+ * total that is consumed once - credits bought as a pack, a trial's cap. It has
  * a window that starts at the anchor and never ends, and the arithmetic below
  * treats it as such rather than as an interval with a large number in it.
  */
@@ -52,7 +52,7 @@ export interface ResetWindow {
 
 export interface WindowInput {
   /**
-   * When this allowance began — the subscription start, or the moment the plan
+   * When this allowance began - the subscription start, or the moment the plan
    * was assigned. Every boundary is derived from it, so it must not drift once
    * chosen.
    */
@@ -131,7 +131,7 @@ function periodsElapsed({
 
   // ⚠ THE CALENDAR-MONTH COUNT OVERSHOOTS WHEN THE DAY HAS NOT ARRIVED YET. An
   // anchor of the 20th asked about the 5th of the following month is zero whole
-  // months, not one — the month number changed but the anniversary has not
+  // months, not one - the month number changed but the anniversary has not
   // happened. Comparing against the computed boundary is what catches it, and
   // doing it as a loop rather than a single correction handles the case where
   // clamping (below) moved the boundary by more than a day.
@@ -150,7 +150,7 @@ function periodsElapsed({
  * ⚠ THE ANCHOR DAY IS PRESERVED ACROSS SHORT MONTHS, AND THIS IS THE OTHER
  * DELIBERATE DIVERGENCE FROM AUTUMN. Their `addInterval` documents itself as
  * "preserves the anchor day (Stripe-compatible end-of-month behavior)" and then
- * computes `anchorDay` and `isMonthBased` and uses neither — it calls date-fns
+ * computes `anchorDay` and `isMonthBased` and uses neither - it calls date-fns
  * `addMonths` on the *previous* boundary and returns.
  *
  * `addMonths` clamps, so stepping repeatedly walks the date backwards and never

@@ -4,7 +4,7 @@ import { Button } from "@repo/ui/components/button"
 /**
  * ⚠ THE COPY IS DELIBERATELY AMBIGUOUS ABOUT WHY, AND THAT IS A PRIVACY
  * PROPERTY RATHER THAN VAGUENESS. Row level security makes another tenant's id
- * indistinguishable from one that never existed — a 404 either way. Saying "you
+ * indistinguishable from one that never existed - a 404 either way. Saying "you
  * do not have access to this" would confirm the id is real, which turns every
  * detail page into an oracle for enumerating other people's records.
  */

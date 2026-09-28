@@ -19,8 +19,8 @@ import { timestampFromUuidV7 } from "../ids.js"
  * Everything the console reads that no other caller needs.
  *
  * ⚠ THIS IS A READ MODEL AND IT WRITES NOTHING. Every mutation the console
- * performs goes through the store that already owns it — `DomainStore` creates
- * domains, `KeyStore` mints keys, `WebhookEndpointStore` manages endpoints — so
+ * performs goes through the store that already owns it - `DomainStore` creates
+ * domains, `KeyStore` mints keys, `WebhookEndpointStore` manages endpoints - so
  * there is exactly one implementation of each rule and the console cannot
  * accidentally bypass a plan limit by having its own path to the table. The two
  * exceptions are `suppressions` and `onboarding`, which have no other owner;
@@ -28,7 +28,7 @@ import { timestampFromUuidV7 } from "../ids.js"
  * else touches would be ceremony.
  *
  * ⚠ AND EVERY QUERY IS INSIDE `withTenant`. `core` is under row level security
- * and a query without the setting RAISES rather than returning nothing — see
+ * and a query without the setting RAISES rather than returning nothing - see
  * db/core.ts. That is the desired behaviour and it is also why a missing
  * wrapper is found immediately rather than in production as a cross-tenant
  * read.
@@ -39,7 +39,7 @@ import { timestampFromUuidV7 } from "../ids.js"
  * ON `core.messages` THAT IS THE DIFFERENCE BETWEEN A PAGE AND A TIMEOUT.
  * `OFFSET 40000` makes Postgres produce and discard forty thousand rows from a
  * partitioned table on every request; a cursor is an index seek regardless of
- * depth. It is also the only form that is CORRECT while rows are arriving —
+ * depth. It is also the only form that is CORRECT while rows are arriving -
  * offset pagination on a descending log shows the same row twice and skips
  * another every time something is inserted between two page loads, which on a
  * live send log is constantly.
@@ -63,7 +63,7 @@ function clampLimit(limit: number | undefined): number {
  * The cursor is `<iso timestamp>|<id>`, and the second half is not decoration.
  *
  * ⚠ A TIMESTAMP ALONE IS NOT A UNIQUE KEY. Two messages accepted in the same
- * millisecond — which a batch send produces by the hundred — would make a
+ * millisecond - which a batch send produces by the hundred - would make a
  * `created_at < cursor` predicate either skip the rest of that millisecond or
  * repeat it forever. The id breaks the tie, and the comparison at each call
  * site is the lexicographic row-value form that Postgres can answer from the
@@ -76,16 +76,16 @@ function encodeCursor(at: string, id: string): string {
 /**
  * ⚠ `timestamptz` IS MICROSECOND PRECISION AND A JS `Date` IS NOT, WHICH IS WHY
  * EVERY LIST SELECTS ITS CURSOR TIMESTAMP AS `::text`. postgres.js parses a
- * timestamp into a `Date`, truncating to milliseconds — so a cursor built from
+ * timestamp into a `Date`, truncating to milliseconds - so a cursor built from
  * one says `T.000` for a row actually stored at `T.000500`. The next page then
- * asks for `created_at < T.000`, and a row at `T.000200` — older, and
- * legitimately on the next page — compares GREATER on the first component and
+ * asks for `created_at < T.000`, and a row at `T.000200` - older, and
+ * legitimately on the next page - compares GREATER on the first component and
  * is skipped. Permanently: no page ever returns it.
  *
  * ⚠ AND THE TIE-BREAK DOES NOT SAVE IT, because the truncation makes the
  * timestamp component unequal in the wrong direction before the id is ever
  * compared. It only bites when two rows share a millisecond with different
- * microsecond offsets — which is every busy send path, since `now()` is fixed
+ * microsecond offsets - which is every busy send path, since `now()` is fixed
  * within a transaction but not across them.
  */
 const rawTimestamp = (column: AnyPgColumn) => sql<string>`${column}::text`
@@ -93,7 +93,7 @@ const rawTimestamp = (column: AnyPgColumn) => sql<string>`${column}::text`
 /**
  * ⚠ SPLIT ON THE **FIRST** SEPARATOR, NOT THE LAST, AND THE SUPPRESSION LIST IS
  * WHY. Its cursor's second half is an EMAIL ADDRESS rather than a uuid, and a
- * quoted local part may legally contain a `|`. An ISO timestamp never can — so
+ * quoted local part may legally contain a `|`. An ISO timestamp never can - so
  * taking everything before the first separator always yields the whole
  * timestamp and everything after it always yields the whole id, whatever the id
  * happens to contain. `lastIndexOf` gets the uuid lists right and silently
@@ -103,11 +103,11 @@ const rawTimestamp = (column: AnyPgColumn) => sql<string>`${column}::text`
 /**
  * ⚠ THE TIMESTAMP HALF IS KEPT AS TEXT AND BOUND WITH `::timestamptz`, NOT
  * PARSED INTO A `Date`. Parsing it would throw away the microseconds the
- * `::text` select exists to preserve — see `rawTimestamp`.
+ * `::text` select exists to preserve - see `rawTimestamp`.
  *
  * ⚠ SO IT IS VALIDATED IN TWO STEPS, AND ONE IS NOT ENOUGH. The shape check
  * alone accepts `2026-13-45 99:99:99`, which is bound safely as a parameter and
- * then raises `invalid input syntax for type timestamp` inside Postgres — a 500
+ * then raises `invalid input syntax for type timestamp` inside Postgres - a 500
  * on a log page because somebody edited the URL. The `Date.parse` that follows
  * rejects it. The shape check is still needed first, because V8's parser is
  * lenient in the other direction: it accepts things Postgres does not, and it
@@ -122,7 +122,7 @@ function decodeCursor(cursor: string | undefined): { at: string; id: string } | 
    * ⚠ SPLIT ON THE **FIRST** SEPARATOR, NOT THE LAST, AND THE SUPPRESSION LIST
    * IS WHY. Its cursor's second half is an EMAIL ADDRESS rather than a uuid,
    * and a quoted local part may legally contain a `|`. A rendered timestamp
-   * never can — so taking everything before the first separator always yields
+   * never can - so taking everything before the first separator always yields
    * the whole timestamp and everything after it always yields the whole id.
    */
   const sep = cursor.indexOf("|")
@@ -131,7 +131,7 @@ function decodeCursor(cursor: string | undefined): { at: string; id: string } | 
   const id = cursor.slice(sep + 1)
   if (!id || !TIMESTAMP.test(at)) return null
   // ⚠ SHAPE IS NOT VALIDITY. See above: month 13 passes the pattern and raises
-  // in Postgres. The parse is only a guard — the ORIGINAL string is what gets
+  // in Postgres. The parse is only a guard - the ORIGINAL string is what gets
   // bound, so nothing is lost to the Date's millisecond precision.
   if (Number.isNaN(Date.parse(at))) return null
   return { at, id }
@@ -405,7 +405,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
           /*
            * ⚠ THE ROW-VALUE COMPARISON, NOT `created_at < x OR (created_at = x
            * AND id < y)`. They are logically identical and only the first is
-           * answered by an index scan on `(created_at desc, id desc)` — the
+           * answered by an index scan on `(created_at desc, id desc)` - the
            * second makes the planner choose between two disjoint ranges and it
            * usually chooses a scan of both.
            */
@@ -418,7 +418,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
          * ⚠ ONE EXTRA ROW IS FETCHED TO LEARN WHETHER THERE IS A NEXT PAGE.
          * The alternative is a `count(*)` over the same predicate on every
          * request, which on a partitioned message table is the single most
-         * expensive thing this endpoint could do — and it answers a question
+         * expensive thing this endpoint could do - and it answers a question
          * nobody asked. Nobody wants to know there are 41,812 results; they
          * want to know whether to show a "load more".
          */
@@ -447,7 +447,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
 
         /*
          * ⚠ THE EVENTS ARE FETCHED FOR THE PAGE IN ONE QUERY, NOT PER ROW. A
-         * per-row lookup is fifty round trips for one screen — the textbook
+         * per-row lookup is fifty round trips for one screen - the textbook
          * N+1, and on a partitioned events table each one is expensive. The
          * `inArray` below is a single index scan, and `selectDistinct` bounds
          * the result at eight rows per message because there are eight event
@@ -501,8 +501,8 @@ export function consoleQueries(db: Database): ConsoleQueries {
         /*
          * ⚠ THE STATUS FILTER IS APPLIED IN TYPESCRIPT, AFTER THE PAGE, AND
          * THAT IS A KNOWN AND DELIBERATE LIMITATION RATHER THAN AN OVERSIGHT.
-         * `last_event` is not a column — it is the worst-by-severity of a
-         * message's events, falling back to the row's own status — so filtering
+         * `last_event` is not a column - it is the worst-by-severity of a
+         * message's events, falling back to the row's own status - so filtering
          * on it in SQL means a correlated aggregate over the events table per
          * candidate row, on a partitioned table, in the WHERE clause. That is a
          * materialised `messages.last_event` column maintained by the ingest
@@ -512,7 +512,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
          * The consequence is visible and is documented at the route: a filtered
          * page can return fewer than `limit` rows while more exist further
          * down. The cursor is still taken from the LAST ROW EXAMINED rather
-         * than the last row returned, so paging never stalls — it just walks
+         * than the last row returned, so paging never stalls - it just walks
          * more pages to fill the screen.
          */
         if (filters.status?.length) {
@@ -537,7 +537,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
        * ⚠ THE PARTITION IS DERIVED FROM THE ID, THE SAME WAY `GET /emails/{id}`
        * ALREADY DOES IT. `core.messages` is partitioned by `created_at` and keyed
        * `(id, created_at)`, so a lookup by bare id fans out across every
-       * partition — cheap this month and a scan per partition in a year, on the
+       * partition - cheap this month and a scan per partition in a year, on the
        * page somebody opens from every row of the email list. A UUIDv7 carries
        * its own creation millisecond, so an hour either side prunes to one
        * partition before the index is touched.
@@ -624,7 +624,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
           text: body?.text ?? null,
           headers: (body?.headers as Record<string, string> | null) ?? null,
           /*
-           * ⚠ METADATA ONLY — THE BYTES ARE NEVER RETURNED. An attachment is
+           * ⚠ METADATA ONLY - THE BYTES ARE NEVER RETURNED. An attachment is
            * stored as base64 in a jsonb column; a ten-megabyte PDF would be a
            * thirteen-megabyte JSON response for a page that only ever renders
            * the filename. There is a separate download route for the content.
@@ -701,7 +701,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
             // ⚠ LOWERCASED HERE, BECAUSE THE SEND PATH LOOKS IT UP LOWERCASED.
             // A suppression stored as `Bob@Acme.com` would silently never match
             // and the customer would watch mail keep going to an address they
-            // blocked — the worst possible failure for this particular table.
+            // blocked - the worst possible failure for this particular table.
             address: address.trim().toLowerCase(),
             reason: "manual",
           })
@@ -753,7 +753,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
           .from(webhookDeliveries)
           // ⚠ A LEFT JOIN, BECAUSE THE ENDPOINT MAY HAVE BEEN DELETED. The
           // delivery record outlives it, and an inner join would make the
-          // history of a removed endpoint silently vanish from the log — which
+          // history of a removed endpoint silently vanish from the log - which
           // is exactly the history somebody is looking for after removing one.
           .leftJoin(
             webhookEndpoints,
@@ -846,7 +846,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
        * THE CALL SITE RATHER THAN HERE. The middleware that calls it does not
        * await it: a request log that can fail a request is a log that takes the
        * API down when the table is full. What it must NOT do is swallow the
-       * error silently — the caller catches and logs, so a broken log is
+       * error silently - the caller catches and logs, so a broken log is
        * visible in the API's own logs rather than only in an empty page.
        */
       await withTenant(db, input.tenantId, async (tx) => {
@@ -870,7 +870,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
 /**
  * ⚠ `_`, `%` AND `\` ARE THE THREE `LIKE` METACHARACTERS AND ALL THREE HAVE TO
  * GO. Escaping only `%` leaves `_` as a single-character wildcard, so a search
- * for `a_b` matches `axb` — wrong, but harmless. Leaving `\` unescaped is the
+ * for `a_b` matches `axb` - wrong, but harmless. Leaving `\` unescaped is the
  * one that matters: it lets a search string neutralise the escaping applied to
  * the other two.
  */
@@ -901,7 +901,7 @@ function summariseAttachments(
         : {}),
       // ⚠ THE DECODED SIZE, NOT THE BASE64 LENGTH. Reporting the encoded length
       // overstates every attachment by a third, and the number a person
-      // compares it against — their provider's limit — is in decoded bytes.
+      // compares it against - their provider's limit - is in decoded bytes.
       ...(content ? { size: Math.floor((content.length * 3) / 4) } : {}),
     }
   })

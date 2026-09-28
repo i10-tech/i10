@@ -4,8 +4,8 @@ import { domainProblem, isDomainMalformed } from "../lib/domain-check"
 /**
  * What counts as a domain, and what to say when it is not one.
  *
- * ⚠ THIS FILE USED TO TEST THE TIMING AS WELL — when red appears, when green
- * is earned — and that half has moved to packages/ui/test/validated-field.
+ * ⚠ THIS FILE USED TO TEST THE TIMING AS WELL - when red appears, when green
+ * is earned - and that half has moved to packages/ui/test/validated-field.
  * The rules are the same for every field in the product, so testing them here
  * meant a second copy that could pass while the shared one regressed. What is
  * left is the part that is genuinely about domains.
@@ -20,20 +20,20 @@ import { domainProblem, isDomainMalformed } from "../lib/domain-check"
 describe("a domain that is wrong on its face", () => {
   /*
    * ⚠ EACH WRONG ANSWER GETS ITS OWN CORRECTION. "That does not look like a
-   * domain" is true of all of these and useful for none — the point of
+   * domain" is true of all of these and useful for none - the point of
    * checking them separately is that the sentence names the actual mistake.
    */
   it.each([
-    ["https://acme.com/pricing", "Just the domain — no https:// in front."],
-    ["http://acme.com", "Just the domain — no https:// in front."],
-    ["//acme.com", "Just the domain — no https:// in front."],
+    ["https://acme.com/pricing", "Just the domain - no https:// in front."],
+    ["http://acme.com", "Just the domain - no https:// in front."],
+    ["//acme.com", "Just the domain - no https:// in front."],
     ["mido@acme.com", "That is an email address. Enter the domain after the @."],
-    ["acme.com/pricing", "Just the domain — leave off the path."],
+    ["acme.com/pricing", "Just the domain - leave off the path."],
     ["acme com", "A domain cannot contain spaces."],
     ["acme_mail.com", "Domain names cannot contain underscores."],
     ["acme", "A domain needs a dot, like example.com."],
-    ["acme..com", "That does not look like a domain — check the dots."],
-    [".acme.com", "That does not look like a domain — check the dots."],
+    ["acme..com", "That does not look like a domain - check the dots."],
+    [".acme.com", "That does not look like a domain - check the dots."],
     ["-acme.com", "That does not look like a domain."],
     ["acme-.com", "That does not look like a domain."],
     ["acme.123", "That does not end in a domain ending, like .com."],
@@ -44,7 +44,7 @@ describe("a domain that is wrong on its face", () => {
   })
 
   it("refuses a name longer than the wire format allows", () => {
-    // ⚠ EVERY LABEL IS LEGAL ON ITS OWN — 63 octets is the per-label maximum —
+    // ⚠ EVERY LABEL IS LEGAL ON ITS OWN - 63 octets is the per-label maximum -
     // so this can only fail the 253-octet limit on the WHOLE name, which is the
     // rule being tested. A fixture with an over-long label would pass for the
     // wrong reason.

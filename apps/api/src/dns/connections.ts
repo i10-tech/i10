@@ -9,13 +9,13 @@ import type { Credential } from "./port.js"
  *
  * ⚠ THE CREDENTIAL IS SEALED BEFORE IT REACHES A ROW AND IS NEVER RETURNED TO A
  * CLIENT. A DNS write token can rewrite somebody's MX records and take delivery
- * of their mail — every password reset and every login link they receive — which
+ * of their mail - every password reset and every login link they receive - which
  * makes it strictly more dangerous than the mailbox it protects. There is no
  * "show my connection" endpoint, for the same reason there is none for a webhook
  * signing secret: such a call is a better target than the database it reads.
  *
  * ⚠ AND `summary()` IS WHAT THE CONSOLE GETS. It carries the provider, the
- * label, the zones we proved reachable and the last error — everything needed to
+ * label, the zones we proved reachable and the last error - everything needed to
  * render the state of a connection and nothing that could be used as one.
  */
 
@@ -49,7 +49,7 @@ export interface DnsConnectionStore {
    *
    * ⚠ SEPARATE FROM `save` BECAUSE A RENEWAL IS NOT A RECONNECTION. `save`
    * takes the label and the zone list, which a refresh does not have and must
-   * not invent — re-listing zones on every token renewal would put a second
+   * not invent - re-listing zones on every token renewal would put a second
    * round trip on the publish path, and passing an empty list would erase the
    * zones the console renders.
    */
@@ -129,7 +129,7 @@ export function dnsConnectionStore(
         /*
          * ⚠ A CREDENTIAL THAT WILL NOT OPEN IS TREATED AS ABSENT, NOT AS A
          * CRASH. It means the sealing key has been rotated or replaced, which
-         * is our problem and not the customer's — and the correct outcome is
+         * is our problem and not the customer's - and the correct outcome is
          * "you are not connected, reconnect", which is exactly what `null`
          * produces one layer up. Throwing would make every page that lists
          * connections fail for a tenant whose row is merely stale.

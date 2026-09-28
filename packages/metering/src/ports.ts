@@ -8,8 +8,8 @@ import type { MeterKey } from "./key.js"
  * ⚠ EVERYTHING THAT TOUCHES A DISK, A SOCKET OR A CLOCK IS ON THIS SIDE OF THE
  * LINE, AND THAT IS WHAT MAKES THE PACKAGE PORTABLE. There are two adapters
  * coming and they have nothing in common: Postgres over Drizzle on the box, and
- * Durable Object storage at the edge. Neither can be imported here — one needs
- * `pg`, the other needs the Workers runtime — so the core names what it needs
+ * Durable Object storage at the edge. Neither can be imported here - one needs
+ * `pg`, the other needs the Workers runtime - so the core names what it needs
  * and is handed an implementation.
  *
  * ⚠ AND THE INTERFACES ARE DELIBERATELY NARROW. `UsageStore` cannot read a
@@ -25,7 +25,7 @@ import type { MeterKey } from "./key.js"
  * ⚠ `id` IS `messageId`, AND IT IS THE PROPERTY THE WHOLE DESIGN RESTS ON. The
  * buffer entry at the edge, the row in Postgres and Polar's `external_id` all
  * key on the same value, which is what makes every leg of the pipeline
- * independently retryable — and being independently retryable is what makes
+ * independently retryable - and being independently retryable is what makes
  * buffering usage at the edge safe at all. A count can only ever be added to;
  * an id can be checked.
  */
@@ -55,7 +55,7 @@ export interface UsageStore {
   /**
    * Units recorded for this key inside this window.
    *
-   * ⚠ FOR THIS KEY, WHICH MEANS FOR THIS SHARD — NOT FOR THE TENANT. When a
+   * ⚠ FOR THIS KEY, WHICH MEANS FOR THIS SHARD - NOT FOR THE TENANT. When a
    * meter is split, each shard gates against its own slice of the allowance and
    * never reads its siblings, because a cross-shard read is exactly the
    * coordination the split was bought to avoid. Summing the shards is a
@@ -80,7 +80,7 @@ export interface UsageStore {
  * ⚠ IT IS A SEPARATE PORT FROM `UsageStore`, NOT A METHOD ON IT, BECAUSE THE
  * TWO READ DIFFERENT KINDS OF THING FROM DIFFERENT PLACES. Usage is a sum of
  * events this package's own ledger recorded. A level is the count of things
- * that presently exist, and it is owned by whoever owns those things — rows in
+ * that presently exist, and it is owned by whoever owns those things - rows in
  * `core.domains`, mailboxes in the identity projection, bytes reported by the
  * mail server. Metering does not write any of them and must never try to keep
  * its own copy: the copy is what goes stale, and a stale seat count either
@@ -97,7 +97,7 @@ export interface LevelStore {
    *
    * ⚠ ONE READ PER FEATURE, AND THE ADAPTER DECIDES WHAT IT MEANS. `meterKey`
    * carries the feature id, so `domains.sending` and `domains.mailbox` are two
-   * different questions against the same table — and a domain that does both
+   * different questions against the same table - and a domain that does both
    * counts in both, because each is a count over its own flag rather than a
    * partition of one total.
    */

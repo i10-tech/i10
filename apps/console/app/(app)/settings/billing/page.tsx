@@ -26,7 +26,7 @@ export const metadata: Metadata = { title: "Billing" }
  *
  * ⚠ NOTHING ON THIS PAGE GRANTS ANYTHING. Starting a checkout returns a URL;
  * changing a plan returns a 202. The entitlement moves only when Polar's
- * signature-verified webhook says the money arrived — see
+ * signature-verified webhook says the money arrived - see
  * apps/api/src/routes/polar-events.ts. That is why the buttons say what they do
  * rather than claiming the plan has changed.
  *
@@ -45,7 +45,7 @@ export default async function BillingPage({
   // page started the checkout rather than at one confirmation screen for the
   // whole product, so the outcome is reported here, in place, above the plan
   // the customer just bought. See routes/console/account.ts.
-  // ⚠ READ ONCE FROM THE QUERY, THEN FROM A COOKIE — `ArrivalQuery` below
+  // ⚠ READ ONCE FROM THE QUERY, THEN FROM A COOKIE - `ArrivalQuery` below
   // moves it out of the address bar on arrival. See lib/arrival.ts.
   const checkoutId = await readArrival(
     ARRIVAL.checkout,
@@ -64,8 +64,8 @@ export default async function BillingPage({
   const { billing } = usage.data
 
   /*
-   * ⚠ THE NAME, NOT THE ID. `scheduled_plan_id` is our internal handle — `pro`,
-   * `starter` — and everything else on this page renders `plan.name`. Printing
+   * ⚠ THE NAME, NOT THE ID. `scheduled_plan_id` is our internal handle - `pro`,
+   * `starter` - and everything else on this page renders `plan.name`. Printing
    * the id would be the only place in the console where a customer is shown one,
    * in the sentence that is supposed to reassure them about a change they just
    * made. The catalogue may fail to load, in which case the id is still better
@@ -83,7 +83,7 @@ export default async function BillingPage({
       {/*
        * ⚠ THE OUTCOME USED TO BE A SECTION OF ITS OWN AND THAT SECTION WAS
        * THE JUMP. `Section` carries `border-b py-6`, and it is rendered by
-       * the server the moment `?checkout_id=` is in the URL — so the page
+       * the server the moment `?checkout_id=` is in the URL - so the page
        * painted an empty bordered box with 24px of padding, and the banner
        * only grew into it a second later when the poll answered. The
        * separator arriving in one frame is what pushed everything down.
@@ -112,8 +112,8 @@ export default async function BillingPage({
                    * ⚠ A SCHEDULED CHANGE IS CHECKED FIRST, BECAUSE IT IS THE
                    * ONE THING THIS LINE COULD NOT SAY. A downgrade is applied
                    * at the period boundary so the customer keeps what they paid
-                   * for — which means every other field here still describes the
-                   * plan they are leaving, and the page read "Pro — renews on
+                   * for - which means every other field here still describes the
+                   * plan they are leaving, and the page read "Pro - renews on
                    * the 4th" to somebody who had just downgraded. That is
                    * indistinguishable from the button having done nothing, and
                    * it is the same complaint cancelling used to get.
@@ -123,7 +123,7 @@ export default async function BillingPage({
                         billing.subscription.scheduled_at
                           ? `on ${formatExact(billing.subscription.scheduled_at)}`
                           : "at the end of this period"
-                      } — you keep ${billing.plan?.name ?? "your current plan"} until then.`
+                      } - you keep ${billing.plan?.name ?? "your current plan"} until then.`
                     : billing.subscription.cancel_at_period_end
                       ? /*
                          * ⚠ A CANCELLED SUBSCRIPTION IS STILL ACTIVE UNTIL THE
@@ -135,7 +135,7 @@ export default async function BillingPage({
                           billing.subscription.current_period_end
                             ? formatExact(billing.subscription.current_period_end)
                             : "at the end of this period"
-                        } — sending continues until then.`
+                        } - sending continues until then.`
                       : billing.subscription.current_period_end
                         ? `Renews ${formatExact(billing.subscription.current_period_end)}`
                         : "Active"}
@@ -161,7 +161,7 @@ export default async function BillingPage({
       <Section>
         <SectionTitle>Plans</SectionTitle>
         <SectionDescription>
-          Changing plan takes effect when the payment clears — usually a second or two.
+          Changing plan takes effect when the payment clears - usually a second or two.
           Your allowances move at that moment, not before.
         </SectionDescription>
         <SectionContent>
@@ -180,14 +180,14 @@ export default async function BillingPage({
       <Section>
         <SectionTitle>Payment method and invoices</SectionTitle>
         <SectionDescription>
-          Card details and receipts are held by our payment provider — we never see or
+          Card details and receipts are held by our payment provider - we never see or
           store a card number.
         </SectionDescription>
         <SectionContent className="space-y-3">
           {/*
            * ⚠ THE CARD IS SELF-SERVE; THE INVOICE LIST IS STILL NOT. Polar's
            * embedded payment-method form takes a customer-session token, which
-           * `/console/billing/payment-method-session` now mints — so adding or
+           * `/console/billing/payment-method-session` now mints - so adding or
            * replacing a card is a button. Listing past invoices needs a
            * different surface of Polar's portal and is still written up in
            * docs/decisions/console.md §7, which is why the sentence below stays
@@ -200,7 +200,7 @@ export default async function BillingPage({
              * ⚠ THE CARD IS COLLECTED DURING CHECKOUT, AND SAYING SO IS BETTER
              * THAN A BUTTON THAT WOULD FAIL. Polar has no customer record for a
              * workspace that has never subscribed, so minting a portal session
-             * for one answers "Customer does not exist" — see
+             * for one answers "Customer does not exist" - see
              * `PaymentMethodButton`. There is genuinely nothing to manage yet.
              */
             <p className="text-sm text-muted-foreground">

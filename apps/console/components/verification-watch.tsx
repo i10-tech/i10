@@ -13,14 +13,14 @@ import { watchUntilVerified } from "@/lib/domain-activation"
  * from there the only thing outstanding is Amazon's own check, which answers
  * on its own schedule and tells nobody. So the product's final state was a page
  * that had gone quiet, a badge that said "pending", and a button whose whole
- * job was to ask the question again — which is a poll with a person in it.
+ * job was to ask the question again - which is a poll with a person in it.
  *
  * ⚠ IT RENDERS ALMOST NOTHING, AND THAT IS DELIBERATE. A progress bar or a
  * countdown would promise a duration we do not control. One line saying we are
  * still looking is the honest version, and it disappears by itself.
  *
- * ⚠ AND IT STOPS. Seven attempts over about a minute — see the schedule in
- * lib/domain-activation.ts — and then it gives up quietly rather than polling
+ * ⚠ AND IT STOPS. Seven attempts over about a minute - see the schedule in
+ * lib/domain-activation.ts - and then it gives up quietly rather than polling
  * an open tab for an afternoon. A domain that has not verified in a minute is
  * in the state the nightly re-check exists for, and the badge is correct on the
  * next page load either way.
@@ -41,7 +41,7 @@ export function VerificationWatch({
    * the state a domain sits in when the records are up but the one verify after
    * publishing arrived before DNS was serving. This used to be watched with
    * `refresh`, which writes nothing for a row with no identity, so the page said
-   * "checking your records" while nothing could ever change — until somebody
+   * "checking your records" while nothing could ever change - until somebody
    * pressed Verify. The watch now re-proves such a row itself; see
    * `watchUntilVerified`.
    */
@@ -74,7 +74,7 @@ export function VerificationWatch({
   return (
     <p className="flex items-center gap-2 text-xs text-muted-foreground">
       <Spinner className="size-3" />
-      Checking your records — this page updates itself.
+      Checking your records - this page updates itself.
     </p>
   )
 }

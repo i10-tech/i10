@@ -9,14 +9,14 @@ import { timestampFromUuidV7 } from "../ids.js"
  *
  * ⚠ THE PARTITION IS DERIVED FROM THE ID, WHICH IS THE WHOLE REASON THIS IS
  * AFFORDABLE. `core.messages` is partitioned by `created_at` and keyed
- * `(id, created_at)`, so a lookup by bare id has to touch every partition —
+ * `(id, created_at)`, so a lookup by bare id has to touch every partition -
  * today that is cheap and in a year it is a table scan per status check, on the
  * endpoint an SDK polls. A UUIDv7 carries its own creation millisecond, so the
  * range predicate below prunes to a single partition before the index is used.
  *
  * ⚠ AND THE WINDOW IS A WINDOW RATHER THAN AN EQUALITY, because the id's
  * timestamp and the column's `now()` are minted microseconds apart in the same
- * statement — close enough to prune with, wrong to match on. An hour either side
+ * statement - close enough to prune with, wrong to match on. An hour either side
  * costs nothing (the planner still drops every other partition) and cannot be
  * defeated by clock skew between the database and whoever generated the id.
  */
@@ -56,7 +56,7 @@ export function emailLookup(db: Database): EmailLookup {
         // ⚠ THE RANGE IS OMITTED FOR AN ID WE CANNOT DATE rather than guessed.
         // A v4 from a fixture, or an id minted by some future scheme, would
         // otherwise prune to a window it never belonged to and return null for
-        // a message that exists — a 404 for a real send is worse than a slow
+        // a message that exists - a 404 for a real send is worse than a slow
         // query.
         const window = minted
           ? [
@@ -110,11 +110,11 @@ export function emailLookup(db: Database): EmailLookup {
           // ⚠ `message_events` IS PARTITIONED ON `occurred_at` TOO, so this
           // needs its own lower bound or it merge-appends across every
           // partition ever created. An event cannot precede the message, so
-          // the message's own creation time — minus the same slack the id
-          // window uses — prunes everything older and excludes nothing real.
+          // the message's own creation time - minus the same slack the id
+          // window uses - prunes everything older and excludes nothing real.
           //
           // ⚠ AND IT IS `distinct` RATHER THAN ordered-and-limited. `lastEvent`
-          // takes a maximum over a severity table, so order buys nothing — and
+          // takes a maximum over a severity table, so order buys nothing - and
           // a `limit` on an ordered scan could cut off the very event that
           // matters, reporting `delivered` for a message that later bounced.
           // There are eight event types, so distinct is bounded by design.
@@ -162,8 +162,8 @@ export function emailLookup(db: Database): EmailLookup {
 
 /**
  * ⚠ THE ROW'S STATUS AND THE EVENT LOG ANSWER DIFFERENT QUESTIONS, AND THE
- * CUSTOMER ONLY CARES ABOUT ONE. `status` is our own sending state machine —
- * queued, sending, sent — and it stops at "SES accepted it". Everything after
+ * CUSTOMER ONLY CARES ABOUT ONE. `status` is our own sending state machine -
+ * queued, sending, sent - and it stops at "SES accepted it". Everything after
  * that lives in the event log, which SES feeds. A message that bounced is still
  * `sent` in the row, so reporting the column alone would tell a customer their
  * mail was fine when it was returned an hour ago.
@@ -181,7 +181,7 @@ export function lastEvent(
 
   if (worst) return (worst === "rejected" ? "failed" : worst) as EmailEventName
 
-  // No events yet. Fall back to what we know ourselves — and distinguish a
+  // No events yet. Fall back to what we know ourselves - and distinguish a
   // message that is waiting for its moment from one that is waiting for a
   // worker, because "queued" for a send scheduled next Tuesday reads as stuck.
   if (status === "queued" && scheduledAt && scheduledAt.getTime() > Date.now()) {

@@ -12,7 +12,7 @@
  *   builds depend on a running service; pointing it at a file in the tree does
  *   not.
  *
- * Committing it also makes contract changes visible in review — a diff on this
+ * Committing it also makes contract changes visible in review - a diff on this
  * file is a diff on the public API, which is exactly the thing that should never
  * change by accident.
  *

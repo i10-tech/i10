@@ -32,7 +32,7 @@ export function mountCampaigns(app: Hono, d: ConsoleDeps): void {
       ...broadcastPatch(body),
     })
     // ⚠ 422 NAMING THE FIELD, NOT 404. The broadcast is fine; the segment or
-    // topic it was pointed at is not this workspace's. See `assertOwned` — a
+    // topic it was pointed at is not this workspace's. See `assertOwned` - a
     // foreign key accepts it, because an FK check bypasses row security.
     if ("unknown" in created) return c.json(unknownTarget(created.unknown), 422)
     return c.json(created, 201)
@@ -166,20 +166,20 @@ export function mountCampaigns(app: Hono, d: ConsoleDeps): void {
 /**
  * The wire body of a broadcast, mapped onto the store's field names.
  *
- * ⚠ THE RETURN TYPE IS ANNOTATED, AND THAT IS NOT DECORATION — IT IS THE ONLY
+ * ⚠ THE RETURN TYPE IS ANNOTATED, AND THAT IS NOT DECORATION - IT IS THE ONLY
  * THING THAT CATCHES THIS CLASS OF BUG. Without it this function returned
  * `{ audienceId }` while `BroadcastInput` has `segmentId`, and `topic_id` was
  * never mapped at all: a broadcast's targeting was silently dropped on every
  * write, the API answered 200, and the UI showed a success toast. TypeScript
  * did not complain because excess-property checking does not apply to a value
- * that is SPREAD into an argument — `createBroadcast(tenantId, { name, ...patch })`
+ * that is SPREAD into an argument - `createBroadcast(tenantId, { name, ...patch })`
  * type-checks cleanly however wrong `patch` is. An explicit
  * `Partial<BroadcastInput>` here is where the wire names and the column names
  * are forced to meet.
  */
 /**
  * ⚠ THE MESSAGE NAMES THE FIELD AND NOTHING ELSE. It must not say whether the
- * id exists somewhere else in the cluster — that would make this endpoint an
+ * id exists somewhere else in the cluster - that would make this endpoint an
  * oracle for enumerating other tenants' segment ids, which is the smaller half
  * of the problem `assertOwned` exists to close.
  */
@@ -195,7 +195,7 @@ export function broadcastPatch(
   if (!body) return {}
   return {
     // ⚠ `segment_id`, NOT `audience_id`. The model is contacts + segments +
-    // topics — see db/core.ts — and `audience` is the older vocabulary this
+    // topics - see db/core.ts - and `audience` is the older vocabulary this
     // product deliberately does not use.
     ...(body.segment_id !== undefined
       ? { segmentId: asNullableString(body.segment_id) }

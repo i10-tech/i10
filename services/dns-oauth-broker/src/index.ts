@@ -13,13 +13,13 @@
  *   `api.cloudflare.com` from the same host  → ordinary JSON, never challenged
  *
  * So it is the calling ADDRESS, and no header, client or HTTP version changes
- * it. The publish path is unaffected — `api.cloudflare.com` is an API host and
- * talks to us fine — which is why this brokers the token exchange ONLY.
+ * it. The publish path is unaffected - `api.cloudflare.com` is an API host and
+ * talks to us fine - which is why this brokers the token exchange ONLY.
  *
  * ⚠ AND A WORKER IS NOT AN ARBITRARY DODGE, IT IS THE SHORTEST HONEST ROUTE.
  * The request's destination is Cloudflare either way, so sending it from
  * Cloudflare's own network adds no third party to a call that carries a client
- * secret — which is the thing that would be wrong with a rented proxy. Measured
+ * secret - which is the thing that would be wrong with a rented proxy. Measured
  * the same day from a Worker: `401 invalid_client`, `cf-mitigated: null`. The
  * endpoint answers; it simply will not answer Hetzner.
  *
@@ -49,7 +49,7 @@ interface Env {
  * Its own failures, never confused with Cloudflare's.
  *
  * ⚠ THE HEADER IS THE WHOLE POINT. The API reads the upstream's status and body
- * to tell "your client secret is wrong" from "we were challenged" — see
+ * to tell "your client secret is wrong" from "we were challenged" - see
  * `describeFailure` in apps/api/src/dns/oauth.ts. A broker that refused a
  * request and answered with a bare 401 would be indistinguishable from
  * Cloudflare rejecting the client, which is the single most misleading thing
@@ -64,7 +64,7 @@ const refuse = (status: number, reason: string) =>
 /**
  * ⚠ CONSTANT TIME, AND THE LENGTH CHECK FIRST. `timingSafeEqual` throws on a
  * length mismatch rather than returning false, so comparing directly turns a
- * wrong-length token into a 500 — and a 500 that only happens for some tokens
+ * wrong-length token into a 500 - and a 500 that only happens for some tokens
  * is itself an oracle.
  */
 function sameSecret(given: string, expected: string): boolean {
@@ -117,12 +117,12 @@ export default {
     }
 
     /*
-     * ⚠ THE UPSTREAM'S ANSWER IS RETURNED UNTOUCHED — status, body, and the
+     * ⚠ THE UPSTREAM'S ANSWER IS RETURNED UNTOUCHED - status, body, and the
      * headers that identify what served it. The API's diagnostics read exactly
      * these: `cf-ray` is what Cloudflare support asks for, and `cf-mitigated`
      * is the only unambiguous signal that a challenge rather than a firewall
      * rule stopped the request. Summarising here would throw away the evidence
-     * that a988c74 exists to preserve — and if this broker ever starts being
+     * that a988c74 exists to preserve - and if this broker ever starts being
      * challenged too, this is how we will find out.
      */
     const headers = new Headers({ "x-broker": "ok" })

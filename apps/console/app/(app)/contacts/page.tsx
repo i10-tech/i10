@@ -21,7 +21,7 @@ export const metadata: Metadata = { title: "Contacts" }
  * Everyone this workspace can send marketing mail to.
  *
  * ⚠ A CONTACT IS GLOBAL TO THE WORKSPACE AND UNIQUE BY ADDRESS. The obvious
- * alternative — a contact row per list — makes unsubscribing a per-list act,
+ * alternative - a contact row per list - makes unsubscribing a per-list act,
  * which means re-importing last quarter's CSV quietly resurrects somebody who
  * opted out. Segments are a grouping OF these contacts, not copies of them.
  */

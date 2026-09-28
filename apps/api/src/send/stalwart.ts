@@ -17,7 +17,7 @@ import {
  *
  * ⚠ HAND-OFF, NOT DELIVERY. This hands a finished message to Stalwart's
  * internal `relay` listener over SMTP and stops there. Stalwart owns the queue, the retries, the MX lookups
- * and the DSN generation from that point — all of which it already does
+ * and the DSN generation from that point - all of which it already does
  * properly, and none of which is worth rebuilding inside a worker. The same
  * argument in reverse is why mailbox mail does not go out through the SES API:
  * see docs/decisions/mail-routing.md.
@@ -29,7 +29,7 @@ import {
  *
  * ⚠ THE CLIENT IS upyo'S AS OF 2026-09-17, AND `sendRaw` IS WHY IT CAN BE. Its
  * contract is "deliver these serialized bytes unchanged, apart from SMTP
- * dot-stuffing" — documented, not inferred — which is exactly what this
+ * dot-stuffing" - documented, not inferred - which is exactly what this
  * transport needs and what stops a second library composing MIME behind our
  * back. upyo's own `dkim` config is deliberately NOT set: `sendRaw` bypasses it
  * by design, and the signature is already on the bytes by the time they get
@@ -74,8 +74,8 @@ export interface StalwartTransportOptions {
    * WORST OF THE THREE OPTIONS. SMTP can accept a `DATA` after rejecting
    * individual `RCPT TO`s, so a message to five people can be delivered to four
    * with a `250` on the transaction. `SendOutcome` has no shape for "mostly
-   * sent" — and inventing one would ripple through the claim, the metering and
-   * the reconcilers for a case that is already rare — so the outcome stays
+   * sent" - and inventing one would ripple through the claim, the metering and
+   * the reconcilers for a case that is already rare - so the outcome stays
    * `sent` and this is how the missing recipients become visible.
    *
    * ⚠ AN INJECTED EFFECT, NOT A LOGGER FIELD, WHICH KEEPS THIS TRANSPORT PURE
@@ -98,7 +98,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
 
       // ⚠ THE LOOKUP GETS ITS OWN try, AND CONFLATING IT WITH SIGNING COST REAL
       // MAIL. `domainSending` is a database round trip, so it fails for reasons
-      // that say nothing about the message — a reset connection, a statement
+      // that say nothing about the message - a reset connection, a statement
       // timeout, a failover. Sharing a catch with `signMessage` classified every
       // one of those as `rejected`, which `handleBatch` treats as permanent: the
       // row went to `failed` and a message that a retry seconds later would have
@@ -129,7 +129,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
         raw = await signMessage(unsigned, domain, sending.dkim)
       } catch (err) {
         // Building or signing failing is ours, not the network's, and retrying
-        // it reproduces it exactly — so it is permanent rather than deferred.
+        // it reproduces it exactly - so it is permanent rather than deferred.
         //
         // ⚠ AND upyo THROWING HERE IS THE POINT. An unusable key now raises
         // `Failed to import private key` instead of quietly handing back an
@@ -140,7 +140,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
 
       // ⚠ THE ENVELOPE TAKES BARE ADDRESSES, AND THE HEADERS DO NOT. A
       // recipient may arrive as `Bob <bob@x.test>`; that is what `To:` should
-      // show and it is NOT an SMTP address — `RCPT TO` would read the local part
+      // show and it is NOT an SMTP address - `RCPT TO` would read the local part
       // as `Bob <bob`, which is invalid. The previous client unwrapped this
       // silently, so every send with a display name in `to` depended on it.
       //
@@ -161,7 +161,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
       try {
         receipt = await opts.mailer.sendRaw({
           envelope: {
-            // ⚠ VERP, UNDER THE CUSTOMER'S OWN RETURN PATH — the same name SES
+            // ⚠ VERP, UNDER THE CUSTOMER'S OWN RETURN PATH - the same name SES
             // uses, published with an SPF record that authorises us too (see
             // `returnPathDomain`), so SPF passes and aligns with the `From:`.
             // The message id in the local part is what Stalwart's delivery
@@ -170,7 +170,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
             from: `bounce+${message.id}@${sending.returnPath}`,
             // ⚠ EVERY RECIPIENT, INCLUDING BCC, AND THIS IS WHAT KEEPS BCC
             // BLIND. `buildRawMessage` deliberately writes no `Bcc:` header, so
-            // the envelope is the only thing that says who receives it — the
+            // the envelope is the only thing that says who receives it - the
             // same split SES makes with `Destination`.
             to: recipients,
           },
@@ -193,7 +193,7 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
         })
       } catch (err) {
         // ⚠ `sendRaw` RETURNS FAILURES RATHER THAN THROWING THEM, so reaching
-        // this catch means something outside the SMTP conversation went wrong —
+        // this catch means something outside the SMTP conversation went wrong -
         // in practice an abort. Nothing about the message, so: temporary.
         return { status: "deferred", reason: describeError(err) }
       }
@@ -208,20 +208,20 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
         })
       }
 
-      // ⚠ OUR OWN Message-ID, NOT `receipt.messageId` — BECAUSE ON THIS ROUTE
+      // ⚠ OUR OWN Message-ID, NOT `receipt.messageId` - BECAUSE ON THIS ROUTE
       // THAT FIELD IS SYNTHETIC.
       //
       // Stalwart answers `250 2.0.0 Message queued for delivery.`, with no queue
-      // identifier — unlike Postfix's `queued as ABC123`. upyo looks for one
+      // identifier - unlike Postfix's `queued as ABC123`. upyo looks for one
       // with `/(?:Message-ID:|id=)[\s<]*([^>\s]+)/`, finds nothing, and falls
       // back to `smtp-${Date.now()}-${random}`. Storing that would refill
       // `core.messages.provider_message_id` with values that look like ids and
-      // resolve nowhere — which is the exact bug this column already had once,
+      // resolve nowhere - which is the exact bug this column already had once,
       // when it held nodemailer's client-side UUID.
       //
       // What DOES identify the message is the header we wrote ourselves.
       // `mime.ts` emits `messageIdHeader(id, from)`, it reaches the wire
-      // unmodified (measured — SES overwrites it, Stalwart does not), it is
+      // unmodified (measured - SES overwrites it, Stalwart does not), it is
       // covered by the DKIM signature, and it is the value that appears in
       // Stalwart's logs and in any DSN a receiving server generates. So on
       // this route the column means "the id this message travels under",
@@ -229,14 +229,14 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
       //
       // ⚠ IT IS DERIVABLE FROM `messages.id`, AND IS STILL STORED. Recomputing
       // it at read time would mean every reader knowing the derivation and
-      // re-deriving it identically — including the display-name unwrapping
+      // re-deriving it identically - including the display-name unwrapping
       // that has been wrong once already. One column, written once, by the
       // same function that wrote the header.
       const id = messageIdHeader(message.id, message.from)
 
       // Mirrors sesTransport: an acceptance we cannot name is not something to
       // record as sent, because nothing could later be joined to it. Here that
-      // is near-unreachable — the id is derived rather than returned — but the
+      // is near-unreachable - the id is derived rather than returned - but the
       // guard costs nothing and keeps the two transports the same shape.
       if (!id) {
         return { status: "deferred", reason: "relay returned no message id" }
@@ -251,12 +251,12 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
  * IS THE ONE PLACE THIS TRANSPORT MUST NOT GUESS. 5xx means the message will
  * never be accepted and retrying spends the attempt budget to reach the same
  * answer; 4xx means not now. Collapsing them costs real mail in both
- * directions — the same split `sesTransport.classify` makes for a different
+ * directions - the same split `sesTransport.classify` makes for a different
  * provider's vocabulary.
  *
  * ⚠ AND WE DO NOT TRUST `receipt.retryable`, WHICH IS THE IMPORTANT PART. upyo
  * sets it from a structured classification when it recognises the failure and
- * from SUBSTRING MATCHING ON THE ERROR TEXT when it does not — and that fallback
+ * from SUBSTRING MATCHING ON THE ERROR TEXT when it does not - and that fallback
  * ends `{ category: "unknown", retryable: false }`. Taken at face value, a TLS
  * handshake failure ("unable to verify the first certificate" matches nothing)
  * would be permanent, and every message in the queue would be destroyed by a
@@ -265,11 +265,11 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
  *
  * ⚠ THE `smtp.` PREFIX IS WHAT SEPARATES THE TWO, AND IT IS NOT A COINCIDENCE.
  * upyo emits `code: "smtp.…"` only from branches where it recognised a specific
- * condition — a numeric reply, or a deterministic local fault like an envelope
+ * condition - a numeric reply, or a deterministic local fault like an envelope
  * it will not accept or a message past the server's size limit. Its text-matching
  * fallback produces bare codes (`network`, `unknown`, `timeout`) with no prefix.
  * So the prefix means "upyo knows what this is", and its absence means "upyo
- * guessed" — which is exactly the line we want to draw.
+ * guessed" - which is exactly the line we want to draw.
  */
 function classify(receipt: Extract<SmtpReceipt, { successful: false }>): SendOutcome {
   const reason = receipt.errorMessages.join("; ") || "relay failed"
@@ -286,7 +286,7 @@ function classify(receipt: Extract<SmtpReceipt, { successful: false }>): SendOut
     // cause. The session is ours to fix and the mail is still deliverable, so
     // it waits.
     //
-    // The message-phase commands — `MAIL FROM`, `RCPT TO`, `DATA` — are the
+    // The message-phase commands - `MAIL FROM`, `RCPT TO`, `DATA` - are the
     // only ones whose 5xx is about this message.
     const command = commandOf(error?.providerDetails)
     if (command !== null && !MESSAGE_PHASE.has(command)) {
@@ -294,7 +294,7 @@ function classify(receipt: Extract<SmtpReceipt, { successful: false }>): SendOut
     }
 
     // ⚠ AND THE SAME EVENT CAN ARRIVE IN THE MESSAGE PHASE, BECAUSE THE RELAY
-    // TAKES NO CREDENTIAL. What `535` on AUTH used to mean — "not you" — now
+    // TAKES NO CREDENTIAL. What `535` on AUTH used to mean - "not you" - now
     // comes back as a refusal of the envelope, and it is still about us: a
     // rule in plan.ndjson not applied, a listener that still demands AUTH, a
     // return path the sender rule refuses. Each answers identically for every
@@ -315,7 +315,7 @@ function classify(receipt: Extract<SmtpReceipt, { successful: false }>): SendOut
   // so retrying only spends the attempt budget.
   if (code.startsWith("smtp.")) return { status: "rejected", reason }
 
-  // Everything else — a socket that never opened, a TLS handshake that failed, a
+  // Everything else - a socket that never opened, a TLS handshake that failed, a
   // connection closed mid-command, or a message upyo could only guess at. None
   // of those is evidence about the message.
   return { status: "deferred", reason }
@@ -332,9 +332,9 @@ const MESSAGE_PHASE = new Set(["MAIL FROM", "RCPT TO", "DATA"])
  * ⚠ READ FROM STALWART'S SOURCE (v0.16.19, `smtp/src/inbound`), NOT FROM THE
  * RFCs, BECAUSE THE CODES ARE ITS CHOICES:
  *
- *   RCPT TO    550 5.1.2 Relay not allowed.          — `allowRelaying` said no
- *   MAIL FROM  503 5.5.1 You must authenticate first. — the port demands AUTH
- *   MAIL FROM  550 5.7.1 Sender address not allowed.  — `isSenderAllowed` said no
+ *   RCPT TO    550 5.1.2 Relay not allowed.          - `allowRelaying` said no
+ *   MAIL FROM  503 5.5.1 You must authenticate first. - the port demands AUTH
+ *   MAIL FROM  550 5.7.1 Sender address not allowed.  - `isSenderAllowed` said no
  *
  * ⚠ THE ENHANCED CODE AND NOT THE TEXT. Wording changes between releases; the
  * status code is what the reply is classified by everywhere else. And it is

@@ -7,7 +7,7 @@ import { failureFor, relativeName, zoneFor } from "../src/dns/port.js"
  * ⚠ THESE THREE FUNCTIONS DECIDE WHERE SOMEBODY ELSE'S DNS GETS WRITTEN, which
  * makes them the highest-consequence pure code in the product. Every failure
  * here is silent: the request succeeds, the provider is happy, and the record
- * simply exists somewhere that resolves for nobody — discovered days later as
+ * simply exists somewhere that resolves for nobody - discovered days later as
  * "delegation did nothing".
  */
 
@@ -17,7 +17,7 @@ describe("picking the zone a record belongs in", () => {
   /**
    * ⚠ THE LONGEST SUFFIX, NOT THE FIRST MATCH. An account can hold both
    * `example.com` and `mail.example.com` as separate zones, and our own
-   * delegation puts records at `send.mail.example.com` — which belongs in the
+   * delegation puts records at `send.mail.example.com` - which belongs in the
    * second. Picking the first would write it into the parent, where it is inert
    * and looks published.
    */
@@ -89,7 +89,7 @@ describe("naming a record relative to its zone", () => {
 describe("whose fault a provider's refusal is", () => {
   /**
    * ⚠ THE DISTINCTION DRIVES A DIFFERENT DIALOG, and collapsing it sends
-   * everybody to reconnect — including the people for whom reconnecting will
+   * everybody to reconnect - including the people for whom reconnecting will
    * produce the identical failure, because their token is alive and simply
    * lacks the scope.
    */

@@ -12,7 +12,7 @@ import { useResetOnOpen } from "@/lib/react"
 
 /**
  * ⚠ THE FOLDER IS A PATH TYPED BY HAND, NOT A PICKER. Folders here are a flat
- * string column rendered as a tree — there is nothing to create and nothing to
+ * string column rendered as a tree - there is nothing to create and nothing to
  * choose from until one exists. A picker would have to offer "new folder…" as
  * its first option, which is a text field with extra steps.
  */
@@ -22,7 +22,7 @@ export function NewTemplateButton() {
   const [folder, setFolder] = React.useState("")
   const [open, setOpen] = React.useState(false)
 
-  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES — emptying the fields on
+  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES - emptying the fields on
   // close does it while the dialog is still animating out, which reads as
   // the input being wiped from under you. Adjusted during render rather
   // than in an effect; see lib/react.ts.
@@ -42,7 +42,7 @@ export function NewTemplateButton() {
         </Button>
       }
       title="New template"
-      description="Names are unique within a workspace — your code references this one by id, not by name."
+      description="Names are unique within a workspace - your code references this one by id, not by name."
       submitLabel="Create"
       canSubmit={name.trim().length > 0}
       onSubmit={() =>
@@ -68,7 +68,7 @@ export function NewTemplateButton() {
         onChange={(event) => setFolder(event.target.value)}
         autoComplete="off"
         className="font-mono text-xs"
-        hint="Optional. Use slashes to nest — it is only a label for the list."
+        hint="Optional. Use slashes to nest - it is only a label for the list."
       />
     </FormDialog>
   )

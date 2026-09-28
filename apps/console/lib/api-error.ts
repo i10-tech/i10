@@ -2,8 +2,8 @@
  * The envelope every failure in this console is rendered from.
  *
  * ⚠ IT LIVES HERE RATHER THAN IN `api.ts` BECAUSE `api.ts` IS `server-only`.
- * This is a pure fact about a wire format — no session, no fetch, nothing that
- * must not reach a browser bundle — and keeping it behind that import meant it
+ * This is a pure fact about a wire format - no session, no fetch, nothing that
+ * must not reach a browser bundle - and keeping it behind that import meant it
  * could not be tested without pulling a server module into the test runner.
  */
 export interface ApiError {
@@ -17,7 +17,7 @@ export interface ApiError {
  *
  * ⚠ THE WHOLE BODY IS KEPT, AND REBUILDING IT FIELD BY FIELD WAS A REAL BUG
  * RATHER THAN A TIDINESS QUESTION. This used to construct a fresh object from
- * `statusCode`, `name` and `message` and discard everything else — which
+ * `statusCode`, `name` and `message` and discard everything else - which
  * silently defeated three features that had already shipped:
  *
  *   - `publish-records` reads `body.conflicts`, the records standing in the
@@ -46,7 +46,7 @@ export function normaliseError(
     message: `The API answered ${status}.`,
   }
 
-  // ⚠ A BODY WITH NO MESSAGE IS NOT AN API ERROR ENVELOPE — it is an ingress
+  // ⚠ A BODY WITH NO MESSAGE IS NOT AN API ERROR ENVELOPE - it is an ingress
   // page or a proxy's JSON. Spreading it would produce an object with no
   // sentence to render.
   if (!json || typeof json.message !== "string") return fallback

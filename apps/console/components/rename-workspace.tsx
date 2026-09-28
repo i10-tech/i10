@@ -15,12 +15,12 @@ import { useSyncedState } from "@/lib/react"
  *
  * ⚠ IT USED TO END IN `router.refresh()`, WHICH IS A RE-RENDER OF EVERY SERVER
  * COMPONENT ON THE PAGE FOR ONE STRING. The settings tree, the shell, the rail
- * — all re-fetched and reconciled a beat after Save, which reads as the page
+ * - all re-fetched and reconciled a beat after Save, which reads as the page
  * blinking. The action no longer revalidates either; see `renameWorkspace`.
  *
  * ⚠ AND THE NAME IN THE RAIL IS CLERK'S, NOT OURS, SO A REFRESH WOULD NOT HAVE
  * FIXED IT ANYWAY. `WorkspaceBar` renders Clerk's `<OrganizationSwitcher>`,
- * which reads its own client-side store — re-rendering our server tree leaves
+ * which reads its own client-side store - re-rendering our server tree leaves
  * it showing the old name until Clerk happens to refetch. The rename reaches
  * Clerk on the server (`clerk.organizations.updateOrganization`), so the fix
  * is to tell Clerk's client to re-read the organization it already has.
@@ -33,7 +33,7 @@ export function RenameWorkspace({
   /**
    * ⚠ PASSED FROM THE SERVER, THE SAME WAY `WorkspaceBar` TAKES IT. Clerk's
    * hooks throw outside a `<ClerkProvider>`, and the provider is only mounted
-   * when a publishable key exists — so the hook has to live in a child that
+   * when a publishable key exists - so the hook has to live in a child that
    * is not rendered at all in the fallback.
    */
   clerkEnabled: boolean
@@ -41,7 +41,7 @@ export function RenameWorkspace({
   const router = useRouter()
   // ⚠ FOLLOWS THE SERVER VALUE WHEN IT CHANGES. Without that, saving leaves the
   // input holding what you typed while the rest of the page has re-rendered
-  // from the server — fine until somebody renames it in another tab, at which
+  // from the server - fine until somebody renames it in another tab, at which
   // point this field silently disagrees with the heading above it.
   const [name, setName] = useSyncedState(current)
 
@@ -50,14 +50,14 @@ export function RenameWorkspace({
    * moment this component stopped refreshing the page.
    *
    * ⚠ WITHOUT IT, A RENAME CANNOT BE UNDONE WITHOUT A RELOAD. The guard used
-   * to compare against `current`, which is a server prop — and with no
+   * to compare against `current`, which is a server prop - and with no
    * refresh it still says "testing" after a save to "testing 2". So typing
    * "testing" back matched the prop, the button disabled itself, and the form
    * insisted that the name it was showing was already in place when it was
    * not. Reported straight after the refresh came out.
    *
-   * ⚠ IT IS STILL SYNCED TO THE SERVER, so a rename in another tab — or any
-   * navigation that re-renders this page — moves both this and the field
+   * ⚠ IT IS STILL SYNCED TO THE SERVER, so a rename in another tab - or any
+   * navigation that re-renders this page - moves both this and the field
    * together, which is what `current` was doing correctly before.
    */
   const [saved, setSaved] = useSyncedState(current)
@@ -73,9 +73,9 @@ export function RenameWorkspace({
 
   /*
    * ⚠ THE CHILD HANDS THE FUNCTION OVER RATHER THAN WRITING INTO A REF WE
-   * PASS DOWN. The compiler refuses the second shape — a ref arriving as a
+   * PASS DOWN. The compiler refuses the second shape - a ref arriving as a
    * prop is somebody else's value and mutating it is exactly the kind of
-   * cross-component write it exists to stop — so the write happens here, in
+   * cross-component write it exists to stop - so the write happens here, in
    * the component that owns the ref.
    */
   const holdReload = React.useCallback((reload: () => Promise<void>) => {
@@ -161,7 +161,7 @@ export function RenameWorkspace({
  * decision, legally expressed.
  *
  * ⚠ IT RENDERS NOTHING. The name it refreshes is drawn by Clerk's own switcher
- * in the rail, several components away — this exists only to reach it.
+ * in the rail, several components away - this exists only to reach it.
  */
 function OrganizationReload({
   onReady,

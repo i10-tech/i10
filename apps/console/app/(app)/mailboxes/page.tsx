@@ -15,10 +15,10 @@ export const metadata: Metadata = { title: "Mailboxes" }
 /**
  * The human half of i10.
  *
- * ⚠ FIXTURE — THE PAGE IS REAL AND THE DATA IS NOT WIRED YET. `/mailboxes` on
+ * ⚠ FIXTURE - THE PAGE IS REAL AND THE DATA IS NOT WIRED YET. `/mailboxes` on
  * the API is SESSION authenticated and already works; what it does not have is
  * a LIST that the console's tenant-scoped surface can read. The mailbox routes
- * answer for the signed-in PERSON (their own mailboxes), not for the tenant —
+ * answer for the signed-in PERSON (their own mailboxes), not for the tenant -
  * deliberately, because a mailbox belongs to whoever holds it rather than to
  * whoever pays the bill.
  *
@@ -39,7 +39,7 @@ export default function MailboxesPage() {
           <PageTitle>Mailboxes</PageTitle>
         </PageHeaderRow>
         <PageDescription>
-          Real IMAP mailboxes on your own domains — one address, one password, the same
+          Real IMAP mailboxes on your own domains - one address, one password, the same
           account you sign in with.
         </PageDescription>
       </PageHeader>
@@ -57,7 +57,7 @@ export default function MailboxesPage() {
             <p className="font-medium">What exists today</p>
             <p className="text-muted-foreground">
               A domain marked as hosting mailboxes accepts mail through our own MTA and
-              authenticates over LDAP against your i10 account — so a mailbox holder has
+              authenticates over LDAP against your i10 account - so a mailbox holder has
               one password, not two. Creating one is an API call that takes your
               session, not an API key.
             </p>

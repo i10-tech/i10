@@ -3,14 +3,14 @@
 # Did the commit CI just pushed actually reach production, and did it come up?
 #
 # ⚠ "DID IT COME UP" RATHER THAN "IS EVERYTHING HEALTHY", AND THE DIFFERENCE IS
-# LOAD-BEARING — see §2. This answers for the rollout it was given a sha for; it
+# LOAD-BEARING - see §2. This answers for the rollout it was given a sha for; it
 # does not answer for the Application as a whole, because Argo's aggregate
 # health folds in every failed CronJob Job and one of those blocked every deploy
 # for reasons no deploy could fix.
 #
 # ⚠ THIS EXISTS BECAUSE "PUSHED" AND "DEPLOYED" WERE THE SAME SENTENCE IN THE
 # WORKFLOW SUMMARY AND ARE NOT THE SAME EVENT. CI pinned the digests, pushed,
-# and declared the rollout done — while Argo had not yet polled, the image had
+# and declared the rollout done - while Argo had not yet polled, the image had
 # not been pulled, and nothing had started. Every failure after that point was
 # invisible to the pipeline: a bad manifest, a missing secret, an
 # ImagePullBackOff, a container that crashlooped on a config error. The first
@@ -18,20 +18,20 @@
 #
 # ⚠ IT RUNS ON THE BOX, NOT ON THE RUNNER, BECAUSE THE CONTROL PLANE IS NOT
 # EXPOSED. `argocd-server` is a ClusterIP with no ingress and the Kubernetes API
-# is not public — deliberately. The alternative is publishing one of them to the
+# is not public - deliberately. The alternative is publishing one of them to the
 # internet so a CI runner can call it, which trades a lot of attack surface for
 # a convenience. SSH is already open and already audited.
 #
 # ⚠ AND IT IS THE FORCED COMMAND FOR CI'S KEY. `authorized_keys` pins this
 # script with `command=`, so the key GitHub holds cannot open a shell, read a
-# secret or change a workload — it can ask this one question and read the
+# secret or change a workload - it can ask this one question and read the
 # answer. See infra/scripts/README.md.
 #
 # Usage:  verify-rollout.sh <argo-revision-sha> [images] [image-tag-sha]
 #
 # `argo-revision-sha` is the DEPLOY commit Argo must reach; `image-tag-sha` is
-# the commit the images are TAGGED with. They differ — see the note by
-# IMAGE_SHA — and conflating them made §4 unpassable.
+# the commit the images are TAGGED with. They differ - see the note by
+# IMAGE_SHA - and conflating them made §4 unpassable.
 
 set -uo pipefail
 
@@ -41,7 +41,7 @@ set -uo pipefail
 
 # ⚠ SET EXPLICITLY, BECAUSE k3s's `kubectl` IGNORES `~/.kube/config` BY DEFAULT.
 # The binary at /usr/local/bin/kubectl is k3s, which points itself at
-# /etc/rancher/k3s/k3s.yaml unless KUBECONFIG says otherwise — and that file is
+# /etc/rancher/k3s/k3s.yaml unless KUBECONFIG says otherwise - and that file is
 # root-only. The CI user has its own client certificate and its own config, so
 # without this line every kubectl below fails with "permission denied", each one
 # into /dev/null, and the script reports a rollout that never came up rather than
@@ -56,12 +56,12 @@ APP="${I10_APP:-i10-workloads}"
 
 # ⚠ EVERY APP THAT CAN CARRY A BUILT IMAGE, NOT JUST THE ONE WE WAIT ON. CI
 # rebuilds `i10-authd`, whose only deployment is a SIDECAR in the Stalwart
-# StatefulSet — which belongs to the `i10-stalwart` Application, not to
+# StatefulSet - which belongs to the `i10-stalwart` Application, not to
 # `i10-workloads`. So §4 asserted an image owned by an app this script never
 # refreshed and never waited for, and failed on a race it had no part in.
 #
 # ⚠ THEY ARE NUDGED BUT NOT GATED ON. Requiring every app to reach `Synced`
-# would re-couple this check to unrelated failures — exactly what §2 stopped
+# would re-couple this check to unrelated failures - exactly what §2 stopped
 # doing. Refreshing them costs nothing, removes the three-minute wait, and §3
 # then waits for the workloads themselves, which is the honest bar.
 APPS="${I10_APPS:-$APP i10-stalwart}"
@@ -76,7 +76,7 @@ ROLLOUT_TIMEOUT="${I10_ROLLOUT_TIMEOUT:-240}"
 # ── the argument ─────────────────────────────────────────────────────────────
 
 # ⚠ READ FROM `SSH_ORIGINAL_COMMAND` WHEN THERE IS ONE, because that is where a
-# forced command finds what the client asked for — and it is validated to
+# forced command finds what the client asked for - and it is validated to
 # characters that cannot form a command. A forced command that interpolated an
 # unvalidated string would be a remote shell with extra steps.
 RAW="${*:-${SSH_ORIGINAL_COMMAND:-}}"
@@ -87,14 +87,14 @@ IMAGES="$(printf '%s' "$SAFE" | awk '{print $2}' | tr -dc '0-9a-z,-')"
 
 # ⚠ A THIRD ARGUMENT, BECAUSE THE TWO SHAS ARE NOT THE SAME COMMIT AND §4 HAD
 # BEEN COMPARING THE WRONG ONE SINCE IT WAS WRITTEN. Argo syncs to the DEPLOY
-# commit — the one CI creates when it pins the digests — while the images are
+# commit - the one CI creates when it pins the digests - while the images are
 # tagged `prod-${GITHUB_SHA}`, the MERGE commit that triggered the build. The
 # deploy commit always comes after, so `prod-<deploy sha>` is a tag that does
 # not exist and never will.
 #
 # ⚠ THE EFFECT WAS A CHECK THAT COULD NOT PASS. §4 reported "stale images" on
 # every single deploy, including ones where exactly the right image was running
-# — which is indistinguishable, in the job summary, from a rollout that really
+# - which is indistinguishable, in the job summary, from a rollout that really
 # did not land. Two failing checks were hiding each other.
 #
 # ⚠ IT DEFAULTS TO `SHA` SO AN OLD CALLER STILL WORKS, and a deployment that
@@ -126,7 +126,7 @@ done
 
 # ⚠ THIS WAITS FOR `Synced`, NOT FOR `Healthy`, AND THAT NARROWING IS
 # DELIBERATE. Argo's app health is the WORST health of every resource it owns,
-# and that set includes the CronJobs — so one failed Job holds the whole
+# and that set includes the CronJobs - so one failed Job holds the whole
 # Application at `Degraded` until its history rolls over. `i10-billing-reconcile`
 # has been failing every thirty minutes on three Polar subscriptions that no
 # code change can fix, which made this check fail EVERY deploy, for a reason
@@ -141,7 +141,7 @@ done
 # deploy commit and nothing else; §3 waits for every Deployment to finish
 # rolling, which is what catches a crashloop, an ImagePullBackOff or a bad
 # config; and §4 asserts the new tag is in a live pod spec. Both of today's
-# broken images — the ones whose entrypoints had moved to `dist/src/` — were
+# broken images - the ones whose entrypoints had moved to `dist/src/` - were
 # caught by §3 and §4, not by aggregate health.
 #
 # ⚠ HEALTH IS STILL READ AND STILL REPORTED, one line below, because a Degraded
@@ -165,7 +165,7 @@ while (( SECONDS < deadline )); do
 done
 
 if [[ "$synced" != true ]]; then
-  echo "verify-rollout: FAILED — Argo did not reach ${SHORT}" >&2
+  echo "verify-rollout: FAILED - Argo did not reach ${SHORT}" >&2
   echo "  revision: ${revision:-<none>}" >&2
   echo "  sync:     ${sync:-<none>}" >&2
   echo "  health:   ${health:-<none>}" >&2
@@ -181,9 +181,9 @@ echo "verify-rollout: Argo is synced to ${SHORT}"
 if [[ "$health" != "Healthy" ]]; then
   # ⚠ TO STDOUT AND NOT stderr, AND IT DOES NOT SET A FAILURE. This is the line
   # that keeps the fact visible now that it no longer blocks: something in the
-  # Application is unwell, and it is somebody's job — just not this job's, and
+  # Application is unwell, and it is somebody's job - just not this job's, and
   # not this deploy's fault.
-  echo "verify-rollout: WARNING — the Application is ${health}, which this deploy"
+  echo "verify-rollout: WARNING - the Application is ${health}, which this deploy"
   echo "  did not necessarily cause. Not failing on it; the rollout checks below"
   echo "  are what decide. Worth looking at:"
   kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null \
@@ -195,7 +195,7 @@ fi
 failed=()
 
 # ⚠ STATEFULSETS AND DAEMONSETS TOO, NOT ONLY DEPLOYMENTS. The list used to be
-# `kubectl get deployments`, which silently skipped Stalwart — the StatefulSet
+# `kubectl get deployments`, which silently skipped Stalwart - the StatefulSet
 # that carries the `i10-authd` sidecar. §4 then asserted that image was running
 # at the new tag having never waited for the thing that rolls it, so a deploy
 # that rebuilt authd failed on timing rather than on anything being wrong.
@@ -230,7 +230,7 @@ done < <(
 )
 
 if (( ${#failed[@]} > 0 )); then
-  echo "verify-rollout: FAILED — not ready: ${failed[*]}" >&2
+  echo "verify-rollout: FAILED - not ready: ${failed[*]}" >&2
   exit 1
 fi
 
@@ -244,7 +244,7 @@ fi
 #
 # ⚠ AND IT IS SKIPPED WHEN NO IMAGE WAS REBUILT, which is most infrastructure
 # commits. A deploy that only edits a manifest pins no new tag, so demanding one
-# would fail every such change — the caller says what it built.
+# would fail every such change - the caller says what it built.
 if [[ -n "$IMAGES" ]]; then
   missing=()
   IFS=',' read -ra wanted <<< "$IMAGES"
@@ -261,7 +261,7 @@ if [[ -n "$IMAGES" ]]; then
   done
 
   if (( ${#missing[@]} > 0 )); then
-    echo "verify-rollout: FAILED — stale images: ${missing[*]}" >&2
+    echo "verify-rollout: FAILED - stale images: ${missing[*]}" >&2
     exit 1
   fi
 fi

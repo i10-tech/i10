@@ -14,7 +14,7 @@ import {
  * things a forged `email.bounced` can do to a customer are not small: mark a
  * user's address dead, unsubscribe them, fire an alert, roll back a signup. The
  * signature is the only thing between their endpoint and anyone who learns its
- * URL — and URLs leak, through logs, browser history, and screenshots.
+ * URL - and URLs leak, through logs, browser history, and screenshots.
  *
  * ⚠ THE TIMESTAMP IS PART OF THE SIGNED MATERIAL, NOT A HEADER BESIDE IT. Sign
  * only the body and a captured request stays valid forever: anyone who sees one
@@ -22,8 +22,8 @@ import {
  * `timestamp.body` means a replay is detectable, because the timestamp cannot
  * be changed without breaking the signature and a stale one can be refused.
  *
- * ⚠ THE WIRE FORMAT IS STANDARD WEBHOOKS, NOT OURS. It was a bespoke scheme —
- * a bare hex digest over `timestamp.body` in an `i10-signature` header — until
+ * ⚠ THE WIRE FORMAT IS STANDARD WEBHOOKS, NOT OURS. It was a bespoke scheme -
+ * a bare hex digest over `timestamp.body` in an `i10-signature` header - until
  * 2026-09-04, when it moved to the published spec while there were still no
  * customers holding the old one. See `docs/decisions/metering.md`.
  *
@@ -34,7 +34,7 @@ import {
  * ⚠ THE SIGNED MATERIAL IS `id.timestamp.body`, AND THE ID BEING IN IT IS THE
  * POINT. Under the old scheme the delivery id travelled beside the signature
  * rather than inside it, so anyone replaying a captured delivery could rewrite
- * it — and a receiver deduplicating on that id would treat one replayed event
+ * it - and a receiver deduplicating on that id would treat one replayed event
  * as many distinct ones.
  *
  * ⚠ THE LIST IS WHAT MAKES ROTATION POSSIBLE, and it is why the header is not
@@ -45,7 +45,7 @@ import {
  * ⚠ THE HMAC KEY IS THE DECODED BYTES, NOT THE PRINTABLE SECRET. `whsec_…` is
  * a base64 payload behind a prefix. Keying with the string as typed produces a
  * different digest that verifies fine against our own code and fails against
- * every off-the-shelf Standard Webhooks library — which is the whole reason we
+ * every off-the-shelf Standard Webhooks library - which is the whole reason we
  * moved. `webhooks/svix.ts` decodes the same way for the inbound direction.
  *
  * `test/webhook-signing.test.ts` and `packages/next/test/webhook.test.ts` pin
@@ -112,7 +112,7 @@ const digest = (secret: string, id: string, timestamp: string, body: string) =>
  *
  * ⚠ CONSTANT TIME, AND NOT AS A MICRO-OPTIMISATION. `===` on a digest returns
  * as soon as two bytes differ, so the time it takes leaks how much of a guess
- * was right — enough to recover a valid signature one byte at a time against an
+ * was right - enough to recover a valid signature one byte at a time against an
  * endpoint that answers quickly. An unparseable entry is skipped rather than
  * rejected outright, because a list may legitimately carry versions we do not
  * implement.
@@ -129,7 +129,7 @@ export function matchesAnySignature(expected: Buffer, header: string): boolean {
       continue
     }
     // timingSafeEqual throws on a length mismatch, so guard first. The length
-    // is not a secret — the digest is a fixed 32 bytes.
+    // is not a secret - the digest is a fixed 32 bytes.
     if (candidate.length === expected.length && timingSafeEqual(candidate, expected)) {
       return true
     }
@@ -153,7 +153,7 @@ export function verifySignature(
   if (!Number.isFinite(t)) return false
 
   // ⚠ BOTH DIRECTIONS. Refusing only old timestamps lets a forger with a
-  // skewed clock — or a deliberately future one — mint a signature that stays
+  // skewed clock - or a deliberately future one - mint a signature that stays
   // valid for as long as they chose.
   if (Math.abs(Math.floor(now.getTime() / 1000) - t) > toleranceSeconds) return false
 
@@ -168,7 +168,7 @@ export function verifySignature(
 
 /**
  * ⚠ CONSTANT-TIME COMPARISON, IN ONE PLACE. `timingSafeEqual` throws on a
- * length mismatch, so every caller needs the same length guard first — and
+ * length mismatch, so every caller needs the same length guard first - and
  * three copies of that guard is three chances for one of them to become `===`
  * during a refactor, which is a leak nothing would ever fail on.
  */
@@ -185,15 +185,15 @@ export function equalSecrets(expected: string, given: string): boolean {
  * COMPARED. The delivery worker needs the secret back to sign with it, so the
  * one-way storage a password gets is not available. What is available is
  * separating the two halves: the ciphertext lives in Postgres and the key lives
- * in the environment, so a stolen backup — the most likely way a database
- * leaves the building — carries nothing usable.
+ * in the environment, so a stolen backup - the most likely way a database
+ * leaves the building - carries nothing usable.
  *
  * ⚠ AES-256-GCM, SO THE CIPHERTEXT IS AUTHENTICATED. Without the tag, a row
  * edited by anyone with write access decrypts to a different secret and the
  * only symptom is every signature silently failing verification at the
  * customer's end.
  *
- * Format: `v1.<iv base64url>.<tag base64url>.<ciphertext base64url>` — versioned
+ * Format: `v1.<iv base64url>.<tag base64url>.<ciphertext base64url>` - versioned
  * so a future key rotation or algorithm change can be recognised rather than
  * guessed.
  */

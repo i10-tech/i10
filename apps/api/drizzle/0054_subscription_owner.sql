@@ -2,7 +2,7 @@
 --
 -- ⚠ THIS EXISTS BECAUSE POLAR'S `external_id` IS IMMUTABLE, WHICH TURNS A
 -- SURVIVABLE MISATTRIBUTION INTO A PERMANENT ONE. Polar deduplicates customers
--- by email and stamps `external_id` only when it CREATES one — so a customer
+-- by email and stamps `external_id` only when it CREATES one - so a customer
 -- who deletes their workspace and signs up again carries their OLD tenant id
 -- for ever. `release_subscription` (0047) fixed the direction where the live
 -- tenant is claiming the id; this answers the other direction, which is every
@@ -17,7 +17,7 @@
 -- ⚠ SECURITY DEFINER BECAUSE THE CALLER IS SCOPED TO THE WRONG TENANT. The
 -- webhook arrives attributed to the tenant Polar names; under
 -- `core.subscriptions`'s policy the row belonging to the tenant that actually
--- bought is invisible, so the caller cannot discover the disagreement at all —
+-- bought is invisible, so the caller cannot discover the disagreement at all -
 -- it can only crash into the unique index, which is what it did.
 --
 -- ⚠ IT RETURNS ONE UUID AND NOTHING ELSE. Same rule as `release_subscription`

@@ -15,7 +15,7 @@ describe("what the lookup asks for", () => {
   /**
    * ⚠ THE ASSERTION THIS FILE EXISTS FOR. `core.api_keys` carries
    * `tenant_isolation`, which reads `current_setting('app.tenant_id')` strictly
-   * — and verification runs to DISCOVER the tenant, so there is none set when
+   * - and verification runs to DISCOVER the tenant, so there is none set when
    * it runs. Read off the table directly this does not return the wrong row; it
    * raises `unrecognized configuration parameter` on the first request after
    * every deploy, which is precisely the failure that has bitten this codebase
@@ -27,7 +27,7 @@ describe("what the lookup asks for", () => {
     expect(statement).not.toContain("from core.api_keys")
   })
 
-  // The hash is bound, never interpolated — it is attacker-supplied material.
+  // The hash is bound, never interpolated - it is attacker-supplied material.
   it("binds the hash as a parameter", () => {
     const { params, sql: statement } = render(resolveStatement("deadbeef"))
     expect(params).toEqual(["deadbeef"])
@@ -51,7 +51,7 @@ describe("reading a row back", () => {
    * ⚠ COERCED, BECAUSE postgres.js HAS BEEN OBSERVED RETURNING A TIMESTAMPTZ AS
    * A STRING BESIDE ONE IT PARSED. `planRow` declared `z.date()` on exactly such
    * a column and threw `expected date, received string` on the first real call
-   * in production — a 500 on every gate that resolves a plan. Accepting both is
+   * in production - a 500 on every gate that resolves a plan. Accepting both is
    * free; assuming one is not.
    */
   it("accepts timestamps the driver returned as strings", async () => {
@@ -91,7 +91,7 @@ describe("reading a row back", () => {
     expect(row?.revokedAt).toEqual(at)
   })
 
-  // ⚠ Null scopes must not become null on ResolvedKey — every consumer reads it
+  // ⚠ Null scopes must not become null on ResolvedKey - every consumer reads it
   // as an array, and one undefined here is a crash on a request path.
   it("reads a missing scopes column as empty rather than null", async () => {
     const row = await keyLookup(
@@ -117,11 +117,11 @@ describe("reading a row back", () => {
 
 describe("what actually reaches postgres on a write", () => {
   /**
-   * ⚠ A JS ARRAY BOUND INTO A RAW `sql` TEMPLATE RENDERS AS `($1, $2)` — A ROW
-   * CONSTRUCTOR — AND POSTGRES ANSWERS `cannot cast type record to text[]`.
+   * ⚠ A JS ARRAY BOUND INTO A RAW `sql` TEMPLATE RENDERS AS `($1, $2)` - A ROW
+   * CONSTRUCTOR - AND POSTGRES ANSWERS `cannot cast type record to text[]`.
    * That exact defect shipped in the meter's mark-shipped statement and was only
    * found in production. This is a DIFFERENT path: drizzle's typed `.array()`
-   * column has its own driver mapper, so it is expected to be fine — which is
+   * column has its own driver mapper, so it is expected to be fine - which is
    * exactly the kind of expectation worth pinning rather than believing.
    */
   it("binds scopes as one parameter, not as a row constructor", () => {

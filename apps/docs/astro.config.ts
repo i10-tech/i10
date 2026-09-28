@@ -6,7 +6,7 @@ import { tableScroll } from "@cloudflare/nimbus-docs/markdown"
 const nimbusConfig = defineNimbusConfig({
   // The canonical origin drives canonical URLs, absolute OG image URLs,
   // robots.txt, the sitemap and the links inside /llms.txt. A wrong value
-  // here is not cosmetic — it publishes links to a host that is not us.
+  // here is not cosmetic - it publishes links to a host that is not us.
   site: "https://docs.i10.tech",
   title: "i10",
   description: "Transactional and human email. Keep your code, change one import.",
@@ -19,7 +19,7 @@ const nimbusConfig = defineNimbusConfig({
 export default defineConfig({
   output: "static",
   // Tailwind v4 via its Vite plugin (the integration Astro recommends for
-  // Tailwind v4 — replaces the PostCSS plugin, which doesn't build under
+  // Tailwind v4 - replaces the PostCSS plugin, which doesn't build under
   // Astro 7's Vite 8 bundler).
   vite: {
     plugins: [tailwindcss()],
@@ -32,12 +32,12 @@ export default defineConfig({
   },
   integrations: [
     nimbus(nimbusConfig, {
-      // Authoring rules are opt-in by design — your repo, your taste. The
+      // Authoring rules are opt-in by design - your repo, your taste. The
       // two below are the load-bearing pair: frontmatter has to validate
       // against the content schema for the page to render properly, and
       // broken internal links are 404s for your readers. Add the others
       // (heading hierarchy, code-block language, style, etc.) when you're
-      // ready to enforce them — see `nimbus-docs lint --help`.
+      // ready to enforce them - see `nimbus-docs lint --help`.
       rules: {
         "nimbus/frontmatter-shape": "error",
         "nimbus/internal-link": "error",

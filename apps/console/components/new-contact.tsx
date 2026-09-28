@@ -14,7 +14,7 @@ import { useResetOnOpen } from "@/lib/react"
  * ⚠ ADDING SOMEBODY WHO ALREADY EXISTS IS AN UPSERT, NOT A CONFLICT. It is what
  * a person does when they are not sure whether the address is already there,
  * and a 409 for that is an error message for a non-error. What it does NOT do
- * is re-subscribe them — `unsubscribed` is deliberately absent from the upsert's
+ * is re-subscribe them - `unsubscribed` is deliberately absent from the upsert's
  * update set, because somebody's choice to opt out has to outlive our imports.
  */
 export function NewContactButton() {
@@ -23,7 +23,7 @@ export function NewContactButton() {
   const [lastName, setLastName] = React.useState("")
   const [open, setOpen] = React.useState(false)
 
-  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES — emptying the fields on
+  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES - emptying the fields on
   // close does it while the dialog is still animating out, which reads as
   // the input being wiped from under you. Adjusted during render rather
   // than in an effect; see lib/react.ts.
@@ -48,7 +48,7 @@ export function NewContactButton() {
       submitLabel="Add contact"
       /*
        * ⚠ THE BUTTON AND THE FIELD ASK THE SAME QUESTION NOW. This was
-       * `email.includes("@")`, which let `mido@` through to the API — and the
+       * `email.includes("@")`, which let `mido@` through to the API - and the
        * box beside it, once it learned the rule, would have refused the same
        * value. Two answers to one question is how a form ends up with a live
        * button that does nothing.

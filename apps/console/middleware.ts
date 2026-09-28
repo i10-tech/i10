@@ -4,15 +4,15 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
  * Signing in to dash.i10.tech.
  *
  * ⚠ THE CONSOLE HOSTS NO SIGN-IN PAGE. `apps/auth`, served at auth.i10.tech,
- * does — custom flows on Clerk's SDK rather than Clerk's hosted Account Portal.
+ * does - custom flows on Clerk's SDK rather than Clerk's hosted Account Portal.
  * This middleware only sends people there. Rendering a sign-in form here as
  * well would give one Clerk instance two sign-in surfaces that can drift, and
  * would put the "set your password" step inside the app that shows a tenant's
- * billing — which the invited mailbox holder has no business seeing.
+ * billing - which the invited mailbox holder has no business seeing.
  *
  * ⚠ EVERY SECRET IS READ FROM RUNTIME ENV AND PASSED EXPLICITLY, and the names
  * deliberately have NO `NEXT_PUBLIC_` PREFIX. Next replaces `NEXT_PUBLIC_*`
- * textually at BUILD time — even in server code — so a prefixed variable that
+ * textually at BUILD time - even in server code - so a prefixed variable that
  * is absent when `docker build` runs is compiled in as `undefined` and no
  * amount of setting it in the pod will bring it back. The image is built once
  * in CI and configured per environment by Doppler, so anything the build cannot
@@ -24,13 +24,13 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
  * last frame of a checkout: the customer has just paid, and if their session
  * lapsed while they were on Polar's site, gating it would answer their payment
  * with a login wall. It is safe to leave open because the page decides nothing
- * — it renders a verdict read from `core.subscriptions`, which only the
+ * - it renders a verdict read from `core.subscriptions`, which only the
  * signature-verified webhook can move, and the `checkout_id` it carries is a
  * lookup key rather than evidence of anything.
  *
  * ⚠ AND ITS PROXY ROUTE GOES WITH IT. `/api/checkout-status/*` is deliberately
- * unauthenticated upstream — see the route's own note on why it attaches no
- * credential — so protecting the page's data source while leaving the page open
+ * unauthenticated upstream - see the route's own note on why it attaches no
+ * credential - so protecting the page's data source while leaving the page open
  * would just make the page permanently say "still setting up".
  */
 /**
@@ -64,13 +64,13 @@ const PREVIEW =
 /**
  * ⚠ IN PREVIEW MODE `clerkMiddleware` IS NEVER CONSTRUCTED, NOT MERELY SHORT-
  * CIRCUITED INSIDE. Clerk throws "Missing publishableKey" from the middleware
- * itself, before the handler body runs — so an early `return` inside the
+ * itself, before the handler body runs - so an early `return` inside the
  * callback was not enough and every request 500'd. A ternary only evaluates the
  * branch it takes, so with no Clerk instance the factory is never called at
  * all.
  *
  * ⚠ AND THE FALLBACK RETURNS `undefined`, WHICH MEANS "CONTINUE". It is not a
- * permissive auth decision — there is no auth to decide. In a production build
+ * permissive auth decision - there is no auth to decide. In a production build
  * `PREVIEW` folds to `false` and this whole branch is removed by the bundler.
  */
 export default PREVIEW
@@ -93,7 +93,7 @@ export default PREVIEW
           if (!session.userId) {
             // ⚠ BACK TO ONBOARDING, NOT THE OFFER PAGE. A new account sets up
             // there, and its domain step lists offers addressed to it with an
-            // Accept button — so the domain they came for IS the first step.
+            // Accept button - so the domain they came for IS the first step.
             return session.redirectToSignUp({
               returnBackUrl: new URL("/onboarding", request.nextUrl).toString(),
             })
@@ -110,7 +110,7 @@ export default PREVIEW
          * ⚠ `secretKey` IS DELIBERATELY NOT PASSED, AND PASSING IT CRASHES THE APP.
          * Handing `clerkMiddleware` an explicit secret puts it in "dynamic keys"
          * mode, where the key is encrypted and propagated from the middleware to
-         * the server runtime — which requires `CLERK_ENCRYPTION_KEY`. Without one
+         * the server runtime - which requires `CLERK_ENCRYPTION_KEY`. Without one
          * it throws `encryption_key_missing` on EVERY request, so the pod starts,
          * answers 500 to everything including its own probe, and never goes ready.
          * The guard is literally `if (requestData.secretKey && !ENCRYPTION_KEY)`.
@@ -125,7 +125,7 @@ export default PREVIEW
         publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
         /**
          * ⚠ THESE MUST BE SET IN PRODUCTION, and pointed at auth.i10.tech. Left
-         * unset, Clerk falls back to inferring its own hosted Account Portal — so
+         * unset, Clerk falls back to inferring its own hosted Account Portal - so
          * forgetting them does not fail loudly, it quietly sends customers to a
          * sign-in page we did not build and cannot change. Clerk appends
          * `?redirect_url=` when it bounces someone, which apps/auth validates
@@ -158,8 +158,8 @@ export const config = {
    *     /data.json            before: protected  after: protected
    *
    * ⚠ IT IS DEFENCE IN DEPTH RATHER THAN A LIVE HOLE TODAY, AND IT IS WORTH
-   * HAVING ANYWAY. Neither bypass path currently resolves to a page — the App
-   * Router has no route shaped like `/domains/[id]/[rest]` — so today they 404
+   * HAVING ANYWAY. Neither bypass path currently resolves to a page - the App
+   * Router has no route shaped like `/domains/[id]/[rest]` - so today they 404
    * before reaching anything. That is a property of the current route tree, not
    * of this regex: the first catch-all segment anybody adds turns it into an
    * unauthenticated page, and nothing about adding one would suggest checking

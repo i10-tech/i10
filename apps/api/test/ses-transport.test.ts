@@ -79,7 +79,7 @@ describe("what reaches SES", () => {
     expect(inputOf(c as never).ConfigurationSetName).toBe("i10-prod")
   })
 
-  // ⚠ #156. A tenant is named only when the message carries one — the worker
+  // ⚠ #156. A tenant is named only when the message carries one - the worker
   // sets it only once the identity is recorded as attached, because SES refuses
   // a tenant send whose identity or configuration set it does not associate.
   it("names the SES tenant when the message carries one", async () => {
@@ -99,7 +99,7 @@ describe("what reaches SES", () => {
   //
   // ⚠ AND IT IS READ OUT OF THE RAW BYTES, WHICH IS THE WHOLE POINT. This used
   // to assert `Content.Simple.Headers`, and passed, while SES refused every
-  // such send with `Header <Message-ID> is not supported` — the header is
+  // such send with `Header <Message-ID> is not supported` - the header is
   // reserved there and can only travel in raw MIME.
   it("sets a Message-ID derived from our own id", async () => {
     const c = client()
@@ -130,7 +130,7 @@ describe("what reaches SES", () => {
 describe("tags", () => {
   // ⚠ OURS CANNOT BE OVERWRITTEN. `i10_message_id` matches an event back to the
   // message it describes; a customer tag of the same name would detach every
-  // bounce and complaint for that send from the row that explains it — and
+  // bounce and complaint for that send from the row that explains it - and
   // suppression, built from those events, would stop working for it.
   it("keeps i10's tag ahead of the caller's and refuses a collision", async () => {
     const c = client()

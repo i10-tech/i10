@@ -1,7 +1,7 @@
 /**
  * Public identifiers.
  *
- * Rows are keyed by UUIDv7 in Postgres — native `uuid`, so 16 bytes rather than
+ * Rows are keyed by UUIDv7 in Postgres - native `uuid`, so 16 bytes rather than
  * 36, and time-ordered, so inserts into the message tables stay at the right
  * edge of the index instead of scattering across it. What customers see is a
  * prefixed string, because `msg_…` in a log line says what it is and `dom_…`
@@ -36,7 +36,7 @@ export function encodeId(kind: IdKind, uuid: string): string {
  * `msg_0199a3f2…` → `0199a3f2-…`, or null.
  *
  * ⚠ IT RETURNS NULL RATHER THAN THROWING, AND THE KIND IS CHECKED. These
- * arrive from customer requests, so a malformed one is a 404 or a 422 — an
+ * arrive from customer requests, so a malformed one is a 404 or a 422 - an
  * ordinary answer, not an exception to handle at every call site. Checking the
  * kind is what stops a domain id in a message route from becoming a lookup that
  * happens to find nothing for a confusing reason.
@@ -67,8 +67,8 @@ export function decodeId(kind: IdKind, id: string): string | null {
  * big-endian millisecond timestamp in the first six bytes of a v7. Deriving the
  * partition from the id turns a fan-out into a single-partition seek.
  *
- * Returns null for anything that is not a v7 — an id minted by an older scheme,
- * or a v4 from a test fixture — so the caller falls back to a full lookup
+ * Returns null for anything that is not a v7 - an id minted by an older scheme,
+ * or a v4 from a test fixture - so the caller falls back to a full lookup
  * rather than reading a random number as a date.
  */
 export function timestampFromUuidV7(uuid: string): Date | null {

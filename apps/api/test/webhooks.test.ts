@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test"
 // ⚠ `mock.module` IS NOT HOISTED, WHICH IS WHY THE IMPORT BELOW IS DYNAMIC.
 // Vitest lifted `vi.mock` above every statement in the file and needed
 // `vi.hoisted` to get the double defined in time; bun runs this line where it
-// is written, so the double is an ordinary const — but a STATIC
+// is written, so the double is an ordinary const - but a STATIC
 // `import { createApp } from "../src/app.js"` would then be evaluated before
 // this line ran, and the route would hold the real writer. The `await import`
 // is load-bearing, not a leftover.
@@ -249,7 +249,7 @@ describe("a deletion arriving from Clerk", () => {
 
   /*
    * ⚠ IT RUNS OUTSIDE THE SVIX DEDUPE, WHICH IS THE POINT. `applyClerkEvent`
-   * claims the message id and answers `duplicate` on a redelivery — right for
+   * claims the message id and answers `duplicate` on a redelivery - right for
    * the projection, and fatal here: if the Polar revoke failed the first time,
    * the retry is the only thing that stops the billing.
    */

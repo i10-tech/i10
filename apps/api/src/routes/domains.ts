@@ -21,7 +21,7 @@ import { errorResponse, notWired as notWiredFor } from "./shared.js"
  *
  * ⚠ AND THERE IS NO `PATCH`. Resend's updates tracking pixels and TLS
  * enforcement, none of which i10 implements. A route that accepted the body and
- * did nothing would be worse than its absence — the customer would believe
+ * did nothing would be worse than its absence - the customer would believe
  * click tracking was on. A 404 says plainly that it is not there yet.
  */
 export const domains = new OpenAPIHono()
@@ -105,7 +105,7 @@ domains.openapi(
         )
       default:
         // ⚠ 403, NOT 429. A plan limit on a resource is not rate limiting and
-        // must not be retried — the SDKs back off on 429, and waiting will not
+        // must not be retried - the SDKs back off on 429, and waiting will not
         // create another domain. The fix is an upgrade or a deletion.
         return c.json(
           {
@@ -187,7 +187,7 @@ const verify = createRoute({
     "Asks the provider to re-check the DNS records. Verification is not " +
     "instant: a `pending` answer means the records have not propagated yet, " +
     "and `temporary_failure` means the lookup itself failed and is worth " +
-    "retrying — neither means the records are wrong.",
+    "retrying - neither means the records are wrong.",
   tags: ["Domains"],
   security: [{ bearerAuth: [] }],
   middleware: [requireApiKey] as const,
@@ -218,7 +218,7 @@ domains.openapi(verify, async (c) => {
     /*
      * ⚠ 200, NOT AN ERROR. The challenge record simply is not published yet,
      * which is the ordinary state of every delegated domain between being added
-     * and being set up — the same state a manual domain is in before its six
+     * and being set up - the same state a manual domain is in before its six
      * records resolve, which also answers 200. The domain comes back carrying
      * its record list, where the outstanding `Ownership` row is the signal.
      */
@@ -230,7 +230,7 @@ domains.openapi(verify, async (c) => {
     default:
       // ⚠ A RACE OVER THE NAME, NOT A VERDICT ON THEIR DNS. Proving a name takes
       // it from whoever holds it, so this is only ever two proofs landing at
-      // once — see the console route for the long version.
+      // once - see the console route for the long version.
       return c.json(
         {
           statusCode: 409,

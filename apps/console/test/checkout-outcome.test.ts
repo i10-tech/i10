@@ -7,7 +7,7 @@ import { isStatus, keepPolling, present, type Result } from "../lib/checkout-out
  * ⚠ THESE WERE UNREACHABLE WITHOUT A POLAR ACCOUNT AND A DECLINED CARD, which
  * is why "the redirect shows nothing" survived as long as it did. Success had a
  * banner; failure, abandonment and the in-flight second had none, because the
- * only way to arrive at this component was Polar's redirect — and nobody is
+ * only way to arrive at this component was Polar's redirect - and nobody is
  * redirected for changing their mind. The console now reports the outcome of a
  * checkout it closed itself, so all of them are reachable and all of them have
  * to be right.
@@ -79,8 +79,8 @@ describe("what the customer is told", () => {
 
   /*
    * ⚠ THE ONE PAID STATE THAT IS A DEAD END. The API tries to repair
-   * attribution itself — including reclaiming a Polar customer left behind by a
-   * deleted workspace — so reaching here means a human is needed, and the copy
+   * attribution itself - including reclaiming a Polar customer left behind by a
+   * deleted workspace - so reaching here means a human is needed, and the copy
    * must not promise a repair that cannot happen.
    */
   it("does not promise a repair for a payment nothing can attribute", () => {
@@ -144,7 +144,7 @@ describe("whether to keep asking", () => {
 
 /*
  * ⚠ THE GUARD THAT BROKE THIS ONCE. The proxy answers the API's own error shape
- * verbatim — `{ statusCode, name, message }` with no `status` at all — and
+ * verbatim - `{ statusCode, name, message }` with no `status` at all - and
  * casting that to a result made the poll STOP on a body that said nothing, and
  * render "we could not find that checkout" to somebody who had paid.
  */

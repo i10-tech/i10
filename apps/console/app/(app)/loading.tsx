@@ -4,12 +4,12 @@ import { Skeleton } from "@repo/ui/components/skeleton"
  * ⚠ A SKELETON WITH THE SHAPE OF A PAGE, NOT A CENTRED SPINNER. A spinner in
  * the middle of the content area makes every navigation feel like it went
  * somewhere blank; a header bar and a few rows keep the layout stable so the
- * real content lands in the space that was already reserved for it — no shift,
+ * real content lands in the space that was already reserved for it - no shift,
  * which is the thing people actually notice.
  *
  * ⚠ AND IT DOES NOT PULSE INDEFINITELY ANYWHERE THAT MATTERS. Tailwind's
  * `animate-pulse` is an infinite loop; the accessibility rules this design
- * system follows allow it because it is short-lived by construction — the
+ * system follows allow it because it is short-lived by construction - the
  * component unmounts the moment the route resolves.
  */
 export default function Loading() {

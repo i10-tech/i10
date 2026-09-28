@@ -2,7 +2,7 @@
 --
 -- ⚠ NOTHING HAS EVER LOOKED, AND DELETES HAVE BEEN FAILING SILENTLY THE WHOLE
 -- TIME. `remove` tidies the zones behind a deleted domain and is allowed to
--- fail doing it — deliberately, because the row is already gone and a 500 the
+-- fail doing it - deliberately, because the row is already gone and a 500 the
 -- customer cannot act on is worse than a leak. Every one of those failures is a
 -- zone left in `pdns` answering for a domain nobody owns, with a DKIM key and a
 -- return path in it, and the only record is a log line.
@@ -10,7 +10,7 @@
 -- ⚠ AND THE GUARD ABOVE IT WAS WRONG FOR EVERY OLD DOMAIN UNTIL 0051. Zones
 -- used to be published by `create`, before claims existed, so a delegated
 -- domain from before that change has three live zones and no row in
--- `core.delegations` — and the old `holdsZones` read that as "not mine" and
+-- `core.delegations` - and the old `holdsZones` read that as "not mine" and
 -- left them. This function is how the ones already stranded get found.
 --
 -- ⚠ IT MATCHES ONLY THE THREE NAMES WE ISSUE, AND THAT IS THE SAFETY PROPERTY.
@@ -21,7 +21,7 @@
 -- workspace anywhere holds a domain row for that name.
 --
 -- ⚠ `NOT EXISTS` OVER EVERY TENANT, NOT THIS ONE. A zone is in use if ANYBODY
--- holds the name — several workspaces may hold one name as pending, and the
+-- holds the name - several workspaces may hold one name as pending, and the
 -- zone belongs to whichever of them is being served. Scoping this per tenant
 -- would report a live zone as an orphan and delete somebody's mail routing.
 CREATE FUNCTION "core"."orphaned_zones"(p_limit int)
@@ -41,7 +41,7 @@ AS $$
       z.name       AS zone_name,
       -- ⚠ THE OFFSET IS COMPUTED, NOT COUNTED BY HAND. `_domainkey.` is eleven
       -- characters and `_dmarc.` is seven, and getting either off by one
-      -- silently yields a name that matches no domain row — which would report
+      -- silently yields a name that matches no domain row - which would report
       -- every zone as an orphan and delete all of them.
       CASE
         WHEN z.name LIKE '\_domainkey.%'

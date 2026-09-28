@@ -15,7 +15,7 @@ import type { DnsRecord } from "@/lib/types"
  * ELLIPSIS THAT WOULD BE COPIED. A DKIM public key is 200-odd characters of
  * base64 and the single most common setup failure is pasting a truncated one.
  * The cell scrolls horizontally instead, and the copy button carries the whole
- * value regardless of what is visible — which is why the button, not the text,
+ * value regardless of what is visible - which is why the button, not the text,
  * is the thing the instructions point at.
  *
  * ⚠ AND THE TABLE BECOMES A CARD LIST BELOW `md`. A six-column table on a phone
@@ -46,8 +46,8 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
       const value =
         record.type === "TXT"
           ? // ⚠ QUOTED, AND LONG VALUES SPLIT INTO 255-BYTE STRINGS. A TXT
-            // record longer than 255 bytes is invalid as a single string — the
-            // wire format transmits it in chunks that the resolver rejoins —
+            // record longer than 255 bytes is invalid as a single string - the
+            // wire format transmits it in chunks that the resolver rejoins -
             // and a DKIM key is always longer than that. Every zone file that
             // gets this wrong fails to load with a message about a string being
             // too long.
@@ -83,8 +83,8 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
               <tr key={`${record.type}-${record.name}-${index}`}>
                 {/*
                  * ⚠ THE SECOND LINE IS DROPPED WHEN IT REPEATS THE FIRST. The
-                 * two fields answer different questions — `type` is the DNS
-                 * record type, `record` is what the record is FOR — and for a
+                 * two fields answer different questions - `type` is the DNS
+                 * record type, `record` is what the record is FOR - and for a
                  * manual domain they differ usefully: TXT over "DKIM", MX
                  * over "SPF". For a delegated one every row is an NS record
                  * whose purpose is the delegation, so both fields say "NS"
@@ -111,7 +111,7 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
                   {/*
                    * ⚠ `justify-start`, AND THE VALUE DOES NOT GROW. It used to
                    * carry `flex-1`, which made the span eat the whole column and
-                   * stranded the copy button against the TTL header — a hand's
+                   * stranded the copy button against the TTL header - a hand's
                    * width away from `ns1.i10.tech`, and nowhere near the row it
                    * belonged to. The Name column beside it has always put its
                    * button directly after the text; the two columns disagreed on

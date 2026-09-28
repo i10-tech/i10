@@ -25,7 +25,7 @@ export const metadata: Metadata = { title: "Topics" }
  * ⚠ `default_subscription` IS IMMUTABLE ONCE A TOPIC EXISTS, AND THE UI SAYS SO
  * RATHER THAN DISABLING A CONTROL SILENTLY. Flipping a topic from opt-out to
  * opt-in would retroactively subscribe every contact who simply never answered
- * — marketing mail to people who did not ask for it, at scale, because of a
+ * - marketing mail to people who did not ask for it, at scale, because of a
  * dropdown. The API refuses the field with a 422 for the same reason.
  *
  * ⚠ AND THE SUBSCRIBER COUNT ACCOUNTS FOR THE DEFAULT. On an opt-in topic a
@@ -46,7 +46,7 @@ export default async function TopicsPage() {
           {/*
            * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
            * CARRIES THIS ACTION. Two buttons for one action, eight inches
-           * apart, reads as two different things — and the one in the header is
+           * apart, reads as two different things - and the one in the header is
            * the smaller and less explained of the two, so it wins attention it
            * has not earned. The empty state's version says what will happen;
            * this one just says a noun.

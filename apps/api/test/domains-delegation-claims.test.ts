@@ -12,7 +12,7 @@ import type { DelegationProbe } from "../src/domains/ownership.js"
  *
  * ⚠ THIS IS A PRIVILEGE BOUNDARY, NOT A TIDINESS RULE, AND THE REASON IS
  * CIRCULAR. A delegated domain is verified when SES resolves
- * `<selector>._domainkey.<domain>` — a lookup that follows the customer's NS
+ * `<selector>._domainkey.<domain>` - a lookup that follows the customer's NS
  * records into a zone WE serve. So writing the zone is not a record of a claim;
  * it is the act that MANUFACTURES the proof the claim is granted on. Whoever
  * can write the zone can verify, and whoever can verify can sign mail as that
@@ -72,10 +72,10 @@ function fakeDb(handlers: {
   claim?: () => unknown[]
   onClaimInsert?: () => void
   del?: () => void
-  /** `core.delegation_holder` — who a challenger must displace, if anybody. */
+  /** `core.delegation_holder` - who a challenger must displace, if anybody. */
   holder?: () => unknown[]
   /**
-   * `core.zone_owner` — who a delegated domain's zones belong to on delete.
+   * `core.zone_owner` - who a delegated domain's zones belong to on delete.
    *
    * ⚠ IT IS SEPARATE FROM `claim` BECAUSE THE QUESTION SPANS TENANTS AND THE
    * DRIZZLE READ DOES NOT. `claim` models this tenant's own row in
@@ -174,7 +174,7 @@ const spyZones = () => ({
  * ⚠ THE CLAIM IS IN THE NAMESERVER NAME, WHICH IS THE WHOLE DESIGN. There is no
  * challenge record any more: `<claim>.ns1.i10.tech` can only be published by
  * whoever holds the domain's DNS, and the label says whose claim it is. Passing
- * several claims is a domain whose parent lists more than one — a customer
+ * several claims is a domain whose parent lists more than one - a customer
  * mid-migration, or two workspaces that both hold the DNS.
  */
 const delegating = (...claims: string[]): DelegationProbe =>
@@ -236,7 +236,7 @@ describe("adding a delegated domain", () => {
    * necessary because every customer published the same two nameservers, so the
    * delegation established that SOMEBODY had delegated the name and nothing
    * about who. The claim now lives in the nameserver names themselves, which
-   * only the holder of the domain's DNS can publish — so the seventh record,
+   * only the holder of the domain's DNS can publish - so the seventh record,
    * and the explaining that went with it, are gone.
    */
   it("asks for six NS records carrying this row's claim, and nothing else", async () => {
@@ -256,7 +256,7 @@ describe("adding a delegated domain", () => {
     expect(records.map((r) => r.value)).toContain(`${OWNER_TOKEN}.ns1.i10.tech`)
 
     // ⚠ AND NEVER A BARE NAMESERVER NAME, which would prove only that somebody
-    // delegated to i10 — precisely the hole this design closes.
+    // delegated to i10 - precisely the hole this design closes.
     expect(records.some((r) => r.value === "ns1.i10.tech")).toBe(false)
     expect(records.some((r) => r.type === "TXT")).toBe(false)
   })
@@ -265,7 +265,7 @@ describe("adding a delegated domain", () => {
 describe("the squatter, verifying a domain they do not own", () => {
   /**
    * ⚠ THE WHOLE POINT. The stranger holds a row for `example.com` and the REAL
-   * OWNER has published a challenge — theirs, carrying the owner's token. The
+   * OWNER has published a challenge - theirs, carrying the owner's token. The
    * stranger's verify finds a challenge record at the right name and must still
    * refuse it, because the token is not the one issued to their row.
    */
@@ -300,8 +300,8 @@ describe("the squatter, verifying a domain they do not own", () => {
      * intent.
      *
      * ⚠ AND IT DISCLOSES NOTHING, which is the only reason this is acceptable.
-     * The message tells them these nameservers are i10's — a fact anybody can
-     * read with `dig NS send.example.com` — and never names the workspace
+     * The message tells them these nameservers are i10's - a fact anybody can
+     * read with `dig NS send.example.com` - and never names the workspace
      * holding it, the same restraint `create`'s conflict wording keeps. Acting
      * on the advice requires control of the domain's DNS, which a squatter by
      * definition does not have.
@@ -482,8 +482,8 @@ describe("deleting a delegated domain", () => {
    * what leaked every zone published before claims existed. Zones used to be
    * written by `create`; a delegated domain from before that change has three
    * live zones and no row in `core.delegations` at all. This deployment is
-   * entirely in that state — `core.delegations` is empty while `pdns` holds six
-   * zones — so the old rule left all of them behind on delete, answering for
+   * entirely in that state - `core.delegations` is empty while `pdns` holds six
+   * zones - so the old rule left all of them behind on delete, answering for
    * ever with a DKIM key and a return path for a domain nobody owns.
    */
   it("removes the zones when there is no claim and nobody else holds the name", async () => {
@@ -511,7 +511,7 @@ describe("deleting a delegated domain", () => {
   /**
    * ⚠ AND THE CROSS-TENANT GUARD SURVIVES THAT CHANGE, which is the only reason
    * it is safe to make. The hole the claim was invented to close needs TWO rows
-   * holding one name — a stranger with an unproven row deleting the zones of
+   * holding one name - a stranger with an unproven row deleting the zones of
    * whoever is actually being served. Two holders is exactly what the fallback
    * refuses, claim or no claim.
    */
@@ -536,7 +536,7 @@ describe("deleting a delegated domain", () => {
   /**
    * ⚠ AND A LOOKUP THAT THROWS MUST NOT FAIL THE DELETE. This read happens
    * BEFORE the row is removed, so anything it raises comes out of the route as
-   * "Could not delete the domain — Something went wrong." and the customer
+   * "Could not delete the domain - Something went wrong." and the customer
    * cannot delete their domain at all. It happened the first time this code met
    * a database without migration 0051: a missing function turned into an
    * undeletable domain. Leaving the zones is the cheap failure; refusing the
@@ -571,8 +571,8 @@ describe("deleting a delegated domain", () => {
 
   /**
    * ⚠ A FUNCTION THAT ANSWERED NOTHING MUST NOT READ AS "MINE". If the definer
-   * call returns no row at all — a migration not yet applied, a permission lost
-   * — the count falls back to zero, and zero must not satisfy "I am the only
+   * call returns no row at all - a migration not yet applied, a permission lost
+   * - the count falls back to zero, and zero must not satisfy "I am the only
    * holder". Failing in the cheap direction means leaving the zone.
    */
   it("removes no zone when the owner lookup answers nothing", async () => {
@@ -596,7 +596,7 @@ describe("deleting a delegated domain", () => {
  * ⚠ PROOF WAS ONE-SHOT, AND THAT IS NOT HOW DOMAINS WORK. A workspace that
  * proved `example.com` once keeps the claim and the verified badge for ever.
  * The registration lapses, somebody else buys it, and the new owner publishes
- * every record correctly and is told the name belongs to another workspace —
+ * every record correctly and is told the name belongs to another workspace -
  * while the previous owner keeps a verified sending identity for a domain that
  * is no longer theirs, which is the half that actually matters.
  */
@@ -615,7 +615,7 @@ const incumbent = (over: Record<string, unknown> = {}) => [
 ]
 
 /**
- * ⚠ THE LATEST PROOF WINS. This block used to pin the opposite — a contest in
+ * ⚠ THE LATEST PROOF WINS. This block used to pin the opposite - a contest in
  * which a holder who could still prove the name kept it, so a tie granted
  * nothing. That left an owner who lost the account their domain was in with no
  * way back: the old account's records were still in their DNS, so the old
@@ -664,7 +664,7 @@ describe("a domain somebody else holds", () => {
 
     expect(out.status).toBe("ok")
     // ⚠ UNDER THE HOLDER'S OWN TENANT, so row level security confines the
-    // two writes to their row — no definer function widens it.
+    // two writes to their row - no definer function widens it.
     expect(tenants).toContain(OTHER_TENANT)
     expect(sets).toContainEqual(
       expect.objectContaining({ status: "failed", displacedAt: NOW }),
@@ -736,8 +736,8 @@ describe("a domain somebody else holds", () => {
   })
 
   /**
-   * ⚠ A HOLDER WE COULD NOT RE-CHECK IS STILL MOVED — the challenger's proof is
-   * what decides now — but nothing is reported as left over, because a
+   * ⚠ A HOLDER WE COULD NOT RE-CHECK IS STILL MOVED - the challenger's proof is
+   * what decides now - but nothing is reported as left over, because a
    * question we failed to ask is not evidence of anything.
    */
   it("reports nothing left over when the holder cannot be re-checked", async () => {

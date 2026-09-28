@@ -12,7 +12,7 @@ const config: NextConfig = {
   /*
    * ⚠ THE BUILD DIRECTORY IS OVERRIDABLE SO THE PREVIEW CAN RUN ALONGSIDE THE
    * REAL CONSOLE. Next takes a lock on `.next`, so a second `next dev` in this
-   * directory refuses to start — which made `dev:preview` mutually exclusive
+   * directory refuses to start - which made `dev:preview` mutually exclusive
    * with `dev`, and reviewing the interface meant stopping the stack you were
    * reviewing it against. One variable, defaulting to the normal path, so
    * nothing about a real build changes.
@@ -25,13 +25,13 @@ const config: NextConfig = {
   /*
    * Security headers for every response.
    *
-   * ⚠ THE CONSOLE IS THE HIGHEST-VALUE PAGE IN THE PRODUCT — it mints API keys,
-   * changes plans and removes sending domains — so the cheapest protections
+   * ⚠ THE CONSOLE IS THE HIGHEST-VALUE PAGE IN THE PRODUCT - it mints API keys,
+   * changes plans and removes sending domains - so the cheapest protections
    * belong on it whether or not anything is known to be wrong today.
    *
    * ⚠ AND THE CSP IS DELIBERATELY A SUBSET WITH NO `script-src`. A strict
    * script policy on Next's App Router needs a per-request nonce threaded
-   * through the middleware, and a wrong one does not degrade — it blanks the
+   * through the middleware, and a wrong one does not degrade - it blanks the
    * page. These four directives cannot break a page that works: they constrain
    * where a document may be FRAMED, what a `<base>` may rewrite, where a form
    * may post, and whether plugins may load. Adding `script-src` with a nonce is
@@ -60,7 +60,7 @@ const config: NextConfig = {
                * ⚠ THIS IS THE ONE DIRECTIVE THAT COULD BREAK A PAGE, AND THE
                * PAGES TO WATCH ARE `/account` AND `/settings/team`. They embed
                * Clerk's `<UserProfile>` and `<OrganizationProfile>`, which talk
-               * to Clerk's Frontend API with `fetch` — and `form-action` governs
+               * to Clerk's Frontend API with `fetch` - and `form-action` governs
                * native form SUBMISSION, not `fetch`, so it should not apply.
                * That reasoning cannot be confirmed without a live Clerk
                * instance, which preview mode deliberately does not have. If
@@ -79,7 +79,7 @@ const config: NextConfig = {
           // ⚠ WITHOUT THIS, A BROWSER MAY SNIFF A JSON RESPONSE AS HTML and run
           // script it finds inside customer-controlled values.
           { key: "X-Content-Type-Options", value: "nosniff" },
-          // ⚠ PATHS HERE CARRY IDS — a domain id, a message id — and a full
+          // ⚠ PATHS HERE CARRY IDS - a domain id, a message id - and a full
           // Referer would hand them to every third-party URL somebody follows.
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           // ⚠ NOTHING ON THIS SURFACE NEEDS A CAMERA, A MICROPHONE OR A

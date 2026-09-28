@@ -1,4 +1,4 @@
-# Bulwark — JMAP webmail over the same Stalwart instance.
+# Bulwark - JMAP webmail over the same Stalwart instance.
 #
 # This is the half that makes i10 a mail SERVICE rather than a sending API,
 # and therefore the half that distinguishes it from Resend rather than
@@ -12,7 +12,7 @@
 # material in its fork lineage, preserved in its NOTICE). Section 13 is the
 # clause that matters: anyone who interacts with the software REMOTELY OVER A
 # NETWORK must be offered the corresponding source of the version they are
-# using — including our modifications.
+# using - including our modifications.
 #
 # So the position this deployment takes, deliberately:
 #
@@ -22,7 +22,7 @@
 #   MODIFYING IT IS A DECISION, NOT A TASK. The moment an i10 change ships
 #   here, §13 obliges publishing that change. That is tolerable for a client;
 #   it is exactly the reflex the PSL Mail read called fatal if it reaches the
-#   server — and Bulwark IS a server, a Next.js app we would be hosting.
+#   server - and Bulwark IS a server, a Next.js app we would be hosting.
 #
 # Which is also why this runs the published upstream image rather than a build
 # from a fork in this monorepo. Keeping i10 source and Bulwark source in
@@ -30,7 +30,7 @@
 #
 # If Bulwark has to be modified: fork it in its own repository with an
 # `upstream` remote and a long-lived branch, publish the fork, and minimise
-# the diff — every patched line is a permanent merge tax as well as a
+# the diff - every patched line is a permanent merge tax as well as a
 # permanent publication obligation. Ask upstream about commercial terms first;
 # that is the cheaper conversation.
 ---

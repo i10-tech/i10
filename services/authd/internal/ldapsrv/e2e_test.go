@@ -168,7 +168,7 @@ func newFixtureWith(t *testing.T, store projection.Store, v ldapsrv.Verifier, pe
 	// Shut down by closing the listener rather than calling srv.Stop().
 	//
 	// ldapserver has a data race between Serve, which assigns s.Listener, and
-	// Stop, which reads it — both unsynchronised (server.go:82 vs :186). Closing
+	// Stop, which reads it - both unsynchronised (server.go:82 vs :186). Closing
 	// the listener we own makes the accept loop return, and the only goroutine
 	// touching s.Listener is the one running Serve.
 	done := make(chan error, 1)

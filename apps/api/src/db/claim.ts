@@ -4,14 +4,14 @@ import { sql, type SQL } from "drizzle-orm"
  * Claiming a message for delivery.
  *
  * ⚠ THIS IS THE THING THAT STOPS TWO WORKERS SENDING THE SAME EMAIL, AND IT IS
- * NOT THE QUEUE. groupmq holds a lease in Redis — `reserve()` moves the job to a
+ * NOT THE QUEUE. groupmq holds a lease in Redis - `reserve()` moves the job to a
  * `processing` set with a deadline, `heartbeat()` extends it, `checkStalledJobs()`
  * hands it back if the worker dies. That is exactly the visibility timeout the
  * design calls for, and it is a LIVENESS mechanism: it guarantees the job gets
  * picked up again, not that it is only ever executed once.
  *
- * A lease can expire while the work is still running — a blocked event loop, a
- * long SES call, a paused container — and then two workers hold the same job
+ * A lease can expire while the work is still running - a blocked event loop, a
+ * long SES call, a paused container - and then two workers hold the same job
  * believing they own it. The compare-and-swap below is what makes that
  * survivable: whichever one wins the UPDATE sends, and the other gets no row
  * back and drops the job.
@@ -21,16 +21,16 @@ import { sql, type SQL } from "drizzle-orm"
  * ⚠ AND IT IS DELIBERATELY AT-LEAST-ONCE, NOT EXACTLY-ONCE. There is one window
  * this cannot close: the worker calls SES, SES accepts, and the process dies
  * before recording the result. The row says `sending`, the claim times out, and
- * a second worker cannot ask SES whether it already took that message — SES
+ * a second worker cannot ask SES whether it already took that message - SES
  * offers no request-level idempotency key. So it sends again.
  *
  * That is the agreed trade: a message that never arrives is a support ticket, a
- * duplicate is a shrug. One thing narrows it — the window is one statement wide,
+ * duplicate is a shrug. One thing narrows it - the window is one statement wide,
  * because the result is written immediately after the call returns.
  *
  * ⚠ THE SECOND MITIGATION HOLDS ON ONE ROUTE AND NOT THE OTHER. The retry
  * reuses the same RFC 5322 Message-ID, derived from the row's id, and receiving
- * systems collapse duplicates on it — but SES overwrites that header with its
+ * systems collapse duplicates on it - but SES overwrites that header with its
  * own before delivery, so each SES retry carries a different one and arrives as
  * a visibly separate email. Measured, and documented in AWS's SendRawEmail
  * reference.
@@ -49,7 +49,7 @@ import { sql, type SQL } from "drizzle-orm"
  * `core.messages` is partitioned by `created_at`, so its primary key is
  * `(id, created_at)` and every lookup needs the pair. The id is a UUIDv7 and
  * does carry a timestamp, but the column defaults to `now()` in the same
- * statement — the two are microseconds apart, not equal. The embedded one is
+ * statement - the two are microseconds apart, not equal. The embedded one is
  * good enough to prune partitions with a range predicate and wrong for an
  * equality match, which is the one place it would silently return nothing.
  */
@@ -95,14 +95,14 @@ export interface ClaimOptions {
  * Returns only the rows this worker actually won: the UPDATE ... RETURNING is
  * one statement, so the check and the take cannot be separated by another
  * transaction. Anything missing from the result belongs to somebody else and
- * must be dropped rather than retried — retrying is how a lost race turns into
+ * must be dropped rather than retried - retrying is how a lost race turns into
  * a duplicate send.
  *
  * ⚠ AND IT IS WHAT ACTUALLY HONOURS `scheduled_at`. The queue delays the job,
  * but Redis is a prompt and this is the record: a delayed job promoted early, a
  * sweep that re-enqueues a waiting row, or a hand-run of the worker would all
  * otherwise send a message before its time. The predicate makes an early send
- * impossible rather than unlikely — and a row that is not yet due simply is not
+ * impossible rather than unlikely - and a row that is not yet due simply is not
  * returned, which the handler already treats as "somebody else's", drops, and
  * leaves for the delayed job to bring back.
  *
@@ -162,14 +162,14 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
  * handed the same value so the two sides cannot disagree across a midnight
  * boundary. Re-deriving it from the worker's own `Date.now()` would put the two
  * a few milliseconds apart, which is enough to make one day short and the next
- * long — and the reconciler tops up the short one on every run.
+ * long - and the reconciler tops up the short one on every run.
  *
  * ⚠ GUARDED ON `status = 'sending'` AND ON THE CLAIM. A worker whose lease
  * expired mid-send may still be alive and may still reach this line, by which
  * time another worker owns the row and may already have sent it. Writing
  * unconditionally would overwrite the second worker's `provider_message_id`
  * with the first's, and the event stream would then join to a message id we no
- * longer hold — a delivery that appears to belong to nothing.
+ * longer hold - a delivery that appears to belong to nothing.
  *
  * ⚠ `sent_route` IS WRITTEN HERE AND NOWHERE ELSE, FOR THE SAME REASON AS THE
  * id BESIDE IT. Both are facts about the attempt that actually succeeded, so

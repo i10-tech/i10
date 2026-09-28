@@ -6,7 +6,7 @@ import { unmetered, type Metering } from "../src/send/metering.js"
 /**
  * The route, end to end through Hono, with the persistence faked.
  *
- * Authentication is stubbed by injecting an apiKeyAuth that always verifies —
+ * Authentication is stubbed by injecting an apiKeyAuth that always verifies -
  * `requireApiKey` is covered by its own tests, and what these assert is the
  * mapping from an accept outcome to a status code, which is the part every SDK
  * on the compatibility path reads.
@@ -89,7 +89,7 @@ describe("POST /emails", () => {
   it("queues it", async () => {
     const { app: a, enqueue } = app()
     await post(a, "/emails", body)
-    // ⚠ transactional, not bulk — a single send is the one somebody is waiting
+    // ⚠ transactional, not bulk - a single send is the one somebody is waiting
     // for.
     expect(enqueue).toHaveBeenCalledWith("transactional", expect.anything())
   })
@@ -137,7 +137,7 @@ describe("POST /emails", () => {
    * name is the only thing that can tell a caller which.
    *
    * ⚠ AND THE OLD BEHAVIOUR HERE WAS A 200. The send was accepted, written and
-   * queued, then refused by SES at delivery — so the caller got an id for mail
+   * queued, then refused by SES at delivery - so the caller got an id for mail
    * that was never going anywhere, and the only trace was a `failed` row.
    */
   it("answers 403 when the from domain is not verified", async () => {
@@ -151,7 +151,7 @@ describe("POST /emails", () => {
     expect(await res.json()).toMatchObject({ name: "domain_not_verified" })
   })
 
-  // ⚠ 429 with daily_quota_exceeded, which is what makes an SDK back off — and
+  // ⚠ 429 with daily_quota_exceeded, which is what makes an SDK back off - and
   // the name is what distinguishes it from a rate limit, which is retryable.
   it("answers 429 when over quota", async () => {
     const { app: a } = app(
@@ -178,7 +178,7 @@ describe("POST /emails", () => {
 
   // ⚠ THE VALIDATION THAT PROTECTS THE SEND PATH RATHER THAN THE CALLER. Each of
   // these would otherwise reach the worker and fail somewhere it cannot be
-  // explained — or, worse, succeed in a way nobody wanted.
+  // explained - or, worse, succeed in a way nobody wanted.
   describe("attachments and tags", () => {
     const file = {
       filename: "receipt.pdf",
@@ -262,7 +262,7 @@ describe("POST /emails", () => {
     })
 
     // A scheduled message holds a row, a body and a delayed job for its whole
-    // wait — and its partition is dropped long before a date two years out.
+    // wait - and its partition is dropped long before a date two years out.
     it("refuses a time beyond the horizon", async () => {
       const { app: a } = app()
       const far = new Date(Date.now() + 400 * 24 * 3600 * 1000).toISOString()

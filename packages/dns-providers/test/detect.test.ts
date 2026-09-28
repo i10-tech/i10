@@ -14,7 +14,7 @@ import {
  * ⚠ THE FIRST BLOCK IS A SECURITY TEST, NOT A TIDINESS ONE. Anybody can name
  * their own nameserver. If the match were a substring rather than a suffix on a
  * label boundary, a third party could choose which provider's mark and which
- * "Connect" dialog we put in front of a customer — and that dialog asks them to
+ * "Connect" dialog we put in front of a customer - and that dialog asks them to
  * paste a credential that can rewrite their MX records.
  */
 describe("matchesPattern", () => {
@@ -123,7 +123,7 @@ describe("detectProvider", () => {
   /**
    * ⚠ NS1 IS THE BACKEND FOR NETLIFY, WIX AND SQUARESPACE. Without the backend
    * tiebreak, `dns1.p04.nsone.net` would win on pattern length for a large share
-   * of Netlify customers and send them to NS1's dashboard — an answer that is
+   * of Netlify customers and send them to NS1's dashboard - an answer that is
    * true about the nameservers and useless about where to click.
    */
   test("prefers the branded provider over the backend that serves it", () => {
@@ -157,7 +157,7 @@ describe("detectProvider", () => {
 /**
  * ⚠ THE RESOLVERS CAN NEVER BE DETECTED, BY CONSTRUCTION. 8.8.8.8 and 9.9.9.9
  * hold nobody's records and cannot appear in an NS record set. They are in the
- * registry only so a picker can list them and correct the misconception — a
+ * registry only so a picker can list them and correct the misconception - a
  * "Connect Google Public DNS" button would be offering something that cannot
  * exist.
  */
@@ -210,7 +210,7 @@ describe("registry integrity", () => {
   /**
    * ⚠ THE DESTRUCTIVE-WRITE FLAG IS THE MOST DANGEROUS FIELD IN THE REGISTRY.
    * This pins the known set so that removing one is a deliberate act with a
-   * failing test attached, rather than a quiet edit — an adapter that assumes
+   * failing test attached, rather than a quiet edit - an adapter that assumes
    * an additive write against any of these DELETES the customer's MX records.
    */
   test("the providers whose writes replace the whole zone are the known ones", () => {
@@ -252,7 +252,7 @@ describe("registry integrity", () => {
 
 /**
  * ⚠ THESE PIN THE BACKEND COLLAPSE, WHICH IS EASY TO BREAK BY ACCIDENT. Before
- * it existed the Netlify case passed anyway — `netlifydns.com` is simply a
+ * it existed the Netlify case passed anyway - `netlifydns.com` is simply a
  * longer string than `nsone.net`, so longest-pattern happened to give the right
  * answer. That is an accident of spelling, not a rule, and the first
  * NS1-hosted brand with a short domain would have broken it silently.

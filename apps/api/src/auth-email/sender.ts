@@ -9,7 +9,7 @@ import type { AuthEmailSend, AuthEmailSender } from "./deliver.js"
  * point of doing this at all. The send path is where DKIM signing, the
  * suppression list, the message log, delivery events and the retrying worker
  * live. A separate direct-to-SES path for auth mail would be a second sender
- * with none of that — invisible in the dashboard, ignoring suppressions, and
+ * with none of that - invisible in the dashboard, ignoring suppressions, and
  * bouncing repeatedly at an address that already hard-bounced, which is exactly
  * how a sending domain's reputation is destroyed.
  */
@@ -18,7 +18,7 @@ export interface AuthEmailSenderOptions {
    * i10's own tenant.
    *
    * ⚠ RESOLVED BY SLUG AT BOOT, NEVER HARDCODED. The id is generated per
-   * deployment — migration 0029 makes the same point when it attributes
+   * deployment - migration 0029 makes the same point when it attributes
    * i10.tech by slug. A literal uuid would silently send nothing anywhere but
    * the deployment it was copied from.
    */
@@ -35,7 +35,7 @@ export interface AuthEmailSenderOptions {
  * `acceptSend` refuses a tenant that is out of budget, which is right for a
  * customer's mail and catastrophic for ours: nobody could verify an address or
  * reset a password because i10 had sent too much of its own mail that month.
- * Usage is still RECORDED — `track` passes straight through — so the volume is
+ * Usage is still RECORDED - `track` passes straight through - so the volume is
  * visible; it simply cannot bar the door.
  */
 function unmetered(metering: Metering): Metering {
@@ -61,7 +61,7 @@ export function authEmailSender(options: AuthEmailSenderOptions): AuthEmailSende
           apiKeyId: null,
           endpoint: "single",
           // ⚠ CLERK'S EMAIL ID. The send path refuses to write the same key
-          // twice, which is what makes a Svix redelivery harmless — see
+          // twice, which is what makes a Svix redelivery harmless - see
           // deliver.ts.
           idempotencyKey: input.idempotencyKey,
           payloads: [
@@ -78,7 +78,7 @@ export function authEmailSender(options: AuthEmailSenderOptions): AuthEmailSende
       )
 
       // ⚠ THROWN, NOT SWALLOWED, SO THE WEBHOOK ANSWERS 500 AND SVIX RETRIES.
-      // The alternative — logging and returning 200 — tells Clerk the mail was
+      // The alternative - logging and returning 200 - tells Clerk the mail was
       // handled and loses somebody's verification code permanently. The
       // idempotency key above is what makes the retry safe.
       if (outcome.status !== "accepted") {

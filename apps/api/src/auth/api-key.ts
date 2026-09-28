@@ -10,16 +10,16 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
  * request. Measured on the live API: 1119ms cold against 353ms warm, where an
  * unauthenticated 401 costs 180ms of pure round trip. Roughly 900ms of every
  * cold send was spent asking a third party a question about a row we already
- * owned — more than the SES call it was authenticating.
+ * owned - more than the SES call it was authenticating.
  *
  * ⚠ AND CLERK WAS NEVER WHAT TIED A KEY TO A TENANT. Its `subject` is a
  * `user_…` or `org_…`; our tenant is neither. This file read `claims.tenantId`
- * — a claim we stamped ourselves at creation — and ignored `subject` entirely.
+ * - a claim we stamped ourselves at creation - and ignored `subject` entirely.
  * The link was always `core.api_keys.tenant_id`.
  *
  * ⚠ WHAT WENT AWAY WITH IT IS WORTH KNOWING. Clerk publishes no way to change
  * its `ak_` prefix, so keys were rewritten to `i10_live_…` outbound and back
- * inbound — and since both our prefixes are nine characters, `i10_live_X` and
+ * inbound - and since both our prefixes are nine characters, `i10_live_X` and
  * `i10_test_X` stripped to ONE Clerk secret. The mode therefore could not be
  * read from the string without letting anyone promote a test key to a live one
  * by editing a character. Hashing the whole key, prefix included, makes those
@@ -50,7 +50,7 @@ export interface ResolvedKey {
   /**
    * ⚠ i10'S OWN `core.api_keys.id`, WHERE THIS USED TO BE CLERK'S `ak_…`. It is
    * the value written to `core.messages.api_key_id`, so the send path no longer
-   * has to look the row up to attribute a message — see send/accept-db.ts.
+   * has to look the row up to attribute a message - see send/accept-db.ts.
    */
   apiKeyId: string
   tenantId: string
@@ -69,7 +69,7 @@ export type VerifyOutcome =
    * ⚠ STILL HERE, AND STILL NOT COLLAPSIBLE INTO `rejected`, THOUGH THE THING
    * THAT CAN FAIL HAS CHANGED. It used to mean "Clerk did not answer"; it now
    * means "the database did not answer". A 401 tells a customer their key is
-   * wrong, and their next move is to rotate a key that was fine — during an
+   * wrong, and their next move is to rotate a key that was fine - during an
    * outage that was never theirs. Same rule as services/authd answering LDAP
    * `unavailable` rather than `invalidCredentials`.
    */
@@ -132,12 +132,12 @@ export function hashKey(key: string): string {
  * The part shown in the dashboard: `i10_live_a1b2c3d4`.
  *
  * ⚠ EIGHT CHARACTERS OF A 256-BIT SECRET, WHICH LEAVES ABOUT 208 BITS. Stored
- * in the clear, so a database read hands them over — irrelevant at this
+ * in the clear, so a database read hands them over - irrelevant at this
  * entropy, and it stops being irrelevant the moment anybody shortens the
  * secret. Shorten one and not the other and this becomes a real disclosure.
  *
  * ⚠ THE LITERAL PREFIX IS THE HALF THAT EARNS ITS KEEP. `i10_live_` is what
- * makes a leaked key findable by grepping repositories, logs and paste sites —
+ * makes a leaked key findable by grepping repositories, logs and paste sites -
  * showing only secret characters would identify a key to its owner and to
  * nobody scanning for one.
  */
@@ -186,8 +186,8 @@ export interface VerifyDeps {
  * The cache key.
  *
  * ⚠ DERIVED FROM THE HASH, NOT FROM THE PLAINTEXT, AND THIS IS WHAT MAKES
- * REVOCATION IMMEDIATE. Revocation happens in a route that has the key's ROW —
- * its id and its `secret_hash` — and never the secret itself, which nothing
+ * REVOCATION IMMEDIATE. Revocation happens in a route that has the key's ROW -
+ * its id and its `secret_hash` - and never the secret itself, which nothing
  * stores. Keying the cache on the plaintext would leave no way to evict the
  * entry at that moment, and "instant revocation" would quietly mean "within the
  * TTL", which is the exact behaviour this change set out to remove.
@@ -268,7 +268,7 @@ export async function verifyApiKey(
 
 /**
  * ⚠ CONSTANT-TIME, THOUGH THE LOOKUP ABOVE DOES NOT NEED IT. Exported for
- * comparing two hashes where one came from a request — rotation confirming a
+ * comparing two hashes where one came from a request - rotation confirming a
  * caller holds the key it is replacing, say. Timing-safe comparison of the HASH
  * is free; comparing secrets themselves is what this exists to avoid.
  */

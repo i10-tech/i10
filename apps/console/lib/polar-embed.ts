@@ -13,25 +13,25 @@
  *
  * `confirmed` and `success` carry the identical guard. So their ✕ was not
  * broken, it was returning early; the `success` event did not go missing, it
- * was never sent; and `PolarEmbedCheckout.create()` — which resolves only when
- * the `loaded` message arrives — never resolved at all. That last one is why
+ * was never sent; and `PolarEmbedCheckout.create()` - which resolves only when
+ * the `loaded` message arrives - never resolved at all. That last one is why
  * the modal was a trap rather than merely a nuisance: everything this module
  * does ran AFTER that `await`, so the close button was never drawn, Escape was
  * never bound, and the status poll never started. A payment form covering the
- * whole viewport with nothing listening behind it. The field is now sent — see
+ * whole viewport with nothing listening behind it. The field is now sent - see
  * `embed_origin` in apps/api/src/billing/polar.ts.
  *
  * ⚠ AND NOTHING HERE WAITS FOR THEM ANY MORE, WHICH IS THE PART THAT SURVIVES
  * THE NEXT REGRESSION. Escape and the status poll are live before the iframe is
- * asked to announce itself, so a checkout that never says `loaded` — a future
+ * asked to announce itself, so a checkout that never says `loaded` - a future
  * change on their side, an origin that stops matching, a blocked third-party
- * frame — is a modal somebody can still close and a payment we still notice.
+ * frame - is a modal somebody can still close and a payment we still notice.
  * Correct configuration should not be what stands between a customer and the
  * Escape key.
  *
  * ⚠ THE ✕ IS THE HALF THAT HAD TO BECOME CONDITIONAL, BECAUSE THE FIX WORKED.
  * With `embed_origin` sent, Polar's page renders its own close button and
- * announces itself — so an unconditional one of ours is simply a second ✕ in
+ * announces itself - so an unconditional one of ours is simply a second ✕ in
  * the same corner of somebody's payment form. It is now built up front and
  * shown only if `loaded` has not arrived; see `THEIRS_SHOULD_HAVE_LOADED_MS`.
  * The recovery is kept, the duplicate is not.
@@ -57,12 +57,12 @@ export interface OpenCheckoutOptions {
   /** Fired once the payment is known to have succeeded, however we learn it. */
   onSuccess(): void
   /**
-   * Fired when the modal goes away without a known success — the ✕, Escape, or
+   * Fired when the modal goes away without a known success - the ✕, Escape, or
    * Polar's own close.
    *
    * ⚠ IT EXISTS BECAUSE "NOTHING HAPPENED" WAS THE ONLY OUTCOME WITH NO
    * FEEDBACK AT ALL. A card that is declined, a checkout that expires while the
-   * tab sits open, somebody who closes the form — all three used to end with the
+   * tab sits open, somebody who closes the form - all three used to end with the
    * overlay vanishing and the page underneath completely unchanged, which is
    * indistinguishable from the Upgrade button not working. The caller uses this
    * to ask our own status endpoint what actually became of the checkout.
@@ -83,8 +83,8 @@ export interface OpenCheckoutOptions {
 /**
  * ⚠ THE POLL IS NO LONGER THE ONLY THING STANDING BETWEEN A CUSTOMER AND A
  * DEAD MODAL, BUT IT IS STILL WORTH KEEPING. Polar's page waits for actual
- * fulfilment before posting `success` — `listenFulfillment` in their
- * `useCheckoutConfirmedRedirect` — and on timeout it deliberately posts
+ * fulfilment before posting `success` - `listenFulfillment` in their
+ * `useCheckoutConfirmedRedirect` - and on timeout it deliberately posts
  * NOTHING and navigates its own iframe to a confirmation page instead. That is
  * a correct decision on their side and an invisible one on ours, so
  * `/api/checkout-status/{id}` reads the row our own webhook writes and
@@ -109,7 +109,7 @@ export async function openPolarCheckout(
 
   /*
    * ⚠ STARTED, NOT AWAITED. `create()` appends the iframe synchronously and
-   * returns a promise that settles on their `loaded` message — so the frame is
+   * returns a promise that settles on their `loaded` message - so the frame is
    * on screen either way, and awaiting it here is what used to make every
    * escape route conditional on their page being correctly configured.
    */
@@ -117,8 +117,8 @@ export async function openPolarCheckout(
 
   /*
    * ⚠ EVERY TEARDOWN PATH GOES THROUGH ONE FUNCTION, AND IT IS IDEMPOTENT.
-   * There are four ways out of here — our button, Escape, Polar's `success`,
-   * and the caller — and three of them can happen in any order. Removing a
+   * There are four ways out of here - our button, Escape, Polar's `success`,
+   * and the caller - and three of them can happen in any order. Removing a
    * listener twice is free; leaving one attached keeps a key handler alive for
    * the rest of the session, listening for Escape over a page that no longer
    * has a modal on it.
@@ -181,7 +181,7 @@ export async function openPolarCheckout(
    * One way out, whether Polar told us or we found out ourselves.
    *
    * ⚠ IDEMPOTENT, BECAUSE BOTH PATHS CAN FIRE. If the event arrives and the
-   * poll also comes back `paid`, `onSuccess` would otherwise run twice — two
+   * poll also comes back `paid`, `onSuccess` would otherwise run twice - two
    * toasts and two router refreshes for one payment. `teardown` already guards
    * on `done`; this reads the same flag before doing anything else.
    */
@@ -195,7 +195,7 @@ export async function openPolarCheckout(
 
   /**
    * ⚠ IT CHECKS `done` BEFORE CALLING BACK, NOT ONLY BEFORE TEARING DOWN.
-   * `teardown` is idempotent, so the old code could run it twice harmlessly —
+   * `teardown` is idempotent, so the old code could run it twice harmlessly -
    * but Polar fires its own `close` event immediately after a successful
    * payment closes the frame, and reporting that as a dismissal would have the
    * page ask "what happened to this checkout" one beat after it had already
@@ -247,20 +247,20 @@ export async function openPolarCheckout(
    * ⚠ IT IS BUILT NOW AND SHOWN ONLY IF THEIRS NEVER ARRIVES, WHICH IS THE
    * WHOLE OF THE DIFFERENCE BETWEEN THIS AND TWO CLOSE BUTTONS. Polar draws its
    * own ✕ inside the checkout page, so it exists from the moment that page
-   * renders — and `loaded` is the page announcing exactly that. Ours was
+   * renders - and `loaded` is the page announcing exactly that. Ours was
    * appended unconditionally while `embed_origin` was missing and `loaded`
    * therefore never came; now that the field is sent, both appear and the
    * modal has two identical buttons in the same corner.
    *
    * ⚠ SO THE ESCAPE HATCH STAYS, AND ONLY THE DUPLICATE GOES. A checkout
-   * that never says `loaded` — a blocked third-party frame, an origin that
-   * stops matching, the next regression on their side — is still a payment form
+   * that never says `loaded` - a blocked third-party frame, an origin that
+   * stops matching, the next regression on their side - is still a payment form
    * covering the viewport, and the reason this module exists is that there was
    * no way out of one. Deleting the button because it is currently redundant
    * would delete the recovery along with it.
    *
    * ⚠ THE DELAY IS A CEILING ON A LOAD, NOT A GUESS AT ONE. Before the page
-   * renders there is nothing to duplicate — their ✕ is not there either — so
+   * renders there is nothing to duplicate - their ✕ is not there either - so
    * showing ours early on a slow connection costs nothing and is removed the
    * moment `loaded` lands. Escape is bound throughout and never duplicates
    * anything.
@@ -272,7 +272,7 @@ export async function openPolarCheckout(
   /*
    * ⚠ THEIR EVENTS ARE WIRED WHEN THE INSTANCE ARRIVES, AND EVERYTHING ABOVE
    * WORKS WITHOUT IT. `loaded` always precedes `confirmed` and `success`, so
-   * nothing can be missed by attaching here — and if it never arrives, the
+   * nothing can be missed by attaching here - and if it never arrives, the
    * button, the key handler and the poll are already live.
    *
    * ⚠ AND THE REJECTION IS SWALLOWED DELIBERATELY. `create()` does not reject
@@ -309,7 +309,7 @@ export async function openPolarCheckout(
        * ⚠ AND `preventDefault()` STOPS THEM NAVIGATING THE PARENT, WHICH IS
        * THE LAST BLIP AND THE ONLY ONE THAT WAS NEVER OURS. Our success URL is
        * external, so their default handler sends the whole window to
-       * `…?checkout_id=…` — a full page load a second after the modal closes.
+       * `…?checkout_id=…` - a full page load a second after the modal closes.
        * That is what survived every refresh we removed downstream: the toast
        * about the payment died with the document, the banner and the tick came
        * back animating from nothing because the tree was new, and the plan
@@ -322,7 +322,7 @@ export async function openPolarCheckout(
        * `history.replaceState`, so a reload still lands on the same screen.
        *
        * ⚠ THE EVENT IS CANCELABLE AND THE SDK CHECKS `defaultPrevented`
-       * BEFORE ITS OWN HANDLER RUNS — read from @polar-sh/checkout's bundle,
+       * BEFORE ITS OWN HANDLER RUNS - read from @polar-sh/checkout's bundle,
        * where every posted message becomes a `CustomEvent` with
        * `cancelable: true`.
        */
@@ -365,7 +365,7 @@ export async function openPolarCheckout(
         .then((body: { status?: string } | null) => {
           // ⚠ BOTH WORDS MEAN THE MONEY LANDED. `paid` is the checkout having
           // succeeded; `granted` is that plus the entitlement being live. The
-          // modal has no business staying open for either — the difference
+          // modal has no business staying open for either - the difference
           // belongs to the page underneath, which says "allowances appear as
           // soon as it clears".
           if (body?.status === "paid" || body?.status === "granted") succeed()
@@ -394,13 +394,13 @@ const READABLE_FOR_MS = 20_000
  * MINUTES. Measured against the sandbox 2026-09-26: `b408fd81…` was created at
  * 21:46:34, answered `404` to our own token at ~21:48, and `200 open` at ~21:50.
  * Their checkout page reads it the same way, and its 404 is served with
- * `frame-ancestors 'none'` — so an iframe opened in that window shows Chrome's
+ * `frame-ancestors 'none'` - so an iframe opened in that window shows Chrome's
  * "sandbox.polar.sh refused to connect", which looked like an embedding-host
  * misconfiguration and was not one. Flaky by exactly as much as their lag is.
  *
  * ⚠ OUR STATUS ENDPOINT IS THE PROBE, BECAUSE IT ALREADY ASKS POLAR THE SAME
- * QUESTION. It answers `unknown` while Polar 404s the id; anything else — `open`
- * via `unpaid`, or any other status — means the page will render. A body with
+ * QUESTION. It answers `unknown` while Polar 404s the id; anything else - `open`
+ * via `unpaid`, or any other status - means the page will render. A body with
  * no status at all (a 503, our API restarting) is not an answer either way and
  * keeps waiting.
  *

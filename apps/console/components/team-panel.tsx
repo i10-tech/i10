@@ -5,16 +5,16 @@ import { CLERK_PANEL } from "@repo/ui/clerk"
 import { Skeleton } from "@repo/ui/components/skeleton"
 
 /**
- * Members, roles and invitations — or an explanation of why there are none.
+ * Members, roles and invitations - or an explanation of why there are none.
  *
  * ⚠ THIS EXISTS BECAUSE THE PAGE RENDERED A HEADING AND NOTHING ELSE.
  * `<OrganizationProfile />` returns null when no organization is active, which
- * is the state of anybody signed in to a personal account — and Clerk does not
+ * is the state of anybody signed in to a personal account - and Clerk does not
  * say so, it simply renders nothing. The result was a Team page consisting of a
  * title, one sentence about sharing a workspace, and empty space below it: no
  * error, no explanation, and nothing to click. It reads as a page that failed
- * to load, and the actual situation — "you have no team yet, here is how to
- * start one" — was invisible.
+ * to load, and the actual situation - "you have no team yet, here is how to
+ * start one" - was invisible.
  *
  * ⚠ THE EMPTY STATE IS `CreateOrganization`, NOT A SENTENCE. The reason there
  * are no members is that there is no organization, and the whole remedy is one

@@ -22,20 +22,20 @@ import type { Me } from "@/lib/types"
  * ⚠ A SERVER COMPONENT, AND THE THREE CLIENT ISLANDS INSIDE IT ARE THE ONLY
  * JAVASCRIPT THE CHROME COSTS. The sidebar needs `usePathname`, the mobile
  * drawer needs open state, and the command menu needs a keydown listener.
- * Everything else — the workspace bar, the usage rail, the wordmark — renders
+ * Everything else - the workspace bar, the usage rail, the wordmark - renders
  * on the server and ships as markup.
  *
  * ⚠ AND THE ONBOARDING REDIRECT LIVES HERE RATHER THAN IN THE MIDDLEWARE.
  * Deciding it in middleware would mean an API round trip on every navigation,
  * including on static assets that slip past the matcher, and the answer depends
- * on the tenant's plan and their domains — which middleware would have to fetch
+ * on the tenant's plan and their domains - which middleware would have to fetch
  * with no session helpers and no error boundary. Here it is one call that the
  * layout already needs for the workspace name.
  *
  * ⚠ NOTHING UNDER THIS LAYOUT IS EVER PRERENDERED, AND `dynamic` BELOW IS WHERE
  * THAT IS DECLARED. Every page here reads a Clerk session and renders one
  * tenant's data; a statically generated shell would either be built with no
- * session — and fail — or, far worse, be built with one and served to everybody.
+ * session - and fail - or, far worse, be built with one and served to everybody.
  * It is set on the LAYOUT rather than per page so a page added tomorrow
  * inherits it; without it `next build` fails with "couldn't be rendered
  * statically because it used `headers`", which is Next catching the mistake,
@@ -50,7 +50,7 @@ export default async function AppLayout({
 
   /*
    * ⚠ `tenant_not_ready` IS NOT AN ERROR AND MUST NOT RENDER AS ONE. It means
-   * the Clerk webhook that provisions the tenant has not landed yet — a window
+   * the Clerk webhook that provisions the tenant has not landed yet - a window
    * of a second or two on somebody's very first visit. A red error page there
    * is the first thing they ever see of the product, and their response to
    * "you do not have access to this workspace" is to sign up again.
@@ -63,14 +63,14 @@ export default async function AppLayout({
     /*
      * ⚠ THROWN, SO `error.tsx` HANDLES IT, RATHER THAN RENDERING AN ERROR HERE.
      * A layout that renders its own failure state renders it around every page
-     * in the segment, including the ones that would have worked — and it loses
+     * in the segment, including the ones that would have worked - and it loses
      * the retry button that an error boundary gets for free.
      */
     throw new Error(me.error.message)
   }
 
   // ⚠ THE FLAG DECIDES THE REDIRECT AND NOTHING ELSE. `/onboarding` is outside
-  // this layout precisely so it stays reachable when this fires — see
+  // this layout precisely so it stays reachable when this fires - see
   // docs/decisions/console.md §4. A guard that ran there too would be a loop.
   //
   // ⚠ AND THE SKIP IS CHECKED HERE, BECAUSE THIS REDIRECT IS WHAT IT OVERRIDES.
@@ -103,15 +103,15 @@ export default async function AppLayout({
      * box it lives in. A fixed-height shell makes it structural.
      *
      * ⚠ `overflow-hidden` HERE IS WHAT STOPS THE BOUNCE, not a style choice.
-     * Without it a flick past the end of the pane rubber-bands the document —
-     * the rail lifts off the top edge and drops back — which is precisely the
+     * Without it a flick past the end of the pane rubber-bands the document -
+     * the rail lifts off the top edge and drops back - which is precisely the
      * movement this layout is meant to remove.
      */
     <div className="flex h-dvh overflow-hidden">
       {/*
        * ⚠ NO HEIGHT OF ITS OWN: `h-full` DEFERS TO THE SHELL. A rail that
        * declared `h-dvh` a second time would be two numbers that have to agree
-       * — and they stop agreeing the first time the shell grows a header.
+       * - and they stop agreeing the first time the shell grows a header.
        */}
       <aside className="hidden h-full w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
         <div className="flex h-14 items-center px-4">
@@ -181,7 +181,7 @@ export default async function AppLayout({
          * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,
          * the workspace bar and the mobile header stay perfectly still while the
          * content changes. A transition that moved the chrome as well would be a
-         * page load with extra steps — the whole value of an app shell is that
+         * page load with extra steps - the whole value of an app shell is that
          * most of the screen does not go anywhere.
          */}
         <PageFrame>{children}</PageFrame>

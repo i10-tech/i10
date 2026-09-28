@@ -7,12 +7,12 @@ import { forgetFlow } from "./resume"
 /**
  * Leaving this app once a flow is done.
  *
- * ⚠ `replace`, NEVER `assign` OR `location.href` — HYGIENE, NOT THE PHONE BUG.
+ * ⚠ `replace`, NEVER `assign` OR `location.href` - HYGIENE, NOT THE PHONE BUG.
  * It was first written believing it was the fix for sign-up hanging on iOS; a
  * HAR from a real failing phone proved otherwise, and the actual cause is
  * documented on `finalizeAndLeave` below. It stays because it is still right:
  * assigning pushes a history entry, so the finished sign-up page sits one
- * gesture behind the dashboard — and iOS Safari's back-swipe is not a
+ * gesture behind the dashboard - and iOS Safari's back-swipe is not a
  * deliberate act, it is what half a scroll near the left edge does. Restoring
  * that entry re-renders a sign-up form for somebody already signed in.
  * Replacing leaves nothing to go back to.
@@ -21,14 +21,14 @@ export function leaveFor(url: string) {
   /*
    * ⚠ THE "LAST USED" MARKER IS PROMOTED HERE, BECAUSE THIS IS THE ONE PLACE
    * EVERY SUCCESSFUL FLOW PASSES THROUGH. Password, SSO callback, passkey, MFA
-   * and an already-signed-in session all leave through this function — so
+   * and an already-signed-in session all leave through this function - so
    * recording it here cannot be forgotten by the sixth flow somebody adds
    * later, and the failure of forgetting is silent: a missing badge looks
    * exactly like a first visit. See _lib/last-used.ts for why it is promoted on
    * success rather than written on click.
    */
   confirmSignIn()
-  // ⚠ AND THE STORED STEPS GO WITH IT — a finished flow must not come back as
+  // ⚠ AND THE STORED STEPS GO WITH IT - a finished flow must not come back as
   // a half-finished one the next time this tab opens the auth app.
   forgetFlow()
   window.location.replace(url)
@@ -52,7 +52,7 @@ type Navigate = NonNullable<FinalizeParams["navigate"]>
  *
  * and `setActive` awaits the second one after running our callback. So the old
  * code assigned `window.location`, the browser began a cross-origin navigation,
- * and then `router.refresh()` fired underneath it — its RSC fetch was cut off
+ * and then `router.refresh()` fired underneath it - its RSC fetch was cut off
  * by the navigation in progress, Next answered "Failed to fetch RSC payload,
  * falling back to browser navigation", and that fallback loaded /sign-up as a
  * full page. The pending redirect to the dashboard was cancelled, and the
@@ -61,8 +61,8 @@ type Navigate = NonNullable<FinalizeParams["navigate"]>
  * ⚠ IT IS A RACE, WHICH IS WHY IT LOOKED LIKE A PHONE-ONLY BUG. On a laptop the
  * redirect commits before the refresh can land, `isUnloading()` reports true,
  * and `setActive` returns early without ever calling `router.refresh()`. On a
- * phone the same redirect is slower — Safari's ITP workaround adds a hop
- * through FAPI's `/v1/client/touch` first — so the refresh wins. Same code,
+ * phone the same redirect is slower - Safari's ITP workaround adds a hop
+ * through FAPI's `/v1/client/touch` first - so the refresh wins. Same code,
  * opposite outcome, entirely down to which finished first.
  *
  * ⚠ `decorateUrl` IS STILL CALLED INSIDE THE CALLBACK, and it has to be. It is
@@ -73,7 +73,7 @@ type Navigate = NonNullable<FinalizeParams["navigate"]>
  *
  * ⚠ AND `navigate` IS NOT ASSUMED TO RUN. A `finalize()` that resolves cleanly
  * without invoking it leaves the browser sitting on the auth page with a live
- * session and no error — so an uncaptured destination falls back to the plain
+ * session and no error - so an uncaptured destination falls back to the plain
  * URL rather than to nothing happening.
  */
 export async function finalizeAndLeave<R extends { error: unknown }>(
@@ -93,13 +93,13 @@ export async function finalizeAndLeave<R extends { error: unknown }>(
  * ⚠ THIS EXISTS FOR THE STEPPED SIGN-UP, WHERE THREE STEPS COME *AFTER* THE
  * ACCOUNT IS REAL. Adding a passkey, enrolling an authenticator app and linking
  * a Google account are all things `UserResource` does, and `UserResource` does
- * not exist until a session does — which is what `finalize` creates. So the
+ * not exist until a session does - which is what `finalize` creates. So the
  * flow has to finalize in the middle rather than at the end, and then leave
  * under its own steam once the person is done being offered things.
  *
  * ⚠ THE DECORATED URL IS CAPTURED NOW AND USED A MINUTE LATER, WHICH IS SAFE
  * AND WORTH SAYING WHY. `decorateUrl` is only offered inside this callback, so
- * there is no second chance to ask for it — `clerk.buildUrlWithAuth()` is NOT
+ * there is no second chance to ask for it - `clerk.buildUrlWithAuth()` is NOT
  * an equivalent, its own type says "for development instances" and it does not
  * produce the production ITP hop. What it hands back is either a
  * `__clerk_db_jwt` query parameter (development, and that token long outlives a
@@ -135,8 +135,8 @@ export async function finalizeWithoutLeaving<R extends { error: unknown }>(
  * another and hands back a session id directly, which is why clerk-js's own
  * redirect callback answers `case "complete"` with `setActive` rather than
  * with a finalize. Same ordering rule as `finalizeAndLeave` above, and for the
- * same reason: capture the decorated URL, let `setActive` finish its work —
- * including Clerk's Next.js hooks — and only then navigate.
+ * same reason: capture the decorated URL, let `setActive` finish its work -
+ * including Clerk's Next.js hooks - and only then navigate.
  */
 export async function setActiveAndLeave(
   setActive: (params: { session: string; navigate: Navigate }) => Promise<unknown>,

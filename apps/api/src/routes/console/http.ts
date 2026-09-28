@@ -56,7 +56,7 @@ export function asNullableString(value: unknown): string | null {
  * ⚠ IT FILTERS TO WELL-FORMED UUIDs RATHER THAN PASSING STRINGS THROUGH. These
  * ids go into an `IN` list against a uuid column; a non-uuid string does not
  * match nothing, it raises `invalid input syntax for type uuid` and fails the
- * whole statement — so one junk id in a bulk delete of 400 would refuse all 400
+ * whole statement - so one junk id in a bulk delete of 400 would refuse all 400
  * with an error that names Postgres rather than the input.
  */
 export function asIdArray(value: unknown): string[] {

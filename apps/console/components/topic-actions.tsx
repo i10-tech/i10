@@ -48,7 +48,7 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
         open={confirming}
         onOpenChange={setConfirming}
         title={`Delete ${topic.name}?`}
-        description="Every preference recorded against this topic is deleted with it — including the explicit opt-outs. You will have no record that those people asked not to receive it."
+        description="Every preference recorded against this topic is deleted with it - including the explicit opt-outs. You will have no record that those people asked not to receive it."
         confirmLabel="Delete topic"
         doneLabel="Deleted"
         confirmWord={topic.name}

@@ -12,7 +12,7 @@ import { useResetOnOpen } from "@/lib/react"
 
 /**
  * ⚠ THE DEFAULT SUBSCRIPTION CANNOT BE CHANGED LATER, AND THE FORM SAYS SO
- * WHILE THE DECISION IS BEING MADE — not afterwards, in a disabled control on
+ * WHILE THE DECISION IS BEING MADE - not afterwards, in a disabled control on
  * an edit screen. Flipping opt-out to opt-in would retroactively subscribe
  * everybody who never answered, which is sending marketing mail to people who
  * did not ask for it, at scale, because of a dropdown. The API refuses the
@@ -27,7 +27,7 @@ export function NewTopicButton() {
   const [visibility, setVisibility] = React.useState<"public" | "private">("public")
   const [open, setOpen] = React.useState(false)
 
-  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES — emptying the fields on
+  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES - emptying the fields on
   // close does it while the dialog is still animating out, which reads as
   // the input being wiped from under you. Adjusted during render rather
   // than in an effect; see lib/react.ts.

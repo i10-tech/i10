@@ -2,7 +2,7 @@
 #
 # ⚠ `i10-prod` CARRIES `default-deny-ingress`, SO WITHOUT THIS THE HEALTH PROBE
 # FAILS AND THE POD NEVER GOES READY. The kubelet probes from the node, which is
-# not a pod and matches no namespace selector — so the probe is dropped and the
+# not a pod and matches no namespace selector - so the probe is dropped and the
 # deployment crashloops on a liveness failure that looks like PowerDNS refusing
 # to start. That is the single most confusing way for this to be broken, because
 # the DNS side would be working the whole time.
@@ -15,7 +15,7 @@
 # drops every DNS query that arrives from off-box.
 #
 # ⚠ AND IT FAILS ASYMMETRICALLY, WHICH IS WHY IT SURVIVED. A query from the node
-# itself is exempt — NetworkPolicy does not govern node-originated traffic — so
+# itself is exempt - NetworkPolicy does not govern node-originated traffic - so
 # `dig @127.0.0.1` and `dig @<public ip>` ON THE NODE both answer, the pod is
 # Ready because its 8081 probe is allowed, and every check that can be run by
 # hand from the box says the nameserver is healthy. Only the internet is
@@ -51,7 +51,7 @@ spec:
     # list. See the deployment's flags.
     #
     # ⚠ TCP AS WELL AS UDP, AND THE TCP HALF IS NOT OPTIONAL. An answer over 512
-    # bytes sets the truncated bit and the resolver retries over TCP — so a
+    # bytes sets the truncated bit and the resolver retries over TCP - so a
     # UDP-only rule yields a nameserver that works until a zone grows a DKIM key,
     # which is the hardest shape of DNS fault to see.
     - from:
@@ -62,7 +62,7 @@ spec:
   egress:
     # ⚠ POSTGRES AND NOTHING ELSE. This process needs exactly one destination:
     # the pooler, where it reads the zones the API wrote. It does not recurse,
-    # does not fetch, and has no reason to open a connection anywhere else — so
+    # does not fetch, and has no reason to open a connection anywhere else - so
     # a bug in it cannot become a route out of the cluster.
     - to:
         - namespaceSelector:

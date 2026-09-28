@@ -4,7 +4,7 @@ import { z } from "zod"
  * Validated once at boot, and the process refuses to start without it.
  *
  * A missing variable that only surfaces on the first request is a deploy that
- * looks healthy and is not — the pod passes its readiness probe and then 500s
+ * looks healthy and is not - the pod passes its readiness probe and then 500s
  * on real traffic. Failing here means the rollout never completes and the old
  * pod keeps serving.
  */
@@ -12,7 +12,7 @@ import { z } from "zod"
  * Reads the SES kill switch out of its environment variable.
  *
  * ⚠ EXTRACTED SO IT CAN BE TESTED, AND IT NEEDED TO BE. Inline in the schema it
- * was `raw !== "false"` — so `SES_ENABLED=0`, which is what somebody actually
+ * was `raw !== "false"` - so `SES_ENABLED=0`, which is what somebody actually
  * types at two in the morning, silently meant ENABLED. Every paid domain kept
  * routing into the outage the switch was thrown to escape, with no log line and
  * a variable that read as set in the config UI.
@@ -23,7 +23,7 @@ import { z } from "zod"
  *
  * ⚠ AND ABSENT STILL MEANS ENABLED. The failure mode of defaulting off is every
  * paying customer's mail silently moving to our own IP the first time this is
- * missing from a config — a deliverability change nobody asked for, caused by a
+ * missing from a config - a deliverability change nobody asked for, caused by a
  * typo in a secret name.
  */
 export function parseSesEnabled(value: string | undefined): boolean {
@@ -41,7 +41,7 @@ const schema = z.object({
 
   // The Postgres behind PgBouncer.
   //
-  // ⚠ TRANSACTION POOLING DROPS `search_path` — PgBouncer accepts the SET and
+  // ⚠ TRANSACTION POOLING DROPS `search_path` - PgBouncer accepts the SET and
   // silently ignores it, because a pooled connection is not the same backend
   // twice. Schema-qualify every statement, or use SET LOCAL inside an explicit
   // transaction. Advisory locks must be pg_advisory_xact_lock, never the
@@ -49,7 +49,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
 
   // The queues' Redis. i10's OWN instance, never one shared with PSL under a
-  // prefix — queues are product data, and a shared Redis is exactly the kind
+  // prefix - queues are product data, and a shared Redis is exactly the kind
   // of coupling that turns extraction into a rewrite.
   REDIS_URL: z.string().min(1),
 
@@ -57,12 +57,12 @@ const schema = z.object({
   //
   // The bounce MX must point at feedback-smtp.<region>.amazonses.com. SES
   // re-verifies it continuously, and RFC 2181 forbids an MX target that is a
-  // CNAME — so it cannot be aliased behind an i10 hostname. Changing region
+  // CNAME - so it cannot be aliased behind an i10 hostname. Changing region
   // means every customer edits DNS. Chosen once, deliberately: eu-central-1.
   AWS_REGION: z.literal("eu-central-1").default("eu-central-1"),
 
   // The AWS account SES lives in, for the ARNs SES tenant associations name
-  // (#156). Not a secret — it appears in every ARN — and a constant for the
+  // (#156). Not a secret - it appears in every ARN - and a constant for the
   // same reason the region is one.
   AWS_ACCOUNT_ID: z
     .string()
@@ -80,7 +80,7 @@ const schema = z.object({
    * ⚠ UNSET MEANS CLERK KEEPS SENDING, WHICH IS THE SAFE DEFAULT RATHER THAN A
    * DEGRADED ONE. Clerk's per-template "Delivered by Clerk" switch is still on
    * until somebody turns it off, so an unconfigured deployment simply does not
-   * take over — it must never be the case that we stop Clerk sending and then
+   * take over - it must never be the case that we stop Clerk sending and then
    * fail to send ourselves, because that is a sign-up nobody can complete.
    */
   AUTH_EMAIL_FROM: z.string().min(1).optional(),
@@ -96,7 +96,7 @@ const schema = z.object({
   AUTH_EMAIL_TENANT_SLUG: z.string().min(1).default("i10"),
 
   // Issues and verifies customer API keys. Clerk owns the secret; what a
-  // customer holds is that secret rewritten under our own prefix — see
+  // customer holds is that secret rewritten under our own prefix - see
   // src/auth/api-key.ts.
   CLERK_SECRET_KEY: z.string().min(1),
 
@@ -109,17 +109,17 @@ const schema = z.object({
    * "Publishable key is missing" rather than returning a signed-out state. The
    * verifier catches that and reports `unavailable`, so `/console/*` and
    * `/mailboxes` answer "Could not verify your session right now. Retry
-   * shortly." — a message that is correct for a Clerk outage and actively
+   * shortly." - a message that is correct for a Clerk outage and actively
    * misleading here, because waiting never helps. This took the console down in
    * production for exactly that reason.
    *
    * ⚠ IT IS NOT A SECRET, DESPITE SITTING BESIDE ONE. A publishable key is
-   * published — it ships to every browser that loads the sign-in page. It is
+   * published - it ships to every browser that loads the sign-in page. It is
    * here because Clerk's server SDK needs it, not because it needs protecting.
    *
    * ⚠ AND IT IS OPTIONAL IN THE SCHEMA WHILE `CLERK_SECRET_KEY` IS REQUIRED,
    * which is deliberate rather than an oversight. Making it required would stop
-   * the API booting — and this process also carries `/emails`, the send path,
+   * the API booting - and this process also carries `/emails`, the send path,
    * which has nothing to do with Clerk and would be taken down by a console
    * variable. Instead its absence is reported loudly at startup (see index.ts)
    * and on every failed verification. Once it is set everywhere, tightening
@@ -132,8 +132,8 @@ const schema = z.object({
    *
    * ⚠ THIS IS THE `azp` CHECK, AND LEAVING IT EMPTY DISABLES IT. One Clerk
    * instance can back several applications; without this, a token minted for
-   * any of them is accepted here. It lists the origins that HOLD the session —
-   * the dashboard — not the one that issues it, because `azp` records who asked
+   * any of them is accepted here. It lists the origins that HOLD the session -
+   * the dashboard - not the one that issues it, because `azp` records who asked
    * for the token rather than where the person typed their password.
    */
   CONSOLE_ORIGINS: z
@@ -153,18 +153,18 @@ const schema = z.object({
    * WORKING, AND THAT STOPPED BEING TRUE TWICE OVER. It was written when
    * verification was a network call to Clerk on every send, so the TTL traded
    * third-party latency against revocation lag. Migration 0031 moved keys into
-   * `core.api_keys`, and `index.ts` now passes `keyLookup(db)` — an indexed
+   * `core.api_keys`, and `index.ts` now passes `keyLookup(db)` - an indexed
    * lookup on our own table. There is no longer a Clerk round trip to save.
    *
    * ⚠ AND REVOCATION DOES NOT WAIT FOR THIS TO EXPIRE. `routes/api-keys.ts`
    * deletes the cache entry on both revoke and rotate, keyed on the same secret
-   * hash the verifier caches under — so a key revoked through the API stops
+   * hash the verifier caches under - so a key revoked through the API stops
    * working at once, whatever this says. The TTL is the window only for a key
    * revoked OUT OF BAND: a direct UPDATE against the table, or a restore that
    * rolls one back.
    *
    * ⚠ THE CEILING WAS 300 AND SILENTLY REFUSED ANYTHING LARGER. A deployment
-   * that set fifteen minutes did not get fifteen minutes — it failed schema
+   * that set fifteen minutes did not get fifteen minutes - it failed schema
    * validation at boot, which is loud, but only if somebody read the log.
    */
   API_KEY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(3600),
@@ -198,14 +198,14 @@ const schema = z.object({
    * The operator kill switch. `false` routes every send through our own MTA.
    *
    * ⚠ IT IS A SWITCH A PERSON THROWS, AND THERE IS DELIBERATELY NO HEALTH PROBE
-   * BEHIND IT. `Transport` already handles SES being slow or throttling — those
+   * BEHIND IT. `Transport` already handles SES being slow or throttling - those
    * come back `deferred` and the message waits. This is for the case that
    * outlasts a queue: SES down for long enough that waiting stops being the
    * right answer. See `resolveRoute`, which is where it is read.
    *
    * ⚠ DEFAULTS TO ENABLED, AND IT HAS TO. The failure mode of defaulting off is
    * every paying customer's mail silently moving to our own IP the first time
-   * this variable is missing from a config — a deliverability change nobody
+   * this variable is missing from a config - a deliverability change nobody
    * asked for, caused by a typo in a secret name.
    */
   /**
@@ -251,7 +251,7 @@ const schema = z.object({
    * ⚠ IT DEFAULTS OFF, WHICH IS THE OPPOSITE OF `SES_ENABLED` AND DELIBERATE.
    * That one defaults on because defaulting off would silently move every paying
    * customer onto our own IP. This one defaults off because defaulting on would
-   * point human mail at an SMTP relay that may have no credentials behind it —
+   * point human mail at an SMTP relay that may have no credentials behind it -
    * and the first symptom would be our own mail queueing. Off until somebody
    * creates the credentials and means it.
    *
@@ -266,7 +266,7 @@ const schema = z.object({
       try {
         // ⚠ THE SAME PARSER, SO `0`, `no` AND `off` MEAN THE SAME THING IN BOTH.
         // Two hand-rolled boolean readers is two chances for `SES_ENABLED=0` to
-        // mean disabled in one place and enabled in the other — which is exactly
+        // mean disabled in one place and enabled in the other - which is exactly
         // the bug `parseSesEnabled` was written to fix.
         return v === undefined ? false : parseSesEnabled(v)
       } catch (err) {
@@ -290,20 +290,20 @@ const schema = z.object({
    * `WORKER_CONCURRENCY`, which is the fan-out inside a single batch.
    *
    * ⚠ ONE IS groupmq's DEFAULT AND IT IS THE WRONG DEFAULT FOR US. Per-group
-   * serialisation is deliberate — a tenant never has two batches in flight —
+   * serialisation is deliberate - a tenant never has two batches in flight -
    * but one batch at a time across ALL groups means one tenant's batch blocks
    * every other tenant's, which is precisely the head-of-line blocking the
    * transactional/bulk split was built to prevent, arriving one level down.
    *
    * ⚠ AND IT MULTIPLIES WITH EVERYTHING ELSE AGAINST THE SES RATE. What SES
    * sees is `replicas × WORKER_BATCH_CONCURRENCY × WORKER_CONCURRENCY` calls in
-   * flight — at the defaults that is 1 × 8, and doubling this doubles it.
+   * flight - at the defaults that is 1 × 8, and doubling this doubles it.
    *
    * ⚠ SO THE DEFAULT IS STILL 1 WHILE THE SES ACCOUNT IS IN THE SANDBOX, for
    * exactly the reason `maxReplicaCount` is 1 in worker-autoscale.yaml: at a
    * 1/s account rate the extra calls come back 429, the transport defers them,
    * and the queue drains SLOWER with nothing logging an error. What changed is
-   * that the number now exists, is named, and is raised deliberately — before
+   * that the number now exists, is named, and is raised deliberately - before
    * this it was groupmq's undocumented default and the blocking it caused was
    * invisible. Raise it in the same change that raises the SES quota.
    */
@@ -335,7 +335,7 @@ const schema = z.object({
    * enforces it as a ceiling; the Worker's own value is what actually
    * dead-letters, in `handleJobFailure`. Configured apart, the API and the
    * worker each looked right and the effective budget was whichever was
-   * smaller — a number nothing in the code stated.
+   * smaller - a number nothing in the code stated.
    */
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(3),
 
@@ -349,7 +349,7 @@ const schema = z.object({
    * KNOB. A message SES throttled goes back to `queued` with nothing pointing
    * at it, and this plus the CronJob's interval is the whole of the delay
    * before it is tried again. Too short and the sweep re-enqueues rows a worker
-   * is about to take anyway — harmless, because the claim refuses them, but it
+   * is about to take anyway - harmless, because the claim refuses them, but it
    * spends the pass's budget on work that was never lost.
    */
   SWEEP_QUEUED_GRACE: z.string().min(1).default("5 minutes"),
@@ -359,7 +359,7 @@ const schema = z.object({
    *
    * ⚠ HITTING IT IS A SIGNAL, NOT A LIMIT TO RAISE. The sweep reports reaching
    * this to Sentry, because a backlog bigger than one pass means messages are
-   * being stranded faster than they are being rescued — which is a problem
+   * being stranded faster than they are being rescued - which is a problem
    * upstream of the sweep and is not fixed by sweeping harder.
    */
   SWEEP_MAX_ROWS: z.coerce.number().int().positive().max(10_000).default(1_000),
@@ -368,8 +368,8 @@ const schema = z.object({
    * How far back the send-side reconcilers look, in days.
    *
    * ⚠ A WINDOW RATHER THAN A HIGH-WATER MARK, DELIBERATELY. Both legs are
-   * idempotent — the SES repair refuses a row already `sent`, and `track` is
-   * keyed on the message id — so overlapping windows cost a repeated
+   * idempotent - the SES repair refuses a row already `sent`, and `track` is
+   * keyed on the message id - so overlapping windows cost a repeated
    * read and nothing else. A stored cursor would have to survive a restore, and
    * would silently skip whatever it was wrong about.
    *
@@ -386,7 +386,7 @@ const schema = z.object({
    * The metered feature every email is one unit of.
    *
    * ⚠ IT IS A ROW IN `core.plans`' entitlements, AND RENAMING IT DOES NOT FAIL.
-   * A feature id no plan grants resolves to `unentitled`, which fails open — so
+   * A feature id no plan grants resolves to `unentitled`, which fails open - so
    * every send goes, unmetered and unbilled, with only a log line to say so.
    * The same warning was true of Autumn's catalogue and is the reason
    * `unentitled` is a separate outcome rather than folded into `exceeded`.
@@ -398,7 +398,7 @@ const schema = z.object({
    *
    * ⚠ IT MUST EXIST IN `core.plans`, WHICH IS WHY MIGRATION 0012 SEEDS IT
    * RATHER THAN LEAVING IT TO A JOB. A tenant assigned a plan id that is not
-   * there has no entitlement at all — and unlike a missing catalogue in a
+   * there has no entitlement at all - and unlike a missing catalogue in a
    * remote service, this one is a foreign key, so the assignment fails loudly
    * instead of leaving a customer silently unmetered.
    */
@@ -407,7 +407,7 @@ const schema = z.object({
   /**
    * The event name usage is ingested under, and what Polar's meter filters on.
    *
-   * ⚠ IF THIS AND THE METER DISAGREE, THE METER AGGREGATES NOTHING — and every
+   * ⚠ IF THIS AND THE METER DISAGREE, THE METER AGGREGATES NOTHING - and every
    * ingest still answers 200, because the events are stored either way. The
    * symptom is an invoice with no usage on it, a month later, which is the
    * worst possible time to find out. It defaults to the feature id so the two
@@ -425,7 +425,7 @@ const schema = z.object({
    * failing SPF with nothing to tell them why.
    *
    * ⚠ AND IT IS A DEDICATED SUBDOMAIN RATHER THAN THE APEX. SPF allows ten DNS
-   * lookups per evaluation, and the apex record has its own job — who may send
+   * lookups per evaluation, and the apex record has its own job - who may send
    * as i10.tech. Conflating them means every customer's SPF inherits every
    * include we add for our own mail.
    */
@@ -437,7 +437,7 @@ const schema = z.object({
    * ⚠ A DELEGATED DOMAIN'S MAIL DNS DEPENDS ENTIRELY ON THESE ANSWERING. A
    * customer publishing records in their own provider keeps resolving whatever
    * happens to us; a delegating one stops resolving at all. Two names are
-   * listed because resolvers expect more than one and will retry the second —
+   * listed because resolvers expect more than one and will retry the second -
    * but pointing both at one machine buys the appearance of redundancy and not
    * the fact of it, which is the reason to move this to Cloudflare or Route 53
    * rather than a reason it is fine.
@@ -446,7 +446,7 @@ const schema = z.object({
    * Stalwart's API, for sampling how much disk each tenant's mailboxes use.
    *
    * ⚠ THE IN-CLUSTER SERVICE, NOT `https://mail.i10.tech`. The management API
-   * is deliberately not routed publicly — `infra/k8s/i10/stalwart/ingressroute.yaml`
+   * is deliberately not routed publicly - `infra/k8s/i10/stalwart/ingressroute.yaml`
    * sends only autoconfig, autodiscover and MTA-STS to the pod, and the network
    * policy's own comment says 8080 is left out "because the management API
    * belongs behind Traefik". Every management path answers 404 from outside.
@@ -465,7 +465,7 @@ const schema = z.object({
    * The HMAC key on Stalwart's `WebHook` object, and the only thing standing
    * between a public endpoint and a stranger's suppression list.
    *
-   * ⚠ WITHOUT IT THE DIRECT ROUTE HAS NO DELIVERY EVENTS AT ALL — a
+   * ⚠ WITHOUT IT THE DIRECT ROUTE HAS NO DELIVERY EVENTS AT ALL - a
    * direct-routed message stops at `sent` and never reaches `delivered` or
    * `bounced`. `/webhooks/stalwart` answers 503 rather than accepting unsigned
    * notifications, which is the same refusal the direct transport makes when
@@ -485,7 +485,7 @@ const schema = z.object({
    * to sample mailbox storage. This is where a finished message is handed over
    * for queueing and delivery.
    *
-   * ⚠ AN ADDRESS AND NOTHING ELSE — THERE IS NO CREDENTIAL TO GO WITH IT. The
+   * ⚠ AN ADDRESS AND NOTHING ELSE - THERE IS NO CREDENTIAL TO GO WITH IT. The
    * `relay` listener accepts without AUTH because only the cluster can reach
    * it; see infra/k8s/i10/stalwart/config/README.md, "The internal relay". So
    * this is set in worker.yaml rather than Doppler, and nothing about the
@@ -493,13 +493,13 @@ const schema = z.object({
    *
    * ⚠ OPTIONAL SO THE WORKER STARTS WITHOUT IT, AND THE DIRECT TRANSPORT
    * REFUSES TO SEND WHEN IT IS ABSENT. Requiring it would make every deployment
-   * that only ever uses SES — and every laptop — fail to boot over a route it
+   * that only ever uses SES - and every laptop - fail to boot over a route it
    * does not take. The refusal is `deferred`, so the mail waits in the queue
    * rather than being lost, and the backlog is the alarm.
    */
   STALWART_RELAY_HOST: z.string().min(1).optional(),
   /**
-   * ⚠ 2525, THE `relay` LISTENER — NOT 25 AND NOT 465. 25 is the public MX, and
+   * ⚠ 2525, THE `relay` LISTENER - NOT 25 AND NOT 465. 25 is the public MX, and
    * 465 is authenticated submission for people's mail clients; neither relays
    * for a client that presents no credential, so pointing the worker at either
    * fails every direct send at `RCPT TO`. The rules that make 2525 different
@@ -522,12 +522,12 @@ const schema = z.object({
 
   /**
    * Encrypts customers' webhook signing secrets at rest. 32 bytes, hex or
-   * base64 — `openssl rand -hex 32`.
+   * base64 - `openssl rand -hex 32`.
    *
    * ⚠ OPTIONAL, AND ITS ABSENCE DISABLES WEBHOOKS RATHER THAN WEAKENING THEM.
    * Without a key the endpoint routes answer 501 and no delivery is attempted,
-   * which is a visible missing feature. The alternative — falling back to
-   * storing secrets in plaintext — would be a silent downgrade of the one thing
+   * which is a visible missing feature. The alternative - falling back to
+   * storing secrets in plaintext - would be a silent downgrade of the one thing
    * that makes a webhook trustworthy.
    *
    * ⚠ AND LOSING IT IS NOT RECOVERABLE. Every stored secret becomes
@@ -539,7 +539,7 @@ const schema = z.object({
   /**
    * How many delivery attempts a webhook gets before the row is marked failed.
    * The backoff is exponential and capped at eight minutes, so five attempts
-   * span roughly a quarter of an hour — enough for a deploy or a restart.
+   * span roughly a quarter of an hour - enough for a deploy or a restart.
    */
   WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
 
@@ -549,7 +549,7 @@ const schema = z.object({
   /**
    * ⚠ GUARDS THE QUEUE-DEPTH ENDPOINT THE AUTOSCALER READS. Queue depth is not
    * secret in a damaging way, but an unauthenticated endpoint that touches
-   * Redis on every request is a free amplifier — and KEDA can send a bearer
+   * Redis on every request is a free amplifier - and KEDA can send a bearer
    * token, so there is no reason to leave it open.
    */
   METRICS_TOKEN: z.string().min(16).optional(),
@@ -569,7 +569,7 @@ const schema = z.object({
   //
   // ⚠ THE ENTITLEMENT USED TO LIVE IN AUTUMN, AND THE SEPARATION IS OLDER THAN
   // THE SWAP. Autumn attached plans with `no_billing_changes` for exactly this
-  // reason — one system decides who paid, another decides what they may do —
+  // reason - one system decides who paid, another decides what they may do -
   // and moving the second half in-house changed the owner, not the shape.
 
   /**
@@ -577,7 +577,7 @@ const schema = z.object({
    * Sandbox has its own tokens, its own webhook secrets and its own product
    * ids; nothing crosses. Defaulting to `sandbox` means the mistake this can
    * make is "a real customer's checkout did not charge them", which is
-   * recoverable and loud — rather than "test traffic took real money".
+   * recoverable and loud - rather than "test traffic took real money".
    */
   POLAR_SERVER: z.enum(["sandbox", "production"]).default("sandbox"),
 
@@ -596,7 +596,7 @@ const schema = z.object({
    *
    * ⚠ THIS IS THE ONLY THING GUARDING THE PLAN-GRANTING ENDPOINT. Polar has no
    * API key of ours to present, so the signature is the whole of the access
-   * control — without this the receiver answers 503 and grants nothing, which
+   * control - without this the receiver answers 503 and grants nothing, which
    * is the correct way to be misconfigured.
    */
   POLAR_WEBHOOK_SECRET: z.string().min(1).optional(),
@@ -650,21 +650,21 @@ const schema = z.object({
    * was a single JSON object, and the argument for that was sound as far as it
    * went: eight providers is sixteen variables, and declaring each one here to
    * be plumbed through and remembered is sixteen chances to miss one.
-   * DISCOVERY removes that objection entirely — nothing is declared, so nothing
-   * can be forgotten — and leaves only the reason the JSON had to go.
+   * DISCOVERY removes that objection entirely - nothing is declared, so nothing
+   * can be forgotten - and leaves only the reason the JSON had to go.
    *
    * ⚠ WHICH IS THAT A MALFORMED BLOB REFUSED TO BOOT THE API. `loadEnv` throws
    * on an invalid value and the process exits, so one trailing comma typed into
-   * Doppler while adding the second provider stopped SENDING — the API, the
-   * console's entire backend, the cron jobs that mount the same secret — for a
+   * Doppler while adding the second provider stopped SENDING - the API, the
+   * console's entire backend, the cron jobs that mount the same secret - for a
    * convenience feature nobody had finished configuring. Measured rather than
    * theorised: a stray `,` produces `Invalid environment` and a crashloop.
    *
    * ⚠ SO THE BLAST RADIUS IS NOW ONE PROVIDER. A key missing its pair is that
    * provider skipped and named in the boot log; every other provider, and the
    * rest of the API, is untouched. That is precisely the failure the old
-   * comment described — "a Connect button that does nothing for one provider
-   * while working for seven" — and accepted as the cost of the JSON, when it
+   * comment described - "a Connect button that does nothing for one provider
+   * while working for seven" - and accepted as the cost of the JSON, when it
    * was in fact the better outcome of the two.
    *
    *   DNS_OAUTH_CLOUDFLARE_CLIENT_ID      = …
@@ -699,8 +699,8 @@ const schema = z.object({
    * Providers whose variables were present but unusable, for the boot log.
    *
    * ⚠ SKIPPED IS NOT SILENT. A client id with no secret beside it is somebody
-   * half-way through configuring a provider, and the symptom — one Connect
-   * button that quietly does nothing — is invisible until a customer presses
+   * half-way through configuring a provider, and the symptom - one Connect
+   * button that quietly does nothing - is invisible until a customer presses
    * it. Not worth refusing to boot over; absolutely worth a line at startup.
    */
   DNS_OAUTH_IGNORED: z.array(z.string()).default([]),
@@ -711,7 +711,7 @@ const schema = z.object({
    * ⚠ ONE URL FOR EVERY PROVIDER, WITH THE SLUG APPENDED AS A PATH SEGMENT.
    * Providers compare the redirect URI against a registered value EXACTLY, so
    * building it from a request header would produce a URI that works on one
-   * hostname and is rejected on another — which, in a product with a console on
+   * hostname and is rejected on another - which, in a product with a console on
    * `dash.` and local development on `localhost`, means it is rejected in
    * exactly one of the two and nobody can tell which is wrong.
    *
@@ -725,21 +725,21 @@ const schema = z.object({
    *
    * ⚠ THIS IS NOT A PROXY FOR CONVENIENCE; IT IS FOR ONE MEASURED REFUSAL.
    * `dash.cloudflare.com` is a DASHBOARD host with bot management on, and from
-   * psl-vps it answers a managed challenge — `403`, `cf-mitigated: challenge` —
+   * psl-vps it answers a managed challenge - `403`, `cf-mitigated: challenge` -
    * to every client we can build: curl and Bun, HTTP/1.1 and h2, IPv4 and IPv6.
    * The identical request from a residential line gets ordinary OAuth JSON.
    * It is a decision about our ADDRESS, so no header, client or HTTP version
    * changes it, and the user-agent work that preceded this could not have.
    *
-   * ⚠ ONLY THE TOKEN EXCHANGE, AND ONLY CLOUDFLARE'S. `api.cloudflare.com` —
-   * every zone read and record write the publish path makes — has never been
+   * ⚠ ONLY THE TOKEN EXCHANGE, AND ONLY CLOUDFLARE'S. `api.cloudflare.com` -
+   * every zone read and record write the publish path makes - has never been
    * challenged from the cluster, and no other provider's token endpoint is
    * either. The host list lives in `dns/oauth.ts`; see `BROKERED_HOSTS`.
    *
    * ⚠ BOTH OR NEITHER. A URL with no secret would call an authenticated Worker
    * with no credential and fail every exchange; a secret with no URL does
    * nothing. Set neither and Cloudflare is simply called directly, which is
-   * correct anywhere the egress is not challenged — local development, or a
+   * correct anywhere the egress is not challenged - local development, or a
    * deployment whose addresses Cloudflare has since exempted.
    */
   DNS_OAUTH_BROKER_URL: z.url().optional(),
@@ -748,8 +748,8 @@ const schema = z.object({
   /**
    * Where Polar returns the browser after payment.
    *
-   * ⚠ A PAGE THAT POLLS, NOT A PAGE THAT GRANTS. Anybody can navigate here —
-   * it is a plain redirect with no proof attached — so whatever is served must
+   * ⚠ A PAGE THAT POLLS, NOT A PAGE THAT GRANTS. Anybody can navigate here -
+   * it is a plain redirect with no proof attached - so whatever is served must
    * ask our own API what plan the tenant holds and wait. See routes/billing.ts.
    */
   POLAR_SUCCESS_URL: z.url().optional(),
@@ -791,7 +791,7 @@ const schema = z.object({
  * Postgres interval syntax, in milliseconds, or null if we cannot tell.
  *
  * ⚠ IT REFUSES TO GUESS RATHER THAN GUESSING WRONG. Postgres accepts far more
- * than this recognises — `P1DT2H`, `1 mon`, fractional units — and a parser that
+ * than this recognises - `P1DT2H`, `1 mon`, fractional units - and a parser that
  * returned a plausible number for a form it did not really understand would
  * turn the check below into a check that fails on correct configuration. Null
  * means "not comparable", and the invariant is then left unenforced rather than
@@ -841,7 +841,7 @@ export function intervalToMs(value: string): number | null {
  * to a second worker after `WORKER_JOB_TIMEOUT_MS`, and the claim refuses that
  * worker the rows until `WORKER_CLAIM_STALE_AFTER` has passed. Set the interval
  * shorter than the lease and the database releases a row while Redis still
- * believes the first worker holds it — both win the compare-and-swap in turn,
+ * believes the first worker holds it - both win the compare-and-swap in turn,
  * and a duplicate send becomes routine rather than exceptional.
  *
  * It is checked here because the two are configured independently, in Doppler,
@@ -866,14 +866,14 @@ const validated = schema.superRefine((env, ctx) => {
    * ⚠ THE DEFAULT IS THE BUG, WHICH IS WHY THIS IS A CHECK AND NOT A DEFAULT.
    * `SENTRY_ENVIRONMENT` falls back to "development", so a production
    * deployment that never sets it reports its errors tagged as a developer's
-   * laptop — and every dashboard, alert rule and filter that selects on
+   * laptop - and every dashboard, alert rule and filter that selects on
    * environment quietly excludes the only deployment anybody cares about.
    * Nothing errors, nothing is missing, and the events are simply filed under
    * the wrong name.
    *
    * ⚠ AND `NODE_ENV` CANNOT SUPPLY THE ANSWER, WHICH IS THE WHOLE DIFFICULTY.
    * The promotion model re-tags one image for staging and production, so both
-   * run `NODE_ENV=production` — deriving the value would label staging's errors
+   * run `NODE_ENV=production` - deriving the value would label staging's errors
    * as production's, trading a visible mistake for an invisible one. The only
    * correct source is an explicit statement per deployment, so production is
    * required to make it and this is what makes the omission loud.
@@ -883,7 +883,7 @@ const validated = schema.superRefine((env, ctx) => {
       code: "custom",
       path: ["SENTRY_ENVIRONMENT"],
       message:
-        `must be set explicitly when NODE_ENV is production — "development" is ` +
+        `must be set explicitly when NODE_ENV is production - "development" is ` +
         `the fallback, and leaving it means production errors arrive tagged as ` +
         `development and are filtered out of every view that matters. Staging ` +
         `and production run the same image, so only this value tells them apart.`,
@@ -943,7 +943,7 @@ export function collectOAuthApps(source: NodeJS.ProcessEnv): {
     /*
      * ⚠ AN EMPTY SECRET IS NOT AN ABSENT ONE. Absent means a public client
      * authenticating with PKCE alone; empty means a value somebody meant to
-     * fill in, and forwarding it produces `invalid_client` — which reads in a
+     * fill in, and forwarding it produces `invalid_client` - which reads in a
      * log exactly like a real secret that has been rotated.
      */
     const usable =

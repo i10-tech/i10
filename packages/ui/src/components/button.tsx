@@ -25,7 +25,7 @@ const buttonVariants = cva(
         /*
          * ⚠ 56px, WHICH IS `FloatingInput`'s HEIGHT AND NOT A ROUND NUMBER.
          * This size exists so a submit button can sit directly under a field
-         * and read as the same object continuing — at `lg` the button was
+         * and read as the same object continuing - at `lg` the button was
          * 40px against the field's 56 and the pair looked like a control and
          * its afterthought. If the field height ever changes, this changes
          * with it.

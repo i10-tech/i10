@@ -17,7 +17,7 @@ export const OTP_LENGTH = 6
  * because three screens happened to look alike. Sign-up renders its two stages
  * from one component, and a bare `<Input>` in the verify stage landed at the
  * SAME position in the React tree as the "Full Name" field of the stage before
- * it. React reconciles by position and type, so it reused the DOM node — and
+ * it. React reconciles by position and type, so it reused the DOM node - and
  * the name the person had just typed was sitting in the code box, waiting to be
  * deleted before they could type anything. A different component at that
  * position cannot be reused, which fixes it structurally rather than by
@@ -49,7 +49,7 @@ export function OtpField({
   /**
    * ⚠ THE SAME FOUR STATES EVERY OTHER FIELD HAS, AND `invalid` IS THE ONE THIS
    * SCREEN WAS MISSING. A rejected code used to be reported by a toast and
-   * nothing else — it slid away after four seconds and left six boxes looking
+   * nothing else - it slid away after four seconds and left six boxes looking
    * exactly as they had when the code was still unjudged, which is the state
    * somebody is in when they type the same wrong code again.
    */
@@ -60,7 +60,7 @@ export function OtpField({
    * The code was accepted.
    *
    * ⚠ IT IS A SEPARATE PROP RATHER THAN `state="valid"` AT EACH CALL SITE,
-   * because the accepted state is not just a colour — it is a colour, a word
+   * because the accepted state is not just a colour - it is a colour, a word
    * and a movement, and four screens reproducing that from three props is four
    * chances for them to disagree. Everything that asks for a code now confirms
    * it identically.

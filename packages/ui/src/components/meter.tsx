@@ -12,7 +12,7 @@ import { cn } from "cn"
  * full bar at 400,000, which is the one number they opened the page for.
  *
  * ⚠ AND THE TONE IS DERIVED, NOT PASSED. Whether being at 90% is a warning
- * depends on whether the plan bills past the line — on overage it is a
+ * depends on whether the plan bills past the line - on overage it is a
  * forecast, and on a hard cap it is a deadline. One rule, here, rather than
  * every caller deciding.
  */
@@ -21,7 +21,7 @@ export interface MeterProps extends Omit<React.ComponentProps<"div">, "children"
   /** Units consumed this period. */
   used: number
   /**
-   * Units included. `null` means unlimited — the bar is then not drawn at all,
+   * Units included. `null` means unlimited - the bar is then not drawn at all,
    * because a bar with no end is a lie about there being one.
    */
   limit: number | null
@@ -51,7 +51,7 @@ export function Meter({
 
   /*
    * ⚠ THE OVERAGE SEGMENT IS DRAWN INSIDE THE SAME TRACK, NOT PAST IT. The
-   * track stays the width of the allowance — that is what it means — and the
+   * track stays the width of the allowance - that is what it means - and the
    * portion of it painted in the overage tone is `1 - 1/ratio`, i.e. how much
    * of what you have sent is past the line. At 2× the bar is half included and
    * half billable, which is true and immediately readable. Letting the fill
@@ -103,7 +103,7 @@ export function Meter({
 }
 
 /**
- * The meter with its numbers — what actually goes on a usage page.
+ * The meter with its numbers - what actually goes on a usage page.
  *
  * ⚠ THE COUNTS ARE `tabular`. A column of usage rows whose digits are
  * proportionally spaced is ragged down its right edge, and the eye reads the

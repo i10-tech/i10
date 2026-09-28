@@ -11,13 +11,13 @@ import { isStatus, keepPolling, present, type Result } from "@/lib/checkout-outc
 /*
  * ⚠ THIS COMPONENT CANNOT GRANT ANYTHING, AND ITS EXISTENCE IS THE REASON IT
  * MUST NOT LOOK AS THOUGH IT COULD. Polar's success redirect is a browser
- * navigation — anybody can type the URL — so nothing on screen may be decided
+ * navigation - anybody can type the URL - so nothing on screen may be decided
  * by having arrived here. Every state below comes from the API reading
  * `core.subscriptions`, a row only the signature-verified Polar webhook moves.
  *
  * ⚠ IT IS A BANNER ON THE PAGE THEY STARTED FROM, NOT A PAGE OF ITS OWN. The
  * old confirmation was a full-screen dark takeover at `/billing` with hardcoded
- * hexes and `text-white/55` — its own visual world, on the reasoning that it
+ * hexes and `text-white/55` - its own visual world, on the reasoning that it
  * was the last frame of Polar's checkout rather than the first of the console.
  * The cost was that it was a DEAD END: somebody who bought a plan during
  * onboarding landed there and the flow they were part-way through was gone. It
@@ -33,7 +33,7 @@ import { isStatus, keepPolling, present, type Result } from "@/lib/checkout-outc
  *
  * ⚠ AND REACHING IT IS NOW RARE RATHER THAN ROUTINE. The status endpoint used
  * to only report, so a lost webhook meant ninety seconds of spinner followed by
- * "we check for stragglers every half hour" — the reconciler's schedule, shown
+ * "we check for stragglers every half hour" - the reconciler's schedule, shown
  * to a customer who had just paid. It now grants from Polar's own answer inside
  * the poll that notices, so getting here means Polar itself could not be
  * reached or could not be acted on, which is worth saying differently.
@@ -52,8 +52,8 @@ export function CheckoutOutcome({
   className?: string
   /**
    * ⚠ LETS A CALLER TAKE THE BANNER AWAY WITHOUT UNMOUNTING IT. The plan
-   * step hides the checkout's answer once a cancellation supersedes it —
-   * "You're on Pro" over a subscription that is ending is stale news — and
+   * step hides the checkout's answer once a cancellation supersedes it -
+   * "You're on Pro" over a subscription that is ending is stale news - and
    * an unmounted element cannot animate out.
    */
   show?: boolean
@@ -72,7 +72,7 @@ export function CheckoutOutcome({
   /*
    * ⚠ THE PAGE AROUND THIS BANNER IS OLDER THAN THE BANNER, AND ONLY THE BANNER
    * KNOWS IT. Everything below is server-rendered from `/console/me`, fetched
-   * at the moment the browser arrived — which is a second BEFORE the grant
+   * at the moment the browser arrived - which is a second BEFORE the grant
    * lands, because the grant is what this component is here to wait for. So the
    * banner said "You're on Pro" while the plan step under it still read "You
    * are on Free" and the free card still said "Current", for somebody who had
@@ -81,7 +81,7 @@ export function CheckoutOutcome({
    * ⚠ A SOFT REFRESH, WHICH IS WHY IT IS SAFE HERE. `router.refresh()` re-runs
    * the server components and reconciles; it does NOT remount the client tree,
    * so onboarding keeps the step it is on. A hard navigation would throw
-   * somebody back to whatever step the facts imply — which is the dead end this
+   * somebody back to whatever step the facts imply - which is the dead end this
    * whole flow was rebuilt to remove.
    *
    * ⚠ AND ONLY ON `granted`, BECAUSE THAT IS THE ONLY OUTCOME THAT MOVES THE
@@ -95,7 +95,7 @@ export function CheckoutOutcome({
     /*
      * ⚠ NOT WHEN THE CARDS HAVE ALREADY APPLIED IT THEMSELVES. A checkout
      * completed in the embed hands `PlanCards` the plan that was bought, and
-     * it updates in place — so this refresh had nothing left to correct and
+     * it updates in place - so this refresh had nothing left to correct and
      * everything to spoil: it fired a second after the modal closed, blanked
      * and re-rendered the tree under a toast about the payment, and undid the
      * point of applying it locally. `reportOutcome` marks the URL when it has
@@ -130,7 +130,7 @@ export function CheckoutOutcome({
         /*
          * ⚠ AN UNRECOGNISED BODY IS TREATED AS "KEEP WAITING", NOT AS A
          * VERDICT. The proxy answers the API's own error shape verbatim when
-         * something upstream fails — `{ statusCode, name, message }`, with no
+         * something upstream fails - `{ statusCode, name, message }`, with no
          * `status` field at all. Casting that to `Result` and comparing it is
          * what once made the poll STOP on a body that said nothing, and render
          * "we could not find that checkout" to somebody who had paid.
@@ -153,7 +153,7 @@ export function CheckoutOutcome({
 
         // ⚠ THE RULE LIVES IN `keepPolling`, WHERE IT CAN BE ASSERTED. Three
         // states are not endings and missing any of them freezes the page on
-        // the wrong sentence — see lib/checkout-outcome.ts.
+        // the wrong sentence - see lib/checkout-outcome.ts.
         if (!keepPolling(next)) return
       } catch {
         if (!live) return
@@ -180,8 +180,8 @@ export function CheckoutOutcome({
   /*
    * ⚠ NOTHING IS SHOWN WHILE THE ANSWER IS STILL BEING FETCHED, AND THAT IS A
    * DELIBERATE REVERSAL. This used to render an amber "Checking your payment"
-   * the instant the page loaded, which meant the ordinary happy path — pay,
-   * come back, grant lands a second or two later — was a warning-coloured box
+   * the instant the page loaded, which meant the ordinary happy path - pay,
+   * come back, grant lands a second or two later - was a warning-coloured box
    * that turned green. Two states for one event, the first of which says
    * "something may be wrong" about something that is going fine.
    *
@@ -199,7 +199,7 @@ export function CheckoutOutcome({
    * ⚠ REVEALED RATHER THAN INSERTED, BECAUSE THIS BANNER ARRIVES LATE BY
    * DESIGN. It is not rendered until the poll answers, so it appears a second
    * or two after the checkout closes and shoves the whole page down in one
-   * frame — under somebody who is at that moment reading a toast about the
+   * frame - under somebody who is at that moment reading a toast about the
    * payment they just made. Growing into place on the same spring the rest of
    * the console uses turns a jump into the page making room.
    *
@@ -211,7 +211,7 @@ export function CheckoutOutcome({
    * ⚠ `unknown` SAYS NOTHING, BECAUSE IT IS NOW MOSTLY SOMEBODY ELSE'S CHECKOUT.
    * The id lives in a browser cookie, so a second account signed in within its
    * ten minutes carries the first one's; the API answers `unknown` for it rather
-   * than the other workspace's plan. "We could not find that checkout — if you
+   * than the other workspace's plan. "We could not find that checkout - if you
    * have paid, your plan is safe" is then a message about a payment this person
    * never made. The page under the banner already shows their real plan.
    */
@@ -246,13 +246,13 @@ export function CheckoutOutcome({
  *
  * ⚠ EXTRACTED THE MOMENT THERE WAS A SECOND MESSAGE TO SHOW. The plan step
  * needs to say "You're keeping Pro" after a cancellation is called off, in
- * the same place and the same shape as the checkout's own answer — and a
+ * the same place and the same shape as the checkout's own answer - and a
  * second copy of this markup is how the two would come to disagree about a
  * border colour, an icon size, or which spring they grow on.
  *
  * ⚠ IT TAKES `show` RATHER THAN BEING CONDITIONALLY RENDERED. An element
- * removed by its parent cannot animate out — `AnimatePresence` needs to
- * still own it — so every caller that wants the banner to LEAVE has to hand
+ * removed by its parent cannot animate out - `AnimatePresence` needs to
+ * still own it - so every caller that wants the banner to LEAVE has to hand
  * the decision in rather than act on it.
  */
 export function BillingBanner({

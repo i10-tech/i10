@@ -16,13 +16,13 @@ import { DeleteDomainDialog } from "@/components/delete-domain-dialog"
  *
  * ⚠ THE SAME DROPDOWN-AND-CONFIRM AS EVERY OTHER LIST IN THIS CONSOLE. Topics
  * and segments already end their rows this way; a domain row that invented its
- * own affordance — an inline red button, a hover-revealed ✕ — would be a third
+ * own affordance - an inline red button, a hover-revealed ✕ - would be a third
  * spelling of a thing people have already learned twice.
  *
  * ⚠ THE HIGHLIGHT ON THE ITEM USED TO BE A DIFFERENT SHAPE FROM THE PANEL
  * AROUND IT, AND IT WAS FIXED IN THE COMPONENT RATHER THAN HERE. A one-item
  * menu puts a 10px highlight inside an 18px panel with nothing between them,
- * which is where the mismatch became obvious — but it was wrong in every menu.
+ * which is where the mismatch became obvious - but it was wrong in every menu.
  * See dropdown-menu.tsx.
  *
  * ⚠ AND IT DELEGATES THE WHOLE DELETE TO THE SHARED DIALOG rather than
@@ -72,7 +72,7 @@ export function DomainActions({
         onOpenChange={setConfirming}
         // ⚠ NO `onDeleted`: THE LIST STAYS PUT. `deleteDomain` revalidates
         // `/domains`, so the row is already gone behind the dialog by the time
-        // it closes — there is nowhere to go and nothing to re-read.
+        // it closes - there is nowhere to go and nothing to re-read.
       />
     </>
   )

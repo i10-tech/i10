@@ -5,20 +5,20 @@
 # a promotion re-tags the same artifact rather than rebuilding, so what reaches
 # production is byte-for-byte what was tested on staging. That is why
 # SENTRY_ENVIRONMENT and friends are turbo passThrough rather than build inputs
-# — listing them would make staging and prod produce different images, which is
+# - listing them would make staging and prod produce different images, which is
 # exactly what this model avoids.
 #
 # ── ONLY WHAT CHANGED ────────────────────────────────────────────────────────
 #
 # `changes` runs dorny/paths-filter over the diff and emits a matrix containing
-# only the apps whose own sources — or a workspace package they consume —
+# only the apps whose own sources - or a workspace package they consume -
 # actually moved. Everything else is not rebuilt AND NOT RETAGGED: the manifests
 # already carry that image's digest from the commit that last changed it, so
 # `infra/k8s/i10/**` at any revision is a complete description of what runs.
 #
 # ⚠ THAT IS A DELIBERATE DIVERGENCE FROM PSL, which retags every unchanged app
 # to the new sha so its promote workflow finds a per-sha tag for all of them.
-# i10 has no promote step — main publishes prod-* directly — and pins by digest
+# i10 has no promote step - main publishes prod-* directly - and pins by digest
 # rather than by tag, so the retag would produce an alias with no consumer and
 # a NEW wrapper digest that would roll a pod whose contents did not change.
 #
@@ -61,7 +61,7 @@ permissions:
 env:
   REGISTRY: ghcr.io
   # ⚠ lowercase. GHCR rejects an uppercase path segment, and the org is
-  # `i10-tech`, so this is safe — but a repository_owner interpolation would
+  # `i10-tech`, so this is safe - but a repository_owner interpolation would
   # not be if the org were ever renamed with capitals.
   NAMESPACE: i10-tech
 
@@ -74,7 +74,7 @@ jobs:
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:
-      # A JSON array of matrix entries — `[]` when nothing needs building.
+      # A JSON array of matrix entries - `[]` when nothing needs building.
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,7 +84,7 @@ jobs:
 
       # ⚠ SKIPPED ON workflow_dispatch, WHERE THERE IS NO DIFF TO READ. A manual
       # run has no "before" commit, so the filter would either fail or report
-      # nothing changed — and a human pressing Run Workflow means "build it".
+      # nothing changed - and a human pressing Run Workflow means "build it".
       # The plan step turns that into every app.
       - name: Filter paths per app
         id: filter
@@ -117,7 +117,7 @@ jobs:
               - 'apps/web/**'
               - 'packages/ui/**'
             # ⚠ docs DEPENDS ON apps/api. It is not a documentation site that
-            # happens to mention the API — it builds `@i10/api` to generate the
+            # happens to mention the API - it builds `@i10/api` to generate the
             # OpenAPI document Scalar renders. An api-only change that did not
             # rebuild docs would leave the published reference describing the
             # previous release.
@@ -136,7 +136,7 @@ jobs:
               # repo-relative, and picomatch matches the pattern against that
               # string, so `/package.json` would match nothing. A bare
               # `package.json` has no separator, so it matches ONLY the root
-              # file — each app's own is already covered above.
+              # file - each app's own is already covered above.
               - 'package.json'
               - 'bun.lock'
               # bunfig.toml replaces BOTH .npmrc and pnpm-workspace.yaml: it
@@ -147,7 +147,7 @@ jobs:
               # is part of every task's cache key and decides which variables
               # are visible to a build.
               - 'turbo.json'
-              # Catch-all for any package NOT mapped to an app above —
+              # Catch-all for any package NOT mapped to an app above -
               # eslint-config, typescript-config, and anything added later.
               # ONE positive extglob on purpose: paths-filter evaluates each
               # pattern independently with .some() semantics, so a separate
@@ -185,7 +185,7 @@ jobs:
           # REPO ROOT because their Dockerfiles install from the workspace
           # lockfile and a per-app context would have no bun.lock to be frozen
           # against. authd is a self-contained Go module with its own go.sum,
-          # so its context is its own directory — giving it the repo root would
+          # so its context is its own directory - giving it the repo root would
           # ship the entire monorepo into the build.
           table=$(jq -nc \
             --arg api "${CH_API:-false}" \
@@ -219,7 +219,7 @@ jobs:
 
           # Publish the plan as THIS job's summary, not the build job's.
           # GitHub renders a summary when the job that wrote it finishes, and
-          # this one ends in seconds — so the plan is readable on the run page
+          # this one ends in seconds - so the plan is readable on the run page
           # while the images are still building, rather than ten minutes later
           # alongside the result it was meant to predict.
           {
@@ -228,7 +228,7 @@ jobs:
             echo "| Image | Own paths changed | Decision |"
             echo "|-------|-------------------|----------|"
             jq -r '.[] | "| `\(.image)` | \(.changed) | " +
-                   (if .build then "🔨 build" else "⏭️ unchanged — keeps its pinned digest" end) + " |"' <<<"$decided"
+                   (if .build then "🔨 build" else "⏭️ unchanged - keeps its pinned digest" end) + " |"' <<<"$decided"
             echo ""
             # ⚠ `if`, NOT `[[ … ]] && echo`. Under `set -e` a false test at the
             # end of a group is the group's exit status, so a run where no
@@ -245,7 +245,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
-  # Build, push and sign — only the apps the plan named.
+  # Build, push and sign - only the apps the plan named.
   # ---------------------------------------------------------------------------
   build:
     name: ${{ matrix.app.image }}
@@ -301,7 +301,7 @@ jobs:
           provenance: true
           sbom: true
 
-      # Sign the DIGEST, never a tag. A tag is a mutable pointer — signing one
+      # Sign the DIGEST, never a tag. A tag is a mutable pointer - signing one
       # attests to whatever it points at now, which is the thing an attacker
       # would change.
       - name: Sign the image
@@ -312,7 +312,7 @@ jobs:
             "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.app.image }}@${DIGEST}"
 
       # ⚠ AN ARTIFACT, NOT A JOB OUTPUT. A matrix leg writing to `outputs` is
-      # overwritten by every other leg — last one to finish wins — so four
+      # overwritten by every other leg - last one to finish wins - so four
       # parallel builds would hand the deploy job one digest and three
       # nothing. One artifact per image, merged downstream.
       - name: Record the digest
@@ -343,7 +343,7 @@ jobs:
   deploy:
     name: Pin digests and deploy
     needs: [changes, build]
-    # main only. A staging push publishes staging-* images and stops there —
+    # main only. A staging push publishes staging-* images and stops there -
     # there is no staging cluster for them to roll into yet.
     if: ${{ github.ref == 'refs/heads/main' && needs.build.result == 'success' }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
@@ -358,7 +358,7 @@ jobs:
       name: production
       url: https://i10.tech
     # ⚠ THE SECRETS ARE TURNED INTO BOOLEANS HERE BECAUSE A STEP-LEVEL `if:`
-    # CANNOT SEE `secrets`, AND GETTING THAT WRONG DOES NOT FAIL THE STEP — IT
+    # CANNOT SEE `secrets`, AND GETTING THAT WRONG DOES NOT FAIL THE STEP - IT
     # FAILS THE WHOLE WORKFLOW BEFORE ANY JOB STARTS. GitHub validates context
     # availability when it parses the file, so `if: secrets.X != ''` on a step
     # produces a run with zero jobs, no logs, and only "this run likely failed
@@ -367,7 +367,7 @@ jobs:
     #
     # `jobs.<id>.env` is one of the places `secrets` IS available, so the
     # presence check happens once, here, and the steps below compare strings.
-    # The VALUES are never exposed this way — only whether they are set.
+    # The VALUES are never exposed this way - only whether they are set.
     env:
       HAS_TAILSCALE: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID != '' }}
     steps:
@@ -391,8 +391,8 @@ jobs:
       #
       # ⚠ IT SCANS EVERY MANIFEST RATHER THAN A MAPPED FILE PER IMAGE. There
       # used to be a `manifest:` column in the app table above; it broke the
-      # moment one image appeared in two files — `i10-api` runs both the API and
-      # the worker — and it broke SILENTLY, leaving the second file on a stale
+      # moment one image appeared in two files - `i10-api` runs both the API and
+      # the worker - and it broke SILENTLY, leaving the second file on a stale
       # digest with nothing to notice. A mapping you must remember to update is
       # a mapping that will be forgotten, so there is no mapping: every
       # reference to a built image is rewritten wherever it appears.
@@ -406,7 +406,7 @@ jobs:
           while read -r image; do
             digest_file="/tmp/digests/${image}"
             if [[ ! -s "$digest_file" ]]; then
-              echo "::error::No digest artifact for ${image} — the build job did not record one."
+              echo "::error::No digest artifact for ${image} - the build job did not record one."
               exit 1
             fi
             digest=$(cat "$digest_file")
@@ -426,7 +426,7 @@ jobs:
                   total += n
                   print(f"  {path}: {n} reference(s)")
           if total == 0:
-              sys.exit(f"no reference to {repo} under infra/k8s — is the image still deployed?")
+              sys.exit(f"no reference to {repo} under infra/k8s - is the image still deployed?")
           print(f"  → {ref}")
           PY
             pinned+=("$image")
@@ -444,7 +444,7 @@ jobs:
           git add -- infra/k8s
 
           if git diff --cached --quiet; then
-            echo "Manifests already reference these digests — nothing to deploy."
+            echo "Manifests already reference these digests - nothing to deploy."
             # ⚠ RECORDED, BECAUSE THE VERIFY STEP MUST NOT RUN. With no new
             # commit there is nothing for Argo to move to, so waiting for one
             # would spend the whole timeout and then report a failed rollout
@@ -465,7 +465,7 @@ jobs:
               echo "pushed=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "Push rejected — rebasing onto origin/${GITHUB_REF_NAME} and retrying."
+            echo "Push rejected - rebasing onto origin/${GITHUB_REF_NAME} and retrying."
             git fetch origin "${GITHUB_REF_NAME}"
             git rebase "origin/${GITHUB_REF_NAME}" || { git rebase --abort; exit 1; }
           done
@@ -474,7 +474,7 @@ jobs:
 
       # ⚠ THE DEPLOY COMMIT'S SHA, NOT `GITHUB_SHA`. Argo syncs to whatever is at
       # the head of `main`, and the head is now the commit the step above
-      # created — pinning the digests. Waiting for `GITHUB_SHA` would wait for
+      # created - pinning the digests. Waiting for `GITHUB_SHA` would wait for
       # the merge commit, which Argo passed through on its way here and which
       # does NOT carry the new image references.
       - name: Record the deployed revision
@@ -484,7 +484,7 @@ jobs:
       # ⚠ "PUSHED" AND "DEPLOYED" WERE THE SAME SENTENCE HERE AND ARE NOT THE
       # SAME EVENT. Until this step existed the workflow went green the moment
       # git accepted the commit, while Argo had not polled, the image had not
-      # been pulled and nothing had started — so an ImagePullBackOff, a missing
+      # been pulled and nothing had started - so an ImagePullBackOff, a missing
       # secret or a container that crashlooped on a config error were all
       # invisible to CI. The first anybody knew was opening the site.
       #
@@ -494,8 +494,8 @@ jobs:
       # buys a convenience with a lot of attack surface.
       #
       # ⚠ AND IT GOES OVER TAILSCALE, BECAUSE SSH IS NOT ON THE PUBLIC INTERNET
-      # EITHER. `sshd` on psl-vps binds ONLY the tailnet addresses —
-      # `100.127.102.63:22` and its IPv6 — so a GitHub-hosted runner has no
+      # EITHER. `sshd` on psl-vps binds ONLY the tailnet addresses -
+      # `100.127.102.63:22` and its IPv6 - so a GitHub-hosted runner has no
       # route to port 22 at all; it is not a firewall rule that could be opened,
       # there is nothing listening. Measured, after a first version of this step
       # was written assuming a public address.
@@ -508,7 +508,7 @@ jobs:
       # ⚠ AND THE KEY CAN DO NOTHING ELSE. `authorized_keys` on the box pins
       # `infra/scripts/verify-rollout.sh` as a forced command with `restrict`,
       # so this credential cannot open a shell, read a secret or change a
-      # workload — see infra/scripts/README.md. If it were a general-purpose
+      # workload - see infra/scripts/README.md. If it were a general-purpose
       # deploy key, it would be the most valuable secret in the organisation.
       #
       # ⚠ SKIPPED RATHER THAN FAILED WHEN NO KEY IS CONFIGURED, so the pipeline
@@ -529,7 +529,7 @@ jobs:
 
       # ⚠ THE TAILNET IS THE CREDENTIAL, AND THERE IS NO SSH KEY AT ALL. This
       # used to carry a private key, a pinned host key and a forced command on
-      # the box — a design that is strictly stronger and that DOES NOT WORK
+      # the box - a design that is strictly stronger and that DOES NOT WORK
       # HERE, because psl-vps runs Tailscale SSH. `tailscaled` intercepts port
       # 22 before sshd sees it and never reads `authorized_keys`, so the forced
       # command was inert and the key authenticated nothing. The symptom is a
@@ -539,12 +539,12 @@ jobs:
       # ⚠ SO AUTHORISATION MOVED TO WHERE IT ACTUALLY LIVES: the tailnet ACL.
       # The runner joins as an ephemeral node tagged `tag:ci`, and an `ssh` rule
       # admits that tag to ONE user on ONE host. This is the same model psl uses
-      # for Infisical and the deploy webhooks — be on the tailnet, then talk to
-      # the thing — and it is two secrets instead of five.
+      # for Infisical and the deploy webhooks - be on the tailnet, then talk to
+      # the thing - and it is two secrets instead of five.
       #
       # ⚠ WHAT IS GIVEN UP, SAID PLAINLY: `tag:ci` gets a shell as
       # `i10-deploy`, not one pinned command. Tailscale SSH has no forced-command
-      # concept, so the blast radius is bounded by that user's RBAC instead —
+      # concept, so the blast radius is bounded by that user's RBAC instead -
       # get/list/watch on applications, deployments and pods, plus patch on
       # applications, and no sudo. A leaked OAuth secret reaches a read-only
       # view of one namespace, not the box.
@@ -552,7 +552,7 @@ jobs:
       # ⚠ AND `accept-new` IS CORRECT HERE RATHER THAN LAX, which it would not
       # be on the public internet. The connection is already authenticated and
       # encrypted by WireGuard before SSH begins, so impersonating the host
-      # means already holding a tailnet identity — at which point the host key
+      # means already holding a tailnet identity - at which point the host key
       # is not what is protecting anything. Pinning one is also actively wrong
       # now: the key presented is Tailscale SSH's, not sshd's.
       - name: Verify the rollout
@@ -570,7 +570,7 @@ jobs:
           images=$(tr ' ' ',' <<<"${PINNED:-}")
 
           # ⚠ TWO SHAS, AND THEY ARE DIFFERENT COMMITS. `REVISION` is the deploy
-          # commit Argo must reach — created by the step above, after the merge.
+          # commit Argo must reach - created by the step above, after the merge.
           # `GITHUB_SHA` is the merge commit, which is what the images are
           # TAGGED with (`:prod-${GITHUB_SHA}` in the pin step). Passing only the
           # first made the script's image assertion compare against a tag that
@@ -617,9 +617,9 @@ jobs:
                 ;;
               *)
                 if [ "${PUSHED:-false}" != "true" ]; then
-                  echo "Nothing to deploy — the manifests already referenced these digests."
+                  echo "Nothing to deploy - the manifests already referenced these digests."
                 else
-                  echo "⚠ Rollout not verified — \`TAILSCALE_OAUTH_CLIENT_ID\` is not"
+                  echo "⚠ Rollout not verified - \`TAILSCALE_OAUTH_CLIENT_ID\` is not"
                   echo "configured. The box is reachable only over the tailnet, and the"
                   echo "tailnet is what authorises CI. See infra/scripts/README.md."
                 fi

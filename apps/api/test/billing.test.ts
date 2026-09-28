@@ -45,14 +45,14 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   /*
    * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
    * was written for. The reconciler now asks whether a tenant still exists
-   * before trying to repair it — a fake that answered "no" would send every one
+   * before trying to repair it - a fake that answered "no" would send every one
    * of these through the new unknown-tenant branch instead of the repair path
    * they are actually about.
    */
   knownTenants: async (ids: readonly string[]) => new Set(ids),
   // ⚠ A NO-OP HERE, BUT NOT OPTIONAL ON THE PORT. `plan-change` calls it inside
   // the try that reports a refusal, so a fake missing it turns every
-  // cancellation test into "Polar could not apply the change" — which is
+  // cancellation test into "Polar could not apply the change" - which is
   // exactly the message the missing WRITE produced in production.
   noteCancelling: async () => {},
   noteResuming: async () => {},
@@ -119,7 +119,7 @@ describe("granting a plan", () => {
   // CAUGHT A REVOCATION LEAVING PRO SWITCHED ON. `subscription_id` asserts
   // "this attachment IS that Polar subscription"; the free plan is not the
   // subscription that just ended, and Autumn rejects the claim with 409
-  // `duplicate_subscription_id` — so every downgrade failed.
+  // `duplicate_subscription_id` - so every downgrade failed.
   it("withholds it when dropping the tenant back to free", async () => {
     const grantPlan = mock(async () => {})
     const grants = subscriptionGrants({
@@ -170,7 +170,7 @@ describe("granting a plan", () => {
   })
 
   // ⚠ THE STRONGER CLAIM STILL BELONGS TO THE CHECKOUT. `reassign` takes the id
-  // OFF whoever holds it, on the evidence of a succeeded checkout — so asking
+  // OFF whoever holds it, on the evidence of a succeeded checkout - so asking
   // who holds it first would answer with the very binding that path exists to
   // correct.
   it("leaves a reassigning checkout to decide the tenant for itself", async () => {
@@ -274,7 +274,7 @@ describe("reconciling against Polar", () => {
   /*
    * ⚠ THE ONE THING THE BACKSTOP CANNOT BACK UP, AND IT USED TO SKIP IT
    * SILENTLY. The reconciler attributes subscriptions by
-   * `customer.external_id`, exactly as the webhook does — so a subscription
+   * `customer.external_id`, exactly as the webhook does - so a subscription
    * without one is invisible to both, and a bare `continue` meant a run could
    * report perfect agreement while somebody who had paid sat on the free plan
    * for ever.
@@ -342,8 +342,8 @@ describe("reconciling against Polar", () => {
    * ⚠ THE FOREIGN KEY VIOLATION THAT RAN EVERY THIRTY MINUTES FOR EVER. Polar
    * keeps `customer.external_id` after the workspace it names is deleted, so a
    * live subscription can point at a tenant that no longer exists. With no way
-   * to ask, the reconciler read the missing row as a lost webhook — the one
-   * case it repairs — tried to repair it, and the insert died on
+   * to ask, the reconciler read the missing row as a lost webhook - the one
+   * case it repairs - tried to repair it, and the insert died on
    * `subscriptions_tenant_id_tenants_id_fk`. Three tenants were doing this in
    * production, the job exited non-zero every run, and the Argo Application sat
    * Degraded because of it.
@@ -388,7 +388,7 @@ describe("reconciling against Polar", () => {
 
   /*
    * ⚠ THE SAME RULE ON THE OTHER UNATTRIBUTABLE CASE. `stranded` means somebody
-   * PAID and nothing here will ever grant it — which an ended subscription is
+   * PAID and nothing here will ever grant it - which an ended subscription is
    * not. Polar never deletes a subscription, and deleting a customer stops its
    * `external_id` resolving, so without this every cancelled subscription that
    * customer ever had is reported on every run and the job can never go green.
@@ -421,7 +421,7 @@ describe("reconciling against Polar", () => {
   })
 
   // ⚠ BUT A LIVE ONE STILL SHOUTS, because that IS money from somebody we
-  // cannot name — the case the whole `stranded` bucket exists for.
+  // cannot name - the case the whole `stranded` bucket exists for.
   it("still strands a live subscription it cannot attribute", async () => {
     const report = await reconcileSubscriptions({
       polar: {
@@ -452,7 +452,7 @@ describe("reconciling against Polar", () => {
    * ⚠ AND ONCE IT IS REVOKED IT IS NOT A FINDING AT ALL, which is the
    * difference between an alert and a permanently red job. Polar never deletes
    * a subscription, so a cancelled one naming a dead tenant stays in the list
-   * for ever — reporting it on every run means acting on the alert can never
+   * for ever - reporting it on every run means acting on the alert can never
    * clear it, and everybody learns to ignore the job.
    *
    * Observed 2026-09-21 with a dev signup against the shared sandbox Polar
@@ -489,8 +489,8 @@ describe("reconciling against Polar", () => {
 
   /*
    * ⚠ THE SECOND CRASH, AND IT IS NOT THE SAME BUG AS THE ONE ABOVE. These two
-   * arrived together in production and looked alike in the log — three tenants,
-   * every run, all counted as `failed` — but one was a foreign key on a tenant
+   * arrived together in production and looked alike in the log - three tenants,
+   * every run, all counted as `failed` - but one was a foreign key on a tenant
    * that does not exist and two were this: a UNIQUE violation on
    * `polar_subscription_id`, for tenants that exist perfectly well, because
    * somebody else's row already holds the subscription Polar attributes to them.
@@ -550,7 +550,7 @@ describe("reconciling against Polar", () => {
   /*
    * ⚠ AND A LIVE TENANT WITH NO ROW IS STILL REPAIRED, which is the case the
    * whole job exists for. If the new check swallowed this one it would have
-   * turned a lost webhook into a silent permanent downgrade — strictly worse
+   * turned a lost webhook into a silent permanent downgrade - strictly worse
    * than the crash it replaces.
    */
   it("still repairs a live tenant that has no subscription row", async () => {
@@ -770,7 +770,7 @@ describe("reconciling against Polar", () => {
   })
 
   // ⚠ THE SAFETY VALVE. Polar never deletes subscriptions, so absence means our
-  // data is wrong or the token points at the wrong organisation — and acting on
+  // data is wrong or the token points at the wrong organisation - and acting on
   // it would downgrade every paying customer at once.
   it("reports a row Polar has no subscription for, and never downgrades it", async () => {
     const apply = mock()
@@ -896,7 +896,7 @@ describe("POST /billing/checkout", () => {
   })
 
   // ⚠ A CALLER WHO COULD NAME A PRODUCT COULD NAME A ONE-CENT ONE and buy Pro
-  // with it — and the webhook would grant it perfectly correctly, because from
+  // with it - and the webhook would grant it perfectly correctly, because from
   // Polar's side the payment really did succeed.
   it("refuses a plan that is not in our own product map", async () => {
     const createCheckout = mock(async () => checkout)
@@ -1013,7 +1013,7 @@ describe("GET /billing/plan", () => {
       cancelAtPeriodEnd: true,
       currentPeriodEnd: "2026-10-03T00:00:00.000Z",
       // ⚠ PRESENT AND NULL, NOT ABSENT. A deferred downgrade leaves every other
-      // field describing the plan they are LEAVING — see billing/events.ts — so
+      // field describing the plan they are LEAVING - see billing/events.ts - so
       // this is the only thing that can say one was accepted, and a consumer
       // that had to distinguish "no change" from "an older API build" would
       // have to guess.

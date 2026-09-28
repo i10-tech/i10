@@ -98,7 +98,7 @@ describe("signing", () => {
     expect(signed).toContain(`s=${keypair.selector}`)
     expect(signed).toContain("a=rsa-sha256")
     expect(signed).toContain("c=relaxed/relaxed")
-    // The message itself must survive untouched — the signature covers it.
+    // The message itself must survive untouched - the signature covers it.
     expect(signed).toContain("\r\n\r\nbody\r\n")
   })
 
@@ -138,7 +138,7 @@ describe("signing", () => {
   /**
    * ⚠ EVERY HEADER `buildRawMessage` EMITS, AND THE ABSENT ONES TOO. A name in
    * `h=` with no matching header is hashed as the null string (RFC 6376 §3.7),
-   * which is oversigning — it stops an intermediary ADDING a `Cc` the signature
+   * which is oversigning - it stops an intermediary ADDING a `Cc` the signature
    * never covered. This differs from nodemailer, which dropped absent names from
    * the tag, so it is asserted rather than assumed.
    */
@@ -174,7 +174,7 @@ describe("the direct transport", () => {
 
     expect(outcome.status).toBe("sent")
     // ⚠ THE TAG, WITH ITS TERMINATOR. Asserting the bare substring would also
-    // pass for `d=example.com>` — the exact malformed value this unwrapping
+    // pass for `d=example.com>` - the exact malformed value this unwrapping
     // exists to prevent, since the From carries a display name.
     expect(rawOf(m.calls[0]!)).toMatch(/d=example\.com;/)
   })
@@ -200,7 +200,7 @@ describe("the direct transport", () => {
    * ⚠ THE RECORDED ID MUST RESOLVE TO SOMETHING, AND upyo'S IS SYNTHETIC HERE.
    * Stalwart's `250 2.0.0 Message queued for delivery.` carries no queue id, so
    * upyo's extractor finds nothing and falls back to
-   * `smtp-${Date.now()}-${random}` — a value that looks like an id and resolves
+   * `smtp-${Date.now()}-${random}` - a value that looks like an id and resolves
    * nowhere, which is the exact bug this column already had once when it held
    * nodemailer's client-side UUID. The honest identifier is the `Message-ID` we
    * wrote, which reaches the wire unmodified and appears in Stalwart's logs.
@@ -221,7 +221,7 @@ describe("the direct transport", () => {
   })
 
   // ⚠ THE KEY MUST BELONG TO THE TENANT WHOSE MESSAGE THIS IS, not merely to
-  // whoever owns a row with that name — which is what scoping the lookup buys
+  // whoever owns a row with that name - which is what scoping the lookup buys
   // beyond fixing the RLS raise.
   it("looks the key up for the sending message's own tenant", async () => {
     const seen: { domain: string; tenantId: string }[] = []
@@ -258,7 +258,7 @@ describe("the direct transport", () => {
   /**
    * ⚠ LEAVING `encoding` UNSET IS WHAT MAKES upyo VALIDATE THE BYTES. Naming it
    * would skip the analysis pass that enforces CRLF endings, the 998-octet line
-   * limit and the absence of NUL — the pass that found two latent faults in
+   * limit and the absence of NUL - the pass that found two latent faults in
    * `buildRawMessage`.
    */
   it("hands over unencoded bytes and lets the client classify them", async () => {
@@ -289,8 +289,8 @@ describe("the direct transport", () => {
 
   /**
    * ⚠ THE ENVELOPE TAKES BARE ADDRESSES AND THE HEADER KEEPS THE NAME. `RCPT TO`
-   * with `Bob <bob@x.test>` reads the local part as `Bob <bob` — a space and an
-   * angle bracket, which is not a valid address — so the relay client
+   * with `Bob <bob@x.test>` reads the local part as `Bob <bob` - a space and an
+   * angle bracket, which is not a valid address - so the relay client
    * refuses the whole message. The previous client unwrapped this silently, so
    * every send with a display name in `to` depended on behaviour we no longer
    * have. Getting this wrong fails those sends permanently, on the direct route
@@ -313,7 +313,7 @@ describe("the direct transport", () => {
       "cc@elsewhere.test",
       "hidden@elsewhere.test",
     ])
-    // The recipient still sees the name — that is the header's job, not the
+    // The recipient still sees the name - that is the header's job, not the
     // envelope's.
     expect(rawOf(m.calls[0]!)).toContain('To: "Bob Loblaw" <bob@elsewhere.test>')
     // ...and bcc stays blind either way.
@@ -368,7 +368,7 @@ describe("the direct transport", () => {
 /**
  * ⚠ SMTP CAN TAKE A MESSAGE AND STILL REFUSE SOME OF ITS RECIPIENTS, which is
  * information the previous client never surfaced. The send really did succeed,
- * so the outcome stays `sent` — this callback is the only place the missing
+ * so the outcome stays `sent` - this callback is the only place the missing
  * recipients become visible.
  */
 describe("partial acceptance", () => {
@@ -460,7 +460,7 @@ describe("classifying a relay failure", () => {
    * ⚠ THE REGRESSION THIS PREVENTS IS A QUEUE-WIDE EXTINCTION EVENT. A server
    * refusing the session answers the same 5xx for EVERY message, and a hard 5xx
    * read as a verdict on the message would burn the entire backlog to `failed`
-   * in one batch — each row blaming the message rather than the cause. The
+   * in one batch - each row blaming the message rather than the cause. The
    * session is ours to fix and the mail is still deliverable, so it waits.
    */
   it("defers a 5xx from the session rather than the message", async () => {
@@ -482,7 +482,7 @@ describe("classifying a relay failure", () => {
   /**
    * ⚠ THE SAME EXTINCTION EVENT, ARRIVING IN THE MESSAGE PHASE. The relay takes
    * no credential, so what a bad password used to cause now shows up as a
-   * refusal of the envelope — and it is just as much about us. These are
+   * refusal of the envelope - and it is just as much about us. These are
    * Stalwart's exact replies, from its source, for a relay rule that is not
    * applied, a port that still demands AUTH, and a return path the sender rule
    * refuses. Every message would get the same answer; none of it is the mail's
@@ -568,7 +568,7 @@ describe("classifying a relay failure", () => {
   /**
    * ⚠ THE REGRESSION: A LOOKUP FAILURE IS NOT A VERDICT ON THE MESSAGE. This
    * used to share a catch with signing and came back `rejected`, which
-   * handleBatch treats as permanent — so a momentary database blip marked a
+   * handleBatch treats as permanent - so a momentary database blip marked a
    * perfectly deliverable message `failed` and it was never retried.
    */
   it("defers when the key lookup itself fails, rather than failing the message", async () => {
@@ -586,7 +586,7 @@ describe("classifying a relay failure", () => {
 
   /**
    * ⚠ `sendRaw` RETURNS FAILURES RATHER THAN THROWING THEM, so a throw means
-   * something outside the SMTP conversation went wrong — in practice an abort.
+   * something outside the SMTP conversation went wrong - in practice an abort.
    * Nothing about the message, so it waits.
    */
   it("defers when the client throws instead of returning a receipt", async () => {

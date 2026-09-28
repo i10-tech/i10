@@ -10,7 +10,7 @@ import { cn } from "cn"
  * DESIGN. The page is a server component that queries by `days`; holding the
  * range in React would mean fetching on the client, which means a loading
  * spinner where there is currently server-rendered HTML. In the URL it is also
- * shareable, bookmarkable and survives a reload — somebody looking at a bad
+ * shareable, bookmarkable and survives a reload - somebody looking at a bad
  * week can send the link.
  *
  * ⚠ AND IT PRESERVES THE OTHER PARAMETERS. Building the query from scratch
@@ -32,7 +32,7 @@ export function RangePicker({ value }: { value: number }) {
     // cursor points into the PREVIOUS result set; carrying one across a range
     // change starts the new list part-way down, so a fresh view silently begins
     // in the middle and reads as missing rows. The overview has no cursor today
-    // — this is here so that the first paginated page to reuse this control
+    // - this is here so that the first paginated page to reuse this control
     // does not have to rediscover the rule.
     next.delete("cursor")
     // ⚠ `scroll: false`, because this is a filter and not a navigation. Jumping

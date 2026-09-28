@@ -10,7 +10,7 @@ import { sesTenantName, type DomainIdentity } from "./identity.js"
  * identity, which covers every new domain and every transfer; the daily
  * re-check calls it for each verified domain it visits, which covers an attach
  * that failed and every domain that predates tenants. Two copies of "attach,
- * then record" would drift on the one detail that matters — the column is
+ * then record" would drift on the one detail that matters - the column is
  * written only after SES said yes.
  *
  * ⚠ THE COLUMN IS WHAT THE WORKER TRUSTS. A send that names a tenant is refused
@@ -20,7 +20,7 @@ import { sesTenantName, type DomainIdentity } from "./identity.js"
  * refused mail instead of mail sent without tenant isolation.
  *
  * ⚠ AND A FAILURE HERE NEVER FAILS THE CALLER. Mail still goes without a tenant
- * — at the account level, exactly as it did before tenants existed — and the
+ * - at the account level, exactly as it did before tenants existed - and the
  * next re-check tries again. Failing a customer's Verify because an SES
  * bookkeeping call throttled would be a worse outage than the one it prevents.
  */
@@ -63,7 +63,7 @@ export async function ensureSesTenant(
   } catch (error) {
     log?.error?.(
       { err: error, tenantId, domainId, domain: row.name, sesTenant: wanted },
-      "could not attach the SES identity to its tenant — mail sends untenanted until the re-check retries",
+      "could not attach the SES identity to its tenant - mail sends untenanted until the re-check retries",
     )
     return "failed"
   }

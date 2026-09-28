@@ -2,7 +2,7 @@
  * The rules a field is judged by. One sentence per way of being wrong.
  *
  * ⚠ A CHECK RETURNS THE CORRECTION, NOT A BOOLEAN, AND THAT IS THE WHOLE
- * INTERFACE. `false` tells somebody they are wrong; "Just the domain — no
+ * INTERFACE. `false` tells somebody they are wrong; "Just the domain - no
  * https:// in front." tells them what to do instead, and the difference is
  * whether they get unstuck. It also means the message lives next to the test
  * that produced it rather than in a lookup table three files away, which is
@@ -14,7 +14,7 @@
  * meaningful.
  *
  * ⚠ CHECKS ARE NEVER ASKED ABOUT AN EMPTY VALUE. Emptiness is the field's own
- * business — it is not a mistake until somebody presses the button — so every
+ * business - it is not a mistake until somebody presses the button - so every
  * function here may assume it has been given something.
  */
 
@@ -40,8 +40,8 @@ export type Check = (value: string) => Problem | null
  * no public domain is one we would accept and then fail to reach.
  *
  * ⚠ AND IT IS DELIBERATELY LOOSE EVERYWHERE ELSE. Every regex that tries to
- * fully implement RFC 5322 rejects addresses that work — plus-tagging,
- * apostrophes, long TLDs, new gTLDs — and the cost of a false rejection is
+ * fully implement RFC 5322 rejects addresses that work - plus-tagging,
+ * apostrophes, long TLDs, new gTLDs - and the cost of a false rejection is
  * somebody who cannot sign up at all and has no way to argue. The rule is "has
  * a local part, one @, a domain with a dot, and a plausible TLD", and nothing
  * beyond it.
@@ -52,7 +52,7 @@ const EMAIL = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[a-z]{2,}$/i
  * An email address.
  *
  * ⚠ IT MOVED OUT OF THE AUTH APP BECAUSE THE CONSOLE ASKS FOR ADDRESSES TOO,
- * and was not checking them at all — "Add a contact" and "Suppress an address"
+ * and was not checking them at all - "Add a contact" and "Suppress an address"
  * both took whatever was typed and sent it to the API. Two rules for one
  * concept is how `mido@localhost` gets refused at sign-up and accepted as a
  * contact.
@@ -93,7 +93,7 @@ export const httpsUrlProblem: Check = (value) => {
       : "That does not look like a URL."
   }
 
-  if (url.protocol === "http:") return "Use https:// — we will not post over http."
+  if (url.protocol === "http:") return "Use https:// - we will not post over http."
   if (url.protocol !== "https:") return "Start with https://"
   if (url.hostname === "localhost" || url.hostname.endsWith(".localhost")) {
     return "We cannot reach localhost. Use a tunnel while developing."

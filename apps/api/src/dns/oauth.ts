@@ -14,7 +14,7 @@ import { DNS_USER_AGENT } from "./user-agent.js"
  * ⚠ `state` IS SIGNED AND CARRIES THE TENANT, RATHER THAN BEING A RANDOM VALUE
  * IN A SESSION STORE. The callback arrives as a plain browser navigation with
  * no session we control, so the only thing telling us which workspace authorised
- * this is what we put in `state` — and if that is unauthenticated, anybody can
+ * this is what we put in `state` - and if that is unauthenticated, anybody can
  * craft a callback that attaches THEIR DNS credential to SOMEBODY ELSE'S
  * workspace. That is not a theoretical: it is the standard OAuth
  * account-linking attack, and the consequence here is a stranger holding a
@@ -32,7 +32,7 @@ export interface OAuthApp {
   /**
    * ⚠ OPTIONAL, BECAUSE NOT EVERY PROVIDER ISSUES ONE. Cloudflare's OAuth has
    * `none` among its `token_endpoint_auth_methods_supported`, which is how
-   * `wrangler` authenticates — a PUBLIC client, with no secret to keep, whose
+   * `wrangler` authenticates - a PUBLIC client, with no secret to keep, whose
    * entire protection against a stolen authorization code is PKCE. Requiring a
    * secret here would make such an app impossible to configure; sending an
    * empty one would be rejected by the token endpoint.
@@ -50,8 +50,8 @@ export interface OAuthApp {
    * endpoint that needs credentials to read.
    *
    * ⚠ SO GETTING ONE WRONG IS A DOPPLER EDIT RATHER THAN A DEPLOY. The failure
-   * it fixes — a consent screen that refuses, or grants a token that cannot do
-   * the one thing we need — is discovered during setup by whoever is holding
+   * it fixes - a consent screen that refuses, or grants a token that cannot do
+   * the one thing we need - is discovered during setup by whoever is holding
    * the dashboard, and making them wait for a release to try the next string is
    * the difference between ten minutes and an afternoon.
    */
@@ -67,7 +67,7 @@ export interface OAuthConfig {
    * ⚠ ONE URL FOR EVERY PROVIDER, WITH THE SLUG IN THE PATH. Most providers
    * require every redirect URI to be registered ahead of time and compared
    * exactly, so building it from a request header would mean a redirect that
-   * works on one hostname and is rejected on another — including, eventually,
+   * works on one hostname and is rejected on another - including, eventually,
    * production.
    */
   redirectBase: string
@@ -79,8 +79,8 @@ export interface OAuthConfig {
    * ⚠ IT EXISTS FOR EXACTLY ONE MEASURED FAILURE AND IS NOT A GENERAL PROXY.
    * `dash.cloudflare.com` is a dashboard host behind Cloudflare's bot
    * management; from psl-vps it answers a managed challenge to every client we
-   * can construct — curl and Bun alike, HTTP/1.1 and h2 alike, over IPv4 and
-   * IPv6 alike — while answering ordinary OAuth JSON to the same request from a
+   * can construct - curl and Bun alike, HTTP/1.1 and h2 alike, over IPv4 and
+   * IPv6 alike - while answering ordinary OAuth JSON to the same request from a
    * residential line. No header fixes that, because it is a decision about the
    * ADDRESS. See services/dns-oauth-broker.
    *
@@ -97,7 +97,7 @@ export interface OAuthConfig {
  * Token endpoints that will not answer our egress, so the broker is used.
  *
  * ⚠ A HOST LIST RATHER THAN A PROVIDER LIST, BECAUSE THE PROBLEM IS THE HOST.
- * What is challenged is `dash.cloudflare.com` — the dashboard — and not
+ * What is challenged is `dash.cloudflare.com` - the dashboard - and not
  * Cloudflare as a company: their `api.cloudflare.com`, which the publish path
  * uses for every zone read and record write, has never been challenged from the
  * cluster. Keying on the provider slug would have brokered calls that work
@@ -116,7 +116,7 @@ const STATE_TTL_MS = 10 * 60 * 1000
  * A place on our own console, or nothing.
  *
  * ⚠ THE `//` CASE IS THE WHOLE REASON THIS IS A FUNCTION. `/foo` is a path and
- * `https://evil.test` is obviously not — but `//evil.test` is BOTH: it starts
+ * `https://evil.test` is obviously not - but `//evil.test` is BOTH: it starts
  * with a slash and every browser reads it as a protocol-relative URL to another
  * origin. A check for a leading slash alone passes it, which is the classic
  * open-redirect bug and it would be one we had signed.
@@ -174,7 +174,7 @@ function describeFailure(
   /*
    * ⚠ THE RAY ID IS THE ONLY THING CLOUDFLARE SUPPORT WILL ASK FOR. It
    * identifies the exact request in their own logs, including the rule that
-   * stopped it — which is the one fact nobody on this side of the connection
+   * stopped it - which is the one fact nobody on this side of the connection
    * can otherwise discover. `wrangler` prints it for the same reason and in
    * the same situation; see `isBotChallenge`.
    */
@@ -185,7 +185,7 @@ function describeFailure(
 }
 
 const CHALLENGED =
-  "Cloudflare challenged the request instead of answering it — a bot-management " +
+  "Cloudflare challenged the request instead of answering it - a bot-management " +
   "decision about where we called from, not about your authorisation. Quote the " +
   "ray id to Cloudflare support."
 
@@ -197,25 +197,25 @@ const blockedBy = (code: string) =>
  * What stopped this, when it was not the OAuth endpoint.
  *
  * ⚠ THESE WERE ONE BRANCH AND THEY ARE TWO DIFFERENT PROBLEMS WITH TWO
- * DIFFERENT FIXES. A CHALLENGE is bot management scoring the caller — the
- * address, the ASN, the TLS fingerprint, the user agent — and it clears by
+ * DIFFERENT FIXES. A CHALLENGE is bot management scoring the caller - the
+ * address, the ASN, the TLS fingerprint, the user agent - and it clears by
  * changing one of those or by being allowlisted. A BLOCK (`error code: 1010`,
  * `1020`, and friends) is a firewall rule that matched, which is a different
  * conversation with support and often a different team. Reporting both as "a
  * bot challenge" was us asserting a cause we had not established, on a page
- * that then tells the customer it is nobody's fault — and being wrong about
+ * that then tells the customer it is nobody's fault - and being wrong about
  * that sends whoever reads it to argue the wrong case.
  *
  * ⚠ `Attention Required` HAS BEEN DROPPED AS A CHALLENGE MARKER, because it is
  * the TITLE OF THE BLOCK PAGE. It was the loosest of the three and the one
  * most likely to make a firewall rule look like a bot score. A block page with
  * no error code in it now falls through to `snippet`, which quotes the page
- * itself — less of a claim, and more information.
+ * itself - less of a claim, and more information.
  *
  * ⚠ `cf-mitigated` IS STILL FIRST BECAUSE IT IS THE ONLY UNAMBIGUOUS SIGNAL.
  * Cloudflare sets it on a challenged response and on nothing else.
  *
- * ⚠ AND `challenge-platform` IS NOT A GUESS ABOUT SOMEBODY ELSE'S SYSTEM —
+ * ⚠ AND `challenge-platform` IS NOT A GUESS ABOUT SOMEBODY ELSE'S SYSTEM -
  * CLOUDFLARE'S OWN CLIENT MATCHES IT ON THIS EXACT ENDPOINT. `wrangler`'s
  * `getJSONFromResponse` tests `<!DOCTYPE html>` and then `challenge-platform`,
  * and prints "It looks like you might have hit a bot challenge page… please
@@ -240,7 +240,7 @@ function interference(response: Response, raw: string): Interference {
  *
  * ⚠ THE DETECTOR ABOVE WAS EATING THE ONLY EVIDENCE THERE IS, AND THAT IS WHY
  * THIS FAILURE HAS BEEN ARGUED ABOUT INSTEAD OF SETTLED. `describeFailure`
- * quotes the body only when it does NOT classify it — so in the one case where
+ * quotes the body only when it does NOT classify it - so in the one case where
  * we most need to know what Cloudflare actually served, the body was read,
  * matched against three substrings, reduced to a sentence, and dropped. Two
  * rounds of this were spent reasoning about a response nobody had ever seen.
@@ -324,7 +324,7 @@ export interface DnsOAuth {
      *
      * ⚠ IT TRAVELS IN THE SIGNED `state` BECAUSE IT CANNOT TRAVEL ANYWHERE
      * ELSE. Providers compare `redirect_uri` character for character against
-     * what is registered, so a query parameter cannot be appended to it — and
+     * what is registered, so a query parameter cannot be appended to it - and
      * `state` is the only field that round-trips untouched.
      *
      * ⚠ AND IT IS A PATH, NEVER A URL. An absolute value here would be an open
@@ -359,7 +359,7 @@ export interface DnsOAuth {
    * ⚠ WITHOUT THIS A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND THEN DEAD. The
    * grant was stored from the moment somebody authorised us and never looked at
    * again, so the first publish after the token expired failed `unauthorized`
-   * — which the console correctly reports as "reconnect", asking a customer to
+   * - which the console correctly reports as "reconnect", asking a customer to
    * redo an authorisation that never actually lapsed.
    */
   refresh(input: { slug: string; refreshToken: string }): Promise<TokenGrant>
@@ -378,14 +378,14 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
    * stored.
    *
    * ⚠ PKCE EXISTS BECAUSE THE AUTHORIZATION CODE TRAVELS THROUGH A BROWSER WE
-   * DO NOT CONTROL. Anything that can read the redirect — a malicious
-   * extension, a proxy, a referrer log, shoulder-surfing a URL bar — holds a
+   * DO NOT CONTROL. Anything that can read the redirect - a malicious
+   * extension, a proxy, a referrer log, shoulder-surfing a URL bar - holds a
    * code that can be exchanged for a credential that writes DNS in a customer's
    * zone. The challenge binds that code to a secret only this server knows.
    *
    * ⚠ WHICH IS EXACTLY WHY THE VERIFIER MUST NOT TRAVEL IN `state`. It is the
-   * obvious place to put it — `state` already round-trips and is already
-   * signed — but signed is not secret: the payload is base64url, readable by
+   * obvious place to put it - `state` already round-trips and is already
+   * signed - but signed is not secret: the payload is base64url, readable by
    * anyone holding the URL. A verifier sitting beside the code it protects
    * protects nothing at all.
    *
@@ -456,7 +456,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       url.searchParams.set("state", state)
       // ⚠ THE CONFIGURED LIST WINS WHOLESALE, NOT MERGED. A merge would mean a
       // deployment could only ever ADD to whatever the registry happens to
-      // say — so a registry entry that is simply wrong could not be corrected,
+      // say - so a registry entry that is simply wrong could not be corrected,
       // which is the entire case for this override existing.
       const scopes = app.scopes ?? oauth.scopes
       if (scopes.length > 0) {
@@ -489,7 +489,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
        * ⚠ `timingSafeEqual`, AND THE LENGTH CHECK BEFORE IT. It throws on a
        * length mismatch rather than returning false, so comparing directly
        * turns a forged state of the wrong length into a 500 instead of a
-       * refusal — and the difference in response is itself an oracle.
+       * refusal - and the difference in response is itself an oracle.
        */
       const a = Buffer.from(signature)
       const b = Buffer.from(expected)
@@ -526,7 +526,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         client_id: app.clientId,
         // ⚠ OMITTED ENTIRELY FOR A PUBLIC CLIENT, not sent empty. An empty
         // `client_secret` is a supplied-and-wrong secret to a token
-        // endpoint, which answers `invalid_client` — indistinguishable in
+        // endpoint, which answers `invalid_client` - indistinguishable in
         // the log from a real secret that has been rotated.
         ...(app.clientSecret ? { client_secret: app.clientSecret } : {}),
         code_verifier: verifier,
@@ -551,9 +551,9 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
    * One POST to a provider's token endpoint, whatever is being traded.
    *
    * ⚠ SHARED SO THE TWO GRANTS CANNOT DRIFT. An authorization-code exchange and
-   * a refresh differ only in the body; everything around them — the form
+   * a refresh differ only in the body; everything around them - the form
    * encoding, the timeout, which failures are `exchange_failed`, how an expiry
-   * becomes an absolute timestamp — is identical, and the half that is easy to
+   * becomes an absolute timestamp - is identical, and the half that is easy to
    * forget in a second copy is the one that only matters an hour after somebody
    * connected.
    */
@@ -620,7 +620,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
     /*
      * ⚠ THE BROKER'S OWN REFUSAL IS NOT THE PROVIDER'S, AND CONFLATING THEM
      * WOULD UNDO THE POINT OF IT. A rotated broker secret answers 401, which is
-     * the same status Cloudflare uses for `invalid_client` — so without this
+     * the same status Cloudflare uses for `invalid_client` - so without this
      * header a misconfigured Worker would be reported to an administrator as
      * "your client secret is wrong", sending them to edit the one thing that
      * was correct. `x-broker-error` is set only by the Worker; Cloudflare never
@@ -638,8 +638,8 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
     /*
      * ⚠ READ AS TEXT FIRST, BECAUSE THE FAILURE WE CANNOT DIAGNOSE IS THE ONE
      * THAT IS NOT JSON. `response.json().catch(() => null)` threw away the
-     * whole body, so a Cloudflare challenge page — the single most likely
-     * reason a token exchange fails from inside a datacentre — arrived here as
+     * whole body, so a Cloudflare challenge page - the single most likely
+     * reason a token exchange fails from inside a datacentre - arrived here as
      * `null` and was reported as the bare status. "HTTP 403" and "the client
      * secret is wrong" were indistinguishable, and the difference is the whole
      * question: one is our egress being challenged, the other is a Doppler

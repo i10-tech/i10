@@ -90,7 +90,7 @@ describe("reading a scope", () => {
   /*
    * ⚠ EXACT MATCH, NOT SUFFIX, AND A SUBDOMAIN IS A DIFFERENT DOMAIN. In
    * `core.domains` `mail.acme.com` is its own row with its own verification and
-   * its own DKIM key — often kept separate on purpose, so its reputation does
+   * its own DKIM key - often kept separate on purpose, so its reputation does
    * not touch the apex. A key scoped to the apex must not reach it.
    */
   it("does not let a scope for an apex cover its subdomains", () => {

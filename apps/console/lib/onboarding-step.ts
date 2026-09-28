@@ -12,7 +12,7 @@
  *
  * ⚠ KEYED TO THE WORKSPACE, like the skip cookie in ./onboarding-skip.ts, so a
  * step remembered in one workspace is never applied to another. A session
- * cookie — no max-age — so a closed browser starts from the facts again.
+ * cookie - no max-age - so a closed browser starts from the facts again.
  */
 
 export const ONBOARDING_STEP_COOKIE = "i10_onboarding_step"

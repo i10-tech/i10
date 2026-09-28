@@ -26,7 +26,7 @@ const bucket = (tenantId: string, d: string, count: number): UsageBucket => ({
  * ⚠ THE GUARANTEES MOVED INTO A MIGRATION, SO THE ASSERTIONS FOLLOWED THEM.
  * These properties used to be pinned against the statement this file builds;
  * they now live in `core.sent_usage_snapshot`, because the question spans every
- * tenant and row level security means no tenant-scoped connection can ask it —
+ * tenant and row level security means no tenant-scoped connection can ask it -
  * outside a `withTenant()` transaction the old statement raised rather than
  * returning rows. Asserting the function body is the only place left where
  * "billed on `sent_at`, in UTC, half-open, `sent` only" is still checked, and
@@ -108,7 +108,7 @@ describe("what i10 believes it sent", () => {
   /**
    * ⚠ THE ASSERTION THAT WOULD HAVE CAUGHT A LIVE OUTAGE, AND DID NOT EXIST.
    * postgres.js binds a parameter by writing its bytes, so a `Date` throws
-   * `ERR_INVALID_ARG_TYPE` before the query is sent — this call had never once
+   * `ERR_INVALID_ARG_TYPE` before the query is sent - this call had never once
    * completed in production. Every test above renders SQL and never binds, so
    * the whole suite passed against a statement that could not run.
    *
@@ -177,7 +177,7 @@ describe("comparing the two sides", () => {
 
   // ⚠ NEVER AUTO-CORRECTED. Autumn counting more than we sent means something
   // recorded a duplicate, and issuing negative usage would erase the only
-  // evidence of it — and is itself a way to under-bill by accident.
+  // evidence of it - and is itself a way to under-bill by accident.
   it("reports a surplus separately and never as a deficit", () => {
     const result = reconcile([bucket("a", "01", 5)], [bucket("a", "01", 9)])
     expect(result.deficits).toEqual([])
@@ -218,7 +218,7 @@ describe("comparing the two sides", () => {
     })
   })
 
-  // Two reconcilers racing, or one retried, must reach the same answer — the
+  // Two reconcilers racing, or one retried, must reach the same answer - the
   // safety net itself cannot be a source of double-billing.
   it("is a pure function of its inputs", () => {
     const ours = [bucket("a", "01", 10)]
@@ -239,7 +239,7 @@ describe("every tenant should exist as a customer", () => {
 
   // ⚠ A DIFFERENT KIND OF ERROR FROM A DRIFTED NUMBER. A tenant Autumn has
   // never heard of means every track call for it has been failing since the
-  // tenant was created — and the usage reconciler cannot see it, because both
+  // tenant was created - and the usage reconciler cannot see it, because both
   // sides read zero and agree.
   it("finds a tenant the billing side has never heard of", () => {
     expect(missingCustomers(tenants, ["a"])).toEqual([
@@ -271,7 +271,7 @@ describe("the paying-tenant list", () => {
   /**
    * ⚠ THE ASSERTION THIS FUNCTION EXISTS FOR. Polar holds customers, not users.
    * Checking every active tenant made the nightly job fail on the first free
-   * signup — correct state, reported as an outage, forever.
+   * signup - correct state, reported as an outage, forever.
    */
   it("excludes tenants on the free plan", () => {
     expect(payingBody()).toContain("a.plan_id <> p_free_plan_id")

@@ -23,13 +23,13 @@ import type { DnsConnection, DnsInspection } from "@/lib/types"
  *
  * ⚠ THE DNS LOOKUP HAPPENS *BEFORE* THE DOMAIN IS CREATED, WHICH IS WHY IT
  * TAKES A NAME RATHER THAN AN ID. The whole value of it is telling somebody who
- * hosts their DNS while they are still deciding how to set this up — asking
+ * hosts their DNS while they are still deciding how to set this up - asking
  * them to create a row first, find out we cannot help, and then delete it is a
  * worse flow than not detecting anything at all.
  *
  * ⚠ AND DELEGATION IS THE DEFAULT, NOT THE FALLBACK. Twenty-two of the forty
  * providers in the registry have no usable per-customer API, and the two
- * largest registrars gate theirs behind spend thresholds — so "connect your
+ * largest registrars gate theirs behind spend thresholds - so "connect your
  * provider" is the exception. Delegation also removes an entire class of
  * failure: the records cannot drift, because the customer does not hold them.
  *
@@ -41,9 +41,9 @@ import type { DnsConnection, DnsInspection } from "@/lib/types"
  * ⚠ THERE ARE TWO QUESTIONS HERE, NOT ONE, AND CONFLATING THEM IS WHAT THIS
  * FORM USED TO DO. "Delegate, or keep your own records" is about WHICH records
  * exist and who maintains them; "we add them, or you add them" is about HOW they
- * reach the zone. They are independent — a delegating customer can still paste
+ * reach the zone. They are independent - a delegating customer can still paste
  * six NS records by hand, and a customer keeping their own records can still
- * have us write them — so offering "delegate" against "publish the records
+ * have us write them - so offering "delegate" against "publish the records
  * myself" made one of the four combinations unreachable and implied the other
  * three were one decision.
  */
@@ -61,7 +61,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   /*
    * ⚠ FETCHED ONCE AND ALLOWED TO FAIL. Whether this workspace has already
    * connected the provider changes only what the automatic option SAYS, never
-   * whether it is offered — so a failed request leaves somebody able to pick it
+   * whether it is offered - so a failed request leaves somebody able to pick it
    * and connect on the next screen, rather than blocking the form on a fact it
    * does not need.
    */
@@ -73,7 +73,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * have we finished looking up" and "what did we find" are different facts, and
    * a failed lookup has the first without the second. Collapsing them meant a
    * failure was indistinguishable from "still waiting", so the spinner spun for
-   * ever on any domain whose lookup errored — and the submit guard below, which
+   * ever on any domain whose lookup errored - and the submit guard below, which
    * waits for the lookup, would have made that a form that can never be
    * submitted.
    */
@@ -81,8 +81,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
     domain: string
     inspection: DnsInspection | null
     /**
-     * Why the API would refuse this name — ours, or already in this
-     * workspace — asked in the same debounce as the lookup, so the
+     * Why the API would refuse this name - ours, or already in this
+     * workspace - asked in the same debounce as the lookup, so the
      * box goes red once they stop typing rather than once they press Add.
      */
     refusal: string | null
@@ -92,13 +92,13 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * A name the server refused, and what it said.
    *
    * ⚠ A REFUSAL ABOUT THE VALUE BELONGS NEXT TO THE VALUE, NOT IN A CORNER. The
-   * server owns rules this form cannot check — `i10.tech` is ours, and only the
-   * API knows what `MAIL_DOMAINS` holds — so those verdicts arrive after a round
+   * server owns rules this form cannot check - `i10.tech` is ours, and only the
+   * API knows what `MAIL_DOMAINS` holds - so those verdicts arrive after a round
    * trip. Sending them to a toast put the sentence describing what is wrong with
    * the box a long way from the box, on a timer, while the offending value sat
    * there looking accepted.
    *
-   * ⚠ MOST OF THESE ARE CAUGHT AS THEY ARE TYPED NOW — see `answered.refusal`.
+   * ⚠ MOST OF THESE ARE CAUGHT AS THEY ARE TYPED NOW - see `answered.refusal`.
    * This is the backstop for the race that check cannot close: a name taken
    * between the check and the press.
    *
@@ -117,7 +117,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * ⚠ THE SAME RULES THE SIGN-IN PAGE'S EMAIL BOX FOLLOWS, FROM THE SAME HOOK.
    * Red only once somebody has stopped typing, green only where a value was
    * shown wrong and has since been fixed. The alternative was a second set of
-   * rules on the one field in the console people get wrong most often — and a
+   * rules on the one field in the console people get wrong most often - and a
    * form that reddens `acme.` on the third keystroke of `acme.com` is a form
    * whose red means nothing by the time it is right.
    */
@@ -125,7 +125,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const candidate = name.trim().toLowerCase()
 
   // ⚠ COMPARED ON THE NORMALISED NAME, so `I10.tech ` is still the refused
-  // `i10.tech` — the field would otherwise go quiet over a capital letter.
+  // `i10.tech` - the field would otherwise go quiet over a capital letter.
   const refusedLate =
     refused && candidate === refused.name.toLowerCase() ? refused.reason : undefined
 
@@ -134,7 +134,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * USED NOT TO. This line was its own regex, and it was looser than the
    * verdict in ways that showed: `acme.c` passed it, so the form spent a
    * nameserver lookup on a name the field was about to call malformed, and then
-   * reported what it found — "DNS hosted by Cloudflare" under a domain that
+   * reported what it found - "DNS hosted by Cloudflare" under a domain that
    * does not exist. Two definitions of "is this a domain" in one component is
    * one more than there can be.
    */
@@ -142,7 +142,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
 
   /*
    * ⚠ DERIVED, NOT STATE. "Are we looking one up" is entirely a function of what
-   * has been typed and what has been answered — a `looking` flag set inside the
+   * has been typed and what has been answered - a `looking` flag set inside the
    * debounce effect would be a second source of truth for the same fact, and it
    * is exactly the kind of state that gets stuck true when a request is dropped.
    *
@@ -156,7 +156,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * ⚠ THE LOOKUP IS DEBOUNCED AND GUARDED BY A REQUEST TOKEN. Typing
    * "acme.com" fires eight renders; without the debounce that is eight DNS
    * lookups, and without the token the answer for "acme.c" can land after the
-   * answer for "acme.com" and overwrite it — so the screen shows the provider
+   * answer for "acme.com" and overwrite it - so the screen shows the provider
    * for a domain that was never submitted. The counter is compared on arrival
    * and a stale response is dropped.
    */
@@ -173,7 +173,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const request = React.useRef(0)
 
   React.useEffect(() => {
-    // Not yet a plausible apex. Nothing to look up, and nothing to clear —
+    // Not yet a plausible apex. Nothing to look up, and nothing to clear -
     // `looking` is derived and `inspection` is compared against the current
     // candidate wherever it is read.
     if (!plausible) return
@@ -186,7 +186,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         checkDomain(candidate),
       ])
       // ⚠ A STALE ANSWER IS DROPPED. The response for "acme.c" can land after
-      // the response for "acme.com" and would otherwise overwrite it — showing
+      // the response for "acme.com" and would otherwise overwrite it - showing
       // the provider for a domain that was never submitted.
       if (token !== request.current) return
       // ⚠ A FAILURE IS RECORDED AS AN ANSWER, NOT AS AN ABSENCE. Detection is a
@@ -220,7 +220,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * ⚠ WHAT THE PANEL DRAWS WHILE IT IS COLLAPSING, WHICH IS NOT WHAT THE FORM
    * ACTS ON. `current` goes null the instant a character is typed, and a block
    * that is animating its height to zero still has to render every frame of
-   * that — so binding the panel's CONTENT to `current` would blank it before it
+   * that - so binding the panel's CONTENT to `current` would blank it before it
    * finished leaving. The last answer we received is the right thing to show on
    * the way out, and `show` above stays bound to `current` so it is on the way
    * out at all.
@@ -232,7 +232,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * the same reason the panel's does.
    *
    * ⚠ IT MUST NOT BE USED FOR ANY DECISION. `provider` is what the form acts
-   * on — which options exist, what gets submitted — and it is null the moment
+   * on - which options exist, what gets submitted - and it is null the moment
    * the typed name stops matching what we looked up. This one exists only so
    * the fieldset has a name to print while it collapses.
    */
@@ -246,7 +246,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
 
   /*
    * ⚠ DERIVED RATHER THAN CORRECTED. Forcing the stored choice back to `manual`
-   * in an effect would overwrite what the person picked — so if they then typed
+   * in an effect would overwrite what the person picked - so if they then typed
    * a different domain whose provider DOES support NS records, their original
    * preference would be gone. Keeping the choice and resolving it at the point
    * of use means the form remembers what they asked for.
@@ -256,7 +256,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   /*
    * ⚠ AUTOMATIC IS ONLY REAL WHERE WE HOLD AN ADAPTER FOR THE PROVIDER.
    * Twenty-two of the forty providers in the registry have no usable
-   * per-customer API, so for most domains this axis has one answer — and
+   * per-customer API, so for most domains this axis has one answer - and
    * resolving it here rather than correcting the stored choice means somebody
    * who types a Cloudflare domain, then a Namecheap one, then goes back still
    * has the preference they picked.
@@ -264,8 +264,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const canAutomate = provider?.canConnect === true
   /*
    * ⚠ NO LONGER A STORED ANSWER, BECAUSE IT IS NO LONGER A QUESTION. This was
-   * a two-card fieldset — "Add them for me at Cloudflare" against "I'll add
-   * them myself" — and the cards are gone: connecting is simply the offer,
+   * a two-card fieldset - "Add them for me at Cloudflare" against "I'll add
+   * them myself" - and the cards are gone: connecting is simply the offer,
    * and declining it is a link under the button. So the intent is whatever
    * the provider makes possible, and the control that gets pressed decides
    * the rest. See the footer, and `submit`'s `override`.
@@ -277,7 +277,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   /*
    * ⚠ ONLY ONCE THE LOOKUP HAS ANSWERED. `canAutomate` comes from the detected
    * provider, so before it lands this is false and the button says "Add
-   * domain" — which is correct rather than merely safe: a domain whose DNS we
+   * domain" - which is correct rather than merely safe: a domain whose DNS we
    * cannot write to never shows a connect button at all.
    */
   const needsConnection = canAutomate && !connected
@@ -289,7 +289,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * ⚠ AN ARGUMENT RATHER THAN A `setState` BEFORE SUBMITTING. "I'll add them
    * myself" is one press that both answers the question and creates the
    * domain, and a state write would not be visible to the submit that runs in
-   * the same tick — so the domain would be created as `automatic` and the
+   * the same tick - so the domain would be created as `automatic` and the
    * person would be sent to connect the provider they just declined.
    */
   async function submit(event?: React.FormEvent, override?: Delivery) {
@@ -300,7 +300,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
 
     /*
      * ⚠ NOTHING GUARDS THE SHAPE HERE ANY MORE. The field refuses its own
-     * form's submit before this is reached — reddening itself, releasing the
+     * form's submit before this is reached - reddening itself, releasing the
      * caret so the red can be seen, and leaving an empty box alone because
      * emptiness is not a mistake until somebody says they are finished. That
      * was twenty lines in this file and four more in the sign-in form, both
@@ -317,7 +317,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
 
     /*
      * ⚠ STILL SUBMITTING. This used to clear here, the moment the domain row
-     * existed — and then went on to publish the records and navigate, which
+     * existed - and then went on to publish the records and navigate, which
      * takes seconds. So the button un-spun and became pressable again while
      * the work it started was still running, and a second press created a
      * second domain. It reads as the press not having registered, which is
@@ -338,9 +338,9 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        * inside it; the toast carries the same action.
        */
       /*
-       * ⚠ A REFUSAL OF THE NAME GOES UNDER THE NAME — ours (422), or already
-       * held here or elsewhere (409). The rest — the plan is full, the API is
-       * down — are not answered by looking at the box again, which is why they
+       * ⚠ A REFUSAL OF THE NAME GOES UNDER THE NAME - ours (422), or already
+       * held here or elsewhere (409). The rest - the plan is full, the API is
+       * down - are not answered by looking at the box again, which is why they
        * keep the toast and the plan limit keeps its button.
        */
       if (refusesTheName(result.name)) {
@@ -411,8 +411,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
             toast.success(`${created.name} added and published`, {
               description:
                 outcome.written === 0
-                  ? `Every record was already in place at ${provider.name}. We are checking now — nothing else is needed from you.`
-                  : `${outcome.written} records written to ${provider.name}. We are checking now — nothing else is needed from you.`,
+                  ? `Every record was already in place at ${provider.name}. We are checking now - nothing else is needed from you.`
+                  : `${outcome.written} records written to ${provider.name}. We are checking now - nothing else is needed from you.`,
             })
           } else {
             toast.warning(`${created.name} added and published`, {
@@ -452,8 +452,8 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   return (
     /*
      * ⚠ `noValidate`, BECAUSE THE BROWSER'S OWN BUBBLE IS NOT OUR INTERFACE.
-     * The field is still `required` — that is what it is, and screen readers
-     * read it — but without this the empty submit raised a native "Please fill
+     * The field is still `required` - that is what it is, and screen readers
+     * read it - but without this the empty submit raised a native "Please fill
      * out this field." tooltip in the operating system's styling, positioned by
      * the browser, which then swallowed the message this form writes itself.
      * The same reason every form in the auth app carries it.
@@ -462,13 +462,13 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
       {/*
        * ⚠ THE FIELD GOES AMBER WHILE THE NAMESERVER LOOKUP IS IN FLIGHT, which
        * is the same fact the disabled submit button below is already acting on
-       * — it just was not visible anywhere. `looking` is derived from what has
+       * - it just was not visible anywhere. `looking` is derived from what has
        * been typed against what has been answered, so it cannot latch on.
        */}
       <ValidatedInput
         id="domain"
         // ⚠ THE ONE FIELD THIS PAGE EXISTS FOR, so it has the caret on arrival
-        // and on a reload — everything else on the form follows from it.
+        // and on a reload - everything else on the form follows from it.
         autoFocus
         label="Domain"
         value={name}
@@ -477,19 +477,19 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         autoCapitalize="none"
         spellCheck={false}
         // ⚠ `url` WOULD BE WRONG HERE. It offers a keyboard with a "/" key
-        // and browsers autofill it with whole URLs — and `https://acme.com`
+        // and browsers autofill it with whole URLs - and `https://acme.com`
         // creates a domain that can never verify.
         inputMode="url"
         className="font-mono"
         check={domainProblem}
-        // The server's refusal of exactly this name — see `refused` above. It
+        // The server's refusal of exactly this name - see `refused` above. It
         // clears itself because `refusedHere` stops matching once they edit.
         refused={refusedHere}
         required="Enter the domain you send from."
         /*
          * ⚠ THE LOOKUP OUTRANKS THE VERDICT, AND THEY CANNOT BOTH BE TRUE. A
          * name is only looked up once it is well formed, so `busy` implies the
-         * verdict is `idle` — the order is what it reads like, not a tie being
+         * verdict is `idle` - the order is what it reads like, not a tie being
          * broken.
          */
         busy={looking}
@@ -497,13 +497,13 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
         /*
          * ⚠ THE COMPLAINT REPLACES THE EXPLANATION RATHER THAN JOINING IT. Both
          * at once is two sentences in two colours under one box, and the one
-         * that matters is the one about what is wrong right now — the guidance
+         * that matters is the one about what is wrong right now - the guidance
          * comes back the moment the value does. The field does that swap
          * itself now.
          */
         hint={
           <>
-            The apex, or a subdomain you send from — a subdomain like{" "}
+            The apex, or a subdomain you send from - a subdomain like{" "}
             <code className="font-mono">mail.example.com</code> keeps your sending
             reputation separate.
           </>
@@ -520,7 +520,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        * ⚠ IT IS STILL BOUND TO THE ANSWER FOR WHAT IS CURRENTLY TYPED, NOT TO
        * THE LAST ANSWER WE GOT. Holding the previous inspection open while a
        * new lookup is in flight would keep the panel from collapsing when
-       * somebody edits a finished domain — smoother, and it would be showing
+       * somebody edits a finished domain - smoother, and it would be showing
        * one domain's nameservers under another domain's name. The collapse is
        * the truthful thing to do, and now it is a movement rather than a cut.
        */}
@@ -543,7 +543,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           description={
             delegationBlocked
               ? `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`
-              : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever — including when they change."
+              : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever - including when they change."
           }
         />
 
@@ -552,14 +552,14 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
           onSelect={() => setChosenMode("manual")}
           icon={<Check className="size-4" />}
           title="Keep the records in my zone"
-          description="Four ordinary records — the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
+          description="Four ordinary records - the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
         />
       </fieldset>
 
       {/*
        * ⚠ A BUTTON AND A `Reveal`, NOT `Collapsible`. Radix's collapsible is
        * correct and does nothing at all on its own: it toggles `data-state` and
-       * expects a stylesheet to carry the height, and ours never did — so this
+       * expects a stylesheet to carry the height, and ours never did - so this
        * disclosure snapped open on a screen where the panel above it springs.
        * Wiring CSS keyframes to it would have fixed the snap and left this one
        * element moving to a different curve from everything around it.
@@ -609,7 +609,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
       {/*
        * ⚠ ONE PRIMARY CONTROL THAT DOES NOT CHANGE ITS MIND MID-FORM. This was
        * a `StepStage` that morphed "Add domain" into "Connect Cloudflare" as
-       * the second fieldset was answered — and the morph was the defect: the
+       * the second fieldset was answered - and the morph was the defect: the
        * two buttons are different widths and different colours, so the swap
        * played as a smear between two shapes every time somebody changed their
        * answer. The fieldset is gone and so is the swap. Where we can write
@@ -620,7 +620,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
        * equals, twenty seconds after somebody typed their domain, when one of
        * the two options is the one we recommend and the other is an afternoon
        * of DNS. Same shape, same words, same hierarchy as the onboarding
-       * screen — see onboarding/domain-setup.tsx.
+       * screen - see onboarding/domain-setup.tsx.
        *
        * ⚠ IT IS NOT A MODE TOGGLE. Pressing it creates the domain manually
        * there and then, rather than re-arming the button it sits under, so
@@ -634,13 +634,13 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
            * DECIDED UNTIL IT LANDS. `delegationBlocked` comes from the
            * detected provider, so submitting during the debounce sends
            * `delegated: true` for a Wix or Shopify domain whose DNS editor has
-           * no NS row — a domain created in a configuration that can never
+           * no NS row - a domain created in a configuration that can never
            * verify, and one this form refuses to create a second later. The
            * wait is bounded: a failed lookup still answers, so this cannot
            * latch.
            *
            * ⚠ WHAT WAS TYPED IS NOT CARRIED ACROSS THE CONNECT, DELIBERATELY.
-           * It could be — session storage survives the round trip — but
+           * It could be - session storage survives the round trip - but
            * restoring it means writing React state from an effect on mount,
            * which is a cascading render the compiler is right to refuse, and a
            * lazy initialiser reading storage produces a hydration mismatch on
@@ -732,7 +732,7 @@ function ModeCard({
       /*
        * ⚠ `aria-pressed` RATHER THAN A HIDDEN RADIO INPUT. A visually hidden
        * radio with a label wrapping a card is the usual trick and it breaks the
-       * moment the card contains its own interactive element — which this one
+       * moment the card contains its own interactive element - which this one
        * will, as soon as "Connect" moves inside it. A toggle button announces
        * its state correctly and has no such constraint.
        */

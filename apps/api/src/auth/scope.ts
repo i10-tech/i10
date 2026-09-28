@@ -3,7 +3,7 @@
  *
  * ⚠ `scopes` EXISTED AND WAS ENFORCED NOWHERE. The column has been on
  * `core.api_keys` since 0031, it is returned by `core.resolve_api_key`, it
- * reaches every request as `ResolvedKey.scopes` — and no route has ever read
+ * reaches every request as `ResolvedKey.scopes` - and no route has ever read
  * it. A key created for a staging domain could send as the production one, and
  * the only thing standing between a leaked key and every domain a customer
  * owns was that nobody had tried.
@@ -22,7 +22,7 @@
  * ⚠ AND IT IS A PREFIXED STRING RATHER THAN A JOIN TABLE, WHICH IS A
  * FAIL-CLOSED DECISION RATHER THAN A LAZY ONE. A join table with
  * `ON DELETE CASCADE` turns "delete the domain this key was restricted to"
- * into "this key is now unrestricted" — silently widening a credential at the
+ * into "this key is now unrestricted" - silently widening a credential at the
  * exact moment somebody is tidying up. A name that no longer resolves to a
  * verified domain simply cannot be sent from, so the key goes dead instead.
  * It also keeps the check in memory: this runs on the send path, which exists
@@ -54,7 +54,7 @@ export function scopedDomains(scopes: readonly string[]): string[] {
  * Whether a key may send from this address's domain.
  *
  * ⚠ EXACT MATCH, NOT SUFFIX. `acme.com` does not license `evil-acme.com`, and
- * — more importantly — it does not license `mail.acme.com`, which is a
+ * - more importantly - it does not license `mail.acme.com`, which is a
  * SEPARATE domain in `core.domains` with its own verification and its own DKIM
  * key. Treating a subdomain as covered would let a key scoped to the apex send
  * as a subdomain the customer deliberately kept apart.

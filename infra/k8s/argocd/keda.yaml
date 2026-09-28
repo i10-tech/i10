@@ -2,7 +2,7 @@
 #
 # ⚠ APPLIED BY HAND, LIKE root.yaml, AND DELIBERATELY NOT IN argocd/apps/. The
 # i10 app-of-apps creates its children in `i10-prod` under the `i10` AppProject,
-# which is restricted to `i10-*` destinations — so a child Application targeting
+# which is restricted to `i10-*` destinations - so a child Application targeting
 # the `keda` namespace is refused by the very boundary that makes i10
 # extractable, and one claiming `project: default` from outside `argocd` is
 # refused as a cross-project claim. Dropping this file into argocd/apps/ would
@@ -13,13 +13,13 @@
 #
 # ⚠ AND IT MUST BE SYNCED BEFORE infra/k8s/i10/workloads. That path contains a
 # ScaledObject, and until KEDA's CRDs exist the i10-workloads Application fails
-# to sync with `no matches for kind "ScaledObject"` — which looks like a broken
+# to sync with `no matches for kind "ScaledObject"` - which looks like a broken
 # manifest rather than a missing operator.
 #
 # ⚠ THIS IS A CLUSTER-WIDE OPERATOR ON A CLUSTER SHARED WITH PSL. It installs
 # CRDs and a controller in `keda`, and it can scale any Deployment in any
 # namespace that carries a ScaledObject. Nothing in PSL gets one, so the blast
-# radius is a controller PSL does not use — but it is a shared-cluster change
+# radius is a controller PSL does not use - but it is a shared-cluster change
 # rather than an i10 one, and the upgrade path is shared too.
 #
 # ⚠ AND IT IS HERE BECAUSE CPU IS THE WRONG SIGNAL, NOT BECAUSE THE HPA WAS

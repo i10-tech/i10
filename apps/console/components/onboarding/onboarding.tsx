@@ -35,7 +35,7 @@ import type {
  * it fails, the worst outcome is starting a step earlier.
  *
  * ⚠ AND THE FLOW NEVER BLOCKS ON A STEP BEING "COMPLETE". Somebody can walk
- * past the domain step without adding one — they may be evaluating, or waiting
+ * past the domain step without adding one - they may be evaluating, or waiting
  * on whoever controls DNS. A wizard that refuses to advance is a wizard people
  * abandon, and every one of these steps is reachable from its own page
  * afterwards.
@@ -70,19 +70,19 @@ export function Onboarding({
   domains: DomainSummary[]
   /** Domains offered to this person by email, shown on the domain step. */
   offers?: TransferOffer[]
-  /** The signed-in person's verified address — the test email goes to them. */
+  /** The signed-in person's verified address - the test email goes to them. */
   userEmail?: string | null
   plans: PlanSummary[]
   billing: BillingState
   /** From the checkout cookie (see lib/arrival.ts), for the plan step's outcome banner. */
   checkoutId: string | null
   /**
-   * The step this browser was last on, from its cookie — it outranks
+   * The step this browser was last on, from its cookie - it outranks
    * everything below. See lib/onboarding-step.ts.
    *
    * ⚠ IT EXISTS BECAUSE PAYING THREW PEOPLE BACKWARDS. The step is local state;
    * returning from Polar's checkout remounts this component, the initialiser
-   * below runs again, and the facts it reads say "has a domain, not verified" —
+   * below runs again, and the facts it reads say "has a domain, not verified" -
    * so somebody who paid on step five was put back on step three. The facts
    * were right and the conclusion was wrong: they had not gone back, they had
    * come back.
@@ -103,7 +103,7 @@ export function Onboarding({
   /*
    * ⚠ ONE FACT THE SHELL KEEPS FOR THE PLAN STEP, BECAUSE THE FOOTER IS THE
    * SHELL'S. Once a payment has landed, "You can come back to this at any
-   * time from Set-up" is advice about a flow that has just finished — and the
+   * time from Set-up" is advice about a flow that has just finished - and the
    * step below it is offering a way to the dashboard.
    */
   const [paidNow, setPaidNow] = React.useState(false)
@@ -125,8 +125,8 @@ export function Onboarding({
 
   /*
    * ⚠ BUT "ONCE" MEANS ONCE PER VISIT, NOT ONCE PER RENDER, AND DELETING THE
-   * COOKIE MADE IT THE SECOND. The very next server render — the verify step's
-   * own poll, or Next refreshing when the tab regains focus — reads no cookie
+   * COOKIE MADE IT THE SECOND. The very next server render - the verify step's
+   * own poll, or Next refreshing when the tab regains focus - reads no cookie
    * and passes 0, so the green "Your records were added" vanished a few seconds
    * after arriving, or the moment somebody glanced at another tab and came
    * back. Held here, it stays for as long as this page does; a reload is still
@@ -152,8 +152,8 @@ export function Onboarding({
     /*
      * ⚠ NO DOMAIN MEANS NO STEP PAST THE DOMAIN STEP, WHATEVER THE ROW SAYS.
      * The stored step used to be returned as-is here, so somebody who reached
-     * "verify" and then deleted their only domain — or never finished adding
-     * one — reopened set-up on a Verify screen with nothing on it to verify,
+     * "verify" and then deleted their only domain - or never finished adding
+     * one - reopened set-up on a Verify screen with nothing on it to verify,
      * and no indication that the thing to do was one step back. The facts had
      * already said `has_domain: false`; the row simply outranked them on this
      * one line, which is the opposite of the rule the rest of this block
@@ -174,7 +174,7 @@ export function Onboarding({
 
   /*
    * ⚠ WHICH WAY THE STEPS SLIDE, DECIDED AT THE MOMENT OF THE MOVE. Back, a
-   * click on an earlier dot, or Skip — the rail lets somebody go anywhere, so
+   * click on an earlier dot, or Skip - the rail lets somebody go anywhere, so
    * the direction is "is the new step before or after this one", not "was it
    * the Back button". Set in the same batch as the step, so the pane that
    * leaves and the one that arrives agree on it.
@@ -191,7 +191,7 @@ export function Onboarding({
       /*
        * ⚠ INTO A COOKIE, NOT THE URL. It used to be `?step=` via
        * `history.replaceState`; the address bar now stays `/onboarding` from the
-       * first step to the last. The server reads the cookie on the way back in —
+       * first step to the last. The server reads the cookie on the way back in -
        * see lib/onboarding-step.ts.
        */
       rememberStep(tenantId, next)
@@ -245,7 +245,7 @@ export function Onboarding({
                   )}
                 >
                   {/* ⚠ THE TICK ARRIVES THE WAY EVERY OTHER TICK IN THE CONSOLE
-                      DOES — a small scale-in — so finishing a step reads as the
+                      DOES - a small scale-in - so finishing a step reads as the
                       same event as a form that worked. Keyed, so it only plays
                       when a step becomes done, not on every render. */}
                   {done ? (
@@ -262,7 +262,7 @@ export function Onboarding({
               {i < STEPS.length - 1 && (
                 /*
                  * ⚠ THE CONNECTOR FILLS, LEFT TO RIGHT, AS THE STEP BEFORE IT
-                 * COMPLETES — and empties the other way on Back. It is the
+                 * COMPLETES - and empties the other way on Back. It is the
                  * rail's continuity: the line you just travelled is the one
                  * that changes, in the direction you travelled it. A transform
                  * on an inner bar, so it runs on the compositor.
@@ -286,8 +286,8 @@ export function Onboarding({
        * ⚠ THE STEPS SLIDE, AND THE FOOTER RIDES THE HEIGHT CHANGE. Each step
        * was conditional JSX, so moving on was a hard cut to a screen of a
        * different height and the Back/Skip row jumped with it. `StepStage`
-       * slides the panes 12px in the direction of travel — the same motion as
-       * the sign-in flow — and `AutoHeight` animates the real height so the
+       * slides the panes 12px in the direction of travel - the same motion as
+       * the sign-in flow - and `AutoHeight` animates the real height so the
        * row below glides to its new place rather than landing there first.
        */}
       <AutoHeight>
@@ -342,8 +342,8 @@ export function Onboarding({
       {/*
        * ⚠ THERE IS EXACTLY ONE WAY FORWARD FROM EACH STEP, AND IT IS THE STEP'S
        * OWN BUTTON. This bar used to carry a primary "Next" as well, so every
-       * screen showed two buttons that did the same thing — "Continue" inside
-       * the step and "Next" underneath it — and a person had to work out
+       * screen showed two buttons that did the same thing - "Continue" inside
+       * the step and "Next" underneath it - and a person had to work out
        * whether they differed. They did not, except on the workspace step,
        * where "Continue" saved the name and "Next" silently discarded it. Two
        * controls for one action is not a convenience; it is a question.
@@ -351,7 +351,7 @@ export function Onboarding({
        * ⚠ "Skip this step" SURVIVES, BECAUSE IT IS WHAT "Next" WAS ACTUALLY
        * FOR. The original note is still right: a wizard that refuses to advance
        * until DNS propagates is a wizard people close. What it needed was an
-       * escape, not a second primary action — so the escape stays and says what
+       * escape, not a second primary action - so the escape stays and says what
        * it does.
        */}
       <div className="mt-8 flex items-center justify-between border-t pt-4">

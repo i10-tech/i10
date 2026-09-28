@@ -7,7 +7,7 @@ import type { PasswordRules } from "./environment"
  *
  * ⚠ THIS EXISTS BECAUSE THE FORM WAS ASKING CLERK QUESTIONS IT COULD ANSWER
  * ITSELF. Typing a five-character password and pressing Create account produced
- * a spinner, a network round trip, and a toast two seconds later — for a value
+ * a spinner, a network round trip, and a toast two seconds later - for a value
  * that could not possibly have been accepted, decided by a server on another
  * continent. The check belongs where the answer already is.
  *
@@ -26,7 +26,7 @@ import type { PasswordRules } from "./environment"
 /**
  * The password rules this instance actually enforces, checked here first.
  *
- * ⚠ THE NUMBER COMES FROM CLERK AND IS NEVER WRITTEN DOWN, which is the point —
+ * ⚠ THE NUMBER COMES FROM CLERK AND IS NEVER WRITTEN DOWN, which is the point -
  * see `passwordRules` in _lib/environment.ts. The hint under the box, the border
  * colour and whether the submit button is enabled are all the same number, so
  * they cannot drift from each other or from the instance.
@@ -38,7 +38,7 @@ import type { PasswordRules } from "./environment"
  *
  * ⚠ AND IT IS A FACTORY BECAUSE THE RULES COME FROM THE INSTANCE, not from this
  * file. `Check` takes a value and nothing else, so the policy is closed over
- * once per render rather than threaded through every caller — which is also
+ * once per render rather than threaded through every caller - which is also
  * what lets the field, the hint and the submit guard read the same numbers.
  */
 export const passwordProblem =
@@ -51,7 +51,7 @@ export const passwordProblem =
      * ⚠ LENGTH IS REPORTED WHILE TYPING, THE OTHER RULES ARE NOT. "6 of 8
      * characters" is a progress indicator and is useful on every keystroke;
      * "needs a number" on the second character is a complaint about a password
-     * nobody has finished writing. `early` is exactly that distinction — see
+     * nobody has finished writing. `early` is exactly that distinction - see
      * `Problem` in @repo/ui/checks.
      */
     return unmet.kind === "length" ? { message: unmet.hint, early: true } : unmet.hint
@@ -90,7 +90,7 @@ function firstUnmet(value: string, rules: PasswordRules): Unmet | null {
  *
  * ⚠ IT IS BUILT FROM THE INSTANCE RATHER THAN WRITTEN OUT, so an instance with
  * `require_numbers` on gets a hint that says so without anybody editing this
- * file — and an instance that turns the minimum down from fifteen to twelve
+ * file - and an instance that turns the minimum down from fifteen to twelve
  * says twelve everywhere, immediately, with no deploy.
  */
 export function describeRules(rules: PasswordRules): string {

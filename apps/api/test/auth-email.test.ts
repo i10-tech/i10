@@ -64,7 +64,7 @@ describe("what gets sent", () => {
     await h.delivery.onEmailCreated(event())
 
     expect(h.sent[0]!.html).toContain("384021")
-    // A real plain-text part, not stripped HTML — see renderClerkEmail.
+    // A real plain-text part, not stripped HTML - see renderClerkEmail.
     expect(h.sent[0]!.text?.length).toBeGreaterThan(0)
   })
 
@@ -133,7 +133,7 @@ describe("what cannot be sent", () => {
 describe("surviving a redelivery", () => {
   /**
    * ⚠ THE SEND PATH DEDUPES, NOT THIS MODULE. Svix retries, and the projection
-   * claims the Svix id in a transaction that commits before anything is sent —
+   * claims the Svix id in a transaction that commits before anything is sent -
    * so keying on that would skip a send that had failed. Clerk's email id is
    * stable across redeliveries and is what the send path refuses twice.
    */

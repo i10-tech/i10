@@ -31,7 +31,7 @@ export const metadata: Metadata = { title: "Segments" }
  *
  * ⚠ MEMBERSHIP IS EXPLICIT, NOT A STORED QUERY. A rule-based segment has to be
  * evaluated at send time against the event log, which makes a broadcast's
- * recipient list unreproducible afterwards — somebody asks "why did she get
+ * recipient list unreproducible afterwards - somebody asks "why did she get
  * this" and the honest answer is "she matched at 09:04". Explicit membership is
  * auditable, and rules can be added later as something that WRITES membership.
  */
@@ -47,7 +47,7 @@ export default async function SegmentsPage() {
           {/*
            * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
            * CARRIES THIS ACTION. Two buttons for one action, eight inches
-           * apart, reads as two different things — and the one in the header is
+           * apart, reads as two different things - and the one in the header is
            * the smaller and less explained of the two, so it wins attention it
            * has not earned. The empty state's version says what will happen;
            * this one just says a noun.
@@ -59,7 +59,7 @@ export default async function SegmentsPage() {
           )}
         </PageHeaderRow>
         <PageDescription>
-          Groups you target a broadcast at. Recipients never see them — that is what
+          Groups you target a broadcast at. Recipients never see them - that is what
           topics are for.
         </PageDescription>
       </PageHeader>

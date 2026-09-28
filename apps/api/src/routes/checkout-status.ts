@@ -15,13 +15,13 @@ import { requireTenant, type TenantAuthDeps } from "../middleware/tenant.js"
  * Polar's success redirect is a browser navigation: anyone can type that URL,
  * so a page that concluded "paid" from arriving there would make Pro free to
  * anyone who reads their own address bar once. Nothing in the request is
- * believed — not the tenant, not the plan, not the fact that a payment
+ * believed - not the tenant, not the plan, not the fact that a payment
  * happened.
  *
  * ⚠ IT CAN NEVERTHELESS APPLY A GRANT, AND THE DISTINCTION IS WHERE THE
  * EVIDENCE COMES FROM. When Polar's own API says this checkout `succeeded` and
  * our row shows no grant, this reads that customer's subscriptions back over
- * our access token and applies the one `toState` says entitles them — the same
+ * our access token and applies the one `toState` says entitles them - the same
  * judgement, on the same evidence, as the webhook and the reconciler. What it
  * removes is the WAIT: a webhook lost during a deploy used to mean a spinner,
  * a ninety-second give-up, and a customer told to expect their plan within half
@@ -34,7 +34,7 @@ import { requireTenant, type TenantAuthDeps } from "../middleware/tenant.js"
  *
  * ⚠ THE CHECKOUT ID IS THE CAPABILITY. It is a 122-bit Polar UUID handed only
  * to the person who bought, and the tenant is read from Polar's copy of the
- * checkout rather than from the request — so possessing an id reveals the state
+ * checkout rather than from the request - so possessing an id reveals the state
  * of that checkout and nothing else. It carries no personal data, no email and
  * no tenant id. Enumeration is not feasible; guessing is the threat model, and
  * a random UUID is the answer to it.
@@ -43,7 +43,7 @@ import { requireTenant, type TenantAuthDeps } from "../middleware/tenant.js"
  * CALLER ONLY EVER HEARS ABOUT ITS OWN WORKSPACE. The console keeps the id in a
  * cookie for ten minutes, and nothing about a cookie knows who is signed in:
  * somebody upgraded one account, signed up a second in the same browser, and
- * the second account's onboarding said "You're on Pro" — the FIRST account's
+ * the second account's onboarding said "You're on Pro" - the FIRST account's
  * checkout, answered truthfully about the first account's workspace. Reported
  * from production 2026-09-27. So when the console forwards a session, a
  * checkout belonging to any other tenant is `unknown`, exactly as though it
@@ -62,7 +62,7 @@ export interface CheckoutStatusDeps {
    * What applies an entitlement, for the paid-but-not-granted path.
    *
    * ⚠ OPTIONAL SO THE ROUTE STILL MOUNTS WITHOUT IT. Without these two the
-   * endpoint only reports, and the half-hourly reconciler does the granting —
+   * endpoint only reports, and the half-hourly reconciler does the granting -
    * which is thirty minutes in front of a page that gives up after ninety
    * seconds. With them, a checkout Polar says succeeded is granted inside the
    * poll that noticed it, whatever happened to the webhook.
@@ -86,7 +86,7 @@ export interface CheckoutStatusDeps {
    * top on why a signed-in caller is held to its own workspace.
    *
    * ⚠ ONLY CONSULTED WHEN A SESSION IS SENT, and then with `requireTenant`'s
-   * own answers — 401 for a bad session, 503 when Clerk cannot say. A session
+   * own answers - 401 for a bad session, 503 when Clerk cannot say. A session
    * that fails to verify is NOT downgraded to anonymous: that would hand the
    * answer back to exactly the caller this exists to refuse.
    */
@@ -96,7 +96,7 @@ export interface CheckoutStatusDeps {
 /**
  * The four states the page can be in, and they are deliberately not Polar's.
  *
- * `paid` covers the window — usually a second or two — where Polar has taken
+ * `paid` covers the window - usually a second or two - where Polar has taken
  * the money and our webhook has not landed yet. It is the honest answer for
  * that second, and the reason the page polls rather than deciding once.
  */
@@ -108,18 +108,18 @@ export type CheckoutStatus = "granted" | "paid" | "unpaid" | "unknown"
  *
  * ⚠ THIS USED TO ONLY DETECT, AND DETECTING WAS NOT ENOUGH. Polar sets
  * `external_id` on a customer it CREATES from a checkout's
- * `external_customer_id` and leaves it alone on one that already existed — so a
+ * `external_customer_id` and leaves it alone on one that already existed - so a
  * tenant whose Polar customer predates the checkout pays, subscribes, and is
  * dropped by `toState` on every event, in the webhook and the reconciler alike,
  * for ever. The old code found exactly that, logged it, and told the customer
  * to email support. The id is ours to write, and writing it is the fix.
  *
- * ⚠ OVER A NULL ALWAYS, AND OVER A DEAD TENANT'S ID — NEVER OVER A LIVE ONE. A
+ * ⚠ OVER A NULL ALWAYS, AND OVER A DEAD TENANT'S ID - NEVER OVER A LIVE ONE. A
  * customer carrying a DIFFERENT tenant's id has two readings and they need
  * opposite answers:
  *
- *   - That tenant is live. This is a collision — two workspaces pointing at one
- *     Polar customer — and stamping ours over it would move somebody else's
+ *   - That tenant is live. This is a collision - two workspaces pointing at one
+ *     Polar customer - and stamping ours over it would move somebody else's
  *     billing onto this one. `stranded`, loudly, for a human.
  *
  *   - That tenant is gone. This is a RECLAIM, and refusing it is the bug that
@@ -127,7 +127,7 @@ export type CheckoutStatus = "granted" | "paid" | "unpaid" | "unknown"
  *     by email: somebody who subscribed, deleted their account and signed up
  *     again is handed back the same Polar customer, still carrying their FIRST
  *     tenant's id. Treating that as a collision meant every checkout they ever
- *     completed was attributed to a workspace that no longer existed — money
+ *     completed was attributed to a workspace that no longer existed - money
  *     taken, `stranded` logged, no plan granted, and no half-hourly reconciler
  *     or webhook redelivery could ever fix it, because both attribute by the
  *     same field. Reported as "no plan is granted if the user ever had one
@@ -141,7 +141,7 @@ export type CheckoutStatus = "granted" | "paid" | "unpaid" | "unknown"
  * THE SAFE DIRECTION. Not being able to ask is not permission to assume.
  *
  * ⚠ AND THE TENANT COMES FROM THE CHECKOUT'S OWN METADATA, WHICH WE SET AT
- * CREATION AND POLAR ECHOES BACK. Not from the request, not from an email —
+ * CREATION AND POLAR ECHOES BACK. Not from the request, not from an email -
  * the same rule the rest of billing already follows about never letting a
  * caller name the thing being bought or who is buying it.
  */
@@ -170,15 +170,15 @@ async function attribute(
             externalId: held,
           },
           "a paid checkout resolved to a Polar customer carrying a DIFFERENT " +
-            "LIVE tenant id — refusing to overwrite it; this needs a human",
+            "LIVE tenant id - refusing to overwrite it; this needs a human",
         )
         return "stranded"
       }
 
       /*
        * ⚠ THE ID CANNOT BE RECLAIMED, AND TRYING WAS WORSE THAN NOT TRYING.
-       * Polar's `external_id` is immutable ONCE SET — "Once set, it can't be
-       * updated" in their schema, `422` from the API — so this branch used to
+       * Polar's `external_id` is immutable ONCE SET - "Once set, it can't be
+       * updated" in their schema, `422` from the API - so this branch used to
        * fall through to a PATCH that could never succeed, log "its subscription
        * events remain unattributable", and return `stranded`. That put
        * `detail: "unattributed"` on the confirmation page of somebody who had
@@ -204,7 +204,7 @@ async function attribute(
           polarCustomerId: checkout.customerId,
           staleExternalId: held,
         },
-        "a returning customer's Polar record still names a deleted workspace — " +
+        "a returning customer's Polar record still names a deleted workspace - " +
           "it cannot be rewritten, and nothing depends on it: the subscription " +
           "is bound to the live tenant by the checkout",
       )
@@ -223,7 +223,7 @@ async function attribute(
           tenantId: checkout.tenantId,
           polarCustomerId: checkout.customerId,
         },
-        "could not write our tenant id onto a paid checkout's Polar customer — " +
+        "could not write our tenant id onto a paid checkout's Polar customer - " +
           "its subscription events remain unattributable",
       )
       return "stranded"
@@ -235,7 +235,7 @@ async function attribute(
         tenantId: checkout.tenantId,
         polarCustomerId: checkout.customerId,
       },
-      "stamped our tenant id onto a Polar customer that had none — a checkout " +
+      "stamped our tenant id onto a Polar customer that had none - a checkout " +
         "reused a customer Polar did not create",
     )
     return "repaired"
@@ -267,7 +267,7 @@ const ATTEMPT_MEMORY_MS = 15 * 60_000
  *
  * ⚠ IT NO LONGER RUNS ONLY AFTER A REPAIR, AND THAT IS THE FIX FOR "IT SHOULD
  * NOT TAKE HALF AN HOUR". The webhook is the normal path and lands in a second
- * or two — but when it does not, every other route to a grant is slow: Polar
+ * or two - but when it does not, every other route to a grant is slow: Polar
  * re-sends nothing, the reconciler runs every thirty minutes, and this page
  * gives up after ninety seconds and tells the customer to wait for a job they
  * cannot see. A checkout Polar reports as `succeeded`, for a tenant whose row
@@ -279,13 +279,13 @@ const ATTEMPT_MEMORY_MS = 15 * 60_000
  * grants nothing; it only asks the question sooner. See billing/grants.ts.
  *
  * ⚠ ONE SUBSCRIPTION DECIDES, CHOSEN BY `pick`. A customer who has bought
- * before has several — Polar never deletes one — and applying them in list
+ * before has several - Polar never deletes one - and applying them in list
  * order lets a dead subscription write the live one's row. That is not
  * hypothetical here: the customer this path exists for is precisely the one who
  * subscribed, deleted their account, and subscribed again.
  *
  * ⚠ IT IS BEST EFFORT AND SAYS SO BY RETURNING NOTHING. If it fails, the
- * reconciler still repairs this within the half hour — the customer is no worse
+ * reconciler still repairs this within the half hour - the customer is no worse
  * off than before.
  */
 async function grantNow(
@@ -320,7 +320,7 @@ async function grantNow(
     /*
      * ⚠ ATTRIBUTED TO THE CHECKOUT'S TENANT, NOT THE CUSTOMER'S. This used to
      * call `pick`, which filters on `customer.external_id` exactly as the
-     * webhook does — and that field names whoever created the Polar customer,
+     * webhook does - and that field names whoever created the Polar customer,
      * not whoever is paying now. For anybody on their second workspace it
      * therefore discarded every subscription they owned, including the one just
      * bought, and granted nothing while reporting nothing. See
@@ -342,13 +342,13 @@ async function grantNow(
 
     // ⚠ `reassign`, BECAUSE THE WEBHOOK HAS PROBABLY ALREADY CLAIMED IT FOR THE
     // WRONG TENANT. It attributes by the same stale `external_id`, lands first,
-    // and binds the new subscription to a dead workspace — after which this
+    // and binds the new subscription to a dead workspace - after which this
     // insert dies on the unique index unless the id is taken back. See db.ts.
     await deps.grants.apply(state, { reassign: true })
   } catch (err) {
     deps.log.error(
       { checkoutId: checkout.id, tenantId: checkout.tenantId, err: String(err) },
-      "could not grant from the checkout status poll — the reconciler will " +
+      "could not grant from the checkout status poll - the reconciler will " +
         "pick it up",
     )
   }
@@ -362,8 +362,8 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
    *
    * ⚠ PER PROCESS, AND IT DOES NOT NEED TO BE ANYTHING MORE. It exists to stop
    * one browser's two-second poll becoming a two-second call to Polar, and the
-   * cost of a miss — another pod answering the next poll, a restart forgetting
-   * everything — is one extra list call. Making it shared state would put a
+   * cost of a miss - another pod answering the next poll, a restart forgetting
+   * everything - is one extra list call. Making it shared state would put a
    * Redis round trip in front of a page a customer is watching, to save an
    * API call we can afford.
    */
@@ -430,7 +430,7 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
 
     const current = await deps.subscriptions.current(checkout.tenantId)
 
-    // ⚠ `plan` IS `granted_plan_id` — what was actually granted, not what
+    // ⚠ `plan` IS `granted_plan_id` - what was actually granted, not what
     // Polar said. Reading `plan_id` instead would show "Pro" the instant the
     // row was written and before the entitlement existed, which is exactly the
     // lie this page is built to avoid.
@@ -451,26 +451,26 @@ export function createCheckoutStatus(deps?: CheckoutStatusDeps) {
      * ⚠ THE GRANT IS ATTEMPTED IN THIS REQUEST, and then the row is read AGAIN
      * rather than assumed. `grantNow` is best effort, so claiming "granted"
      * because it did not throw would be reporting an entitlement we had not
-     * confirmed — the exact lie the `granted_plan_id` rule above exists to
+     * confirmed - the exact lie the `granted_plan_id` rule above exists to
      * prevent.
      *
      * ⚠ AND IT RUNS FOR EVERY PAID-BUT-UNGRANTED CHECKOUT, WITHOUT CONSULTING
      * THE ATTRIBUTION VERDICT AT ALL. It was gated first on `repaired` and then
      * on "not `stranded`", and both gates made the grant depend on a repair
-     * that needs `customers:read` and `customers:write` — scopes a Polar
+     * that needs `customers:read` and `customers:write` - scopes a Polar
      * organisation access token does not carry by default. Measured in
      * production 2026-09-20: `getCustomer` answered `403 insufficient_scope` on
      * every call, so the verdict was never better than a guess, and a customer
      * who had paid sat on `{"status":"paid","plan":null}` indefinitely.
      *
      * ⚠ THE GRANT DOES NOT NEED THAT VERDICT, BECAUSE THE CHECKOUT ALREADY
-     * ANSWERS IT. Polar says this checkout `succeeded` — its word that the
-     * money moved for THIS checkout — and its `metadata.tenant_id` is a value
+     * ANSWERS IT. Polar says this checkout `succeeded` - its word that the
+     * money moved for THIS checkout - and its `metadata.tenant_id` is a value
      * OUR API wrote from an authenticated session. `pickForCheckout` then takes
      * only a subscription on that customer, for that product, created no
      * earlier than the checkout itself, which can be nothing other than the one
      * just bought. `attribution` is now about the durable REPAIR and about what
-     * to tell somebody when the grant did not land — not about permission.
+     * to tell somebody when the grant did not land - not about permission.
      */
     await grantNow(deps, attempted, {
       id: checkoutId,

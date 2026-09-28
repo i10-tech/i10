@@ -18,15 +18,15 @@ import { SignUpForm } from "../sign-up/sign-up-form"
  * such account. Both are dead ends reached by answering honestly.
  *
  * ⚠ SO THE ADDRESS DECIDES, AND IT IS ASKED ONCE. `signIn.create({ identifier })`
- * is the lookup — it is what the sign-in form already did to find out which
- * factors exist — and its `form_identifier_not_found` is simply the other
+ * is the lookup - it is what the sign-in form already did to find out which
+ * factors exist - and its `form_identifier_not_found` is simply the other
  * answer. Known goes on to a password; unknown starts a sign-up with the
  * address already filled in.
  *
  * ⚠ AND ONE SET OF PROVIDER BUTTONS, SAYING "CONTINUE WITH", NOT TWO SAYING
  * "SIGN IN WITH" AND "SIGN UP WITH". They were always the same button: Clerk's
  * SSO callback transfers an unrecognised provider account into a sign-up by
- * itself, so the label was the only thing that ever differed — and it was
+ * itself, so the label was the only thing that ever differed - and it was
  * asking the person to predict the outcome of a lookup they cannot perform.
  *
  * ⚠ THE BRANCH LIVES HERE RATHER THAN IN EITHER FORM, so neither imports the
@@ -66,7 +66,7 @@ export function AuthFlow({
   /*
    * ⚠ THE SAME MOVEMENT THE STEPS INSIDE EACH FORM ALREADY USE. Both forms
    * carry their own `StepStage`, so every step within them slides 12px and the
-   * card springs to its new height — and then the one transition BETWEEN them,
+   * card springs to its new height - and then the one transition BETWEEN them,
    * which is the biggest change of content on the page, was a hard swap. The
    * effect was that the most ordinary path in the product was the only one that
    * flickered, and a taller sign-up form snapping into place read as a page
@@ -85,7 +85,7 @@ export function AuthFlow({
           /*
            * ⚠ STILL A WAY BACK, EVEN THOUGH THE PERSON DID NOT CHOOSE THIS
            * DOOR. The lookup decided for them, and a lookup can be wrong about
-           * what somebody meant — a typo in the address lands here looking
+           * what somebody meant - a typo in the address lands here looking
            * exactly like a new customer.
            */
           redirectRaw={redirectRaw}
@@ -94,7 +94,7 @@ export function AuthFlow({
           password={password}
           initialEmail={newAccount}
           // ⚠ BACK TO THE EMAIL BOX IN PLACE. The link used to point at
-          // /sign-in, which is this page — a soft navigation to the same route
+          // /sign-in, which is this page - a soft navigation to the same route
           // keeps this state, so pressing it did nothing at all.
           onSignIn={() => {
             forgetFlow()

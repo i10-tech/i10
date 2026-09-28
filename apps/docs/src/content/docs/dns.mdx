@@ -14,11 +14,11 @@ treating them as one address.
 | --- | --- | --- |
 | **SPF** | Is this server allowed to send for the domain? | The **envelope** (Return-Path) |
 | **DKIM** | Does the signature verify against the published key? | The signing domain (`d=`) |
-| **DMARC** | Does **either** of those match the From: domain? | Both — one match is enough |
+| **DMARC** | Does **either** of those match the From: domain? | Both - one match is enough |
 
 That "one is enough" is why i10 has two onboarding tiers rather than one.
 
-## Tier 1 — the quick start
+## Tier 1 - the quick start
 
 One record. You are sending in two minutes.
 
@@ -30,7 +30,7 @@ DKIM passes and aligns, so DMARC passes. The envelope stays on i10's relay, so
 recipients in Gmail see `mailed-by: amazonses.com` in the message details.
 Nothing is broken; the envelope simply is not yours yet.
 
-## Tier 2 — the complete setup
+## Tier 2 - the complete setup
 
 Two more records make the envelope yours.
 
@@ -40,7 +40,7 @@ send.yourdomain.com             TXT   "v=spf1 include:_spf.i10.tech ~all"
 ```
 
 Now SPF aligns as well as DKIM, and Gmail shows `mailed-by: yourdomain.com`.
-Google's bulk-sender requirements — which apply above 5,000 messages a day —
+Google's bulk-sender requirements - which apply above 5,000 messages a day -
 ask for SPF **and** DKIM to exist and pass, so this is the setup to be on
 before volume, not after.
 
@@ -53,7 +53,7 @@ covers both, and nothing in the design cares which you choose.
 
 That MX has to point at `feedback-smtp.<region>.amazonses.com` directly. It is
 where delivery failures are returned, the relay re-verifies it continuously,
-and RFC 2181 forbids pointing an MX at a CNAME — so it cannot be hidden behind
+and RFC 2181 forbids pointing an MX at a CNAME - so it cannot be hidden behind
 an i10 hostname without breaking bounce handling.
 
 The SPF record is a different story. `include:_spf.i10.tech` resolves on our

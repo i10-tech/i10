@@ -15,7 +15,7 @@ import type { Tone } from "@repo/ui/components/status"
  * LAYER. Three of these keys are on the API's public contract and one set is
  * Polar's; a design-system package holding them would be a package every
  * product change has to be pushed through, and the console is the only thing
- * that reads them. What `packages/ui` owns is the DRAWING — five tones, a dot,
+ * that reads them. What `packages/ui` owns is the DRAWING - five tones, a dot,
  * a pill, and the rule that the word is always in the DOM.
  */
 
@@ -23,8 +23,8 @@ import type { Tone } from "@repo/ui/components/status"
  * Every state string the product can show, mapped to a tone and a human label.
  *
  * ⚠ THE KEYS ARE THE WIRE VALUES, VERBATIM, INCLUDING RESEND'S. `not_started`,
- * `temporary_failure` and `delivery_delayed` are on the API's public contract —
- * see packages/contracts — so they arrive here exactly as a customer would see
+ * `temporary_failure` and `delivery_delayed` are on the API's public contract -
+ * see packages/contracts - so they arrive here exactly as a customer would see
  * them in their own code. Prettifying them at the boundary and mapping the
  * pretty version here would put a second vocabulary between the console and the
  * API, and the first bug it caused would be a state that renders as nothing.
@@ -42,7 +42,7 @@ const TONE: Record<string, { tone: Tone; label: string }> = {
   failed: { tone: "danger", label: "Failed" },
   canceled: { tone: "neutral", label: "Canceled" },
 
-  // The email event vocabulary — what SES and Stalwart report back.
+  // The email event vocabulary - what SES and Stalwart report back.
   scheduled: { tone: "neutral", label: "Scheduled" },
   delivered: { tone: "success", label: "Delivered" },
   delivery_delayed: { tone: "warning", label: "Delayed" },

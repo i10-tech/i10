@@ -9,7 +9,7 @@ import type { BillingState, FeatureUsage } from "@/lib/types"
  * Sending volume against the plan, pinned to the bottom of the sidebar.
  *
  * ⚠ IT IS ON EVERY SCREEN ON PURPOSE. Metering that lives only on a billing
- * page is metering nobody looks at until a send is refused — at which point the
+ * page is metering nobody looks at until a send is refused - at which point the
  * first they know of a limit is a 403 in production. A bar in the corner is the
  * cheapest possible way to make the number ambient, and it is also the only
  * permanent home the upgrade button has.
@@ -62,8 +62,8 @@ export async function UsageRail() {
           {/*
             ⚠ `formatDay` ON THE UTC CALENDAR DAY, NOT `toLocaleDateString` WITH
             AN IMPLICIT LOCALE. This renders on the server, where the locale is
-            the container's — `undefined` means "whatever ICU defaults to",
-            which is not the reader's — and the timezone is UTC, so a reset at
+            the container's - `undefined` means "whatever ICU defaults to",
+            which is not the reader's - and the timezone is UTC, so a reset at
             `2026-10-01T00:00:00Z` printed in local time reads as 30 Sep for
             everybody west of Greenwich. One day early on the number people
             budget against.

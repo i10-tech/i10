@@ -4,12 +4,12 @@
 # FIXING ONLY ONE OF THEM CHANGES NOTHING.
 #
 # First, the PEM reaches the container as an environment variable, and env vars
-# are fixed for the life of a container — kubelet rewrites a mounted file when a
+# are fixed for the life of a container - kubelet rewrites a mounted file when a
 # Secret changes, but never an env var.
 #
 # Second, and this is the one that is easy to miss: even with fresh material,
 # Stalwart does not switch certificates on `Action/ReloadSettings`. That was
-# established the hard way — the Certificate object applied cleanly and the
+# established the hard way - the Certificate object applied cleanly and the
 # server derived the SANs from the PEM, proving it had parsed it, and it went on
 # serving `CN=rcgen self signed cert` until the pod was restarted. Certificate
 # selection is part of the boot-time snapshot.
@@ -17,7 +17,7 @@
 # So the only thing that actually rotates the served certificate is a restart.
 #
 # ⚠ IT DELETES THE POD RATHER THAN PATCHING THE StatefulSet. `kubectl rollout
-# restart` works by stamping an annotation on the pod template — which is drift
+# restart` works by stamping an annotation on the pod template - which is drift
 # the moment Argo compares this Application against git, and Argo would revert
 # it. Deleting the pod changes no manifest: the StatefulSet controller simply
 # recreates it, and there is nothing for a sync to disagree with.
@@ -49,7 +49,7 @@ rules:
     resources: ["pods"]
     verbs: ["get"]
   # ⚠ Delete is scoped to the one pod by name. This role can restart Stalwart
-  # and nothing else — a cron job that could delete arbitrary pods in the
+  # and nothing else - a cron job that could delete arbitrary pods in the
   # namespace would be a much larger thing than the problem it solves.
   - apiGroups: [""]
     resources: ["pods"]
@@ -77,7 +77,7 @@ metadata:
   namespace: i10-prod
 spec:
   # Daily. cert-manager renews at two thirds of the certificate's life, so a
-  # renewal has weeks of validity left when it lands — checking hourly would buy
+  # renewal has weeks of validity left when it lands - checking hourly would buy
   # nothing and run 24x the jobs.
   schedule: "17 4 * * *"
   concurrencyPolicy: Forbid
@@ -101,7 +101,7 @@ spec:
             seccompProfile: { type: RuntimeDefault }
           containers:
             - name: reload
-              # ⚠ NOT registry.k8s.io/kubectl — THAT IMAGE IS DISTROLESS AND HAS
+              # ⚠ NOT registry.k8s.io/kubectl - THAT IMAGE IS DISTROLESS AND HAS
               # NO SHELL. It runs `kubectl` as a direct binary perfectly well,
               # which is exactly why the mistake survives a casual check; the
               # container only fails once something asks for /bin/sh, and it
@@ -113,7 +113,7 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities: { drop: ["ALL"] }
               # kubectl writes a discovery cache under $HOME. Unset, HOME is `/`
-              # — which readOnlyRootFilesystem makes unwritable — so point both
+              # - which readOnlyRootFilesystem makes unwritable - so point both
               # it and the cache at the one writable mount.
               env:
                 - name: HOME
@@ -142,7 +142,7 @@ spec:
                   fi
 
                   # Both are RFC3339 in UTC, so a string comparison is a
-                  # chronological one — no date parsing in a distroless image.
+                  # chronological one - no date parsing in a distroless image.
                   if [ "$cert_not_before" \> "$pod_started" ]; then
                     echo "certificate issued $cert_not_before is newer than the"
                     echo "pod started at $pod_started; restarting to pick it up"

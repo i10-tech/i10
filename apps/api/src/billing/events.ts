@@ -4,7 +4,7 @@
  * ⚠ THE DECISION IS MADE FROM `data.status`, NOT FROM THE EVENT NAME. Polar has
  * eleven subscription events and adds more; switching on the name means a new
  * one is silently ignored, and `subscription.created` in particular is NOT
- * proof of payment — it can describe a subscription that is `incomplete` and
+ * proof of payment - it can describe a subscription that is `incomplete` and
  * never pays. The status field is the thing Polar actually maintains, so it is
  * what this reads, and an event type we have never seen still lands on the
  * right side of the line.
@@ -12,12 +12,12 @@
  * ⚠ `canceled` IS NOT `revoked`, AND CONFUSING THEM TAKES AWAY ACCESS SOMEBODY
  * PAID FOR. `subscription.canceled` fires the moment a customer clicks cancel:
  * the status stays `active` with `cancel_at_period_end` set, and they keep what
- * they bought until the period ends. Only `revoked` — status `canceled` — ends
+ * they bought until the period ends. Only `revoked` - status `canceled` - ends
  * it. So `cancelAtPeriodEnd` is recorded and deliberately not acted on.
  *
  * ⚠ BUT A CANCELLATION'S OWN DEADLINE IS ENFORCED WITHOUT WAITING TO BE TOLD.
  * Once `cancel_at_period_end` is set, Polar has stated the end date, and after
- * that date passes the subscription entitles nothing — whether or not the
+ * that date passes the subscription entitles nothing - whether or not the
  * `revoked` event announcing it ever arrives. Reading it that way is what makes
  * the end date the end date: the alternative is that a lost webhook silently
  * becomes an open-ended free extension, granted by nobody and noticed by no
@@ -50,7 +50,7 @@ export interface PolarSubscription {
    *
    * ⚠ IT IS THE ONLY FIELD ON A SUBSCRIPTION THAT NAMES A WORKSPACE, and it
    * does so indirectly and reliably. We create the checkout, so
-   * `core.polar_checkouts` holds the tenant it was started for — written
+   * `core.polar_checkouts` holds the tenant it was started for - written
    * before the redirect, from an authenticated session, unreachable from
    * Polar's side. `customer.external_id` cannot do this job: it is scoped to
    * the PERSON, deduplicated by email, and immutable once set.
@@ -66,7 +66,7 @@ export interface PolarSubscription {
    *
    * ⚠ THIS IS WHAT A DOWNGRADE LOOKS LIKE FOR THE REST OF THE MONTH, AND
    * READING IT IS THE ONLY WAY TO KNOW ONE HAPPENED. `prorationFor("downgrade")`
-   * asks for `next_period` precisely so the customer keeps what they paid for —
+   * asks for `next_period` precisely so the customer keeps what they paid for -
    * and the consequence is that `product_id` above still names the OLD plan
    * until the boundary passes. Everything else we store would say nothing had
    * changed.
@@ -100,7 +100,7 @@ export interface SubscriptionState {
   polarProductId: string
   /** Our plan id, from the product map. What they bought. */
   planId: string
-  /** Polar's status verbatim — see the note on the column. */
+  /** Polar's status verbatim - see the note on the column. */
   status: string
   cancelAtPeriodEnd: boolean
   currentPeriodEnd: Date | null
@@ -112,7 +112,7 @@ export interface SubscriptionState {
    */
   eventAt: Date
   /**
-   * The plan the customer should hold RIGHT NOW — `planId` while the
+   * The plan the customer should hold RIGHT NOW - `planId` while the
    * subscription entitles them, the free plan once it does not. This is what
    * gets attached, and keeping it separate from `planId` is what lets
    * the row still say what they bought after access ends.
@@ -141,11 +141,11 @@ export type Decision =
        * ⚠ IT SEPARATES THE ONE IGNORE THAT COSTS MONEY FROM THE THREE THAT DO
        * NOT, AND WITHOUT IT ALL FOUR WERE ONE `info` LINE. An order event, a
        * benefit, a product somebody else sells in the same Polar organisation
-       * — those are genuinely not ours and logging them loudly would train
+       * - those are genuinely not ours and logging them loudly would train
        * everybody to ignore the log. A subscription whose customer carries no
        * `external_id` is the opposite: somebody has paid, Polar shows them as
        * active, and this is the exact moment we decide to do nothing about it
-       * — permanently, because the reconciler drops it by the identical rule.
+       * - permanently, because the reconciler drops it by the identical rule.
        */
       stranded?: boolean
     }
@@ -169,7 +169,7 @@ export interface DecideOptions {
  * the route answers 2xx to those. Polar retries a non-2xx for hours; an
  * `order.paid` we have no use for would be retried all afternoon, and a
  * subscription for a product we do not recognise would be retried forever.
- * Neither is a failure — they are events that are not ours.
+ * Neither is a failure - they are events that are not ours.
  */
 export function decide(
   event: PolarEvent,
@@ -205,8 +205,8 @@ export function decide(
  *
  * ⚠ ONE FUNCTION FOR BOTH DIRECTIONS, ON PURPOSE. The reconciler exists to
  * catch what the webhook path missed; if it decided entitlement by its own
- * slightly different rules, the two would disagree on edge cases — a trialing
- * customer, a `past_due` one — and the disagreement would present as the
+ * slightly different rules, the two would disagree on edge cases - a trialing
+ * customer, a `past_due` one - and the disagreement would present as the
  * reconciler flipping a plan back and forth on every run.
  */
 export function toState(
@@ -217,11 +217,11 @@ export function toState(
    * `customer.external_id`.
    *
    * ⚠ ONLY EVER THE TENANT ON A SUCCEEDED CHECKOUT, AND THAT IS A STRONGER
-   * ATTRIBUTION THAN THE FIELD IT OVERRIDES — not a weaker one. `external_id`
+   * ATTRIBUTION THAN THE FIELD IT OVERRIDES - not a weaker one. `external_id`
    * is stamped by Polar ONCE, when it creates a customer from a checkout's
    * `external_customer_id`, and is never maintained afterwards. Polar
    * deduplicates customers by EMAIL, so every later purchase by the same person
-   * — a new workspace, a re-signup after deleting an account — reuses that
+   * - a new workspace, a re-signup after deleting an account - reuses that
    * customer and inherits an id naming whoever bought FIRST. Observed in
    * production 2026-09-20: seven subscriptions on one customer, all seven
    * carrying a tenant that no longer existed, including one created thirty
@@ -229,8 +229,8 @@ export function toState(
    *
    * `metadata.tenant_id` on the checkout is the opposite: OUR API writes it at
    * creation, from an authenticated session, and Polar echoes it back
-   * unchanged. Combined with `status === "succeeded"` — Polar's own word that
-   * the money moved for THIS checkout — it says exactly who paid for what.
+   * unchanged. Combined with `status === "succeeded"` - Polar's own word that
+   * the money moved for THIS checkout - it says exactly who paid for what.
    *
    * ⚠ IT IS A PARAMETER RATHER THAN A FIELD ON `DecideOptions` SO THE WEBHOOK
    * CANNOT REACH IT. That path has no checkout and no business overriding
@@ -243,15 +243,15 @@ export function toState(
   }
 
   // ⚠ THE TENANT COMES FROM `external_customer_id`, WHICH WE SET AT CHECKOUT.
-  // Not from the email — a customer can change that mid-checkout, and matching
+  // Not from the email - a customer can change that mid-checkout, and matching
   // on it would attach a plan to whoever else happens to own the address.
   const tenantId = attributeTo ?? sub.customer?.external_id ?? undefined
   if (!tenantId) {
     /*
      * ⚠ THIS IS NOT A MALFORMED PAYLOAD, AND TREATING IT AS ONE IS WHY IT WENT
      * UNNOTICED. Polar sets `external_id` on a customer it CREATES from a
-     * checkout's `external_customer_id` — their field documentation says so in
-     * as many words — and leaves it alone on a customer that already existed.
+     * checkout's `external_customer_id` - their field documentation says so in
+     * as many words - and leaves it alone on a customer that already existed.
      * So a tenant whose Polar customer was made any other way pays, subscribes,
      * and is dropped here on every event for ever.
      */
@@ -264,7 +264,7 @@ export function toState(
      *
      * ⚠ AND POLAR NEVER DELETES A SUBSCRIPTION, so without this the list only
      * grows. Deleting a customer soft-deletes it and its `external_id` stops
-     * resolving — so every cancelled subscription it ever had becomes
+     * resolving - so every cancelled subscription it ever had becomes
      * permanently unattributable, is reported on every run, and the job can
      * never be green again. Measured after flushing the sandbox organisation:
      * 31 cancelled subscriptions, 31 `stranded`, exit 1, for ever.
@@ -327,7 +327,7 @@ export function toState(
       cancelAtPeriodEnd,
       currentPeriodEnd,
       // `modified_at` is null on an object that has never been modified, so
-      // `created_at` is the fallback rather than `now()` — using our own clock
+      // `created_at` is the fallback rather than `now()` - using our own clock
       // would make two events that arrive together unorderable.
       eventAt: parseDate(sub.modified_at) ?? parseDate(sub.created_at) ?? new Date(),
       entitledPlanId: entitled ? planId : opts.freePlanId,
@@ -345,7 +345,7 @@ function parseDate(value: string | null | undefined): Date | null {
  * Which of two subscriptions for the same tenant states their entitlement.
  *
  * ⚠ ENTITLEMENT WINS BEFORE RECENCY, AND THAT ORDER IS THE POINT. Recency
- * alone answers the ordinary case — resubscribing after churn — but it answers
+ * alone answers the ordinary case - resubscribing after churn - but it answers
  * it by accident, because the new subscription happens to have been modified
  * last. It gives the wrong answer the moment anything at all touches an ended
  * subscription after a live one was created, and that is a downgrade for
@@ -356,7 +356,7 @@ function parseDate(value: string | null | undefined): Date | null {
  * ⚠ IT LIVES HERE RATHER THAN IN THE RECONCILER BECAUSE IT IS NOW ASKED IN TWO
  * PLACES, AND THE SECOND ONE IS WHERE IT MATTERS MOST. `pick` below is what the
  * post-checkout page uses to decide which of a customer's subscriptions to
- * grant from — and a customer who deleted an account and signed up again has
+ * grant from - and a customer who deleted an account and signed up again has
  * two, one dead and one just paid for. Reading the list in order there would
  * let the dead one decide, which is the precise bug this ordering prevents in
  * the reconciler.
@@ -376,8 +376,8 @@ export function supersedes(
  * The one subscription that decides a tenant's plan, out of everything Polar
  * holds for a customer.
  *
- * ⚠ POLAR NEVER DELETES A SUBSCRIPTION — a cancelled one stays in the list with
- * status `canceled` for ever — so "the customer's subscriptions" is a growing
+ * ⚠ POLAR NEVER DELETES A SUBSCRIPTION - a cancelled one stays in the list with
+ * status `canceled` for ever - so "the customer's subscriptions" is a growing
  * list of which at most one is live, and `core.subscriptions` holds exactly one
  * row per tenant. Applying them in list order means the dead one gets its turn
  * at writing the live one's row, and the only thing standing between a paying
@@ -414,7 +414,7 @@ export function pick(
  *
  * ⚠ THIS EXISTS BECAUSE `pick` CANNOT ANSWER FOR THE CUSTOMER WHO HAS BOUGHT
  * BEFORE, AND THAT IS THE COMMON CASE RATHER THAN AN EDGE ONE. It filters by
- * `customer.external_id`, which names whoever created the Polar customer — so
+ * `customer.external_id`, which names whoever created the Polar customer - so
  * for anybody on their second workspace it discards every subscription they
  * own, including the one they have just paid for, and grants nothing at all.
  * Silently: no error, no `stranded`, just a page that spins and a plan that
@@ -422,7 +422,7 @@ export function pick(
  *
  * ⚠ AND IT NEEDS NO `customers` SCOPE, WHICH IS THE OTHER HALF OF WHY. Repairing
  * `external_id` requires `customers:read` and `customers:write`, which a Polar
- * organisation access token does NOT carry by default — so on a deployment
+ * organisation access token does NOT carry by default - so on a deployment
  * missing them the repair path cannot even look at the customer, let alone fix
  * it. Checkouts and subscriptions are readable with the scopes every deployment
  * already has.
@@ -432,7 +432,7 @@ export function pick(
  * here, not the largest thing on the account.
  *
  * ⚠ AND NEWEST-CREATED WINS AMONG EQUALS, NOT `supersedes`. That rule ranks by
- * entitlement first and is right for "what does this tenant hold overall" —
+ * entitlement first and is right for "what does this tenant hold overall" -
  * here the question is narrower and has an exact answer: Polar creates the
  * subscription moments after the checkout succeeds, so the newest one for that
  * product IS the one just bought. Observed: six cancelled subscriptions for the
@@ -450,7 +450,7 @@ export function pickForCheckout(
   /*
    * ⚠ THE SUBSCRIPTION THIS CHECKOUT MADE CANNOT PREDATE THE CHECKOUT, and that
    * one inequality is what keeps the override honest. Two live workspaces can
-   * share a Polar customer — same person, same email — and without a floor this
+   * share a Polar customer - same person, same email - and without a floor this
    * would happily attribute the OTHER workspace's older subscription to
    * whoever just completed a checkout. Polar creates the subscription moments
    * after the money clears, so anything older than the checkout belongs to a

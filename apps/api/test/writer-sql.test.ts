@@ -8,7 +8,7 @@ import { accounts } from "../src/db/schema.js"
  *
  * The two properties below are the ones that are silently catastrophic if they
  * regress, and both are invisible in a unit test that only checks return
- * values — they live in the statement text.
+ * values - they live in the statement text.
  */
 const db = drizzle.mock()
 

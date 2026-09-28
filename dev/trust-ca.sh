@@ -2,7 +2,7 @@
 #
 # Teaches this machine to trust the certificates Caddy issues locally.
 #
-# ⚠ WITHOUT THIS, EVERY LOCAL PAGE IS A CERTIFICATE WARNING — and a browser that
+# ⚠ WITHOUT THIS, EVERY LOCAL PAGE IS A CERTIFICATE WARNING - and a browser that
 # has been click-throughed once will do it again on a page that matters. It also
 # breaks things that are not a browser: a server-side `fetch` from the console to
 # `https://api.i10.localhost` fails outright on an untrusted chain, with an error
@@ -69,7 +69,7 @@ case "$(uname -s)" in
     echo "dev:trust: Firefox and Chrome keep separate stores; see dev/README.md."
     ;;
   *)
-    echo "dev:trust: unsupported platform. The root is at $CERT — trust it by hand." >&2
+    echo "dev:trust: unsupported platform. The root is at $CERT - trust it by hand." >&2
     exit 1
     ;;
 esac

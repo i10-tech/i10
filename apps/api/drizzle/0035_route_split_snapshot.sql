@@ -2,7 +2,7 @@
 --
 -- ⚠ `sent_route` HAS BEEN WRITTEN SINCE 0033 AND READ BY NOTHING. Every `sent`
 -- row records the MTA that carried it, which is exactly the record the routing
--- decision promised to keep — and until now the only way to ask "how much went
+-- decision promised to keep - and until now the only way to ask "how much went
 -- direct" was to open a psql session and write the query by hand. A column
 -- nobody can read is a column that quietly stops being correct.
 --
@@ -10,7 +10,7 @@
 -- and bill at one price; the split is what decides how much SES we are buying
 -- and how much of our own IP reputation we are spending. Publishing it on the
 -- customer API would make the route visible in the product, which is the one
--- thing the per-domain lever exists to prevent — so this is a privileged
+-- thing the per-domain lever exists to prevent - so this is a privileged
 -- function for the reconciler and for whoever has psql, and it stops there.
 --
 -- ⚠ `SECURITY DEFINER` FOR THE SAME REASON `sent_usage_snapshot` IS. Every
@@ -21,7 +21,7 @@
 --
 -- ⚠ IT SCANS EVERY PARTITION IN RANGE AND DOES NOT PRUNE, WHICH IS A PROPERTY
 -- RATHER THAN A FAULT. `core.messages` is partitioned by `created_at`; this
--- filters on `sent_at`, so Postgres appends across all of them — measured on the
+-- filters on `sent_at`, so Postgres appends across all of them - measured on the
 -- live plan, which walks `messages_2026_09`, `_10` and `_11` for a one-day
 -- window. `sent_usage_snapshot` has exactly the same shape for exactly the same
 -- reason: acceptance is not delivery, and bucketing on `created_at` would file a
@@ -45,7 +45,7 @@ AS $$
          -- ⚠ `unknown` RATHER THAN COALESCING INTO `ses`, AND THE DIFFERENCE IS
          -- THE WHOLE VALUE OF THIS ROW. `sent_route` is nullable: 0033 backfilled
          -- the rows that existed and `markSentStatement` has written it on every
-         -- row since, so a `sent` message with no route is a FAULT — a write path
+         -- row since, so a `sent` message with no route is a FAULT - a write path
          -- that skipped it, or a repair that did not set it. Folding those into
          -- `ses` would make the fault add up to a plausible number and disappear.
          coalesce(m.sent_route::text, 'unknown'),

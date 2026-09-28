@@ -12,7 +12,7 @@ import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
  * ⚠ EVERY ITEM IS `rounded-lg` WHERE UPSTREAM SAYS `rounded-sm`, AND THAT IS
  * ARITHMETIC RATHER THAN TASTE. A radius nested inside another has one correct
  * value: the outer radius minus the gap between them. The panel here is
- * `rounded-xl` with `p-1` — 18px and 4px — so an item's corners want 14px,
+ * `rounded-xl` with `p-1` - 18px and 4px - so an item's corners want 14px,
  * which is `rounded-lg`. Upstream's `rounded-sm` is 10px against our
  * `--radius`, and 10 inside 18 reads as a squarer shape floating in a rounder
  * one.
@@ -20,7 +20,7 @@ import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
  * ⚠ IT WENT UNNOTICED UNTIL A MENU HAD EXACTLY ONE ITEM IN IT. With a list,
  * the highlight is a band among other bands and nothing nearby shows the
  * mismatch; with one item the highlight is almost the whole panel, with the
- * panel's own corner four pixels outside its own — which is what the domains
+ * panel's own corner four pixels outside its own - which is what the domains
  * row menu made visible.
  *
  * ⚠ AND THE SUBMENU PANEL IS `rounded-xl` TOO, so the same arithmetic holds

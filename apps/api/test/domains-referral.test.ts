@@ -73,7 +73,7 @@ function packet({
 describe("reading the delegation out of a referral", () => {
   /**
    * ⚠ THE AUTHORITY SECTION IS WHERE A REFERRAL PUTS IT, and reading only the
-   * answer section — which is what `dns.resolveNs` does — reports ENODATA for a
+   * answer section - which is what `dns.resolveNs` does - reports ENODATA for a
    * delegation that plainly exists.
    */
   it("reads NS records out of the authority section", () => {
@@ -111,12 +111,12 @@ describe("reading the delegation out of a referral", () => {
 
   /**
    * ⚠ COMPRESSION IS NOT OPTIONAL TO SUPPORT. A real referral names the zone
-   * once and points at that offset for every record after it — the root's
+   * once and points at that offset for every record after it - the root's
    * referral for `com` is thirteen records and almost entirely pointers.
    */
   it("follows compression pointers", () => {
     // The question's QNAME starts at offset 12, so a pointer there is the
-    // delegated name — exactly what a server emits.
+    // delegated name - exactly what a server emits.
     const parsed = parseReferral(
       packet({
         authority: [
@@ -243,7 +243,7 @@ describe("asking the parent", () => {
 
   /**
    * ⚠ AND SERVFAIL IS NOT. "Could not ask" must never be reported as "they
-   * published nothing" — everything downstream of this treats the second as
+   * published nothing" - everything downstream of this treats the second as
    * grounds to take a domain away.
    */
   it("treats SERVFAIL as unreachable rather than as undelegated", async () => {

@@ -26,7 +26,7 @@ const TIMESTAMP_HEADER = "webhook-timestamp"
  *
  * i10 signs `${id}.${timestamp}.${body}` with HMAC-SHA256 and sends the digest
  * base64-encoded as `v1,<digest>` in `webhook-signature`. That is the published
- * spec, so this function is a convenience rather than a requirement — any
+ * spec, so this function is a convenience rather than a requirement - any
  * conforming library verifies an i10 webhook.
  *
  * The id and timestamp are inside the signed payload rather than merely

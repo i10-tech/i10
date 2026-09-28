@@ -23,12 +23,12 @@ import type {
  * ⚠ EVERY STATEMENT GOES THROUGH `withTenant`, INCLUDING THE READS. Row level
  * security is what keeps one tenant's usage out of another's balance, and the
  * policies read `app.tenant_id`, which only a `withTenant` transaction sets. A
- * query issued outside one does not return the wrong rows — it raises, which is
+ * query issued outside one does not return the wrong rows - it raises, which is
  * the behaviour 0002 chose deliberately over failing closed and looking like an
  * empty account.
  *
  * The statement builders are exported because the properties that matter here
- * are not visible in a return value — that the anchor is absent from the DO
+ * are not visible in a return value - that the anchor is absent from the DO
  * UPDATE, that the window is half-open, that the conflict does nothing rather
  * than something. Those live in the SQL text, and test/metering-sql.test.ts
  * asserts them there. Same approach as db/claim.ts.
@@ -82,13 +82,13 @@ const planRow = z.object({
   /**
    * ⚠ COERCED, BECAUSE THE DRIVER RETURNS EITHER A `Date` OR A STRING AND WE DO
    * NOT GET TO PICK. postgres.js maps timestamptz (OID 1184) to `new Date(x)`
-   * by default, so `z.date()` looked right — and then the first real call to
+   * by default, so `z.date()` looked right - and then the first real call to
    * `find()` in production threw `expected date, received string` on this exact
    * column while `overage_enabled` beside it parsed as a boolean.
    *
    * ⚠ AND IT THREW AS A 500 ON `POST /domains`, WHICH IS THE SHAPE THAT MAKES
-   * THIS WORTH A COMMENT. Every gate — sending, adding a domain, any limit at
-   * all — resolves the plan through here first, so a plan that cannot be parsed
+   * THIS WORTH A COMMENT. Every gate - sending, adding a domain, any limit at
+   * all - resolves the plan through here first, so a plan that cannot be parsed
    * is not a degraded limit check, it is the whole API answering "something went
    * wrong" for a customer whose account is perfectly fine.
    *
@@ -115,8 +115,8 @@ export const assignmentStatement = (tenantId: string): SQL => sql`
  *
  * ⚠ `anchor` IS ABSENT FROM THE `DO UPDATE SET`, AND THAT OMISSION IS THE RULE
  * ITSELF RATHER THAN AN OVERSIGHT. Re-anchoring on every assignment would hand
- * every customer a free reset — exhaust the allowance, change plan, start a
- * fresh window, repeat — and would make the old and new windows overlap at the
+ * every customer a free reset - exhaust the allowance, change plan, start a
+ * fresh window, repeat - and would make the old and new windows overlap at the
  * moment of the change, so the same usage falls inside both and the ledger's
  * buckets stop partitioning time. The column is written once, on the insert,
  * and never again.
@@ -144,7 +144,7 @@ export const assignStatement = (input: {
  * INTERCHANGEABLE. This is the signup path: it guarantees a brand-new tenant
  * has an allowance, and it must never be able to move a paying customer back
  * onto free. A provisioning webhook Clerk redelivers, or a retry after a
- * timeout, would do exactly that with an upsert — silently, on a customer who
+ * timeout, would do exactly that with an upsert - silently, on a customer who
  * had already bought Pro.
  */
 export const ensureStatement = (input: {
@@ -166,7 +166,7 @@ export const ensureStatement = (input: {
  *
  * ⚠ THROUGH A SECURITY DEFINER FUNCTION, BECAUSE NO TENANT-SCOPED CONNECTION
  * CAN ANSWER THIS. Row level security shows `i10_api` exactly one tenant, and
- * the reconciler's question spans all of them — under the policy it would
+ * the reconciler's question spans all of them - under the policy it would
  * conclude every other customer's usage had vanished, and its job is to act on
  * discrepancies. See 0013 for the function and what it deliberately does not
  * return.
@@ -192,7 +192,7 @@ export const assignedTenantIdsStatement = (): SQL => sql`
 /**
  * Whether one tenant holds a plan, asked directly.
  *
- * ⚠ TENANT-SCOPED, SO IT NEEDS NO DEFINER FUNCTION — and it is deliberately a
+ * ⚠ TENANT-SCOPED, SO IT NEEDS NO DEFINER FUNCTION - and it is deliberately a
  * second question rather than a filter on the list above. A snapshot and a
  * point lookup can disagree when a tenant is provisioned between them, and
  * reporting that race as "this tenant has no plan" would page somebody over
@@ -219,15 +219,15 @@ export const hasAssignmentStatement = (tenantId: string): SQL => sql`
  *
  * ⚠ THE BOUNDS ARE ISO STRINGS WITH AN EXPLICIT CAST, AND THIS WAS THE ONE
  * STATEMENT IN THE FILE THAT PASSED A `Date` STRAIGHT THROUGH. The driver
- * cannot serialise one here — it raises `The "string" argument must be of type
+ * cannot serialise one here - it raises `The "string" argument must be of type
  * string or an instance of Buffer or ArrayBuffer. Received an instance of
- * Date` — so EVERY usage read failed, permanently, for every tenant and every
+ * Date` - so EVERY usage read failed, permanently, for every tenant and every
  * feature. It was caught and logged rather than thrown, which is why it ran
  * for weeks as a warning every few seconds instead of as an outage: the meter
  * fell back, allowances stopped being readable, and the console reported
  * numbers that came from the fallback rather than from the events.
  *
- * ⚠ EVERY OTHER DATE IN THIS FILE ALREADY DID THIS — the anchors above, the
+ * ⚠ EVERY OTHER DATE IN THIS FILE ALREADY DID THIS - the anchors above, the
  * range, the event's `occurred_at`. This one was the exception, which is
  * exactly why nobody looked at it.
  */
@@ -252,7 +252,7 @@ export const usedInStatement = (key: MeterKey, window: ResetWindow): SQL => sql`
  *
  * ⚠ AND `RETURNING` IS HOW DUPLICATES ARE COUNTED. Rows suppressed by the
  * conflict are not returned, so the difference between what was sent and what
- * came back is the number that were already there — a signal worth logging,
+ * came back is the number that were already there - a signal worth logging,
  * because a rate of duplicates that is not near zero means something upstream
  * is retrying much harder than it should be.
  */
@@ -282,7 +282,7 @@ export interface PlanAssignments extends AssignmentStore {
    * Polar event, exactly as it was for Autumn's `grantPlan`. This writes a row.
    */
   assign(input: { tenantId: string; planId: string; anchor: Date }): Promise<void>
-  /** Give a tenant a plan if — and only if — they hold none yet. */
+  /** Give a tenant a plan if - and only if - they hold none yet. */
   ensure(input: { tenantId: string; planId: string; anchor: Date }): Promise<void>
 }
 
@@ -339,7 +339,7 @@ export function meterEventStore(db: Database): UsageStore {
           used: string | number
         }[]
         // ⚠ `sum()` OVER A bigint COMES BACK AS A STRING from postgres-js, and
-        // `"0" > 100` is false while `"90" > 100` is also false — a string
+        // `"0" > 100` is false while `"90" > 100` is also false - a string
         // comparison that looks like it works right up until it does not.
         return Number(rows[0]?.used ?? 0)
       })
@@ -377,7 +377,7 @@ export function meterEventStore(db: Database): UsageStore {
 }
 
 /**
- * ⚠ WITHIN ONE BATCH ONLY — the database handles duplicates across batches.
+ * ⚠ WITHIN ONE BATCH ONLY - the database handles duplicates across batches.
  * This is here for the statement, not for the arithmetic: repeating a key
  * inside a single `VALUES` list makes the insert depend on how Postgres
  * resolves a row conflicting with one it is inserting in the same command,

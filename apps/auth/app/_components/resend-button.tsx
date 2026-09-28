@@ -7,17 +7,17 @@ import { FieldDescription } from "@repo/ui/components/field"
 const COOLDOWN_SECONDS = 60
 
 /**
- * "Didn't get it? Resend" — but not for a minute.
+ * "Didn't get it? Resend" - but not for a minute.
  *
  * ⚠ THE COOLDOWN STARTS ON MOUNT, NOT ON THE FIRST CLICK. This renders
  * immediately after a code has ALREADY been sent, so a button that was live on
- * arrival would let somebody fire a second mail before the first one landed —
+ * arrival would let somebody fire a second mail before the first one landed -
  * and each new code invalidates the one before it, so the impatient person ends
  * up typing a code that has just been retired. Starting the clock at mount
  * matches the mail that is already in flight.
  *
  * ⚠ AND IT IS NOT THE RATE LIMIT. Clerk enforces its own, server side, and that
- * is the one that actually protects anything — this is here so the UI stops
+ * is the one that actually protects anything - this is here so the UI stops
  * somebody hammering a button and being told off by an API. Deleting it would
  * be rude rather than dangerous; deleting Clerk's would be the other way round.
  */

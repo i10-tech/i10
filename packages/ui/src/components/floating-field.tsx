@@ -10,12 +10,12 @@ import { cn } from "cn"
  *
  * At rest the label sits where the value will be, at the value's size, so the
  * field reads as a single object rather than a caption stacked on a box. On
- * focus — or as soon as there is anything to show — it shrinks and moves onto
+ * focus - or as soon as there is anything to show - it shrinks and moves onto
  * the top border, which opens a gap around it.
  *
  * ⚠ THE NOTCH IS A REAL `<fieldset>`/`<legend>`, NOT A LABEL WITH A BACKGROUND
  * BEHIND IT, AND THE ALTERNATIVE IS WHY. The obvious trick is to paint a strip
- * of the page colour behind the label so it appears to interrupt the border —
+ * of the page colour behind the label so it appears to interrupt the border -
  * and it works right up until the field is inside something that is not the
  * page. This console puts inputs on `--background`, on `--card` and on
  * `--popover`, which are three different colours in dark mode, so the chip
@@ -45,7 +45,7 @@ export type FieldState = "idle" | "pending" | "invalid" | "valid"
 /**
  * ⚠ ONE COMPOUND SELECTOR, NOT TWO STACKED VARIANTS, AND THE DIFFERENCE IS A
  * REAL BUG. The obvious spelling is `peer-placeholder-shown:` for the resting
- * position and `peer-focus:` to override it — but those generate two rules of
+ * position and `peer-focus:` to override it - but those generate two rules of
  * IDENTICAL specificity, so which one wins is decided by the order Tailwind
  * happens to emit them in. `:placeholder-shown:not(:focus)` is a single
  * selector that is simply true or false, and cannot be reordered.
@@ -55,7 +55,7 @@ export type FieldState = "idle" | "pending" | "invalid" | "valid"
  * apps rendered stuck in the floated position over an empty box: Tailwind finds
  * classes by scanning source text for complete literals, so a template string is
  * invisible to it and the variant was never generated. The repetition is not
- * stylistic — it is the only form the compiler can see.
+ * stylistic - it is the only form the compiler can see.
  */
 /*
  * ⚠ THE HORIZONTAL GEOMETRY IS ARITHMETIC, NOT TASTE, AND ALL OF IT IS ONE
@@ -70,38 +70,38 @@ export type FieldState = "idle" | "pending" | "invalid" | "valid"
  * ILLUSION. It starts where the value will be, at the value's size, and travels
  * straight up while shrinking. A version of this shipped briefly with the
  * resting position at 24 and the floated one at 32, on the theory that the notch
- * had to clear the corner arc — it looked like the label sliding diagonally, and
+ * had to clear the corner arc - it looked like the label sliding diagonally, and
  * it put the resting placeholder a quarter of an inch off the rounded edge it is
  * supposed to sit inside.
  *
  * ⚠ THE CORNER ARC IS NOT THE CONSTRAINT IT WAS TAKEN FOR. `rounded-pill` on
  * `h-14` is a 28px radius, and the top border is only truly horizontal from
- * x = 28 onward — but the arc is almost flat well before that. At x = 20 it sits
+ * x = 28 onward - but the arc is almost flat well before that. At x = 20 it sits
  * 1.2px below the horizontal (28 − √(28² − 8²)), which is less than the border
  * is wide. Opening the notch there interrupts what looks like a straight line;
  * opening it at 16, which is where this started, leaves 2.7px of orphaned arc
  * and reads as a missing corner.
  *
  * ⚠ AND THE LABEL AND THE LEGEND MUST NOT DRIFT APART. They were 4px out of step
- * once — label at `start-3` (12), legend at `ms-2` (16) — so the gap opened four
+ * once - label at `start-3` (12), legend at `ms-2` (16) - so the gap opened four
  * pixels to the RIGHT of the word: no clearance before the first letter, double
  * after the last. The 20s above are one number written twice, and changing
  * either means changing both.
  */
 const LABEL = cn(
   // ⚠ ONE HORIZONTAL POSITION FOR BOTH STATES. 20px + the `px-1` below puts the
-  // glyphs at 24px, which is where the VALUE starts — see `CONTROL_INPUT`. The
+  // glyphs at 24px, which is where the VALUE starts - see `CONTROL_INPUT`. The
   // label does not move sideways as it rises; only `top` and `font-size` do.
   "pointer-events-none absolute start-5 z-10 truncate px-1",
   // ⚠ 14px FLOATED AGAINST A 16px VALUE, AND `leading-none` IS THE HALF THAT
   // FIXES THE ALIGNMENT. Tailwind pairs `text-sm` with a 20px line height, so
-  // the label's BOX is 20px tall while the gap in the border is 14 — centre the
+  // the label's BOX is 20px tall while the gap in the border is 14 - centre the
   // box on the border and six pixels of it stick out above the notch, which is
   // exactly the "too much on the top" the field was showing. `leading-none`
   // collapses the box onto the glyphs so the thing being centred is the text.
   "max-w-[calc(100%-3.5rem)] text-sm leading-none font-medium",
   // ⚠ NO TRANSFORM IS INTERPOLATED. The label keeps `-translate-y-1/2` in both
-  // states, so what animates is `top` and `font-size` — two lengths, each with
+  // states, so what animates is `top` and `font-size` - two lengths, each with
   // an exact end value, and nothing to land half a pixel off.
   /*
    * ⚠ IT LEAVES AT ONCE AND TAKES ITS TIME ARRIVING, AND THOSE ARE TWO SEPARATE
@@ -120,7 +120,7 @@ const LABEL = cn(
    * merely FAST: a fifth-power ease-out is most of the way there inside one
    * frame, so lengthening the duration adds time to a tail nobody can see and
    * the movement looks identical. The two curves tried in its place fixed that
-   * by removing the immediacy — they ease in, or start from rest — and the pause
+   * by removing the immediacy - they ease in, or start from rest - and the pause
    * between the click and the response reads as the interface being slow.
    *
    * `--ease-quad-out` is the second-power ease-out: non-zero velocity at t=0, so
@@ -128,7 +128,7 @@ const LABEL = cn(
    * spent travelling rather than settling. See its note in styles/tokens.css.
    *
    * ⚠ AND THE DURATION IS BACK ON THE 100ms RUNG. At 200ms the same curve was
-   * simply too slow — the point of the gentler curve is that the duration now
+   * simply too slow - the point of the gentler curve is that the duration now
    * MEANS something, which cuts both ways.
    */
   "-translate-y-1/2 transition-[top,font-size,color]",
@@ -141,7 +141,7 @@ const LABEL = cn(
  * ⚠ THE RESTING POSITION DIFFERS BY CONTROL AND CANNOT BE SHARED. On the input
  * the label rests where the value will be, which is the vertical centre of a
  * fixed box. On a textarea the value starts at the TOP of a box several rows
- * tall, so centring the label would park it in the middle of the writing area —
+ * tall, so centring the label would park it in the middle of the writing area -
  * the caret would be two lines above the thing naming the field.
  */
 const RESTS_CENTRED = cn("top-0", "peer-[:placeholder-shown:not(:focus)]:top-1/2")
@@ -155,7 +155,7 @@ const RESTS_AT_TOP = cn("top-0", "peer-[:placeholder-shown:not(:focus)]:top-7")
  * legend is laid out THROUGH that border, and the browser drops the border line
  * to the legend's vertical middle. So a fieldset at `inset-0` reports
  * `getBoundingClientRect().top === 0` while its visible line is drawn seven
- * pixels lower — and the label, centred on the box's real top edge, floats
+ * pixels lower - and the label, centred on the box's real top edge, floats
  * clearly above the border instead of sitting in it.
  *
  * This was removed once on the reasoning that Material's own -5px was a magic
@@ -167,13 +167,13 @@ const RESTS_AT_TOP = cn("top-0", "peer-[:placeholder-shown:not(:focus)]:top-7")
  * compiles `peer-*` to a FOLLOWING-SIBLING combinator, `.peer ~ &`. The legend
  * is a CHILD of this element, not a sibling of the input, so the same variant
  * written on the legend matched nothing at all and the gap stayed open on every
- * empty, unfocused field — visible as a break in the border with no label in
+ * empty, unfocused field - visible as a break in the border with no label in
  * it. Written here it compiles to `.peer… ~ fieldset > legend`, which is the
  * relationship that actually exists.
  */
 const FRAME = cn(
   // ⚠ NO HORIZONTAL PADDING. The fieldset's only child is the legend, so its
-  // padding does nothing except push the notch sideways — and it was doing
+  // padding does nothing except push the notch sideways - and it was doing
   // exactly that, by 8px, which is half of why the gap and the label were out
   // of step. The legend's own margin is now the single number that places it.
   "pointer-events-none absolute inset-0 -top-[7px]",
@@ -182,13 +182,13 @@ const FRAME = cn(
   /*
    * ⚠ THE CLOSED STATE ALSO CARRIES THE CLOSING DELAY, WHICH IS ZERO. A
    * transition reads its duration and delay from the state it is moving TO, so
-   * this is the one place the way OUT can be timed separately from the way in —
+   * this is the one place the way OUT can be timed separately from the way in -
    * no JavaScript, no second element.
    *
    * ⚠ AND IT IS NEEDED BECAUSE THE DELAY THAT IS RIGHT ON THE WAY IN IS WRONG
    * ON THE WAY OUT. Measured with the same delay in both directions, the label
    * left the border long before the gap began to close, leaving the same empty
-   * slot as before — just after the word rather than before it. At zero the gap
+   * slot as before - just after the word rather than before it. At zero the gap
    * starts closing at 28ms, which is the same frame the label clears the border.
    */
   "peer-[:placeholder-shown:not(:focus)]:[&>legend]:max-w-[0.01px]",
@@ -196,13 +196,13 @@ const FRAME = cn(
 )
 
 /**
- * ⚠ `max-width`, NOT `width`, IS WHAT ANIMATES — and the closed value is
+ * ⚠ `max-width`, NOT `width`, IS WHAT ANIMATES - and the closed value is
  * `0.01px` rather than `0`. A legend of zero width is dropped from layout by
  * some engines, which snaps the notch shut with no transition at all; a
  * hundredth of a pixel is indistinguishable and keeps the box alive.
  *
  * ⚠ `invisible` RATHER THAN `sr-only` OR `hidden`. The legend has to OCCUPY its
- * width — that width is the notch — while painting nothing, which is precisely
+ * width - that width is the notch - while painting nothing, which is precisely
  * what `visibility: hidden` does. It also keeps the duplicated label text out of
  * the accessibility tree, so a screen reader does not read the field's name
  * twice.
@@ -222,12 +222,12 @@ const LEGEND = cn(
   /*
    * ⚠ A SHORT TRANSITION ON A DELAY, NOT A LONG ONE MATCHING THE LABEL, AND THE
    * OBVIOUS VERSION OF THIS PRODUCED A VISIBLE BLIP. `max-width` animates from
-   * `0.01px` to `100%` — 100% of the FIELDSET, which is the whole control, so
+   * `0.01px` to `100%` - 100% of the FIELDSET, which is the whole control, so
    * on a 350px field the range is 350px while the legend's own content is about
    * 90. The gap is therefore fully open as soon as `max-width` passes 90, which
    * is 26% of the range; under `quint-out` that is reached at 6% of the
    * duration. The notch snapped open in roughly TWELVE MILLISECONDS and then
-   * spent the rest of the transition growing a max-width nothing could see —
+   * spent the rest of the transition growing a max-width nothing could see -
    * while the label was still travelling up towards it.
    *
    * What that looks like is a black slot appearing in the border out of nowhere
@@ -242,20 +242,20 @@ const LEGEND = cn(
    *     60ms   the label's box reaches the border line
    *
    * With no delay the gap was fully open at 9ms against a label that did not
-   * arrive until 60 — fifty milliseconds of a black slot sitting in the border
+   * arrive until 60 - fifty milliseconds of a black slot sitting in the border
    * with nothing in it, which is exactly how it was reported: "the background
    * blips, then the placeholder moves up".
    *
    * ⚠ THE NUMBER DEPENDS ON THE LABEL'S CURVE AND ITS DURATION, so this is not
    * independent of `LABEL` above. The word has reached the border at 22ms, 60,
    * 99 and 126 under the four combinations tried, and this delay moved with
-   * every one of them. Change one, re-measure the other — the harness is two
+   * every one of them. Change one, re-measure the other - the harness is two
    * `getBoundingClientRect()` calls in a loop.
    *
    * ⚠ AND CLOSING NEEDS A DIFFERENT DELAY, WHICH IS WHY `FRAME` CARRIES ONE.
    * The same 35ms that is right on the way in is wrong on the way out: measured,
    * the label leaves the border at 18ms while the gap did not start closing
-   * until 63 and was not shut until 107 — the same empty slot as before, just
+   * until 63 and was not shut until 107 - the same empty slot as before, just
    * after the word rather than before it. A transition uses the timing declared
    * on the state it is moving TO, so the closed rule sets its own delay of zero
    * and the two directions are tuned separately without any JavaScript.
@@ -276,33 +276,33 @@ const LEGEND = cn(
  * ⚠ FOCUS IS THE BORDER GOING FULL STRENGTH, AND NOTHING ELSE IS PAINTED. Each
  * tone is the same colour twice: muted at rest, solid on focus. `--ring` is now
  * `--foreground`, so an idle field goes from grey hairline to white line in dark
- * mode and grey to near-black in light — see the `--ring` note in
+ * mode and grey to near-black in light - see the `--ring` note in
  * styles/tokens.css for why the 3px translucent halo shadcn ships was the wrong
  * signal on this surface.
  *
  * ⚠ AND THE STATE TONES DO NOT REVERT TO `--ring` ON FOCUS. A field that is
  * showing an error has to keep showing it while somebody types the correction
- * into it — a red border that turns white the moment the caret lands removes
+ * into it - a red border that turns white the moment the caret lands removes
  * the message exactly when it is being acted on.
  */
 /*
  * ⚠ AN IDLE FIELD INSIDE A FORM THAT HAS JUST WORKED GOES GREEN, AND THE FORM
- * SAYS SO RATHER THAN EACH FIELD. `data-outcome="done"` on any ancestor — the
+ * SAYS SO RATHER THAN EACH FIELD. `data-outcome="done"` on any ancestor - the
  * console's forms set it from the same state that puts the tick in their submit
- * button — reaches every field below it through Tailwind's `in-*` variant, so a
+ * button - reaches every field below it through Tailwind's `in-*` variant, so a
  * dialog with four boxes confirms all four without one prop threaded to each.
  * It is the language Clerk's code field speaks: the boxes you filled in are the
  * thing that turns green, and the word under them is the thing that says why.
  *
  * ⚠ `!` BECAUSE `in-*` COMPILES TO `:where()`, WHICH HAS NO SPECIFICITY. The
- * field is very often still focused when the answer lands — Enter submits
- * without blurring — and `peer-focus:border-ring` would win, leaving the one box
+ * field is very often still focused when the answer lands - Enter submits
+ * without blurring - and `peer-focus:border-ring` would win, leaving the one box
  * the person is looking at as the one that did not change.
  *
  * ⚠ ONLY A FIELD THAT WAS FILLED IN. An optional box left empty took no part
  * in what just worked, and a green outline round nothing reads as the form
  * claiming an answer nobody gave. `:placeholder-shown` is how this markup
- * already tells empty from filled — see FRAME.
+ * already tells empty from filled - see FRAME.
  *
  * ⚠ ONLY ON `idle`. A field showing a verdict of its own keeps it; a form cannot
  * have succeeded with a red field in it, and a warning tone means something is
@@ -337,7 +337,7 @@ const TONES: Record<FieldState, { frame: string; label: string; hint: string }> 
  * The colour a validation message takes for a given state.
  *
  * ⚠ EXPORTED SO THE CODE FIELD DOES NOT PICK ITS OWN RED. `input-otp` draws
- * nothing like this component — no peer, no floating label, no frame — but the
+ * nothing like this component - no peer, no floating label, no frame - but the
  * sentence under it means exactly what the sentence under an email box means,
  * and two files each choosing `text-danger` is how the two drift apart the
  * first time one of them is adjusted. Only the hint half is shared: the frame
@@ -361,7 +361,7 @@ const CONTROL_INPUT = cn(
    * a field somebody types their password into is not a table.
    */
   // ⚠ `px-6` IS 24px, WHICH IS WHERE THE RESTING LABEL'S GLYPHS ARE. See the
-  // sum in LABEL — if the LEADING value disagrees, the label jumps sideways as
+  // sum in LABEL - if the LEADING value disagrees, the label jumps sideways as
   // it rises, and the jump is at the instant somebody types their first
   // character, which is the worst possible moment to move the thing they are
   // reading.
@@ -375,7 +375,7 @@ const CONTROL_INPUT = cn(
   "disabled:cursor-not-allowed",
   // ⚠ CHROME PAINTS AUTOFILLED FIELDS WITH ITS OWN YELLOW AND IGNORES
   // `background-color` TO DO IT. A 1000px inset shadow is the only thing that
-  // covers that layer, and it would also cover the text — so the fill colour
+  // covers that layer, and it would also cover the text - so the fill colour
   // has to be restored explicitly, or the field looks empty while holding a
   // value. Both halves are needed; neither works alone.
   "autofill:[-webkit-text-fill-color:var(--foreground)]",
@@ -388,18 +388,18 @@ const CONTROL_INPUT = cn(
  * ⚠ THERE ARE TWO KINDS OF LINE UNDER A FIELD AND THEY WANT OPPOSITE LAYOUTS,
  * WHICH IS WHY `reserveHint` EXISTS RATHER THAN ONE BEHAVIOUR FOR BOTH.
  *
- *   DESCRIPTION — "Must be HTTPS and publicly reachable", "e.g. production-api".
+ *   DESCRIPTION - "Must be HTTPS and publicly reachable", "e.g. production-api".
  *   Always there, often two lines, and part of what the field IS. It belongs in
  *   the flow: it is content, and the form should be as tall as its content.
  *
- *   VALIDATION — "That does not look like an email address". Absent most of the
+ *   VALIDATION - "That does not look like an email address". Absent most of the
  *   time and present for a few seconds. Putting it in the flow means every
  *   field permanently carries a strip of empty space against the moment it
  *   might have something to say, and a sign-up form pays for four of those.
  *
  * ⚠ RESERVING IS STILL THE DEFAULT, AND THAT IS NOT TIMIDITY. Nineteen call
  * sites across the console pass a description, several of which wrap to two
- * lines at dialog width — overlaying those would put a second line of text on
+ * lines at dialog width - overlaying those would put a second line of text on
  * top of the next field. The caller that knows its hint is transient and short
  * is the caller that can say so.
  *
@@ -431,12 +431,12 @@ function Frame({
    * JUMP. A message that wraps to a second line used to add sixteen pixels in
    * one frame and shove every field and button under it down by sixteen in the
    * same frame; fixing the value took them back up just as abruptly. The row is
-   * measured, and the box around it springs to that height — so what is below
+   * measured, and the box around it springs to that height - so what is below
    * it slides, both ways, whatever the message says.
    *
    * ⚠ IN OVERLAY MODE ONLY THE OVERFLOW IS PAID FOR. One line still hangs in
    * the gap below the field and costs nothing; a second line is what would
-   * land on top of the next field, so exactly that much is pushed — on the
+   * land on top of the next field, so exactly that much is pushed - on the
    * same spring.
    */
   const push = height === null ? 0 : Math.max(0, height - ONE_LINE)
@@ -453,7 +453,7 @@ function Frame({
         /*
          * ⚠ `min-h-4` IS THE RESERVATION, AND IT IS THE WHOLE POINT OF THE
          * FLOW VERSION. A message that appears on blur without it pushes every
-         * field below it down by twenty pixels — on a four-field form the
+         * field below it down by twenty pixels - on a four-field form the
          * submit button moves under the cursor between the mousedown and the
          * click. Sixteen reserved pixels remove a class of misclick that is
          * invisible until somebody hits the wrong button.
@@ -463,7 +463,7 @@ function Frame({
           : /*
              * ⚠ `pointer-events-none` BECAUSE IT NOW HANGS OVER SOMETHING
              * ELSE. Out of flow, this strip sits in the gap above whatever
-             * comes next — on the last field of a form, that is the submit
+             * comes next - on the last field of a form, that is the submit
              * button. An invisible 22px band across it would swallow clicks
              * along its top edge, which is the kind of defect nobody reports
              * because it only bites near one border.
@@ -499,7 +499,7 @@ function Frame({
         </>
       ) : (
         <>
-          {/* ⚠ THE ROW ANCHORS TO THE CONTROL, NOT TO THE WHOLE FIELD — the
+          {/* ⚠ THE ROW ANCHORS TO THE CONTROL, NOT TO THE WHOLE FIELD - the
               whole field now includes the spacer below, and `top-full` of that
               would move the message down by exactly the push. */}
           <div className="relative">
@@ -516,7 +516,7 @@ function Frame({
 /**
  * `autoFocus` that also works on a page the server rendered.
  *
- * ⚠ REACT DOES NOT FOCUS AN `autoFocus` INPUT IT HYDRATES — only one it
+ * ⚠ REACT DOES NOT FOCUS AN `autoFocus` INPUT IT HYDRATES - only one it
  * creates. So a one-field page reached by a client navigation had the caret,
  * and the same page opened fresh or reloaded did not: `/domains/new` came up
  * with focus on the body. This focuses it once hydrated, and only when nothing
@@ -542,7 +542,7 @@ const GROW: Transition = { type: "spring", stiffness: 420, damping: 38, mass: 1 
 /**
  * The element's rendered height, kept current as its content wraps and unwraps.
  *
- * ⚠ `null` UNTIL FIRST MEASURED, which the caller reads as "auto" — so the
+ * ⚠ `null` UNTIL FIRST MEASURED, which the caller reads as "auto" - so the
  * server render and the first client paint lay out naturally, and nothing
  * animates on mount.
  */
@@ -561,7 +561,7 @@ function useHeight(ref: React.RefObject<HTMLElement | null>): number | null {
 /**
  * ⚠ THE NOTCH TEXT IS THE LABEL AGAIN, AND THE DUPLICATION IS LOAD-BEARING. The
  * legend is what reserves the gap, and a gap has to be exactly as wide as the
- * word sitting in it — so it has to contain the same string at the same size. It
+ * word sitting in it - so it has to contain the same string at the same size. It
  * is `invisible`, so nothing is painted twice and nothing is announced twice;
  * only the measurement is shared.
  */
@@ -599,14 +599,14 @@ export function FloatingInput({
    */
   reserveHint?: boolean
   /**
-   * Classes for the `<input>` itself — type, size, letter spacing.
+   * Classes for the `<input>` itself - type, size, letter spacing.
    *
    * ⚠ `className` TARGETS THE INPUT RATHER THAN THE WRAPPER, WHICH IS THE
    * OPPOSITE OF WHAT THE MARKUP SUGGESTS AND THE RIGHT CHOICE ANYWAY. This
    * component replaced bare `<Input className="font-mono text-xs" />` call
    * sites, and every one of them means "set the type of the value". Routing them
-   * to the bordered box instead loses `text-xs` silently — the input's own
-   * `text-sm` wins over an inherited size — so an API key would render in the
+   * to the bordered box instead loses `text-xs` silently - the input's own
+   * `text-sm` wins over an inherited size - so an API key would render in the
    * proportional face with nothing to explain it.
    */
   className?: string
@@ -614,7 +614,7 @@ export function FloatingInput({
   controlClassName?: string
   /** Classes for the whole field, including the hint row. */
   containerClassName?: string
-  /** A button or icon pinned to the trailing edge — reveal, clear, spinner. */
+  /** A button or icon pinned to the trailing edge - reveal, clear, spinner. */
   adornment?: React.ReactNode
 }) {
   const generated = React.useId()
@@ -646,7 +646,7 @@ export function FloatingInput({
         </label>
         {/*
          * ⚠ AFTER THE INPUT IN THE DOM, WHICH IS NOT COSMETIC. Every `peer-*`
-         * rule on the frame and the legend compiles to `.peer … ~ &` — a
+         * rule on the frame and the legend compiles to `.peer … ~ &` - a
          * FOLLOWING-sibling combinator. Moving the notch above the input would
          * leave the border with no focus state and the gap permanently shut, and
          * nothing would report it.
@@ -716,7 +716,7 @@ export function FloatingTextarea({
           aria-invalid={state === "invalid" || undefined}
           aria-describedby={hint ? `${id}-hint` : undefined}
           // ⚠ `field-sizing-content` IS NOT SET HERE. It would make the box grow
-          // as you type, which is pleasant — and it also makes the label's
+          // as you type, which is pleasant - and it also makes the label's
           // resting position drift down the box as it grows. The label rests one
           // line from the top, so the height must not move under it.
           className={cn(CONTROL_INPUT, "h-auto resize-y py-4", className)}

@@ -11,7 +11,7 @@ updates:
       # ⚠ CAPPED THE SAME WAY `production` IS, AND FOR A REASON THAT ACTUALLY
       # HAPPENED. Uncapped, this group swept TypeScript 6→7, ESLint 9→10 and
       # @types/node 22→26 into ONE pull request. Every code job failed, and no
-      # amount of reading told you which of the three did it — the only move
+      # amount of reading told you which of the three did it - the only move
       # left was to close it. Majors still get proposed, as their own ungrouped
       # PR each, which is the form you can actually review and revert.
       dev-dependencies:
@@ -32,7 +32,7 @@ updates:
   - package-ecosystem: docker
     # ⚠ ALL FIVE, INCLUDING apps/auth. It was missing here while every other app
     # with a Dockerfile was listed, so its base image was the one nobody was
-    # told about — the failure mode of an omission in a list like this is
+    # told about - the failure mode of an omission in a list like this is
     # silence, not an error.
     directories:
       - "/apps/api"
@@ -46,7 +46,7 @@ updates:
     # ⚠ THE BUN MAJOR IS A SIX-FILE CHANGE, SO IT IS NEVER ONE PR HERE. A bump
     # in one app's Dockerfile leaves that container on a runtime the others are
     # not on, built by a CI pinned to BUN_VERSION in ci.yml and typechecked
-    # against whatever @types/bun says — three-way drift discovered at runtime.
+    # against whatever @types/bun says - three-way drift discovered at runtime.
     # Dependabot proposed exactly that shape for apps/console under Node and it
     # had to be closed. Moving bun means five Dockerfiles, `.bun-version`,
     # `packageManager`, ci.yml and @types/bun together, deliberately, which is

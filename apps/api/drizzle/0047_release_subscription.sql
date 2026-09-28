@@ -2,7 +2,7 @@
 --
 -- ⚠ `polar_subscription_id` IS UNIQUE ON PURPOSE AND STAYS THAT WAY. Two
 -- tenants pointing at one subscription is one payment entitling two accounts,
--- and the reconciler — which matches on that id — would flip the plan back and
+-- and the reconciler - which matches on that id - would flip the plan back and
 -- forth between them on every pass. This does not relax the constraint; it
 -- moves the id, atomically, to the tenant that actually bought.
 --
@@ -11,20 +11,20 @@
 -- CREATES one, so somebody who deletes their account and signs up again keeps
 -- a customer naming their old tenant. The signature-verified webhook therefore
 -- binds the brand-new subscription to the OLD tenant seconds before the
--- post-checkout page tries to bind it to the live one — and that insert dies on
+-- post-checkout page tries to bind it to the live one - and that insert dies on
 -- the unique index, is swallowed, and the customer's plan never arrives.
 -- Observed in production 2026-09-20 on a customer holding seven subscriptions,
 -- every one of them attributed to a tenant that no longer existed.
 --
 -- ⚠ SECURITY DEFINER BECAUSE THE CALLER IS SCOPED TO THE NEW TENANT AND THE ROW
 -- BELONGS TO THE OLD ONE. Under `core.subscriptions`'s policy the losing row is
--- invisible, so a plain DELETE would report success having deleted nothing —
+-- invisible, so a plain DELETE would report success having deleted nothing -
 -- the exact silent failure this is meant to end. Same shape as
 -- `provision_tenant` and `terminate_tenant`, and the same rule: one narrow
 -- question, answered by the owner, returning the minimum.
 --
 -- ⚠ AND IT REFUSES TO TOUCH THE CLAIMANT'S OWN ROW. Called with the tenant that
--- already holds the id, it deletes nothing and answers 0 — so an ordinary
+-- already holds the id, it deletes nothing and answers 0 - so an ordinary
 -- repeat of a grant cannot destroy the row it is about to update.
 CREATE FUNCTION "core"."release_subscription"(
   p_polar_subscription_id text,

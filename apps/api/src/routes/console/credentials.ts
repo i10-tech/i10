@@ -19,8 +19,8 @@ import { notFound, notWired, readJson, validation } from "./http.js"
  * told it was dead. See the delete route.
  *
  * ⚠ THE CONSOLE TALKS IN DOMAIN NAMES; THE ENCODING STAYS ON THIS SIDE. A
- * key's restriction is stored as a `domain:acme.com` entry in `scopes` — see
- * auth/scope.ts — and nothing outside this API needs to know that. These
+ * key's restriction is stored as a `domain:acme.com` entry in `scopes` - see
+ * auth/scope.ts - and nothing outside this API needs to know that. These
  * routes take and return a plain `domain`, so the console cannot spell the
  * prefix wrong and the encoding can change without touching it.
  */
@@ -29,7 +29,7 @@ import { notFound, notWired, readJson, validation } from "./http.js"
  *
  * ⚠ THE NAME IS CHECKED AGAINST THE TENANT'S OWN DOMAINS, AND THAT IS THE
  * POINT OF DOING IT SERVER-SIDE. A scope for a domain the workspace does not
- * hold is a key that can send from nothing — indistinguishable, from the
+ * hold is a key that can send from nothing - indistinguishable, from the
  * dashboard, from a key that works, until the first send fails in production.
  * A typo is refused here instead.
  *
@@ -37,7 +37,7 @@ import { notFound, notWired, readJson, validation } from "./http.js"
  * quietly minting an unrestricted key. Falling back to "no scope" on an error
  * would mean an outage in an unrelated store silently widens a credential.
  *
- * ⚠ `null` IS AN EXPLICIT ANSWER — "every domain" — NOT A MISSING FIELD. It is
+ * ⚠ `null` IS AN EXPLICIT ANSWER - "every domain" - NOT A MISSING FIELD. It is
  * how the edit route widens a key back out, so it cannot be conflated with
  * "the caller did not mention scopes".
  */
@@ -46,7 +46,7 @@ async function resolveScope(
   tenantId: string,
   value: unknown,
 ): Promise<{ ok: true; scopes: string[] } | { ok: false; error: string }> {
-  // ⚠ ABSENT OR EMPTY IS EVERY DOMAIN — the same reading the send path gives
+  // ⚠ ABSENT OR EMPTY IS EVERY DOMAIN - the same reading the send path gives
   // an empty `scopes`, so the two can never disagree about an unrestricted key.
   if (value === undefined || value === null) return { ok: true, scopes: [] }
   if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
@@ -92,15 +92,15 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       data: keys.map((k) => ({
         id: k.id,
         name: k.name,
-        // ⚠ THE PREFIX, NEVER THE KEY. Nothing stores the secret — see
-        // auth/store.ts — so this cannot leak it even by accident, and the
+        // ⚠ THE PREFIX, NEVER THE KEY. Nothing stores the secret - see
+        // auth/store.ts - so this cannot leak it even by accident, and the
         // prefix is what a person matches against their own environment.
         prefix: k.prefix,
         mode: k.mode,
         scopes: k.scopes,
         /*
          * ⚠ DERIVED FROM `scopes`, AND PLURAL NOW. A key may be limited to
-         * several domains — two products sharing a deploy, say — and an empty
+         * several domains - two products sharing a deploy, say - and an empty
          * list is every domain. The `domain:` encoding stays the API's business;
          * the console only ever sees names.
          */
@@ -133,7 +133,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
         name,
         mode,
         scopes: scope.scopes,
-        // ⚠ AUDIT ONLY, NEVER AUTHORIZATION — see 0031. Knowing who minted a
+        // ⚠ AUDIT ONLY, NEVER AUTHORIZATION - see 0031. Knowing who minted a
         // key matters during an incident; tying the key's life to an employee's
         // account would take production sending down when they leave.
         createdBy: userId,
@@ -171,14 +171,14 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
    *
    * ⚠ WITHOUT THIS THE SCOPE IS A DECISION MADE ONCE, IN A DIALOG, FOREVER.
    * The only other way to restrict a key minted unrestricted is to revoke it
-   * and redeploy the secret everywhere it is used — enough friction that
+   * and redeploy the secret everywhere it is used - enough friction that
    * nobody does it, which leaves every key unrestricted and the whole feature
    * decorative.
    *
    * ⚠ AND THE CACHE EVICTION IS NOT OPTIONAL HERE EITHER. A verified key sits
    * in Redis with its scopes baked in for the TTL, so a key narrowed to
    * staging keeps sending as production for up to a minute. It is the same
-   * failure the delete route documents with a quieter symptom — nothing looks
+   * failure the delete route documents with a quieter symptom - nothing looks
    * wrong, the restriction simply is not in force yet.
    */
   app.patch("/api-keys/:id", async (c) => {
@@ -235,7 +235,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
   /*
    * ⚠ STEP-UP, BECAUSE A REVOKED KEY CANNOT BE UN-REVOKED. Everything an
    * attacker holding a stolen session cookie could do to this workspace is
-   * recoverable except the deletions — and revoking the key a customer's
+   * recoverable except the deletions - and revoking the key a customer's
    * production systems send with is an outage they cannot undo from this
    * dialog. See `requireFreshAuth`.
    */
@@ -251,7 +251,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
      * A verified key lives in Redis for the TTL; without deleting that entry
      * the key keeps working for up to a minute after the customer was told it
      * was dead. Reporting success while a leaked credential is still live is
-     * the worst possible answer — they stop looking. The row stays revoked, so
+     * the worst possible answer - they stop looking. The row stays revoked, so
      * a retry converges.
      */
     if (d.keys.cache) {

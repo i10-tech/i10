@@ -6,14 +6,14 @@ import { createHmac, timingSafeEqual } from "node:crypto"
  * ⚠ THIS ENDPOINT GRANTS PAID PLANS. Everything else in the repo that verifies
  * a signature is protecting data; this one is protecting revenue. A forged
  * `subscription.active` is a free Pro account for anyone who learns the URL,
- * and there is nothing downstream that would ever notice — the row looks
+ * and there is nothing downstream that would ever notice - the row looks
  * exactly like a real one. So nothing is parsed for meaning before this passes.
  *
  * ⚠ POLAR'S KEY DERIVATION IS NOT THE STANDARD WEBHOOKS ONE, AND A CORRECT
  * IMPLEMENTATION OF THE SPEC REJECTS EVERY REAL POLAR WEBHOOK. The spec says
  * the secret is `whsec_` followed by base64, and that the HMAC key is those
  * decoded bytes. Polar signs with the UTF-8 bytes of the WHOLE secret string,
- * `whsec_` prefix included — their own SDK reaches the same place by
+ * `whsec_` prefix included - their own SDK reaches the same place by
  * base64-encoding the entire secret before handing it to the standardwebhooks
  * library, which then base64-decodes it straight back.
  *
@@ -42,8 +42,8 @@ export type VerifyResult =
 
 /**
  * ⚠ TAKES THE RAW BODY, NOT A PARSED OBJECT. `JSON.parse` followed by
- * `JSON.stringify` is not the identity — key order, unicode escapes and number
- * formatting all move — so a signature checked against a re-serialised body
+ * `JSON.stringify` is not the identity - key order, unicode escapes and number
+ * formatting all move - so a signature checked against a re-serialised body
  * fails for reasons that look like a wrong secret. The route must read
  * `c.req.text()` and hand that exact string to both this and the parser.
  */
@@ -62,7 +62,7 @@ export function verifyPolarWebhook(
 
   // ⚠ BOTH DIRECTIONS. Refusing only old timestamps lets anyone with a forged
   // future timestamp mint something that stays acceptable for as long as they
-  // chose — the window is a window, not a floor.
+  // chose - the window is a window, not a floor.
   if (Math.abs(Math.floor(now.getTime() / 1000) - t) > toleranceSeconds) {
     return { ok: false, reason: "stale" }
   }
@@ -86,7 +86,7 @@ export function verifyPolarWebhook(
 /**
  * Polar's key first, the spec's second.
  *
- * A secret with no `whsec_` prefix has only one candidate — base64-decoding an
+ * A secret with no `whsec_` prefix has only one candidate - base64-decoding an
  * arbitrary string does not throw, it silently produces garbage bytes, so the
  * second candidate is only offered when the prefix says the remainder is
  * meant to be base64.

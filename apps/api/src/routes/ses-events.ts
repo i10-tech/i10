@@ -12,15 +12,15 @@ import {
  * SES delivery events, arriving over SNS.
  *
  * ⚠ THE ENDPOINT IS PUBLIC AND WHAT IT WRITES IS PERMANENT. A `Bounce` here
- * suppresses an address for a tenant — their mail to that person stops, quietly
- * and for good — and a `Complaint` does the same. Anyone who learns this URL can
+ * suppresses an address for a tenant - their mail to that person stops, quietly
+ * and for good - and a `Complaint` does the same. Anyone who learns this URL can
  * do that to every customer at once unless each notification is proved to be
  * Amazon's, so nothing reaches the database before the signature verifies.
  *
  * ⚠ AND THE STATUS CODES ARE A RETRY POLICY, NOT DECORATION. SNS retries
  * anything that is not 2xx, for hours, with backoff:
  *
- *   403  the signature did not verify. Retrying cannot help — and answering 200
+ *   403  the signature did not verify. Retrying cannot help - and answering 200
  *        to an unverified request tells a forger their forgery worked.
  *   200  accepted, ignored, duplicate, or about a message we no longer have.
  *        All four mean "stop sending this": the first three are done, and the
@@ -39,7 +39,7 @@ export interface SesWebhookDeps {
    * unconfirmed subscription delivers nothing, so requiring a human to paste a
    * URL means every environment silently has no delivery events until someone
    * notices. It is only safe because the confirmation is signed by Amazon and
-   * the SubscribeURL is checked to be Amazon's before it is fetched — without
+   * the SubscribeURL is checked to be Amazon's before it is fetched - without
    * both, this would be an open redirect that we follow on request.
    */
   confirmSubscriptions?: boolean
@@ -67,7 +67,7 @@ export function createSesWebhooks(deps?: SesWebhookDeps) {
       const parsed: unknown = await c.req.json()
       // ⚠ `JSON.parse` SUCCEEDS ON `null`, `1` AND `"x"`. The verifier reads
       // `.Type` off whatever this is, so a four-byte body of `null` would be a
-      // TypeError rather than a rejection — a public endpoint anyone can make
+      // TypeError rather than a rejection - a public endpoint anyone can make
       // log an error and answer 500 on demand.
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         throw new TypeError("not an object")
@@ -98,7 +98,7 @@ export function createSesWebhooks(deps?: SesWebhookDeps) {
 
     if (message.Type !== "Notification") {
       // An UnsubscribeConfirmation, or something new. Signed by Amazon, so not
-      // an attack — and not ours to act on.
+      // an attack - and not ours to act on.
       deps.log.info({ type: message.Type }, "ignoring an SNS control message")
       return c.json({ ok: true }, 200)
     }

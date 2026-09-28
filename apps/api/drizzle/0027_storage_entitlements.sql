@@ -5,12 +5,12 @@
 -- mailboxes at all, pro gets one seat and ten gigabytes.
 --
 -- ⚠ STORAGE IS IN BYTES, NOT GIGABYTES, AND THAT IS DELIBERATE. Rounding to GB
--- forces a choice between a ceiling — one byte past ten gigabytes reads as
--- eleven and refuses — and a floor, which hands out up to a gigabyte free.
+-- forces a choice between a ceiling - one byte past ten gigabytes reads as
+-- eleven and refuses - and a floor, which hands out up to a gigabyte free.
 -- Neither is defensible on a cap. 10737418240 is 10 GiB; 0 is none.
 --
 -- ⚠ AND `mailboxes` ON FREE IS AN ALLOWANCE OF ZERO, NOT AN ABSENT
--- ENTITLEMENT. Zero answers `exceeded` — "your plan does not include this" —
+-- ENTITLEMENT. Zero answers `exceeded` - "your plan does not include this" -
 -- which is true and actionable. Leaving it out answers `unentitled`, which this
 -- codebase reserves for OUR misconfiguration and deliberately fails open, so a
 -- free tenant would create mailboxes unmetered.

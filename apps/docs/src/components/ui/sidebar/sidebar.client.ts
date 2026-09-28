@@ -32,7 +32,7 @@ function initSidebar(root: HTMLElement): () => void {
 function initFilter(root: HTMLElement): (() => void) | null {
   const input = root.querySelector<HTMLInputElement>("[data-nb-sidebar-filter-input]")
   // SidebarFilter is rendered *next to* Sidebar (sibling), so also look in
-  // the parent — preserves the existing layout where filter sits above.
+  // the parent - preserves the existing layout where filter sits above.
   const inputElement =
     input ??
     root.parentElement?.querySelector<HTMLInputElement>(
@@ -186,7 +186,7 @@ function initPersistence(root: HTMLElement): (() => void) | null {
 }
 
 // ---------------------------------------------------------------------------
-// Global `/` shortcut — bound once at module load
+// Global `/` shortcut - bound once at module load
 // ---------------------------------------------------------------------------
 
 ;(function bindFilterShortcut() {

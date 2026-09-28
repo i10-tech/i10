@@ -14,7 +14,7 @@ export function NewSegmentButton() {
   const [description, setDescription] = React.useState("")
   const [open, setOpen] = React.useState(false)
 
-  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES — emptying the fields on
+  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES - emptying the fields on
   // close does it while the dialog is still animating out, which reads as
   // the input being wiped from under you. Adjusted during render rather
   // than in an effect; see lib/react.ts.
@@ -34,7 +34,7 @@ export function NewSegmentButton() {
         </Button>
       }
       title="Create a segment"
-      description="An internal grouping. Recipients never see it — use a topic for anything they should be able to opt out of."
+      description="An internal grouping. Recipients never see it - use a topic for anything they should be able to opt out of."
       canSubmit={name.trim().length > 0}
       onSubmit={() =>
         createSegment({ name: name.trim(), description: description.trim() })

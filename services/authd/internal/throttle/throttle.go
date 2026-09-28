@@ -1,7 +1,7 @@
 // Package throttle rate-limits password verification per identity.
 //
 // Its purpose is narrower than it looks. It is NOT protecting users from
-// Clerk's account lockout — we measured that, and the Backend API
+// Clerk's account lockout - we measured that, and the Backend API
 // verify_password endpoint does not feed the lockout counter, so a mail client
 // hammering a stale password cannot lock anyone out of their dashboard.
 //
@@ -77,7 +77,7 @@ func (l *Limiter) Allow(key string) bool {
 
 // Sweep drops buckets that have been idle long enough to have fully refilled.
 // Without it the map grows once per distinct DN ever seen, which for a mail
-// server is unbounded — every address an attacker probes would be remembered.
+// server is unbounded - every address an attacker probes would be remembered.
 func (l *Limiter) Sweep(idleFor time.Duration) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()

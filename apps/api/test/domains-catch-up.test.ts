@@ -8,7 +8,7 @@ import type { DomainStore, RefreshOutcome } from "../src/domains/store.js"
  * Catching up with SES on the domains that are still waiting.
  *
  * ⚠ NOTHING ASKED TWICE, AND THAT MADE US WRONG ABOUT OUR OWN STATE.
- * `core.domains_due_recheck` — the only background reader of this table —
+ * `core.domains_due_recheck` - the only background reader of this table -
  * selects `WHERE status = 'verified'`, because its job is re-proving ownership.
  * A domain that has NOT got there is in no background job at all, so the only
  * readers were a human pressing Verify and the console's own poll, which gives
@@ -16,7 +16,7 @@ import type { DomainStore, RefreshOutcome } from "../src/domains/store.js"
  *
  * ⚠ THE OBSERVED CONSEQUENCE WAS A CUSTOMER SENDING REAL MAIL FROM A DOMAIN THE
  * DASHBOARD CALLED PENDING. That is survivable while nothing acts on the column
- * — and stops being survivable the moment the send path refuses on it, which it
+ * - and stops being survivable the moment the send path refuses on it, which it
  * now does.
  */
 

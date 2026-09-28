@@ -7,13 +7,13 @@
 #
 # ⚠ AND A MISSED RUN IS THE FAILURE NOTHING HERE CAN REPORT. A run that fails
 # leaves a pod behind to read. A CronJob that is suspended, rescheduled, or
-# cannot be placed produces no pod, no logs and no exit code — the job is simply
+# cannot be placed produces no pod, no logs and no exit code - the job is simply
 # absent, and absence is invisible to everything in this file. The Sentry
 # check-in in apps/api/src/reconcile.ts is what closes that, which is why the
 # schedule below is declared in two places on purpose.
 #
 # ⚠ WHY THIS EXISTS AT ALL. Polar is the state of record for what a customer
-# pays, and `core.plan_assignments` is a downstream copy — the only thing
+# pays, and `core.plan_assignments` is a downstream copy - the only thing
 # carrying state between them is a webhook. One lost during a deploy is a
 # customer silently on the wrong plan, in either direction, with nothing in
 # either system that would ever notice. This is what notices.
@@ -34,13 +34,13 @@ metadata:
   namespace: i10-prod
 spec:
   # Every half hour. The upper bound on how long a customer who paid can be
-  # sitting on free-tier limits after a lost webhook — which is the number this
+  # sitting on free-tier limits after a lost webhook - which is the number this
   # schedule actually sets, and the reason it is not nightly.
   #
   # ⚠ THIS STRING IS ALSO IN apps/api/src/reconcile.ts, AND THEY MUST AGREE.
   # Sentry decides a run is MISSING by comparing the clock against the schedule
   # the job declares in its check-in. Changing it here alone does not break the
-  # job — it makes the alerting wrong, either crying missed on a healthy
+  # job - it makes the alerting wrong, either crying missed on a healthy
   # deployment or staying quiet through a real outage.
   schedule: "*/30 * * * *"
   # ⚠ NEVER TWO AT ONCE. A run that overruns its slot would otherwise be joined
@@ -77,7 +77,7 @@ spec:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }
               env:
-                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # ⚠ `i10_api`, NOT THE OWNER - the same rule as everywhere else.
                 # This job writes entitlements for every tenant, and it reaches
                 # across them through one narrow SECURITY DEFINER function
                 # (`core.subscriptions_snapshot`) rather than by holding a role

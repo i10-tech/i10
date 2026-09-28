@@ -53,7 +53,7 @@ const flush = (rows: unknown[], client = polar()) => {
 
 describe("what gets read", () => {
   // ⚠ Cross-tenant, so it goes through the privileged function rather than the
-  // table — under the policy the job would see one tenant and conclude everyone
+  // table - under the policy the job would see one tenant and conclude everyone
   // else had sent nothing.
   it("reads through the definer function, never off the table", () => {
     const { sql: statement } = render(unshippedStatement("emails", 500))
@@ -65,7 +65,7 @@ describe("what gets read", () => {
 describe("what gets marked", () => {
   /**
    * ⚠ THE IDS THAT WERE SENT, NOT A TIME RANGE. "Mark everything older than X"
-   * sweeps up rows that arrived during the request and were never in it — units
+   * sweeps up rows that arrived during the request and were never in it - units
    * that are then never billed, with nothing left un-shipped to notice.
    */
   it("marks exactly the ids it shipped", () => {
@@ -78,7 +78,7 @@ describe("what gets marked", () => {
   /**
    * ⚠ AN ARRAY LITERAL, NOT A ROW CONSTRUCTOR, AND THE TEST ABOVE COULD NOT
    * TELL THEM APART. Interpolating the id array directly renders `any(($3, $4))`
-   * — which satisfies `toContain("any(")` and which Postgres rejects at run time
+   * - which satisfies `toContain("any(")` and which Postgres rejects at run time
    * with `cannot cast type record to text[]`.
    *
    * ⚠ AND THE CONSEQUENCE WAS RE-BILLING, NOT AN OUTAGE. The flush had already
@@ -188,7 +188,7 @@ describe("flushing", () => {
 
   /**
    * ⚠ THE UNITS ARE IN POLAR ALREADY, so a failure to record that is worth a
-   * log line and not worth failing the pass — the next run re-sends and Polar
+   * log line and not worth failing the pass - the next run re-sends and Polar
    * skips them.
    */
   it("survives a failure to mark", async () => {

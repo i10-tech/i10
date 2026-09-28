@@ -11,7 +11,7 @@
  *
  * ⚠ A CronJob RATHER THAN AN INTERVAL IN THE WORKER, FOR THE REASON GIVEN IN
  * reconcile.ts. The worker Deployment scales on queue depth, so an interval
- * inside it would run once per replica — every replica reading the same stranded
+ * inside it would run once per replica - every replica reading the same stranded
  * rows and enqueueing the same batches. The claim would make that survivable
  * rather than wrong, but it would be N times the work to reach the same place,
  * and Kubernetes already owns "run this once, on a schedule".
@@ -19,7 +19,7 @@
  * ⚠ AND IT IS DELIBERATELY THE DUMBEST THING THAT WORKS. It reads ids, groups
  * them, and enqueues. It does not send, it does not write to `core.messages`,
  * and it holds no lock. Every decision about who actually sends stays where it
- * already was — the compare-and-swap in db/claim.ts — so a row this picks up
+ * already was - the compare-and-swap in db/claim.ts - so a row this picks up
  * while a worker genuinely still holds it is refused there and dropped, and a
  * pass that overlaps a worker is a non-event rather than a race.
  */
@@ -65,7 +65,7 @@ await withMonitor(
   },
   async () => {
     // ⚠ ONE CLOCK FOR THE WHOLE PASS, READ ONCE. It names every job this run
-    // enqueues — see `sweepJobId` — so a second call to `Date.now()` partway
+    // enqueues - see `sweepJobId` - so a second call to `Date.now()` partway
     // through would split one pass across two id namespaces and lose the
     // collapse that makes planning a batch twice harmless.
     const runStartedAt = new Date()
@@ -74,7 +74,7 @@ await withMonitor(
 
     // The same check the API, the worker and the reconciler make. This job
     // reaches across every tenant, through one narrow SECURITY DEFINER
-    // function rather than by holding a role that can see everything — so the
+    // function rather than by holding a role that can see everything - so the
     // role still has to be the one row level security applies to.
     try {
       await assertRlsSubject(sql, log)
@@ -83,7 +83,7 @@ await withMonitor(
       captureError(error, { phase: "boot" })
       await sql.end({ timeout: 5 })
       // An exit code rather than `process.exit`, so the check-in and its flush
-      // still run — the same reason reconcile.ts does it this way.
+      // still run - the same reason reconcile.ts does it this way.
       process.exitCode = 1
       return
     }
@@ -147,7 +147,7 @@ await withMonitor(
         } catch (error) {
           // ⚠ ONE BATCH AT A TIME, AND A FAILURE DOES NOT ABANDON THE REST. The
           // rows are still `queued`, so anything missed here is simply found by
-          // the next pass — but stopping at the first failure would let one bad
+          // the next pass - but stopping at the first failure would let one bad
           // tenant hold up every other tenant's recovery indefinitely.
           failed += 1
           log.error(
@@ -166,7 +166,7 @@ await withMonitor(
       // ⚠ REACHING THE CAP IS REPORTED, BECAUSE IT MEANS THE SWEEP IS NO LONGER
       // KEEPING UP. Below it, a pass that finds rows is the mechanism working.
       // At it, there were more stranded messages than one pass can carry, and
-      // the next pass starts behind — which is a problem upstream of this job
+      // the next pass starts behind - which is a problem upstream of this job
       // and is not fixed by raising the limit.
       if (stranded.length >= env.SWEEP_MAX_ROWS) {
         captureMessage(

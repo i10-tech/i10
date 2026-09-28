@@ -24,7 +24,7 @@ import type { BroadcastDetail, DomainSummary, SegmentRow, TopicRow } from "@/lib
  * Writing a broadcast.
  *
  * ⚠ IT IS A DRAFT UNTIL IT IS NOT, AND EDITING STOPS THE MOMENT FAN-OUT STARTS.
- * The API refuses a PATCH on anything past `scheduled` — changing the subject
+ * The API refuses a PATCH on anything past `scheduled` - changing the subject
  * half-way through a send would put two different emails out under one name,
  * and the record of what was sent would match neither. This form goes read-only
  * rather than letting somebody type into a field that will be rejected.
@@ -70,7 +70,7 @@ export function BroadcastEditor({
    * ⚠ THE DIRTY CHECK IS A COMPARISON AGAINST THE SERVER'S VALUES, NOT A FLAG
    * SET BY EVERY onChange. A flag set on change never clears correctly when
    * somebody types a character and deletes it, so the "unsaved changes" warning
-   * fires on a form identical to what is stored — and people learn to ignore it.
+   * fires on a form identical to what is stored - and people learn to ignore it.
    */
   const dirty =
     name !== broadcast.name ||
@@ -213,7 +213,7 @@ export function BroadcastEditor({
         value={previewText}
         onChange={(event) => setPreviewText(event.target.value)}
         disabled={!editable}
-        hint='{/* * ⚠ REAL ADVICE, NOT FILLER. Left empty, every mail client falls back * to the first words of the body — which for most templates is "View * this email in your browser". It is the most-read and least-edited * line in any marketing email. */} Left empty, clients show the first words of your body — usually the unsubscribe preamble.'
+        hint='{/* * ⚠ REAL ADVICE, NOT FILLER. Left empty, every mail client falls back * to the first words of the body - which for most templates is "View * this email in your browser". It is the most-read and least-edited * line in any marketing email. */} Left empty, clients show the first words of your body - usually the unsubscribe preamble.'
       />
 
       <div className="space-y-2">
@@ -226,7 +226,7 @@ export function BroadcastEditor({
           <SelectTrigger id="broadcast-topic">
             <SelectValue
               placeholder={
-                topics.length === 0 ? "No topics yet" : "No topic — send to everyone"
+                topics.length === 0 ? "No topics yet" : "No topic - send to everyone"
               }
             />
           </SelectTrigger>
@@ -260,7 +260,7 @@ export function BroadcastEditor({
           Merge fields: <code className="font-mono">{"{{first_name}}"}</code>,{" "}
           <code className="font-mono">{"{{last_name}}"}</code>,{" "}
           <code className="font-mono">{"{{email}}"}</code>, plus any contact property.
-          Include <code className="font-mono">{"{{unsubscribe_url}}"}</code> — it is
+          Include <code className="font-mono">{"{{unsubscribe_url}}"}</code> - it is
           required by law in most places and by every major inbox provider.
         </p>
       </div>

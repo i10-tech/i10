@@ -11,8 +11,8 @@ import { dkimRecordValue } from "./dkim.js"
  * to assert the exact strings without needing AWS or a database.
  *
  * ⚠ AND THE VALUES NAME AMAZON BECAUSE AMAZON SENDS THE MAIL. Being
- * Resend-compatible means the envelope matches — the keys, the status strings,
- * the shape of the array — not that the records point at Resend's hosts.
+ * Resend-compatible means the envelope matches - the keys, the status strings,
+ * the shape of the array - not that the records point at Resend's hosts.
  */
 
 /** SES's feedback host, per region. The MX for the custom MAIL FROM domain. */
@@ -31,7 +31,7 @@ export interface RecordInput {
    * The domain whose SPF record lists our own MTAs, e.g. `_spf.i10.tech`.
    *
    * ⚠ A DEDICATED SUBDOMAIN RATHER THAN THE APEX. SPF allows ten DNS lookups
-   * per evaluation and the apex's record has its own job — it says who may send
+   * per evaluation and the apex's record has its own job - it says who may send
    * as i10.tech. Conflating the two means every customer's SPF inherits every
    * include we ever add for our own mail, and the limit is reached by a change
    * nobody connected to customer deliverability.
@@ -63,7 +63,7 @@ export function dnsRecordsFor({
      * ⚠ ONE RETURN PATH FOR BOTH ROUTES, AND NEITHER HALF IS OPTIONAL. SES and
      * our relay both write `<label>.<domain>` as the envelope sender, so SPF
      * aligns with the customer's `From:` whichever way the mail leaves.
-     * Without the MX, SES refuses the MAIL FROM and falls back to its own —
+     * Without the MX, SES refuses the MAIL FROM and falls back to its own -
      * and it must be AMAZON'S MX, which is why there is only one: see
      * `returnPathDomain` for what that costs. Without the TXT, the return path
      * fails SPF on both routes.
@@ -86,7 +86,7 @@ export function dnsRecordsFor({
       value: returnPathSpf(spfInclude),
     },
     /**
-     * ⚠ ONE TXT HOLDING OUR OWN PUBLIC KEY — BYODKIM. Easy DKIM would be three
+     * ⚠ ONE TXT HOLDING OUR OWN PUBLIC KEY - BYODKIM. Easy DKIM would be three
      * CNAMEs pointing at Amazon, who would then hold the private half and be
      * the only party able to sign. That forecloses the routing decision
      * entirely: a message sent through our own MTA would have no key. One key

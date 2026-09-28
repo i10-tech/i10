@@ -15,21 +15,21 @@ import { stepUp } from "@/lib/actions"
  * are the two things worth one more question.
  *
  * ⚠ THE DIALOG IS CLERK'S, DELIBERATELY. It offers the strongest factor the
- * person actually has — a passkey where one is enrolled, otherwise TOTP, an
- * emailed code or a password — and handles every failure state of each. Ours
+ * person actually has - a passkey where one is enrolled, otherwise TOTP, an
+ * emailed code or a password - and handles every failure state of each. Ours
  * would be a worse copy of it, against the same API, and it would go stale the
  * first time somebody enrolled a factor we had not thought about.
  *
  * ⚠ WHAT MAKES IT OPEN AT ALL IS THE SHAPE OF THE VALUE WE RETURN. Clerk
  * inspects the fetcher's RESULT for `clerk_error.reason === "reverification-error"`
- * — it is not reading a status code and it cannot see a thrown error. Our
+ * - it is not reading a status code and it cannot see a thrown error. Our
  * server actions never throw across the boundary; they return
  * `{ ok: false, body }`, so the hint arrives nested and has to be handed back
  * up before Clerk will act on it. That unwrapping is the whole of this file.
  *
  * ⚠ AND IT IS A CONTEXT RATHER THAN A BARE HOOK, BECAUSE CLERK IS NOT ALWAYS
- * MOUNTED. `<ClerkProvider>` is conditional in the root layout — see the note
- * there on `/_not-found` being prerendered without a publishable key — and
+ * MOUNTED. `<ClerkProvider>` is conditional in the root layout - see the note
+ * there on `/_not-found` being prerendered without a publishable key - and
  * `useReverification` calls `useClerk`, which THROWS outside it. A bare hook
  * took the whole API keys page down with "useClerk can only be used within
  * <ClerkProvider>" in exactly the deployment shape the layout was written to
@@ -45,7 +45,7 @@ const StepUpContext = React.createContext<StepUp | null>(null)
 /**
  * ⚠ WITH NO CLERK THERE IS NO WAY TO ASK, SO THIS ASKS THE API AND BELIEVES IT.
  * It cannot open a prompt, so a stale session simply fails the action with the
- * API's own refusal — which is the fail-CLOSED direction. Returning `true` here
+ * API's own refusal - which is the fail-CLOSED direction. Returning `true` here
  * would be the one mistake that matters: the console would go straight to the
  * delete, and only the API would stand in the way.
  */

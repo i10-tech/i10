@@ -4,20 +4,20 @@
  * ⚠ THIS IS THE MOST DESTRUCTIVE CAPABILITY IN THE PRODUCT, AND THE PORT IS
  * SHAPED TO MAKE THAT HARD TO FORGET. A credential that can add a TXT record can
  * also rewrite an MX record, and an adapter that gets "publish" slightly wrong
- * does not produce a failed request — it produces a customer whose mail silently
+ * does not produce a failed request - it produces a customer whose mail silently
  * stops arriving, days later, for a reason nobody connects to us. Every method
  * below is therefore narrow, and the one that changes anything reports exactly
  * what it changed.
  *
  * ⚠ ADDITIVE AND IDEMPOTENT, NEVER "SYNC THE ZONE". Several providers expose
- * only a whole-zone PUT — `ProviderApi.replacesZone` marks them — and the naive
+ * only a whole-zone PUT - `ProviderApi.replacesZone` marks them - and the naive
  * use of one deletes everything the customer had. An adapter for those must
  * read, merge and write back; an adapter for the rest uses the per-record
  * endpoint. Either way `publish` means "make sure these exist", never "make the
  * zone look like this".
  *
  * ⚠ AND IT LIVES IN THE API, NOT IN `@repo/dns-providers`. That package is
- * imported by the browser — the provider picker renders client-side — and it
+ * imported by the browser - the provider picker renders client-side - and it
  * says in its own header that it must keep no runtime dependencies. Adapters do
  * network I/O against a customer's credential; none of that belongs in a
  * bundle a customer downloads.
@@ -57,7 +57,7 @@ export interface PublishOutcome {
   removed: ConflictingRecord[]
   /**
    * Records of OUR OWN, at the names we are publishing to, that this call
-   * replaced — a previous set left in the zone after the domain was deleted
+   * replaced - a previous set left in the zone after the domain was deleted
    * here and added again. See dns/superseded.ts for why these go without
    * being asked about, and why `removed` still does not.
    *
@@ -80,7 +80,7 @@ export interface PublishOptions {
    *
    * ⚠ FALSE BY DEFAULT, AND THE DEFAULT IS THE WHOLE SAFETY PROPERTY. Delegating
    * `_dmarc.example.com` to us shadows any `_dmarc` TXT record the customer
-   * already has — which, for anybody who has ever configured DMARC, is all of
+   * already has - which, for anybody who has ever configured DMARC, is all of
    * them. Removing it is usually right and is never ours to decide silently, so
    * the first call reports the conflicts and refuses, and the console asks.
    */
@@ -92,7 +92,7 @@ export interface PublishOptions {
    * ⚠ OPT-IN, THE SAME WAY `replaceConflicts` IS, AND FOR A NARROWER REASON.
    * Recognising a record as ours is not the same as establishing that it is
    * THIS domain's to remove: the same name can be held by more than one
-   * workspace — `pslhq.app` was held by three in production — and two of them
+   * workspace - `pslhq.app` was held by three in production - and two of them
    * pointed at the same zone would each see the other's live delegation as
    * litter. Only the publisher knows who holds the name, so only the
    * publisher may turn this on.
@@ -141,8 +141,8 @@ export interface ZoneWriter {
  * The provider refused us, and whose fault it is.
  *
  * ⚠ THE DISTINCTION DRIVES WHAT THE CONSOLE SAYS AND IS NOT COSMETIC.
- * `unauthorized` means the customer must reconnect — a revoked token, an expired
- * grant — and nothing else will fix it. `forbidden` means the credential is
+ * `unauthorized` means the customer must reconnect - a revoked token, an expired
+ * grant - and nothing else will fix it. `forbidden` means the credential is
  * alive but lacks the scope, which is a different dialog. `unavailable` means
  * retry. Collapsing them sends everybody to reconnect, including the people for
  * whom reconnecting will produce the identical failure.
@@ -198,7 +198,7 @@ export function zoneFor(
  *
  * ⚠ THE APEX IS `@`, NOT AN EMPTY STRING. Every provider in the registry that
  * takes a relative name uses `@` for the zone apex, and an empty string is
- * accepted by some of them as a literal label — producing a record at
+ * accepted by some of them as a literal label - producing a record at
  * `.example.com` that resolves for nobody.
  */
 export function relativeName(recordName: string, zoneName: string): string {

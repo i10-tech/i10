@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test"
 
 /**
  * ⚠ THESE PIN WHICH CALL THE WATCH MAKES, BECAUSE THAT WAS THE BUG. It used to
- * poll `refresh` only — and `refresh` writes nothing for a domain with no SES
+ * poll `refresh` only - and `refresh` writes nothing for a domain with no SES
  * identity. So a domain whose one verify after publishing arrived before DNS was
  * serving was polled seven times by a call that could never change it, and sat
  * at `not_started` until somebody pressed Verify by hand.
@@ -45,7 +45,7 @@ describe("watching a domain after its records are published", () => {
   })
 
   // ⚠ AND IT STOPS RE-PROVING ONCE AMAZON HAS THE IDENTITY. From there the
-  // only thing outstanding is Amazon's own check, which `refresh` reads — a
+  // only thing outstanding is Amazon's own check, which `refresh` reads - a
   // proof per tick would be DNS lookups against the customer's nameservers for
   // an answer we already have.
   it("switches to refresh as soon as the identity exists", async () => {

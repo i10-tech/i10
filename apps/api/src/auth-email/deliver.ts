@@ -4,7 +4,7 @@ import { NOT_OURS, renderClerkEmail, SLUG, type ClerkEmailPayload } from "@repo/
  * Sending Clerk's authentication mail ourselves.
  *
  * ⚠ THE WHOLE POINT IS THAT CLERK STOPS BEING THE SENDER, and the switch is
- * PER TEMPLATE rather than global — Clerk has no way to disable its delivery
+ * PER TEMPLATE rather than global - Clerk has no way to disable its delivery
  * for everything at once. So during the migration both states exist side by
  * side, and `delivered_by_clerk` on each event is the only thing that says
  * which. Ignoring it does not fail loudly; it sends every customer two copies
@@ -12,7 +12,7 @@ import { NOT_OURS, renderClerkEmail, SLUG, type ClerkEmailPayload } from "@repo/
  *
  * ⚠ AND THE IDEMPOTENCY KEY IS CLERK'S EMAIL ID, NOT THE SVIX MESSAGE ID. Svix
  * retries, and the projection's dedupe table claims the Svix id inside a
- * transaction that commits BEFORE we have sent anything — so keying off that
+ * transaction that commits BEFORE we have sent anything - so keying off that
  * would mean a send that failed once is skipped as a duplicate forever, and the
  * person never gets their code. The email id is stable across redeliveries and
  * is handed to the send path, which already refuses to write the same key
@@ -46,7 +46,7 @@ export interface DeliverDeps {
 export type DeliverOutcome =
   /** We rendered and queued it. */
   | "sent"
-  /** Clerk still owns this template's delivery — see the note above. */
+  /** Clerk still owns this template's delivery - see the note above. */
   | "clerk_delivers"
   /** No recipient, or nothing to render and no body from Clerk either. */
   | "nothing_to_send"
@@ -80,7 +80,7 @@ export function authEmailDelivery(deps: DeliverDeps) {
       }
 
       // ⚠ LOGGED FOR EVERY SLUG WE DO NOT RECOGNISE, AND THIS IS HOW THE SLUG
-      // TABLE GETS FILLED IN. Clerk does not publish the identifiers anywhere —
+      // TABLE GETS FILLED IN. Clerk does not publish the identifiers anywhere -
       // one real send of each template puts the exact string in the logs, and
       // until then those emails go out in Clerk's own styling rather than
       // failing.
@@ -88,7 +88,7 @@ export function authEmailDelivery(deps: DeliverDeps) {
       if (!TEMPLATED.has(slug) && !DELIBERATE.has(slug)) {
         deps.log?.info(
           { slug: event.slug ?? null },
-          "clerk email sent with clerk's own body — add this slug to @repo/emails",
+          "clerk email sent with clerk's own body - add this slug to @repo/emails",
         )
       }
 
@@ -114,12 +114,12 @@ export function authEmailDelivery(deps: DeliverDeps) {
  *
  * ⚠ DERIVED FROM THE REGISTRY ITSELF, NOT LISTED AGAIN HERE. A second copy of
  * this list would drift the first time somebody added a template, and the only
- * symptom would be a log line that stopped appearing — which nobody notices.
+ * symptom would be a log line that stopped appearing - which nobody notices.
  */
 const TEMPLATED = new Set<string>(Object.values(SLUG))
 
 /**
- * Templates we deliver but deliberately do not style — Clerk's own billing
+ * Templates we deliver but deliberately do not style - Clerk's own billing
  * product and its operational mail to us. See `NOT_OURS`.
  */
 const DELIBERATE = new Set<string>(NOT_OURS)

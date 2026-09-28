@@ -5,8 +5,8 @@ import { shouldOnboard } from "../src/console/onboarding.js"
  * Whether the console redirects somebody into the set-up flow.
  *
  * ⚠ THIS IS PURE FOR EXACTLY THIS REASON. The rule has four inputs and a
- * surprising shape — re-run on upgrade FROM free, never on paid → paid, and
- * never at all for somebody who set everything up through the API — and every
+ * surprising shape - re-run on upgrade FROM free, never on paid → paid, and
+ * never at all for somebody who set everything up through the API - and every
  * way of getting it wrong is a bad first impression that nobody reports. A
  * function with a database inside it could not be checked at this resolution.
  */
@@ -35,7 +35,7 @@ describe("shouldOnboard", () => {
   /**
    * ⚠ THE FACTS BEAT THE ROW, AND THIS IS THE CASE THAT MATTERS MOST. Somebody
    * who integrated entirely through the API has no onboarding row at all. The
-   * naive reading — "no row means not onboarded" — would greet an established
+   * naive reading - "no row means not onboarded" - would greet an established
    * customer with a wizard asking them to add their first domain.
    */
   it("does not send somebody who already has a verified domain and a key", () => {
@@ -125,9 +125,9 @@ describe("shouldOnboard", () => {
 
   /**
    * ⚠ THE UPGRADE RULE BEATS THE FACTS SHORTCUT, AND THIS TEST USED TO ASSERT
-   * THE OPPOSITE. The reasoning behind the old order sounded right — somebody
+   * THE OPPOSITE. The reasoning behind the old order sounded right - somebody
    * with a verified domain and a live key does not need to be walked through
-   * creating one — but it answers a question nobody asked. The flow that runs
+   * creating one - but it answers a question nobody asked. The flow that runs
    * after an upgrade ends on the plan screen: here is what you just bought, and
    * here is how much of it you have used. The person who most wants to see that
    * is precisely the established customer this shortcut was excluding, so the
@@ -158,8 +158,8 @@ describe("shouldOnboard", () => {
    * ⚠ THE FACTS SHORTCUT STILL WINS EVERYWHERE ELSE, which is the half that
    * must not regress. Somebody who set everything up through the API and opens
    * the console for the first time has no onboarding row at all; greeting them
-   * with a wizard asking for their first domain — the one they are already
-   * sending from — is the failure that shortcut exists to prevent.
+   * with a wizard asking for their first domain - the one they are already
+   * sending from - is the failure that shortcut exists to prevent.
    */
   it("does not onboard an established tenant who has never opened the console", () => {
     expect(

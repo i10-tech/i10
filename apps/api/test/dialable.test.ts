@@ -5,7 +5,7 @@ import { dialable } from "../src/db/client.js"
 /**
  * ⚠ THESE PIN WHAT IS RETRIED, WHICH IS THE PART THAT CAN GO WRONG IN BOTH
  * DIRECTIONS. Retry too little and every short-lived job keeps losing the
- * ClusterIP first-connect race — the domain prover exited before selecting a
+ * ClusterIP first-connect race - the domain prover exited before selecting a
  * single domain, run after run. Retry too much and a wrong password or a
  * missing database spends ten seconds pretending to be a network blip before
  * saying what it actually is.

@@ -23,11 +23,11 @@ import { Time } from "@/components/time"
  * THIS RESOURCE. A template is referenced by id from production code that is
  * sending mail right now; a single "save" that also went live would mean every
  * half-finished edit reaching customers. `html` is what this editor shows and
- * `published_html` is what a send renders — publishing is the one operation
+ * `published_html` is what a send renders - publishing is the one operation
  * that copies one to the other.
  *
  * ⚠ AND THE STATE BETWEEN THEM IS MADE VISIBLE. "Unpublished changes" is the
- * condition somebody forgets they are in — they edit, save, close the tab, and
+ * condition somebody forgets they are in - they edit, save, close the tab, and
  * wonder for a week why the email has not changed.
  */
 export function TemplateEditor({ template }: { template: TemplateRow }) {
@@ -58,9 +58,9 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
 
   /*
    * ⚠ BOTH ANSWER IN THE BUTTON, AND THE STATUS LINE BESIDE THEM SAYS THE REST.
-   * "Saved as draft — your live template has not changed yet" was a toast
+   * "Saved as draft - your live template has not changed yet" was a toast
    * restating what the line next to the button already reads: "Unpublished
-   * changes — sends still use v3". Publishing is the same: the line flips to
+   * changes - sends still use v3". Publishing is the same: the line flips to
    * "v4 live since …" as the tick lands. See lib/outcome.ts.
    */
   async function save() {
@@ -84,7 +84,7 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
 
     // ⚠ SAVED FIRST, BECAUSE PUBLISH COPIES WHAT IS STORED. Publishing with
     // unsaved edits in the textarea would push the PREVIOUS draft live and tell
-    // the person it worked — the worst kind of success.
+    // the person it worked - the worst kind of success.
     await publishing.run(async () => {
       if (dirty) {
         const saved = await updateTemplate(template.id, {
@@ -131,7 +131,7 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
         {/*
          * ⚠ "DONE" OUTRANKS "NOTHING TO SAVE". The save lands, `dirty` goes
          * false, and a button disabled by it would grey out underneath its
-         * own tick — the confirmation drawn as if it were unavailable.
+         * own tick - the confirmation drawn as if it were unavailable.
          */}
         <ActionButton
           variant="outline"
@@ -164,7 +164,7 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
         >
           {unpublished ? (
             <span className="text-warning">
-              Unpublished changes — sends still use{" "}
+              Unpublished changes - sends still use{" "}
               {template.published_at ? `v${template.version}` : "nothing"}
             </span>
           ) : (
@@ -201,7 +201,7 @@ export function TemplateEditor({ template }: { template: TemplateRow }) {
             return false
           }
           // ⚠ THE NAVIGATION IS THE CONFIRMATION'S EXIT, NOT A SECOND ONE. The
-          // tick holds, then this page — dialog and all — is replaced by the
+          // tick holds, then this page - dialog and all - is replaced by the
           // list without it. A toast on top would announce what the list shows.
           setTimeout(() => router.push("/templates"), OUTCOME_HOLD_MS)
           return true

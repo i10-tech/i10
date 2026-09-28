@@ -1,7 +1,7 @@
 // Package clerkauth delegates password verification to Clerk.
 //
 // Clerk is the source of truth for i10 users. authd holds no password material
-// of any kind — not a hash, not a verifier. Every bind becomes one call to
+// of any kind - not a hash, not a verifier. Every bind becomes one call to
 // Clerk's Backend API and the answer is passed straight through to Stalwart.
 package clerkauth
 
@@ -117,7 +117,7 @@ func (c *Client) Verify(ctx context.Context, userID, password string) (Outcome, 
 	case resp.StatusCode == http.StatusBadRequest:
 		// 400 is only a rejection when Clerk names the reason. An unrecognised
 		// 400 is our bug or a contract change, and guessing "wrong password"
-		// would hide it — so it degrades to Unavailable and gets logged.
+		// would hide it - so it degrades to Unavailable and gets logged.
 		if code := firstErrorCode(resp.Body); code == "no_password_set" {
 			return Rejected, nil
 		} else if code != "" {
@@ -136,7 +136,7 @@ func (c *Client) Verify(ctx context.Context, userID, password string) (Outcome, 
 
 	case resp.StatusCode == http.StatusNotFound:
 		// The projection knows a user Clerk does not. Stale projection, not a
-		// password answer — surface it so the drift gets noticed.
+		// password answer - surface it so the drift gets noticed.
 		return Unavailable, errors.New("clerkauth: user not found in Clerk")
 
 	default:

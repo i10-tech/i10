@@ -1,6 +1,6 @@
 # i10's Postgres.
 #
-# ⚠ ONE CNPG CLUSTER PER PRODUCT — never one Cluster holding a database for
+# ⚠ ONE CNPG CLUSTER PER PRODUCT - never one Cluster holding a database for
 # each. That single choice is the difference between extracting i10 being a
 # `bootstrap.recovery` from its own archive (a documented operation) and being
 # a dump-and-restore with a write freeze. The CNPG *operator* is shared; this
@@ -17,7 +17,7 @@ metadata:
   namespace: i10-prod
 spec:
   instances: 1
-  # 18.5 does not exist upstream — 18.4 and 18.6 do. Probe a tag before pinning.
+  # 18.5 does not exist upstream - 18.4 and 18.6 do. Probe a tag before pinning.
   imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookworm
 
   enableSuperuserAccess: false
@@ -40,10 +40,10 @@ spec:
     parameters:
       # SAFE ONLY BECAUSE THIS IS ZFS. Copy-on-write makes a page write atomic,
       # so torn pages cannot happen. On ext4/xfs this risks unrecoverable
-      # corruption — the setting travels with the storage class, not the cluster.
+      # corruption - the setting travels with the storage class, not the cluster.
       full_page_writes: "off"
 
-  # The fast, LOCAL copy — not a backup. It dies with the pool. What it buys is
+  # The fast, LOCAL copy - not a backup. It dies with the pool. What it buys is
   # instant CoW clones: prod cloned in ~23s for under 2 MB, which is the whole
   # preview-database mechanism. Barman below is the durable, offsite copy.
   backup:
@@ -80,8 +80,8 @@ spec:
       # Reads the Clerk projection, and nothing else.
       #
       # ⚠ SEPARATE FROM THE `i10` OWNER ON PURPOSE. authd parses
-      # attacker-influenced input — login strings and passwords from any IMAP
-      # client, recipient addresses from any sending MTA — and it only ever
+      # attacker-influenced input - login strings and passwords from any IMAP
+      # client, recipient addresses from any sending MTA - and it only ever
       # needs SELECT on the `authd` schema. Connecting as the database owner
       # would mean a parser bug reaches every table in the product. The grants
       # that scope it live in apps/api/drizzle, applied with the schema.
@@ -98,7 +98,7 @@ spec:
       #
       # ⚠ NOT THE `i10` OWNER, AND THAT IS THE WHOLE POINT. Row level security
       # does not apply to a table's owner. Every tenant policy in the `core`
-      # schema is a no-op for `i10`, silently — no error, no log line, just a
+      # schema is a no-op for `i10`, silently - no error, no log line, just a
       # boundary that is not there. This role owns nothing, so the policies bind
       # to it. Migrations still run as the owner, because a backfill has to be
       # able to cross tenants.
@@ -126,7 +126,7 @@ spec:
       # ⚠ AND IT NEEDS WRITE, NOT JUST SELECT. PowerDNS maintains
       # `domains.notified_serial` and, once DNSSEC is on, `records.ordername`
       # and `records.auth`. A read-only grant produces a server that starts,
-      # answers, and then fails at whichever of those it reaches first — which
+      # answers, and then fails at whichever of those it reaches first - which
       # is a failure mode that looks like a corrupt zone. The grants themselves
       # live in apps/api/drizzle/0040_pdns_role_grants.sql; migration 0023
       # wrote them out in a comment and deferred them to this moment.
@@ -148,7 +148,7 @@ spec:
       # ⚠ REMOVED FROM `managed.roles` RATHER THAN SET `ensure: absent`, WHICH
       # WOULD HAVE FAILED. The role OWNS the database, so Postgres refuses to
       # drop it while that database exists. Un-managing it also detaches it from
-      # `i10-autumn-db-role`, a Secret that no longer syncs — CNPG reconciling a
+      # `i10-autumn-db-role`, a Secret that no longer syncs - CNPG reconciling a
       # managed role against a missing passwordSecret is an error loop.
       #
       # To finish the job once the data is certainly not wanted:

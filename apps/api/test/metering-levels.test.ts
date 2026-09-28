@@ -53,7 +53,7 @@ describe("the domain counts", () => {
 
   /**
    * ⚠ TWO COUNTS OVER TWO FLAGS, NOT A PARTITION OF ONE TOTAL. A domain that
-   * both sends and hosts mailboxes is counted by both — otherwise the cheapest
+   * both sends and hosts mailboxes is counted by both - otherwise the cheapest
    * way to hold a domain is to claim both roles for it.
    */
   it("reads each flag on its own", () => {
@@ -85,7 +85,7 @@ describe("reading a level", () => {
   })
 
   // ⚠ `core.domains` is under row level security, so the tenant context is
-  // required — the WHERE clause is defence in depth, not the boundary.
+  // required - the WHERE clause is defence in depth, not the boundary.
   it("carries the tenant into the transaction", async () => {
     const { db, seen } = fakeDb(() => [{ level: "1" }])
     await postgresLevels(db).levelOf(key(SENDING_DOMAINS))
@@ -95,7 +95,7 @@ describe("reading a level", () => {
   /**
    * ⚠ THE ASSERTION THIS FILE EXISTS FOR. Zero held means the whole allowance
    * is free, so a plan granting a feature this store cannot count would hand
-   * every tenant an unlimited number of them — silently, and in the customer's
+   * every tenant an unlimited number of them - silently, and in the customer's
    * favour, which is the direction nobody ever reports.
    */
   it("throws for a feature it cannot count, rather than answering zero", async () => {
@@ -164,7 +164,7 @@ describe("the storage level", () => {
 
   /**
    * ⚠ THE ONE PLACE AN ABSENT ROW IS HONESTLY ZERO. No sample means no mailbox
-   * has ever been measured for this tenant — they hold no storage. An unknown
+   * has ever been measured for this tenant - they hold no storage. An unknown
    * FEATURE still throws; this is a known feature with no data yet.
    */
   it("reads a tenant with no sample as holding nothing", async () => {

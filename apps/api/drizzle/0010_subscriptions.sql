@@ -23,7 +23,7 @@ CREATE INDEX "subscriptions_granted_idx" ON "core"."subscriptions" USING btree (
 --
 -- ⚠ A NEW TABLE IN `core` IS NOT PROTECTED UNTIL THIS RUNS, AND NOTHING FAILS
 -- WHILE IT IS NOT. Grants come free from the ALTER DEFAULT PRIVILEGES in 0002;
--- policies do not. Without this every tenant can read — and write — every other
+-- policies do not. Without this every tenant can read - and write - every other
 -- tenant's plan, and the only symptom is a customer seeing somebody else's
 -- subscription in their console.
 ALTER TABLE "core"."subscriptions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
@@ -36,12 +36,12 @@ CREATE POLICY tenant_isolation ON "core"."subscriptions"
 -- ⚠ THE RECONCILER ASKS A QUESTION NO TENANT-SCOPED CONNECTION CAN ANSWER. It
 -- compares our entitlements against Polar's list of subscriptions, which spans
 -- every tenant at once; under the policy above, `i10_api` sees exactly one row
--- and would conclude that every other customer's subscription had vanished —
+-- and would conclude that every other customer's subscription had vanished -
 -- and the reconciler's job is to act on discrepancies.
 --
 -- Same shape as `sweep_stuck_messages` and `message_owner`, and held to the same
 -- rule: one narrow question, answered by the owner, returning the minimum. It
--- exposes no addresses, no message content and no Polar customer id — only what
+-- exposes no addresses, no message content and no Polar customer id - only what
 -- plan each tenant should hold and what they were last granted, which is the
 -- comparison and nothing more.
 --

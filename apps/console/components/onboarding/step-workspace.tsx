@@ -81,7 +81,7 @@ export function StepWorkspace({
           Let&rsquo;s set up your workspace
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Four short steps and you will be sending. Nothing here is permanent — you can
+          Four short steps and you will be sending. Nothing here is permanent - you can
           change all of it later.
         </p>
       </div>
@@ -118,7 +118,7 @@ export function StepWorkspace({
           ))}
         </div>
         <p className="text-xs text-muted-foreground">
-          Optional. It helps us work out what to build next — nothing you pick changes
+          Optional. It helps us work out what to build next - nothing you pick changes
           what you can do.
         </p>
       </fieldset>

@@ -6,7 +6,7 @@
 // one that cannot be abused.
 //
 // That matters more than it sounds. The bytes this package parses are
-// attacker-influenced end to end — login strings and passwords arrive from any
+// attacker-influenced end to end - login strings and passwords arrive from any
 // IMAP client on the internet, and recipient addresses arrive from any sending
 // MTA via SMTP RCPT TO. Stalwart forwards both into this server.
 package ldapsrv
@@ -44,7 +44,7 @@ type Options struct {
 	// the bind path needs no branch of its own.
 	CredCache *credcache.Cache
 
-	// OpTimeout bounds the work behind a single LDAP operation — the projection
+	// OpTimeout bounds the work behind a single LDAP operation - the projection
 	// query, and for a bind the Clerk call as well.
 	OpTimeout time.Duration
 }
@@ -94,7 +94,7 @@ func (s *Server) Routes() *ldap.RouteMux {
 
 func (s *Server) handleNotFound(w ldap.ResponseWriter, m *ldap.Message) {
 	// A bind that reaches here means an authentication choice we do not
-	// implement. It must fail closed — the default route in the library's own
+	// implement. It must fail closed - the default route in the library's own
 	// example answers Success, which would be a total authentication bypass.
 	if m.ProtocolOpType() == ldap.ApplicationBindRequest {
 		res := ldap.NewBindResponse(ldap.LDAPResultInappropriateAuthentication)
@@ -110,7 +110,7 @@ func (s *Server) handleNotFound(w ldap.ResponseWriter, m *ldap.Message) {
 // opContext bounds one operation.
 //
 // It is deliberately NOT wired to m.Done. Despite its doc comment saying it
-// closes the channel, Abandon does `m.Done <- true` — an unbuffered send, so
+// closes the channel, Abandon does `m.Done <- true` - an unbuffered send, so
 // exactly one receiver gets it. A context goroutine selecting on m.Done would
 // race the handler's own check and swallow the signal. Handlers read m.Done
 // directly, exactly once; cancellation of the backend work is by timeout.

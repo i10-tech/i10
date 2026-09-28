@@ -5,7 +5,7 @@
   // This package has to run unchanged in a Durable Object, so `types` stays
   // empty here and a `Buffer`, `process` or `node:crypto` in src/ is a red
   // squiggle on the day it is written. The tests, however, import `bun:test`,
-  // whose declarations arrive with @types/bun — and `types: ["bun"]` is a
+  // whose declarations arrive with @types/bun - and `types: ["bun"]` is a
   // program-wide switch, so typing the tests in THIS file would hand src/ the
   // whole runtime surface it is forbidden to touch. Two programs is the only
   // way to have both.

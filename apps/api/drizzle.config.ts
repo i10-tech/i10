@@ -10,14 +10,14 @@ import { defineConfig } from "drizzle-kit"
  *
  * ⚠ AND A HAND-WRITTEN MIGRATION MUST STILL LEAVE A SNAPSHOT BEHIND, OR
  * `generate` BREAKS FOR EVERYONE AFTER IT. `drizzle-kit` diffs the schema
- * against the LATEST FILE IN `drizzle/meta`, not against the journal — so a
+ * against the LATEST FILE IN `drizzle/meta`, not against the journal - so a
  * migration added by hand, with only a journal entry, leaves that baseline
  * frozen. The next `generate` re-derives every change made since as pending,
  * and the moment one of them looks like a rename it asks an interactive
  * question, which fails outright in a non-TTY.
  *
  * That is exactly what happened: 0030-0033 were written by hand against a
- * baseline stuck at 0029, and by 0034 `generate` was unusable — it tried to
+ * baseline stuck at 0029, and by 0034 `generate` was unusable - it tried to
  * re-apply 0031's `api_keys` work and prompted about `clerk_key_id`. Repaired
  * 2026-09-16 by regenerating a full baseline into an empty directory (nothing
  * to rename against, so it runs clean) and installing it as
@@ -32,14 +32,14 @@ import { defineConfig } from "drizzle-kit"
  * `core.delegations`, `domains.delegation_token` and two `subscriptions`
  * columns that production already had. Repaired identically: a full baseline
  * regenerated into an empty directory, installed as `meta/0057_snapshot.json`
- * and chained onto 0056's id — after checking production matched `schema.ts`
+ * and chained onto 0056's id - after checking production matched `schema.ts`
  * for each of those objects. It did, except the `delegations` foreign keys,
  * which 0041 named by hand; `schema.ts` now names them the same, or the
  * snapshot would describe constraints that do not exist under those names.
  *
  * So: prefer `bun run db:generate`. If a migration genuinely has to be
- * hand-written — a `SECURITY DEFINER` function, an RLS policy, a data backfill,
- * none of which Drizzle models — add the journal entry AND regenerate the
+ * hand-written - a `SECURITY DEFINER` function, an RLS policy, a data backfill,
+ * none of which Drizzle models - add the journal entry AND regenerate the
  * baseline snapshot, then confirm `db:generate` answers "No schema changes".
  */
 export default defineConfig({

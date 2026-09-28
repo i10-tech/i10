@@ -6,35 +6,35 @@ import type { DomainStore } from "./store.js"
  * Trying again to prove the domains nobody has proved yet.
  *
  * ⚠ REGISTRATION HAD EXACTLY ONE ATTEMPT AND NO RETRY ANYWHERE. `verify` is the
- * only thing that may create an SES identity — deliberately, because SES keys
+ * only thing that may create an SES identity - deliberately, because SES keys
  * identities on the domain name inside ONE AWS account, so registering a name
  * before ownership is proved is how one workspace overwrites another's signing
  * key. That rule is right and this does not weaken it. What was missing is that
  * `verify` is reachable only from two HTTP routes, and the console calls it
  * once, about a second after writing the records. If DNS is not serving at that
- * instant — which is most of the time, and always on the manual path where the
- * customer publishes by hand hours later — the attempt fails and NOTHING EVER
+ * instant - which is most of the time, and always on the manual path where the
+ * customer publishes by hand hours later - the attempt fails and NOTHING EVER
  * MAKES A SECOND ONE.
  *
  * ⚠ AND NOTHING IN THE BACKGROUND COULD HAVE. `domains_awaiting_provider`
  * filters `status <> 'not_started'` because it asks SES about identities that
  * exist; `domains_due_recheck` reads `status = 'verified'` because it re-proves
- * domains that already passed; `DomainStore.refresh` — which is what the
- * console's own watch polls — returns `not_registered` for an unproved row and
+ * domains that already passed; `DomainStore.refresh` - which is what the
+ * console's own watch polls - returns `not_registered` for an unproved row and
  * writes nothing. So the console could poll for a minute, give up, and truthfully
  * report that it had changed nothing, while the onboarding copy promised
  * "verification continues without this page open". It did not.
  *
  * ⚠ IT IS `DomainStore.verify` IN A LOOP, NOT A SECOND PROVER. The rules for
- * what proving a domain may do — claim a delegation only after the challenge
+ * what proving a domain may do - claim a delegation only after the challenge
  * resolves, publish the zone before asking SES, never move `verified_at`
- * backwards, register only once ownership holds — are subtle, already written
+ * backwards, register only once ownership holds - are subtle, already written
  * down once, and were got wrong more than once. A sweep with its own copy would
  * be the next place to get them wrong. This is the same argument `catch-up.ts`
  * makes about `refresh`, applied to the other half of the same feature.
  *
  * ⚠ WITH ONE POWER TAKEN AWAY: `contest: false`. A person pressing Verify may
- * take a name from a workspace that can no longer prove it — that is a
+ * take a name from a workspace that can no longer prove it - that is a
  * deliberate transfer, with somebody waiting for the answer. A cron doing it
  * across every unproved row in the table would migrate domains between
  * customers on its own schedule with nobody asking. `catch-up.ts` refuses the
@@ -56,7 +56,7 @@ export interface ProveDeps {
    * asked about at most once per `staleMs` however often the job fires.
    *
    * ⚠ AND IT IS LONGER THAN CATCH-UP'S MINUTE ON PURPOSE. That one makes a
-   * single cheap `GetEmailIdentity`; this one runs a full ownership proof —
+   * single cheap `GetEmailIdentity`; this one runs a full ownership proof -
    * several DNS lookups against somebody else's nameservers, and for a
    * delegated domain a zone write as well. Two minutes is still far faster than
    * the "until a human notices" it replaces.
@@ -179,7 +179,7 @@ export async function proveWaitingDomains({
     } catch (error) {
       /*
        * ⚠ ONE DOMAIN MUST NOT ABANDON THE REST. A nameserver that hung, a zone
-       * write that failed, a throttled SES call — none of them says anything
+       * write that failed, a throttled SES call - none of them says anything
        * about the other forty-nine rows in this batch, and stopping at the
        * first would leave every later one waiting until somebody noticed by
        * hand. The same rule `catch-up.ts` follows.

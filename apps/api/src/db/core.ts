@@ -22,9 +22,9 @@ import {
  * a different process in a different language.
  *
  * ⚠ EVERY TABLE HERE IS TENANT-SCOPED AND PROTECTED BY ROW LEVEL SECURITY. The
- * policies live in the migration, not here — Drizzle has no DDL for them — and
+ * policies live in the migration, not here - Drizzle has no DDL for them - and
  * they read `app.tenant_id`, which `withTenant()` sets per transaction. A query
- * issued without that setting does not return an empty result — it raises,
+ * issued without that setting does not return an empty result - it raises,
  * deliberately, so a missing tenant context fails at the first query rather
  * than quietly returning nothing and looking like an empty account.
  *
@@ -63,13 +63,13 @@ export const messageStatus = core.enum("message_status", [
  *
  * ⚠ THESE ARE CLASSES, NOT TENANTS. Separating them stops one tenant's bulk
  * batch from queueing in front of another tenant's password reset, which is the
- * failure that matters most — latency on a reset is the product. It does
+ * failure that matters most - latency on a reset is the product. It does
  * nothing about one tenant flooding the transactional class; that is what the
  * per-tenant admission limit at the API is for.
  *
  * Fairness WITHIN a class is deliberately left to a later step. Every job
  * carries its `tenant_id`, so the group key that BullMQ Pro's round-robin needs
- * already exists — the upgrade is two constructors, not a redesign.
+ * already exists - the upgrade is two constructors, not a redesign.
  */
 export const messageQueue = core.enum("message_queue", ["transactional", "bulk"])
 
@@ -89,7 +89,7 @@ export const messageEventType = core.enum("message_event_type", [
  *
  * ⚠ THESE NAMES ARE A PUBLIC CONTRACT AND ARRIVE IN CUSTOMER CODE AS STRING
  * LITERALS. A rename is a breaking change to every `if (event.type === …)` any
- * customer has written, and it breaks silently — their handler stops matching
+ * customer has written, and it breaks silently - their handler stops matching
  * and does nothing. Add, never rename.
  *
  * ⚠ AND EVERY ONE OF THEM ORIGINATES AT SES, INCLUDING `email.sent`. The send
@@ -111,7 +111,7 @@ export const webhookEventType = core.enum("webhook_event_type", [
 export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
   "pending",
   "delivered",
-  /** Every attempt used. Terminal — the reconciler for this is a person. */
+  /** Every attempt used. Terminal - the reconciler for this is a person. */
   "failed",
 ])
 
@@ -135,7 +135,7 @@ export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
  * the decision in one place and leaves the column for the exceptions.
  *
  * ⚠ AND THE OVERRIDES EXIST FOR SUPPORT, NOT FOR CUSTOMERS. A domain pinned to
- * `direct` or `ses` ignores the plan entirely — for a customer whose
+ * `direct` or `ses` ignores the plan entirely - for a customer whose
  * deliverability needs one specific path, or to move somebody off a route that
  * is having a bad day. It is a dashboard control, not an API field.
  */
@@ -173,7 +173,7 @@ export const suppressionReason = core.enum("suppression_reason", [
 ])
 
 /**
- * A customer of i10 — the unit of ownership, billing and isolation.
+ * A customer of i10 - the unit of ownership, billing and isolation.
  *
  * ⚠ IT REFERENCES CLERK, IT IS NOT CLERK. `clerk_org_id` is nullable because a
  * solo developer signs up with no organization and must still be able to send.
@@ -188,7 +188,7 @@ export const tenants = core.table(
       .primaryKey()
       .default(sql`uuidv7()`),
 
-    /** URL-safe handle. Stable once issued — it appears in dashboard links. */
+    /** URL-safe handle. Stable once issued - it appears in dashboard links. */
     slug: text("slug").notNull().unique(),
     name: text("name").notNull(),
 
@@ -204,7 +204,7 @@ export const tenants = core.table(
 
     /**
      * Suspension is not deletion. A suspended tenant keeps its data and its
-     * domains — it simply stops being allowed to send, which is a decision
+     * domains - it simply stops being allowed to send, which is a decision
      * billing makes and this column records.
      */
     status: tenantStatus("status").notNull().default("active"),
@@ -242,7 +242,7 @@ export const domains = core.table(
     /**
      * ⚠ NOT GLOBALLY UNIQUE, AND THAT IS A DELIBERATE REVERSAL. It was, and the
      * consequence was that the first account to type `spotify.com` held it for
-     * ever — without publishing a single record. The real owner then hit "That
+     * ever - without publishing a single record. The real owner then hit "That
      * domain is already registered" with no route past it. Exclusivity now
      * follows PROOF instead of arrival order: see the two indexes below and
      * migration 0039.
@@ -255,19 +255,19 @@ export const domains = core.table(
 
     /**
      * The return path's subdomain, stored as the label only ("send"), not the
-     * FQDN — derive the name with `returnPathDomain` rather than by hand.
+     * FQDN - derive the name with `returnPathDomain` rather than by hand.
      *
      * ⚠ ONE RETURN PATH FOR BOTH ROUTES. SES and our relay both write it as
      * the envelope sender, and its SPF record authorises both, so SPF passes
      * and aligns with the customer's `From:` whichever way the mail leaves.
-     * Its MX must be Amazon's — see `returnPathDomain` for what that costs.
+     * Its MX must be Amazon's - see `returnPathDomain` for what that costs.
      * There used to be a second label, `bounce_subdomain`, with its MX pointed
      * at us; migration 0057 dropped it.
      *
      * ⚠ RELAXED ALIGNMENT IS WHAT MAKES A SUBDOMAIN ENOUGH. DMARC's default
      * `aspf=r` aligns anything under the organizational domain, so
      * `send.example.com` aligns with `From: someone@example.com`. Under
-     * `aspf=s` it would not — which is a reason never to publish a DMARC record
+     * `aspf=s` it would not - which is a reason never to publish a DMARC record
      * for a customer with strict alignment on.
      */
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
@@ -281,8 +281,8 @@ export const domains = core.table(
      * both.
      *
      * ⚠ THIS WAS ONE COLUMN CALLED `delivery_route` AND ONE VALUE COULD NOT SAY
-     * ENOUGH. A domain has two kinds of mail leaving it — what the API sends
-     * and what its mailboxes send — and they are different products with
+     * ENOUGH. A domain has two kinds of mail leaving it - what the API sends
+     * and what its mailboxes send - and they are different products with
      * different economics. One column forced the same answer on both, so a
      * customer whose people send through our own MTA could not also have their
      * transactional traffic on SES. Split 2026-09-16; the old column became
@@ -307,7 +307,7 @@ export const domains = core.table(
      *
      * ⚠ STORED AND RENDERED, AND READ BY NOTHING YET. Stalwart chooses the
      * mailbox route itself by evaluating an expression against its own queue,
-     * and that expression — plus the SES SMTP relay behind it — is not built.
+     * and that expression - plus the SES SMTP relay behind it - is not built.
      * The column exists so the preference has somewhere to live and the API can
      * answer with it; see docs/decisions/mail-routing.md. It is the same shape
      * of promise `delivery_route` made before anything read that either, which
@@ -338,7 +338,7 @@ export const domains = core.table(
      * below.
      *
      * ⚠ THE SELECTOR IS RANDOM RATHER THAN A FIXED `i10`, which is what makes
-     * rotation possible at all — see domains/dkim.ts. A fixed one means a single
+     * rotation possible at all - see domains/dkim.ts. A fixed one means a single
      * name per domain, so replacing a key is a destructive edit of a live record
      * with a window in which nothing verifies.
      */
@@ -357,7 +357,7 @@ export const domains = core.table(
      * opens this lives outside the database, so the ciphertext is inert without
      * it.
      *
-     * ⚠ AN EARLIER DESIGN PUT A `dkim_private_key_ref` HERE INSTEAD — a pointer
+     * ⚠ AN EARLIER DESIGN PUT A `dkim_private_key_ref` HERE INSTEAD - a pointer
      * into an external secret store, on the reasoning that the key must not be
      * in this table at any price. Sealing buys the same property without the
      * second system to run, so the column was superseded and never written;
@@ -376,7 +376,7 @@ export const domains = core.table(
      *
      * ⚠ THE DELEGATION RECORDS CANNOT DO IT, WHICH IS WHY THIS EXISTS. Every
      * delegating customer is told to publish the same two nameservers, so what
-     * lands in DNS is identical whoever produced it — and the zone claim fell
+     * lands in DNS is identical whoever produced it - and the zone claim fell
      * to arrival order, which is not evidence. A stranger could add a domain,
      * publish nothing, and have the real owner's NS records resolve to the
      * stranger's zone and verify them. See migration 0042 and ownership.ts.
@@ -384,12 +384,12 @@ export const domains = core.table(
      * ⚠ IT IS NOW THE LABEL ON THE NAMESERVER NAMES, NOT A SEPARATE CHALLENGE
      * RECORD. It began as a token in a `_i10-challenge.<domain>` TXT record,
      * published beside the delegation to carry the identity the delegation
-     * could not. Prefixing the nameservers with it instead —
-     * `<claim>.ns1.i10.tech` — collapses the two into one fact: only the holder
+     * could not. Prefixing the nameservers with it instead -
+     * `<claim>.ns1.i10.tech` - collapses the two into one fact: only the holder
      * of the domain's DNS can publish it, and the label says whose claim it is.
      * The challenge record is gone; see domains/zone.ts and domains/referral.ts.
      *
-     * ⚠ WHICH MEANS EACH NAMESERVER NAME NEEDS A WILDCARD A RECORD —
+     * ⚠ WHICH MEANS EACH NAMESERVER NAME NEEDS A WILDCARD A RECORD -
      * `*.ns1.i10.tech`, pointed at the nameserver and NOT PROXIED. Without it
      * every claim's delegation points at a name that resolves to nothing.
      *
@@ -401,7 +401,7 @@ export const domains = core.table(
       .default(sql`replace(gen_random_uuid()::text, '-', '')`),
 
     /**
-     * ⚠ SES'S ANSWER, COPIED — NOT DERIVED FROM `verified_at`. A domain can be
+     * ⚠ SES'S ANSWER, COPIED - NOT DERIVED FROM `verified_at`. A domain can be
      * `failed` or `temporary_failure` while `verified_at` is null, and those
      * three states are what a customer needs told apart: one means wait, one
      * means check your DNS, one means it never started.
@@ -415,7 +415,7 @@ export const domains = core.table(
      * When another workspace proved this name and took it from this row.
      *
      * ⚠ THE LATEST PROOF WINS, SO THIS IS HOW THE LOSER FINDS OUT. A workspace
-     * that verifies a name somebody else holds takes it — the case it exists
+     * that verifies a name somebody else holds takes it - the case it exists
      * for is an owner who lost the account the domain was in and has to prove
      * it again from a new one. The old row is kept, set `failed` so it cannot
      * send, and stamped here so the console can say WHY rather than showing a
@@ -436,7 +436,7 @@ export const domains = core.table(
 
     /**
      * ⚠ ONE WORKSPACE, ONE ROW PER NAME. Without this, dropping the global
-     * constraint would let a single tenant add `example.com` twice — two DKIM
+     * constraint would let a single tenant add `example.com` twice - two DKIM
      * keys and two record sets for one name, with no way to tell which of two
      * identical rows is the one that verified.
      */
@@ -446,7 +446,7 @@ export const domains = core.table(
      * ⚠ THE EXCLUSIVITY, SCOPED TO PROOF. Any number of tenants may hold a name
      * as pending; exactly one may hold it verified. The second tenant to verify
      * gets 23505 on the UPDATE, which `domainStore.verify` turns into a
-     * `conflict` — true, and the only safe direction for the race to fall.
+     * `conflict` - true, and the only safe direction for the race to fall.
      */
     uniqueIndex("domains_verified_name_unique")
       .on(t.name)
@@ -460,7 +460,7 @@ export const domains = core.table(
  * ⚠ THIS IS THE HALF OF `domains_verified_name_unique` THAT INDEX CANNOT COVER,
  * AND THE REASON IS CIRCULAR. A delegated domain is verified when SES resolves
  * `<selector>._domainkey.<domain>`, and that lookup follows the customer's NS
- * records into a zone we serve — so publishing the zone is not a record of a
+ * records into a zone we serve - so publishing the zone is not a record of a
  * claim, it is the act that MANUFACTURES the proof the claim is granted on.
  * Exclusivity therefore cannot wait for `status = 'verified'`: nothing can
  * verify until its zone already answers.
@@ -469,13 +469,13 @@ export const domains = core.table(
  * ALONE. `upsertZoneStatement` is `on conflict (name) do update`, so a second
  * tenant adding an already-delegated domain replaced the first tenant's zone
  * with their own DKIM selector, underneath NS records the real owner had
- * published — and then verified against it. `remove` was the mirror: it dropped
+ * published - and then verified against it. `remove` was the mirror: it dropped
  * the zones by name with no ownership test at all.
  *
  * ⚠ SO IT IS FIRST-COME, WHICH IS A DELIBERATE AND BOUNDED STEP BACK TOWARDS
  * WHAT 0039 REMOVED. A stranger can hold the DELEGATED mode for a name they do
- * not own. They cannot verify it — SES reads the real owner's DNS, which does
- * not point here — cannot send from it, and cannot stop the owner using the
+ * not own. They cannot verify it - SES reads the real owner's DNS, which does
+ * not point here - cannot send from it, and cannot stop the owner using the
  * MANUAL record path, which is the default and needs nothing from us. A name
  * that cannot be delegated is an inconvenience; a name somebody else can sign
  * as is a takeover. Only one of those is worth accepting.
@@ -484,7 +484,7 @@ export const delegations = core.table(
   "delegations",
   {
     /**
-     * The customer's domain, e.g. `example.com` — NOT the three zone names
+     * The customer's domain, e.g. `example.com` - NOT the three zone names
      * under it. Those are derived by `delegatedZoneNames` and always move
      * together, so one row arbitrates all three and they cannot be split.
      */
@@ -514,7 +514,7 @@ export const delegations = core.table(
      * ⚠ NAMED TO MATCH THE DATABASE, which got them from the hand-written 0041
      * rather than from Drizzle's `<table>_<col>_<ref>_<col>_fk` default. Left to
      * the default, the snapshot described constraints that do not exist under
-     * those names — invisible until a migration tries to drop one.
+     * those names - invisible until a migration tries to drop one.
      */
     foreignKey({
       name: "delegations_domain_fk",
@@ -535,13 +535,13 @@ export const delegations = core.table(
  * ⚠ ADDRESSED TO AN EMAIL, NOT A WORKSPACE, because the person receiving it
  * may not have an account yet. It is accepted by somebody signed in with that
  * address VERIFIED at Clerk, into whichever workspace they are in when they
- * press Accept — so a forwarded link is useless to anybody else, and there is
+ * press Accept - so a forwarded link is useless to anybody else, and there is
  * no token to leak.
  *
  * ⚠ TWO AUDIENCES, SO TWO POLICIES, BOTH DECLARED HERE AND GENERATED. The
  * sending workspace sees its own offers by `app.tenant_id`, exactly like every
- * other table. The recipient cannot — the row belongs to somebody else's
- * tenant — so a second policy admits rows whose `recipient_email` is one of
+ * other table. The recipient cannot - the row belongs to somebody else's
+ * tenant - so a second policy admits rows whose `recipient_email` is one of
  * `app.recipient_emails`, which the API sets only from Clerk's verified
  * addresses for the signed-in person. Policies are permissive, so either one
  * suffices; neither widens the other.
@@ -553,7 +553,7 @@ export const delegations = core.table(
  * An unset or empty value matches nothing.
  *
  * ⚠ THE DOMAIN'S NAME AND THE SENDER ARE COPIED ONTO THE ROW. The recipient
- * cannot read the sender's `domains` or `tenants` rows — RLS — so what they
+ * cannot read the sender's `domains` or `tenants` rows - RLS - so what they
  * are being offered has to travel with the offer.
  */
 export const domainTransfers = core.table(
@@ -571,7 +571,7 @@ export const domainTransfers = core.table(
     /**
      * ⚠ NOT A FOREIGN KEY, AND A CASCADE WOULD BE THE BUG. Accepting moves the
      * domain by deleting its row under the sender's tenant and inserting it
-     * under the recipient's — so `on delete cascade` would erase the very
+     * under the recipient's - so `on delete cascade` would erase the very
      * offer being accepted, mid-transaction, along with every earlier offer
      * for that domain. A deleted domain leaves its offer pointing at nothing,
      * and accepting it answers `missing`.
@@ -583,7 +583,7 @@ export const domainTransfers = core.table(
     /** Stored lowercased; compared lowercased. */
     recipientEmail: text("recipient_email").notNull(),
 
-    /** Who pressed Transfer, and from which workspace — shown to the recipient. */
+    /** Who pressed Transfer, and from which workspace - shown to the recipient. */
     offeredBy: text("offered_by").notNull(),
     fromWorkspace: text("from_workspace").notNull(),
 
@@ -637,7 +637,7 @@ export const domainTransfers = core.table(
  * Every API key i10 has issued. This table IS the credential store.
  *
  * ⚠ IT USED TO BE A THIN INDEX OF KEYS CLERK HELD, AND THE COMMENT HERE ARGUED
- * AGAINST EXACTLY WHAT IT NOW DOES — no hash, no scopes, no revocation, on the
+ * AGAINST EXACTLY WHAT IT NOW DOES - no hash, no scopes, no revocation, on the
  * grounds that a second source of truth for authentication "fails silently and
  * in the customer's favour". That reasoning was sound while Clerk was the first
  * source. It stopped applying when Clerk was removed: there is one source now,
@@ -645,7 +645,7 @@ export const domainTransfers = core.table(
  *
  * ⚠ WHAT FORCED THE CHANGE WAS LATENCY, MEASURED RATHER THAN ASSUMED. Verifying
  * against Clerk cost ~900ms on a cache miss with a 60s TTL, which is most
- * requests for a customer who sends sporadically — larger than the SES call it
+ * requests for a customer who sends sporadically - larger than the SES call it
  * was authenticating. See drizzle/0031.
  *
  * ⚠ AND THE TENANT LINK DID NOT MOVE. It was already `tenant_id` here, mirrored
@@ -679,7 +679,7 @@ export const apiKeys = core.table(
     secretHash: text("secret_hash").notNull().unique(),
 
     /**
-     * The leading, non-secret part of the key — `i10_live_a1b2c3d4`. Shown in
+     * The leading, non-secret part of the key - `i10_live_a1b2c3d4`. Shown in
      * the dashboard so a customer can tell two keys apart, and greppable in a
      * leak scan. It is not sufficient to authenticate.
      */
@@ -704,7 +704,7 @@ export const apiKeys = core.table(
 
     /**
      * ⚠ REVOCATION IS IMMEDIATE, AND THAT IS THE WHOLE REASON IT LIVES HERE.
-     * Under Clerk the floor was the cache TTL — a leaked production key stayed
+     * Under Clerk the floor was the cache TTL - a leaked production key stayed
      * live for up to a minute. Setting this and deleting the cache entry ends it
      * at once.
      */
@@ -712,7 +712,7 @@ export const apiKeys = core.table(
     expiresAt: timestamp("expires_at", { withTimezone: true }),
 
     /**
-     * ⚠ COARSE BY CONSTRUCTION — written on a cache miss, so once a minute per
+     * ⚠ COARSE BY CONSTRUCTION - written on a cache miss, so once a minute per
      * key rather than once per request. See `core.resolve_api_key`. It answers
      * "is this key still in use", which does not need to be exact.
      */
@@ -734,7 +734,7 @@ export const apiKeys = core.table(
 )
 
 /**
- * Ingress idempotency — layer one of three.
+ * Ingress idempotency - layer one of three.
  *
  * A customer retrying `POST /emails` after a timeout must get the same message
  * id back, not a second email. `request_hash` separates a genuine retry from a
@@ -745,7 +745,7 @@ export const apiKeys = core.table(
  * WHAT SERIALISES A DOUBLE-POST. `insert … on conflict (tenant_id, key) do
  * nothing` blocks on a conflicting row that is still uncommitted, so of two
  * simultaneous retries one inserts and the other waits, then reads the ids the
- * winner wrote. Deciding outside the transaction — read, then insert — would
+ * winner wrote. Deciding outside the transaction - read, then insert - would
  * let both miss and both mint a full set of messages, which is the exact
  * duplicate this table exists to prevent.
  *
@@ -768,7 +768,7 @@ export const idempotencyKeys = core.table(
      * single `message_id` can only replay a single send; a replayed batch would
      * have to answer with 99 nulls or with nothing, and an SDK that got nothing
      * back would send the batch again. Null only while the inserting
-     * transaction is still open — a committed row always carries its ids.
+     * transaction is still open - a committed row always carries its ids.
      */
     messageIds: uuid("message_ids").array(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -783,8 +783,8 @@ export const idempotencyKeys = core.table(
  * One row per message accepted, and the source of truth for whether it was sent.
  *
  * ⚠ THIS TABLE IS THE SEND LOCK, NOT BULLMQ. A BullMQ job lock expires, and a
- * worker that is merely slow — a blocked event loop, a long SES call without
- * lock renewal — has its job declared stalled and handed to a second worker.
+ * worker that is merely slow - a blocked event loop, a long SES call without
+ * lock renewal - has its job declared stalled and handed to a second worker.
  * That is the double-send path, and it opens under load. The guard is a
  * compare-and-swap here:
  *
@@ -799,7 +799,7 @@ export const idempotencyKeys = core.table(
  * Tenant partitioning yields thousands of partitions and worse plans; time
  * partitioning makes retention a DROP, which is the only operation on this
  * table that is otherwise ruinous. The consequence is that the primary key must
- * include the partition key — hence `(id, created_at)` — and that a lookup by
+ * include the partition key - hence `(id, created_at)` - and that a lookup by
  * bare id would have to touch every partition. It does not have to: the ids are
  * UUIDv7, so the timestamp is inside the id and the partition is derivable from
  * it.
@@ -824,14 +824,14 @@ export const messages = core.table(
      * ⚠ NOT A FOREIGN KEY, LIKE EVERY OTHER REFERENCE ON THIS TABLE.
      * `core.messages` is partitioned, and a partitioned table cannot be the
      * referencing side of an FK to a non-partitioned one without the constraint
-     * being declared on every partition — which the create-partition path would
+     * being declared on every partition - which the create-partition path would
      * have to know about and would silently omit for any partition made by
      * hand. The reference is enforced by the code that writes it, which is the
      * same position `domain_id` and `api_key_id` already take.
      *
      * ⚠ AND IT IS WHAT MAKES A BROADCAST'S NUMBERS DERIVED RATHER THAN STORED.
      * Every count on the broadcast page is an aggregate over the messages that
-     * carry this id, joined to their events — so a late bounce moves the number
+     * carry this id, joined to their events - so a late bounce moves the number
      * on its own, and there is no counter to drift.
      */
     broadcastId: uuid("broadcast_id"),
@@ -858,7 +858,7 @@ export const messages = core.table(
     /**
      * The delivery attempt counter and its claim.
      *
-     * A row left in `sending` past the claim timeout is genuinely ambiguous —
+     * A row left in `sending` past the claim timeout is genuinely ambiguous -
      * SES was called and the outcome was never recorded, and there is no way to
      * ask SES which it was. The sweeper resends it: a reset that never arrives
      * is a support ticket, a duplicate is a shrug. What makes that safe is that
@@ -877,8 +877,8 @@ export const messages = core.table(
      * its events.
      *
      * ⚠ THIS WAS `ses_message_id`, AND THE NAME WAS A ROUTING ASSUMPTION IN A
-     * COLUMN. A direct-routed message has no SES id — it has whatever our own
-     * MTA called it — so the old name would have meant writing a Stalwart queue
+     * COLUMN. A direct-routed message has no SES id - it has whatever our own
+     * MTA called it - so the old name would have meant writing a Stalwart queue
      * id into a column named for Amazon, and every reader would have had to
      * know that. Renamed 2026-09-16 alongside `sent_route`, which says which
      * provider the id belongs to.
@@ -902,7 +902,7 @@ export const messages = core.table(
      * ⚠ NULLABLE ON PURPOSE: A QUEUED MESSAGE HAS NOT BEEN ROUTED YET. The
      * route is resolved at send, not at admission, because the domain's
      * preference or the tenant's plan can change while a message sits in the
-     * queue — and stamping it early would record an intention rather than a
+     * queue - and stamping it early would record an intention rather than a
      * fact. It is also what makes "how much went direct" answerable without
      * joining anything.
      */
@@ -924,8 +924,8 @@ export const messages = core.table(
 /**
  * Bodies, kept out of `messages` on purpose.
  *
- * The hot paths — draining the queue, listing a tenant's recent sends, sweeping
- * stuck rows — never read the body, and an HTML body is orders of magnitude
+ * The hot paths - draining the queue, listing a tenant's recent sends, sweeping
+ * stuck rows - never read the body, and an HTML body is orders of magnitude
  * larger than the row that describes it. Keeping them apart is what lets the
  * status table stay narrow enough for its indexes to matter.
  *
@@ -948,7 +948,7 @@ export const messageBodies = core.table(
      *
      * ⚠ IN THE DATABASE RATHER THAN IN OBJECT STORAGE, AND THAT IS A BOUNDED
      * DECISION. The contract caps a message's attachments, so a row cannot grow
-     * without limit — and the alternative, a bucket, would put a second store
+     * without limit - and the alternative, a bucket, would put a second store
      * with its own lifecycle, its own access control and its own retention in
      * front of every send. Here retention is the partition drop that already
      * exists, and row level security already covers it.
@@ -979,8 +979,8 @@ export const messageBodies = core.table(
  *
  * ⚠ NO FOREIGN KEY TO `messages`, AND THAT IS DELIBERATE. Events arrive
  * asynchronously from an external system that has its own retry schedule; an FK
- * turns a race — an event landing while its message row is still being written,
- * or after retention has dropped it — into a failed insert and a lost event. An
+ * turns a race - an event landing while its message row is still being written,
+ * or after retention has dropped it - into a failed insert and a lost event. An
  * index gives the joins without making SES's timing our correctness problem.
  *
  * `source_event_id` is SES's own id for the notification, and the unique index
@@ -1015,7 +1015,7 @@ export const messageEvents = core.table(
  * ⚠ THE ENDPOINT IS THE UNIT OF ORDERING AND OF ISOLATION, WHICH IS WHY THE
  * DELIVERY QUEUE IS GROUPED BY ITS ID RATHER THAN BY TENANT. One customer's
  * staging endpoint timing out for an hour must not delay their production one,
- * and events for a single endpoint must arrive in the order they happened —
+ * and events for a single endpoint must arrive in the order they happened -
  * `email.sent` before `email.delivered`, or a customer's state machine reads
  * backwards. Per-endpoint grouping gives both.
  */
@@ -1029,7 +1029,7 @@ export const webhookEndpoints = core.table(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
 
-    /** ⚠ https only, and never a private address — see webhooks/endpoints.ts. */
+    /** ⚠ https only, and never a private address - see webhooks/endpoints.ts. */
     url: text("url").notNull(),
     description: text("description"),
 
@@ -1037,7 +1037,7 @@ export const webhookEndpoints = core.table(
      * The signing secret, ENCRYPTED AT REST.
      *
      * ⚠ IT CANNOT BE A HASH, WHICH IS WHY IT IS ENCRYPTED INSTEAD. A signature
-     * is computed, not compared, so the worker needs the secret back — one-way
+     * is computed, not compared, so the worker needs the secret back - one-way
      * hashing is not available here the way it is for a password. What is
      * available is that a database dump alone is not enough: the key lives in
      * the environment, so an exfiltrated backup yields ciphertext.
@@ -1057,7 +1057,7 @@ export const webhookEndpoints = core.table(
      * PROTECTION FOR US RATHER THAN A COURTESY TO THEM. A customer who deletes
      * their receiver without deleting the endpoint would otherwise have every
      * event they ever generate retried against a dead host, forever, at our
-     * expense — and the queue those retries sit in is shared.
+     * expense - and the queue those retries sit in is shared.
      */
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
@@ -1078,7 +1078,7 @@ export const webhookEndpoints = core.table(
  *
  * ⚠ AND IT CARRIES ITS OWN PAYLOAD RATHER THAN REBUILDING IT AT DELIVERY TIME.
  * A webhook says what was true when the event happened. Rebuilding from the
- * message row at attempt four would describe the message as it is now — a
+ * message row at attempt four would describe the message as it is now - a
  * `bounced` event whose body says `sent`, because a later retry succeeded.
  */
 export const webhookDeliveries = core.table(
@@ -1098,12 +1098,12 @@ export const webhookDeliveries = core.table(
      *
      * ⚠ THIS IS WHAT THE CUSTOMER'S ENVELOPE CARRIES, SO IT CANNOT BE
      * `created_at`. SNS can be delayed, and our ingestion can be down for an
-     * hour and catch up afterwards — publishing the row's own creation time
+     * hour and catch up afterwards - publishing the row's own creation time
      * would tell a customer a bounce from an hour ago happened just now, and
      * anyone measuring delivery latency would be measuring our backlog.
      */
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
-    /** The message this is about. No FK — see `messageEvents` for why. */
+    /** The message this is about. No FK - see `messageEvents` for why. */
     messageId: uuid("message_id"),
     payload: jsonb("payload").notNull(),
 
@@ -1152,7 +1152,7 @@ export const suppressions = core.table(
  * What a tenant is paying for, as Polar last told us.
  *
  * ⚠ THIS TABLE IS A COPY, NOT THE TRUTH. Polar is the state of record for
- * subscriptions — it took the money and it is what a dispute is settled
+ * subscriptions - it took the money and it is what a dispute is settled
  * against. This row exists so the console can answer "what plan am I on"
  * without a round trip to Polar, and so the reconciler has something to compare
  * against; every value in it arrives from a signature-verified webhook.
@@ -1161,7 +1161,7 @@ export const suppressions = core.table(
  * row first, entitlement second. If the grant then fails, the truth is
  * already durable and the reconciler repairs the entitlement on its next pass.
  * Reversed, a crash between the two leaves a customer holding a paid plan that
- * nothing in our database records — invisible, and never revoked.
+ * nothing in our database records - invisible, and never revoked.
  *
  * ⚠ ONE ROW PER TENANT, NOT A HISTORY. `tenant_id` is unique so the upsert has
  * something to conflict on; what the customer is entitled to today is a single
@@ -1183,7 +1183,7 @@ export const subscriptions = core.table(
     /**
      * ⚠ ALSO UNIQUE, AND THAT IS A SAFETY PROPERTY. Two tenants pointing at one
      * Polar subscription would mean one payment entitling two accounts, and the
-     * reconciler — which matches on this id — would flip the plan back and
+     * reconciler - which matches on this id - would flip the plan back and
      * forth between them on every pass.
      */
     polarSubscriptionId: text("polar_subscription_id").notNull().unique(),
@@ -1206,7 +1206,7 @@ export const subscriptions = core.table(
     /**
      * Set the moment a customer clicks cancel, while the subscription is still
      * active and paid for. Recorded so the console can say "ends on the 4th",
-     * and deliberately not acted on — see billing/events.ts.
+     * and deliberately not acted on - see billing/events.ts.
      */
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
@@ -1225,7 +1225,7 @@ export const subscriptions = core.table(
      *
      * ⚠ THIS COLUMN IS THE ENTIRE POINT OF THE RECONCILER. It is what makes
      * "the row was written but the entitlement never applied" a query rather
-     * than an invisible state — where it is out of step with the plan the
+     * than an invisible state - where it is out of step with the plan the
      * subscription entitles, a customer is paying for something they do not
      * have, or holding something they no longer pay for.
      */
@@ -1236,9 +1236,9 @@ export const subscriptions = core.table(
      * The plan a deferred change is waiting to become, and when.
      *
      * ⚠ WITHOUT THESE A DOWNGRADE LEAVES NO TRACE UNTIL IT HAPPENS. Polar
-     * applies a `next_period` change at the period boundary — which is the
+     * applies a `next_period` change at the period boundary - which is the
      * point of requesting downgrades that way, since the customer keeps what
-     * they paid for — so `plan_id` and `polar_product_id` both still name the
+     * they paid for - so `plan_id` and `polar_product_id` both still name the
      * OLD plan for the rest of the period. The console could therefore only
      * say "Pro, renews on the 4th" to somebody who had just downgraded, which
      * reads as a button that did nothing.
@@ -1259,7 +1259,7 @@ export const subscriptions = core.table(
  * Where a plan came from, and who is allowed to overwrite it.
  *
  * ⚠ THE DISCRIMINATOR IS A MECHANISM, NOT A LABEL. `catalog` plans are seeded
- * from configuration and reconciled destructively by a push — the file wins,
+ * from configuration and reconciled destructively by a push - the file wins,
  * and anything edited by clicking is reverted. `custom` plans belong to one
  * tenant, are created through the dashboard for a specific deal, and a push
  * never touches them. The second is the only reason the first can safely be
@@ -1272,7 +1272,7 @@ export const planSource = core.enum("plan_source", ["catalog", "custom"])
  *
  * ⚠ THIS TYPE IS AN ASSERTION ABOUT JSON, NOT A GUARANTEE. `$type` is erased at
  * runtime and the column can hold anything a migration or a psql session put
- * there, so every read parses it — see `parseEntitlements` in
+ * there, so every read parses it - see `parseEntitlements` in
  * src/metering/postgres.ts. It mirrors `Entitlement` in `@repo/metering`, and it
  * is declared here rather than imported so the schema stays free of a
  * dependency that drizzle-kit would have to resolve.
@@ -1308,7 +1308,7 @@ export type StoredEntitlement =
  *
  * ⚠ THE ENTITLEMENTS ARE `jsonb` RATHER THAN A CHILD TABLE, AND THE REASON IS
  * THAT THEY ARE NEVER READ APART FROM THEIR PLAN. Autumn modelled these as
- * `product_items` rows because it carries a full pricing model — tiers, prices,
+ * `product_items` rows because it carries a full pricing model - tiers, prices,
  * proration. Ours are four fields, always loaded as a set, and a child table
  * would buy a second RLS policy, a second index and a join on the hot path of
  * every quota check in exchange for nothing.
@@ -1316,7 +1316,7 @@ export type StoredEntitlement =
  * ⚠ AND A PLAN IS NOT TENANT-SCOPED THE WAY EVERY OTHER TABLE HERE IS. A
  * catalogue row has `tenant_id IS NULL` and is readable by everyone; a custom
  * row is readable only by its owner. The policy in the migration says so, and
- * its WITH CHECK excludes NULL — so `i10_api` can create a bespoke plan for the
+ * its WITH CHECK excludes NULL - so `i10_api` can create a bespoke plan for the
  * tenant it is scoped to, and can never create or alter a catalogue one. That
  * is the "the file is the source of truth" rule, enforced by the database
  * rather than by reviewers.
@@ -1343,14 +1343,14 @@ export const plans = core.table(
      * Where this plan sits relative to the others. Higher is more.
      *
      * ⚠ AN EXPLICIT NUMBER, NOT AN INFERENCE FROM PRICE OR ALLOWANCE. Whether a
-     * plan change is an upgrade decides how Polar prorates it — charged now, or
-     * deferred to the period end — so the answer has to be one somebody chose.
+     * plan change is an upgrade decides how Polar prorates it - charged now, or
+     * deferred to the period end - so the answer has to be one somebody chose.
      * Inferring it from the `emails` allowance breaks the moment a plan is
      * cheaper on volume and dearer on seats, and inferring it from price means
      * storing a price we deliberately do not own.
      *
      * ⚠ TIES ARE NOT UPGRADES. Two plans at the same rank are a sideways move,
-     * which is neither charged nor deferred — see `directionOf`.
+     * which is neither charged nor deferred - see `directionOf`.
      */
     rank: integer("rank").notNull().default(0),
 
@@ -1366,7 +1366,7 @@ export const plans = core.table(
  * ⚠ SEPARATE FROM `subscriptions`, BECAUSE AN ASSIGNMENT DOES NOT REQUIRE A
  * PAYMENT. `core.subscriptions` is our copy of what Polar says was bought;
  * this is what we actually entitle the tenant to. They agree for every ordinary
- * customer and must be able to differ for the ones that matter — an enterprise
+ * customer and must be able to differ for the ones that matter - an enterprise
  * on a bespoke plan, an account comped by support, our own internal tenant.
  * Folding this into `subscriptions` would mean inventing a fake Polar
  * subscription id to put anybody on a plan they did not buy.
@@ -1387,7 +1387,7 @@ export const planAssignments = core.table("plan_assignments", {
   /**
    * ⚠ SET ONCE, AND NEVER MOVED BY A PLAN CHANGE. Every reset boundary for this
    * tenant is derived from it, so rewriting it re-buckets all of their history
-   * — and re-anchoring on assignment would hand every customer a free reset:
+   * - and re-anchoring on assignment would hand every customer a free reset:
    * exhaust the allowance, change plan, start a fresh window, repeat. The
    * upsert in src/metering/postgres.ts deliberately omits this column from its
    * DO UPDATE, which is where the rule is actually enforced.
@@ -1417,14 +1417,14 @@ export const planAssignments = core.table("plan_assignments", {
  * How much disk each tenant's mailboxes occupy, as last sampled.
  *
  * ⚠ A SAMPLE, NOT A LEDGER, AND THE DIFFERENCE IS THE WHOLE DESIGN. Storage is
- * a LEVEL that goes up and down — a deleted folder frees space — so it cannot
+ * a LEVEL that goes up and down - a deleted folder frees space - so it cannot
  * be accumulated from events the way sends are. There is exactly one row per
  * tenant and it is overwritten; the history, if it is ever wanted, is a
  * different table with a different retention.
  *
  * ⚠ AND IT IS OUR COPY OF SOMEBODY ELSE'S NUMBER. Stalwart computes it and owns
  * it. This exists so the quota check is an indexed local read rather than a
- * synchronous call to another service on a request path — see the note on
+ * synchronous call to another service on a request path - see the note on
  * freshness in `sampledAt`.
  */
 export const tenantStorage = core.table("tenant_storage", {
@@ -1434,14 +1434,14 @@ export const tenantStorage = core.table("tenant_storage", {
 
   /**
    * ⚠ BYTES, NOT GIGABYTES, AND THE ALLOWANCE IS IN BYTES TOO. Rounding to GB
-   * forces a choice between a ceiling — where one byte past ten gigabytes reads
-   * as eleven and refuses — and a floor, which hands out up to a gigabyte free.
+   * forces a choice between a ceiling - where one byte past ten gigabytes reads
+   * as eleven and refuses - and a floor, which hands out up to a gigabyte free.
    * Neither is defensible on a cap, and `draw()` needs no rounding at all if
    * both sides are exact. The catalogue writes the byte figure and says the GB
    * equivalent in a comment.
    *
    * ⚠ `bigint`, BECAUSE A TERABYTE DOES NOT FIT IN AN `integer`. 2^31 bytes is
-   * 2.1 GB — a limit some tenants would pass in their first month.
+   * 2.1 GB - a limit some tenants would pass in their first month.
    */
   bytes: bigint("bytes", { mode: "number" }).notNull(),
 
@@ -1463,8 +1463,8 @@ export const tenantStorage = core.table("tenant_storage", {
  * ⚠ IT DUPLICATES A COUNT THAT `core.messages` ALREADY IMPLIES, AND THAT IS THE
  * POINT RATHER THAN AN OVERSIGHT. `send/reconcile.ts` exists to compare two
  * INDEPENDENTLY DERIVED numbers; deriving the meter from `core.messages` would
- * have it compare a number against itself, and a bad flush — from the send path
- * today, from a Durable Object at the edge later — would become undetectable.
+ * have it compare a number against itself, and a bad flush - from the send path
+ * today, from a Durable Object at the edge later - would become undetectable.
  * The cost is a narrow row per message; the thing bought is the only mechanism
  * that can notice metering has gone wrong.
  *
@@ -1476,7 +1476,7 @@ export const tenantStorage = core.table("tenant_storage", {
  * ⚠ NOT PARTITIONED, UNLIKE `messages`. Its volume is the same but its
  * retention is not: message content ages out, and billing evidence is what a
  * disputed invoice is settled against. When this needs partitioning it wants
- * yearly bounds and a different retention job than the monthly one in 0002 —
+ * yearly bounds and a different retention job than the monthly one in 0002 -
  * a decision to make with a real row count rather than now.
  */
 export const meterEvents = core.table(
@@ -1492,7 +1492,7 @@ export const meterEvents = core.table(
     /**
      * ⚠ `messageId`, AND IT IS THE PROPERTY THE WHOLE DESIGN RESTS ON. The same
      * value keys the buffer entry at the edge, this row, and Polar's
-     * `external_id`, which is what makes every leg independently retryable —
+     * `external_id`, which is what makes every leg independently retryable -
      * and being independently retryable is what makes buffering usage away from
      * this table safe at all.
      */
@@ -1520,7 +1520,7 @@ export const meterEvents = core.table(
      *
      * ⚠ IT IS A WATERMARK PER ROW, NOT A GLOBAL ONE, AND THAT IS WHAT MAKES THE
      * FLUSH RESUMABLE. A "last shipped at" timestamp would be wrong the moment a
-     * late-arriving event lands behind it — the row would be skipped forever,
+     * late-arriving event lands behind it - the row would be skipped forever,
      * silently, and the customer would be under-billed with nothing to notice
      * it. Per row, an interrupted flush simply finds the same rows next time.
      *
@@ -1568,7 +1568,7 @@ export const routingSettings = core.table("routing_settings", {
    * ⚠ A SECOND SWITCH, AND NOT A DUPLICATE OF THE FIRST. The transactional route
    * uses the SES API; mailbox mail can only use SES SMTP, because Stalwart's
    * outbound has no HTTP hook. Different credentials, which can exist
-   * independently — so one flag cannot govern both.
+   * independently - so one flag cannot govern both.
    *
    * ⚠ DEFAULTS FALSE SO THE MIGRATION MOVES NO MAIL. i10.tech is on `pro` and
    * hosts mailboxes, so a default of true would silently put our own human mail
@@ -1586,7 +1586,7 @@ export const routingSettings = core.table("routing_settings", {
 // Marketing mail.
 //
 // ⚠ THE MODEL IS CONTACTS + SEGMENTS + TOPICS, NOT "AUDIENCES", AND THE
-// DIFFERENCE IS NOT COSMETIC. The obvious shape — a list, with people on it —
+// DIFFERENCE IS NOT COSMETIC. The obvious shape - a list, with people on it -
 // makes the same person a different row on every list, which means unsubscribing
 // them once unsubscribes them from one list, and a CSV re-import quietly
 // resurrects them on the others. A contact is therefore GLOBAL to a tenant and
@@ -1601,7 +1601,7 @@ export const routingSettings = core.table("routing_settings", {
 // recipients or make their preferences unenforceable.
 //
 // ⚠ AND A BROADCAST FANS OUT INTO ORDINARY MESSAGES. One row in `core.messages`
-// per recipient, on the `bulk` queue, carrying the broadcast's id — so metering,
+// per recipient, on the `bulk` queue, carrying the broadcast's id - so metering,
 // suppression, DKIM, the event ingest, webhooks and the delivery log are the
 // code that already exists and is already in production. A parallel sending path
 // for marketing mail would be a second answer to "did this deliver", and the two
@@ -1649,7 +1649,7 @@ export const contacts = core.table(
      *
      * ⚠ A JSONB BAG RATHER THAN A COLUMN PER PROPERTY, because the keys are the
      * customer's and are created at runtime. The `contact_properties` table
-     * below is what gives them a declared type and a fallback — without it this
+     * below is what gives them a declared type and a fallback - without it this
      * column is a free-for-all where `plan` is the string "3" for one contact
      * and the number 3 for the next, and a template renders one of them wrong.
      */
@@ -1707,7 +1707,7 @@ export const contactProperties = core.table(
  * ⚠ STATIC MEMBERSHIP, NOT A STORED QUERY, AND THAT IS A DELIBERATE FIRST
  * VERSION. A rule-based segment ("everyone who opened in the last 30 days") has
  * to be evaluated at send time against the event log, which makes a broadcast's
- * recipient list unreproducible after the fact — somebody asks "why did she get
+ * recipient list unreproducible after the fact - somebody asks "why did she get
  * this" and the answer is "she matched at 09:04". Explicit membership is
  * auditable, and a rules engine can be added later as a thing that WRITES
  * membership rather than replaces it.
@@ -1742,7 +1742,7 @@ export const segmentContacts = core.table(
      * ⚠ DENORMALISED ONTO THE JOIN TABLE SO RLS IS A PLAIN EQUALITY. Every other
      * policy in `core` compares one column to `app.tenant_id`; a join table
      * without its own `tenant_id` would need a policy that joins to `segments`,
-     * which is itself under RLS — evaluated per row, on the table that grows
+     * which is itself under RLS - evaluated per row, on the table that grows
      * fastest here.
      */
     tenantId: uuid("tenant_id")
@@ -1765,12 +1765,12 @@ export const topicVisibility = core.enum("topic_visibility", ["private", "public
  *
  * ⚠ THIS IS THE RECIPIENT'S SURFACE, NOT THE SENDER'S. It appears on the
  * preference page behind every unsubscribe link, and a person's answer to it is
- * binding on us. That is why it is a different table from `segments` — see the
+ * binding on us. That is why it is a different table from `segments` - see the
  * block comment above.
  *
  * ⚠ `default_subscription` IS IMMUTABLE ONCE SET, AND THE APPLICATION ENFORCES
  * IT. Flipping a topic from opt-out to opt-in would retroactively subscribe
- * every contact who had simply never answered — which is sending marketing mail
+ * every contact who had simply never answered - which is sending marketing mail
  * to people who did not ask, at scale, because of a dropdown.
  */
 export const topics = core.table(
@@ -1800,7 +1800,7 @@ export const topics = core.table(
  * ⚠ A ROW HERE MEANS THEY CHOSE; ITS ABSENCE MEANS THEY HAVE NOT. That is why
  * `subscribed` is NOT NULL and the row is optional, rather than a nullable
  * column on a row that always exists. The default comes from the topic, and
- * "never asked" has to stay distinguishable from "said yes" — otherwise
+ * "never asked" has to stay distinguishable from "said yes" - otherwise
  * switching a topic's default silently rewrites people's stated preferences.
  */
 export const contactTopics = core.table(
@@ -1840,7 +1840,7 @@ export const broadcastStatus = core.enum("broadcast_status", [
  * ⚠ IT HOLDS THE CONTENT, NOT THE DELIVERY. Once fan-out starts, what happened
  * lives in `core.messages` and `core.message_events` like every other email,
  * joined back by `broadcast_id`. The counters a person sees on the broadcast
- * page are aggregates over those, computed on read — a denormalised
+ * page are aggregates over those, computed on read - a denormalised
  * `delivered_count` would be wrong within a day, because events arrive for hours
  * after a send, and nothing would ever recompute it to disagree.
  */
@@ -1856,7 +1856,7 @@ export const broadcasts = core.table(
 
     /**
      * ⚠ `set null`, NOT `cascade`. Deleting a segment must not delete the record
-     * of a broadcast already sent to it — that record is what a customer needs
+     * of a broadcast already sent to it - that record is what a customer needs
      * when somebody asks why they received an email.
      */
     segmentId: uuid("segment_id").references(() => segments.id, {
@@ -1941,7 +1941,7 @@ export const templates = core.table(
  * How far through onboarding a tenant is.
  *
  * ⚠ THIS DECIDES WHERE WE SEND SOMEBODY, NEVER WHERE THEY MAY GO. `/onboarding`
- * is a route anyone can open at any time — see docs/decisions/console.md — and
+ * is a route anyone can open at any time - see docs/decisions/console.md - and
  * this row only answers "should the console redirect them there on arrival".
  * A flag that gated access would make re-running the flow after an upgrade
  * impossible, which is the exact thing it is required to support.
@@ -1957,14 +1957,14 @@ export const onboarding = core.table("onboarding", {
     .primaryKey()
     .references(() => tenants.id, { onDelete: "cascade" }),
 
-  /** The step last reached. A string, not an int — see the console's STEPS. */
+  /** The step last reached. A string, not an int - see the console's STEPS. */
   step: text("step").notNull().default("workspace"),
 
   /**
    * ⚠ SET WHEN THE FLOW IS FINISHED *OR* SKIPPED, AND THE TWO ARE NOT
    * DISTINGUISHED ON PURPOSE. Both mean "stop redirecting me". Whether somebody
-   * completed step 4 is answerable from the things themselves — do they have a
-   * verified domain, do they have a key — and those answers stay true when this
+   * completed step 4 is answerable from the things themselves - do they have a
+   * verified domain, do they have a key - and those answers stay true when this
    * row is wrong.
    */
   completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -1993,17 +1993,17 @@ export const onboarding = core.table("onboarding", {
  * Cloudflare and Route 53 can both restrict to one zone; the connect flow asks
  * for that and says why. Where a provider only issues account-wide credentials
  * the UI says so plainly rather than implying a narrower blast radius than
- * exists — see `ProviderApi.zoneScoped` in @repo/dns-providers.
+ * exists - see `ProviderApi.zoneScoped` in @repo/dns-providers.
  *
  * ⚠ NOTHING WRITES THIS TABLE YET, AND THAT IS KNOWN RATHER THAN OVERLOOKED.
  * The console's "Connect <provider>" button is rendered disabled and labelled
- * `soon` — deliberately, because the capability is real and the adapters are
- * the next piece of work — and `@repo/dns-providers` already carries the per-
+ * `soon` - deliberately, because the capability is real and the adapters are
+ * the next piece of work - and `@repo/dns-providers` already carries the per-
  * provider facts those adapters need. It is here now because it arrives with
  * the RLS policy and the `tenant_id` cascade that 0037 applies to all eleven
  * console tables in one place; adding the only table that handles a
  * zone-rewriting credential in a later, separate migration is how one ends up
- * without a policy. If the connect flow is abandoned, drop it — an empty table
+ * without a policy. If the connect flow is abandoned, drop it - an empty table
  * is not free, it is a thing every future reader has to ask about.
  */
 export const dnsConnections = core.table(
@@ -2025,7 +2025,7 @@ export const dnsConnections = core.table(
     /**
      * ⚠ THE WHOLE CREDENTIAL, SEALED. Some providers need two parts (a key and a
      * secret, or a key id and a region), so this is a sealed JSON object rather
-     * than a sealed string — otherwise the second provider to need two fields
+     * than a sealed string - otherwise the second provider to need two fields
      * forces a migration.
      */
     credentialSealed: text("credential_sealed").notNull(),
@@ -2045,7 +2045,7 @@ export const dnsConnections = core.table(
   /*
    * ⚠ UNIQUE, AND IT HAS TO BE: `save()` UPSERTS ON THIS EXACT PAIR. A plain
    * index satisfies the lookup but NOT `ON CONFLICT ("tenant_id","provider")`,
-   * which Postgres refuses with 42P10 — "no unique or exclusion constraint
+   * which Postgres refuses with 42P10 - "no unique or exclusion constraint
    * matching the ON CONFLICT specification". So every insert this table has
    * ever received failed, and the table has never held a row.
    *
@@ -2054,8 +2054,8 @@ export const dnsConnections = core.table(
    * authorisation that actually succeeded is the one that found this.
    *
    * ⚠ AND UNIQUENESS IS THE MODEL, NOT JUST THE MECHANISM. Re-authorising
-   * REPLACES a connection — two live tokens for one account is two things to
-   * revoke and only one that anybody remembers — and `get()` reads one row per
+   * REPLACES a connection - two live tokens for one account is two things to
+   * revoke and only one that anybody remembers - and `get()` reads one row per
    * provider. See dns/connections.ts.
    */
   (t) => [uniqueIndex("dns_connections_tenant_idx").on(t.tenantId, t.provider)],
@@ -2065,7 +2065,7 @@ export const dnsConnections = core.table(
  * The API request log behind the console's Logs page.
  *
  * ⚠ IT RECORDS THE ENVELOPE AND NEVER THE BODY. A request body on this API
- * contains the customer's mail — subject lines, recipients, and the HTML of
+ * contains the customer's mail - subject lines, recipients, and the HTML of
  * whatever they sent. Keeping it would turn an operational log into a copy of
  * every email the platform has ever carried, retained under a policy nobody
  * wrote, readable by anyone who can read logs. Method, path, status, duration
@@ -2074,7 +2074,7 @@ export const dnsConnections = core.table(
  * ⚠ AND IT IS NOT PARTITIONED, WHICH IS A DECISION WITH AN EXPIRY DATE.
  * `core.messages` is partitioned because it is the product; this is a 30-day
  * operational window swept on a schedule. When request volume makes the sweep
- * expensive it becomes partitioned like its neighbour — the index below is
+ * expensive it becomes partitioned like its neighbour - the index below is
  * already ordered to make that a mechanical change.
  */
 export const apiRequests = core.table(

@@ -21,12 +21,12 @@ import type { DailyStat } from "@/lib/types"
  * the badge in the log and the dot on the detail page; a chart with its own
  * colour scheme would mean learning the legend before the picture means
  * anything. `delivered` is deliberately the neutral foreground rather than
- * green — it is the bulk of every series, and a wall of green makes the small
+ * green - it is the bulk of every series, and a wall of green makes the small
  * red area impossible to find, which is the one thing somebody is looking for.
  *
  * ⚠ AND IT IS STACKED, BECAUSE THE SERIES ARE MUTUALLY EXCLUSIVE OUTCOMES OF
  * ONE SEND. Overlaid areas would let `delivered` hide `bounced` completely
- * behind it for any tenant whose mail mostly works — which is all of them, and
+ * behind it for any tenant whose mail mostly works - which is all of them, and
  * is precisely when a bounce matters most.
  */
 const CONFIG = {
@@ -42,7 +42,7 @@ export function OverviewChart({ series }: { series: DailyStat[] }) {
    * ⚠ THE X LABEL IS PRECOMPUTED, NOT FORMATTED IN A TICK CALLBACK. Recharts
    * calls the formatter on every render of every tick; doing date maths there
    * is thousands of `Intl` constructions during a resize. It also keeps the
-   * UTC handling in one place — see `formatDay` on why parsing `YYYY-MM-DD`
+   * UTC handling in one place - see `formatDay` on why parsing `YYYY-MM-DD`
    * naively renders the wrong day west of Greenwich.
    */
   const data = React.useMemo(
@@ -71,7 +71,7 @@ export function OverviewChart({ series }: { series: DailyStat[] }) {
       <AreaChart data={data} margin={{ left: 4, right: 4, top: 8 }}>
         {/*
          * ⚠ HORIZONTAL LINES ONLY. Vertical gridlines on a time axis add one
-         * rule per day — thirty of them — to a chart whose whole job is the
+         * rule per day - thirty of them - to a chart whose whole job is the
          * shape of a curve. The date labels already carry the x positions.
          */}
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
@@ -97,12 +97,12 @@ export function OverviewChart({ series }: { series: DailyStat[] }) {
 
         {/*
          * ⚠ ONLY `delivered` CARRIES A STROKE, AND THE OTHER FOUR ARE SOLID
-         * FILLS WITH NONE. This is not a style preference — it is the fix for a
+         * FILLS WITH NONE. This is not a style preference - it is the fix for a
          * chart that read as a single red line. Bounces and failures are two
          * orders of magnitude smaller than deliveries, so when they are stacked
          * on top their curves sit within a pixel or two of the delivered curve;
-         * every one of their strokes then draws over it, and the topmost —
-         * `failed`, red — is the only one you see. Dropping their strokes lets
+         * every one of their strokes then draws over it, and the topmost -
+         * `failed`, red - is the only one you see. Dropping their strokes lets
          * the neutral delivered line stay the shape of the chart.
          *
          * ⚠ AND THEIR FILL IS NEARLY OPAQUE WHILE `delivered` IS A WASH. At this

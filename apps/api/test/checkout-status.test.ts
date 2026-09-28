@@ -8,7 +8,7 @@ const log = { info: () => {}, warn: () => {}, error: () => {} }
 const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   record: async () => "applied",
   markGranted: async () => {},
-  // Nobody holds the id by default — see the note on the same field in
+  // Nobody holds the id by default - see the note on the same field in
   // billing.test.ts. The checkout path passes `reassign`, which skips the
   // lookup entirely, so these tests never reach it.
   ownerOf: async () => null,
@@ -23,12 +23,12 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps => ({
   /*
    * ⚠ EVERY TENANT IS KNOWN BY DEFAULT, so each existing test keeps the case it
    * was written for. The reconciler now asks whether a tenant still exists
-   * before trying to repair it — a fake that answered "no" would send every one
+   * before trying to repair it - a fake that answered "no" would send every one
    * of these through the new unknown-tenant branch instead of the repair path
    * they are actually about.
    */
   knownTenants: async (ids: readonly string[]) => new Set(ids),
-  // Not reached here — this suite is about the checkout poll, not cancelling.
+  // Not reached here - this suite is about the checkout poll, not cancelling.
   noteCancelling: async () => {},
   noteResuming: async () => {},
   current: async () => ({
@@ -67,7 +67,7 @@ const succeeded: CheckoutState = {
   customerId: "cus_1",
   productId: "prod_pro",
   // ⚠ THE FLOOR EVERY FIXTURE SUBSCRIPTION MUST SIT AFTER. A subscription older
-  // than the checkout belongs to a different purchase — see `pickForCheckout`.
+  // than the checkout belongs to a different purchase - see `pickForCheckout`.
   createdAt: "2026-09-20T09:00:00Z",
 }
 
@@ -143,7 +143,7 @@ describe("the post-checkout status page", () => {
    * ⚠ THE ONE PENDING STATE THAT IS NOT PENDING, AND IT IS NOW REPAIRED RATHER
    * THAN REPORTED. Polar sets a customer's `external_id` only on a customer it
    * CREATES from the checkout, so a checkout that resolved to a customer Polar
-   * already had carries no tenant id — and `toState` drops every subscription
+   * already had carries no tenant id - and `toState` drops every subscription
    * event for it, in the webhook AND the reconciler, by the same rule. Telling
    * the customer to email support was the old answer; the id is ours to write.
    */
@@ -171,7 +171,7 @@ describe("the post-checkout status page", () => {
   /*
    * ⚠ A CUSTOMER CARRYING SOMEBODY ELSE'S TENANT ID IS A COLLISION, NOT A GAP.
    * Stamping ours over it would move another workspace's billing onto this one
-   * — a far worse outcome than the stuck page it would fix.
+   * - a far worse outcome than the stuck page it would fix.
    */
   it("refuses to overwrite a different tenant's id, and says so", async () => {
     const wrote = mock(async () => true)
@@ -308,7 +308,7 @@ describe("the post-checkout status page", () => {
   /*
    * ⚠ THE CHECKOUT ID LIVES IN A BROWSER COOKIE, NOT WITH A PERSON. Reported
    * from production 2026-09-27: one account upgraded, a second was signed up in
-   * the same browser, and its onboarding said "You're on Pro" — the first
+   * the same browser, and its onboarding said "You're on Pro" - the first
    * account's checkout, answered about the first account's workspace. A
    * forwarded session holds the answer to the caller's own tenant.
    */
@@ -375,7 +375,7 @@ describe("the post-checkout status page", () => {
   })
 
   // ⚠ NEVER A VERDICT ON AN OUTAGE. Answering "unpaid" because Polar timed out
-  // tells somebody who has just paid that they have not — the same reasoning
+  // tells somebody who has just paid that they have not - the same reasoning
   // that makes authd answer `unavailable` rather than `invalidCredentials`.
   it("answers 503 when Polar cannot be reached", async () => {
     const app = createApp({
@@ -415,7 +415,7 @@ describe("the post-checkout status page", () => {
 /*
  * ⚠ THE REPORTED BUG, AND IT IS A PERMANENT ONE RATHER THAN A DELAY. Polar
  * deduplicates customers by email, so somebody who subscribed, deleted their
- * account and signed up again is handed back the SAME Polar customer — still
+ * account and signed up again is handed back the SAME Polar customer - still
  * carrying their FIRST tenant's `external_id`. Every subscription event for it
  * is then attributed to a workspace that no longer exists, in the webhook and
  * the reconciler alike, and refusing to overwrite the id as a "collision" meant
@@ -440,8 +440,8 @@ describe("a Polar customer left behind by a deleted workspace", () => {
 
   /*
    * ⚠ THIS USED TO ASSERT A RECLAIM POLAR DOES NOT PERMIT. `external_id` is
-   * immutable once set — "Once set, it can't be updated" in Polar's own schema,
-   * `422` from the API — so the PATCH this expected always failed, `attribute`
+   * immutable once set - "Once set, it can't be updated" in Polar's own schema,
+   * `422` from the API - so the PATCH this expected always failed, `attribute`
    * returned `stranded`, and a returning customer who had just paid was told on
    * the confirmation page that their payment was unattributed. Their plan was
    * granted correctly the whole time, by `reassign`.
@@ -467,7 +467,7 @@ describe("a Polar customer left behind by a deleted workspace", () => {
 
     // No doomed PATCH: the id cannot be moved, so asking is only a way to fail.
     expect(wrote).not.toHaveBeenCalled()
-    // And emphatically not `unattributed` — the subscription is bound to the
+    // And emphatically not `unattributed` - the subscription is bound to the
     // live tenant by the checkout, so there is nothing for a human to do.
     expect(body).not.toMatchObject({ detail: "unattributed" })
   })
@@ -513,8 +513,8 @@ describe("a Polar customer left behind by a deleted workspace", () => {
 
   /*
    * ⚠ AND THE RECLAIM MUST NOT LET THE DEAD SUBSCRIPTION DECIDE. The customer
-   * this path exists for has two subscriptions — the one from the account they
-   * deleted and the one they just bought — and Polar returns both, for ever.
+   * this path exists for has two subscriptions - the one from the account they
+   * deleted and the one they just bought - and Polar returns both, for ever.
    * Applying them in list order lets the cancelled one write the live one's row.
    */
   it("grants from the live subscription, not the one that ended", async () => {
@@ -567,7 +567,7 @@ describe("a Polar customer left behind by a deleted workspace", () => {
  * ⚠ THE HALF-HOUR WAIT, WHICH IS WHAT THE PAGE USED TO PROMISE. The immediate
  * grant used to run only after an attribution repair, so an ordinary lost
  * webhook meant ninety seconds of spinner and then "we check for stragglers
- * every half hour" — a job the customer cannot see, for a payment they have
+ * every half hour" - a job the customer cannot see, for a payment they have
  * already made.
  */
 describe("granting without waiting for the webhook", () => {
@@ -606,14 +606,14 @@ describe("granting without waiting for the webhook", () => {
     expect(applied).toHaveBeenCalledTimes(1)
   })
 
-  // ⚠ THERE IS GENUINELY NOTHING TO GRANT FOR A STRANDED CHECKOUT — no
-  // subscription of that customer's belongs to this tenant — and asking Polar
+  // ⚠ THERE IS GENUINELY NOTHING TO GRANT FOR A STRANDED CHECKOUT - no
+  // subscription of that customer's belongs to this tenant - and asking Polar
   // on every poll for an answer that cannot change is just load.
   /*
    * ⚠ THIS ASSERTED THE OPPOSITE UNTIL 2026-09-20, AND THE ASSERTION WAS THE
    * BUG. It pinned "a stranded checkout is never granted", on the reasoning
    * that no subscription of that customer belongs to this tenant. That
-   * reasoning reads `customer.external_id` as the truth about who is paying —
+   * reasoning reads `customer.external_id` as the truth about who is paying -
    * and it is not: Polar stamps it once, at customer creation, and never
    * maintains it, so for anybody buying a second time it names whoever bought
    * first. The customer it was protecting is the customer it was starving.
@@ -621,7 +621,7 @@ describe("granting without waiting for the webhook", () => {
    * The grant is safe here because it does not use that field at all. The
    * checkout succeeded, it names this tenant in metadata we wrote, and the
    * subscription taken is one on that customer, for that product, created no
-   * earlier than the checkout — which nothing but this purchase can be.
+   * earlier than the checkout - which nothing but this purchase can be.
    */
   it("grants a stranded checkout anyway, from the checkout's own evidence", async () => {
     const applied = mock(async () => ({ status: "applied" }))
@@ -671,7 +671,7 @@ describe("granting without waiting for the webhook", () => {
 
   // ⚠ IT REPORTS THE ROW, NOT THE CALL. `grantNow` is best effort, so answering
   // `granted` because it did not throw would claim an entitlement nobody
-  // confirmed — the exact lie `granted_plan_id` exists to prevent.
+  // confirmed - the exact lie `granted_plan_id` exists to prevent.
   it("still says `paid` when the grant did not land", async () => {
     const app = createApp({
       checkoutStatus: {
@@ -696,7 +696,7 @@ describe("granting without waiting for the webhook", () => {
  * ⚠ THE PRODUCTION FAILURE OF 2026-09-20, AND IT IS THE ORDINARY CASE FOR ANY
  * SECOND PURCHASE. Polar deduplicates customers by EMAIL and stamps
  * `external_id` only on a customer it CREATES. So the customer of somebody who
- * has bought before carries whoever bought FIRST — observed live as seven
+ * has bought before carries whoever bought FIRST - observed live as seven
  * subscriptions on one customer, every one of them naming a tenant that no
  * longer existed, including the one created thirty-six seconds after the
  * checkout being answered.
@@ -704,8 +704,8 @@ describe("granting without waiting for the webhook", () => {
  * Filtering those by `customer.external_id` discards the subscription the
  * customer has just paid for, so nothing is granted and nothing is reported:
  * `{"status":"paid","plan":null}` for ever. The checkout is the stronger
- * attribution — WE wrote its `metadata.tenant_id` from an authenticated session
- * and Polar echoes it back — so that is what the grant uses.
+ * attribution - WE wrote its `metadata.tenant_id` from an authenticated session
+ * and Polar echoes it back - so that is what the grant uses.
  */
 describe("a customer whose external_id names somebody else entirely", () => {
   const options = {
@@ -775,7 +775,7 @@ describe("a customer whose external_id names somebody else entirely", () => {
   /*
    * ⚠ THE GUARD THAT KEEPS THE OVERRIDE HONEST. Two live workspaces can share a
    * Polar customer, and without a floor this would hand whoever completed a
-   * checkout the OTHER workspace's older subscription — a plan granted off the
+   * checkout the OTHER workspace's older subscription - a plan granted off the
    * back of somebody else's payment.
    */
   it("refuses a subscription that predates the checkout", async () => {
@@ -833,7 +833,7 @@ describe("a customer whose external_id names somebody else entirely", () => {
   /*
    * ⚠ AND A 403 FROM `getCustomer` MUST NOT STOP THE GRANT. That is precisely
    * the deployment this was found on: the token lacks `customers:read`, so the
-   * attribution repair cannot run at all — and the grant must not depend on it,
+   * attribution repair cannot run at all - and the grant must not depend on it,
    * because the checkout already says everything needed.
    */
   it("still grants when the token cannot read customers at all", async () => {

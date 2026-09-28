@@ -13,7 +13,7 @@ export interface I10Options {
 export interface RequestOptions {
   /**
    * Replays with the same key return the FIRST result rather than sending
-   * again. Supply one for anything a retry could duplicate — a password reset
+   * again. Supply one for anything a retry could duplicate - a password reset
    * loop that fires twice is the failure this exists to prevent.
    */
   idempotencyKey?: string

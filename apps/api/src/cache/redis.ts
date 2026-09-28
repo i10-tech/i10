@@ -1,7 +1,7 @@
 // ⚠ A NAMED IMPORT. ioredis 6 still has a default export, but under
 // NodeNext resolution the module namespace is what `import Redis from` binds,
 // and TypeScript then reports "Cannot use namespace 'Redis' as a type" and
-// "not constructable" — one mistake surfacing as two confusing errors.
+// "not constructable" - one mistake surfacing as two confusing errors.
 import { Redis } from "ioredis"
 import type { KeyCache } from "../auth/api-key.js"
 
@@ -10,7 +10,7 @@ import type { KeyCache } from "../auth/api-key.js"
  *
  * ⚠ THIS CONNECTION IS FOR CACHING ONLY, AND ITS FAILURES ARE NOT FATAL.
  * Everything reached through it treats an error as a miss, because the cache
- * exists to keep Clerk off the hot path — not to be a dependency of it. A Redis
+ * exists to keep Clerk off the hot path - not to be a dependency of it. A Redis
  * outage should cost latency and Clerk quota, never a refused customer.
  *
  * `maxRetriesPerRequest: 1` is what makes that true. ioredis defaults to 20,
@@ -32,7 +32,7 @@ export function createCacheClient(url: string): Redis {
  * The connection the send queues run on.
  *
  * ⚠ A SECOND CLIENT WITH THE OPPOSITE FAILURE POLICY, NOT A SHARED ONE. The
- * cache above is allowed to fail — an error there is a miss. This one is a
+ * cache above is allowed to fail - an error there is a miss. This one is a
  * dependency: a batch that cannot be enqueued waits for the stale-message sweep
  * instead of going out now, so it is worth retrying and worth queueing commands
  * across a reconnect. One client cannot hold both policies, which is why there
@@ -63,7 +63,7 @@ export function redisKeyCache(client: Redis): KeyCache {
      * across every API pod, so one delete reaches all of them.
      *
      * ⚠ AND A FAILURE HERE IS NOT SWALLOWED BY THE CALLER. Unlike a get or a
-     * set — where an error is a miss and costs one lookup — a delete that
+     * set - where an error is a miss and costs one lookup - a delete that
      * silently failed would leave a revoked key working for the rest of its TTL
      * while the route reported success.
      */

@@ -26,7 +26,7 @@ export default function AccountLocked({
         {lockoutDuration
           ? `It unlocks automatically after ${lockoutDuration}.`
           : "It unlocks automatically after a short wait."}{" "}
-        If you were not expecting this, someone may be trying to sign in as you — change
+        If you were not expecting this, someone may be trying to sign in as you - change
         your password once you can.
       </Text>
     </Layout>
@@ -36,7 +36,7 @@ export default function AccountLocked({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

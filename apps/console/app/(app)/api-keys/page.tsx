@@ -20,8 +20,8 @@ export const metadata: Metadata = { title: "API keys" }
  * The credentials a customer's servers send with.
  *
  * ⚠ THE SECRET IS SHOWN EXACTLY ONCE, AT CREATION, AND NOTHING STORES IT. The
- * API keeps a SHA-256 of the whole key including its prefix — see migration
- * 0031 — so there is no "reveal" to build even if we wanted one. The UI has to
+ * API keeps a SHA-256 of the whole key including its prefix - see migration
+ * 0031 - so there is no "reveal" to build even if we wanted one. The UI has to
  * make that obvious at the moment of creation rather than leaving somebody to
  * discover it by closing the dialog.
  *
@@ -41,7 +41,7 @@ export default async function ApiKeysPage({
    * ⚠ THE DOMAINS COME WITH THE PAGE SO THE SCOPE CONTROLS HAVE SOMETHING TO
    * OFFER. Both the create dialog and the scope editor need the list, and
    * fetching it inside each of them would put a spinner inside a dialog
-   * somebody has already opened — for a list that is usually three rows long.
+   * somebody has already opened - for a list that is usually three rows long.
    *
    * ⚠ AND ITS FAILURE IS NOT THE PAGE'S FAILURE. If domains cannot be read the
    * keys still list, create and revoke; the scope control simply has nothing to
@@ -63,7 +63,7 @@ export default async function ApiKeysPage({
             {/*
              * ⚠ `?new=1` OPENS THE DIALOG, SO THE COMMAND MENU CAN LINK TO IT.
              * A dialog whose only trigger is a button on one page cannot be
-             * reached from ⌘K, from a doc, or from an onboarding step — all
+             * reached from ⌘K, from a doc, or from an onboarding step - all
              * three of which want to say "create a key" and land somebody in
              * the form rather than next to it.
              */}
@@ -72,7 +72,7 @@ export default async function ApiKeysPage({
         </PageHeaderRow>
         <PageDescription>
           Keys authenticate your servers. They are shown once when created and stored
-          only as a hash — if you lose one, rotate it rather than looking for it.
+          only as a hash - if you lose one, rotate it rather than looking for it.
         </PageDescription>
       </PageHeader>
 

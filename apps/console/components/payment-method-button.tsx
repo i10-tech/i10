@@ -12,7 +12,7 @@ import { paymentMethodSession } from "@/lib/actions"
 /**
  * Adding or replacing the card on file.
  *
- * ⚠ THE FIELDS ARE POLAR'S, IN POLAR'S IFRAME, ON POLAR'S ORIGIN — and that is
+ * ⚠ THE FIELDS ARE POLAR'S, IN POLAR'S IFRAME, ON POLAR'S ORIGIN - and that is
  * the entire reason this is an embed rather than a form. A card number typed
  * into a field this application rendered would put i10 in scope for the long
  * version of the PCI questionnaire, and would mean a single XSS anywhere in the
@@ -23,7 +23,7 @@ import { paymentMethodSession } from "@/lib/actions"
  * ⚠ THE TOKEN IS FETCHED ON CLICK, NOT RENDERED INTO THE PAGE. It authorises one
  * customer's portal for an hour. Minting it during server render would put it in
  * the HTML of every billing page view, including the ones where nobody ever
- * presses this — see `paymentMethodSession`.
+ * presses this - see `paymentMethodSession`.
  *
  * ⚠ AND THE FAILURE PATH IS A TOAST, NOT A BROKEN MODAL. Polar's script is
  * loaded on demand; a blocked CDN, an expired token or an outage all end here
@@ -33,7 +33,7 @@ import { paymentMethodSession } from "@/lib/actions"
  * ⚠ IT IS NOT RENDERED WITHOUT A SUBSCRIPTION, AND THAT IS A REAL CONSTRAINT
  * RATHER THAN A TIDINESS RULE. Polar creates the customer at the FIRST
  * CHECKOUT, not at our sign-up, so `POST /v1/customer-sessions` for a workspace
- * that has never subscribed answers `422 Customer does not exist` — verified
+ * that has never subscribed answers `422 Customer does not exist` - verified
  * against the sandbox. A button that is always visible would therefore fail for
  * every free workspace, which is most of them, with an error about a customer
  * record they have never heard of. The card is collected during checkout; there
@@ -42,7 +42,7 @@ import { paymentMethodSession } from "@/lib/actions"
  * ⚠ AND THIS EMBED CANNOT BE EXERCISED AGAINST POLAR'S SANDBOX AT ALL. Read the
  * SDK: it resolves the iframe host as `window.location.origin` when the PAGE is
  * itself served from polar.sh or sandbox.polar.sh, and otherwise hard-defaults
- * to `https://polar.sh` — production. There is no option to change it. A
+ * to `https://polar.sh` - production. There is no option to change it. A
  * sandbox session token framed against production answers "Session expired",
  * which is exactly what it did when tested. The checkout embed above does not
  * have this problem, because its URL comes from the checkout object and already
@@ -58,7 +58,7 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
   /*
    * ⚠ NOT EVERY CARD IS SAVED WITHOUT LEAVING THE PAGE, AND THE ONES THAT ARE
    * NOT HAD NOWHERE TO REPORT BACK TO. A method that needs the bank's own
-   * approval — 3-D Secure, iDEAL, Bancontact — takes the whole browser to the
+   * approval - 3-D Secure, iDEAL, Bancontact - takes the whole browser to the
    * issuer and returns it to `embed_return_url`, which the SDK sets to this
    * page. The `success` listener below is on an iframe that no longer exists
    * by then, so somebody completing a 3-D Secure challenge came back to a
@@ -94,7 +94,7 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
       }
 
       // ⚠ THE BANK REFUSED, NOT US. There is nothing to retry automatically
-      // and no detail to show — Polar does not pass one back — so this says
+      // and no detail to show - Polar does not pass one back - so this says
       // what happened and leaves the button where it was.
       toast.error("That card was not saved", {
         description: "Your bank did not approve it. Try again or use another card.",
@@ -142,7 +142,7 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
     }
   }
 
-  // ⚠ RENDERED AS NOTHING, NOT AS A DISABLED BUTTON — and the early return is
+  // ⚠ RENDERED AS NOTHING, NOT AS A DISABLED BUTTON - and the early return is
   // AFTER the hooks, because React requires every hook to run on every render.
   // A greyed-out control would imply the feature is coming for this workspace;
   // the sentence beside it on the billing page says what actually applies.

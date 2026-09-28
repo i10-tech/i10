@@ -11,7 +11,7 @@ CREATE INDEX "meter_events_unshipped_idx"
 
 -- ⚠ ROWS THAT PREDATE THE INGEST ARE MARKED AS ALREADY SENT, AND THAT IS THE
 -- SAFE DIRECTION. Leaving them NULL would make the first flush post every unit
--- ever recorded to Polar — attributed by RECEIPT time, so an entire back
+-- ever recorded to Polar - attributed by RECEIPT time, so an entire back
 -- catalogue would land in the current billing period and appear on one
 -- customer's invoice as a single enormous month.
 UPDATE core.meter_events SET ingested_at = now() WHERE ingested_at IS NULL;
@@ -19,7 +19,7 @@ UPDATE core.meter_events SET ingested_at = now() WHERE ingested_at IS NULL;
 
 -- Everything not yet in Polar's meter, across every tenant.
 --
--- ⚠ CROSS-TENANT, SO A SECURITY DEFINER FUNCTION — same reason as
+-- ⚠ CROSS-TENANT, SO A SECURITY DEFINER FUNCTION - same reason as
 -- `sent_usage_snapshot`: the flush job holds no tenant context, and under the
 -- policy it would see one tenant's usage and conclude everyone else had sent
 -- nothing. It returns a count, an id and a timestamp; no address, no subject.

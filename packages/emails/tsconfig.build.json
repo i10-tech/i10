@@ -9,7 +9,7 @@
   "extends": "@repo/typescript-config/react-library.json",
   "compilerOptions": {
     "noEmit": false,
-    // Local, not inherited — the same path-resolution note as contracts.
+    // Local, not inherited - the same path-resolution note as contracts.
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true

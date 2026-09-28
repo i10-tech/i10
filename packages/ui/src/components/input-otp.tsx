@@ -12,7 +12,7 @@ import type { FieldState } from "./floating-field"
  * ⚠ IT ARRIVED AS SHADCN'S DEFAULT AND LOOKED LIKE IT: nine-by-nine boxes fused
  * into one strip by shared borders, `rounded-md` corners and a 14px digit. Every
  * other field in the product is a 56px pill with a floating label, so the one
- * screen that asks for a code was visibly from a different product — and it is
+ * screen that asks for a code was visibly from a different product - and it is
  * not a rare screen, it is on the path of every sign-up, every password reset
  * and every second factor.
  *
@@ -24,7 +24,7 @@ import type { FieldState } from "./floating-field"
  *
  * ⚠ AND IT SPEAKS THE SAME `FieldState` AS EVERY OTHER FIELD. A wrong code is
  * the most ordinary failure in the product, and it used to be reported only by
- * a toast that slid away — leaving six boxes looking exactly as they had
+ * a toast that slid away - leaving six boxes looking exactly as they had
  * before. `invalid` paints the same red the email box uses; `valid` the same
  * green. The tones are imported rather than re-picked, because the one thing
  * worse than an unstyled code field is a second, slightly different red.
@@ -34,7 +34,7 @@ import type { FieldState } from "./floating-field"
  * ⚠ THE SAME TWO-STRENGTH RULE THE FLOATING FIELD USES: muted at rest, solid
  * when the box is the one being typed into. It is duplicated here rather than
  * imported because the floating field's map is keyed to a `peer-focus` selector
- * that does not exist in this markup — the real input is a single hidden field
+ * that does not exist in this markup - the real input is a single hidden field
  * somewhere else in the tree, so "active" is a piece of state `input-otp` hands
  * us, not a CSS relationship.
  */
@@ -116,7 +116,7 @@ function InputOTPSlot({
         /*
          * ⚠ THE TRANSITION IS EXPLICIT AND SHORT. `transition-all` was picking
          * up the layout properties too, so a slot that gained a digit animated
-         * its own metrics — which at six boxes filled in a second reads as the
+         * its own metrics - which at six boxes filled in a second reads as the
          * row wobbling.
          */
         "transition-colors duration-(--duration-instant) ease-(--ease-linear)",

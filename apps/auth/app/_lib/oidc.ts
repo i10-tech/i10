@@ -3,7 +3,7 @@
  *
  * ⚠ THIS EXISTS TO GET A REFRESH TOKEN OUT OF GOOGLE, AND NOTHING ELSE. Clerk's
  * user profile renders "This account has been disconnected" for exactly four
- * error codes — read out of its shipped bundle — and one of them is
+ * error codes - read out of its shipped bundle - and one of them is
  * `external_account_missing_refresh_token`. Google returns a refresh token only
  * when the authorize request carries `access_type=offline` AND the consent
  * screen is actually shown. Clerk asks for `access_type=offline&prompt=select_account`,
@@ -30,7 +30,7 @@
 /**
  * ⚠ `consent` ALONGSIDE `select_account`, NOT INSTEAD OF IT. Google's `prompt`
  * is a space-delimited list; dropping `select_account` would stop somebody with
- * several Google accounts choosing which one — a worse bug than the one being
+ * several Google accounts choosing which one - a worse bug than the one being
  * fixed.
  */
 export const CONSENT_PROMPT = "consent select_account"
@@ -58,7 +58,7 @@ export function needsConsentForRefreshToken(provider: string): boolean {
  *
  * ⚠ IT IS THE TRIGGER FOR THE SECOND ROUND TRIP, WHICH IS WHY IT IS CHECKED
  * RATHER THAN ASSUMED. Somebody authorising i10 for the very first time IS
- * shown Google's consent screen and DOES come back with a token — sending them
+ * shown Google's consent screen and DOES come back with a token - sending them
  * to Google twice would be a redirect nobody needed.
  */
 export const MISSING_REFRESH_TOKEN = "external_account_missing_refresh_token"

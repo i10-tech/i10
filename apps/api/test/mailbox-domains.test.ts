@@ -10,8 +10,8 @@ import {
 /**
  * Two questions about a domain, and they must never collapse into one.
  *
- *   counting  — how many does this tenant HAVE?     verified or not
- *   acting    — what may this domain DO?            verified only
+ *   counting  - how many does this tenant HAVE?     verified or not
+ *   acting    - what may this domain DO?            verified only
  *
  * A limit counts what exists, because an unverified domain is still a row the
  * customer created and can see in their dashboard; counting only verified ones
@@ -20,8 +20,8 @@ import {
  * domain as a local recipient, so an unverified one would let somebody receive
  * mail for a name they merely typed.
  *
- * Both predicates live in places a unit test cannot reach — one in a migration,
- * one in a statement — so they are asserted as text, the same way
+ * Both predicates live in places a unit test cannot reach - one in a migration,
+ * one in a statement - so they are asserted as text, the same way
  * reconcile.test.ts pins the snapshot functions.
  */
 const migration = readFileSync(
@@ -43,7 +43,7 @@ describe("what a domain may do", () => {
 
   /**
    * ⚠ THE SECURITY BOUNDARY. Without it, anyone who types a domain name they do
-   * not own starts receiving that domain's mail — the claim is enough.
+   * not own starts receiving that domain's mail - the claim is enough.
    */
   it("returns verified domains only", () => {
     expect(body).toContain("d.verified_at IS NOT NULL")

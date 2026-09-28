@@ -5,13 +5,13 @@ import { errorSchema } from "@repo/contracts"
  *
  * The 422 validation hook is deliberately NOT here. Hono infers a handler's
  * `c.req.valid()` types from the route it is registered with, and a hook typed
- * concretely enough to be shared collapses that inference at every call site —
+ * concretely enough to be shared collapses that inference at every call site -
  * the deduplication would be paid for in `as never` casts on the request body,
  * which is the opposite trade.
  *
  * ⚠ `errorSchema.openapi("Error")` MUST BE CALLED IN ONE PLACE. `.openapi()`
  * registers a named component, and two modules registering the same name means
- * two definitions competing for one `$ref` — whichever is imported last wins,
+ * two definitions competing for one `$ref` - whichever is imported last wins,
  * silently, and the published document describes one of them for both. Sharing
  * the object rather than the call removes the race.
  */
