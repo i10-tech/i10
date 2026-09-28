@@ -49,8 +49,17 @@ spec:
       #
       # ⚠ THE STALWART IMAGE, NOT busybox:latest. It is already on the node, is
       # pinned to a version, and its busybox `nc` exits 0 on connect and 1 on a
-      # refusal or an unresolvable name - verified in the running pod. Pulling a
+      # refusal or an unresolvable name - verified in this image. Pulling a
       # second image to run one loop would add a supply chain for nothing.
+      #
+      # ⚠ `-e true`, OR EVERY START COSTS A MINUTE. Busybox `nc` without it
+      # connects and then sits reading the socket; `-w` does not bound that
+      # read. PgBouncer says nothing until it gets a startup packet, so the first
+      # rollout of this held the pod for 62s until PgBouncer's
+      # client_login_timeout closed the connection - the FATAL in the log was
+      # PgBouncer's, and the wait "succeeded". `-e true` execs `true` the moment
+      # the connection is up: 0 on connect, 1 on a refusal or a bad name, and
+      # nothing is ever read.
       #
       # ⚠ BOUNDED, SO A DATABASE THAT IS REALLY DOWN STILL FAILS. After ~60s the
       # container exits 1, the pod shows Init:Error with the reason in this
@@ -65,7 +74,7 @@ spec:
             - |
               host=i10-platform-pooler.i10-prod.svc.cluster.local
               for i in $(seq 1 60); do
-                nc -w 2 "$host" 5432 </dev/null && exit 0
+                nc -w 2 "$host" 5432 -e true </dev/null && exit 0
                 echo "wait-for-db: $host:5432 unreachable (attempt $i), retrying"
                 sleep 1
               done
