@@ -1,10 +1,13 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ArrowLeft, type LucideIcon } from "lucide-react"
 import { motion, type Transition, type Variants } from "motion/react"
 import { cn } from "cn"
+import { StatusDot } from "@repo/ui/components/status"
+import type { Attention } from "@/lib/types"
 import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
 /**
@@ -44,9 +47,15 @@ export function SidebarNav({
    * identity changed is a highlight that fades instead of travelling.
    */
   scope = "rail",
+  /**
+   * What needs somebody to act, streamed in after the rail has rendered - see
+   * `AttentionMark`. Null when it could not be read.
+   */
+  attention,
 }: {
   groups?: NavGroup[]
   scope?: string
+  attention?: Promise<Attention["domains"] | null>
 }) {
   const pathname = usePathname()
 
@@ -155,6 +164,11 @@ export function SidebarNav({
                   )}
                   <NavIcon icon={Icon} active={active} />
                   <span className="truncate">{item.label}</span>
+                  {item.href === "/domains" && attention && (
+                    <React.Suspense fallback={null}>
+                      <AttentionMark attention={attention} />
+                    </React.Suspense>
+                  )}
                 </MotionLink>
               )
             })}
@@ -217,5 +231,48 @@ function NavIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) 
         className={cn("size-4", active ? "text-foreground" : "text-muted-foreground")}
       />
     </motion.span>
+  )
+}
+
+/**
+ * A dot on "Domains" while anything there needs somebody (#158 follow-up):
+ * a domain not yet verified or whose proof went missing, an incoming transfer
+ * offer, or a reputation finding or pause.
+ *
+ * ⚠ A DOT, NOT A COUNT BADGE. A number in a pill is the loud chip #145 is
+ * removing; the question the rail answers is "is there something to look at",
+ * and the domains page says what. Red only for a pause, which stops mail;
+ * everything else is amber.
+ *
+ * ⚠ STREAMED, SO THE RAIL NEVER WAITS FOR IT. The count reads Clerk for the
+ * transfer offers; a slow answer must not hold up the navigation, so the
+ * layout passes the unresolved promise and the dot arrives when it does.
+ *
+ * ⚠ THE WORDS ARE IN THE DOM. A dot alone is invisible to a screen reader and
+ * to anybody who cannot tell amber from grey.
+ */
+function AttentionMark({
+  attention,
+}: {
+  attention: Promise<Attention["domains"] | null>
+}) {
+  const a = React.use(attention)
+  if (!a || a.total === 0) return null
+  const reasons = [
+    a.unverified > 0 && `${a.unverified} not verified`,
+    a.proof_missing > 0 && `${a.proof_missing} losing verification`,
+    a.transfers > 0 &&
+      `${a.transfers} transfer ${a.transfers === 1 ? "offer" : "offers"}`,
+    a.reputation === "paused" && "sending paused",
+    a.reputation === "at_risk" && "sending at risk",
+  ].filter(Boolean)
+  return (
+    <span className="ml-auto flex items-center" title={reasons.join(", ")}>
+      <StatusDot
+        tone={a.reputation === "paused" ? "danger" : "warning"}
+        className="size-2"
+      />
+      <span className="sr-only">Needs attention: {reasons.join(", ")}</span>
+    </span>
   )
 }

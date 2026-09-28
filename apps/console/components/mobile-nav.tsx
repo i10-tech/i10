@@ -18,7 +18,7 @@ import { SidebarNav } from "@/components/sidebar-nav"
 import { AccountBar } from "@/components/account-bar"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { Wordmark } from "@/components/wordmark"
-import type { PlanSummary, TenantProfile } from "@/lib/types"
+import type { Attention, PlanSummary, TenantProfile } from "@/lib/types"
 import { useResetWhen } from "@/lib/react"
 
 /**
@@ -40,10 +40,12 @@ export function MobileNav({
   tenant,
   plan,
   clerkEnabled,
+  attention,
 }: {
   tenant: TenantProfile | null
   plan: PlanSummary | null
   clerkEnabled: boolean
+  attention?: Promise<Attention["domains"] | null>
 }) {
   const [open, setOpen] = React.useState(false)
   const pathname = usePathname()
@@ -94,7 +96,7 @@ export function MobileNav({
              * drawer is open; sharing a `layoutId` would have Motion morph one
              * into the other across the screen every time either re-rendered.
              */}
-            <SidebarNav scope="drawer" />
+            <SidebarNav scope="drawer" attention={attention} />
           </div>
 
           {/* The same reading order as the desktop rail: workspace, then where

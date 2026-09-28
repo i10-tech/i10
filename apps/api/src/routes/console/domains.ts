@@ -4,6 +4,7 @@ import { cacheKeyFor } from "../../auth/api-key.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
+import { sendingStatus } from "./sending.js"
 
 /**
  * Sending domains, and the live DNS behind them.
@@ -14,6 +15,56 @@ import { notFound, notWired, readJson, validation } from "./http.js"
  * where somebody would notice it was missing last.
  */
 export function mountDomains(app: Hono, d: ConsoleDeps): void {
+  /*
+   * What the sidebar's mark on "Domains" is counting.
+   *
+   * ⚠ EVERY PART IS BEST-EFFORT AND ALWAYS 200. The mark is on every page; a
+   * slow Clerk or a missing store must drop that one reason, never fail the
+   * shell or paint a problem that is not there.
+   *
+   * ⚠ REPUTATION IS HERE THOUGH IT IS THE WORKSPACE'S, NOT A DOMAIN'S. SES
+   * judges the tenant, but what a customer fixes about it - which domain is
+   * sending to a stale list - they fix from the domains they send from.
+   */
+  app.get("/attention", async (c) => {
+    const { tenantId } = c.get("auth")
+    const userId = c.get("user").userId
+    const settle = async <T>(p: Promise<T> | undefined, fallback: T): Promise<T> => {
+      try {
+        return (await p) ?? fallback
+      } catch {
+        return fallback
+      }
+    }
+
+    const [held, transfers, status] = await Promise.all([
+      settle(d.domains?.needsAttention(tenantId), { unverified: 0, proofMissing: 0 }),
+      settle(
+        d.transfers && d.people
+          ? verifiedEmailsFor(d, userId).then((emails) =>
+              d.transfers!.incoming(tenantId, emails),
+            )
+          : undefined,
+        [],
+      ),
+      settle(sendingStatus(d, tenantId), null),
+    ])
+    const reputation = status?.health ?? "healthy"
+    return c.json({
+      domains: {
+        total:
+          held.unverified +
+          held.proofMissing +
+          transfers.length +
+          (reputation === "healthy" ? 0 : 1),
+        unverified: held.unverified,
+        proof_missing: held.proofMissing,
+        transfers: transfers.length,
+        reputation,
+      },
+    })
+  })
+
   // ───────────────────────────────────────────────────────────────────────────
   // Domains
   // ───────────────────────────────────────────────────────────────────────────
@@ -687,4 +738,31 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       })
     }
   })
+}
+
+/**
+ * A person's verified addresses, remembered for a minute.
+ *
+ * ⚠ THE ATTENTION MARK IS FETCHED ON EVERY PAGE, AND THIS IS A CLERK API CALL.
+ * Uncached it would be one backend request per navigation per person - the
+ * fastest route to Clerk's rate limit the console has. A minute is short
+ * enough that a newly verified address shows its offers almost at once, and
+ * the transfers page itself always asks fresh.
+ */
+const EMAILS_TTL_MS = 60_000
+const emailsCache = new Map<string, { at: number; emails: string[] }>()
+
+async function verifiedEmailsFor(d: ConsoleDeps, userId: string): Promise<string[]> {
+  const hit = emailsCache.get(userId)
+  if (hit && Date.now() - hit.at < EMAILS_TTL_MS) return hit.emails
+  const { verifiedEmails } = await d.people!.get(userId)
+  // Bounded: an entry per person who opened the console in the last minute,
+  // swept on write so a long-lived pod does not keep everyone it ever saw.
+  if (emailsCache.size > 5_000) {
+    for (const [k, v] of emailsCache) {
+      if (Date.now() - v.at >= EMAILS_TTL_MS) emailsCache.delete(k)
+    }
+  }
+  emailsCache.set(userId, { at: Date.now(), emails: verifiedEmails })
+  return verifiedEmails
 }

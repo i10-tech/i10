@@ -104,6 +104,14 @@ export interface DomainStore {
    */
   update(tenantId: string, id: string, input: UpdateDomain): Promise<Domain | null>
   list(tenantId: string): Promise<DomainSummary[]>
+  /**
+   * How many domains need somebody to act, for the sidebar's mark: not yet
+   * verified (including taken by another workspace), and verified but with
+   * the proof gone missing since.
+   */
+  needsAttention(
+    tenantId: string,
+  ): Promise<{ unverified: number; proofMissing: number }>
   remove(tenantId: string, id: string): Promise<boolean>
   /** Re-reads the provider and stores what it says. */
   verify(tenantId: string, id: string, options?: VerifyOptions): Promise<VerifyOutcome>
@@ -952,6 +960,29 @@ export function domainStore({
           .orderBy(desc(domains.createdAt))
         return rows.map((row) => summarise(row as Row, region))
       })
+    },
+
+    async needsAttention(tenantId) {
+      /*
+       * ⚠ RAW SQL FOR ONE COLUMN THE SCHEMA DOES NOT DECLARE. 0044 added
+       * `proof_missing_since` by hand beside a definer function, and it was
+       * never mirrored in core.ts; the recheck reads it the same way.
+       */
+      const rows = (await withTenant(db, tenantId, (tx) =>
+        tx.execute(sql`
+          select
+            count(*) filter (where status <> 'verified')::int as unverified,
+            count(*) filter (
+              where status = 'verified' and proof_missing_since is not null
+            )::int as proof_missing
+          from core.domains
+          where tenant_id = ${tenantId}
+        `),
+      )) as unknown as { unverified: number; proof_missing: number }[]
+      return {
+        unverified: Number(rows[0]?.unverified ?? 0),
+        proofMissing: Number(rows[0]?.proof_missing ?? 0),
+      }
     },
 
     async releaseDomains(tenantId) {
