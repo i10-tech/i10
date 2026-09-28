@@ -39,19 +39,19 @@ import type { BatchDeps } from "./handle-batch.js"
 export type ClaimedMessage = OutboundMessage & {
   createdAt: Date
   /**
-   * The routing inputs, read on the same statement that won the row.
+   * The routing input, read on the same statement that won the row.
    *
    * ⚠ CARRIED RATHER THAN LOOKED UP AT SEND TIME. Resolving the route needs the
-   * domain's override and the tenant's plan, and fetching either per message
-   * would put two more round trips on the hot path of every send. The claim is
-   * already reading the row; these ride along on it.
+   * domain's override, and fetching it per message would put another round trip
+   * on the hot path of every send. The claim is already reading the row; it
+   * rides along on it. The plan used to ride along too, until #155 took it out
+   * of the transactional rule.
    *
    * ⚠ AND `routeOverride` IS NULLABLE BECAUSE `domain_id` IS. A message with no
    * domain has no override, which `resolveRoute` reads as `auto` — the same
    * answer it would give for a domain that never set one.
    */
   routeOverride: RouteOverride | null
-  planId: string | null
 }
 
 type Row = Record<string, unknown>
@@ -106,7 +106,6 @@ export function databaseOps(
             id: String(row.id),
             createdAt: new Date(row.created_at as string),
             routeOverride: (row.transactional_route as RouteOverride | null) ?? null,
-            planId: row.plan_id === null ? null : String(row.plan_id),
             tenantId: String(row.tenant_id),
             from: String(row.from_address),
             to: (row.to_addresses as string[] | null) ?? [],

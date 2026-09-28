@@ -1,6 +1,8 @@
 # Choosing the MTA, per message
 
-**Decided:** 2026-09-05.
+**Decided:** 2026-09-05. **Amended 2026-09-28 (#155):** transactional mail goes
+through SES on every plan, free included; the plan now decides only the
+**mailbox** route. See "Free transactional mail moved to SES" below.
 
 i10 sends mail two ways and they are not the same product. Transactional mail
 goes out through the SES **API**, from `apps/api`. Human mail — the mailboxes
@@ -306,15 +308,13 @@ being a single point of failure — it has to increase on every write.
       ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX**, logging `Smtp(IdNotFound)` —
       `get_route_or_default` in crates/common/src/network/mta.rs. So the failure
       mode of shipping the lever early is mail leaving the way it does today.
-- [ ] **`resolveRoute`'s comment and its code disagree, and the code wins.** The
-      comment says "free is the DEFAULT... anything we do not recognise as a paid
-      plan lands here", warning that otherwise "a plan id renamed in the
-      catalogue would start spending SES money on free tenants". The code
-      recognises FREE by name and treats everything else as paid — so renaming
-      the free plan without moving `METERING_FREE_PLAN_ID` puts every free tenant
-      on SES, which is exactly the outcome the comment claims to prevent. Found
-      2026-09-17 while mirroring the rule into SQL. The SQL mirrors the CODE, so
-      the two levers agree; whether the rule should change is a pricing decision.
+- [x] ~~**`resolveRoute`'s comment and its code disagree, and the code wins.**~~
+      **Resolved 2026-09-28 (#155).** `resolveRoute` no longer takes a plan, so
+      the transactional half of the question is gone. The plan rule survives
+      only for mailbox mail, as `resolveMailboxRoute` mirroring
+      `core.resolve_route`, and its comment now says what the code does: free
+      is recognised by name and everything else is treated as paid. Whether
+      free mailbox mail should use SES at all is #191.
 - [x] ~~The transactional lever.~~ **Built 2026-09-16.** `stalwartTransport`
       beside `sesTransport`, selected per message from
       `core.domains.transactional_route`. The worker signs with the domain's own
@@ -601,3 +601,26 @@ being a single point of failure — it has to increase on every write.
       counted separately and raises in the reconcile job rather than being folded
       into `ses`, where it would add up to a plausible number and never be found.
 - [ ] DKIM key rotation. The random selector makes it possible; nothing does it.
+
+---
+
+## Free transactional mail moved to SES
+
+**Decided 2026-09-28 (#155).** `resolveRoute` used to send free tenants direct,
+to save SES's per-message fee on tenants who pay nothing. It now answers `ses`
+for every plan; only the kill switch and a support override can say `direct`.
+
+⚠ **THE TRADE WAS BACKWARDS.** It saved a fraction of a cent per message, and
+free volume is already capped at 100 a day by metering (0012). What it spent
+was putting the least-vetted senders on the one IP Stalwart's human mail
+leaves from, and outside every control abuse handling is built on: SES's
+per-tenant reputation, suppression and pause (#156, #157, #159, #170). A
+blocklisted mailbox IP costs every mailbox customer at once.
+
+⚠ **MAILBOX MAIL IS UNCHANGED.** The plan still decides it, through
+`core.resolve_route`, and nothing moves until the `ses-relay` route exists and
+`SES_RELAY_ENABLED` is on (#191).
+
+⚠ **THE CLAIM NO LONGER READS THE PLAN.** `plan_id` rode along on every claimed
+row only to feed this rule, so it went with it — one correlated subquery fewer
+on the worker's hot path.

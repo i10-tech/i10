@@ -192,14 +192,13 @@ const transports: Record<DeliveryRoute, Transport> = {
   direct: directTransport(),
 }
 
-// ⚠ RESOLVED FROM WHAT THE CLAIM READ, NOT FROM A FRESH LOOKUP. The override and
-// the plan came back on the statement that won the row, so this is pure — and
-// the same rule the dashboard and Stalwart read. See domains/route.ts.
+// ⚠ RESOLVED FROM WHAT THE CLAIM READ, NOT FROM A FRESH LOOKUP. The override
+// came back on the statement that won the row, so this is pure. The plan is not
+// an input: every plan's transactional mail goes through SES. See
+// domains/route.ts.
 const routeFor = (message: ClaimedMessage): DeliveryRoute =>
   resolveRoute({
     override: message.routeOverride ?? "auto",
-    planId: message.planId,
-    freePlanId: env.METERING_FREE_PLAN_ID,
     sesEnabled: env.SES_ENABLED,
   })
 
