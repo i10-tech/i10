@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Sign in · i10" }
  * The only door.
  *
  * ⚠ THERE IS NO SIGN-UP PAGE ANY MORE, AND THAT IS THE WHOLE CHANGE. Two pages
- * made somebody choose a door before we had told them which one was theirs —
+ * made somebody choose a door before we had told them which one was theirs -
  * a question only a lookup can answer. Answering it wrong was the failure in
  * both directions: a returning customer on the sign-up page told their address
  * was taken, a new one on the sign-in page told there was no such account.
@@ -46,7 +46,7 @@ export default async function Page({
 
   /*
    * ⚠ ALL THREE READ THE SAME CLERK ENVIRONMENT DOCUMENT AND COST ONE REQUEST.
-   * Next dedupes identical `fetch`es within a render pass — see
+   * Next dedupes identical `fetch`es within a render pass - see
    * _lib/environment.ts, which owns the fetch and its cache.
    *
    * ⚠ AND THE SIGN-UP FACTS ARE FETCHED EVEN THOUGH MOST VISITS ARE SIGN-INS,

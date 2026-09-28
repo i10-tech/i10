@@ -36,7 +36,7 @@ import { useSyncedState } from "@/lib/react"
  * ⚠ THIS LIST IS EXACTLY WHAT `lastEvent` CAN RETURN, AND NOTHING ELSE. The
  * filter is applied against `last_event`, which is either the worst event by
  * severity (send/lookup.ts: `SEVERITY`) or, when there are no events yet, the
- * row's own `message_status` — with `queued` + a future `scheduled_at`
+ * row's own `message_status` - with `queued` + a future `scheduled_at`
  * reported as `scheduled`. So the list is the severity table, plus the row
  * statuses that can survive to the fallback.
  *
@@ -46,7 +46,7 @@ import { useSyncedState } from "@/lib/react"
  * question during an incident.
  *
  * ⚠ AND `opened` AND `clicked` ARE DELIBERATELY ABSENT. They are not in
- * `SEVERITY`, so they can never BE a `last_event` — a message that was opened
+ * `SEVERITY`, so they can never BE a `last_event` - a message that was opened
  * is still `delivered`. Offering them here would be a filter that matches
  * nothing, every time, which reads as tracking being broken. Filtering by
  * engagement is a different query against `message_events` and is written up in
@@ -78,7 +78,7 @@ export function EmailFilters() {
   const urlSearch = searchParams.get("search") ?? ""
 
   /*
-   * ⚠ LOCAL, BUT IT FOLLOWS THE URL WHEN THAT CHANGES FROM SOMEWHERE ELSE —
+   * ⚠ LOCAL, BUT IT FOLLOWS THE URL WHEN THAT CHANGES FROM SOMEWHERE ELSE -
    * pressing back, or the "clear filters" button in the empty state. Without
    * that the input keeps showing the old text after the results have changed
    * underneath it, which reads as the filter having stuck. Adjusted during

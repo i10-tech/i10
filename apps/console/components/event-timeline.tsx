@@ -13,14 +13,14 @@ import { Time } from "@/components/time"
  * DIFFERENT QUESTIONS. The badge shows the WORST outcome by severity, because
  * "did this work" has one answer and it must not depend on which mail server
  * replied faster. This list shows the sequence, because "what happened" is a
- * story — accepted, delivered to one recipient, bounced from another.
+ * story - accepted, delivered to one recipient, bounced from another.
  *
  * ⚠ AND A MESSAGE WITH SEVERAL RECIPIENTS PRODUCES SEVERAL EVENTS OF THE SAME
  * TYPE. They are not deduplicated: two `delivered` events mean two recipients
  * received it, and collapsing them would hide the fact that the third did not.
  *
  * ⚠ THE PAYLOAD IS EXPANDABLE AND RENDERED AS TEXT. It is the provider's raw
- * notification — SES's bounce object, Stalwart's delivery report — and it is
+ * notification - SES's bounce object, Stalwart's delivery report - and it is
  * where the diagnostic code lives. It is also third-party JSON, so it goes
  * through `JSON.stringify` into a `<pre>` and never near `innerHTML`.
  */
@@ -37,7 +37,7 @@ export function EventTimeline({
 
   /*
    * ⚠ THE ACCEPTED STEP IS SYNTHESISED FROM `created_at`, BECAUSE NOTHING EMITS
-   * IT. Every event in `core.message_events` originates at the provider — SES
+   * IT. Every event in `core.message_events` originates at the provider - SES
    * publishes `Send` when it accepts, and everything after that follows. The
    * moment WE accepted the API call is the row's own timestamp, and without it
    * the timeline for a queued message is completely empty, which reads as the
@@ -48,7 +48,7 @@ export function EventTimeline({
     /*
      * ⚠ A NODE RATHER THAN A STRING, SO THAT A TIMESTAMP INSIDE A LABEL CAN GO
      * THROUGH `<Time>`. The scheduled step used to interpolate `formatExact`
-     * here, which formats in the RUNTIME'S TIME ZONE — UTC in the server
+     * here, which formats in the RUNTIME'S TIME ZONE - UTC in the server
      * container, something else in the reader's browser. This is a client
      * component, so both passes run and disagree by hours, and React answers a
      * hydration mismatch by throwing away the server HTML for the subtree and
@@ -102,7 +102,7 @@ export function EventTimeline({
             {/*
              * ⚠ THE CONNECTOR IS AN ABSOLUTELY POSITIONED RULE, NOT A BORDER ON
              * THE LIST ITEM. A left border would run the full height of the
-             * last item too, leaving a line dangling below the final dot — the
+             * last item too, leaving a line dangling below the final dot - the
              * detail that makes a hand-built timeline look unfinished.
              */}
             {!last && (

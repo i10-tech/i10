@@ -18,12 +18,12 @@ import { useResumable } from "../_lib/resume"
  *
  * ⚠ THIS PAGE HOLDS NO STATE OF ITS OWN ABOUT WHO IS SIGNING IN. It resumes the
  * `signIn` that the sign-in form left in Clerk's client state, which is why
- * getting here has to be a CLIENT-SIDE navigation — a full page load starts a
+ * getting here has to be a CLIENT-SIDE navigation - a full page load starts a
  * fresh Clerk client with no attempt in progress, and the person would be sent
  * back to the beginning. `router.push` from the sign-in form, never
  * `window.location`.
  *
- * ⚠ A RELOAD IS NOT A LOST ATTEMPT — PROBED 2026-09-25. Clerk's client keeps
+ * ⚠ A RELOAD IS NOT A LOST ATTEMPT - PROBED 2026-09-25. Clerk's client keeps
  * the in-progress attempt server-side and hands it back on load, so this page
  * resumes it after a refresh exactly as after the `router.push`. What IS lost
  * is an attempt that expired or finished elsewhere: if the status is not
@@ -72,7 +72,7 @@ export function MfaForm({
    *
    * ⚠ A REF, NOT STATE, AND THE DIFFERENCE IS CORRECTNESS RATHER THAN STYLE.
    * Nothing renders from it, so making it state would schedule a re-render that
-   * re-runs this effect — and setting state inside an effect that depends on it
+   * re-runs this effect - and setting state inside an effect that depends on it
    * is the loop React lints against. A ref also updates SYNCHRONOUSLY, which is
    * the property that actually matters here: two renders in the same tick both
    * see the write, so a second code is never sent to invalidate the first.
@@ -81,7 +81,7 @@ export function MfaForm({
 
   // ⚠ TWO STATUSES LAND HERE, AND ONLY ONE OF THEM IS "TWO-FACTOR AUTH".
   // `needs_second_factor` is a factor the ACCOUNT enrolled. `needs_client_trust`
-  // is Clerk proving this BROWSER — it fires on a first sign-in from a new
+  // is Clerk proving this BROWSER - it fires on a first sign-in from a new
   // device whether or not anyone turned MFA on, and it is answered through the
   // same `mfa` namespace. Gating on the first alone left the common case
   // stranded on a page that told people to start again.
@@ -94,7 +94,7 @@ export function MfaForm({
     .filter((s): s is Method => s in LABELS)
 
   // ⚠ TOTP FIRST WHERE IT EXISTS, because it is the only one that needs no
-  // round trip — the code is already on the person's phone. Defaulting to a
+  // round trip - the code is already on the person's phone. Defaulting to a
   // code we have to send would put an avoidable email or SMS in front of
   // somebody who did not need one.
   const preferred =
@@ -107,7 +107,7 @@ export function MfaForm({
 
   /*
    * ⚠ THE "ALREADY SENT" FACT HAS TO SURVIVE A RELOAD, AND A REF DOES NOT. This
-   * guard used to be the ref alone, which is per component INSTANCE — so every
+   * guard used to be the ref alone, which is per component INSTANCE - so every
    * refresh of this page got a fresh one, the effect below decided no code had
    * been sent, and Clerk sent another. Each new code retires the one before it,
    * so somebody who reloaded while reading the email was then typing a code
@@ -118,7 +118,7 @@ export function MfaForm({
    * starting a genuinely new sign-in must too, which is what the id does.
    *
    * ⚠ `sessionStorage`, SO IT DIES WITH THE TAB. The attempt it describes does
-   * too — this must not still be set tomorrow when somebody signs in again.
+   * too - this must not still be set tomorrow when somebody signs in again.
    */
   /*
    * ⚠ THE ATTEMPT ID, PULLED OUT SO THE CALLBACKS BELOW CAN DEPEND ON IT.
@@ -130,7 +130,7 @@ export function MfaForm({
 
   /*
    * ⚠ MEMOISED, AND NOT FOR SPEED. The effect below reads both of these, so
-   * `react-hooks/exhaustive-deps` wants them in its dependency array — and
+   * `react-hooks/exhaustive-deps` wants them in its dependency array - and
    * as plain functions they are new identities on every render, which would
    * re-run the send effect on every render. `useCallback` makes the identity
    * mean what the rule assumes it means: unchanged until the attempt does.
@@ -147,7 +147,7 @@ export function MfaForm({
         return window.sessionStorage.getItem(sentKey(factor)) !== null
       } catch {
         // ⚠ BLOCKED STORAGE MEANS THE REF IS ALL THERE IS, which is the
-        // behaviour that shipped before this — a resend on reload rather than
+        // behaviour that shipped before this - a resend on reload rather than
         // a screen that cannot send at all. Degrading to the lesser bug is the
         // right direction.
         return false
@@ -215,7 +215,7 @@ export function MfaForm({
          * ⚠ UNDER THE BOXES, NOT IN A TOAST. A rejected code is the single most
          * common failure on this screen, and a toast that slides away after
          * four seconds leaves six boxes looking exactly as they did when the
-         * code was still unjudged — so somebody who looked away comes back to a
+         * code was still unjudged - so somebody who looked away comes back to a
          * screen that has forgotten it said no. The field now holds the verdict
          * until it is acted on, which is what the red border is for.
          */
@@ -232,7 +232,7 @@ export function MfaForm({
         // ⚠ BEFORE THE NAVIGATION, so the green lands while there is still a
         // screen to land on. See `verified` on OtpField.
         setAccepted(true)
-        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
+        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh -
         // see the sign-in form. `finalizeAndLeave` also replaces rather than
         // assigns, and navigates itself if Clerk's callback never runs: see
         // _lib/finish.ts for the phone-shaped bug both of those close.
@@ -296,7 +296,7 @@ export function MfaForm({
             autoFocus
             /*
              * ⚠ NO `check`, BECAUSE ONLY CLERK KNOWS. A backup code has no
-             * shape worth asserting — they are issued, not composed — so the
+             * shape worth asserting - they are issued, not composed - so the
              * only thing this field can say for itself is that it is empty.
              */
             required="Enter one of your backup codes."
@@ -339,7 +339,7 @@ export function MfaForm({
         {/*
          * ⚠ NO RESEND FOR TOTP OR A BACKUP CODE, because there is nothing to
          * send. An authenticator generates its own code on the device and a
-         * backup code was printed once, months ago — offering "resend" for
+         * backup code was printed once, months ago - offering "resend" for
          * either would promise a mail that never arrives.
          */}
         {active === "phone_code" || active === "email_code" ? (

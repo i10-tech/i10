@@ -5,7 +5,7 @@
  * ⚠ NOTHING HERE PERFORMS I/O, AND NOTHING HERE READS A CLOCK. Storage arrives
  * through a port and the current time arrives as an argument, which is what
  * lets the same code answer a quota check inside `POST /emails` on the API
- * server and inside a Durable Object at the edge — see docs/decisions/metering.md.
+ * server and inside a Durable Object at the edge - see docs/decisions/metering.md.
  *
  * Some of the semantics are derived from Autumn (Apache-2.0). See NOTICE for
  * what was taken and, more importantly, where this deliberately differs.

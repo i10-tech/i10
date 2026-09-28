@@ -1,8 +1,8 @@
 -- The sweeper must not resurrect a message that is not due yet.
 --
 -- ⚠ WITHOUT THIS, `scheduled_at` AND THE SWEEP FIGHT. The sweep exists to find
--- rows the queue lost — `queued` past a grace period, `sending` past the claim
--- timeout — and a message scheduled for next week is `queued` and older than any
+-- rows the queue lost - `queued` past a grace period, `sending` past the claim
+-- timeout - and a message scheduled for next week is `queued` and older than any
 -- grace period the moment the grace period elapses. It would be re-enqueued on
 -- every pass, forever, and each of those jobs would then be refused by the claim
 -- (which checks the same predicate) and dropped. Nothing would send early, but

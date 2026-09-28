@@ -23,7 +23,7 @@ export type { ConsoleDeps }
  * `requireTenant`, which verifies a Clerk session and resolves it to a tenant.
  * An API key must not reach these: a sending key's advertised blast radius is
  * "can send mail", and rotating keys, reading invoices and connecting a DNS
- * provider are emphatically not that. A wildcard guard fails closed — a route
+ * provider are emphatically not that. A wildcard guard fails closed - a route
  * added in any of the six modules below is protected because nobody remembered
  * to protect it, which is the only version of this that stays correct.
  *
@@ -46,7 +46,7 @@ declare module "hono" {
      * Set by the route-scoped body limit, read by the wildcard one.
      *
      * ⚠ IT MEANS "A LIMIT HAS ALREADY BEEN APPLIED", NOT "THIS IS THE IMPORT".
-     * The wildcard stands down rather than wrapping an already-wrapped stream —
+     * The wildcard stands down rather than wrapping an already-wrapped stream -
      * see the note in `createConsole` for why nesting two limits silently
      * enforces the smaller one.
      */
@@ -87,7 +87,7 @@ export function createConsole(deps?: ConsoleDeps) {
    *
    * ⚠ IT EXISTS BECAUSE SOME OF THOSE FLOWS ARE MORE THAN ONE REQUEST. Deleting
    * a domain can revoke its keys first, and `useReverification` in the browser
-   * works by REPLAYING the call that was refused — replay a half-finished
+   * works by REPLAYING the call that was refused - replay a half-finished
    * sequence and the second attempt re-revokes keys that are already revoked,
    * which answers 404 and reports a failure for work that succeeded. Asking
    * once, up front, against a route that does nothing is always safe to retry.
@@ -102,7 +102,7 @@ export function createConsole(deps?: ConsoleDeps) {
   /*
    * ⚠ EVERY MUTATION HERE IS CAPPED, INCLUDING THE ONES THAT LOOK HARMLESS.
    * These routes are reached with a session rather than a key, so the caller is
-   * a browser on somebody's laptop — but a signed-in caller is still an
+   * a browser on somebody's laptop - but a signed-in caller is still an
    * authenticated caller, and `await c.req.json()` on a 500 MB body buffers the
    * whole thing in this process before a single line of validation runs. One
    * signed-in account could take the API down for every tenant on it.
@@ -122,14 +122,14 @@ export function createConsole(deps?: ConsoleDeps) {
    * both fail silently:
    *
    *   • `c.req.path.endsWith("/contacts/import")` reads the FULL path, prefix
-   *     and all, so it also matches `/console/anything/contacts/import` — a
+   *     and all, so it also matches `/console/anything/contacts/import` - a
    *     path with no handler, which still runs wildcard middleware before
    *     answering 404, and would therefore read twenty megabytes before
    *     deciding it did not want them.
    *   • `except("/contacts/import", …)` from `hono/combine` matches its pattern
    *     against `c.req.path` too. Unmounted that is `/contacts/import` and it
    *     works; mounted at `/console` the real path is `/console/contacts/import`
-   *     and the exemption stops matching — so the import silently drops to the
+   *     and the exemption stops matching - so the import silently drops to the
    *     256 KB limit, in production only, while a test against the bare router
    *     passes. `app.use(path, …)` is different: `app.route()` rewrites a
    *     sub-app's registered paths, so this one moves with the mount point.
@@ -137,8 +137,8 @@ export function createConsole(deps?: ConsoleDeps) {
    * ⚠ AND THE TWO LIMITS MUST NOT NEST, WHICH IS WHAT THE FLAG IS FOR.
    * `bodyLimit` wraps the request stream, so a 256 KB wrapper around a 20 MB one
    * caps at 256 KB and the import breaks at exactly the size it is documented to
-   * accept. The route-scoped limit is registered FIRST — Hono runs matching
-   * middleware in registration order — and marks the request, and the wildcard
+   * accept. The route-scoped limit is registered FIRST - Hono runs matching
+   * middleware in registration order - and marks the request, and the wildcard
    * below stands down when it sees the mark.
    */
   const tooLarge = (c: Context) =>
@@ -165,7 +165,7 @@ export function createConsole(deps?: ConsoleDeps) {
   /*
    * ⚠ THE ROUTES ARE MOUNTED IN SIX GROUPS, AND THE SPLIT IS BY WHAT A CHANGE
    * TOUCHES RATHER THAN BY HTTP VERB. Sixty-three handlers in one file is a file
-   * nobody reads to the end of — and the thing a reviewer most needs to be able
+   * nobody reads to the end of - and the thing a reviewer most needs to be able
    * to see at a glance here is that every one of them is behind the guard above.
    * Each group is a plain function that takes the same `app`, so the ORDER and
    * the middleware chain are identical to one file; nothing is nested, and there

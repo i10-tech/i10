@@ -7,7 +7,7 @@ import { broadcastPatch } from "../src/routes/console/campaigns.js"
  * ⚠ THIS FUNCTION IS THE ONLY PLACE THE TWO VOCABULARIES MEET, AND A MISSING
  * LINE IN IT IS SILENT. `PATCH /broadcasts/:id` answers 200 with the broadcast
  * either way; the field simply does not move. The first version of this dropped
- * `segment_id` and `topic_id` entirely — so choosing who a broadcast goes to
+ * `segment_id` and `topic_id` entirely - so choosing who a broadcast goes to
  * appeared to work, saved nothing, and sent to nobody.
  *
  * ⚠ AND `undefined` VERSUS `null` IS THE WHOLE SEMANTIC. Absent means "leave it
@@ -51,7 +51,7 @@ describe("broadcastPatch", () => {
 
   /**
    * ⚠ AN EXPLICIT NULL IS AN INSTRUCTION. "Send to everybody rather than to a
-   * segment", "unschedule this", "drop the plain-text part" — each is a real
+   * segment", "unschedule this", "drop the plain-text part" - each is a real
    * edit somebody makes, and each is indistinguishable from "field absent" if
    * the mapping tests `typeof x === "string"` instead of `!== undefined`.
    */
@@ -83,7 +83,7 @@ describe("broadcastPatch", () => {
   /**
    * ⚠ A `reply_to` WITH A NUMBER IN IT MUST NOT REACH A `text[]` COLUMN. The
    * insert would throw, which is a 500 for a body the API should have refused
-   * — and the array arrives from a form that a browser extension or a bad SDK
+   * - and the array arrives from a form that a browser extension or a bad SDK
    * can shape however it likes.
    */
   it("keeps only the strings out of reply_to", () => {
@@ -95,7 +95,7 @@ describe("broadcastPatch", () => {
   /**
    * ⚠ AN UNPARSEABLE DATE BECOMES `null`, NOT AN `Invalid Date`. An invalid Date
    * object passed to the driver is `NaN` in a timestamptz parameter, which fails
-   * the statement — a 500 for somebody typing in a date field.
+   * the statement - a 500 for somebody typing in a date field.
    */
   it("does not pass an unparseable date through", () => {
     expect(broadcastPatch({ scheduled_at: "next tuesday" })).toEqual({

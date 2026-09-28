@@ -17,14 +17,14 @@
  * ⚠ AND "APPROXIMATE" NOW COSTS THE CUSTOMER, NOT US. While the gate could only
  * refuse, a permissive gate meant unbilled revenue and the reconciler swept it
  * up. With `overage` enabled the gate never refuses, so the same imprecision
- * puts units on somebody's invoice. The tiering is still right — no invoice is
- * ever computed from this number, only from the ledger — but the bound on
+ * puts units on somebody's invoice. The tiering is still right - no invoice is
+ * ever computed from this number, only from the ledger - but the bound on
  * "approximate" has to be stated before sharding, because sharding is what
  * makes it loose. See docs/decisions/metering.md.
  *
  * ⚠ AND IT IS PURE ARITHMETIC WITH NO CLOCK AND NO STORAGE. Everything that
- * makes a decision hard to test — when the window rolled over, what the store
- * said, who else was asking — is resolved by the caller and passed in. What is
+ * makes a decision hard to test - when the window rolled over, what the store
+ * said, who else was asking - is resolved by the caller and passed in. What is
  * left is small enough to be obviously right.
  */
 
@@ -42,7 +42,7 @@ export interface DrawInput {
   allowance: Allowance
   /**
    * Consumed in the current window, or currently held. May exceed the
-   * allowance — see above.
+   * allowance - see above.
    */
   used: number
   /** How many units this request wants. A batch of 500 asks once, for 500. */
@@ -68,7 +68,7 @@ export type DrawOutcome =
   /**
    * Accepted, and part of it is billable.
    *
-   * ⚠ THE REQUEST IS STILL ACCEPTED WHOLE — THIS IS NOT PARTIAL ACCEPTANCE.
+   * ⚠ THE REQUEST IS STILL ACCEPTED WHOLE - THIS IS NOT PARTIAL ACCEPTANCE.
    * Five hundred asked for with three hundred included left is five hundred
    * sent, attributed as three hundred included and two hundred billable.
    * Acceptance is all-or-nothing; attribution is not, and conflating the two is
@@ -96,7 +96,7 @@ export type DrawOutcome =
  * ⚠ ALL-OR-NOTHING, NEVER PARTIAL. A batch of five hundred with three hundred
  * left and no overage is refused, not trimmed. Partial acceptance would mean
  * answering a single `POST /emails` with "some of these were accepted" and
- * leaving the caller to work out which two hundred recipients were dropped — an
+ * leaving the caller to work out which two hundred recipients were dropped - an
  * outcome no sender can act on, and one that turns a quota error into silent
  * data loss.
  *
@@ -116,7 +116,7 @@ export function draw({
 
   if (allowance === "unlimited") {
     // ⚠ NEVER `overage`. There is no allowance to be past, so there is nothing
-    // to bill — and an unlimited feature that produced billable units would be
+    // to bill - and an unlimited feature that produced billable units would be
     // a contradiction somebody has to notice on an invoice.
     return { status: "allowed", remaining: Number.POSITIVE_INFINITY }
   }
@@ -151,7 +151,7 @@ export function draw({
  * It goes in a `X-RateLimit-Remaining` header and onto a usage dashboard, and
  * "-1,204 remaining" reads as a bug in our product rather than as an overdraft
  * we already decided to tolerate. The overdraft is still visible where it
- * belongs — `used` against `allowance` in the ledger.
+ * belongs - `used` against `allowance` in the ledger.
  */
 export function remainingOf({
   allowance,

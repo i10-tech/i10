@@ -20,19 +20,19 @@ import { useResumable, useResumeLive } from "../_lib/resume"
 /*
  * Forgotten password, in Clerk's stable three-call shape.
  *
- *   1. `signIn.create({ identifier })`                     — names the account
- *   2. `signIn.resetPasswordEmailCode.sendCode()`          — emails a code
- *   3. `resetPasswordEmailCode.verifyCode({ code })`       — accepts it
- *   4. `resetPasswordEmailCode.submitPassword({ password })` — sets the password
+ *   1. `signIn.create({ identifier })`                     - names the account
+ *   2. `signIn.resetPasswordEmailCode.sendCode()`          - emails a code
+ *   3. `resetPasswordEmailCode.verifyCode({ code })`       - accepts it
+ *   4. `resetPasswordEmailCode.submitPassword({ password })` - sets the password
  *
  * ⚠ STEPS 3 AND 4 ARE ONE SCREEN BUT TWO CALLS, and they cannot be collapsed.
- * The code has to be accepted before Clerk will take a new password — sending
- * both at once fails — so the form gathers them together and the handler makes
+ * The code has to be accepted before Clerk will take a new password - sending
+ * both at once fails - so the form gathers them together and the handler makes
  * the calls in order. Splitting them across two screens would be honest to the
  * API and worse for the person, who would be asked to prove themselves twice.
  *
  * ⚠ THIS PAGE IS NOT REACHED WITH THE PERSON'S MAILBOX. The code goes to the
- * address they signed up with — a Gmail, a work address — which is exactly why
+ * address they signed up with - a Gmail, a work address - which is exactly why
  * a mailbox customer who forgets their password is not locked out of their own
  * recovery. The i10 mailbox is never the recovery channel for the account that
  * owns it.
@@ -132,7 +132,7 @@ export function ResetPasswordForm({
 
     /*
      * ⚠ THE MISMATCH IS THE CONFIRMATION FIELD'S OWN BUSINESS NOW. It used to
-     * be a toast fired after the button was pressed — a message that slides
+     * be a toast fired after the button was pressed - a message that slides
      * away, about two boxes it does not point at, for a mistake you can only
      * see by comparing two rows of dots. The field says it under itself, in
      * red, the moment the caret leaves.
@@ -169,7 +169,7 @@ export function ResetPasswordForm({
       }
 
       if (signIn.status === "complete") {
-        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh —
+        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh -
         // see the sign-in form. `finalizeAndLeave` also replaces rather than
         // assigns, and navigates itself if Clerk's callback never runs: see
         // _lib/finish.ts for the phone-shaped bug both of those close.
@@ -238,7 +238,7 @@ export function ResetPasswordForm({
             value={confirmation}
             onChange={(event) => setConfirmation(event.target.value)}
             /*
-             * ⚠ THE RULE IS ABOUT ANOTHER FIELD, AND THAT IS FINE — a `Check`
+             * ⚠ THE RULE IS ABOUT ANOTHER FIELD, AND THAT IS FINE - a `Check`
              * is an ordinary closure, so "matches the box above" is expressed
              * the same way "is an email address" is. It does not repeat the
              * policy: a confirmation that does not match is the only thing

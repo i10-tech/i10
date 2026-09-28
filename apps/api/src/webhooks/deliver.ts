@@ -10,11 +10,11 @@ import { signPayload, timestampFor } from "./signing.js"
  * receiver that commits its work and then times out on the response is
  * indistinguishable from one that never received the request, so we send again.
  * The delivery id is stable across attempts precisely so the customer can make
- * their handler idempotent — it is the only thing that lets them.
+ * their handler idempotent - it is the only thing that lets them.
  *
  * ⚠ AND A DELIVERY MUST NEVER BE ABLE TO HANG A WORKER. A customer's endpoint
  * is code we do not control, on infrastructure we do not control, and the
- * failure that matters is not an error — it is a socket that accepts the
+ * failure that matters is not an error - it is a socket that accepts the
  * connection and then says nothing. Without a hard timeout, one such endpoint
  * occupies a worker slot until the job lease expires, and a handful of them
  * stop every other customer's webhooks.
@@ -25,7 +25,7 @@ export const DELIVERY_TIMEOUT_MS = 10_000
 
 /**
  * ⚠ AFTER THIS MANY CONSECUTIVE FAILURES THE ENDPOINT IS SWITCHED OFF. Not a
- * courtesy to the customer — a protection for the queue. An endpoint whose host
+ * courtesy to the customer - a protection for the queue. An endpoint whose host
  * no longer exists would otherwise take five attempts for every event that
  * tenant ever generates, forever, in a queue their neighbours share.
  */
@@ -102,7 +102,7 @@ export async function deliverWebhook(
         "user-agent": "i10-webhooks/1",
         // ⚠ THESE THREE NAMES ARE THE STANDARD WEBHOOKS SPEC's, NOT OURS TO
         // PICK. They are what lets a customer verify with any conforming
-        // library in any language rather than only with `@i10/next` — which is
+        // library in any language rather than only with `@i10/next` - which is
         // the entire reason the format moved. All three are signed material.
         "webhook-id": delivery.id,
         "webhook-timestamp": timestampFor(now),
@@ -164,7 +164,7 @@ export async function deliverWebhook(
 
   // ⚠ THROWN SO groupmq SCHEDULES THE RETRY, BUT ONLY WHILE THERE IS BUDGET.
   // Throwing on the final attempt too would make the job fail loudly for a
-  // failure the row has already recorded — and the customer's dead endpoint
+  // failure the row has already recorded - and the customer's dead endpoint
   // would fill the failed-job list that a real bug needs to be visible in.
   if (!final) throw new Error(outcome.reason)
 

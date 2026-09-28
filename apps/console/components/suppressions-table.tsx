@@ -22,7 +22,7 @@ import { Time } from "@/components/time"
  * The suppression list.
  *
  * ⚠ REMOVING AN ENTRY IS CONFIRMED, AND THE CONFIRMATION SAYS WHAT IT DOES NOT
- * DO. Removing an address does not guarantee delivery — if it bounces again it
+ * DO. Removing an address does not guarantee delivery - if it bounces again it
  * is suppressed again automatically, and every attempt in between counts
  * against the account's reputation with that receiving network. People remove
  * entries expecting the mail to start arriving; the dialog is the one chance to
@@ -30,7 +30,7 @@ import { Time } from "@/components/time"
  *
  * ⚠ THE ROW LEAVES THE MOMENT IT IS CONFIRMED, NOT WHEN THE SERVER AGREES.
  * Removing a suppression is a write, a revalidation and a re-render of the whole
- * page — on a slow connection that is a second or more during which the dialog
+ * page - on a slow connection that is a second or more during which the dialog
  * has closed and the row somebody just removed is still sitting there. They
  * press it again. `useOptimistic` takes the row out immediately and puts it back
  * if the call fails, which is the only version where the interface and the
@@ -40,11 +40,11 @@ import { Time } from "@/components/time"
  * CORRECTION RATHER THAN A PREFERENCE. `useOptimistic` was tried first and the
  * row never left: its value only exists while React considers an Action
  * pending, and an `await` inside a hand-rolled `startTransition` did not keep it
- * pending here — so the update was discarded before it could paint, with no
+ * pending here - so the update was discarded before it could paint, with no
  * error anywhere to say so. Measured, not assumed: the row was still in the DOM
  * at 0, 10, 25, 50, 100, 200, 400, 800 and 1500ms after the confirmation.
  *
- * A list of hidden addresses is the same idea with none of the ambiguity — it is
+ * A list of hidden addresses is the same idea with none of the ambiguity - it is
  * visible in the render, it is cleared by exactly one rule, and the failure path
  * is a line of code rather than a framework behaviour.
  *
@@ -52,7 +52,7 @@ import { Time } from "@/components/time"
  * FROM BECOMING A LIE. Holding "hidden" forever would suppress the row even if
  * the address bounced again and the server legitimately sent it back. Tying the
  * reset to `rows` identity means the optimistic view survives exactly as long as
- * the data it is guessing about — see lib/react.ts for why that is a render-phase
+ * the data it is guessing about - see lib/react.ts for why that is a render-phase
  * comparison rather than an effect.
  *
  * ⚠ AND THE REASON COLUMN IS NOT DECORATION. `hard_bounce` means the address
@@ -78,7 +78,7 @@ const REASON_COPY: Record<string, { label: string; detail: string }> = {
 }
 
 /**
- * How the rows below close the gap. Short, and shorter than the sidebar's — a
+ * How the rows below close the gap. Short, and shorter than the sidebar's - a
  * row leaving a table is not a shared element travelling across the screen, and
  * anything over about 200ms makes removing several in a row feel like queueing
  * behind an animation.
@@ -93,7 +93,7 @@ const ROW_LAYOUT: Transition = {
 /**
  * ⚠ A TWEEN, NOT A SPRING, AND THE FIRST VERSION OF THIS WAS A REAL BUG RATHER
  * THAN A STYLE SLIP. The spring tokens in @repo/ui/styles/tokens.css say in so
- * many words that springs are for transforms and sizes and NEVER for opacity —
+ * many words that springs are for transforms and sizes and NEVER for opacity -
  * an overshoot on opacity means going past fully transparent and coming back,
  * which is both invisible and slow to settle. `AnimatePresence` keeps an exiting
  * element mounted until its exit animation FINISHES, so a spring that takes a
@@ -118,7 +118,7 @@ export function SuppressionsTable({
   /*
    * ⚠ KEYED ON THE ADDRESS, WHICH IS THIS TABLE'S REAL PRIMARY KEY. It is
    * already what `key={row.address}` uses below, and a suppression list cannot
-   * hold the same address twice — so filtering by it is exact rather than a
+   * hold the same address twice - so filtering by it is exact rather than a
    * guess at identity.
    */
   const shownRemoving = useRetained(removing)
@@ -129,7 +129,7 @@ export function SuppressionsTable({
     hidden.length === 0 ? rows : rows.filter((row) => !hidden.includes(row.address))
 
   const urlSearch = searchParams.get("search") ?? ""
-  // Local while typing, but follows the URL when that changes elsewhere — see
+  // Local while typing, but follows the URL when that changes elsewhere - see
   // lib/react.ts on why this is not an effect.
   const [search, setSearch] = useSyncedState(urlSearch)
 
@@ -191,7 +191,7 @@ export function SuppressionsTable({
               <tbody className="divide-y">
                 {/*
                  * ⚠ `initial={false}` SO A PAGE OF ROWS DOES NOT FADE ITSELF IN.
-                 * The only animation wanted here is the one on the way OUT —
+                 * The only animation wanted here is the one on the way OUT -
                  * rows arriving from the server should already be there.
                  */}
                 <AnimatePresence initial={false}>
@@ -233,7 +233,7 @@ export function SuppressionsTable({
                               View
                             </Link>
                           ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
+                            <span className="text-xs text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-right text-xs whitespace-nowrap text-muted-foreground">
@@ -270,7 +270,7 @@ export function SuppressionsTable({
           // the other sentence while it fades out. See `useRetained`.
           shownRemoving?.reason === "complaint"
             ? "This recipient marked a message as spam. Sending to them again risks your reputation and, in some jurisdictions, breaks the law. If they bounce or complain again they are suppressed again automatically."
-            : "We will start sending to this address again. If it bounces again it is suppressed again automatically — removing it does not guarantee delivery."
+            : "We will start sending to this address again. If it bounces again it is suppressed again automatically - removing it does not guarantee delivery."
         }
         confirmLabel="Remove"
         confirmWord={removing?.address}

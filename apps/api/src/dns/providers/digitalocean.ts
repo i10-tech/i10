@@ -18,7 +18,7 @@ import { DNS_USER_AGENT } from "../user-agent.js"
  * Cloudflare identifies a zone by an opaque id and takes fully qualified record
  * names; DigitalOcean identifies a zone by the domain name itself and takes
  * names RELATIVE to it. An adapter layer that assumed either would have to be
- * rewritten for the first provider that disagreed — which is the second one.
+ * rewritten for the first provider that disagreed - which is the second one.
  *
  * ⚠ AND THE OAUTH SCOPES ARE NARROWER THAN A PERSONAL ACCESS TOKEN, which is
  * the reason to prefer the OAuth path here. A pasted DigitalOcean token is
@@ -48,7 +48,7 @@ async function call<T>(
    * ⚠ READ BEFORE THE `try`, AND THAT IS NOT A STYLE CHOICE. `tokenOf` throws
    * `unauthorized` for a credential that has lost its token, and inside the
    * block below that throw is caught by the network handler and re-wrapped as
-   * `unavailable` — so a connection that can only be fixed by reconnecting
+   * `unavailable` - so a connection that can only be fixed by reconnecting
    * reports itself as a DigitalOcean outage, the console says "try again", and
    * trying again produces the identical failure for ever. The port's own note
    * on `DnsWriteFailure` is about exactly this collapse, in the other
@@ -199,7 +199,7 @@ export function digitalOceanWriter(): ZoneWriter {
              * ⚠ A TRAILING DOT ON EVERY HOSTNAME VALUE, AND IT IS NOT OPTIONAL
              * HERE. DigitalOcean treats an unqualified NS, MX or CNAME target as
              * relative to the zone, so `ns1.i10.tech` becomes
-             * `ns1.i10.tech.example.com.` — a delegation to a nameserver that
+             * `ns1.i10.tech.example.com.` - a delegation to a nameserver that
              * does not exist, published successfully, with no error anywhere.
              */
             data: needsTrailingDot(record.type) ? `${record.value}.` : record.value,

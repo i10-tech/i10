@@ -28,7 +28,7 @@ import { ARRIVAL, setArrival } from "@/lib/arrival"
  * ⚠ AND THE BUTTON PICKS BETWEEN TWO DIFFERENT CALLS. A tenant with no
  * subscription goes through checkout; one that already has a subscription goes
  * through a plan change. Sending an existing customer through checkout again
- * creates a SECOND subscription and bills them twice — which is the kind of bug
+ * creates a SECOND subscription and bills them twice - which is the kind of bug
  * that is discovered by the customer.
  *
  * ⚠ PRICES ARE DELIBERATELY ABSENT. They live in Polar, which owns currency,
@@ -82,8 +82,8 @@ export function PlanCards({
    * ⚠ THE DERIVATION USED TO LIVE AT EACH CALL SITE AND THEY DRIFTED, WHICH
    * IS A BUG A CUSTOMER SAW. The billing page worked out `endingAt` and
    * `scheduledPlanId` from `billing.subscription`; the onboarding step passed
-   * neither. So somebody who cancelled on the billing page — where the free
-   * card correctly went to a disabled "Ending" — walked into set-up and found
+   * neither. So somebody who cancelled on the billing page - where the free
+   * card correctly went to a disabled "Ending" - walked into set-up and found
    * "Cancel subscription" live again, pressed it, and got a second
    * cancellation refused by Polar and reported as our misconfiguration.
    *
@@ -100,14 +100,14 @@ export function PlanCards({
    * ⚠ IT EXISTS FOR THE LAST STEP OF ONBOARDING AND NOWHERE ELSE. On the
    * billing page the current plan is a fact, so its card is a disabled
    * "Current plan" and the only actions are the other two. At the end of
-   * set-up the same card is the answer to a question — "this one, thanks" —
+   * set-up the same card is the answer to a question - "this one, thanks" -
    * and leaving it inert meant the only way out of the flow was a separate
    * "Finish set-up" button underneath, which is a second control for a
    * decision the cards were already presenting.
    *
    * ⚠ AND IT IS NOT "CHOOSE THE FREE PLAN". It fires for whichever plan is
    * current, including one just paid for during set-up, because the thing it
-   * means is "keep this and move on" — nothing is bought and nothing changes.
+   * means is "keep this and move on" - nothing is bought and nothing changes.
    */
   onKeep?: () => void
   /**
@@ -115,8 +115,8 @@ export function PlanCards({
    *
    * ⚠ IT EXISTS SO THE SCREEN AROUND THE CARDS CAN REACT WITHOUT A REFRESH
    * EITHER. The last step of onboarding swaps its footer for a way out once
-   * somebody has paid, and the alternative — re-fetching the tree to learn a
-   * fact we were just handed — is the blip this whole change removes.
+   * somebody has paid, and the alternative - re-fetching the tree to learn a
+   * fact we were just handed - is the blip this whole change removes.
    */
   onSubscribed?: (planId: string) => void
   /**
@@ -143,7 +143,7 @@ export function PlanCards({
   /*
    * ⚠ A SENTINEL RATHER THAN A SECOND FLAG. `pending` holds the plan id being
    * acted on; resuming is not about a plan, so it needs a value that cannot
-   * collide with one — and sharing the flag is what keeps every other card
+   * collide with one - and sharing the flag is what keeps every other card
    * disabled while it runs.
    */
   const [pending, setPending] = React.useState<string | null>(null)
@@ -151,7 +151,7 @@ export function PlanCards({
   /*
    * ⚠ THE PLAN JUST BOUGHT, HELD HERE RATHER THAN RE-READ FROM THE SERVER.
    * This used to be a `router.refresh()`: the checkout closed, a toast said
-   * "Payment received", and the whole tree re-rendered underneath it — a
+   * "Payment received", and the whole tree re-rendered underneath it - a
    * black blip, a layout that moved, and the toast gone before it could be
    * read. Everything that actually changes on this screen is knowable from
    * the success we were just handed, so it is applied here instead.
@@ -167,7 +167,7 @@ export function PlanCards({
   /*
    * ⚠ WHETHER A CANCELLATION IS PENDING, OVERRIDING THE SERVER'S ANSWER
    * WHILE THIS COMPONENT IS MOUNTED. Cancelling and un-cancelling both used
-   * to end in `router.refresh()`, which re-renders the tree — the same blank
+   * to end in `router.refresh()`, which re-renders the tree - the same blank
    * frame the checkout path had, on two more buttons. The only thing either
    * action changes on this screen is this flag: the period end does not move
    * when a subscription is marked to end, so the date the cards show is
@@ -217,15 +217,15 @@ export function PlanCards({
    * to `success_url?checkout_id=…` is what makes `CheckoutOutcome` render, and
    * in the embedded flow that redirect very often never happens: whichever of
    * their `success` event or our own status poll fires first tears the iframe
-   * out, and their default handler — the thing that navigates the parent — does
+   * out, and their default handler - the thing that navigates the parent - does
    * not get to run. The customer was left with a toast that fades after a few
    * seconds and a page that otherwise looked exactly as it had before they
    * paid.
    *
    * ⚠ AND IT IS ATTACHED ON EVERY ENDING, NOT ONLY ON SUCCESS. Failure and
    * abandonment had no feedback at all, which is the same bug in the direction
-   * nobody thinks to test. The banner reads the real state from our API — paid,
-   * granted, failed, expired, closed — so it tells the truth for all of them
+   * nobody thinks to test. The banner reads the real state from our API - paid,
+   * granted, failed, expired, closed - so it tells the truth for all of them
    * rather than being told what to say from here.
    *
    * ⚠ `replace`, NOT `push`. Back should return to wherever they were before
@@ -234,7 +234,7 @@ export function PlanCards({
   const reportOutcome = React.useCallback(
     (checkoutId: string | null) => {
       // ⚠ NO ID MEANS NO BANNER, AND THE REFRESH STILL HAPPENS. An older API
-      // build returns no checkout id — see `startCheckout` — and there is
+      // build returns no checkout id - see `startCheckout` - and there is
       // nothing for the status endpoint to be asked about, so this degrades to
       // exactly the behaviour that existed before rather than routing somebody
       // to `?checkout_id=null`.
@@ -262,7 +262,7 @@ export function PlanCards({
 
       if (!onCheckout) {
         /*
-         * ⚠ THE CALLER CANNOT HOLD THE ID, SO THE SERVER HAS TO — and that
+         * ⚠ THE CALLER CANNOT HOLD THE ID, SO THE SERVER HAS TO - and that
          * costs a re-render. The billing settings page renders the banner at
          * the top and these cards half a page below it, inside a server
          * component, so there is nowhere between them to keep client state.
@@ -290,7 +290,7 @@ export function PlanCards({
    *
    * ⚠ BOUND ONLY WHILE SOMETHING IS ARMED. A permanent listener would swallow
    * nothing and cost nothing, but it would also fire inside the checkout
-   * modal and the confirm dialogs that render over these cards — and an
+   * modal and the confirm dialogs that render over these cards - and an
    * Escape meant for one of those is not meant for this.
    */
   React.useEffect(() => {
@@ -308,7 +308,7 @@ export function PlanCards({
    * Every other button here moves between things somebody is paying for;
    * `free` ends the subscription, and it sits in the same row of identical
    * cards as the rest. The confirmation exists because the consequence is
-   * different in kind, not because it is severe — it is reversible by
+   * different in kind, not because it is severe - it is reversible by
    * subscribing again, and the dialog says when it takes effect.
    */
   const leavingPaidPlan = (plan: PlanSummary) =>
@@ -316,8 +316,8 @@ export function PlanCards({
 
   /*
    * ⚠ THE WAY BACK FROM A CANCELLATION, WHICH DID NOT EXIST. Cancelling is
-   * deferred to the period boundary — they have paid for the rest of the
-   * month — so for up to a month the subscription is alive, billed for, and
+   * deferred to the period boundary - they have paid for the rest of the
+   * month - so for up to a month the subscription is alive, billed for, and
    * marked to end, and every control on this screen read that as settled.
    * The only route back was to wait for it to lapse and buy it again.
    *
@@ -370,7 +370,7 @@ export function PlanCards({
       /*
        * ⚠ 202 MEANS ACCEPTED, NOT DONE. Polar has taken the change; the
        * entitlement moves when their webhook lands, a second or two later. The
-       * refresh picks it up — and the message is worded so that somebody who
+       * refresh picks it up - and the message is worded so that somebody who
        * reloads immediately and sees the old plan is not confused.
        *
        * ⚠ AND CANCELLING GETS ITS OWN SENTENCE, because "your allowances move
@@ -399,7 +399,7 @@ export function PlanCards({
        * server knows. Modelling the second locally would be inventing them.
        *
        * ⚠ AND THE RE-READ IS `changePlan`'S OWN RESPONSE, not a second
-       * request from here — see `run` in lib/actions.ts. By the time this toast
+       * request from here - see `run` in lib/actions.ts. By the time this toast
        * shows, the cards already say what it says.
        */
       return
@@ -408,14 +408,14 @@ export function PlanCards({
     /*
      * ⚠ THE PAGE THIS WAS PRESSED ON, SO POLAR RETURNS TO IT. The cards render
      * on the billing settings page and inside onboarding, and those are two
-     * different places to come back to — one confirmation page for both was a
+     * different places to come back to - one confirmation page for both was a
      * dead end for whichever flow had steps left.
      */
     /*
      * ⚠ PATH *AND* QUERY, FOR THE SAME REASON THE BANNER'S URL KEEPS ITS QUERY.
      * This is the `success_url` Polar sends the browser to when the embed is
      * not used or does not survive, and a path alone loses the step somebody
-     * was on — turning the redirect fallback into the same backwards jump the
+     * was on - turning the redirect fallback into the same backwards jump the
      * embedded path had.
      */
     const result = await startCheckout(
@@ -433,7 +433,7 @@ export function PlanCards({
      * ⚠ NOT OPENED UNTIL POLAR CAN SERVE IT. Polar returns a checkout id before
      * its own page can read that checkout, and in the gap the iframe is a
      * "refused to connect" error rather than a form. The button keeps its
-     * spinner meanwhile — usually well under a second. See
+     * spinner meanwhile - usually well under a second. See
      * `untilCheckoutReadable`.
      */
     if (result.data.id && !(await untilCheckoutReadable(result.data.id))) {
@@ -441,7 +441,7 @@ export function PlanCards({
       toast.error("Checkout is taking a moment to open", {
         description:
           "Our payment provider has not finished preparing it. Nothing was " +
-          "charged — try again in a minute.",
+          "charged - try again in a minute.",
       })
       return
     }
@@ -451,8 +451,8 @@ export function PlanCards({
      * somebody to another domain to pay is the highest-drop-off moment in the
      * product: the URL bar changes, the branding changes, and coming back
      * depends on a redirect surviving. Polar's embed renders their checkout in
-     * an iframe over this page, so the card fields are still theirs — we never
-     * see a card number, and stay in PCI SAQ A — while the page around it stays
+     * an iframe over this page, so the card fields are still theirs - we never
+     * see a card number, and stay in PCI SAQ A - while the page around it stays
      * ours. Verified against the Polar sandbox: a real checkout renders inside
      * an iframe on `localhost:3000`.
      *
@@ -470,7 +470,7 @@ export function PlanCards({
        * DIRECTLY, SO THE WAY OUT EXISTS BEFORE THE IFRAME DOES. The SDK's
        * `create()` resolves only when Polar's page posts `loaded`, and every
        * message that page sends is gated on the `embed_origin` we failed to
-       * set — so it resolved never, and a full-viewport payment form had
+       * set - so it resolved never, and a full-viewport payment form had
        * nothing behind it. The API sends the field now; that module stops the
        * whole class by binding Escape, drawing a close button and starting the
        * status poll without waiting to be told the frame is ready. See
@@ -486,24 +486,24 @@ export function PlanCards({
            * ⚠ LONGER THAN THE DEFAULT, BECAUSE A NAVIGATION HAPPENS UNDER IT.
            * `reportOutcome` replaces the URL and refreshes the tree a moment
            * later, and at Sonner's default the toast was already fading while
-           * the page re-rendered — so the one acknowledgement somebody gets
+           * the page re-rendered - so the one acknowledgement somebody gets
            * for a payment was gone before they could read it. It has to
            * outlive the refresh it triggers.
            */
           toast.success("Payment received", {
-            description: "Setting up your plan — it appears here in a moment.",
+            description: "Setting up your plan - it appears here in a moment.",
           })
           setSubscribed(plan.id)
           onSubscribed?.(plan.id)
           // ⚠ THE BANNER IS THE ACTUAL ANSWER; THE TOAST IS ONLY THE FIRST
           // ACKNOWLEDGEMENT. It polls our own row and says "You're on Pro" when
-          // the entitlement is really there — which a toast cannot, because it
+          // the entitlement is really there - which a toast cannot, because it
           // has already faded by then.
           reportOutcome(result.data.id)
         },
         // ⚠ CLOSED WITHOUT A KNOWN SUCCESS IS NOT THE SAME AS FAILED, AND THE
         // BANNER IS WHAT TELLS THEM APART. It asks our status endpoint, which
-        // asks Polar — so a declined card says so, an expired checkout says so,
+        // asks Polar - so a declined card says so, an expired checkout says so,
         // and a payment that went through while the modal was being closed is
         // still reported as the success it was.
         onClose: () => reportOutcome(result.data.id),
@@ -540,7 +540,7 @@ export function PlanCards({
       {plans.map((plan) => {
         const isCurrent = plan.id === currentPlanId
         // ⚠ RANK, NOT PRICE OR NAME. `core.plans.rank` exists precisely so an
-        // upgrade can be told from a downgrade without parsing a plan id — see
+        // upgrade can be told from a downgrade without parsing a plan id - see
         // migration 0025, which added it because an in-progress upgrade was
         // being read as a downgrade and deferring a charge.
         const isUpgrade = current !== null && plan.rank > current.rank
@@ -557,7 +557,7 @@ export function PlanCards({
          * ⚠ "Subscribed" IS NOT ONLY ABOUT THIS VISIT. Somebody who paid last
          * week and reopened set-up saw "Continue on Pro" on a plan they are
          * already subscribed to, and the footer still offered to let them
-         * come back later — a step presented as outstanding when it was
+         * come back later - a step presented as outstanding when it was
          * done. The state belongs to the workspace, not to the session that
          * produced it.
          *
@@ -569,7 +569,7 @@ export function PlanCards({
          * ⚠ BUT NEVER WHILE A CANCELLATION IS IN FLIGHT, AND LEAVING THAT
          * OUT BROKE THE WAY BACK. Polar keeps a cancelling subscription
          * `active` until the period ends, so `onPaidPlan` is still true the
-         * moment after somebody cancels — and this card went on saying
+         * moment after somebody cancels - and this card went on saying
          * "Subscribed", disabled and green, over a subscription that was
          * expiring. It hid the one control that undoes it.
          */
@@ -617,7 +617,7 @@ export function PlanCards({
               /*
                * ⚠ "Subscribed" IS NOT DISABLED-LOOKING, THOUGH IT IS
                * DISABLED. A confirmation at half opacity reads as a control
-               * that is unavailable rather than as a thing that happened —
+               * that is unavailable rather than as a thing that happened -
                * and this is the one moment in the flow somebody most wants
                * to be told it worked. The opacity is restored and the
                * surface takes the success colour the tick already carries.
@@ -637,8 +637,8 @@ export function PlanCards({
                       : "outline"
               }
               // ⚠ ALREADY-CANCELLING DISABLES THE FREE CARD RATHER THAN HIDING
-              // IT. There is nothing left to ask for — the subscription ends on
-              // its own — and a live button would send a second cancel that
+              // IT. There is nothing left to ask for - the subscription ends on
+              // its own - and a live button would send a second cancel that
               // Polar treats as a no-op, which reads as the first one having
               // failed.
               disabled={
@@ -686,7 +686,7 @@ export function PlanCards({
             {/*
              * ⚠ THE DATE IS THE MESSAGE, EXACTLY AS IT IS FOR A CANCELLATION.
              * "Scheduled" on its own invites the question this is supposed to
-             * answer — when, and what happens in the meantime.
+             * answer - when, and what happens in the meantime.
              */}
             {scheduled && (
               <p className="mt-2 text-xs text-muted-foreground">
@@ -726,12 +726,12 @@ export function PlanCards({
  * card was wrong in a way that mattered: it does not move somebody to a cheaper
  * plan, it ends their subscription, and the two have different consequences and
  * different timing. Naming it correctly is most of the fix for "there is
- * nowhere to downgrade or cancel" — the path existed and did not say so.
+ * nowhere to downgrade or cancel" - the path existed and did not say so.
  */
 function label(state: {
   /**
    * ⚠ FIRST, AND IT OUTRANKS EVERY OTHER STATE. Where staying put is an
-   * action — the end of onboarding — the card must say what pressing it does.
+   * action - the end of onboarding - the card must say what pressing it does.
    * "Current plan" is a label for a control nobody can press.
    */
   keepLabel: string | null
@@ -754,8 +754,8 @@ function label(state: {
     /*
      * ⚠ "Downgrade", NOT "Cancel subscription", AND THAT IS A REVERSAL OF
      * WHAT THE NOTE ABOVE THIS FUNCTION ARGUES FOR. The argument still
-     * stands on the facts — moving to free ENDS the subscription rather than
-     * moving between paid plans — but it was reversed deliberately: the free
+     * stands on the facts - moving to free ENDS the subscription rather than
+     * moving between paid plans - but it was reversed deliberately: the free
      * card sits in a row of three identical cards whose other two say
      * "Upgrade" and "Downgrade", and the odd one out read as a different
      * kind of control rather than the same control pointing down.

@@ -13,7 +13,7 @@ const GROW: Transition = { type: "spring", stiffness: 420, damping: 38, mass: 1 
  * ⚠ THE SAME FIX THE FLOATING FIELD USES FOR ITS HINT, FOR ANY TEXT THAT CAN
  * CHANGE FROM ONE LINE TO SEVERAL. Swapping a short sentence for a long one
  * adds its extra lines in one frame and shoves everything below down in the
- * same frame — a jump. The content is measured and the box around it springs
+ * same frame - a jump. The content is measured and the box around it springs
  * to that height, so what is below slides, both ways.
  *
  * ⚠ `null` UNTIL FIRST MEASURED, read as "auto", so the first paint lays out

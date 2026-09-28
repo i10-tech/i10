@@ -13,7 +13,7 @@ import { Spinner } from "./spinner"
  * ⚠ THE POINT IS THAT THE ANSWER APPEARS WHERE THE QUESTION WAS ASKED. The
  * pattern this replaces is: press a button, the button spins, the button goes
  * back to normal, and a toast slides in from a corner of the screen the eye is
- * not on. That works — it is what the console does everywhere — but it splits
+ * not on. That works - it is what the console does everywhere - but it splits
  * one interaction across two places, and for a fast, self-explanatory outcome
  * ("copied", "verified", "saved") the toast is a notification about something
  * the person is already looking at.
@@ -21,13 +21,13 @@ import { Spinner } from "./spinner"
  * ⚠ IT DOES NOT REPLACE THE TOAST FOR ANYTHING THAT NEEDS EXPLAINING. A tick
  * inside a button can say "that worked". It cannot say "the records have not
  * propagated yet, which is normal for the first few minutes and can take up to
- * 72 hours" — and the moment an outcome needs a sentence, it needs the toast.
+ * 72 hours" - and the moment an outcome needs a sentence, it needs the toast.
  * So `done` and `failed` here are a SECOND channel for the one-word version,
  * not a reason to stop describing what happened. See lib/toast.ts.
  *
  * ⚠ AND IT REVERTS ITSELF. A button frozen on a tick is a button nobody can
  * tell is still pressable, and the state it is reporting goes stale within
- * seconds — the tick means "that call succeeded", not "this is verified".
+ * seconds - the tick means "that call succeeded", not "this is verified".
  * Reverting is what keeps it an ANNOUNCEMENT rather than a status.
  */
 
@@ -38,14 +38,14 @@ export type ActionState = "idle" | "pending" | "done" | "failed"
  * DIFFERENT ANIMATIONS ON PURPOSE. "Verify" to "Checking…" is a real change of
  * size, and a button that snaps between widths mid-interaction shoves whatever
  * is beside it sideways under the cursor. Springing the width and fading the
- * label means the box grows smoothly while the words swap inside it — the
+ * label means the box grows smoothly while the words swap inside it - the
  * layout move is the thing you feel, the text change is the thing you read.
  */
 const BOX: Transition = { type: "spring", stiffness: 500, damping: 42, mass: 1 }
 
 /**
  * ⚠ FAST, AND FASTER OUT THAN IN. The two labels overlap for a moment
- * regardless — they occupy the same grid cell — so a slow crossfade renders
+ * regardless - they occupy the same grid cell - so a slow crossfade renders
  * both at half opacity, which reads as a rendering fault rather than as a
  * transition.
  */
@@ -76,7 +76,7 @@ export function ActionButton({
 }: Omit<React.ComponentProps<"button">, "children"> &
   React.ComponentProps<typeof buttonVariants> & {
     state: ActionState
-    /** The resting content — icon and label, exactly as for `<Button>`. */
+    /** The resting content - icon and label, exactly as for `<Button>`. */
     children: React.ReactNode
     pendingLabel: string
     doneLabel?: string
@@ -94,7 +94,7 @@ export function ActionButton({
    * ⚠ THE TIMER IS AN EFFECT AND IS CANCELLED ON EVERY STATE CHANGE, which is
    * what stops a second press being reverted by the FIRST press's timer.
    * Without the cleanup, pressing twice inside the window schedules two
-   * resets — and the second one fires while the second call is still pending,
+   * resets - and the second one fires while the second call is still pending,
    * so the button silently drops back to idle mid-flight.
    */
   React.useEffect(() => {
@@ -108,7 +108,7 @@ export function ActionButton({
   const content =
     state === "pending" ? (
       <>
-        {/* ⚠ `aria-hidden` — the label beside it already says "Checking…", and
+        {/* ⚠ `aria-hidden` - the label beside it already says "Checking…", and
             the Spinner ships with `role="status"`. Both on means a screen
             reader announces the same thing twice. */}
         <Spinner aria-hidden="true" aria-label={undefined} />
@@ -119,8 +119,8 @@ export function ActionButton({
         {/*
          * ⚠ THE TICK IS THE ONE THING IN THE BUTTON THAT TAKES THE SUCCESS
          * COLOUR, AND IT ARRIVES ON A SPRING. It is the same mark, in the same
-         * green, that a field shows when it has been accepted — see the
-         * `data-outcome` note in floating-field — so a form that worked reads as
+         * green, that a field shows when it has been accepted - see the
+         * `data-outcome` note in floating-field - so a form that worked reads as
          * one event across the box and the button rather than two. The pop is a
          * scale from 60% with `--ease-spring`'s few-percent overshoot: felt as a
          * click landing, not watched as an animation.
@@ -161,7 +161,7 @@ export function ActionButton({
       /*
        * ⚠ `polite`, ON THE BUTTON ITSELF. The outcome replaces the button's own
        * accessible name, so without a live region a screen reader user gets no
-       * announcement at all — the name simply becomes something else the next
+       * announcement at all - the name simply becomes something else the next
        * time they land on it.
        */
       aria-live="polite"
@@ -170,7 +170,7 @@ export function ActionButton({
       {/*
        * ⚠ `mode="popLayout"` AND A GRID, TOGETHER. `popLayout` takes the
        * outgoing label out of flow so the button measures only the incoming
-       * one — otherwise the width springs to fit BOTH and then shrinks. The
+       * one - otherwise the width springs to fit BOTH and then shrinks. The
        * single-cell grid is what keeps them stacked while they overlap.
        */}
       <AnimatePresence mode="popLayout" initial={false}>

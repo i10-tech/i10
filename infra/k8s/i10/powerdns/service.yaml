@@ -3,7 +3,7 @@
 # ⚠ THE DNS PORTS ARE DELIBERATELY NOT HERE, for the same reason Stalwart's mail
 # ports are not in its Service. On k3s a `type: LoadBalancer` is served by
 # klipper-lb, which DNATs twice, re-enters the host on a NodePort and
-# MASQUERADEs — so the nameserver would see the node as the source of every
+# MASQUERADEs - so the nameserver would see the node as the source of every
 # query in the world. The container claims :53 on the host directly; see the
 # note on `ports:` in deployment.yaml.
 #

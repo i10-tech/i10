@@ -9,14 +9,14 @@ import { abortPendingWebAuthn, installAbortableWebAuthn } from "../app/_lib/weba
  * page arms one on mount (conditional mediation, the passkey offered inside the
  * email field's autofill menu) and it stays pending for the life of the
  * document. Since sign-in became the only door, the sign-up runs in that SAME
- * document — so `createPasskey()` four steps later met
+ * document - so `createPasskey()` four steps later met
  * `OperationError: A request is already pending.`, which clerk-js does not
  * translate and which therefore surfaced as "we could not add a passkey on this
  * device", with no prompt ever shown.
  *
- * ⚠ NO DOM IS NEEDED AND NONE IS USED. Everything here is `globalThis` — the
+ * ⚠ NO DOM IS NEEDED AND NONE IS USED. Everything here is `globalThis` - the
  * Clerk singleton is a property on it and `navigator.credentials` is reached
- * through it — which matters because this repo has no DOM test environment and
+ * through it - which matters because this repo has no DOM test environment and
  * adding one to cover three functions would be the larger change.
  */
 
@@ -170,7 +170,7 @@ describe("releasing the pending request", () => {
    * ⚠ THE CODE HAS TO SURVIVE IN THE TEXT, because the caller rewraps whatever
    * we return as a generic `passkey_retrieval_failed` and keeps only
    * `.message`. A cancellation that loses its code becomes a failure, and
-   * somebody who pressed Cancel is told their passkey did not work — which is
+   * somebody who pressed Cancel is told their passkey did not work - which is
    * the bug `_lib/passkey.ts` exists to prevent, reintroduced from the far end.
    */
   it("carries the mapped code inside the message an abort produces", async () => {

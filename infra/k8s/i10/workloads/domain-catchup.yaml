@@ -7,14 +7,14 @@
 # ⚠ WHY THIS EXISTS, AND IT IS NOT THE SAME BUG AS domain-recheck.yaml. That job
 # re-proves domains that are ALREADY verified; its selector,
 # `core.domains_due_recheck`, reads `WHERE status = 'verified'`. A domain that
-# has not got there yet appears in NO background job at all — so it was read
+# has not got there yet appears in NO background job at all - so it was read
 # exactly once, by whoever pressed Verify, and then never again. SES verifies a
 # DKIM identity on its own schedule and announces it to nobody.
 #
 # ⚠ THE VISIBLE SHAPE OF THAT BUG WAS A CUSTOMER SENDING REAL MAIL FROM A DOMAIN
 # THE DASHBOARD CALLED PENDING. SES had verified it, so SES accepted the send and
 # delivered it; our row still said `pending` and would have said so for ever. The
-# mail working was never the problem — being unable to say so was, and it becomes
+# mail working was never the problem - being unable to say so was, and it becomes
 # a great deal worse once anything REFUSES a send on the strength of that column.
 # `send/accept.ts` now does exactly that, which makes this job a precondition for
 # it rather than a nicety.
@@ -22,7 +22,7 @@
 # ⚠ EVERY MINUTE, BECAUSE THE READER IS A PERSON WAITING. The re-check runs daily
 # because it asks a question about domains that are fine. This one is answering
 # "has it gone green yet" for somebody who set a domain up ten minutes ago, and
-# the console's own poll gives up after about a minute — so beyond that, this
+# the console's own poll gives up after about a minute - so beyond that, this
 # schedule IS how long they wait.
 #
 # ⚠ AND THE SCHEDULE IS NOT WHAT LIMITS SES. `staleMs` inside the sweep decides
@@ -33,8 +33,8 @@
 # which usually does one indexed read and exits.
 #
 # ⚠ AND IT COSTS ALMOST NOTHING WHEN THERE IS NOTHING TO DO. The selector is
-# bounded by a staleness window AND a seven-day horizon — SES abandons DKIM
-# verification after 72 hours — so a deployment with no domains mid-setup does
+# bounded by a staleness window AND a seven-day horizon - SES abandons DKIM
+# verification after 72 hours - so a deployment with no domains mid-setup does
 # one indexed read and exits.
 ---
 apiVersion: batch/v1
@@ -49,7 +49,7 @@ spec:
   # working and the alerting wrong.
   schedule: "*/1 * * * *"
   # ⚠ NEVER TWO AT ONCE. Two passes would ask SES about the same domains in the
-  # same window — harmless, because each write is idempotent, and pointless.
+  # same window - harmless, because each write is idempotent, and pointless.
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   # Failed runs kept longer than successful ones: the check-in says a run failed,
@@ -63,11 +63,11 @@ spec:
     spec:
       # One attempt per slot. Every write this job makes is idempotent and the
       # next slot is a minute away, so an immediate retry only compresses the
-      # same failure — a throttled SES, most likely — into a tighter loop.
+      # same failure - a throttled SES, most likely - into a tighter loop.
       backoffLimit: 0
       # ⚠ UNDER THE ONE-MINUTE INTERVAL, AND THAT BOUND IS WHY THE BATCH IS 100.
       # A pass that hangs must be killed before the next one is due, or `Forbid`
-      # turns one stuck pod into a catch-up that never runs again — and a killed
+      # turns one stuck pod into a catch-up that never runs again - and a killed
       # run sends no check-in, so Sentry reports it as missed rather than as
       # nothing at all. A backlog is not lost either way: the selector orders
       # oldest-first, so the next minute resumes where this one stopped.
@@ -84,7 +84,7 @@ spec:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }
               env:
-                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # ⚠ `i10_api`, NOT THE OWNER - the same rule as everywhere else.
                 # This pass reaches across every tenant, and it does it through
                 # one narrow SECURITY DEFINER function
                 # (`core.domains_awaiting_provider`) rather than by holding a

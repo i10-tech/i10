@@ -3,7 +3,7 @@
  *
  * ⚠ IT IS A COMPONENT BECAUSE IT APPEARS ELEVEN TIMES AND HAS TO BE IDENTICAL
  * IN ALL OF THEM. Every step of the sign-up flow, both stages of sign-in, the
- * passkey page and the second-factor page open with the same shape — and the
+ * passkey page and the second-factor page open with the same shape - and the
  * whole argument for stepping a form is that the container stays put while its
  * contents change. A heading that is `text-2xl` on one step and `text-xl` on
  * the next makes the panel appear to resize for no reason, which is exactly the

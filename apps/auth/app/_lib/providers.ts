@@ -4,7 +4,7 @@ import { isAppleUserAgent } from "./apple"
 import { clerkEnvironment } from "./environment"
 
 /**
- * Which SSO buttons to draw — asked of Clerk, not hard-coded here.
+ * Which SSO buttons to draw - asked of Clerk, not hard-coded here.
  *
  * ⚠ THE LIST USED TO BE A CONSTANT IN THE COMPONENT, AND THAT IS HOW WE SHIPPED
  * A "Continue with Apple" BUTTON FOR A PROVIDER THE INSTANCE HAD NEVER HAD.
@@ -12,7 +12,7 @@ import { clerkEnvironment } from "./environment"
  * configured; a literal in our source is a second copy of that answer, and the
  * two drift the moment somebody adds or removes a connection in the dashboard.
  * Reading it means adding a provider in Clerk is the whole of adding a provider
- * — no deploy, no code change.
+ * - no deploy, no code change.
  *
  * ⚠ IT IS FETCHED ON THE SERVER, WHICH IS WHAT KEEPS THE FIRST PAINT HONEST.
  * Deciding this in the browser would draw the buttons we guessed at and then
@@ -20,20 +20,20 @@ import { clerkEnvironment } from "./environment"
  * is reaching for one. Both pages are `force-dynamic` already.
  *
  * ⚠ THE ENDPOINT NEEDS NO CREDENTIALS. It is the same document clerk-js fetches
- * from the browser on every page load, and it is public by design — verified by
+ * from the browser on every page load, and it is public by design - verified by
  * fetching it with a bare curl and no cookie. So this needs no secret and no
  * new environment variable.
  */
 export interface SsoProvider {
   strategy: SsoStrategy
-  /** Clerk's own display name, which becomes the button's label — "GitHub". */
+  /** Clerk's own display name, which becomes the button's label - "GitHub". */
   name: string
 }
 
 /**
  * ⚠ APPLE IS GATED TWICE, AND BOTH GATES ARE NEEDED. Clerk has to have the
  * connection (or the button cannot work at all) AND the person has to be on
- * Apple hardware (or it is noise) — see _lib/apple.ts. Neither condition
+ * Apple hardware (or it is noise) - see _lib/apple.ts. Neither condition
  * implies the other.
  */
 const APPLE: string = "oauth_apple"

@@ -21,7 +21,7 @@ export const metadata: Metadata = { title: "Suppressions" }
  *
  * ⚠ THIS LIST PROTECTS THE ACCOUNT, NOT THE RECIPIENT, AND THE DISTINCTION
  * MATTERS WHEN SOMEBODY ASKS TO REMOVE AN ENTRY. Continuing to send to an
- * address that hard-bounced is the fastest way to lose a sending reputation —
+ * address that hard-bounced is the fastest way to lose a sending reputation -
  * every attempt is counted against the account by the receiving networks. An
  * address here is not being punished; it is being skipped so the rest of the
  * mail keeps arriving.

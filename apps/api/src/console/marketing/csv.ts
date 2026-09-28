@@ -2,7 +2,7 @@
  * Reading somebody else's contacts export.
  *
  * ⚠ THIS IS A PARSER FOR FILES WE DID NOT WRITE, SO IT IS FORGIVING IN EXACTLY
- * THE WAYS REAL EXPORTS ARE MALFORMED — a byte-order mark from Excel, CRLF line
+ * THE WAYS REAL EXPORTS ARE MALFORMED - a byte-order mark from Excel, CRLF line
  * endings, a quoted field containing a comma or a newline, the same address
  * twice, and four different spellings of the email column. Every one of those
  * is a file somebody will actually upload, and refusing it means telling a
@@ -24,7 +24,7 @@
  *
  * ⚠ AND IT IS DELIBERATELY NOT A CSV LIBRARY. The API has no CSV dependency and
  * adding one to read a five-column file is a supply-chain surface for fifty
- * lines of code. What it does NOT handle is a stream — the whole file is in
+ * lines of code. What it does NOT handle is a stream - the whole file is in
  * memory, which is why the route caps the upload size rather than letting
  * somebody post a gigabyte.
  */
@@ -45,7 +45,7 @@ export function parseContactCsv(input: string): {
   // ⚠ SEVERAL SPELLINGS PER COLUMN, BECAUSE EVERY TOOL EXPORTS A DIFFERENT ONE.
   // Mailchimp writes "Email Address", HubSpot writes "Email", a hand-made sheet
   // writes "e-mail". Accepting only one would make the feature useless for the
-  // exact case it exists for — moving off somebody else's product.
+  // exact case it exists for - moving off somebody else's product.
   const emailIdx = findColumn(header, ["email", "email address", "e-mail", "mail"])
   const firstIdx = findColumn(header, [
     "first name",
@@ -83,8 +83,8 @@ export function parseContactCsv(input: string): {
     /*
      * ⚠ DEDUPED WITHIN THE FILE ITSELF, AND `onConflictDoUpdate` CANNOT DO IT
      * FOR US. Postgres refuses a single INSERT whose own VALUES list hits the
-     * same unique key twice — "ON CONFLICT DO UPDATE command cannot affect row a
-     * second time" — so a file containing one address twice would fail the whole
+     * same unique key twice - "ON CONFLICT DO UPDATE command cannot affect row a
+     * second time" - so a file containing one address twice would fail the whole
      * chunk rather than skip a row. Duplicates inside a CSV are common enough
      * that this is a correctness requirement, not a nicety.
      */
@@ -99,7 +99,7 @@ export function parseContactCsv(input: string): {
      * `POST /contact-properties` ENFORCES. It is the shape the merge-tag syntax
      * can address, so a column called `Order Total` or `price(£)` produces a
      * property that is stored, shown in the contact drawer, and can never be
-     * referenced from a template — a field that silently does nothing, created
+     * referenced from a template - a field that silently does nothing, created
      * by the one path that did not check. Importing is also where it is most
      * likely to happen, because the names come from somebody else's export.
      *
@@ -148,7 +148,7 @@ function findColumn(header: string[], names: string[]): number {
 }
 
 /**
- * ⚠ NOT A VALIDATOR — A FILTER. The only fully correct check for an address is
+ * ⚠ NOT A VALIDATOR - A FILTER. The only fully correct check for an address is
  * delivering to it, and every regex that claims otherwise rejects somebody's
  * real address. This rejects what is definitely not an address (no `@`, no dot
  * after it, whitespace) and lets the rest through to be suppressed by a bounce
@@ -171,7 +171,7 @@ function parseCsv(input: string): string[][] {
   let inQuotes = false
 
   // ⚠ THE BOM IS STRIPPED. Excel writes UTF-8 with a byte order mark, so the
-  // first header becomes " email" and the email column is never found —
+  // first header becomes " email" and the email column is never found -
   // for a file that looks completely normal in every editor.
   const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input
 

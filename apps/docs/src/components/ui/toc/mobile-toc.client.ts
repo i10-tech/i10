@@ -1,11 +1,11 @@
 /**
- * Mobile TOC — keeps the "jump to section" <select> in sync with the page.
+ * Mobile TOC - keeps the "jump to section" <select> in sync with the page.
  *
  *   - select → page: on change, scroll to the chosen heading and suppress the
  *     observer briefly so the value doesn't flicker while the page scrolls to
  *     the target.
  *   - page → select: an IntersectionObserver mirrors the active heading back
- *     into the select value — the topmost heading inside the reading band, or
+ *     into the select value - the topmost heading inside the reading band, or
  *     the first/last heading clamped by scroll position when none intersect.
  *
  * Teardown via AbortController for view transitions; a persistent in-band set
@@ -92,7 +92,7 @@ function initMobileToc(root: HTMLElement): () => void {
       return
     }
 
-    // Nothing in the band — clamp to the first or last heading based on where
+    // Nothing in the band - clamp to the first or last heading based on where
     // the boundary headings sit relative to the band; otherwise keep the
     // current value (we're mid-section between two headings).
     const bandTop = window.innerHeight * BAND_TOP

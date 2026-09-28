@@ -7,7 +7,7 @@
 # that is already taken surfaces as `EADDRINUSE` buried between two successful
 # builds, attributed to whichever app lost the race rather than to whatever is
 # actually holding the port. The usual cause is a previous `bun run dev` that
-# was disowned rather than stopped — its servers are still up, still serving
+# was disowned rather than stopped - its servers are still up, still serving
 # stale code, and the new run half-starts on top of them.
 #
 # ⚠ AND IT FAILS RATHER THAN KILLING ANYTHING. A stray `next-server` and a
@@ -35,7 +35,7 @@ for i in "${!PORTS[@]}"; do
   pid="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
   [ -n "$pid" ] || continue
   command="$(ps -o comm= -p "$pid" 2>/dev/null | sed 's|.*/||' || echo '?')"
-  bad "port $port (${OWNERS[$i]}) is already in use by pid $pid — $command"
+  bad "port $port (${OWNERS[$i]}) is already in use by pid $pid - $command"
   held+=("$pid")
 done
 
@@ -47,7 +47,7 @@ if [ ${#held[@]} -gt 0 ]; then
 fi
 
 # ⚠ A LISTENING SOCKET, NOT `docker compose ps`. A container can be up and its
-# service still refusing connections — postgres takes a moment to accept after
+# service still refusing connections - postgres takes a moment to accept after
 # the container reports running, and that window is exactly when somebody runs
 # this. Opening the socket is the thing the apps are about to do anyway.
 reachable() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
@@ -67,8 +67,8 @@ fi
 # ⚠ A WARNING RATHER THAN A FAILURE, BECAUSE BOTH WAYS OF FILLING THE
 # ENVIRONMENT ARE SUPPORTED. Doppler exports into this process, so the variable
 # is visible here; a `.env.development.local` is read by Next itself and is not,
-# so its absence here proves nothing. Running with neither is legitimate — the
-# marketing site and the docs need no identity provider — it just means the
+# so its absence here proves nothing. Running with neither is legitimate - the
+# marketing site and the docs need no identity provider - it just means the
 # console will render signed-out rather than say why.
 if [ -z "${CLERK_PUBLISHABLE_KEY:-}" ] && [ ! -f "$(dirname "$0")/../.env.development.local" ]; then
   note "CLERK_PUBLISHABLE_KEY is not set and there is no .env.development.local."

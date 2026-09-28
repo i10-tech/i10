@@ -2,7 +2,7 @@
 #
 # ⚠ THE HOSTNAMES ARE WHY THIS EXISTS. Signing in on one origin and landing on
 # another is the flow this product is built around, and `localhost:3000` versus
-# `localhost:3004` is not that flow — it is one origin with two ports, where
+# `localhost:3004` is not that flow - it is one origin with two ports, where
 # cookies, `SameSite`, `authorizedParties` and Clerk's satellite handling all
 # behave differently from production. Every bug in that area is invisible until
 # there are two names.
@@ -38,7 +38,7 @@ dash.i10.localhost {
 	reverse_proxy host.docker.internal:3000
 }
 
-# The auth app — sign-in, sign-up, the flows Clerk renders.
+# The auth app - sign-in, sign-up, the flows Clerk renders.
 auth.i10.localhost {
 	tls internal
 	reverse_proxy host.docker.internal:3004
@@ -48,7 +48,7 @@ auth.i10.localhost {
 api.i10.localhost {
 	tls internal
 	# ⚠ A LONGER TIMEOUT THAN THE DEFAULT, because a request that hits a
-	# `bun --watch` restart otherwise reports 502 — which reads as a crash in
+	# `bun --watch` restart otherwise reports 502 - which reads as a crash in
 	# the handler rather than as the file you just saved.
 	reverse_proxy host.docker.internal:3001 {
 		transport http {

@@ -9,7 +9,7 @@ import type { NormalisedEvent, Suppression } from "./events.js"
  * WITHOUT IT A DIRECT-ROUTED MESSAGE STOPS AT `sent` FOREVER.
  * `core.message_events` was written exclusively by the SES ingest, so a customer
  * watching webhooks saw SES-routed mail progress and direct-routed mail go
- * quiet — the one difference in the product that the per-domain route lever is
+ * quiet - the one difference in the product that the per-domain route lever is
  * supposed to make invisible.
  *
  * ⚠ A WEBHOOK FROM OUR OWN MTA, NOT A PARSED DSN, AND THAT IS A BETTER DEAL
@@ -18,13 +18,13 @@ import type { NormalisedEvent, Suppression } from "./events.js"
  * for every customer's return path pointing at us, Stalwart configured to accept those
  * domains, a mailbox to read, and an RFC 3464 `multipart/report` parser. None of
  * that exists, and none of it is needed for the outcomes Stalwart itself
- * observes — it is the one attempting delivery, so it knows the answer before
+ * observes - it is the one attempting delivery, so it knows the answer before
  * any DSN could be written. It also reports `delivered`, which a DSN never does
  * unless the sender asked for a success notification.
  *
  * ⚠ WHAT THIS DOES NOT COVER IS THE ASYNCHRONOUS BOUNCE. A receiver that
  * answers `250` and only later decides the mailbox is gone sends a DSN to the
- * envelope sender, and the return path's MX is Amazon's — SES requires it, and
+ * envelope sender, and the return path's MX is Amazon's - SES requires it, and
  * both routes share one return path (see `returnPathDomain`). So those bounces
  * go to Amazon and are dropped, and stay invisible for mail we deliver
  * ourselves. That is a decision, not a gap left open: the VERP local part still
@@ -39,14 +39,14 @@ import type { NormalisedEvent, Suppression } from "./events.js"
  * the mistake that looks right from inside this codebase. Stalwart is not Svix:
  * its source does `hmac::Key::new(HMAC_SHA256, settings.key.as_bytes())` over
  * the configured string exactly as written. Reusing `decodeSecret` here would
- * reject every genuine notification, and the symptom — a 403 on a signature that
- * is demonstrably correct — sends you looking at the wrong half.
+ * reject every genuine notification, and the symptom - a 403 on a signature that
+ * is demonstrably correct - sends you looking at the wrong half.
  *
  * ⚠ AND IT SIGNS THE RAW BODY, WITH NO TIMESTAMP AND NO ID IN THE PREIMAGE.
  * `hmac::sign(&key, body.as_bytes())`, base64 standard, in `X-Signature`. That
  * means the signature is REPLAYABLE: anyone who captures one request can post it
  * again forever, and nothing in the scheme expires. The dedupe below is the
- * mitigation and is load-bearing rather than an optimisation — a replayed batch
+ * mitigation and is load-bearing rather than an optimisation - a replayed batch
  * must be a no-op, not a second round of customer webhooks.
  */
 export function verifyStalwartSignature(
@@ -65,7 +65,7 @@ export function verifyStalwartSignature(
     return false
   }
 
-  // ⚠ CONSTANT TIME, AND THE LENGTH GUARD IS NOT OPTIONAL — `timingSafeEqual`
+  // ⚠ CONSTANT TIME, AND THE LENGTH GUARD IS NOT OPTIONAL - `timingSafeEqual`
   // throws on a mismatch rather than returning false. The length itself is not
   // a secret: a SHA-256 tag is always 32 bytes.
   return given.length === expected.length && timingSafeEqual(given, expected)
@@ -86,7 +86,7 @@ export interface StalwartEventBatch {
 /**
  * ⚠ EVERY EVENT WE ACT ON, AND NOTHING ELSE. Stalwart emits hundreds, its
  * webhook takes an explicit include list with no wildcards, and this map is the
- * other half of that list — see `plan.ndjson`. An event arriving that is not
+ * other half of that list - see `plan.ndjson`. An event arriving that is not
  * here is ignored rather than an error, for the same reason the SES ingest
  * ignores `Open`: somebody will widen the list in the admin UI to see what it
  * does, and that must not make this endpoint fail every batch.
@@ -96,12 +96,12 @@ export interface StalwartEventBatch {
  *
  *   delivery.delivered         250 on DATA for this recipient.
  *   delivery.rcpt-to-rejected  the receiver refused this address. 5xx means it
- *                              does not exist — the only hard bounce here.
+ *                              does not exist - the only hard bounce here.
  *   delivery.message-rejected  the receiver refused the MESSAGE, not the
  *                              address. Never suppresses: the recipient is
  *                              fine and the content or our reputation is not.
  *   delivery.failed            we gave up after the retry window expired. A
- *                              bounce, but NOT evidence the address is dead —
+ *                              bounce, but NOT evidence the address is dead -
  *                              the receiver was down, and suppressing on it
  *                              would stop a customer's mail to somebody whose
  *                              mailbox works.
@@ -117,15 +117,15 @@ const TYPES: Record<string, WebhookEventName> = {
 /**
  * i10's message id, out of the VERP envelope sender.
  *
- * ⚠ THE `from` KEY IS NOT ON THE OUTCOME EVENT — IT ARRIVES FROM THE SPAN, AND
+ * ⚠ THE `from` KEY IS NOT ON THE OUTCOME EVENT - IT ARRIVES FROM THE SPAN, AND
  * THAT IS WHY THIS WORKS AT ALL. `delivery.delivered` carries only
  * `spanId`, `hostname`, `to`, `code`, `details` and `elapsed`; the envelope
  * sender is on `delivery.attempt-start`, which opens the span. Stalwart's
  * collector attaches the open span to every event carrying its id, and the JSON
  * serializer is built `.with_spans()`, so the span's keys are merged into
  * `data`. Read in the source rather than assumed, because the alternative
- * design — correlating outcome events to an earlier `attempt-start` by
- * `queueId` — needs state we would have to keep and expire ourselves.
+ * design - correlating outcome events to an earlier `attempt-start` by
+ * `queueId` - needs state we would have to keep and expire ourselves.
  *
  * ⚠ THE EVENT'S OWN KEY WINS ON A COLLISION, WHICH IS WHAT WE WANT. Both the
  * event and the span define `to`; the serializer inserts the event's first and
@@ -134,7 +134,7 @@ const TYPES: Record<string, WebhookEventName> = {
  */
 export function messageIdFrom(envelopeSender: unknown): string | null {
   if (typeof envelopeSender !== "string") return null
-  // `bounce+<uuid>@<return path>` — see stalwartTransport.
+  // `bounce+<uuid>@<return path>` - see stalwartTransport.
   const match =
     /\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i.exec(
       envelopeSender,
@@ -147,7 +147,7 @@ export function messageIdFrom(envelopeSender: unknown): string | null {
  *
  * ⚠ STALWART'S OWN `id` DOES NOT, AND USING IT WOULD HAVE BEEN THE BUG. It is
  * `{timestamp}{counter}{typeId}`, where the counter is a PROCESS-GLOBAL ATOMIC
- * INCREMENTED AT SERIALISATION TIME — not a property of the event. When a POST
+ * INCREMENTED AT SERIALISATION TIME - not a property of the event. When a POST
  * fails, Stalwart pushes the same events back onto its pending list and a later
  * batch serialises them again, drawing fresh counter values. So the "unique
  * identifier for the event" is a different string every time the same event is
@@ -162,7 +162,7 @@ export function messageIdFrom(envelopeSender: unknown): string | null {
  *
  * ⚠ AND IT IS PREFIXED, BECAUSE THE COLUMN IS SHARED WITH SNS. `source_event_id`
  * holds Amazon's message ids too, and an unprefixed hash could in principle
- * collide with one — which would silently discard a real event as a duplicate.
+ * collide with one - which would silently discard a real event as a duplicate.
  */
 export function sourceEventIdFor(event: StalwartEvent): string {
   const data = event.data ?? {}
@@ -179,7 +179,7 @@ export function sourceEventIdFor(event: StalwartEvent): string {
  * Turns one Stalwart event into the shape the ingest already understands.
  *
  * ⚠ IT PRODUCES THE SAME `NormalisedEvent` THE SES PATH DOES, SO EVERYTHING
- * DOWNSTREAM IS SHARED — the dedupe, the suppression write, the endpoint fan-out
+ * DOWNSTREAM IS SHARED - the dedupe, the suppression write, the endpoint fan-out
  * and the customer's payload shape. Two interpreters, one persistence path: a
  * customer must not be able to tell from a webhook which MTA carried their
  * message, and the surest way to guarantee that is for there to be only one
@@ -223,8 +223,8 @@ export function interpretStalwartEvent(
  * in a different vocabulary.
  *
  * ⚠ AND NOTHING ELSE SUPPRESSES, DELIBERATELY. `delivery.failed` is the retry
- * window expiring — the receiver was unreachable for days, which says nothing
- * about the address — and `delivery.message-rejected` is about the message. A
+ * window expiring - the receiver was unreachable for days, which says nothing
+ * about the address - and `delivery.message-rejected` is about the message. A
  * suppression is permanent and silent from the customer's side, so the bar for
  * writing one is evidence about the ADDRESS.
  *
@@ -249,7 +249,7 @@ function suppressionsFor(
  * ⚠ THE SHAPE IS THE SES PATH'S SHAPE, FIELD FOR FIELD, AND MATCHING IT IS THE
  * POINT. A customer's handler switches on `type` and reads `bounce.type`; if the
  * direct route spelled the same outcome differently, the route would be visible
- * in their integration — and they would have to write two branches for a choice
+ * in their integration - and they would have to write two branches for a choice
  * we made on their behalf.
  *
  * ⚠ `from` AND `subject` ARE NULL RATHER THAN INVENTED. Stalwart's events carry

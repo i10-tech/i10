@@ -5,15 +5,15 @@ import { decodeSecret, matchesAnySignature } from "./signing.js"
  * Verification for Clerk's webhooks, which are delivered through Svix.
  *
  * ⚠ THIS IS AN AUTHENTICATION BOUNDARY, NOT A CHECKSUM. Everything downstream
- * of it writes to the mailbox projection: which addresses exist, and — once
- * billing drives it — which mailboxes accept mail. A forged event could create
+ * of it writes to the mailbox projection: which addresses exist, and - once
+ * billing drives it - which mailboxes accept mail. A forged event could create
  * a mailbox on a domain we host or silence somebody else's. Nothing may reach
  * the projection without passing here.
  *
  * Implemented directly rather than pulling in the `svix` package. The algorithm
  * is fixed and published (Standard Webhooks), it is forty lines, and it sits in
  * the authentication path where a transitive dependency is a liability rather
- * than a convenience. The tests below cover the failure modes that matter —
+ * than a convenience. The tests below cover the failure modes that matter -
  * wrong key, tampered body, replayed timestamp, malformed header.
  */
 
@@ -46,7 +46,7 @@ export function readSvixHeaders(
  * Verifies a webhook signature.
  *
  * `body` must be the EXACT bytes received. Parsing to JSON and re-serialising
- * changes key order and whitespace, and the signature covers the raw text — so
+ * changes key order and whitespace, and the signature covers the raw text - so
  * the route reads the body as text, verifies, and only then parses.
  */
 export function verifySvixSignature(

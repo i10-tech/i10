@@ -7,7 +7,7 @@ import { Loader2Icon } from "lucide-react"
  * ⚠ `role="status"` AND THE LABEL ARE THE COMPONENT, not decoration around it.
  * A bare spinning icon is invisible to a screen reader, so a button that swaps
  * its text for one goes silent at the exact moment it has something to say.
- * Where a button keeps its label — which is the pattern in apps/auth — pass
+ * Where a button keeps its label - which is the pattern in apps/auth - pass
  * `aria-hidden` and let the label carry the meaning instead, so the state is
  * announced once rather than twice.
  */

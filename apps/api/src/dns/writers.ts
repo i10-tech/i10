@@ -8,7 +8,7 @@ import { hetznerWriter } from "./providers/hetzner.js"
  *
  * ⚠ THE REGISTRY DESCRIBES THIRTY-TWO PROVIDERS WITH AN API; THIS IMPLEMENTS
  * THREE, AND THE GAP IS THE POINT OF HAVING TWO LISTS. `@repo/dns-providers`
- * answers "what is this provider and what would it take" — it is documentation
+ * answers "what is this provider and what would it take" - it is documentation
  * with a type, and it is what tells a customer on Namecheap why we cannot help
  * them. This answers "what can we do today". Collapsing them would mean either
  * claiming a capability for twenty-nine providers we have not written, or

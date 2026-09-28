@@ -26,14 +26,14 @@ import type { DnsInspection, Domain } from "@/lib/types"
  * two fieldsets and an advanced section is four decisions presented as one wall.
  *
  * ⚠ SO THE PHASES ASK ONE THING EACH AND EVERY ANSWER NARROWS THE NEXT. Name,
- * then which records, then — and this is the part that changes the shape of the
- * flow — nothing. The third question is not asked at all, because for a provider
+ * then which records, then - and this is the part that changes the shape of the
+ * flow - nothing. The third question is not asked at all, because for a provider
  * we can write to there is only one sensible answer and we should be trying it
  * rather than offering it.
  *
  * ⚠ AUTOMATIC IS ATTEMPTED, NOT OFFERED. A radio button labelled "let us do it"
  * beside one labelled "I'll do it myself" makes somebody choose between a thing
- * they understand and a thing they do not, twenty seconds after signing up —
+ * they understand and a thing they do not, twenty seconds after signing up -
  * and the one they understand is the one that takes an afternoon. Pressing on
  * and falling back is the same outcome with the choice removed.
  *
@@ -64,7 +64,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
    * ⚠ SEPARATE FROM `domain.status` BECAUSE IT KEEPS MOVING AFTER THE SCREEN
    * RENDERS. The records are published within a second or two and Amazon's
    * verification lands whenever it lands, so the honest screen is one that
-   * says "checking" and changes its own mind — not one that picks a sentence
+   * says "checking" and changes its own mind - not one that picks a sentence
    * at render time and leaves somebody to reload the page to find out.
    */
   const [verified, setVerified] = React.useState(false)
@@ -74,8 +74,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
    *
    * ⚠ THE SAME TREATMENT `/domains/new` GIVES IT, AND IT USED TO BE A TOAST
    * HERE ON THE ONE SCREEN A NEW CUSTOMER IS GUARANTEED TO SEE. The API owns
-   * rules the console cannot check — `i10.tech` is ours, `acme.com` is
-   * already in this workspace — and `answered.refusal` below catches those as
+   * rules the console cannot check - `i10.tech` is ours, `acme.com` is
+   * already in this workspace - and `answered.refusal` below catches those as
    * they are typed. This is the backstop for the race that check cannot
    * close: a name that became taken between the check and the press goes back
    * to the name with the reason under it, not to a toast on the mode screen.
@@ -94,7 +94,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
   const looking = plausible && answered?.domain !== candidate
   const current = answered?.domain === candidate ? answered.inspection : null
   /*
-   * ⚠ ONLY WHILE THE BOX STILL HOLDS THE NAME IT WAS ABOUT — typed-time check
+   * ⚠ ONLY WHILE THE BOX STILL HOLDS THE NAME IT WAS ABOUT - typed-time check
    * first, the create's own refusal as the backstop. Editing clears the red.
    */
   const refusedHere =
@@ -102,8 +102,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     (refused && candidate === refused.name ? refused.reason : undefined)
   const provider = current?.provider ?? null
 
-  // ⚠ DELEGATION IS DISABLED WHERE THE PROVIDER'S EDITOR HAS NO NS ROW — Wix and
-  // Shopify are the live examples — so the question is not asked there at all.
+  // ⚠ DELEGATION IS DISABLED WHERE THE PROVIDER'S EDITOR HAS NO NS ROW - Wix and
+  // Shopify are the live examples - so the question is not asked there at all.
   const canDelegate = provider === null || provider.nsDelegation
 
   React.useEffect(() => {
@@ -133,7 +133,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
       if (token !== request.current) return
       // A failed lookup is an ANSWER, not an absence: detection is a
       // convenience and must never block somebody adding their domain. A
-      // failed check is "no objection" for the same reason — create decides.
+      // failed check is "no objection" for the same reason - create decides.
       setAnswered({
         domain: candidate,
         inspection: result.ok ? result.data : null,
@@ -146,7 +146,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
   /*
    * ⚠ THERE IS NO "SETTING IT UP" SCREEN ON THIS PATH ANY MORE, AND THE
    * REASON IS THAT IT WAS NOT TRUE. Pressing Delegate for a provider we are
-   * not connected to does exactly one thing — create the row — and then asks
+   * not connected to does exactly one thing - create the row - and then asks
    * the next question; nothing is published, so a screen reading "Publishing
    * records for acme.com" described work that had not started and would not
    * start here.
@@ -171,8 +171,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
       /*
        * ⚠ A REFUSAL OF THE NAME GOES BACK TO THE NAME. Leaving the
        * person on the mode screen with a toast about the domain asked them to
-       * fix something that was no longer on screen. Every other refusal — the
-       * plan is full, the API is down — is not answered by editing the name,
+       * fix something that was no longer on screen. Every other refusal - the
+       * plan is full, the API is down - is not answered by editing the name,
        * and keeps the toast and the mode screen.
        */
       if (refusesTheName(created.name)) {
@@ -210,7 +210,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
   /*
    * ⚠ THE SAME SEQUENCE THE ADD FORM AND THE OAUTH CALLBACK RUN, FROM THE SAME
    * FILE. These three screens are the only ways a domain gets set up, and each
-   * used to publish and check in its own words — so "added and published" here
+   * used to publish and check in its own words - so "added and published" here
    * and "connected and published" there could describe different amounts of
    * work having actually happened. See lib/domain-activation.ts.
    */
@@ -240,12 +240,12 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
        * ⚠ A CHECK THAT DID NOT ANSWER IS NOT THE HAPPY PATH, AND SHOWING THE
        * HAPPY SCREEN FOR IT IS HOW A 500 ON EVERY VERIFY WENT UNNOTICED. The
        * records are published either way, so the fallback screen is the right
-       * one — it shows them, says they are in place, and asks nothing further.
+       * one - it shows them, says they are in place, and asks nothing further.
        */
       if (!outcome.checked) {
         setFallbackReason(
           "The records are published, but the check that follows them did not " +
-            "answer. Nothing here needs doing — these are what we added.",
+            "answer. Nothing here needs doing - these are what we added.",
         )
         setPhase("manual")
         return
@@ -257,7 +257,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     /*
      * ⚠ EVERY FAILURE LANDS HERE, INCLUDING THE 409. A zone with an existing
      * DMARC record needs somebody to agree to its removal, and the screen that
-     * explains and confirms that lives on the domain page — asking for it
+     * explains and confirms that lives on the domain page - asking for it
      * during onboarding would be the most consequential question of the flow
      * asked at the moment somebody understands the least.
      */
@@ -272,7 +272,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
   /*
    * ⚠ THE WATCH LIVES HERE RATHER THAN IN `attempt`, SO THAT LEAVING THE STEP
    * STOPS IT. `attempt` is an event handler and anything it started would
-   * outlive this component — still polling, still trying to set state — after
+   * outlive this component - still polling, still trying to set state - after
    * somebody pressed Continue. Tied to the phase, the abort is the cleanup.
    */
   const watching = phase === "done" && domain !== null && !verified
@@ -300,7 +300,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
         {/*
          * ⚠ THE SAME RULE AS /domains/new, WHICH IT DID NOT HAVE. This is the
          * first domain anybody types into the product and it accepted
-         * `https://acme.com` — creating a domain that can never verify — while
+         * `https://acme.com` - creating a domain that can never verify - while
          * the other box in the product refused it by name.
          */}
         <ValidatedInput
@@ -322,16 +322,16 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
           required="Enter the domain you send from."
           busy={looking}
           adornment={looking ? <Spinner className="size-3.5" /> : undefined}
-          hint="The apex, like acme.com — not a URL and not an address."
+          hint="The apex, like acme.com - not a URL and not an address."
           /*
            * ⚠ ENTER CONTINUES, BECAUSE THE FIELD IS NOT IN A FORM. This step
            * is a `div` with a button, so there is no implicit submit and
-           * Enter did nothing at all — in a one-field screen that reads as
+           * Enter did nothing at all - in a one-field screen that reads as
            * the key being broken rather than as the screen being picky.
            *
            * ⚠ AND IT OBEYS THE SAME CONDITIONS AS THE BUTTON. A name that is
            * not yet plausible, a lookup still in flight, or a name the server
-           * has already refused means Enter does nothing — the same answer the
+           * has already refused means Enter does nothing - the same answer the
            * disabled button gives.
            */
           onKeyDown={(event) => {
@@ -350,7 +350,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
                 DNS hosted by <strong className="font-medium">{provider.name}</strong>
               </>
             ) : (
-              "We could not match your nameservers to a provider we know — that is fine, nothing below depends on it."
+              "We could not match your nameservers to a provider we know - that is fine, nothing below depends on it."
             )}
           </p>
         )}
@@ -401,8 +401,8 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     return (
       /*
        * ⚠ IT NO LONGER GUESSES BETWEEN TWO SENTENCES. This phase is entered
-       * from exactly one place — `attempt`, which is publishing at a
-       * connected provider — so "Publishing" is always the true one. The
+       * from exactly one place - `attempt`, which is publishing at a
+       * connected provider - so "Publishing" is always the true one. The
        * `Adding …` branch it used to fall back to was the copy that showed
        * during the flash this screen no longer has.
        */
@@ -419,13 +419,13 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
     return (
       <Shell
         title={`Let us add the records at ${provider.name}`}
-        blurb={`We only ask for permission to read your zones and edit DNS records — nothing else in your ${provider.name} account.`}
+        blurb={`We only ask for permission to read your zones and edit DNS records - nothing else in your ${provider.name} account.`}
         onBack={() => setPhase("mode")}
       >
         {/*
          * ⚠ IT NAMES WHERE TO COME BACK TO, AND WITHOUT THAT THIS STEP WAS A
          * DEAD END. Connecting is a full navigation to the provider and back
-         * through `/dns/callback/…`, which lives in the console shell — so
+         * through `/dns/callback/…`, which lives in the console shell - so
          * somebody who pressed this landed on a page that knew nothing about
          * the flow they were half-way through. The connection was made and the
          * onboarding was simply gone, which read as the button not working.
@@ -440,7 +440,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
         />
         {/*
          * ⚠ A LINK, NOT A SECOND BUTTON. Somebody who does not want to authorise
-         * anything must not be stuck here — but giving the escape the same
+         * anything must not be stuck here - but giving the escape the same
          * weight as the recommended path turns a clear step back into the
          * choice this flow exists to remove.
          */}
@@ -464,15 +464,15 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
         {/*
          * ⚠ `?? []` BECAUSE A WHITE SCREEN IS THE WORST POSSIBLE ANSWER HERE.
          * `DnsRecords` already says something useful for an empty list, and a
-         * response that arrives without them — a shape we did not expect, a
-         * fixture, a future API change — should cost somebody one unhelpful
+         * response that arrives without them - a shape we did not expect, a
+         * fixture, a future API change - should cost somebody one unhelpful
          * panel rather than the whole dashboard.
          */}
         <DnsRecords records={domain.records ?? []} />
         <div className="flex items-center gap-2">
           <Button onClick={onDone}>Done</Button>
           <span className="text-xs text-muted-foreground">
-            We check them for you — nothing here has to be right this minute.
+            We check them for you - nothing here has to be right this minute.
           </span>
         </div>
       </Shell>
@@ -488,7 +488,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
         blurb={
           verified
             ? `The records are live at ${provider?.name ?? "your provider"} and the domain is verified. Nothing else to do.`
-            : `We published the records at ${provider?.name ?? "your provider"} and proved the domain is yours. We are waiting on Amazon's own check now — it usually lands within a few minutes, and nothing here needs you.`
+            : `We published the records at ${provider?.name ?? "your provider"} and proved the domain is yours. We are waiting on Amazon's own check now - it usually lands within a few minutes, and nothing here needs you.`
         }
       >
         {/*
@@ -541,7 +541,7 @@ function Shell({
 }
 
 /**
- * ⚠ SELECTING IS THE WHOLE INTERACTION — there is no Continue after it. A card
+ * ⚠ SELECTING IS THE WHOLE INTERACTION - there is no Continue after it. A card
  * that only highlights, followed by a button, is two actions for one decision;
  * at this point in the flow the choice IS the commitment.
  */

@@ -17,7 +17,7 @@ export const metadata: Metadata = { title: "Profile" }
  * Your own account: name, email, password, MFA, passkeys and active sessions.
  *
  * ⚠ ALL OF IT IS CLERK'S, AND THAT IS THE CORRECT DIVISION. Identity is Clerk's
- * job in this product — the API verifies Clerk sessions and `authd` delegates
+ * job in this product - the API verifies Clerk sessions and `authd` delegates
  * LDAP binds to Clerk. Building our own password form would mean a second place
  * credentials are handled, which is one more place to get wrong than zero.
  *

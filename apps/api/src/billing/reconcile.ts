@@ -15,7 +15,7 @@ import type { PolarClient } from "./polar.js"
  *
  * ⚠ THIS IS NOT OPTIONAL, AND IT IS NOT A SAFETY NET FOR SLOPPINESS. Attaching
  * plans with `no_billing_changes: true` makes Polar the state of record and
- * our own tables a downstream copy — and the only thing that carries state from the one
+ * our own tables a downstream copy - and the only thing that carries state from the one
  * to the other is a webhook. A webhook lost during a deploy, dropped by a
  * rollout, or 500'd past its retry budget is a customer silently on the wrong
  * plan, in either direction: paying for Pro with free-tier limits, or holding
@@ -23,7 +23,7 @@ import type { PolarClient } from "./polar.js"
  * was told the truth as far as it knew.
  *
  * ⚠ IT READS POLAR, NOT OUR OWN TABLES. The question is "does our record match
- * the payment provider", and our record cannot answer it — it holds whatever we
+ * the payment provider", and our record cannot answer it - it holds whatever we
  * last
  * told it, so comparing the two would only ever confirm our own mistake.
  *
@@ -47,7 +47,7 @@ export interface ReconcileReport {
    *
    * ⚠ TENANTS, NOT SUBSCRIPTIONS, BECAUSE POLAR NEVER DELETES ONE. A customer
    * who has bought twice has two subscriptions in the list forever, and we
-   * hold one row per tenant — so `agreed + repaired + failed` counts decisions
+   * hold one row per tenant - so `agreed + repaired + failed` counts decisions
    * made, and this is the number of them.
    */
   checked: number
@@ -58,8 +58,8 @@ export interface ReconcileReport {
   /**
    * Rows of ours that Polar has no subscription for.
    *
-   * ⚠ REPORTED, NEVER ACTED ON. Polar does not delete subscriptions — a
-   * cancelled one stays in the list with status `canceled` — so a row missing
+   * ⚠ REPORTED, NEVER ACTED ON. Polar does not delete subscriptions - a
+   * cancelled one stays in the list with status `canceled` - so a row missing
    * from it means our data is wrong, or the access token points at a different
    * organisation or the other environment. Downgrading here would mean one
    * mis-scoped token silently strips every paying customer of the plan they
@@ -73,7 +73,7 @@ export interface ReconcileReport {
    *
    * ⚠ THIS USED TO BE A BARE `continue`, WHICH MADE THE BACKSTOP SILENT ABOUT
    * THE ONE THING IT CANNOT BACK UP. The reconciler exists because a webhook
-   * can be lost — but it attributes subscriptions by `customer.external_id`
+   * can be lost - but it attributes subscriptions by `customer.external_id`
    * exactly as the webhook does, so a subscription without one is invisible to
    * both, and skipping it quietly meant a run could report perfect agreement
    * while a paying customer sat on the free plan. It is not `orphaned`: that is
@@ -86,20 +86,20 @@ export interface ReconcileReport {
    * ⚠ THIS USED TO BE A FOREIGN KEY VIOLATION, EVERY THIRTY MINUTES, FOR EVER.
    * Polar keeps `customer.external_id` after the workspace it names is deleted,
    * so a live subscription can point at a tenant that no longer exists. The
-   * loop below read "no row for this tenant" as "a webhook we never received" —
-   * the one case it is built to repair — tried to repair it, and the insert died
+   * loop below read "no row for this tenant" as "a webhook we never received" -
+   * the one case it is built to repair - tried to repair it, and the insert died
    * on `subscriptions_tenant_id_tenants_id_fk`. It counted as `failed`, exited
    * non-zero, and took the Argo Application to Degraded with it. Three tenants
    * were doing this in production.
    *
    * ⚠ IT IS NEITHER `orphaned` NOR `stranded`, WHICH IS WHY IT NEEDED ITS OWN
    * NAME. `orphaned` is a row of ours with no Polar subscription. `stranded` is
-   * a Polar subscription with NO `external_id` — money from somebody we cannot
+   * a Polar subscription with NO `external_id` - money from somebody we cannot
    * identify. This is a Polar subscription whose `external_id` is perfectly
    * well-formed and names a workspace that is gone: we know exactly who it was
    * and there is no longer anybody to grant anything to.
    *
-   * ⚠ AND THE COMMONEST CAUSE IS NOT A DELETED CUSTOMER — IT IS A RE-SIGNUP.
+   * ⚠ AND THE COMMONEST CAUSE IS NOT A DELETED CUSTOMER - IT IS A RE-SIGNUP.
    * See `reassign` in db.ts, which documents the same mechanism from the other
    * end: Polar reuses a returning customer's record and keeps its stale
    * `external_id`, so a brand-new subscription is bound to the tenant id that
@@ -111,7 +111,7 @@ export interface ReconcileReport {
    * ⚠ WHICH MEANS IT CANNOT BE RESOLVED FROM HERE, and must not be guessed at.
    * Re-pointing the Polar customer at the live tenant is a claim about WHICH
    * workspace a payment belongs to, and the only place that is known for
-   * certain is the checkout, which writes the tenant id into metadata itself —
+   * certain is the checkout, which writes the tenant id into metadata itself -
    * that is why `reassign` is set there and nowhere else. A reconciler
    * inferring it from an email address would attach somebody's subscription to
    * the wrong workspace.
@@ -126,8 +126,8 @@ export interface ReconcileReport {
    * Subscriptions Polar and our own table disagree about the owner of.
    *
    * ⚠ THIS WAS A UNIQUE VIOLATION, EVERY THIRTY MINUTES, ALONGSIDE THE FOREIGN
-   * KEY ONE. `polar_subscription_id` is UNIQUE deliberately — two tenants
-   * pointing at one subscription is one payment entitling two accounts — and the
+   * KEY ONE. `polar_subscription_id` is UNIQUE deliberately - two tenants
+   * pointing at one subscription is one payment entitling two accounts - and the
    * reconciler attributed by `customer.external_id` without ever checking who
    * already held the id. When they disagreed the INSERT died on the constraint,
    * was caught as a generic failure, and was retried for ever.
@@ -184,8 +184,8 @@ export async function reconcileSubscriptions(
   const seen = new Set<string>()
 
   // ⚠ ONE SUBSCRIPTION PER TENANT DECIDES, AND CHOOSING WHICH IS NOT
-  // BOOKKEEPING. Polar never deletes a subscription — a cancelled one stays in
-  // the list with status `canceled` forever — so a customer who has bought
+  // BOOKKEEPING. Polar never deletes a subscription - a cancelled one stays in
+  // the list with status `canceled` forever - so a customer who has bought
   // twice appears twice, while `core.subscriptions` holds exactly one row for
   // them. Feeding both to `grants.apply` in list order means the dead one gets
   // its turn at writing the live one's row, and the only thing standing
@@ -195,7 +195,7 @@ export async function reconcileSubscriptions(
   // subscription it has already ended. One such touch, for any reason, and the
   // dead subscription wins.
   //
-  // Observed as noise before it was ever a bug — every run logged an "ignored
+  // Observed as noise before it was ever a bug - every run logged an "ignored
   // an out-of-order subscription event" for the old subscription and counted
   // it as agreement.
   const decidedByTenant = new Map<string, SubscriptionState>()
@@ -238,7 +238,7 @@ export async function reconcileSubscriptions(
     /*
      * ⚠ REPORTED, AND NO LONGER SKIPPED. Polar's `external_id` disagreeing with
      * where the subscription actually lives is the ordinary state of every
-     * customer who has deleted an account and signed up again — the field is
+     * customer who has deleted an account and signed up again - the field is
      * stamped once and immutable, so it names their old workspace for ever.
      * This used to be `contested`, which failed the job and repaired nothing;
      * it is now a count of how many customers carry a stale id, which is worth
@@ -264,7 +264,7 @@ export async function reconcileSubscriptions(
           via: attributed.via,
         },
         "Polar's customer names a different tenant than the one this " +
-          "subscription belongs to — reconciling against ours, because " +
+          "subscription belongs to - reconciling against ours, because " +
           "external_id goes stale on a re-signup and cannot be updated in Polar",
       )
     }
@@ -278,7 +278,7 @@ export async function reconcileSubscriptions(
   /*
    * ⚠ ASKED ONCE FOR THE WHOLE BATCH, AND ASKED BEFORE ANY WRITE. The question
    * is "does this tenant still exist", and the only reason it has to be asked
-   * at all is that a `byTenant` miss means two completely different things — a
+   * at all is that a `byTenant` miss means two completely different things - a
    * lost webhook for a live tenant, which this job repairs, or a deleted
    * workspace, which it cannot. One definer call for every id beats one failed
    * INSERT per dead tenant per run.
@@ -300,14 +300,14 @@ export async function reconcileSubscriptions(
        * ⚠ ONLY WHILE IT STILL ENTITLES SOMETHING, AND WITHOUT THAT THE JOB IS
        * RED FOR EVER OVER A RESOLVED PROBLEM. What makes an unknown tenant
        * worth waking somebody for is that Polar is BILLING for a workspace that
-       * does not exist. Revoke the subscription and that is no longer true —
+       * does not exist. Revoke the subscription and that is no longer true -
        * but Polar never deletes a subscription, so the cancelled one stays in
        * the list permanently, and reporting it on every run means the only way
        * to ever get a green run is to have never had the problem.
        *
        * ⚠ AND A PERMANENTLY RED JOB IS WORSE THAN NO JOB. This one exits
        * non-zero to say "a human must act"; an alert that stays lit after the
-       * human acted is how everybody learns to ignore it — which is the exact
+       * human acted is how everybody learns to ignore it - which is the exact
        * failure `stranded` and `contested` are each written to avoid.
        *
        * Observed 2026-09-21: a dev-environment signup against the SHARED
@@ -322,7 +322,7 @@ export async function reconcileSubscriptions(
             subscriptionId: state.polarSubscriptionId,
           },
           "an ended subscription names a workspace this database does not " +
-            "hold — nothing is being billed and there is nobody to grant to",
+            "hold - nothing is being billed and there is nobody to grant to",
         )
         continue
       }
@@ -338,7 +338,7 @@ export async function reconcileSubscriptions(
           subscriptionId: state.polarSubscriptionId,
           plan: state.entitledPlanId,
         },
-        "Polar is BILLING for a workspace that no longer exists — revoke the " +
+        "Polar is BILLING for a workspace that no longer exists - revoke the " +
           "subscription; the deletion path should have done it",
       )
       continue
@@ -348,7 +348,7 @@ export async function reconcileSubscriptions(
     // No row at all is a webhook we never received. An older `event_at` is one
     // we received out of order or lost. A `granted_plan_id` that disagrees with
     // what the subscription entitles is the row having been written while the
-    // grant failed — the state this whole design is built to survive, and
+    // grant failed - the state this whole design is built to survive, and
     // the one no other check would ever surface.
     const outOfStep =
       !row ||
@@ -396,14 +396,14 @@ export async function reconcileSubscriptions(
   if (report.orphaned.length > 0) {
     deps.log.error(
       { tenants: report.orphaned, polarSubscriptions: polarSubs.length },
-      "subscription rows with no matching Polar subscription — NOT downgraded",
+      "subscription rows with no matching Polar subscription - NOT downgraded",
     )
   }
 
   if (report.stranded.length > 0) {
     deps.log.error(
       { subscriptions: report.stranded },
-      "Polar subscriptions that cannot be attributed to a tenant — nothing " +
+      "Polar subscriptions that cannot be attributed to a tenant - nothing " +
         "will ever grant these; set each customer's external_id",
     )
   }

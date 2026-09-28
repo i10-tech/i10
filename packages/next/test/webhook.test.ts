@@ -22,7 +22,7 @@ describe("the wire format", () => {
   /**
    * ⚠ THE CROSS-PACKAGE CONTRACT, PINNED FROM BOTH SIDES. The sender lives in
    * `apps/api/src/webhooks/signing.ts` and is a separate implementation of this
-   * same format — nothing but this vector holds the two together. The identical
+   * same format - nothing but this vector holds the two together. The identical
    * constants are asserted in `apps/api/test/webhook-signing.test.ts`; change
    * one without the other and a test fails here rather than every customer's
    * endpoint answering 401 in production.
@@ -172,7 +172,7 @@ describe("createWebhookHandler", () => {
   /**
    * ⚠ A MISSING ID IS A 400, NOT A 401. It is signed material now, so its
    * absence means the request cannot be verified at all rather than that it
-   * failed verification — and the distinction is what tells an integrator to
+   * failed verification - and the distinction is what tells an integrator to
    * check their proxy's header stripping instead of rotating a good secret.
    */
   it("400s when only the id is missing", async () => {

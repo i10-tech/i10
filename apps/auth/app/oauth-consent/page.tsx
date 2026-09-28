@@ -3,7 +3,7 @@ import { ConsentForm } from "./consent-form"
 
 export const metadata: Metadata = {
   title: "Authorize · i10",
-  // ⚠ NOT INDEXABLE, for the same reason as the sign-in page — and more so.
+  // ⚠ NOT INDEXABLE, for the same reason as the sign-in page - and more so.
   // This URL carries somebody's live authorization request in its query string.
   robots: { index: false, follow: false },
 }
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic"
  * ⚠ THIS IS i10 ACTING AS AN OAUTH *PROVIDER*, WHICH IS THE OPPOSITE DIRECTION
  * FROM THE REST OF THIS APP. Everywhere else here, i10 is the client and Google
  * or GitHub is the provider. Here some other application is the client and i10
- * is the identity — so nothing on this page has anything to do with the SSO
+ * is the identity - so nothing on this page has anything to do with the SSO
  * buttons on /sign-in, and the two must not be reasoned about together.
  *
  * ⚠ IT IS POINTED AT BY A CLERK DASHBOARD SETTING, NOT BY A LINK IN THIS APP.
@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic"
  *
  * ⚠ AND IT MUST STAY PUBLIC IN middleware.ts. Protecting it would send an
  * unauthenticated visitor to /sign-in with `?redirect_url=` pointing back here
- * — which the allowlist in _lib/redirect.ts rejects, because this app's own
+ * - which the allowlist in _lib/redirect.ts rejects, because this app's own
  * origin is not a permitted destination. The signed-out case is handled in the
  * form instead, where it can keep the authorization request intact.
  */

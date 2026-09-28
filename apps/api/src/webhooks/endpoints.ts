@@ -10,8 +10,8 @@
  *
  * ⚠ AND THE MITIGATION HERE IS PARTIAL, WHICH IS WORTH KNOWING RATHER THAN
  * FORGETTING. These checks run on the string. A hostname that resolves to a
- * private address — a customer's own DNS pointing `hooks.example.com` at
- * 10.0.0.1, or a DNS answer that changes between this check and the request —
+ * private address - a customer's own DNS pointing `hooks.example.com` at
+ * 10.0.0.1, or a DNS answer that changes between this check and the request -
  * passes. Closing that needs resolution at delivery time with the resolved
  * address pinned for the connection, which is a socket-level change rather than
  * a validation one. Until then: this stops the obvious attempt, an egress
@@ -41,7 +41,7 @@ export function checkEndpointUrl(raw: string): UrlVerdict {
   }
 
   // ⚠ https ONLY. The payload carries a customer's recipient addresses and
-  // subject lines, and the signature proves who sent it — not that nobody read
+  // subject lines, and the signature proves who sent it - not that nobody read
   // it. Over http, both are on the wire in plain text.
   if (url.protocol !== "https:") {
     return { ok: false, reason: "`url` must use https." }
@@ -76,7 +76,7 @@ export function checkEndpointUrl(raw: string): UrlVerdict {
 
 function isIpLiteral(host: string): boolean {
   // `new URL` normalises an IPv6 literal to bracketed form and strips them from
-  // `hostname`, leaving colons — which no hostname can contain.
+  // `hostname`, leaving colons - which no hostname can contain.
   if (host.includes(":")) return true
   // Anything whose last label is entirely numeric cannot be a real TLD, which
   // covers dotted-quad, decimal and octal spellings alike.

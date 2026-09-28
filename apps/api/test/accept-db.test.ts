@@ -17,7 +17,7 @@ import type { AcceptOps, PreparedMessage } from "../src/send/accept.js"
 /**
  * The adapter, against a fake transaction.
  *
- * What is worth asserting here is not that drizzle emits SQL — it is the
+ * What is worth asserting here is not that drizzle emits SQL - it is the
  * handful of properties that decide whether a customer gets one email or two:
  * the order of the writes, the alignment of ids to submissions, and what a
  * reused idempotency key is allowed to answer.
@@ -33,7 +33,7 @@ interface Canned {
   /** The existing idempotency row, read after losing the insert. */
   priorKey?: { requestHash: string; messageIds: string[] | null }[]
   suppressed?: { address: string }[]
-  /** Rows `sendableFrom`'s query gives back — i.e. the verified domains. */
+  /** Rows `sendableFrom`'s query gives back - i.e. the verified domains. */
   verified?: { name: string }[]
 }
 
@@ -49,7 +49,7 @@ type Op = {
    * predicate IS the behaviour. `sendableFrom` decides whether a workspace may
    * send as a domain at all, and the difference between `verified_at is not
    * null` and that AND `status <> 'failed'` is whether a domain taken away
-   * from somebody can still send — see the note on the adapter.
+   * from somebody can still send - see the note on the adapter.
    */
   where?: unknown
 }
@@ -180,7 +180,7 @@ const wrote = (recorded: Op[], table: unknown) =>
 
 describe("persist", () => {
   // ⚠ THE TENANT BOUNDARY IS A TRANSACTION SETTING, NOT A WHERE CLAUSE. Without
-  // it every policy in `core` raises rather than returning nothing — so its
+  // it every policy in `core` raises rather than returning nothing - so its
   // absence is loud, but its presence is what makes every statement below legal.
   it("sets the tenant on the transaction first", async () => {
     const o = ops()
@@ -204,7 +204,7 @@ describe("persist", () => {
   })
 
   // ⚠ THE ONE THAT SENDS THE WRONG EMAIL TO THE WRONG PERSON IF IT REGRESSES.
-  // `ids[i]` must describe `messages[i]` in both tables — the body written under
+  // `ids[i]` must describe `messages[i]` in both tables - the body written under
   // an id has to belong to the message written under that same id. Nothing
   // downstream can detect a shuffle here: it just sends.
   it("keeps bodies aligned with their messages", async () => {
@@ -238,7 +238,7 @@ describe("persist", () => {
   /**
    * ⚠ WRITTEN STRAIGHT THROUGH, WHERE THIS USED TO BE A LOOKUP. Clerk's `ak_…`
    * had to be translated into our own row id by querying `core.api_keys`, and
-   * best-effort at that — a key minted seconds earlier might not have reached
+   * best-effort at that - a key minted seconds earlier might not have reached
    * the table yet, and attribution was not worth refusing a send over. Keys are
    * ours now, so `apiKeyId` IS the foreign key, it cannot be missing (the
    * request could not have authenticated without the row it names), and the
@@ -371,7 +371,7 @@ describe("enqueue", () => {
  * JUST THE ROWS. Two columns decide it and they disagree on purpose:
  * `verified_at` is stamped once and never moved backwards, so a domain that
  * has sent for months keeps sending through a `temporary_failure` caused by one
- * slow DKIM lookup — and `core.displace_domain` sets `status = 'failed'` while
+ * slow DKIM lookup - and `core.displace_domain` sets `status = 'failed'` while
  * LEAVING `verified_at` alone, which is how a name is taken from a workspace
  * that no longer proves it. Drop the status half and every displaced domain
  * keeps its ability to send; drop the `verified_at` half and a transient at

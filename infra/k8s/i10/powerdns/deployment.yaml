@@ -2,14 +2,14 @@
 #
 # ⚠ WITHOUT THIS, DELEGATION IS A FEATURE THAT CANNOT WORK. The API has written
 # zones into `pdns.domains` and `pdns.records` since migration 0023 and the
-# console has been telling customers to point NS records at `ns1.i10.tech` —
+# console has been telling customers to point NS records at `ns1.i10.tech` -
 # with nothing anywhere serving those zones. `ns1`/`ns2` resolved to
 # Cloudflare's HTTP proxy addresses and answered nothing on port 53, so every
 # delegated domain sat `pending` for ever while the console said propagation can
 # take 72 hours. This is the missing half.
 #
 # ⚠ IT READS THE ZONES; IT DOES NOT OWN THEM. The API writes a domain row and
-# its zone in one transaction — that atomicity is the entire reason the `pdns`
+# its zone in one transaction - that atomicity is the entire reason the `pdns`
 # schema lives inside the `i10` database rather than beside it. PowerDNS here is
 # a renderer of rows somebody else wrote, which is why it needs no persistence,
 # no leader election and no state of its own.
@@ -31,7 +31,7 @@ spec:
   replicas: 1
   strategy:
     # ⚠ Recreate, NOT RollingUpdate. A rolling update would start the new pod
-    # before the old one released :53, and the new one would fail to bind — so
+    # before the old one released :53, and the new one would fail to bind - so
     # every deploy would stall with the old pod already terminating. A few
     # seconds of downtime on a zone whose records have a 300-second TTL is not
     # something a resolver notices; a wedged rollout is.
@@ -47,7 +47,7 @@ spec:
       # ⚠ `ClusterFirst`, AND THE `Default` THAT WAS HERE CRASHLOOPED THE POD.
       # The comment that used to sit here argued the pod must not resolve
       # through CoreDNS, on the reasoning that a nameserver resolving through
-      # something that may forward BACK to it is a loop — and that it only ever
+      # something that may forward BACK to it is a loop - and that it only ever
       # needs Postgres, "which it does by ClusterIP through the env below".
       #
       # That last clause was simply untrue. `PDNS_GPGSQL_HOST` below is the
@@ -63,7 +63,7 @@ spec:
       # answers `*.svc.cluster.local` from its own zone and forwards only what
       # it cannot answer; a cluster service name is answered locally and never
       # leaves the node. The loop would need PowerDNS to resolve a PUBLIC name,
-      # which it has no reason to do — it is authoritative, not recursive.
+      # which it has no reason to do - it is authoritative, not recursive.
       dnsPolicy: ClusterFirst
       securityContext:
         runAsNonRoot: true
@@ -81,16 +81,16 @@ spec:
           # ⚠ 5.1.4, NOT THE 4.9 BRANCH, AND THE REASON IS A SECURITY ADVISORY.
           # This was first written against `pdns-auth-49:4.9.9`, which starts up
           # and prints "PowerDNS Security Update Mandatory". Advisory 2026-11 is
-          # High severity — a crafted DNS packet drives memory and CPU — and is
+          # High severity - a crafted DNS packet drives memory and CPU - and is
           # fixed in 4.9.17, 5.0.7 and 5.1.4. The `pdns-auth-49` image repository
           # publishes nothing past 4.9.9, so the 4.9 branch cannot be patched by
           # image at all. 5.1.4 reports "no known issues" at startup and was
-          # verified against our 4.x gpgsql schema locally — it serves the zones
+          # verified against our 4.x gpgsql schema locally - it serves the zones
           # `powerdns.ts` writes without a schema change.
           #
           # ⚠ AND `runAsUser: 953` BELOW MATCHES THIS IMAGE'S `pdns` ACCOUNT.
           # The image declares `User: pdns` by NAME, and `runAsNonRoot` cannot
-          # verify a name — the kubelet refuses the pod with "has non-numeric
+          # verify a name - the kubelet refuses the pod with "has non-numeric
           # user (pdns), cannot verify user is non-root". 953 is that account's
           # uid, read out of the image's own /etc/passwd.
           image: powerdns/pdns-auth-51:5.1.4@sha256:bb5b1c133bcca1dd455075321de7d55db4945a8d7f2ba23339e3c7bbe416b205
@@ -105,7 +105,7 @@ spec:
               # as an unprivileged uid and cannot escalate.
               add: ["NET_BIND_SERVICE"]
           # ⚠ NO `args` BEYOND THE PASSWORD. Everything else lives in the
-          # ConfigMap mounted below, which REPLACES the image's own pdns.conf —
+          # ConfigMap mounted below, which REPLACES the image's own pdns.conf -
           # see that file for why a config full of command-line flags could not
           # work at all.
           args:
@@ -134,7 +134,7 @@ spec:
           ports:
             # ⚠ hostPort, FOR THE SAME REASON STALWART USES IT. k3s serves
             # `type: LoadBalancer` with klipper-lb, whose path DNATs twice and
-            # re-enters the host on a NodePort — and MASQUERADEs, so the server
+            # re-enters the host on a NodePort - and MASQUERADEs, so the server
             # would see the node as the source of every query. hostPort is one
             # hop through the CNI portmap plugin.
             #
@@ -164,7 +164,7 @@ spec:
           volumeMounts:
             # ⚠ MOUNTED AS A SINGLE FILE OVER THE IMAGE'S OWN, not as a
             # directory. Mounting the directory would hide everything else in
-            # /etc/powerdns — including `pdns.d`, which the image's entrypoint
+            # /etc/powerdns - including `pdns.d`, which the image's entrypoint
             # writes into when an API key is set, and which it would then fail
             # to create on a read-only mount.
             #

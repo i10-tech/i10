@@ -33,7 +33,7 @@ const zone = (name: string) => zones().find((z) => z.name === name)
 describe("what the customer delegates", () => {
   /**
    * ⚠ THREE SUBDOMAINS, NEVER THE APEX. Taking the whole zone would make i10
-   * responsible for their website and their inbound MX — a bad day for our
+   * responsible for their website and their inbound MX - a bad day for our
    * nameserver would take their marketing site down, not just their mail.
    */
   it("is three subdomains and nothing above them", () => {
@@ -56,12 +56,12 @@ describe("what the customer delegates", () => {
    * ⚠ THE NAMESERVER NAMES CARRY THE CLAIM, AND THAT IS WHAT RETIRED THE
    * SEVENTH RECORD. Every delegating customer used to publish the same
    * `ns1.i10.tech`, so the delegation established that SOMEBODY had delegated
-   * the name and nothing about who — a stranger could add a domain, publish
+   * the name and nothing about who - a stranger could add a domain, publish
    * nothing, and have the real owner's records resolve to the stranger's zone.
    * A challenge TXT record had to carry the identity the delegation could not.
    *
    * ⚠ NOW THE DELEGATION PROVES ITSELF. Only the holder of `example.com`'s DNS
-   * can publish `<claim>.ns1.i10.tech`, and the label says whose claim it is —
+   * can publish `<claim>.ns1.i10.tech`, and the label says whose claim it is -
    * the same property a manual domain's per-row DKIM selector always had, which
    * is why a manual domain never needed a challenge record either.
    */
@@ -112,8 +112,8 @@ describe("the zones we then serve", () => {
   })
 
   /**
-   * ⚠ ONE RETURN PATH, DELEGATED BY ITS OWN NAME. Its MX must be Amazon's —
-   * SES re-checks it — and its SPF must authorise us as well, because the
+   * ⚠ ONE RETURN PATH, DELEGATED BY ITS OWN NAME. Its MX must be Amazon's -
+   * SES re-checks it - and its SPF must authorise us as well, because the
    * relay writes the same envelope sender SES does.
    */
   it("serves the return path at the top of its own zone", () => {
@@ -159,7 +159,7 @@ describe("the zones we then serve", () => {
 
   /**
    * ⚠ ABSENT, NOT EMPTY. A zone that answers NOERROR with no TXT reads to a
-   * verifier as "published but malformed" — a permanent failure — where an
+   * verifier as "published but malformed" - a permanent failure - where an
    * absent name reads as "not yet".
    */
   it("omits the DKIM record until the key exists", () => {
@@ -181,7 +181,7 @@ describe("the zones we then serve", () => {
 describe("the PowerDNS statements", () => {
   /**
    * ⚠ POWERDNS'S TABLES CARRY `CHECK (name = LOWER(name))`. A mixed-case domain
-   * — which a customer will paste — is a constraint violation at insert rather
+   * - which a customer will paste - is a constraint violation at insert rather
    * than a zone that quietly fails to match queries.
    */
   it("lowercases every name it writes", () => {

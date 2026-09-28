@@ -20,7 +20,7 @@ import { addrSpec, asList, type AcceptOps } from "./accept.js"
  *   1. ONE TRANSACTION. Messages, bodies and the idempotency row commit
  *      together or not at all. A body without its message is unsendable; a
  *      message without its body sends an empty email.
- *   2. ORDER PRESERVED. `refs[i]` and `ids[i]` must describe `messages[i]` —
+ *   2. ORDER PRESERVED. `refs[i]` and `ids[i]` must describe `messages[i]` -
  *      the caller filters refs by index against the prepared messages, and the
  *      batch response is read positionally by every SDK. A shuffle here sends
  *      one customer's email to another customer's recipient.
@@ -29,7 +29,7 @@ import { addrSpec, asList, type AcceptOps } from "./accept.js"
  *
  * ⚠ EVERY STATEMENT RUNS INSIDE `withTenant`. Row level security is the tenant
  * boundary, `app.tenant_id` is what the policies read, and a transaction that
- * never sets it raises rather than returning nothing — see db/client.ts.
+ * never sets it raises rather than returning nothing - see db/client.ts.
  */
 
 export interface SendPathOptions {
@@ -40,7 +40,7 @@ export interface SendPathOptions {
    * Domains this particular ops object may send from without a verified row.
    *
    * ⚠ IT EXISTS FOR i10'S OWN MAIL AND FOR NOTHING ELSE. Authentication email
-   * leaves from `AUTH_EMAIL_FROM` on a domain we host ourselves — and
+   * leaves from `AUTH_EMAIL_FROM` on a domain we host ourselves - and
    * `DomainStore.create` REFUSES to create a row for our own sending domains,
    * deliberately, so there is no verified row for the gate to find and never
    * will be. Without this, turning the gate on would have stopped every
@@ -50,7 +50,7 @@ export interface SendPathOptions {
    * WHICH IS THE WHOLE REASON IT IS SAFE. The auth-email path builds its own
    * ops object with this set; the customer-facing `sendPath` builds one
    * without it. A customer's request never reaches an object carrying the
-   * exemption, so there is no field for anybody to set, copy or guess — see
+   * exemption, so there is no field for anybody to set, copy or guess - see
    * where both are constructed in index.ts.
    */
   alwaysSendable?: readonly string[]
@@ -66,7 +66,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
           // ⚠ THE KEY IS INSERTED BEFORE THE MESSAGES, AND THE PRIMARY KEY IS
           // THE LOCK. `on conflict do nothing` BLOCKS on a conflicting row that
           // another transaction has written but not yet committed, so of two
-          // simultaneous retries one inserts and the other waits — and by the
+          // simultaneous retries one inserts and the other waits - and by the
           // time the loser reads, the winner's ids are there to return.
           //
           // Reading first and inserting second would let both miss, both mint a
@@ -102,7 +102,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
             // NEVER A SECOND SEND. A different hash is the ordinary case. A row
             // that vanished between the insert and this read is the 24-hour
             // prune racing a very late retry, and a row with no ids should be
-            // impossible — the ids are written in the same transaction that
+            // impossible - the ids are written in the same transaction that
             // created it. In all three the honest answer is "your key is
             // ambiguous, use a new one", because the alternative is sending
             // mail the caller may already have sent.
@@ -118,7 +118,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
 
         // ⚠ IDS MINTED UP FRONT, IN ONE ROUND TRIP, RATHER THAN READ BACK FROM
         // `RETURNING`. A multi-row INSERT gives no ordinal to correlate on, and
-        // RETURNING's row order is not contractual — so the only way to know
+        // RETURNING's row order is not contractual - so the only way to know
         // which id belongs to which submitted email would be to trust an
         // ordering Postgres does not promise. Generating them first makes the
         // mapping ours: `ids[i]` is `input.messages[i]`, by construction.
@@ -140,7 +140,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
         // used to translate Clerk's `ak_…` into our own row id, best-effort,
         // because a key minted seconds earlier might not have reached this
         // table yet. Self-issued keys ARE this table, so `apiKeyId` is already
-        // the foreign key — and it cannot be missing, because the request could
+        // the foreign key - and it cannot be missing, because the request could
         // not have authenticated without the row it names.
         await tx.insert(messages).values(
           input.messages.map((m, i) => ({
@@ -156,7 +156,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
             replyTo: asList(m.payload.reply_to),
             subject: m.payload.subject,
             // ⚠ AND THE CLAIM READS IT. The queue delays the job, but this
-            // column is what actually refuses an early send — see db/claim.ts.
+            // column is what actually refuses an early send - see db/claim.ts.
             // A row written without it would be sendable the moment anything
             // re-enqueued it.
             scheduledAt: m.scheduledAt,
@@ -165,11 +165,11 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
 
         // ⚠ A SEPARATE TABLE, SAME TRANSACTION, SAME PARTITION KEY. The bodies
         // are split off so the claim and the dashboard never drag an HTML body
-        // through their scans — but a message whose body never committed sends
+        // through their scans - but a message whose body never committed sends
         // an empty email, so the split is physical and never transactional.
         //
         // Attachments live here rather than in object storage because the
-        // contract caps them, so the row cannot grow without limit — and the
+        // contract caps them, so the row cannot grow without limit - and the
         // alternative would put a second store with its own lifecycle and its
         // own access control in front of every send.
         await tx.insert(messageBodies).values(
@@ -208,7 +208,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
     async suppressedFor(tenantId, addresses) {
       // ⚠ NORMALISED THE SAME WAY ON BOTH SIDES. The set this returns is
       // compared against `addrSpec()` of each recipient, so the lookup has to
-      // use the same form — otherwise `Bob <bob@x.com>` misses a suppression on
+      // use the same form - otherwise `Bob <bob@x.com>` misses a suppression on
       // `bob@x.com` and the bounced address is sent to again.
       const wanted = [...new Set(addresses.map(addrSpec))].filter(Boolean)
       if (wanted.length === 0) return new Set<string>()
@@ -226,7 +226,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
     /**
      * ⚠ `verified_at IS NOT NULL` RATHER THAN `status = 'verified'`, WHICH IS
      * WHAT THE COLUMN WAS WRITTEN FOR. `status` is SES's current opinion and
-     * moves both ways — a domain that has sent for months can read
+     * moves both ways - a domain that has sent for months can read
      * `temporary_failure` because one DKIM lookup timed out, and stopping that
      * customer's mail over a transient is a far worse failure than the one this
      * gate exists to prevent. `verified_at` is stamped once and never moved
@@ -236,7 +236,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
      * ⚠ AND `status <> 'failed'` IS THE HALF THAT MAKES IT SAFE, because
      * `core.displace_domain` sets `failed` and LEAVES `verified_at` ALONE. That
      * function is how a domain is taken from a workspace that no longer proves
-     * it — a lapsed registration, a name that moved to somebody else, a proof
+     * it - a lapsed registration, a name that moved to somebody else, a proof
      * missing past the grace period. On `verified_at` alone, every displaced
      * domain would keep its ability to send, which is precisely backwards: the
      * one case where we are most sure the sender is no longer the owner.

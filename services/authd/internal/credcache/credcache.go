@@ -1,14 +1,14 @@
 // Package credcache remembers, briefly, that Clerk said yes.
 //
-// Every LDAP bind is one HTTPS round trip to Clerk — measured at roughly a
-// second — and mail clients do not bind once. Apple Mail opens several
+// Every LDAP bind is one HTTPS round trip to Clerk - measured at roughly a
+// second - and mail clients do not bind once. Apple Mail opens several
 // connections to set up an account and reconnects constantly thereafter, so a
 // single user reading their mail spends that second over and over. This caches
 // the answer for sixty seconds.
 //
 // ⚠ IT BREAKS A PROPERTY THIS SERVICE USED TO HAVE, AND THAT IS THE POINT OF
 // THIS COMMENT. `clerkauth` states that authd holds no password material of any
-// kind — not a hash, not a verifier. With this package it holds one HMAC per
+// kind - not a hash, not a verifier. With this package it holds one HMAC per
 // recently-authenticated user, under a key generated at startup and never
 // written down. That is weak material and it dies with the process, but it is
 // material, and anyone auditing this service should meet that fact here rather
@@ -82,7 +82,7 @@ func New(ttl time.Duration) *Cache {
 // TTL. `authd.accounts.clerk_updated_at` is Clerk's own `updated_at`, maintained
 // by the webhook receiver in apps/api; handleBind has already read the row, so
 // the current value costs nothing extra here. Clerk publishes no
-// password-specific timestamp, so this moves on ANY profile change — it
+// password-specific timestamp, so this moves on ANY profile change - it
 // invalidates more often than strictly necessary, never less, which is the
 // direction an authentication cache must err in. The same reasoning already
 // governs what authd serves Stalwart as `pwdChangeTime`; see the column's
@@ -92,7 +92,7 @@ func New(ttl time.Duration) *Cache {
 // (user, password) would give every password its own slot, and a password
 // retired an hour ago would keep answering from its own entry until it expired.
 // With one slot the newest verification overwrites the previous, so a password
-// that is no longer current can only be served until its own TTL runs out — and
+// that is no longer current can only be served until its own TTL runs out - and
 // not at all once anything else has authenticated.
 func (c *Cache) Lookup(userID, password string, clerkUpdatedAt *time.Time) bool {
 	if c == nil || userID == "" || password == "" {
@@ -122,7 +122,7 @@ func (c *Cache) Lookup(userID, password string, clerkUpdatedAt *time.Time) bool 
 }
 
 // Store records that Clerk verified this password. Only ever called for a
-// verified outcome — see handleBind, and the package comment in clerkauth for
+// verified outcome - see handleBind, and the package comment in clerkauth for
 // why a rejection must never be remembered.
 func (c *Cache) Store(userID, password string, clerkUpdatedAt *time.Time) {
 	if c == nil || userID == "" || password == "" {
@@ -152,7 +152,7 @@ func (c *Cache) Store(userID, password string, clerkUpdatedAt *time.Time) {
 	c.entries[userID] = e
 }
 
-// Forget drops any entry for a user. Nothing calls it on the bind path — it
+// Forget drops any entry for a user. Nothing calls it on the bind path - it
 // exists so that a future invalidation signal has somewhere to land.
 func (c *Cache) Forget(userID string) {
 	if c == nil {

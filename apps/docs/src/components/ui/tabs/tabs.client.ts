@@ -21,7 +21,7 @@ function initTabContainer(container: HTMLElement): () => void {
   const synthesize = existingTriggers.length === 0
 
   if (synthesize && tablist) {
-    // Only this container's own panels — exclude a nested <Tabs>'s panels,
+    // Only this container's own panels - exclude a nested <Tabs>'s panels,
     // whose nearest [data-nb-tabs] ancestor is the inner container.
     const panels = Array.from(
       container.querySelectorAll<HTMLElement>("[data-nb-tabs-content]"),
@@ -59,8 +59,8 @@ function initTabContainer(container: HTMLElement): () => void {
     indicator,
     sync: syncKey ? { key: `ui-synced-tabs__${syncKey}` } : undefined,
     // Keep the active tab within the horizontally-scrollable (scrollbar-hidden)
-    // strip's visible range. Fires on every activate() — including the initial
-    // paint and a synced/restored selection — so a right-edge active tab can't
+    // strip's visible range. Fires on every activate() - including the initial
+    // paint and a synced/restored selection - so a right-edge active tab can't
     // render off-screen with no affordance. scrollLeft directly (not
     // scrollIntoView, which would also scroll the page vertically).
     onActivate: (index) => {

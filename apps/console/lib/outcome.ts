@@ -8,11 +8,11 @@ import type { ActionState } from "@repo/ui/components/action-button"
  *
  * ⚠ THE ANSWER APPEARS WHERE THE QUESTION WAS ASKED. Pressing Save used to spin
  * the button, return it to "Save", close the dialog and slide a toast in from
- * the bottom-right corner — four things in three places, for one event, with
+ * the bottom-right corner - four things in three places, for one event, with
  * the only one that said "it worked" being the one furthest from the eye. The
  * language this replaces it with is Clerk's: the button you pressed becomes a
  * tick, the fields you filled in go green, and a dialog holds that for a beat
- * before it leaves — so the confirmation is the thing you were already
+ * before it leaves - so the confirmation is the thing you were already
  * looking at. See `ActionButton` and the `data-outcome` note in floating-field.
  *
  * ⚠ A FAILURE GOES BACK TO IDLE, NOT TO "FAILED". Every failure in this product
@@ -24,7 +24,7 @@ import type { ActionState } from "@repo/ui/components/action-button"
  * ⚠ AND IT NEVER REFRESHES. The action's own response carries the re-rendered
  * page (see `run` in lib/actions.ts), so by the time `action` resolves the list
  * behind the dialog already shows the new row. The hold is the dialog standing
- * over a page that has finished changing — which is why nothing moves when it
+ * over a page that has finished changing - which is why nothing moves when it
  * closes.
  */
 
@@ -41,7 +41,7 @@ export function useOutcome(): {
   /**
    * Run `action`; on `true`, show the tick and call `then` after the hold.
    *
-   * `action` reports its own failure (a toast) and returns `false` — the same
+   * `action` reports its own failure (a toast) and returns `false` - the same
    * contract `ConfirmDialog.onConfirm` already has.
    */
   run: (action: () => Promise<boolean>, then?: () => void) => Promise<boolean>
@@ -52,8 +52,8 @@ export function useOutcome(): {
   const [state, setState] = React.useState<ActionState>("idle")
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ⚠ A HOLD THAT OUTLIVES ITS COMPONENT WOULD CLOSE A DIALOG THAT IS GONE, OR —
-  // worse — one that was reopened in the meantime. Cleared on unmount.
+  // ⚠ A HOLD THAT OUTLIVES ITS COMPONENT WOULD CLOSE A DIALOG THAT IS GONE, OR -
+  // worse - one that was reopened in the meantime. Cleared on unmount.
   React.useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current)

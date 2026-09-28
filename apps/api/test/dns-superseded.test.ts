@@ -8,7 +8,7 @@ import type { DesiredRecord } from "../src/dns/port.js"
  * ⚠ THE CASE THIS EXISTS FOR: a domain deleted in the console and added again
  * while the provider was still connected. Deleting here cannot reach into the
  * customer's zone, so the first set is still sitting there when the second is
- * published — six NS records at three delegated names, or two `v=DKIM1` TXT
+ * published - six NS records at three delegated names, or two `v=DKIM1` TXT
  * records at one selector. Neither is untidy-but-working: both split
  * resolution and leave the domain pending with records that look perfect.
  *
@@ -62,7 +62,7 @@ describe("a previous delegation left in the zone", () => {
 
   /*
    * ⚠ THE ONES WE ARE ABOUT TO WRITE ARE NOT STALE. They are `unchanged`, and
-   * deleting then recreating them would be a window — however short — where
+   * deleting then recreating them would be a window - however short - where
    * the domain has no delegation at all.
    */
   it("leaves the records that are already correct", () => {
@@ -112,7 +112,7 @@ describe("a previous DKIM key at our own selector", () => {
 
   /*
    * ⚠ THE MOST DAMAGING LEFTOVER IN THE PRODUCT. Two keys at one selector is
-   * not "one of them wins" — SES signs with the key it issued and the
+   * not "one of them wins" - SES signs with the key it issued and the
    * resolver answers with both, so verification fails against whichever
    * arrives first.
    */

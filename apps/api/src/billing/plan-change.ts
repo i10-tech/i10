@@ -9,17 +9,17 @@ import type { Logger } from "./grants.js"
 /**
  * Changing a plan, from our console rather than Polar's portal.
  *
- * ⚠ THE POINT IS NOT BRANDING — IT IS THAT PRORATION ONLY WORKS THIS WAY.
+ * ⚠ THE POINT IS NOT BRANDING - IT IS THAT PRORATION ONLY WORKS THIS WAY.
  * `polar/subscription/update.py` matches on `proration_behavior` and has no
- * upgrade/downgrade branch anywhere in it, so the behaviour everyone expects —
- * upgrades charged now, downgrades deferred to the period end — exists only if
+ * upgrade/downgrade branch anywhere in it, so the behaviour everyone expects -
+ * upgrades charged now, downgrades deferred to the period end - exists only if
  * the caller picks per direction. The customer portal always uses the
  * organisation default, and one default cannot be right for both.
  *
  * ⚠ AND NOTHING HERE GRANTS ANYTHING. This asks Polar to move the
  * subscription; the entitlement moves when Polar's webhook says it did, through
  * the one path in this repository that can grant a plan. A response from here
- * means "asked", not "done" — the console polls `GET /billing/plan`, the same
+ * means "asked", not "done" - the console polls `GET /billing/plan`, the same
  * way it already does after a checkout.
  */
 
@@ -27,7 +27,7 @@ export type ChangeDirection = "upgrade" | "downgrade" | "same"
 
 /**
  * ⚠ TIES ARE A SIDEWAYS MOVE, NOT AN UPGRADE. Two plans at the same rank
- * charge nothing and defer nothing — treating a tie as an upgrade would invoice
+ * charge nothing and defer nothing - treating a tie as an upgrade would invoice
  * a customer for a change that cost them nothing.
  */
 export function directionOf(fromRank: number, toRank: number): ChangeDirection {
@@ -52,7 +52,7 @@ export function directionOf(fromRank: number, toRank: number): ChangeDirection {
  * exit, which is why the allowance is deliberately not prorated either.
  *
  * ⚠ NEVER `reset`. It restarts Polar's billing anchor, and ours is fixed at
- * tenant creation and never moves — using it splits the invoice date from the
+ * tenant creation and never moves - using it splits the invoice date from the
  * allowance refill date permanently.
  */
 export function prorationFor(
@@ -66,7 +66,7 @@ export type ChangeOutcome =
   /** Already on it. Not an error, and not a Polar call. */
   | { status: "unchanged" }
   | { status: "rejected"; reason: string }
-  /** Polar refused — most often a card that did not authorise. */
+  /** Polar refused - most often a card that did not authorise. */
   | { status: "failed"; reason: string }
 
 export interface PlanChangeDeps {
@@ -94,7 +94,7 @@ export interface PlanChange {
    * Calls off a cancellation that has not taken effect yet.
    *
    * ⚠ NOT A PLAN CHANGE, WHICH IS WHY IT IS ITS OWN METHOD. Nothing is
-   * bought, no product moves and no proration is decided — the subscription
+   * bought, no product moves and no proration is decided - the subscription
    * simply stops being marked to end. Routing it through `to()` would mean
    * inventing a plan id for "the one you already have".
    */
@@ -127,10 +127,10 @@ async function rankOf(
  *
  * ⚠ `trialing` COUNTS AND `past_due` COUNTS. A trial is a live subscription
  * that Polar will happily move between products, and a past-due one is the
- * case where changing plan is the most useful thing somebody can do — pushing
+ * case where changing plan is the most useful thing somebody can do - pushing
  * them to a fresh checkout there would leave the failing one running beside
- * it. Everything else — `canceled`, `incomplete`, `incomplete_expired`,
- * `unpaid` — has nothing left to amend.
+ * it. Everything else - `canceled`, `incomplete`, `incomplete_expired`,
+ * `unpaid` - has nothing left to amend.
  */
 const LIVE = new Set(["active", "trialing", "past_due"])
 
@@ -139,7 +139,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
     async to(tenantId, planId) {
       /*
        * ⚠ LEAVING IS NOT BUYING, SO IT DOES NOT NEED A PRODUCT. The free plan
-       * has none — there is nothing to charge for — and requiring one here is
+       * has none - there is nothing to charge for - and requiring one here is
        * what made "Downgrade to free" answer `No such plan: free` and leave a
        * paying customer with no way off a plan they no longer wanted. Cancelling
        * at the period end IS the move to free: the subscription lapses and the
@@ -147,7 +147,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
        */
       const leaving = planId === deps.freePlanId
 
-      // ⚠ THE PRODUCT COMES FROM OUR MAP, NEVER FROM THE REQUEST — the same
+      // ⚠ THE PRODUCT COMES FROM OUR MAP, NEVER FROM THE REQUEST - the same
       // rule the checkout route already follows. A caller who could name a
       // Polar product id could name a one-cent one and move themselves to Pro,
       // and the webhook would grant it perfectly correctly.
@@ -160,8 +160,8 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
 
       /*
        * ⚠ A DEAD SUBSCRIPTION IS THE SAME AS NO SUBSCRIPTION, AND READING THE
-       * ID ALONE MISSED THAT. The row survives a cancellation — it has to, it
-       * is the history — so `polar_subscription_id` is still populated for
+       * ID ALONE MISSED THAT. The row survives a cancellation - it has to, it
+       * is the history - so `polar_subscription_id` is still populated for
        * somebody whose subscription ended months ago. This went straight to
        * `PATCH /v1/subscriptions/<canceled one>`, which Polar refuses, and the
        * refusal came back to the customer as "check the payment method" about
@@ -173,7 +173,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
        *
        * ⚠ AND THE ANSWER IS A CHECKOUT, WHICH IS WHAT THE CONSOLE ALREADY
        * DOES WITH THIS REJECTION. Buying again is the only way back onto a
-       * paid plan once a subscription has ended — there is nothing left to
+       * paid plan once a subscription has ended - there is nothing left to
        * amend.
        */
       if (!current.polarSubscriptionId || !LIVE.has(current.status ?? "")) {
@@ -199,7 +199,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
 
       const direction = directionOf(fromRank ?? 0, toRank)
       if (direction === "same") {
-        // Same rank, different id — a sideways move charges nothing, so there
+        // Same rank, different id - a sideways move charges nothing, so there
         // is nothing for proration to decide and nothing to invoice.
         return { status: "unchanged" }
       }
@@ -214,7 +214,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
            * confirms it an event later; until this line existed the console
            * refreshed onto a row that still said "active, not cancelling". So
            * the page kept showing Pro with no end date, the free card stayed
-           * enabled — it is disabled by precisely this flag — and pressing it
+           * enabled - it is disabled by precisely this flag - and pressing it
            * again produced "Polar could not apply the change. Check the
            * payment method." about a card that was perfectly fine.
            *
@@ -259,7 +259,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
       if (!current.polarSubscriptionId || !LIVE.has(current.status ?? "")) {
         /*
          * ⚠ THE SUBSCRIPTION HAS TO STILL BE ALIVE. Once the period has
-         * passed there is nothing to un-mark — Polar has ended it — and the
+         * passed there is nothing to un-mark - Polar has ended it - and the
          * only way back is buying again. Saying so is better than a 404 from
          * a `PATCH` on a closed subscription.
          */
@@ -275,7 +275,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
 
       try {
         await deps.polar.resumeSubscription(current.polarSubscriptionId)
-        // ⚠ AFTER THE CALL, SO A REFUSAL RECORDS NOTHING — the same ordering
+        // ⚠ AFTER THE CALL, SO A REFUSAL RECORDS NOTHING - the same ordering
         // `noteCancelling` follows and for the same reason.
         await deps.subscriptions.noteResuming(tenantId)
       } catch (error) {
@@ -304,7 +304,7 @@ export function planChange(deps: PlanChangeDeps): PlanChange {
  * ⚠ EVERY FAILURE USED TO SAY "Check the payment method", AND FOR MOST OF
  * THEM THAT IS A WILD GOOSE CHASE. For `invoice` and `prorate` Polar applies
  * the change only if the payment succeeds, so a declined card really is the
- * commonest cause in production — but it is nowhere near the commonest in a
+ * commonest cause in production - but it is nowhere near the commonest in a
  * sandbox, where the same sentence appeared for a token from the wrong
  * environment, a subscription belonging to another organisation, and a
  * product id that is not ours. Somebody went to look at a card that was
@@ -323,13 +323,13 @@ function reasonFor(error: unknown): string {
   switch (error.status) {
     case 401:
       // ⚠ OUR CREDENTIAL, NOT THEIR CARD. Usually a token for the other
-      // environment — a sandbox token against api.polar.sh, or the reverse.
+      // environment - a sandbox token against api.polar.sh, or the reverse.
       return "Billing is not configured correctly on our side. We have logged it."
     case 403:
       /*
        * ⚠ 403 IS TWO DIFFERENT FAILURES AND THE BODY IS WHAT SEPARATES THEM.
        * Polar answers `insufficient_scope` when our token lacks a scope,
-       * which is ours to fix and nothing to do with the customer — but it
+       * which is ours to fix and nothing to do with the customer - but it
        * also answers 403 for an operation it will not perform on THIS
        * subscription, which is a fact about their subscription. Collapsing
        * both into "configured incorrectly on our side" told somebody
@@ -342,7 +342,7 @@ function reasonFor(error: unknown): string {
     case 404:
       /*
        * ⚠ THE SUBSCRIPTION IS UNKNOWN TO POLAR, WHICH IS ALMOST ALWAYS US
-       * HOLDING AN ID FROM ANOTHER ORGANISATION — a sandbox rebuilt, or a
+       * HOLDING AN ID FROM ANOTHER ORGANISATION - a sandbox rebuilt, or a
        * production id read with a sandbox token. Telling somebody to check
        * their card for this is the least useful sentence in the product.
        */

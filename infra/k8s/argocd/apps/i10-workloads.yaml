@@ -25,14 +25,14 @@ spec:
     #
     # selfHeal is the half worth knowing before debugging on the box: a
     # hand-applied change to anything under this path is reverted within about
-    # 35 seconds. To test a fix live, remove `automated` first — and put it back.
+    # 35 seconds. To test a fix live, remove `automated` first - and put it back.
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
   # ⚠ KEDA OWNS THE WORKER'S REPLICA COUNT, SO ARGO MUST NOT. `selfHeal` reverts
-  # anything under this path within about 35 seconds — including the replica
+  # anything under this path within about 35 seconds - including the replica
   # count an autoscaler just changed. Without this the two fight every scaling
   # event: KEDA scales to three, Argo puts it back to what the manifest says,
   # KEDA scales up again, and the log fills with a rollout that never settles.

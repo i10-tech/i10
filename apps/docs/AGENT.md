@@ -7,7 +7,7 @@ Astro-based docs. The `nimbus-docs` package handles content schemas, sidebar/TOC
 ```
 astro.config.ts              # imports nimbus + defineNimbusConfig
 src/
-├── components.ts            # MDX globals registry — every component used in .mdx must be listed
+├── components.ts            # MDX globals registry - every component used in .mdx must be listed
 ├── components/              # AgentDirective, Header, Render + ui/<slug>/
 ├── content/
 │   ├── docs/*.mdx
@@ -39,7 +39,7 @@ title: My page
 description: One-line summary.
 ---
 
-Content here. The page H1 comes from `title` — don't repeat it in the body.
+Content here. The page H1 comes from `title` - don't repeat it in the body.
 
 ## Section heading
 ```
@@ -59,10 +59,10 @@ Rules:
 | New partial                  | Create `src/content/partials/<slug>.mdx`. Use via `<Render file="<slug>" />`.                                                                     |
 | UI from registry             | `bunx nimbus-docs add <slug>`. Register in `src/components.ts` if used in MDX.                                                                    |
 | Feature recipe               | `bunx nimbus-docs add <feature-slug>`. Pipe the printed brief to your agent.                                                                      |
-| Check it builds              | `bunx nimbus-docs check` — build-free preflight (env + structure + authoring + types). `--json` for an agent loop, `--fix` to repair what's safe. |
+| Check it builds              | `bunx nimbus-docs check` - build-free preflight (env + structure + authoring + types). `--json` for an agent loop, `--fix` to repair what's safe. |
 | Custom page route            | Add a file under `src/pages/`.                                                                                                                    |
 | Custom OG style              | Edit `src/pages/og/_og-card-config.ts`.                                                                                                           |
-| Check for updates            | `bunx nimbus-docs outdated` — starter files behind their tag + registry components behind.                                                        |
+| Check for updates            | `bunx nimbus-docs outdated` - starter files behind their tag + registry components behind.                                                        |
 | Upgrade a starter file       | `bunx nimbus-docs diff <file>` to review, `diff --apply <file>` to pull a clean upstream change.                                                  |
 | Upgrade a registry component | `bunx nimbus-docs add <slug> --overwrite`, then review with `git diff`.                                                                           |
 
@@ -70,39 +70,39 @@ List installable items: `bunx nimbus-docs list`.
 
 ## Audit this site
 
-Start with `bunx nimbus-docs check --json`. It runs the environment, structural, authoring, and type checks build-free — config validity, `site` placeholder, route collisions, MDX component resolution, the lint rules, and a `tsc` type-check — and returns three top-level signals plus per-scope detail:
+Start with `bunx nimbus-docs check --json`. It runs the environment, structural, authoring, and type checks build-free - config validity, `site` placeholder, route collisions, MDX component resolution, the lint rules, and a `tsc` type-check - and returns three top-level signals plus per-scope detail:
 
 - **`status`** (`passed` | `failed` | `partial`) and **`readiness`** (`buildable` | `blocked` | `unknown`) are the primary signals. `status` is the whole-run verdict; `readiness` answers "does env + structure say it builds?". `ok` (=== zero errors) is kept for back-compat only.
 - **`findings[{scope,code,severity,file,line,message,fixable,fix}]`** are problems we evaluated. Apply each `fix` (or `check --fix`).
-- **`scopes[].notes[{code,reason,requiresBuild?,requiresInput?}]`** are checks we _couldn't_ evaluate yet (e.g. types before a build). A note is never a finding and never carries a `fix` — you resolve it by making the missing thing exist (usually a build), not by `--fix`. `summary.notes` counts them.
+- **`scopes[].notes[{code,reason,requiresBuild?,requiresInput?}]`** are checks we _couldn't_ evaluate yet (e.g. types before a build). A note is never a finding and never carries a `fix` - you resolve it by making the missing thing exist (usually a build), not by `--fix`. `summary.notes` counts them.
 
-Loop terminates on `status !== "failed" && summary.fixable === 0` — a `partial` run with nothing left to fix is a **stop** (optionally build, then re-check), not a `--fix` retry. Exit is `1` only when `status` is `"failed"`. For full coverage (types + link-checking) run a build first, then `check` again.
+Loop terminates on `status !== "failed" && summary.fixable === 0` - a `partial` run with nothing left to fix is a **stop** (optionally build, then re-check), not a `--fix` retry. Exit is `1` only when `status` is `"failed"`. For full coverage (types + link-checking) run a build first, then `check` again.
 
-Then walk the categories below for what `check` doesn't cover yet — route-file existence, registry hygiene, the AI surface, post-build search, and Cloudflare config. Emit findings as:
+Then walk the categories below for what `check` doesn't cover yet - route-file existence, registry hygiene, the AI surface, post-build search, and Cloudflare config. Emit findings as:
 
 ```
-- [error|warn|info] FILE:LINE — what + why + fix.
+- [error|warn|info] FILE:LINE - what + why + fix.
 ```
 
 End with `Summary: N errors, N warnings.`
 
-- **Config** — `astro.config.ts` calls `nimbus(defineNimbusConfig({ ... }))`; `site` is set; `editPattern` (if set) contains `{path}`; `output:` matches the deploy target.
-- **Content** — `content.config.ts` registers `docsCollection()` (and `partialsCollection()` if used); every `.mdx` is inside a registered collection; frontmatter validates.
-- **Sidebar** — every sidebar ref resolves to a content entry; no orphans; no slug collisions.
-- **MDX** — every PascalCase component in `*.mdx` is registered; every `<Render file=...>` resolves; code-fence languages are valid.
-- **Routes** — `llms.txt.ts`, `robots.txt.ts`, `[...slug]/index.md.ts`, `og.png.ts`, `og/[...slug].ts` all exist.
-- **Registry hygiene** — every `src/components/ui/<slug>/` is either MDX-registered or imported in `src/`; transitive deps (`lib/cn.ts`, etc.) exist.
-- **AI surface** — `<AgentDirective />` renders in `BaseLayout.astro`; doc `<head>` has `<link rel="alternate" type="text/markdown" ...>`.
-- **Search** — `data-pagefind-body` is on the docs main wrapper; after `pnpm build`, `dist/pagefind/` exists with ≥1 indexed page.
-- **Cloudflare** (if applicable) — `wrangler.jsonc` has `name`, `compatibility_date`, `assets.directory = "./dist"`, `not_found_handling`.
+- **Config** - `astro.config.ts` calls `nimbus(defineNimbusConfig({ ... }))`; `site` is set; `editPattern` (if set) contains `{path}`; `output:` matches the deploy target.
+- **Content** - `content.config.ts` registers `docsCollection()` (and `partialsCollection()` if used); every `.mdx` is inside a registered collection; frontmatter validates.
+- **Sidebar** - every sidebar ref resolves to a content entry; no orphans; no slug collisions.
+- **MDX** - every PascalCase component in `*.mdx` is registered; every `<Render file=...>` resolves; code-fence languages are valid.
+- **Routes** - `llms.txt.ts`, `robots.txt.ts`, `[...slug]/index.md.ts`, `og.png.ts`, `og/[...slug].ts` all exist.
+- **Registry hygiene** - every `src/components/ui/<slug>/` is either MDX-registered or imported in `src/`; transitive deps (`lib/cn.ts`, etc.) exist.
+- **AI surface** - `<AgentDirective />` renders in `BaseLayout.astro`; doc `<head>` has `<link rel="alternate" type="text/markdown" ...>`.
+- **Search** - `data-pagefind-body` is on the docs main wrapper; after `pnpm build`, `dist/pagefind/` exists with ≥1 indexed page.
+- **Cloudflare** (if applicable) - `wrangler.jsonc` has `name`, `compatibility_date`, `assets.directory = "./dist"`, `not_found_handling`.
 
 ## Don't
 
-- Hand-add components under `src/components/ui/` that exists in the nimbus-docs registry — use `nimbus-docs add` so deps resolve.
-- Import `.mdx` files directly — use `<Render file="..." />`.
-- Attach remark/rehype plugins via `mdx({ remarkPlugins })` — Sätteri silently drops them. Framework-side transformations run as content passes.
+- Hand-add components under `src/components/ui/` that exists in the nimbus-docs registry - use `nimbus-docs add` so deps resolve.
+- Import `.mdx` files directly - use `<Render file="..." />`.
+- Attach remark/rehype plugins via `mdx({ remarkPlugins })` - Sätteri silently drops them. Framework-side transformations run as content passes.
 - Remove `<AgentDirective />` unless asked.
-- Edit `src/components.ts` to bypass registration — if a component is used in `.mdx`, register it.
+- Edit `src/components.ts` to bypass registration - if a component is used in `.mdx`, register it.
 
 ## Project home
 

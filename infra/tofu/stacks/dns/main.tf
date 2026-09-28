@@ -1,7 +1,7 @@
-# S3 — DNS. The MAIL records on i10.tech, and only those.
+# S3 - DNS. The MAIL records on i10.tech, and only those.
 #
 # ⚠ THIS ZONE HAS TWO OWNERS, DELIBERATELY. A proxied wildcard `*.i10.tech`
-# already covers every web surface — dash, auth, api, docs — and that record
+# already covers every web surface - dash, auth, api, docs - and that record
 # stays hand-managed in Cloudflare. Tofu owns the mail half: the host Stalwart
 # answers on, the MX, SPF, DKIM, DMARC, the client-provisioning records, and the
 # include customers point at.
@@ -13,7 +13,7 @@
 #
 # ⚠ EVERY RESOURCE HERE IS IMPORTED, AND THE FILE DESCRIBES WHAT IS LIVE RATHER
 # THAN WHAT WE WISH WERE LIVE. Reconciled against the zone on 2026-09-02, when
-# mail started flowing and it became clear the stack had never been applied —
+# mail started flowing and it became clear the stack had never been applied -
 # no `backend.hcl`, no `terraform.tfvars`, only the examples. Everything in the
 # zone had been created by hand, and the values written here beforehand had
 # drifted from it in ways that would have broken outbound mail on the first
@@ -27,7 +27,7 @@ provider "cloudflare" {}
 
 # ⚠ THE PROVIDER TAKES A FULLY QUALIFIED RECORD NAME. Provider v4 accepted a
 # name relative to the zone and appended the rest; v5 does not, and a relative
-# name here would differ from the fully qualified one the API returns — so every
+# name here would differ from the fully qualified one the API returns - so every
 # record would show a permanent diff after import. This stack was written in the
 # v4 style and never applied, which is why that went unnoticed until 2026-09-02.
 locals {
@@ -43,7 +43,7 @@ module "labels" {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# THE MAIL HOST — grey cloud, both families
+# THE MAIL HOST - grey cloud, both families
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # ⚠ proxied = false, AND IT CAN NEVER BE TRUE. Cloudflare's proxy carries only
@@ -52,14 +52,14 @@ module "labels" {
 # is proxied; these are the deliberate exceptions.
 #
 # The cost is real: grey-clouding publishes the origin IP. The box stops being
-# hidden the day i10's MX goes live. That is unavoidable for mail — an MX has
-# to name a reachable host — not an oversight.
+# hidden the day i10's MX goes live. That is unavoidable for mail - an MX has
+# to name a reachable host - not an oversight.
 #
 # ⚠ AAAA IS NOT DECORATION. Receivers increasingly prefer IPv6 and score its
 # reputation separately from IPv4, so a v4-only mail host is a sender with half
 # a reputation. It is also why the k3s cluster was rebuilt dual-stack: before
 # that an AAAA would have resolved to a port nothing was listening on, which
-# fails for v6-preferring senders ONLY — the worst shape a bug can take.
+# fails for v6-preferring senders ONLY - the worst shape a bug can take.
 
 import {
   to = cloudflare_dns_record.mail_v4
@@ -94,14 +94,14 @@ resource "cloudflare_dns_record" "mail_v6" {
 # ⚠ THESE TWO EXIST BECAUSE THE WILDCARD MAKES ABSENCE IMPOSSIBLE, AND THAT IS
 # WORSE THAN IT SOUNDS.
 #
-# `*.i10.tech` is proxied, so every undeclared name resolves — to Cloudflare,
+# `*.i10.tech` is proxied, so every undeclared name resolves - to Cloudflare,
 # which carries no mail ports. A client connecting to `imap.i10.tech:993` got a
 # TCP connection that went nowhere and sat until it timed out. NXDOMAIN would
 # have failed in milliseconds and the client would have moved on.
 #
 # It matters because Apple Mail has no autoconfiguration to fall back on: for an
 # "Other Mail Account" it neither reads Thunderbird autoconfig nor speaks
-# Autodiscover, so it GUESSES — `imap.<domain>`, `smtp.<domain>`, then
+# Autodiscover, so it GUESSES - `imap.<domain>`, `smtp.<domain>`, then
 # `mail.<domain>`. The wildcard turned the first two guesses into timeouts, and
 # the user saw minutes of "Verifying" followed by a demand to type the hostname
 # by hand. Measured 2026-09-02.
@@ -144,7 +144,7 @@ resource "cloudflare_dns_record" "smtp" {
 # ROUTING
 # ═══════════════════════════════════════════════════════════════════════════
 
-# i10's own inbound mail. Note this is the MX for OUR domain — it is not the
+# i10's own inbound mail. Note this is the MX for OUR domain - it is not the
 # bounce MX customers publish, which points at SES and is per-customer.
 import {
   to = cloudflare_dns_record.apex_mx
@@ -163,7 +163,7 @@ resource "cloudflare_dns_record" "apex_mx" {
 
 # ⚠ i10's OWN bounce MX, and the one record in this file that is not ours to
 # design. SES re-verifies it continuously, and RFC 2181 forbids an MX target
-# that is a CNAME — so it cannot hide behind an i10 hostname, and the REGION is
+# that is a CNAME - so it cannot hide behind an i10 hostname, and the REGION is
 # baked into it. Changing region means editing this, and means every customer
 # editing theirs. Chosen once: eu-central-1.
 import {
@@ -182,13 +182,13 @@ resource "cloudflare_dns_record" "send_mx" {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SENDER AUTHENTICATION — SPF, DKIM, DMARC
+# SENDER AUTHENTICATION - SPF, DKIM, DMARC
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ⚠ `mx`, NOT an SES include, AND THE DIFFERENCE IS LOAD-BEARING TODAY.
 #
 # i10 currently sends its own mail FROM Stalwart on mail.i10.tech, which is the
-# MX — so `v=spf1 mx -all` passes, and Gmail confirms it (spf=pass, dmarc=pass,
+# MX - so `v=spf1 mx -all` passes, and Gmail confirms it (spf=pass, dmarc=pass,
 # measured 2026-09-02).
 #
 # ⚠ THE MOMENT SES PRODUCTION ACCESS LANDS THIS MUST CHANGE, and forgetting is
@@ -199,7 +199,7 @@ resource "cloudflare_dns_record" "send_mx" {
 #     v=spf1 mx include:spf.i10.tech -all
 #
 # together with a NEW `spf.i10.tech` TXT holding `v=spf1 include:amazonses.com
-# ~all`. That indirection is the portability record — customers publish
+# ~all`. That indirection is the portability record - customers publish
 # `include:spf.i10.tech`, so swapping or adding a relay is a change to one line
 # here rather than a request to every customer to edit their DNS. It is not in
 # this file yet because it does not exist in the zone yet, and this file
@@ -242,7 +242,7 @@ resource "cloudflare_dns_record" "send_spf" {
 #
 # ⚠ IT DID NOT EXIST, AND THAT IS NOT A COSMETIC GAP. `apps/docs` and the README
 # both tell customers to publish `include:_spf.i10.tech`, and an SPF `include:`
-# pointing at a name with no TXT record is a PERMERROR under RFC 7208 — not a
+# pointing at a name with no TXT record is a PERMERROR under RFC 7208 - not a
 # soft miss. Every domain onboarded through the domains API would have failed
 # SPF outright. It went unnoticed only because there are no customers yet.
 #
@@ -255,19 +255,19 @@ resource "cloudflare_dns_record" "send_spf" {
 # DNS lookup and costs the ability to move the server: the record would keep
 # authorising an address we no longer send from, and the symptom would be every
 # customer's mail failing SPF with nothing in our own DNS looking wrong. The
-# budget can afford it — the customer spends one lookup reaching this include,
+# budget can afford it - the customer spends one lookup reaching this include,
 # this record spends two more, and `amazonses.com` resolves to a flat list of
 # `ip4:` ranges with no nested includes. Three of ten.
 #
 # ⚠ AND IT IS `mail.i10.tech`, NOT `i10.tech`. The apex is PROXIED, so it
-# resolves to Cloudflare's anycast addresses rather than ours — `a:i10.tech`
+# resolves to Cloudflare's anycast addresses rather than ours - `a:i10.tech`
 # would authorise Cloudflare's proxy range to send as every customer, and would
 # not authorise the machine that actually sends. `mail.i10.tech` is deliberately
 # unproxied for exactly this reason; if that ever changes, this record silently
 # starts naming the wrong hosts.
 #
 # ⚠ `include:i10.tech` WOULD ALSO WORK AND IS STILL WRONG. The apex record is
-# `v=spf1 mx -all`, so it resolves correctly through the MX — but it costs two
+# `v=spf1 mx -all`, so it resolves correctly through the MX - but it costs two
 # lookups instead of one, and it ties what CUSTOMERS may send through to a
 # record that exists to describe i10's OWN mail. The two are free to diverge,
 # and the day they do, nobody would look here.
@@ -285,13 +285,13 @@ resource "cloudflare_dns_record" "spf_include" {
 #
 # ⚠ TWO KEYS, TWO ALGORITHMS, AND BOTH ARE NEEDED. Stalwart signs every outbound
 # message twice. Gmail reports the ed25519 signature as `dkim=neutral (no key)`
-# — it does not implement RFC 8463 — and passes on the RSA one. That is the
+# - it does not implement RFC 8463 - and passes on the RSA one. That is the
 # whole point of dual-signing: ed25519 for receivers that support it, RSA for
 # everyone else, and DMARC alignment satisfied by whichever verifies.
 #
 # The private halves live in Stalwart's own database, generated at first boot.
 # These are the public halves, and they are NOT derivable from anything in this
-# repository — if the Stalwart database is ever lost, new keys are generated
+# repository - if the Stalwart database is ever lost, new keys are generated
 # with new selectors and these records must be replaced. See the bootstrap
 # runbook.
 
@@ -300,7 +300,7 @@ resource "cloudflare_dns_record" "spf_include" {
 # ⚠ THIS REPLACED THREE `*.dkim.amazonses.com` CNAMEs, AND THE DIFFERENCE IS WHO
 # HOLDS THE PRIVATE HALF. Those were Easy DKIM: Amazon generated the pair and
 # kept the private key, which `docs/decisions/mail-routing.md` calls
-# disqualifying — a message routed through our own MTA would have nothing to
+# disqualifying - a message routed through our own MTA would have nothing to
 # sign with. i10.tech was on it because it predates the domains API and was
 # never provisioned through it. `apps/api/scripts/adopt-dkim.ts` moved it across:
 # the key below is generated by us, sealed into `core.domains`, and handed to
@@ -312,7 +312,7 @@ resource "cloudflare_dns_record" "spf_include" {
 #
 # ⚠ ITS `import` BLOCK IS BELOW AND `record_ids["ses_byodkim"]` MUST BE FILLED
 # IN. It was created by hand during the migration, so the id was never captured.
-# While it is empty the plan fails on a malformed import id — which is the
+# While it is empty the plan fails on a malformed import id - which is the
 # intended failure: without the import block at all, the plan would CREATE a
 # SECOND TXT at this name, and a DKIM selector answering with two records is
 # ambiguous to a verifier. See the regeneration command in variables.tf.
@@ -337,14 +337,14 @@ resource "cloudflare_dns_record" "ses_byodkim" {
 # infrastructure on our domain.
 #
 # It no longer does. `apps/api/src/auth-email/sender.ts` takes Clerk's mail
-# through i10's own send path — Clerk webhooks us, we send it, and it leaves
+# through i10's own send path - Clerk webhooks us, we send it, and it leaves
 # signed by `ses_byodkim` above like every other message we send as i10.tech.
 # So Clerk needs no authentication records here, and the ones it had were
 # removed from the zone.
 #
 # ⚠ THEY WERE STILL DECLARED HERE AFTERWARDS, AND THAT BROKE THE PLAN RATHER
 # THAN THE ZONE. Their import blocks named ids that no longer resolve, so every
-# plan failed with `81044 Record does not exist` — which is `record_ids`
+# plan failed with `81044 Record does not exist` - which is `record_ids`
 # working exactly as its comment in variables.tf promises. Removed 2026-09-16.
 # If Clerk ever sends as i10.tech again, the records come back WITH their ids
 # captured, not as a bare resource.
@@ -352,14 +352,14 @@ resource "cloudflare_dns_record" "ses_byodkim" {
 # ⚠ START AT p=none AND MOVE UP ON EVIDENCE. Enforcing before the reports are
 # clean quarantines your own mail, and for a company whose product is email
 # that failure is also the demo. `rua` must be receiving before the policy
-# tightens — a policy with nowhere to report is one nobody can verify.
+# tightens - a policy with nowhere to report is one nobody can verify.
 #
 # ⚠ AND THERE MUST BE EXACTLY ONE OF THESE. RFC 7489 §6.6.3: more than one
 # DMARC record at `_dmarc` and the domain is treated as having NO POLICY AT ALL.
 # A duplicate does not conflict loudly, it silently disables DMARC. Tofu owning
 # this record is the guard.
 #
-# `adkim=s; aspf=s` is strict alignment on both — the subdomain of the From
+# `adkim=s; aspf=s` is strict alignment on both - the subdomain of the From
 # domain must match exactly rather than merely share an organisational domain.
 # Correct while i10 sends only from i10.tech; revisit before sending from a
 # subdomain.
@@ -375,14 +375,14 @@ import {
 #
 # Strict `aspf=s` requires the envelope domain to equal the `From:` domain
 # exactly, and i10's own transactional mail leaves with a MAIL FROM of
-# `send.i10.tech` against a `From:` of `i10.tech` — a subdomain, which aligns
+# `send.i10.tech` against a `From:` of `i10.tech` - a subdomain, which aligns
 # under relaxed and does NOT under strict. Under strict, DMARC would rest
 # entirely on `ses_byodkim` with nothing behind it if that key ever failed to
 # verify. Relaxed keeps both SPF and DKIM aligned on both routes.
 #
 # ⚠ THIS IS i10.tech's OWN POLICY AND NOT WHAT CUSTOMERS GET. `dnsRecordsFor`
 # in apps/api emits `v=DMARC1; p=none;` with no alignment tags at all, which
-# RFC 7489 defaults to relaxed — so a customer domain is unaffected by anything
+# RFC 7489 defaults to relaxed - so a customer domain is unaffected by anything
 # decided here.
 resource "cloudflare_dns_record" "dmarc" {
   zone_id = var.zone_id
@@ -394,11 +394,11 @@ resource "cloudflare_dns_record" "dmarc" {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CLIENT PROVISIONING — RFC 6186
+# CLIENT PROVISIONING - RFC 6186
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # These tell a mail client where to connect without the user typing a port.
-# Thunderbird and several others read them; Apple Mail, measured, does not —
+# Thunderbird and several others read them; Apple Mail, measured, does not -
 # which is why the `.mobileconfig` profile exists and why `imap`/`smtp` above
 # have to resolve.
 #
@@ -406,7 +406,7 @@ resource "cloudflare_dns_record" "dmarc" {
 # both the autoconfig XML and the zone file Stalwart generates, and it is
 # trimmed to imap and smtp because those are the only protocols reachable from
 # the internet. Publishing an SRV for a protocol that is not exposed offers
-# clients an account that can never connect — POP3 on 995 was doing exactly
+# clients an account that can never connect - POP3 on 995 was doing exactly
 # that until 2026-09-02.
 
 import {
@@ -448,7 +448,7 @@ resource "cloudflare_dns_record" "srv_submissions" {
 }
 
 # ⚠ TARGET `.` MEANS "NOT AVAILABLE HERE", AND IT IS AN ANSWER RATHER THAN AN
-# OMISSION. RFC 6186 §3. i10 exposes 993 and 465 only — nothing listens on 143,
+# OMISSION. RFC 6186 §3. i10 exposes 993 and 465 only - nothing listens on 143,
 # and 587 is deliberately not published through the pod's hostPort. Without
 # these two records a client probes both and waits out a timeout on each; with
 # them it stops immediately.
@@ -500,7 +500,7 @@ resource "cloudflare_dns_record" "srv_submission_none" {
 # the id alone reaches nobody until the cache expires.
 #
 # The value must match the id Stalwart serves in the policy body. Stalwart is
-# currently on `mode: testing`, which reports failures and delivers anyway —
+# currently on `mode: testing`, which reports failures and delivers anyway -
 # the right setting until the TLS reports come back clean.
 #
 # There is no CNAME here: `mta-sts.i10.tech` is answered by the proxied
@@ -527,7 +527,7 @@ resource "cloudflare_dns_record" "mta_sts" {
 #
 #   *.i10.tech          proxied wildcard covering every web surface
 #   i10.tech (A)        the apex, proxied
-#   accounts, clerk     Clerk's frontend CNAMEs — web, not mail
+#   accounts, clerk     Clerk's frontend CNAMEs - web, not mail
 #   _doppler_…, _gh-…   ownership-verification TXT records
 #
 # All hand-managed in Cloudflare. Adding them here would mean an apply could
@@ -548,13 +548,13 @@ resource "cloudflare_dns_record" "mta_sts" {
 # POINT OF THEM. `i10.tech` is registered as a domain in i10's own console like
 # any customer's, so the product generated it a DKIM key, handed the private
 # half to SES, and told us to delegate `_domainkey.i10.tech`, `_dmarc.i10.tech`
-# and `mail.i10.tech` to ns1/ns2.i10.tech — which is exactly right for a
+# and `mail.i10.tech` to ns1/ns2.i10.tech - which is exactly right for a
 # customer and exactly wrong for us.
 #
 # It creates a circle. Our nameserver runs in the cluster; if it stops
 # answering, the DKIM record under the delegated subtree stops resolving; SES
 # re-checks, finds nothing, and moves the identity to PENDING; and then EVERY
-# message i10 sends is rejected — including the sign-up codes and every alert
+# message i10 sends is rejected - including the sign-up codes and every alert
 # that would have told somebody the nameserver was down.
 #
 # That is not hypothetical. On 2026-09-18 the PowerDNS pod crashlooped on a
@@ -570,8 +570,8 @@ resource "cloudflare_dns_record" "mta_sts" {
 # matters most. Customer domains keep using the delegation; this one must not.
 
 # ⚠ THE SELECTOR IS THE ONE THE PRODUCT GENERATED, NOT THE ONE ABOVE. SES holds
-# the private half for `i105bfe22eb2288` — see `core.domains.dkim_selector` for
-# i10.tech — so this is the public key that has to be published for the identity
+# the private half for `i105bfe22eb2288` - see `core.domains.dkim_selector` for
+# i10.tech - so this is the public key that has to be published for the identity
 # to verify. The older `ses_byodkim` record above is now ORPHANED: nothing signs
 # with it, because the product overwrote SES's signing attributes when the
 # domain was onboarded. It is left in place deliberately rather than deleted in
@@ -616,7 +616,7 @@ resource "cloudflare_dns_record" "send_mail_spf" {
 }
 
 # ⚠ THE SECOND ROUTE. `bounce.mail` is the return path for mail that leaves
-# through our own MTA rather than SES — see docs/decisions/mail-routing.md. Both
+# through our own MTA rather than SES - see docs/decisions/mail-routing.md. Both
 # are published because one key signs both routes, and which route a message
 # takes is not a DNS decision.
 resource "cloudflare_dns_record" "bounce_mail_mx" {

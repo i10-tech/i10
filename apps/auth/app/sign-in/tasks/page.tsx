@@ -11,11 +11,11 @@ export const metadata: Metadata = { title: "One more step · i10" }
 export const dynamic = "force-dynamic"
 
 /**
- * Clerk's session tasks — the step between "signed in" and "allowed in".
+ * Clerk's session tasks - the step between "signed in" and "allowed in".
  *
  * ⚠ THIS ROUTE WAS MISSING, AND ITS ABSENCE LOCKED PEOPLE OUT OF THE PRODUCT.
  * Clerk v7 can hold a session at `status: "pending"` when the user still owes
- * it something — choosing an organization, resetting an expired password,
+ * it something - choosing an organization, resetting an expired password,
  * enrolling in MFA. `@clerk/backend` handles that by redirecting to
  * `${CLERK_SIGN_IN_URL}/tasks`, unconditionally and with no way to opt out:
  *
@@ -23,13 +23,13 @@ export const dynamic = "force-dynamic"
  *       redirectAdapter(buildUrl(baseUrl, `${url}/tasks`, …))
  *
  * We set `CLERK_SIGN_IN_URL` to our own sign-in page and never built the `tasks`
- * child, so every pending session landed on a 404 — signed in, unable to
+ * child, so every pending session landed on a 404 - signed in, unable to
  * continue, and unable to go back, because the middleware bounces them straight
  * here again. It is not a local-only problem: the same redirect happens in
  * production for anybody Clerk raises a task for.
  *
  * ⚠ AND THE TASK UIs ARE CLERK'S OWN COMPONENTS RATHER THAN HAND-BUILT. That is
- * the same division as the rest of this app — identity is Clerk's job here, and
+ * the same division as the rest of this app - identity is Clerk's job here, and
  * `TaskChooseOrganization` in particular would otherwise mean rebuilding
  * organization creation, invitation acceptance and membership selection against
  * an API whose states we do not control. They inherit our palette from the
@@ -44,7 +44,7 @@ export default async function Page({
 
   // ⚠ THE SAME ALLOWLIST AS EVERY OTHER DOOR. Clerk puts the original
   // destination in `redirect_url` when it bounces somebody here, which makes it
-  // attacker-controllable exactly like the one on /sign-in — see _lib/redirect.
+  // attacker-controllable exactly like the one on /sign-in - see _lib/redirect.
   const after = afterAuthUrl(raw)
 
   return (

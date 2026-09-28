@@ -5,7 +5,7 @@
 #
 # ⚠ WHY THIS EXISTS: THE TIDY IS ALLOWED TO FAIL AND NOTHING COUNTED THE
 # FAILURES. `remove` deletes the domain row first and then cleans up the SES
-# identity and the three delegated zones, swallowing errors in both — which is
+# identity and the three delegated zones, swallowing errors in both - which is
 # the right trade, because the row really is gone and a 500 the customer cannot
 # act on is worse than a leak. It is NOT the right trade against a failure that
 # happens every single time, and that is what was happening:
@@ -14,13 +14,13 @@
 # still-sendable identity in the account.
 #
 # ⚠ AND THE ZONE HALF HAD ITS OWN VERSION OF IT. `holdsZones` read a missing
-# `core.delegations` row as "not mine" — true of every delegated domain created
+# `core.delegations` row as "not mine" - true of every delegated domain created
 # before claims existed, which in this deployment is all of them.
 #
 # ⚠ DAILY, NOT PER-MINUTE, WHICH IS THE OPPOSITE OF ITS TWO SIBLINGS. Catch-up
 # and prove answer "is somebody's domain ready yet" for a person watching a
 # badge, so they run every minute. Nobody is waiting on this one, it cannot get
-# meaningfully worse in an afternoon, and it lists an entire SES account — which
+# meaningfully worse in an afternoon, and it lists an entire SES account - which
 # is not something to do sixty times an hour.
 #
 # ⚠ AND IT REPORTS BEFORE IT REMOVES. `DOMAIN_ORPHANS_REMOVE` is absent here on
@@ -48,7 +48,7 @@ spec:
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   # ⚠ KEPT LONGER THAN THE OTHERS. This job's output IS the artefact while it is
-  # in reporting mode — the list of what it would have removed — so a week of
+  # in reporting mode - the list of what it would have removed - so a week of
   # failed runs is a week of evidence somebody may want to read.
   failedJobsHistoryLimit: 7
   startingDeadlineSeconds: 300
@@ -59,7 +59,7 @@ spec:
       # it, and nothing here is time-critical.
       backoffLimit: 0
       # ⚠ MINUTES, NOT SECONDS, UNLIKE THE PER-MINUTE JOBS. There is no next slot
-      # to protect — the next one is tomorrow — and a pass has to page an entire
+      # to protect - the next one is tomorrow - and a pass has to page an entire
       # SES account and then make one `GetEmailIdentity` per candidate.
       activeDeadlineSeconds: 600
       template:
@@ -76,7 +76,7 @@ spec:
               env:
                 # ⚠ `i10_api`, NOT THE OWNER. This pass reaches across every
                 # tenant and does it through two narrow SECURITY DEFINER
-                # functions — `core.orphaned_zones` and `core.domains_known` —
+                # functions - `core.orphaned_zones` and `core.domains_known` -
                 # rather than by holding a role that can see everything. The
                 # second one is the dangerous read: it decides which SES
                 # identities have no owner, and getting it through row level

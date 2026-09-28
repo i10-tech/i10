@@ -7,7 +7,7 @@ import { ThemeProvider } from "next-themes"
  *
  * ⚠ WITHOUT THIS AN APP IS PERMANENTLY LIGHT, AND NOTHING ANYWHERE SAYS SO.
  * The token sheet defines its dark palette under a `.dark` CLASS, and a class
- * does not apply itself — an app that renders no provider gets the `:root`
+ * does not apply itself - an app that renders no provider gets the `:root`
  * light palette on a machine set to dark, with no error to explain it. That is
  * exactly what apps/console shipped with. `attribute="class"` is what puts
  * `.dark` on <html>, which is the selector the tokens are already written
@@ -16,7 +16,7 @@ import { ThemeProvider } from "next-themes"
  * ⚠ IT LIVES IN THE PACKAGE RATHER THAN IN EACH APP BECAUSE THE DEFAULT IS A
  * PRODUCT DECISION, NOT AN APP ONE. Two copies is two places for "we are dark
  * by default" to be written differently, which is how the console came to be
- * white while auth was dark — someone signing in on a dark page and landing on
+ * white while auth was dark - someone signing in on a dark page and landing on
  * a white one has been shown a seam that does not exist in the product.
  *
  * ⚠ AND `next-themes` IS ALREADY HERE REGARDLESS. shadcn's Sonner calls
@@ -34,7 +34,7 @@ export function Theme({ children }: { children: React.ReactNode }) {
       /**
        * ⚠ DARK IS THE DEFAULT, NOT THE SYSTEM SETTING. `enableSystem` stays on
        * so "system" remains a choice a person can make later, but with nothing
-       * stored this lands on dark regardless of what the machine prefers —
+       * stored this lands on dark regardless of what the machine prefers -
        * which is the decision, not a fallback.
        */
       defaultTheme="dark"

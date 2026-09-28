@@ -11,6 +11,6 @@
   //
   // ⚠ ITS ONLY SECRET IS `BROKER_SECRET`, SET OUT OF BAND:
   //     wrangler secret put BROKER_SECRET
-  // It is NOT in this file and must never be — see the README.
+  // It is NOT in this file and must never be - see the README.
   "observability": { "enabled": true },
 }

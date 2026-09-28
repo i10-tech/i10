@@ -10,10 +10,10 @@ import {
  * The three primitives every list on the console surface is built from.
  *
  * ⚠ ALL THREE FAIL SILENTLY WHEN THEY ARE WRONG, WHICH IS WHY THEY ARE TESTED
- * AND THE QUERIES AROUND THEM ARE NOT. A broken cursor does not throw — it
+ * AND THE QUERIES AROUND THEM ARE NOT. A broken cursor does not throw - it
  * skips a page of somebody's delivery log. A broken `escapeLike` does not throw
- * — it turns a search for a literal `%` into a scan that matches everything. A
- * broken `clampLimit` does not throw — it lets a caller ask for a million rows
+ * - it turns a search for a literal `%` into a scan that matches everything. A
+ * broken `clampLimit` does not throw - it lets a caller ask for a million rows
  * from a partitioned table.
  */
 
@@ -23,7 +23,7 @@ describe("cursor", () => {
    * CARRIED AS THE TEXT POSTGRES RENDERED RATHER THAN AS A `Date`. A `Date` is
    * millisecond precision; a `timestamptz` is microsecond. A cursor rounded
    * down to the millisecond makes the next page ask for `created_at < T.000`,
-   * and a row at `T.000200` — older, and legitimately on that page — compares
+   * and a row at `T.000200` - older, and legitimately on that page - compares
    * GREATER and is skipped by every page, forever.
    */
   it("round-trips the timestamp exactly as Postgres rendered it", () => {
@@ -52,7 +52,7 @@ describe("cursor", () => {
   /**
    * ⚠ THE SEPARATOR IS FOUND FROM THE LEFT, AND THE SUPPRESSION LIST IS WHY.
    * Its cursor's id half is an EMAIL ADDRESS, not a uuid, and a quoted local
-   * part may legally contain a `|`. An ISO timestamp never can — so splitting
+   * part may legally contain a `|`. An ISO timestamp never can - so splitting
    * at the first separator always yields the whole timestamp and the whole id.
    * Splitting at the LAST one would truncate such an address and page past a
    * row rather than to it. This test was written expecting `lastIndexOf` and
@@ -72,7 +72,7 @@ describe("cursor", () => {
 
   it("refuses a cursor it cannot parse rather than guessing", () => {
     // ⚠ EVERY ONE OF THESE MUST BE `null`, NOT A DATE OF `Invalid Date`. A
-    // cursor is caller-supplied — it comes straight off the query string — and
+    // cursor is caller-supplied - it comes straight off the query string - and
     // an unparseable one that produced a NaN date would reach the query as
     // `created_at < NaN`, which matches nothing and renders an empty log for a
     // tenant whose mail is fine.
@@ -88,7 +88,7 @@ describe("cursor", () => {
   /**
    * ⚠ THE SHAPE CHECK ALONE IS NOT ENOUGH, AND THIS IS THE TEST THAT SAYS SO.
    * `2026-13-45 99:99:99` matches the pattern, binds safely as a parameter, and
-   * then raises `invalid input syntax for type timestamp` inside Postgres — a
+   * then raises `invalid input syntax for type timestamp` inside Postgres - a
    * 500 on a log page because somebody edited the URL.
    */
   it("refuses a well-shaped timestamp that is not a real instant", () => {
@@ -101,7 +101,7 @@ describe("escapeLike", () => {
   /**
    * ⚠ THE BACKSLASH IS THE ONE THAT MATTERS, AND IT IS THE ONE PEOPLE FORGET.
    * Escaping only `%` and `_` leaves a search string able to neutralise the
-   * escaping applied to the other two — `\%` arrives at Postgres as an escaped
+   * escaping applied to the other two - `\%` arrives at Postgres as an escaped
    * escape followed by a live wildcard.
    */
   it("escapes all three LIKE metacharacters", () => {
@@ -111,7 +111,7 @@ describe("escapeLike", () => {
   })
 
   it("escapes the backslash before it can protect a wildcard", () => {
-    // `\%` must become `\\\%` — an escaped backslash, then an escaped percent.
+    // `\%` must become `\\\%` - an escaped backslash, then an escaped percent.
     // If the backslash were left alone the result would be `\%`, which Postgres
     // reads as one escaped percent and the leading character disappears.
     expect(escapeLike("\\%")).toBe("\\\\\\%")
@@ -140,7 +140,7 @@ describe("clampLimit", () => {
   /**
    * ⚠ `Number("abc")` IS `NaN` AND `NaN` PASSES EVERY COMPARISON. A limit read
    * off a query string is a string; without the `isFinite` guard, `?limit=abc`
-   * reaches `LIMIT NaN` and the query raises — a 500 on a log page because
+   * reaches `LIMIT NaN` and the query raises - a 500 on a log page because
    * somebody edited the URL.
    */
   it("falls back when the value is not a number", () => {

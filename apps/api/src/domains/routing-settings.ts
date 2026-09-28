@@ -15,7 +15,7 @@ import type { Database } from "../db/client.js"
  * ⚠ THE ENVIRONMENT STAYS THE AUTHORED SOURCE. Nobody edits that row by hand;
  * it is overwritten on every boot from `env`. Editing it directly works until
  * the next deploy and then silently reverts, which is worse than not being able
- * to edit it at all — so the column comments say so and this is the only writer.
+ * to edit it at all - so the column comments say so and this is the only writer.
  *
  * ⚠ WITHOUT IT THE KILL SWITCH ONLY MOVES HALF THE MAIL. `SES_ENABLED` thrown
  * during an incident redirects transactional sends immediately, because the
@@ -40,7 +40,7 @@ export interface RoutingSettings {
 
 /**
  * ⚠ AN UPSERT ONTO ONE FIXED KEY, NOT AN INSERT. The row is created by 0036, so
- * this only ever updates — but writing it as an upsert means a database restored
+ * this only ever updates - but writing it as an upsert means a database restored
  * from a backup taken before that migration still converges instead of leaving
  * the mail server with no settings to read.
  *

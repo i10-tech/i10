@@ -86,7 +86,7 @@ describe("a domain that still proves itself", () => {
     expect(statements.some((s) => s.includes("displace_domain"))).toBe(false)
   })
 
-  /** ⚠ A MANUAL DOMAIN IS PROVED BY ITS OWN ROUTE — the DKIM record it publishes. */
+  /** ⚠ A MANUAL DOMAIN IS PROVED BY ITS OWN ROUTE - the DKIM record it publishes. */
   it("proves a manual domain with its DKIM record", async () => {
     const asked: string[] = []
     const { summary } = await run([due({ delegated: false })], {
@@ -157,7 +157,7 @@ describe("a domain we could not ask about", () => {
    * ⚠ THE MOST IMPORTANT TEST IN THIS FILE. A failure to ASK is not an answer.
    * If a resolver timeout started the clock, one bad afternoon at a large DNS
    * provider would quietly begin un-verifying a large fraction of our customers
-   * at once — and every one of those clocks would look like a genuine failure a
+   * at once - and every one of those clocks would look like a genuine failure a
    * week later, long after the outage was forgotten.
    */
   it("has nothing written about it at all", async () => {
@@ -175,7 +175,7 @@ describe("a domain we could not ask about", () => {
       tenantsAttached: 0,
       tenantsFailed: 0,
     })
-    // ⚠ NOT EVEN THE CHECK TIMESTAMP — the row must come back next run untouched.
+    // ⚠ NOT EVEN THE CHECK TIMESTAMP - the row must come back next run untouched.
     expect(statements.some((s) => s.includes("note_domain_proof"))).toBe(false)
     expect(statements.some((s) => s.includes("displace_domain"))).toBe(false)
   })
@@ -221,7 +221,7 @@ describe("choosing what to re-check", () => {
 
 /**
  * #156: the re-check is where "every domain is in its SES tenant" is kept true
- * — an attach that failed at registration, and every domain that predates
+ * - an attach that failed at registration, and every domain that predates
  * tenants, is repaired here.
  */
 describe("keeping proven domains in their SES tenant", () => {

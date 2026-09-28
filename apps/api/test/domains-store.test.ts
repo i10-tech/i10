@@ -86,7 +86,7 @@ const deps = {
   /**
    * ⚠ NO TEST MAY TOUCH REAL DNS, AND WITHOUT THIS EVERY ONE OF THEM WOULD.
    * `verify` proves ownership before it registers an SES identity, and the
-   * store's default lookup is a real resolver — so a store built without a
+   * store's default lookup is a real resolver - so a store built without a
    * `txt` resolves `example.com` against whatever network the test runner
    * happens to be on. That is slow, non-deterministic, and passes or fails on
    * somebody else's DNS.
@@ -101,7 +101,7 @@ const deps = {
 describe("what counts as a domain name", () => {
   /**
    * ⚠ BOTH OF THESE ARE THINGS PEOPLE PASTE, and both would create a domain
-   * that can never verify — the record names would be built from the wrong
+   * that can never verify - the record names would be built from the wrong
    * string and nothing would say so.
    */
   it("refuses a URL or an address", () => {
@@ -145,7 +145,7 @@ describe("the plan limit", () => {
     const outcome = await store.create(TENANT, { name: "example.com" })
     expect(outcome.status).toBe("limit")
     // ⚠ AND NO IDENTITY WAS CREATED. Creating it first and then refusing leaves
-    // a verified identity in AWS that no row points at — invisible, billable,
+    // a verified identity in AWS that no row points at - invisible, billable,
     // and still able to send.
     expect(create).not.toHaveBeenCalled()
   })
@@ -186,7 +186,7 @@ describe("creating", () => {
 
   /**
    * ⚠ THE MESSAGE MUST NOT SAY WHOSE. `core.domains.name` is unique across every
-   * tenant, so this fires for somebody else's domain too — and "another
+   * tenant, so this fires for somebody else's domain too - and "another
    * customer has example.com" is a way to enumerate our customers.
    */
   it("reports a duplicate without saying whose it is", async () => {
@@ -217,8 +217,8 @@ describe("creating", () => {
       transaction: async (fn: (t: unknown) => Promise<unknown>) =>
         fn({
           execute: async () => [],
-          // ⚠ `create` READS BEFORE IT WRITES NOW. It refuses a duplicate —
-          // this tenant's own, or a name verified elsewhere — before calling
+          // ⚠ `create` READS BEFORE IT WRITES NOW. It refuses a duplicate -
+          // this tenant's own, or a name verified elsewhere - before calling
           // SES, because that call would overwrite the holder's DKIM key. An
           // empty answer here is "the name is free".
           select: () => ({
@@ -249,7 +249,7 @@ describe("verifying", () => {
   /**
    * ⚠ `verified_at` IS THE MOMENT IT FIRST BECAME USABLE AND IS NEVER MOVED
    * BACKWARDS. A transient `temporary_failure` must not un-verify a working
-   * domain — the mailbox projection and the send path both read that column as
+   * domain - the mailbox projection and the send path both read that column as
    * "has this ever been proven".
    */
   it("does not clear verified_at on a temporary failure", async () => {
@@ -326,7 +326,7 @@ describe("verifying", () => {
    * IT ANYWAY MADE THE ROW INVISIBLE TO EVERYTHING THAT MATTERS. Two things
    * produce it from the status read: SES's own `NOT_STARTED`, and a
    * `NotFoundException` from reading back an identity a moment after creating
-   * it — the adapter maps both to the same word, deliberately, because for a
+   * it - the adapter maps both to the same word, deliberately, because for a
    * row that was never registered they mean the same thing.
    *
    * ⚠ STORED, THOUGH, IT MEANS SOMETHING ELSE ENTIRELY TO THE REST OF THE
@@ -349,7 +349,7 @@ describe("verifying", () => {
                 /*
                  * ⚠ BOTH SHAPES AT ONCE, because one fake select serves two
                  * different reads. `verify` reads the ROW, and
-                 * `registerIdentity` reads the sealed private key on its own —
+                 * `registerIdentity` reads the sealed private key on its own -
                  * projected as `{ sealed }`, deliberately kept out of `COLUMNS`
                  * so the only secret in this feature never travels inside the
                  * shape `present()` turns into an API response. A fixture with
@@ -386,7 +386,7 @@ describe("verifying", () => {
   /**
    * ⚠ THE STALENESS CLOCK ONLY TICKS IF AN UNPROVEN VERIFY STAMPS IT. Every
    * unproven exit used to return without touching the row, so `dns_checked_at`
-   * stayed NULL for exactly the rows the proof sweep selects — and an
+   * stayed NULL for exactly the rows the proof sweep selects - and an
    * oldest-first sweep would take the same head of the table on every run for
    * ever, while the rows behind it were never reached. Stamping it asserts only
    * that we asked.
@@ -437,8 +437,8 @@ describe("verifying", () => {
  * ⚠ REFUSED RATHER THAN ALLOWED-AND-BROKEN, and the reason is not tidiness.
  * Every path after `create` assumes the customer controls the name: it would
  * generate a DKIM keypair for a zone this server is already authoritative for,
- * register a second SES identity against our own sending domain, and — on the
- * delegated path — hand a customer's claim the zone carrying OUR SPF and return
+ * register a second SES identity against our own sending domain, and - on the
+ * delegated path - hand a customer's claim the zone carrying OUR SPF and return
  * paths. The first mail to break would be ours.
  */
 describe("adding a domain that belongs to us", () => {
@@ -461,7 +461,7 @@ describe("adding a domain that belongs to us", () => {
 
   /**
    * ⚠ AND A SUBDOMAIN OF IT. `mail.i10.tech` is the zone our own return paths
-   * live in — delegating that to a tenant is the same failure with a longer
+   * live in - delegating that to a tenant is the same failure with a longer
    * name, and it is the one somebody would actually try.
    */
   it("refuses a subdomain of it too", async () => {

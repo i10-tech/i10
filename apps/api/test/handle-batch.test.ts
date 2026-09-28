@@ -99,7 +99,7 @@ describe("the happy path", () => {
     ])
   })
 
-  // ⚠ NO WRITE, NO BILL. A null means the compare-and-swap did not take — the
+  // ⚠ NO WRITE, NO BILL. A null means the compare-and-swap did not take - the
   // claim had already moved to another worker, which will record and bill the
   // row itself. Billing it here too would charge the customer twice for one
   // message.
@@ -122,7 +122,7 @@ describe("the happy path", () => {
 })
 
 describe("losing the claim", () => {
-  // ⚠ NOT AN ERROR. Another worker owns these — the mechanism working. Throwing
+  // ⚠ NOT AN ERROR. Another worker owns these - the mechanism working. Throwing
   // would make groupmq retry and race that worker again, turning a clean
   // hand-off into a duplicate.
   it("does nothing and does not throw", async () => {
@@ -321,11 +321,11 @@ describe("the Message-ID header", () => {
   /**
    * ⚠ THE FORM REAL CALLERS ACTUALLY SEND, AND THE ONE THIS FILE NEVER TRIED.
    * Every case above passes a bare address, so taking everything after the last
-   * `@` looked correct — and on `i10 test <noreply@pslhq.app>` it yields
+   * `@` looked correct - and on `i10 test <noreply@pslhq.app>` it yields
    * `pslhq.app>`, producing `<m@pslhq.app>>` with a doubled bracket.
    *
    * ⚠ AND SES SWALLOWS THAT WITHOUT COMPLAINING. A malformed Message-ID is not
-   * refused, it is replaced with `…@eu-central-1.amazonses.com` — so the header
+   * refused, it is replaced with `…@eu-central-1.amazonses.com` - so the header
    * was simply missing from delivered mail, the retry mitigation was not in
    * force, and the only evidence was in a received message's source.
    */

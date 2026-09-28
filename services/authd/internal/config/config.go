@@ -38,7 +38,7 @@ type Config struct {
 
 	// BindsPerMinute caps password verifications per identity. It exists to
 	// protect the Clerk request budget (1000 req/10s across all of i10) from a
-	// mail client stuck in a retry loop — NOT to protect users from Clerk's
+	// mail client stuck in a retry loop - NOT to protect users from Clerk's
 	// account lockout, which we measured and confirmed the Backend API
 	// verify_password endpoint does not trigger.
 	BindsPerMinute int
@@ -49,7 +49,7 @@ type Config struct {
 	//
 	// ⚠ IT IS ALSO THE WINDOW IN WHICH A ROTATED PASSWORD KEEPS WORKING, and
 	// sixty seconds is the number that was argued for and accepted. Raising it
-	// is a security decision, not a tuning knob — read the package comment in
+	// is a security decision, not a tuning knob - read the package comment in
 	// internal/credcache before changing it, and note that account deactivation
 	// is NOT affected either way, because the projection lookup runs first.
 	CredCacheTTL time.Duration

@@ -7,7 +7,7 @@ import { ActionButton, Detail, FallbackLink, Layout, styles } from "../layout.js
  * ⚠ THE REVOKE BUTTON IS THE ONE ACTIONABLE LINK WE DO SEND, and it is safe
  * where a "reset your password" link would not be: the worst a stolen revoke
  * URL can do is sign somebody OUT. That asymmetry is the whole reason it is
- * allowed here — it fails closed.
+ * allowed here - it fails closed.
  */
 export default function NewSignIn({
   signInMethod,
@@ -59,7 +59,7 @@ export default function NewSignIn({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

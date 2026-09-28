@@ -35,14 +35,14 @@ export const viewport: Viewport = {
 /**
  * ⚠ CLERK IS MOUNTED ONLY WHEN IT IS CONFIGURED, AND THE FALLBACK IS FOR LOCAL
  * REVIEW ONLY. `<ClerkProvider>` throws without a publishable key, so a
- * checkout with no Clerk instance would render nothing at all — and the point
+ * checkout with no Clerk instance would render nothing at all - and the point
  * of preview mode is that somebody can look at the interface before the stack
  * behind it exists. In every real deployment the key is present and this
  * branch is not taken.
  *
  * ⚠ IT IS DELIBERATELY NOT AN AUTHENTICATION BYPASS. The middleware is what
  * protects these pages, and its own preview guard folds to `false` in a
- * production build — see middleware.ts. A production image with a missing
+ * production build - see middleware.ts. A production image with a missing
  * Clerk key renders an unauthenticated shell here and is refused by the API on
  * every request, which is a loud failure rather than a quiet one.
  */
@@ -57,8 +57,8 @@ function Providers({ children }: { children: React.ReactNode }) {
       signUpUrl={process.env.CLERK_SIGN_UP_URL}
       /*
        * ⚠ THIS USED TO BE A HARDCODED DARK PALETTE, AND IN LIGHT MODE IT WAS
-       * SIMPLY WRONG. Nine literal hex values — `colorBackground: "#0a0a0a"`,
-       * `colorForeground: "#fafafa"` — so every Clerk surface rendered dark on
+       * SIMPLY WRONG. Nine literal hex values - `colorBackground: "#0a0a0a"`,
+       * `colorForeground: "#fafafa"` - so every Clerk surface rendered dark on
        * a white page for anybody who had not chosen dark mode, with no way for
        * it to follow the theme. The `fontFamily` named `--font-geist-sans`,
        * which is not a variable this design system defines, so Clerk fell back
@@ -73,7 +73,7 @@ function Providers({ children }: { children: React.ReactNode }) {
       {/*
        * ⚠ INSIDE THE PROVIDER AND ABOVE EVERY ROUTE, INCLUDING `/onboarding`.
        * It picks the workspace a new account was provisioned and never had
-       * selected — see components/activate-workspace.tsx for why Clerk does not
+       * selected - see components/activate-workspace.tsx for why Clerk does not
        * do this itself, and why an unselected organization is not merely a
        * cosmetic problem. It renders nothing; the branch above, with no Clerk
        * key, has no session for it to act on.
@@ -82,7 +82,7 @@ function Providers({ children }: { children: React.ReactNode }) {
       {/*
        * ⚠ INSIDE THE PROVIDER, BECAUSE IT USES A CLERK HOOK THAT THROWS
        * OUTSIDE ONE. It renders nothing; it supplies the "prove it is you"
-       * prompt that guards the deletions — see lib/step-up. The branch above
+       * prompt that guards the deletions - see lib/step-up. The branch above
        * with no Clerk key gets a fallback that cannot prompt and therefore
        * cannot delete anything the API would have refused.
        */}
@@ -94,7 +94,7 @@ function Providers({ children }: { children: React.ReactNode }) {
 /**
  * ⚠ THE WHOLE APP RENDERS AT REQUEST TIME, AND THIS LINE IS LOAD-BEARING RATHER
  * THAN CAUTIOUS. Every PAGE here is already `force-dynamic`, but Next generates
- * one route nobody declares — `/_not-found` — and with no config it is
+ * one route nobody declares - `/_not-found` - and with no config it is
  * PRERENDERED AT BUILD TIME. The image is built in CI with no access to any
  * environment's Clerk instance, so `process.env.CLERK_PUBLISHABLE_KEY` is
  * undefined at that moment, and the 404's copy of this layout was baked with no
@@ -102,8 +102,8 @@ function Providers({ children }: { children: React.ReactNode }) {
  *
  * ⚠ AND A ROOT LAYOUT IS SHARED ACROSS CLIENT NAVIGATIONS, WHICH IS WHAT TURNED
  * THAT INTO A CRASH. Landing on a 404 and pressing "Go to the dashboard" is a
- * soft navigation: Next keeps the layout it already has — the provider-less one
- * from the static build — and mounts the dashboard shell inside it. The shell
+ * soft navigation: Next keeps the layout it already has - the provider-less one
+ * from the static build - and mounts the dashboard shell inside it. The shell
  * contains `<OrganizationSwitcher>`, which throws "can only be used within
  * <ClerkProvider>". Reloading the same URL re-rendered the layout on the server,
  * with the key, and everything worked, which is exactly the signature of a
@@ -124,21 +124,21 @@ export default function RootLayout({
      * Clerk's default is to read `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, which Next
      * inlines at BUILD time. The console image is built once in CI with no
      * access to any environment's Clerk instance, so the key has to arrive at
-     * runtime — which only an unprefixed variable, read in a server component,
+     * runtime - which only an unprefixed variable, read in a server component,
      * actually does.
      *
      * ⚠ AND OMITTING THE TWO URLs FROM THE PROVIDER IS WHY SIGNING IN VISIBLY
      * BOUNCED THROUGH clerk.i10.tech. The middleware and the browser SDK resolve
      * them independently: middleware had them, the provider did not, so anything
-     * Clerk redirected from the client — a protected page hydrating without a
-     * session, `<UserButton />` signing out — fell back to the hosted Account
+     * Clerk redirected from the client - a protected page hydrating without a
+     * session, `<UserButton />` signing out - fell back to the hosted Account
      * Portal at the instance's own domain, which then forwarded to auth.i10.tech.
      * The extra hop was not a network hiccup; it was two halves of one SDK
      * configured differently.
      *
      * ⚠ THE FONT VARIABLES GO ON <html>, NOT ON <body>, BECAUSE PORTALS ESCAPE
      * <body>'s SUBTREE. Radix renders dialogs, popovers and the command menu
-     * into a portal appended to `document.body` — a sibling of our tree, not a
+     * into a portal appended to `document.body` - a sibling of our tree, not a
      * descendant of anything we rendered. Declaring them on <html> makes them
      * reach those portals however a library chooses to mount.
      */
@@ -152,12 +152,12 @@ export default function RootLayout({
          * ⚠ `preconnect` FOR THE FONT ORIGIN, AND `crossOrigin` IS NOT OPTIONAL
          * ON IT. Fonts are fetched in CORS mode whatever the stylesheet says, so
          * a preconnect without the attribute opens a SECOND, non-CORS connection
-         * that the font request cannot reuse — it costs an extra DNS lookup and
+         * that the font request cannot reuse - it costs an extra DNS lookup and
          * TLS handshake rather than saving one, which is the exact opposite of
          * the point and is invisible in every tool except a waterfall.
          *
          * ⚠ AND IT IS `preconnect`, NOT `preload`. Preloading a font the page
-         * may not use — this one is only on headings and the wordmark — makes it
+         * may not use - this one is only on headings and the wordmark - makes it
          * a render-blocking download on every route. Warming the connection is
          * the half that is free.
          */}
@@ -171,7 +171,7 @@ export default function RootLayout({
           {/*
            * ⚠ ONE TOOLTIP PROVIDER AT THE ROOT RATHER THAN ONE PER TOOLTIP.
            * Radix's provider is what makes the SECOND tooltip open instantly
-           * after the first — the "skip delay" behaviour. Wrapping each tooltip
+           * after the first - the "skip delay" behaviour. Wrapping each tooltip
            * in its own provider gives every one of them the full delay, which in
            * a table of copy buttons feels broken.
            */}

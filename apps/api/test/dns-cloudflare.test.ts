@@ -8,7 +8,7 @@ import { DnsWriteError, type DesiredRecord, type RemoteZone } from "../src/dns/p
  * ⚠ THIS IS THE MOST DESTRUCTIVE CODE IN THE PRODUCT AND IT SHIPPED WITH NO
  * TESTS AT ALL. A credential that can add a TXT record can rewrite an MX
  * record, and an adapter that gets `publish` slightly wrong does not fail
- * loudly — it produces a customer whose mail silently stops arriving, days
+ * loudly - it produces a customer whose mail silently stops arriving, days
  * later, for a reason nobody connects to us.
  *
  * ⚠ THE CASES BELOW ARE THE ONES WHERE THAT ACTUALLY HAPPENS: the refusal that
@@ -119,7 +119,7 @@ describe("listing the zones a credential can reach", () => {
 describe("refusing before destroying", () => {
   /**
    * ⚠ THE SAFETY PROPERTY OF THE WHOLE FEATURE. Delegating `_dmarc.example.com`
-   * shadows any DMARC record the customer already has — which, for anybody who
+   * shadows any DMARC record the customer already has - which, for anybody who
    * has ever configured DMARC, is all of them. The first call must report and
    * change NOTHING, or a customer loses a record they never agreed to lose.
    */
@@ -248,8 +248,8 @@ describe("refusing before destroying", () => {
 
   /**
    * ⚠ AND NOT UNLESS IT IS ASKED FOR. Recognising a record as ours does not
-   * establish that it is THIS domain's to delete — the same name can be held
-   * by more than one workspace — so only the publisher, which knows who holds
+   * establish that it is THIS domain's to delete - the same name can be held
+   * by more than one workspace - so only the publisher, which knows who holds
    * the name, may turn the clean-up on. An adapter that did it by default
    * would delete another workspace's live delegation.
    */
@@ -292,7 +292,7 @@ describe("refusing before destroying", () => {
 describe("the blast radius of a delegation", () => {
   /**
    * ⚠ ONLY THE EXACT NAMES BEING DELEGATED. Not the apex, not a parent, not a
-   * record of a different name — a delegation that swept the zone would take
+   * record of a different name - a delegation that swept the zone would take
    * out the customer's website and their inbound MX along with their DMARC.
    */
   it("leaves every other record in the zone alone", async () => {
@@ -382,7 +382,7 @@ describe("running it twice", () => {
    * ⚠ TXT VALUES ARE COMPARED UNQUOTED, and getting this wrong is invisible in
    * the happy path. Cloudflare stores TXT content without the surrounding
    * quotes a zone file carries, so a quoted comparison never matches and every
-   * single run creates another duplicate — none of which ever match the next.
+   * single run creates another duplicate - none of which ever match the next.
    */
   it("matches a TXT record whatever the quoting", async () => {
     stub((url) =>
@@ -430,7 +430,7 @@ describe("running it twice", () => {
 describe("what gets sent to Cloudflare", () => {
   /**
    * ⚠ NEVER PROXIED. An orange-clouded record answers with Cloudflare's own
-   * HTTP addresses instead of the value — which is exactly how `ns1.i10.tech`
+   * HTTP addresses instead of the value - which is exactly how `ns1.i10.tech`
    * came to resolve to a Cloudflare address and serve no DNS at all.
    */
   it("never proxies a record", async () => {

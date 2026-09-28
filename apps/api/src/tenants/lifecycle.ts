@@ -16,7 +16,7 @@ import type { Logger } from "./provision.js"
  * for the rest of the month and should keep it. Deletion is not that: there is
  * nobody left to use the remainder, and "we will keep charging you until the
  * 4th" is not an answer anybody accepts about an account they have deleted. The
- * console's own warning says immediately, so this has to mean it — see
+ * console's own warning says immediately, so this has to mean it - see
  * `revokeSubscription` in billing/polar.ts.
  *
  * ⚠ THE ORDER IS ENTITLEMENT FIRST, POLAR SECOND, AND IT IS CHOSEN FOR THE
@@ -24,7 +24,7 @@ import type { Logger } from "./provision.js"
  * in one statement, so if the Polar call then throws, the workspace is already
  * switched off on our side and the webhook answers non-2xx so Svix retries the
  * revoke. The other order leaves a window where Polar has stopped billing and
- * we still believe they are entitled — a free Pro plan, granted by an error.
+ * we still believe they are entitled - a free Pro plan, granted by an error.
  */
 
 /** What the lifecycle needs of the database. See tenants/db.ts. */
@@ -55,7 +55,7 @@ export interface TenantLifecycleStore {
    *
    * ⚠ `renamed: false` MEANS THE NAME WAS ALREADY THAT, AND IT IS THE ORDINARY
    * ANSWER RATHER THAN A FAILURE. Clerk fires `organization.updated` for every
-   * change to an organization — including the rename WE just asked it to make —
+   * change to an organization - including the rename WE just asked it to make -
    * so most deliveries here are echoes of our own write. Distinguishing them is
    * what keeps the log quiet and the exchange finite.
    */
@@ -87,13 +87,13 @@ export interface SubscriptionRevoker {
  * Clerk, narrowed to the one question the `user.deleted` sweep asks.
  *
  * ⚠ IT ASKS WHETHER ANYBODY IS STILL IN THE ORGANIZATION, NOT WHETHER THE
- * ORGANIZATION STILL EXISTS — AND THE FIRST VERSION OF THIS ASKED THE WRONG
+ * ORGANIZATION STILL EXISTS - AND THE FIRST VERSION OF THIS ASKED THE WRONG
  * ONE. Clerk does NOT delete an organization when its last member is deleted.
  * Measured against production 2026-09-20: two organizations whose only members
  * had deleted their accounts both answered `200 OK` with `total_count: 0`, and
  * neither had fired `organization.deleted`. A sweep conditioned on existence
  * therefore terminates nothing, ever, and a deleted account goes on being
- * billed — the exact failure the sweep was written to prevent, reintroduced by
+ * billed - the exact failure the sweep was written to prevent, reintroduced by
  * the guess it was meant to replace.
  *
  * ⚠ AND MEMBERSHIP IS STILL THE RIGHT LINE RATHER THAN OWNERSHIP. A team whose
@@ -112,7 +112,7 @@ export interface OrganizationLiveness {
    *
    * ⚠ THE SYMMETRIC HALF OF `onUserCreated`, WHICH CREATES ONE. A person who
    * signs up with no organization gets a personal one made for them so they
-   * have a tenant to send from — see provision.ts. Nothing ever removed it
+   * have a tenant to send from - see provision.ts. Nothing ever removed it
    * again, so an account deleted in Clerk left the organization standing with
    * zero members: unreachable by anybody, counting toward the instance, and
    * still holding its slug. Measured 2026-09-20, two of them already.
@@ -120,12 +120,12 @@ export interface OrganizationLiveness {
    * ⚠ AND LEAVING IT IS WORSE THAN A TIDINESS PROBLEM. `provision_tenant`
    * resolves by `clerk_org_id`, so an empty organization that somebody later
    * re-adds a member to maps straight back onto the tenant row we have just
-   * marked `deleted` — a workspace resurrected into a terminated billing state,
+   * marked `deleted` - a workspace resurrected into a terminated billing state,
    * which nothing downstream expects or checks. Deleting the organization is
    * what makes the termination final in both systems rather than one.
    *
    * ⚠ IT TAKES ITS MEMBERSHIPS AND ITS PENDING INVITATIONS WITH IT. That is the
-   * right answer for an organization with no members — there is no admin left
+   * right answer for an organization with no members - there is no admin left
    * to manage either, and an invitee accepting into it would land in exactly
    * the resurrected-dead-tenant state above.
    *
@@ -139,15 +139,15 @@ export interface LifecycleDeps {
   tenants: TenantLifecycleStore
   /**
    * ⚠ OPTIONAL, AND ITS ABSENCE IS LOUD RATHER THAN SILENT. A deployment with
-   * no Polar client can still mark a tenant dead — that half is entirely ours —
+   * no Polar client can still mark a tenant dead - that half is entirely ours -
    * but it cannot stop the billing, and a deletion that leaves a live
    * subscription behind has to say so where somebody will see it.
    */
   polar?: SubscriptionRevoker
   /**
    * ⚠ OPTIONAL FOR THE SAME REASON `polar` IS, AND ITS ABSENCE IS AS LOUD. The
-   * domain store is itself optional — a deployment with no sealing key has no
-   * domains at all — but where there are domains and no releaser, a terminated
+   * domain store is itself optional - a deployment with no sealing key has no
+   * domains at all - but where there are domains and no releaser, a terminated
    * workspace leaves live SES identities and nameservers still answering for
    * its delegated names, and nothing downstream ever asks about them again.
    */
@@ -202,13 +202,13 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
     if (!deps.domains) {
       /*
        * ⚠ `error`, NOT `warn`, ON THE SAME RULE AS THE MISSING POLAR CLIENT.
-       * This is not an absent feature — it is our nameservers going on
+       * This is not an absent feature - it is our nameservers going on
        * answering for a deleted customer's mail domains, and a verified SES
        * identity nobody owns, with no trace anywhere that they are orphaned.
        */
       deps.log.error(
         { tenantId, clerkOrgId },
-        "workspace deleted but domain teardown is not configured — its SES " +
+        "workspace deleted but domain teardown is not configured - its SES " +
           "identities and delegated zones are STILL LIVE and must be removed by hand",
       )
       return
@@ -225,7 +225,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
     } catch (error) {
       deps.log.error(
         { tenantId, clerkOrgId, err: String(error) },
-        "workspace terminated, but its domains could not be released — SES " +
+        "workspace terminated, but its domains could not be released - SES " +
           "identities and delegated zones may be left behind",
       )
     }
@@ -245,8 +245,8 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
 
     /*
      * ⚠ THE DOMAINS GO ON THE WAY OUT OF EVERY EXIT BELOW, NOT AT ONE OF THEM.
-     * There are three ways a termination finishes — no subscription, no Polar
-     * client, a revoke that succeeded — and a teardown attached to the last of
+     * There are three ways a termination finishes - no subscription, no Polar
+     * client, a revoke that succeeded - and a teardown attached to the last of
      * them would silently skip the two commonest. The only exit it is NOT
      * reached from is the revoke throwing, which is the one Svix retries.
      */
@@ -275,7 +275,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
           tenantId: ended.tenantId,
           subscriptionId: ended.polarSubscriptionId,
         },
-        "workspace deleted but billing is not configured — its Polar " +
+        "workspace deleted but billing is not configured - its Polar " +
           "subscription is STILL ACTIVE and must be cancelled by hand",
       )
       return finish("terminated")
@@ -315,10 +315,10 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
      * ⚠ THE SWEEP EXISTS BECAUSE `organization.deleted` MAY NEVER ARRIVE, and
      * the case it covers is the exact one that was reported: somebody deletes
      * their account from the profile panel, which is a `user.deleted`, and the
-     * personal organization behind their workspace goes with it — or does not,
+     * personal organization behind their workspace goes with it - or does not,
      * depending on a Clerk behaviour we cannot assert from here.
      *
-     * ⚠ AND IT CONFIRMS WITH CLERK BEFORE ENDING ANYTHING — BY COUNTING
+     * ⚠ AND IT CONFIRMS WITH CLERK BEFORE ENDING ANYTHING - BY COUNTING
      * MEMBERS, NOT BY ASKING WHETHER THE ORGANIZATION EXISTS. Clerk leaves the
      * organization standing when its last member is deleted, so existence is
      * always true and would gate out every real termination. Owning a tenant is
@@ -333,7 +333,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
 
       const moved = await deps.tenants.renameByOrg(orgId, name.slice(0, 120))
 
-      // No tenant for that organization, or the name already matched — which is
+      // No tenant for that organization, or the name already matched - which is
       // what every echo of our own rename looks like. Neither is worth a line.
       if (!moved?.renamed) return "ignored"
 
@@ -356,7 +356,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
         /*
          * ⚠ WITHOUT CLERK WE DO NOTHING, AND SAY SO. The alternative is
          * terminating on ownership alone, which would switch off a team because
-         * one person left — a strictly worse failure than a subscription that
+         * one person left - a strictly worse failure than a subscription that
          * runs on until the organization event lands or somebody looks.
          */
         deps.log.warn(
@@ -395,8 +395,8 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
          * THE FAILURE EXACTLY AS THE POLAR ONE IS. `terminate` is what stops
          * the money; deleting the organization first and then failing to
          * terminate would destroy the identity while leaving the tenant active
-         * and the card being charged, with the one thing that could find it —
-         * the organization id — gone.
+         * and the card being charged, with the one thing that could find it -
+         * the organization id - gone.
          *
          * ⚠ AND IT NEVER FAILS THE SWEEP. The billing is already stopped by the
          * time this runs; an unreachable Clerk must not turn a successful
@@ -407,7 +407,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
          *
          * ⚠ ONLY THIS PATH DELETES. `onOrganizationDeleted` must not, both
          * because the organization is gone by definition when it runs and
-         * because Clerk fires that event in response to THIS call — so deleting
+         * because Clerk fires that event in response to THIS call - so deleting
          * there would be a second delete of the same thing on every sweep.
          */
         if (outcome === "no_tenant") continue
@@ -422,7 +422,7 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
           deps.log.error(
             { err: String(error), ...tenant },
             "terminated a workspace but could not delete its empty Clerk " +
-              "organization — it remains with no members and must be removed " +
+              "organization - it remains with no members and must be removed " +
               "by hand",
           )
         }

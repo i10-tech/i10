@@ -11,7 +11,7 @@ export type Database = ReturnType<typeof createDb>["db"]
  * ⚠ `prepare: false` IS REQUIRED, NOT A TUNING KNOB. PgBouncer runs in
  * transaction pooling mode, where consecutive statements can land on different
  * backends. Server-side prepared statements do not survive that, and the
- * failure is not at startup — it is an intermittent "prepared statement does
+ * failure is not at startup - it is an intermittent "prepared statement does
  * not exist" under load, which looks like a database fault rather than a client
  * misconfiguration.
  *
@@ -37,7 +37,7 @@ export function createDb(url: string) {
  * what every row level security policy in `core` reads.
  *
  * ⚠ `set_config(..., true)`, NOT `SET LOCAL`. `SET LOCAL app.tenant_id = $1` is
- * not valid — SET takes no bind parameters, and building the statement by
+ * not valid - SET takes no bind parameters, and building the statement by
  * interpolation would put a caller-influenced value into SQL text. `set_config`
  * is the function form and takes the value as a parameter; its third argument
  * is `is_local`, which scopes it to this transaction.
@@ -45,7 +45,7 @@ export function createDb(url: string) {
  * ⚠ THE TRANSACTION IS NOT OPTIONAL, FOR A REASON THAT IS NOT ISOLATION.
  * PgBouncer pools by transaction: outside one, the next statement can land on a
  * different backend that never saw the setting. A non-local `set_config` would
- * be worse than useless — it would leak one tenant's id onto a pooled
+ * be worse than useless - it would leak one tenant's id onto a pooled
  * connection that the next request picks up, and the leak would look like
  * working software.
  */
@@ -62,14 +62,14 @@ export function createDb(url: string) {
  *
  * ⚠ AND IT FAILS AT RUN TIME, NOT AT COMPILE TIME, WHICH IS THE WHOLE PROBLEM.
  * A `Date` is a perfectly good template value as far as TypeScript is
- * concerned, so nothing catches it until the query runs — and each of the
+ * concerned, so nothing catches it until the query runs - and each of the
  * three occurrences was found by a customer rather than by us. It stopped
  * usage reconciliation completing, then it made every metering read fall back
  * silently for weeks, then it 500'd the console's overview page.
  *
  * ⚠ THE CAST IS PART OF IT, NOT DECORATION. Without `::timestamptz` the bound
  * value is `text` and Postgres compares it as a string, which is wrong in
- * exactly the cases that matter — a different offset, or a different number of
+ * exactly the cases that matter - a different offset, or a different number of
  * fractional digits, orders incorrectly.
  */
 export const ts = (value: Date): SQL => sql`${value.toISOString()}::timestamptz`
@@ -90,13 +90,13 @@ export async function withTenant<T>(
  *
  * ⚠ A NEW POD'S FIRST CONNECTION TO A ClusterIP IS REFUSED while kube-proxy and
  * the CNI finish programming rules for it, and postgres.js makes exactly one
- * attempt. So a process that starts fast enough — every bun-built image here —
+ * attempt. So a process that starts fast enough - every bun-built image here -
  * dies with `ECONNREFUSED` on a database that is perfectly healthy, and
  * Postgres logs nothing because the packet never arrived.
  *
  * ⚠ IT COST THE DOMAIN PROVER ITS RUNS. `domain-prove` starts a fresh pod every
  * minute, and the runs that lost this race exited at "refusing to start"
- * before selecting a single domain — which is how a freshly published domain
+ * before selecting a single domain - which is how a freshly published domain
  * could sit unregistered for minutes with a sweep scheduled every sixty
  * seconds. `recheck`, `catch-up` and the reconciler failed the same way.
  * `migrate.ts` has had this fix since the bun move; nothing else did.
@@ -134,7 +134,7 @@ export async function dialable(
       }
       log?.warn(
         { attempt, of: attempts, code },
-        "database not reachable yet — a new pod's first connection is often refused",
+        "database not reachable yet - a new pod's first connection is often refused",
       )
       await new Promise((resolve) => setTimeout(resolve, delayMs))
     }
@@ -146,8 +146,8 @@ export async function dialable(
  *
  * ⚠ THIS EXISTS BECAUSE THE FAILURE IS SILENT. Policies do not apply to a
  * table's owner, to a superuser, or to a role with BYPASSRLS. Point
- * `DATABASE_URL` at the `i10` owner — a copied connection string, a Doppler key
- * edited in the wrong config — and every query keeps working, every test keeps
+ * `DATABASE_URL` at the `i10` owner - a copied connection string, a Doppler key
+ * edited in the wrong config - and every query keeps working, every test keeps
  * passing, and the tenant boundary is simply gone. There is no error to notice
  * and nothing in the log.
  *
@@ -156,7 +156,7 @@ export async function dialable(
  * failure stops the rollout instead of reaching a customer.
  *
  * ⚠ AND BECAUSE IT IS THE FIRST QUERY EVERY PROCESS MAKES, IT IS ALSO WHERE THE
- * FIRST CONNECTION HAPPENS — which is what makes it the place to wait for one.
+ * FIRST CONNECTION HAPPENS - which is what makes it the place to wait for one.
  * See `dialable` above. The role check itself is never retried: a role that
  * bypasses RLS is a configuration, and it will be the same configuration in a
  * second.

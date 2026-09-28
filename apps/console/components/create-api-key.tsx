@@ -36,7 +36,7 @@ import type { CreatedApiKey } from "@/lib/types"
  *
  * ⚠ THE DIALOG DOES NOT CLOSE ON AN OUTSIDE CLICK ONCE THE SECRET IS ON SCREEN,
  * AND THAT IS THE MOST IMPORTANT BEHAVIOUR IN THIS FILE. Nothing stores the
- * secret — the API keeps a SHA-256 of it — so dismissing this by accident means
+ * secret - the API keeps a SHA-256 of it - so dismissing this by accident means
  * the key exists, is billed against the account, and can never be used. The
  * only way out is the button that says, in words, that it will not be shown
  * again.
@@ -62,7 +62,7 @@ export function CreateApiKeyButton({
   const [name, setName] = React.useState("")
   const [mode, setMode] = React.useState<"live" | "test">("live")
   /*
-   * ⚠ `null` — EVERY DOMAIN — IS THE DEFAULT, AND CHANGING THAT WOULD BE A
+   * ⚠ `null` - EVERY DOMAIN - IS THE DEFAULT, AND CHANGING THAT WOULD BE A
    * BREAKING CHANGE DISGUISED AS A SAFER ONE. Defaulting to the first domain
    * would silently mint restricted keys for people who never read this field,
    * and they would find out when a send failed in production.
@@ -93,7 +93,7 @@ export function CreateApiKeyButton({
 
     // ⚠ NO REFRESH: `createApiKey` re-renders this page in its own response, so
     // the new row is already in the table behind the dialog while the secret
-    // is still on screen — which is when somebody glances at it to check.
+    // is still on screen - which is when somebody glances at it to check.
     setCreated(result.data)
   }
 
@@ -127,7 +127,7 @@ export function CreateApiKeyButton({
                 <DialogTitle>Copy your key now</DialogTitle>
                 <DialogDescription>
                   This is the only time it will ever be shown. We store a hash of it,
-                  not the key itself — there is nothing to reveal later.
+                  not the key itself - there is nothing to reveal later.
                 </DialogDescription>
               </DialogHeader>
 
@@ -137,7 +137,7 @@ export function CreateApiKeyButton({
                 <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
                   <span>
-                    Treat it like a password. If it leaks, rotate it — a rotated key
+                    Treat it like a password. If it leaks, rotate it - a rotated key
                     stops working immediately, not at the end of a cache window.
                   </span>
                 </p>

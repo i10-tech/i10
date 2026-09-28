@@ -12,7 +12,7 @@ import { verifyDomain } from "@/lib/actions"
  *
  * ⚠ THE BUTTON DOES NOT REPORT THE OUTCOME, AND IT USED TO. It swapped its own
  * label to "Not yet" while the toast said "Not visible yet" about the same
- * press — one event announced twice, in two wordings, a foot apart. The
+ * press - one event announced twice, in two wordings, a foot apart. The
  * argument for it was that the eye is on the button rather than the corner of
  * the screen; the answer is that every outcome this button has needs a SENTENCE
  * ("normal for the first few minutes, can take up to 72 hours"), and a button
@@ -20,14 +20,14 @@ import { verifyDomain } from "@/lib/actions"
  * being a button.
  *
  * ⚠ AND WITH IT WENT THE ENTRY ANIMATION. Reporting in place meant swapping
- * labels inside a springing box — `layout` on the button and a y-offset fade on
- * its content — which also ran on first paint, so the control rose into place
+ * labels inside a springing box - `layout` on the button and a y-offset fade on
+ * its content - which also ran on first paint, so the control rose into place
  * every time the page loaded. Nothing else in this console enters; a header
  * action that does reads as a glitch rather than as motion.
  *
  * ⚠ THE OUTCOMES ARE STILL REPORTED HONESTLY, WHICH IS THE PART WORTH KEEPING.
  * `pending` means the records have not propagated and `temporary_failure` means
- * the lookup itself failed — neither means the records are wrong. Saying
+ * the lookup itself failed - neither means the records are wrong. Saying
  * "failed" for either sends somebody to change DNS that was already correct,
  * which is the most expensive wrong answer this page can give.
  *
@@ -35,8 +35,8 @@ import { verifyDomain } from "@/lib/actions"
  * page renders per-record status from the server; putting the verify result in
  * client state would leave the table showing the old statuses next to a toast
  * saying it worked. That re-render is `verifyDomain`'s own response (see `run`
- * in lib/actions.ts) — it used to be a second `router.refresh()` from here,
- * landing mid-toast — so the statuses have changed before the toast appears.
+ * in lib/actions.ts) - it used to be a second `router.refresh()` from here,
+ * landing mid-toast - so the statuses have changed before the toast appears.
  */
 export function VerifyButton({ id, status }: { id: string; status: string }) {
   const [pending, setPending] = React.useState(false)
@@ -51,7 +51,7 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
       /*
        * ⚠ A CLAIMED NAME IS NOT A FAILED CHECK. Proving a name takes it from
        * whoever holds it, so this is only two proofs landing in the same
-       * moment — the message says to press again, which settles it.
+       * moment - the message says to press again, which settles it.
        */
       if (result.name === "domain_already_claimed") {
         toast.error("Verified elsewhere at the same moment", {
@@ -67,7 +67,7 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
 
     /*
      * ⚠ WHAT *WE* SAW IN DNS COMES FIRST, AND NOT HAVING IT WAS THE BUG. Below
-     * this is `status`, which is Amazon's opinion and lags DNS by minutes — so
+     * this is `status`, which is Amazon's opinion and lags DNS by minutes - so
      * every outcome that is really about DNS used to arrive here wearing
      * `pending` and got the propagation sentence. Somebody whose nameservers
      * had timed out was told their records had not propagated; so was somebody
@@ -82,12 +82,12 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
          * ⚠ THIS IS NOT "YOUR RECORDS ARE WRONG", AND SAYING SO WOULD SEND
          * SOMEBODY TO BREAK RECORDS THAT ARE CORRECT. We never got an answer
          * out of their nameservers, so we learned nothing at all about what is
-         * published — the same distinction the API keeps between `absent` and
+         * published - the same distinction the API keeps between `absent` and
          * `unreachable`, carried all the way to the sentence.
          */
         toast("We could not reach your nameservers", {
           description:
-            "The lookup timed out, so we have not been able to read your records yet — this says nothing about whether they are right. Try again in a moment.",
+            "The lookup timed out, so we have not been able to read your records yet - this says nothing about whether they are right. Try again in a moment.",
           duration: 8000,
         })
       } else if (ownership.reason === "superseded") {
@@ -95,7 +95,7 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
          * ⚠ THE RECORDS ARE PUBLISHED AND THEY ARE WRONG, WHICH IS A SENTENCE
          * THE OTHER TWO BRANCHES CANNOT SAY. A delegation token is generated per
          * domain ROW, so deleting a domain and adding it again issues a new one
-         * — and the NS records already in their DNS name the old claim. They
+         * - and the NS records already in their DNS name the old claim. They
          * resolve, they point at our nameservers, and they look exactly right in
          * a DNS panel. "We cannot see the records" would be false and would send
          * somebody to stare at records that are present and correct-looking, for
@@ -107,13 +107,13 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
          */
         toast("Your records point at an earlier setup", {
           description:
-            "These nameserver records are ours, but they name a previous version of this domain — adding a domain again issues new ones. Replace the existing rows with the records shown on this page, then check again.",
+            "These nameserver records are ours, but they name a previous version of this domain - adding a domain again issues new ones. Replace the existing rows with the records shown on this page, then check again.",
           duration: 12_000,
         })
       } else {
         toast("We cannot see the records yet", {
           description:
-            "We asked your nameservers and the records are not there yet. If you have just added them, propagation is usually minutes. If it has been longer, check the host of each row — many providers append the domain for you.",
+            "We asked your nameservers and the records are not there yet. If you have just added them, propagation is usually minutes. If it has been longer, check the host of each row - many providers append the domain for you.",
           duration: 8000,
         })
       }
@@ -150,20 +150,20 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
        * ⚠ THE DNS HALF IS DONE HERE, AND SAYING SO IS THE POINT. Reaching this
        * line means we read the customer's own nameservers and proved the
        * domain; the only thing left is Amazon, which checks on its own
-       * schedule. The old wording — "the records have not propagated" — told
+       * schedule. The old wording - "the records have not propagated" - told
        * the one person who had finished that they had not.
        */
       case "pending":
         toast("Records found, waiting on Amazon", {
           description:
-            "We can see your DNS and it is correct. Amazon re-checks on its own schedule, usually within minutes — nothing else is needed from you.",
+            "We can see your DNS and it is correct. Amazon re-checks on its own schedule, usually within minutes - nothing else is needed from you.",
           duration: 8000,
         })
         break
       case "temporary_failure":
         toast("Lookup failed, retrying", {
           description:
-            "The DNS lookup itself failed — this does not mean your records are wrong. We will keep checking.",
+            "The DNS lookup itself failed - this does not mean your records are wrong. We will keep checking.",
         })
         break
       default:

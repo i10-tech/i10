@@ -10,7 +10,7 @@ import type { Credential } from "../src/dns/port.js"
  * ⚠ THE BUG THIS CLOSES WAS INVISIBLE FOR EXACTLY AS LONG AS AN ACCESS TOKEN
  * LASTS. The grant was stored the moment somebody authorised us and never read
  * again, so everything worked in testing and the first publish an hour later
- * failed `unauthorized` — which the console correctly reports as "reconnect",
+ * failed `unauthorized` - which the console correctly reports as "reconnect",
  * asking a customer to redo an authorisation that had not lapsed, while the
  * refresh token sat unused in their row.
  */
@@ -80,7 +80,7 @@ describe("a credential with nothing to renew", () => {
 describe("a credential that is about to expire", () => {
   /**
    * ⚠ RENEWED EARLY, NOT AT THE MOMENT OF EXPIRY. A publish is several round
-   * trips — list zones, list records, create each record — so a token with
+   * trips - list zones, list records, create each record - so a token with
    * thirty seconds left at the first call is an expired token by the third, and
    * the failure lands halfway through writing a delegation.
    */
@@ -163,7 +163,7 @@ describe("a credential that is about to expire", () => {
 describe("when the refresh itself fails", () => {
   /**
    * ⚠ THE OLD CREDENTIAL IS RETURNED RATHER THAN THROWN OVER. A refresh can
-   * fail because the customer revoked our access — in which case the publish is
+   * fail because the customer revoked our access - in which case the publish is
    * going to fail anyway, and it should fail with the PROVIDER's `unauthorized`,
    * which the console already turns into "reconnect". Throwing here replaces
    * that with an error about a token endpoint: true, and useless.

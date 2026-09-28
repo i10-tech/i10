@@ -7,7 +7,7 @@ import { useEffect } from "react"
  *
  * ⚠ IT EXISTS BECAUSE `(app)/error.tsx` CANNOT CATCH `(app)/layout.tsx`. Next's
  * rule is that an `error.tsx` covers its segment's PAGE and everything nested
- * below it, but not the layout alongside it — a layout error has to be caught
+ * below it, but not the layout alongside it - a layout error has to be caught
  * one level up. And `(app)/layout.tsx` is exactly where a failure is most
  * likely: it calls `/console/me` on every request, so an API that is down, a
  * Clerk outage, or a session that lapsed mid-navigation all throw there.
@@ -43,7 +43,7 @@ export default function RootError({
            * ⚠ IN PRODUCTION NEXT REPLACES THIS MESSAGE WITH A GENERIC STRING
            * AND A DIGEST, deliberately, so a server stack trace never reaches a
            * browser. The digest below is what correlates this screen with the
-           * entry in our logs — which is why it is rendered rather than hidden.
+           * entry in our logs - which is why it is rendered rather than hidden.
            */}
           {error.message}
         </p>

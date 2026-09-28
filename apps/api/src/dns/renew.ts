@@ -7,7 +7,7 @@ import type { Credential } from "./port.js"
  *
  * ⚠ WITHOUT THIS A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND THEN DEAD. The
  * grant was stored the moment somebody authorised us and never read again, so
- * the first publish after the token expired failed `unauthorized` — and the
+ * the first publish after the token expired failed `unauthorized` - and the
  * console correctly told the customer to reconnect, asking them to redo an
  * authorisation that had not actually lapsed. The refresh token was sitting in
  * the row the whole time.
@@ -19,7 +19,7 @@ import type { Credential } from "./port.js"
 
 /**
  * ⚠ RENEWED EARLY, NOT AT THE MOMENT OF EXPIRY. A publish is several round
- * trips — list zones, list records, create each one — so a token with thirty
+ * trips - list zones, list records, create each one - so a token with thirty
  * seconds left at the first call is an expired token by the third, and the
  * failure lands halfway through writing a delegation.
  */
@@ -67,7 +67,7 @@ export function credentialRenewal({
     } catch (error) {
       /*
        * ⚠ THE OLD CREDENTIAL IS RETURNED RATHER THAN THROWN OVER. A refresh can
-       * fail because the customer revoked our access — in which case the
+       * fail because the customer revoked our access - in which case the
        * publish is going to fail anyway, and it should fail with the provider's
        * own `unauthorized`, which the console already turns into "reconnect".
        * Throwing here would replace that with an error about a token endpoint,

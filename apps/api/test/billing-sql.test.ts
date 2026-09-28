@@ -9,7 +9,7 @@ import { knownTenantsStatement } from "../src/billing/db.js"
  * ⚠ AND THEY EXIST BECAUSE NOTHING ELSE COULD HAVE CAUGHT THE BUG THEY ARE
  * ABOUT. `knownTenants` shipped passing every test in the suite and failed on
  * the second tenant in production, because the defect was in what Postgres
- * received rather than in anything the code returned — a fake answers the same
+ * received rather than in anything the code returned - a fake answers the same
  * either way. The statement text is the only place this is visible.
  */
 const dialect = new PgDialect()
@@ -21,7 +21,7 @@ const B = "01a0b9c4-0025-763a-ac00-632d7ddaf86b"
 describe("asking which tenants this database holds", () => {
   /*
    * ⚠ THE WHOLE BUG, IN ONE ASSERTION. Interpolating a JS array expands to
-   * `($1, $2)`, which Postgres reads as a ROW CONSTRUCTOR — and
+   * `($1, $2)`, which Postgres reads as a ROW CONSTRUCTOR - and
    * `cannot cast type record to uuid[]` took the subscription leg of the
    * reconciler down every half hour for 23 hours. One parameter carrying an
    * array literal is the fix.
@@ -36,7 +36,7 @@ describe("asking which tenants this database holds", () => {
 
   /*
    * ⚠ THE CASE THAT HID IT. With one id the broken form expands to `($1)`,
-   * which is a plain parenthesised expression and casts perfectly well — so the
+   * which is a plain parenthesised expression and casts perfectly well - so the
    * bug was invisible for exactly as long as one tenant had a subscription.
    * Pinning one and two together is what stops it coming back.
    */
@@ -48,7 +48,7 @@ describe("asking which tenants this database holds", () => {
   })
 
   /*
-   * ⚠ NOT DEFENSIVENESS — CORRECTNESS. These ids arrive from
+   * ⚠ NOT DEFENSIVENESS - CORRECTNESS. These ids arrive from
    * `customer.external_id`, which is whatever text whoever created the Polar
    * customer put there. A `,` or `}` in one would corrupt the literal and throw,
    * which is the exact failure being fixed; and an id this database cannot hold

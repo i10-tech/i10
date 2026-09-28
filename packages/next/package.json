@@ -1,7 +1,7 @@
 {
   "name": "@i10/next",
   "version": "0.0.0",
-  "description": "i10 helpers for Next.js — server client and webhook route handler.",
+  "description": "i10 helpers for Next.js - server client and webhook route handler.",
   "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,

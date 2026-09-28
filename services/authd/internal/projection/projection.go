@@ -33,7 +33,7 @@ type Group struct {
 // handlers can be tested without a database.
 //
 // Every method returns ACTIVE accounts only. Inactive accounts are invisible by
-// construction rather than by a filter the caller has to remember to apply —
+// construction rather than by a filter the caller has to remember to apply -
 // an unpaid or deprovisioned account must never resolve as a recipient, and
 // that guarantee belongs at the bottom of the stack, not the top.
 type Store interface {

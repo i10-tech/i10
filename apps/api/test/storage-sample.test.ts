@@ -31,7 +31,7 @@ function fakeDb(rows: unknown[]) {
 
 /**
  * A mail server that knows exactly these mailboxes. Anything absent is a
- * mailbox it could not answer for — which is how the real adapter reports a
+ * mailbox it could not answer for - which is how the real adapter reports a
  * mailbox our directory has and Stalwart's does not.
  */
 const snapshotOf = (usage: Record<string, number>) => ({
@@ -78,7 +78,7 @@ describe("sampling", () => {
 
   /**
    * ⚠ THE ASSERTION THIS FILE EXISTS FOR. One unreadable mailbox makes the
-   * tenant's total silently low — which on a cap lets them past their limit and
+   * tenant's total silently low - which on a cap lets them past their limit and
    * on billing under-charges, both invisibly. Keeping the previous sample is
    * stale and honest; writing a partial one is neither.
    */
@@ -127,7 +127,7 @@ describe("sampling", () => {
 describe("asking Stalwart", () => {
   /**
    * ⚠ THESE BODIES ARE THE REAL ONES. Every field below was read off the
-   * running server on 2026-09-06 — the `x:` prefix, the opaque id, the `@type`
+   * running server on 2026-09-06 - the `x:` prefix, the opaque id, the `@type`
    * union, `usedDiskQuota` in bytes. The version this file replaced asserted an
    * invented shape and passed, which is precisely how the adapter shipped
    * broken.
@@ -175,7 +175,7 @@ describe("asking Stalwart", () => {
   /**
    * ⚠ THE CAPABILITY AND THE PREFIX ARE THE TWO THINGS THAT WERE WRONG BEFORE.
    * `Account/get` answers `unknownMethod`, and naming a Stalwart URI in `using`
-   * is what a conforming server MUST reject — the session advertises none.
+   * is what a conforming server MUST reject - the session advertises none.
    */
   it("sends only the core capability, and the x: namespace", async () => {
     const { mail, calls } = server([query([]), get([])])
@@ -186,7 +186,7 @@ describe("asking Stalwart", () => {
     expect(first.methodCalls[0]?.[0]).toBe("x:Account/query")
   })
 
-  // ⚠ A GROUP HAS NO usedDiskQuota AT ALL — it is a different variant of the
+  // ⚠ A GROUP HAS NO usedDiskQuota AT ALL - it is a different variant of the
   // union, not a User missing a field. Failing on it would abort a whole
   // tenant's sample over a mailing list.
   it("treats a group as zero rather than as a failure", async () => {
@@ -213,8 +213,8 @@ describe("asking Stalwart", () => {
   })
 
   /**
-   * ⚠ A JMAP ERROR IS A 200. The failure that shipped — `unknownMethod` for a
-   * name we guessed — arrives with an HTTP 200 and `error` in the slot where
+   * ⚠ A JMAP ERROR IS A 200. The failure that shipped - `unknownMethod` for a
+   * name we guessed - arrives with an HTTP 200 and `error` in the slot where
    * the method name goes, so checking `response.ok` alone reads it as an empty
    * success and every mailbox silently becomes zero.
    */

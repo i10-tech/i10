@@ -9,6 +9,6 @@ output "name_prefix" {
 }
 
 output "comment" {
-  description = "One-line provenance string for providers with a free-form comment rather than labels — Cloudflare DNS, for one."
+  description = "One-line provenance string for providers with a free-form comment rather than labels - Cloudflare DNS, for one."
   value       = "i10:tofu:${var.stack}:${var.env}"
 }

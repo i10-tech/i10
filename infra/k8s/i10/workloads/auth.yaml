@@ -1,4 +1,4 @@
-# auth.i10.tech — sign-in, sign-up and password reset.
+# auth.i10.tech - sign-in, sign-up and password reset.
 #
 # ⚠ A SEPARATE ORIGIN FROM THE DASHBOARD, ON PURPOSE. The people who use this
 # app are not all dashboard users: an invited mailbox holder completes their
@@ -7,7 +7,7 @@
 # app that shows a tenant's billing, one routing mistake away, forever.
 #
 # ⚠ THE IMAGE TAG BELOW IS A BOOTSTRAP VALUE AND SHOULD NOT SURVIVE the first
-# build — see console.yaml. `prod-latest` still here after auth has shipped
+# build - see console.yaml. `prod-latest` still here after auth has shipped
 # means its path filter in build.yml does not match where its sources live.
 ---
 apiVersion: v1
@@ -58,8 +58,8 @@ spec:
           #
           # Left alone, the server resolves that pod name and binds to whatever
           # comes back. Under Node that was the pod's IPv4; under bun it is the
-          # IPv6 address, so the container listened on tcp6 ONLY — `/proc/net/tcp`
-          # was empty — while kubelet dialled the pod's IPv4 and got
+          # IPv6 address, so the container listened on tcp6 ONLY - `/proc/net/tcp`
+          # was empty - while kubelet dialled the pod's IPv4 and got
           # `connection refused`. The pod logs "Ready in 0ms" and looks perfectly
           # healthy, the readiness probe never passes, liveness then restarts it,
           # and the Deployment sits Degraded forever with the previous ReplicaSet
@@ -85,13 +85,13 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            # Numeric, matching the Dockerfile's USER - see api.yaml.
             runAsUser: 1001
             runAsGroup: 1001
             capabilities: { drop: ["ALL"] }
           # ⚠ `/healthz`, NOT `/`. Every console page now requires a Clerk
           # session, so `/` answers a 307 to accounts.i10.tech for a signed-out
-          # caller — which kubelet scores as healthy, making the probe pass for
+          # caller - which kubelet scores as healthy, making the probe pass for
           # a reason unrelated to the pod. Worse, if Clerk is unreachable and
           # the middleware raises rather than redirecting, `/` turns 5xx and
           # liveness restarts every replica during somebody else's outage. See

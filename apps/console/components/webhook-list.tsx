@@ -33,8 +33,8 @@ import { Time } from "@/components/time"
  *
  * ⚠ A CARD PER ENDPOINT, BECAUSE THE EVENT LIST IS THE INTERESTING PART AND IT
  * DOES NOT FIT IN A CELL. Six event names is 80-odd characters; in a table
- * column that is either truncated — hiding the exact thing somebody is checking
- * — or it forces the URL column down to nothing. Most accounts have one to three
+ * column that is either truncated - hiding the exact thing somebody is checking
+ * - or it forces the URL column down to nothing. Most accounts have one to three
  * endpoints, so a list of cards costs no scrolling.
  *
  * ⚠ AND A DISABLED ENDPOINT SAYS SO LOUDLY. The API disables an endpoint after
@@ -50,7 +50,7 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
     return (
       <EmptyState
         title="No endpoints yet"
-        description="Add one to receive delivery, bounce and complaint events as they happen — rather than polling for them."
+        description="Add one to receive delivery, bounce and complaint events as they happen - rather than polling for them."
       />
     )
   }
@@ -121,7 +121,7 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
                 // WORTH SAYING OUT LOUD. It is indistinguishable from a broken
                 // handler from the customer's side.
                 <span className="text-xs text-warning">
-                  Subscribed to no events — this endpoint will never be called.
+                  Subscribed to no events - this endpoint will never be called.
                 </span>
               ) : (
                 endpoint.events.map((event) => (

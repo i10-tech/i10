@@ -4,7 +4,7 @@
 -- ⚠ THE RLS BLOCK AT THE BOTTOM IS NOT OPTIONAL AND ITS ABSENCE FAILS SILENTLY.
 -- `0002_tenancy` enabled row level security on the tables that existed then and
 -- left an ALTER DEFAULT PRIVILEGES behind, so a table added later arrives with
--- its GRANTS already correct and NO POLICY AT ALL — readable and writable by
+-- its GRANTS already correct and NO POLICY AT ALL - readable and writable by
 -- every tenant, with nothing in any log to say so. The only symptom is one
 -- customer seeing another's contacts. Every migration that adds a table to
 -- `core` adds its policy in the same migration; this one adds eleven.
@@ -186,7 +186,7 @@ CREATE INDEX "topics_tenant_idx" ON "core"."topics" USING btree ("tenant_id","cr
 -- ─────────────────────────────────────────────────────────────────────────────
 --
 -- Every one of them carries `tenant_id`, so the policy is the same plain
--- equality the rest of `core` uses — including the two JOIN TABLES, which carry
+-- equality the rest of `core` uses - including the two JOIN TABLES, which carry
 -- a denormalised `tenant_id` for exactly this reason. A policy that reached the
 -- tenant through `segment_id` would be a join evaluated per row against a table
 -- that is itself under RLS, on the tables that grow fastest here.
@@ -212,7 +212,7 @@ END $$;
 
 -- ⚠ PARTIAL, BECAUSE ALMOST EVERY MESSAGE HAS NO BROADCAST. A full index on a
 -- mostly-NULL column on the largest table in the database costs write
--- throughput on the send path — the hottest path there is — to speed up a query
+-- throughput on the send path - the hottest path there is - to speed up a query
 -- only a broadcast page ever issues. `WHERE broadcast_id IS NOT NULL` is read by
 -- the planner for exactly that query and by nothing else.
 --

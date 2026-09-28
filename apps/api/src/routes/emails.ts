@@ -16,14 +16,14 @@ import { acceptSend, type AcceptOutcome } from "../send/accept.js"
  * `POST /emails` must return a message id SYNCHRONOUSLY. That is the shape
  * every Resend caller already codes against, and it is also why this service
  * exists rather than the apps posting to Stalwart: SMTP submission and JMAP
- * are message-shaped, not API-shaped — no synchronous id, no per-send tenant
+ * are message-shaped, not API-shaped - no synchronous id, no per-send tenant
  * or configuration-set parameters, and a password reset coupled to the mail
  * store's uptime. The two queues want opposite behaviour too: an MTA retries
  * for days, a reset should fail in seconds.
  *
  * ⚠ THE SCHEMAS COME FROM @repo/contracts, NOT FROM HERE. They are the same
  * objects `@i10/node` validates against, so the published OpenAPI document and
- * the SDK cannot drift from each other — there is only one definition.
+ * the SDK cannot drift from each other - there is only one definition.
  */
 export const emails = new OpenAPIHono()
 
@@ -32,7 +32,7 @@ export const emails = new OpenAPIHono()
  * schema at every use site.
  *
  * This is what makes generated SDKs usable: without names, a generator emits an
- * anonymous type per endpoint — `SendEmailsPostRequestBody` and friends — and
+ * anonymous type per endpoint - `SendEmailsPostRequestBody` and friends - and
  * the same Error object appears four times under four different names. `.openapi()`
  * comes from @hono/zod-openapi's extension of Zod's prototype, so it applies to
  * the plain-Zod schemas in @repo/contracts without those needing to know it exists.
@@ -47,7 +47,7 @@ const GetEmailResponse = getEmailResponseSchema.openapi("Email")
  *
  * ⚠ THE STATUS CODES ARE A COMPATIBILITY SURFACE, NOT A STYLE CHOICE. An SDK
  * maps 429 to a retry and 4xx to a thrown error, so `daily_quota_exceeded`
- * arriving as a 429 is what makes a client back off — and `idempotency_conflict`
+ * arriving as a 429 is what makes a client back off - and `idempotency_conflict`
  * arriving as a 409 rather than a 422 is what stops it retrying a request that
  * will never succeed unchanged.
  */
@@ -55,7 +55,7 @@ function acceptError(outcome: AcceptOutcome) {
   /*
    * ⚠ 403, NOT 401, AND THE DIFFERENCE IS ACTIONABLE. 401 tells a caller their
    * key is wrong and their next move is to rotate one that was fine. This key
-   * IS valid and was refused on what it asked to do — the fix is a different
+   * IS valid and was refused on what it asked to do - the fix is a different
    * `from` address, or a wider scope, and the message names which.
    */
   if (outcome.status === "forbidden") {
@@ -72,7 +72,7 @@ function acceptError(outcome: AcceptOutcome) {
    * ⚠ 403 AND ITS OWN NAME, NOT `restricted_api_key`. Both are 403s and the
    * remedies are opposite: a restricted key needs a different key, an
    * unverified domain needs finishing. `domain_not_verified` has been in
-   * `errorNames` since that file was written and nothing ever emitted it —
+   * `errorNames` since that file was written and nothing ever emitted it -
    * this is the case it was reserved for.
    */
   if (outcome.status === "unverified_domain") {
@@ -164,13 +164,13 @@ emails.openapi(
         tenantId: auth.tenantId,
         apiKeyId: auth.apiKeyId,
         // ⚠ THE KEY'S OWN RESTRICTION, CARRIED FROM THE ROW IT MATCHED. See
-        // auth/scope.ts — the column has existed since 0031 and this is the
+        // auth/scope.ts - the column has existed since 0031 and this is the
         // first thing that has ever read it.
         scopes: auth.scopes,
         payloads: [c.req.valid("json")],
         endpoint: "single",
         // ⚠ THE HEADER IS THE CUSTOMER'S, NOT OURS TO INVENT. Absent, every
-        // request is distinct — which is correct: generating one here would
+        // request is distinct - which is correct: generating one here would
         // make an accidental double-POST look like a replay and silently drop
         // the second email.
         idempotencyKey: c.req.header("Idempotency-Key"),
@@ -262,7 +262,7 @@ emails.openapi(
 
     if (outcome.status === "accepted" || outcome.status === "replayed") {
       // Ids come back in submission order, so element N of the response is
-      // element N of the request — which is the only thing that makes them
+      // element N of the request - which is the only thing that makes them
       // usable to a caller iterating their own list.
       return c.json({ data: outcome.ids.map((id) => ({ id })) }, 200)
     }
@@ -286,7 +286,7 @@ emails.openapi(
 
 /**
  * ⚠ THE OTHER HALF OF AN API THAT ANSWERS BEFORE IT ACTS. `POST /emails` hands
- * back an id in milliseconds because the send is asynchronous — and that leaves
+ * back an id in milliseconds because the send is asynchronous - and that leaves
  * the caller holding an identifier with nothing to ask. Webhooks are the push
  * answer and this is the pull one; a caller who cannot receive an inbound
  * request (a script, a job, a laptop) has only this.
@@ -339,7 +339,7 @@ emails.openapi(
   },
   // ⚠ THE SAME ERROR SHAPE AS EVERY OTHER ROUTE, AND IT HAS TO BE SPELLED OUT
   // PER ROUTE. Without this hook a bad path parameter returns Zod's own body
-  // with a 400 — a shape no SDK on the compatibility path knows how to read,
+  // with a 400 - a shape no SDK on the compatibility path knows how to read,
   // and a status code the others never use for validation.
   (result, c) => {
     if (!result.success) {

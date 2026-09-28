@@ -10,10 +10,10 @@ import { tenants } from "../db/core.js"
  * the console header; who belongs to the organization, what role they hold and
  * who may invite is Clerk's, answered by Clerk's own components in the browser.
  * Projecting membership into our database would give us a second copy that goes
- * stale — and the one place a stale copy of "who is an admin" matters is
+ * stale - and the one place a stale copy of "who is an admin" matters is
  * authorization.
  *
- * ⚠ AND RENAMING HERE STILL DOES NOT RENAME THE CLERK ORGANIZATION — THE ROUTE
+ * ⚠ AND RENAMING HERE STILL DOES NOT RENAME THE CLERK ORGANIZATION - THE ROUTE
  * DOES, AFTERWARDS. That split is the whole design rather than an oversight:
  * this is a transaction against our own database and must not contain a call to
  * somebody else's, or a Clerk outage makes renaming a workspace impossible. So

@@ -8,7 +8,7 @@ import { defineConfig } from "tsup"
 // build. It uses global fetch and nothing else.
 //
 // `@repo/contracts` is a TYPE-ONLY import and is bundled into the .d.ts by dts
-// resolution — it never appears at runtime, and it must never become a real
+// resolution - it never appears at runtime, and it must never become a real
 // dependency, because it is a private workspace package that would not resolve
 // for anyone outside this repo.
 export default defineConfig({

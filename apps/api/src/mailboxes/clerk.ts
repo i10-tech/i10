@@ -19,8 +19,8 @@ export function clerkIdentity(clerk: ClerkClient): MailboxIdentity {
       try {
         user = await clerk.users.getUser(userId)
       } catch (error) {
-        // ⚠ ONLY 404 BECOMES `null`. Every other failure — a timeout, a 5xx, a
-        // revoked secret key — must propagate, because "Clerk did not answer"
+        // ⚠ ONLY 404 BECOMES `null`. Every other failure - a timeout, a 5xx, a
+        // revoked secret key - must propagate, because "Clerk did not answer"
         // and "there is no such user" lead to opposite responses: a retry and
         // a refusal. Collapsing them is the same mistake as answering LDAP
         // `invalidCredentials` during a Clerk outage.
@@ -37,7 +37,7 @@ export function clerkIdentity(clerk: ClerkClient): MailboxIdentity {
         emailAddress: address,
         verified: true,
         // ⚠ NOT PRIMARY, DELIBERATELY. The primary address is where Clerk sends
-        // its own mail — password resets above all. Pointing that at a mailbox
+        // its own mail - password resets above all. Pointing that at a mailbox
         // the person has not set up in a client yet is how somebody locks
         // themselves out: the reset link is delivered to the thing they need
         // the reset in order to read. The projection does not need it either;
@@ -75,13 +75,13 @@ function toWire(user: User): ClerkUser {
 /**
  * ⚠ DUCK-TYPED ON PURPOSE. `ClerkAPIResponseError` carries `status`, but
  * narrowing by class would couple this to an export the SDK is free to move
- * between majors — and the failure mode of getting it wrong is silent: an
+ * between majors - and the failure mode of getting it wrong is silent: an
  * instanceof that stops matching turns every deleted user into a 500. Reading
  * the field degrades safely, because anything unrecognised is rethrown.
  *
  * ⚠ EXPORTED SO THERE IS ONE OF IT. The `user.deleted` sweep in
  * tenants/lifecycle.ts asks Clerk whether an organization still exists and
- * treats 404 as "gone" — an answer that ENDS A SUBSCRIPTION, so a second
+ * treats 404 as "gone" - an answer that ENDS A SUBSCRIPTION, so a second
  * hand-written copy of this predicate drifting from the first is a workspace
  * switched off by a mismatched field name.
  */

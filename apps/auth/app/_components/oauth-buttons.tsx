@@ -34,7 +34,7 @@ import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
  *
  * With an attempt already in flight and no redirect URL on it, that skips the
  * create, finds nothing to navigate to, and resolves `{ error: null }` having
- * done nothing at all. And /sign-in creates exactly that attempt on mount — the
+ * done nothing at all. And /sign-in creates exactly that attempt on mount - the
  * passkey autofill effect POSTs `strategy=passkey`, whose verification carries
  * no redirect URL. The attempt lives on the Clerk CLIENT, in the `__client`
  * cookie, so it follows the person to /sign-up and survives reloads.
@@ -42,7 +42,7 @@ import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
  * ⚠ PRIMING THE ATTEMPT FIRST AND THEN CALLING `sso()` WAS TRIED, AND IT FAILED
  * FOR A SECOND REASON WORTH RECORDING. `create()` REPLACES `clerk.client.signIn`
  * with a fresh resource, while `sso()` operates on the one captured when the
- * hook handed it to us — so the priming landed on one object and the call read
+ * hook handed it to us - so the priming landed on one object and the call read
  * another, still unprimed. Measured live: one `POST /v1/client/sign_ins`, then
  * silence.
  *
@@ -64,7 +64,7 @@ const LOCAL_ICONS: Record<
  *
  * ⚠ THIS EXISTS BECAUSE THE OLD CODE COULD DEAD-END THE WHOLE PAGE. `sso()`
  * resolving with no error was taken to mean "we are navigating", so nothing
- * ever released the lock — and when the hand-off did not happen (a blocked
+ * ever released the lock - and when the hand-off did not happen (a blocked
  * navigation, a provider that never answered) every button on the page stayed
  * disabled with no message, which is the "the OAuth buttons just don't work"
  * report. The timer is long enough that it never fires during a real hand-off,
@@ -84,7 +84,7 @@ export function OAuthButtons({
   afterAuthUrl: string
   /**
    * The ORIGINAL `?redirect_url=`, forwarded to the callback page rather than
-   * the resolved destination — see sso-callback/page.tsx. A resolved URL
+   * the resolved destination - see sso-callback/page.tsx. A resolved URL
    * travelling through a provider's redirect is an unvalidated URL again.
    */
   redirectRaw?: string
@@ -93,14 +93,14 @@ export function OAuthButtons({
   /**
    * Which page these buttons are on.
    *
-   * ⚠ IT CHANGES WHAT WE ASK GOOGLE FOR, not just the label — see _lib/oidc.ts.
+   * ⚠ IT CHANGES WHAT WE ASK GOOGLE FOR, not just the label - see _lib/oidc.ts.
    * Signing up asks for consent so a refresh token comes back; signing in shows
    * the account chooser only, so a returning customer is not made to re-consent
    * every visit.
    */
   intent: "sign-in" | "sign-up"
   /**
-   * What Clerk says is configured, already filtered for this device — see
+   * What Clerk says is configured, already filtered for this device - see
    * _lib/providers.ts. An empty list renders nothing at all, which is the
    * correct answer when the instance has no SSO connections.
    */
@@ -141,8 +141,8 @@ export function OAuthButtons({
     /*
      * ⚠ AND `pageshow` WITH `persisted` IS THE BACK BUTTON, which is the most
      * common way this flow ends without finishing. Safari restores the page
-     * from the back/forward cache exactly as it was — including a `busy` that
-     * has every button greyed out — so someone who thought better of Google and
+     * from the back/forward cache exactly as it was - including a `busy` that
+     * has every button greyed out - so someone who thought better of Google and
      * came back found a page they could no longer use. Unfreezing on restore is
      * the whole fix.
      */
@@ -171,7 +171,7 @@ export function OAuthButtons({
     /*
      * ⚠ AN ATTEMPT, NOT A RESULT. This is the last moment before the browser
      * leaves for the provider, so it is the only place the intention can be
-     * recorded — but it is written to the PENDING slot and is promoted to "last
+     * recorded - but it is written to the PENDING slot and is promoted to "last
      * used" only when a session actually exists. Somebody who backs out of
      * Google's consent screen and then signs in with a password must not be
      * told next time that Google is what they used. See _lib/last-used.ts.
@@ -191,7 +191,7 @@ export function OAuthButtons({
        * where `finalize()` actually creates the session.
        * `actionCompleteRedirectUrl` is where the person ends up afterwards.
        * Point the callback at the dashboard and the handshake is never finished
-       * — the browser lands on an app that has no session and bounces straight
+       * - the browser lands on an app that has no session and bounces straight
        * back to sign-in.
        *
        * ⚠ `buildUrlWithAuth` IS WHAT `sso()` APPLIES TO THE CALLBACK, so it is
@@ -206,8 +206,8 @@ export function OAuthButtons({
         actionCompleteRedirectUrl: afterAuthUrl,
         /*
          * ⚠ WITHOUT THIS, A PROVIDER ACCOUNT THAT HAS NEVER SIGNED IN HERE IS
-         * SIMPLY REFUSED. We always start a sign-IN — correctly, because one
-         * SSO round trip resolves into whichever it turns out to be — but a
+         * SIMPLY REFUSED. We always start a sign-IN - correctly, because one
+         * SSO round trip resolves into whichever it turns out to be - but a
          * sign-in with no matching user has nowhere to go unless it is told it
          * may become a sign-up. Google answered that with a hard
          * `authorization_invalid` from FAPI, before the browser ever got back
@@ -223,7 +223,7 @@ export function OAuthButtons({
         signUpIfMissing: true,
         /*
          * Undefined unless this is a sign-up with a provider that needs it,
-         * which Clerk then omits from the authorize URL — so the ordinary
+         * which Clerk then omits from the authorize URL - so the ordinary
          * sign-in path is untouched.
          */
         oidcPrompt: consentPromptFor(strategy, intent),
@@ -232,7 +232,7 @@ export function OAuthButtons({
       /*
        * ⚠ RE-READ FROM THE CLIENT, NOT FROM A VALUE CAPTURED BEFORE THE CALL.
        * `create()` replaces `clerk.client.signIn`, which is the whole reason
-       * the previous attempt at this bug failed — see the note at the top.
+       * the previous attempt at this bug failed - see the note at the top.
        */
       const verification = clerk.client.signIn.firstFactorVerification
       const target = verification?.externalVerificationRedirectURL
@@ -241,7 +241,7 @@ export function OAuthButtons({
         /*
          * ⚠ `assign`, NOT `replace`, AND NOT AN `href` ASSIGNMENT. Assign keeps
          * this page in history, so backing out of the provider's consent screen
-         * returns here rather than skipping past — the `pageshow` handler above
+         * returns here rather than skipping past - the `pageshow` handler above
          * is what unfreezes the buttons when that happens. It is a method call
          * rather than `location.href = …` because the React Compiler lint rule
          * `react-hooks/immutability` rejects writing to a value defined outside
@@ -273,7 +273,7 @@ export function OAuthButtons({
   /*
    * ⚠ A FRAGMENT RATHER THAN A `<Field>`, AND THE CALLER OWNS THE GROUP NOW.
    * This used to wrap itself, which meant the passkey button added beside it had
-   * to sit in a SECOND Field — 28px of `FieldGroup` gap between two stacks of
+   * to sit in a SECOND Field - 28px of `FieldGroup` gap between two stacks of
    * identical-looking buttons, where the buttons within each stack are 12px
    * apart. They are all "continue without typing a password" and they should
    * read as one list.
@@ -323,7 +323,7 @@ export function OAuthButtons({
             {/*
              * ⚠ ON THE SIGN-IN PAGE ONLY. "Last used" beside a button on the
              * SIGN-UP page is telling somebody who is creating an account about
-             * an account they already have — which is either confusing or, if
+             * an account they already have - which is either confusing or, if
              * they act on it, the thing the badge exists to prevent in reverse.
              */}
             {intent === "sign-in" && lastUsed === strategy && !loading && (
@@ -349,7 +349,7 @@ function callbackUrl(redirectRaw: string | undefined): string {
  * ⚠ THE CLASSIC API THROWS, WHERE THE SIGNALS API RETURNS `{ error }`. That
  * difference is why this exists alongside `_lib/errors.ts`: a handler written
  * for one shape reports nothing useful for the other. `longMessage` first, for
- * the same reason as there — Clerk documents `message` as developer-facing.
+ * the same reason as there - Clerk documents `message` as developer-facing.
  */
 function clerkErrorMessage(error: unknown): string {
   const errors = (error as { errors?: { longMessage?: string; message?: string }[] })

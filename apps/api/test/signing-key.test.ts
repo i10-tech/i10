@@ -4,7 +4,7 @@ import type { SecretBox } from "../src/webhooks/signing.js"
 
 /**
  * ⚠ THIS FILE EXISTS BECAUSE ITS ABSENCE SHIPPED A BUG. `domainSendingLookup`
- * had no test, and the only test of the direct transport stubbed it out — so
+ * had no test, and the only test of the direct transport stubbed it out - so
  * nothing exercised the one thing that was wrong: the query ran outside
  * `withTenant()`, `core.domains`'s RLS policy raised rather than returning no
  * rows, and every direct-routed message was recorded permanently failed.
@@ -12,7 +12,7 @@ import type { SecretBox } from "../src/webhooks/signing.js"
  * The assertions below are therefore about the SHAPE OF THE CALL rather than
  * about rows: that a tenant context is opened at all, and that the tenant it
  * opens is the message's. A fuller check belongs in an integration test running
- * as a non-owner role — noted in mail-routing.md, not faked here.
+ * as a non-owner role - noted in mail-routing.md, not faked here.
  */
 
 const secrets: SecretBox = {
@@ -81,7 +81,7 @@ describe("the DKIM key lookup", () => {
 
     expect(got).toEqual({
       dkim: { selector: "sel1", privateKey: "PRIVATE" },
-      // The full name, from `returnPathDomain` — never a label for the
+      // The full name, from `returnPathDomain` - never a label for the
       // transport to assemble. See the regression note in domains/zone.ts.
       returnPath: "send.example.com",
     })
@@ -107,7 +107,7 @@ describe("the DKIM key lookup", () => {
 
     /**
      * ⚠ KEYED ON TENANT AS WELL AS DOMAIN. Keying on the domain alone would let
-     * one tenant's cached answer — including a cached MISS — be served to
+     * one tenant's cached answer - including a cached MISS - be served to
      * another, which after the RLS fix is the remaining way to cross the
      * boundary.
      */
@@ -134,7 +134,7 @@ describe("the DKIM key lookup", () => {
     /**
      * ⚠ THE BOUND EXISTS BECAUSE ENTRIES HOLD UNSEALED PRIVATE KEYS. Unbounded,
      * a long-lived worker ends up holding every customer's signing key in
-     * plaintext at once — what sealing them in the table exists to prevent,
+     * plaintext at once - what sealing them in the table exists to prevent,
      * reintroduced where a heap dump reaches it.
      */
     it("evicts rather than growing without limit", async () => {

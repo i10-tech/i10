@@ -1,4 +1,4 @@
-// Full-corpus markdown for AI agents — every published page in one
+// Full-corpus markdown for AI agents - every published page in one
 // document. Scope and collation live in the framework helper; reshape or
 // delete this route to change the site's corpus policy.
 import { renderCorpusMarkdown } from "@cloudflare/nimbus-docs"

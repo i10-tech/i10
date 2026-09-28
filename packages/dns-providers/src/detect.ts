@@ -8,7 +8,7 @@ import type { DetectionResult, DnsProvider } from "./types.js"
  * SECURITY PROPERTY RATHER THAN A TIDINESS ONE. `"notcloudflare.com".includes(
  * "cloudflare.com")` is true. Anyone can name their own nameserver, so a
  * substring match lets a third party choose which provider's mark and which
- * "Connect" dialog we show a customer — and that dialog asks them to paste a
+ * "Connect" dialog we show a customer - and that dialog asks them to paste a
  * credential. Requiring the character before the match to be a dot (or the
  * match to be the whole hostname) makes `notcloudflare.com` fail and
  * `gina.ns.cloudflare.com` succeed.
@@ -60,7 +60,7 @@ export function providerFor(nameserver: string): DnsProvider | null {
       /*
        * ⚠ LONGEST PATTERN WINS, WHICH IS WHAT RESOLVES THE OVERLAPS. Netlify's
        * zones are served by NS1's infrastructure, so `dns1.p03.nsone.net`
-       * matches both `nsone.net` (NS1) and `nsone.net` (Netlify) — the tie is
+       * matches both `nsone.net` (NS1) and `nsone.net` (Netlify) - the tie is
        * genuine and is broken below. Where one provider's pattern is a strict
        * suffix of another's, the more specific one is the right answer:
        * `ns.cloudflare.com` beats a hypothetical `cloudflare.com`.
@@ -82,7 +82,7 @@ export function providerFor(nameserver: string): DnsProvider | null {
  * halfway through a migration answers with two providers' nameservers at once,
  * and so does a zone whose owner added a third-party secondary. Reporting the
  * majority provider with `partial` confidence lets the console say "looks like
- * Cloudflare, but your nameservers are not all pointing there" — which is both
+ * Cloudflare, but your nameservers are not all pointing there" - which is both
  * true and the single most useful thing it could tell somebody whose records
  * are about to behave unpredictably.
  */
@@ -107,7 +107,7 @@ export function detectProvider(nameservers: readonly string[]): DetectionResult 
   /*
    * ⚠ A WHITE-LABEL BACKEND LOSES TO THE BRAND IT SERVES, AND THIS IS NOT
    * DECORATIVE. NS1 serves Netlify, Wix and Squarespace, so a Netlify zone
-   * answers with BOTH `ns01.netlifydns.com` and `dns1.p04.nsone.net` — and
+   * answers with BOTH `ns01.netlifydns.com` and `dns1.p04.nsone.net` - and
    * whether the branded pattern happens to be longer than `nsone.net` is an
    * accident of spelling, not a rule. Sending a Netlify customer to NS1's
    * dashboard is an answer that is true about their nameservers and useless
@@ -138,7 +138,7 @@ export function detectProvider(nameservers: readonly string[]): DetectionResult 
   /*
    * ⚠ CONFIDENCE ASKS "DO THESE ALL POINT AT ONE PLACE", NOT "WHAT SHARE DID
    * THE WINNER GET", AND THE DIFFERENCE IS THE NETLIFY CASE. A Netlify zone's
-   * four nameservers are two branded and two NS1 — the winner accounts for two
+   * four nameservers are two branded and two NS1 - the winner accounts for two
    * of four, which by a share calculation is `partial` and is the WRONG answer:
    * all four point at the same infrastructure. Two conditions, both of which
    * have to hold:
@@ -146,8 +146,8 @@ export function detectProvider(nameservers: readonly string[]): DetectionResult 
    *   1. Every host matched something. One we cannot place means there is a
    *      provider in the set we know nothing about.
    *   2. Exactly one provider survives the backend collapse. Two means the
-   *      domain is genuinely split — mid-migration, or a third-party secondary
-   *      — and records added at one of them will resolve unpredictably. That is
+   *      domain is genuinely split - mid-migration, or a third-party secondary
+   *      - and records added at one of them will resolve unpredictably. That is
    *      the single most useful thing the console can warn about here.
    */
   const attributed = hosts.filter((host) => providerFor(host) !== null).length

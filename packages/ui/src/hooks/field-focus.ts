@@ -16,7 +16,7 @@ import { useState } from "react"
  * ⚠ THE RULE FOR RED IS "WRONG **AND** NOT FOCUSED", NOT "WRONG AND ONCE
  * BLURRED". Marking a field touched on blur and leaving it touched means the
  * border is red for the entire time somebody is FIXING it: they tab away from
- * `mido@`, it goes red — correctly — they click back in to finish typing the
+ * `mido@`, it goes red - correctly - they click back in to finish typing the
  * domain, and it stays red at them through every keystroke of the correction.
  * The colour is then reporting a judgement about a value that no longer exists.
  *
@@ -25,7 +25,7 @@ import { useState } from "react"
  * on a form where most people type most fields correctly first time, green
  * appears on almost everything, carries no information, and costs the one
  * colour in a monochrome palette that means "resolved". It is worth something
- * in exactly one situation — this field was shown to be wrong, and now is not —
+ * in exactly one situation - this field was shown to be wrong, and now is not -
  * so that is the only situation it appears in.
  *
  * ⚠ AND ONLY WHILE THE CARET IS STILL IN IT. Green answers a question somebody
@@ -38,17 +38,17 @@ import { useState } from "react"
  * been submitted" and "has it ever actually been shown wrong" are independent,
  * and collapsing any pair of them produces a specific wrong screen:
  *
- *   touched merged into focused — a field left wrong, focused, then abandoned
+ *   touched merged into focused - a field left wrong, focused, then abandoned
  *   without an edit goes quietly back to grey. The person tabbed through it
  *   twice and the form now says nothing about a value it already refused.
  *
- *   submitted merged into touched — this one shipped and was wrong. Tabbing
+ *   submitted merged into touched - this one shipped and was wrong. Tabbing
  *   through an EMPTY field marked it touched, so a box nobody had answered yet
  *   turned red for the crime of being looked at. Emptiness is not a mistake
  *   until somebody presses the button; malformedness is a mistake as soon as
  *   they stop typing it.
  *
- *   wrongWhenLeft merged into touched — green on any correct field that had
+ *   wrongWhenLeft merged into touched - green on any correct field that had
  *   ever been visited, which is every field on a completed form.
  */
 export interface FieldFocus {
@@ -56,7 +56,7 @@ export interface FieldFocus {
    * Whether a MALFORMED value may be painted red right now.
    *
    * ⚠ IT SAYS NOTHING ABOUT AN EMPTY ONE, AND THAT SEPARATION IS THE POINT.
-   * Tabbing through a field you have not filled in yet is not a mistake — it is
+   * Tabbing through a field you have not filled in yet is not a mistake - it is
    * how anybody reads a form before answering it, and reddening it is the
    * interface telling somebody off for looking. Emptiness is only a fault at the
    * moment they say they are finished, which is `submitted` below.
@@ -73,8 +73,8 @@ export interface FieldFocus {
   /**
    * Whether a CORRECT value may be painted green right now.
    *
-   * ⚠ BOTH HALVES ARE REQUIRED. It has to have been wrong — otherwise green is
-   * a receipt for typing something correctly, which is not news — and the caret
+   * ⚠ BOTH HALVES ARE REQUIRED. It has to have been wrong - otherwise green is
+   * a receipt for typing something correctly, which is not news - and the caret
    * has to still be in it, because the question green answers is "is this right
    * yet", and that question stops being asked the moment somebody moves on.
    *
@@ -94,7 +94,7 @@ export interface FieldFocus {
    *
    * ⚠ AND IT TAKES WHETHER **THIS** FIELD IS THE PROBLEM. A refused submit
    * reveals every field at once, but only the ones actually at fault have been
-   * shown wrong — telling a valid field it was wrong would make it go green the
+   * shown wrong - telling a valid field it was wrong would make it go green the
    * next time somebody clicked into it, for nothing.
    */
   reveal: (wrong: boolean) => void
@@ -106,7 +106,7 @@ export interface FieldFocus {
 }
 
 /**
- * @param isWrong Whether what is in the box is MALFORMED — not merely empty.
+ * @param isWrong Whether what is in the box is MALFORMED - not merely empty.
  *   Read at blur time from the event's own value rather than from a prop, so
  *   there is no render-phase latch and no stale closure to reason about.
  */
@@ -118,7 +118,7 @@ export function useFieldFocus(isWrong: (value: string) => boolean): FieldFocus {
    * ⚠ "WAS IT WRONG THE LAST TIME THE CARET LEFT", NOT "HAS IT EVER BEEN
    * WRONG", AND THE SHORTER MEMORY IS WHAT MAKES GREEN MEAN SOMETHING. The
    * first version of this latched for ever, so a field corrected once went
-   * green every subsequent time anybody clicked into it — which is the "green
+   * green every subsequent time anybody clicked into it - which is the "green
    * on everything" problem arriving by a slower route.
    *
    * Clearing it on a clean exit reads as an acknowledgement: the interface
@@ -155,7 +155,7 @@ export function useFieldFocus(isWrong: (value: string) => boolean): FieldFocus {
          *
          * ⚠ AN EMPTY BOX COUNTS AS NOT WRONG, which is also how it resets.
          * Clearing a field and tabbing out disarms green, so the next round of
-         * wrong-then-right earns it again — and a reload does the same thing
+         * wrong-then-right earns it again - and a reload does the same thing
          * for free, because none of this outlives the component.
          */
         setWrongWhenLeft(isWrong(event.currentTarget.value))
@@ -170,7 +170,7 @@ export function useFieldFocus(isWrong: (value: string) => boolean): FieldFocus {
  * ⚠ IT BLURS THE DOM RATHER THAN FAKING THE STATE, AND THAT IS WHAT KEEPS THE
  * RULES ABOVE HONEST. Pressing Enter inside the email box submits the form
  * without blurring anything, so the field is still focused when the guard
- * refuses — and under "not focused" it would show nothing at all, which is a
+ * refuses - and under "not focused" it would show nothing at all, which is a
  * button that visibly does nothing. Setting `focused` to false by hand would fix
  * that screen and break the next one: the caret is still in the box, so the
  * correction they type would be typed at a red border again.

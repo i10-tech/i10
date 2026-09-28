@@ -6,14 +6,14 @@ import { fieldBlocks, fieldVerdict } from "../src/components/validated-field"
  * The rules every field in the product is judged by.
  *
  * ⚠ THESE USED TO BE TESTED TWICE, IN TWO APPS, AGAINST TWO COPIES OF THE SAME
- * LOGIC — apps/auth/test/validate.test.ts and apps/console/test/
+ * LOGIC - apps/auth/test/validate.test.ts and apps/console/test/
  * domain-verdict.test.ts. Both were right and neither could keep the other
  * honest. This is the single copy, so a change to the timing rules breaks one
  * file rather than passing in one app and regressing in the other.
  *
  * ⚠ AND WHAT IS BEING ASSERTED IS **WHEN**, NOT WHETHER. Whether a string is an
  * email address is easy. Red on the first keystroke, red on an untouched empty
- * box, green on everything correct — three bugs, none of them about whether a
+ * box, green on everything correct - three bugs, none of them about whether a
  * string is valid, all three shipped at some point.
  */
 
@@ -172,11 +172,11 @@ describe("the webhook URL rule", () => {
 
   /*
    * ⚠ EACH WRONG ANSWER GETS ITS OWN CORRECTION. The form used to carry all of
-   * this as a grey hint under a box that accepted anything — a rule written
+   * this as a grey hint under a box that accepted anything - a rule written
    * down rather than applied.
    */
   it.each([
-    ["http://acme.com/hooks", "Use https:// — we will not post over http."],
+    ["http://acme.com/hooks", "Use https:// - we will not post over http."],
     ["acme.com/hooks", "Start with https://"],
     ["not a url", "That does not look like a URL."],
     [

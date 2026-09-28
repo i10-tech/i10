@@ -8,13 +8,13 @@ import type { ConflictingRecord, Domain } from "@/lib/types"
  * add form published and toasted; the onboarding flow published and moved to a
  * screen; the OAuth callback published and verified in a loop. All three were
  * doing publish → verify → hope, each with its own idea of what a 409 meant and
- * its own wording for the same outcome — so a fix to one of them fixed one
+ * its own wording for the same outcome - so a fix to one of them fixed one
  * third of the product, and the two surfaces a customer is most likely to
  * compare were the two most likely to disagree.
  *
  * ⚠ IT IS PLAIN FUNCTIONS RATHER THAN A HOOK, WHICH IS WHAT LETS ALL THREE USE
- * IT. The callers do not share a shape — one is a form submit, one is a phase
- * machine, one is an effect that runs once on a callback page — and a hook
+ * IT. The callers do not share a shape - one is a form submit, one is a phase
+ * machine, one is an effect that runs once on a callback page - and a hook
  * would have forced a common render model on three components that legitimately
  * render nothing alike. What they share is the SEQUENCE and the set of
  * OUTCOMES, so that is what is shared; every caller still writes its own words.
@@ -49,7 +49,7 @@ export type Activation =
        * ⚠ FALSE MEANS WE DO NOT KNOW, AND CONFLATING IT WITH TRUE HID A
        * PRODUCTION 500 FOR DAYS. This used to report `published` either way, so
        * a verify that answered 500 produced "we added the records and proved
-       * the domains are yours" — a sentence with two claims in it, one of them
+       * the domains are yours" - a sentence with two claims in it, one of them
        * measured and one of them invented. The person reading it had no reason
        * to look further, and the failing call was invisible until they pressed
        * Verify by hand and got the error the flow had already swallowed.
@@ -70,7 +70,7 @@ export type Activation =
  * ago, so there is nobody else who should have to say "now go and see".
  *
  * ⚠ AND A "not yet" FROM THAT FIRST CHECK IS NOT A FAILURE. It is the expected
- * answer inside the first few seconds — see `watchUntilVerified`, which is what
+ * answer inside the first few seconds - see `watchUntilVerified`, which is what
  * the caller should start next rather than reporting anything final.
  */
 export async function activateDomain({
@@ -140,7 +140,7 @@ export async function activateDomain({
  * ⚠ BACKED OFF RATHER THAN FIXED, AND THE SHAPE IS CHOSEN FOR THE FIRST TEN
  * SECONDS. Cloudflare serves a written record within a second or two and our
  * own proof reads their nameservers directly, so the common case resolves
- * almost immediately — front-loading the attempts is what turns "verified in
+ * almost immediately - front-loading the attempts is what turns "verified in
  * about a minute" into "verified before the success screen finishes animating".
  * What follows is spaced out because everything after the first few seconds is
  * waiting on Amazon, and asking faster does not make Amazon answer sooner.
@@ -156,8 +156,8 @@ const SCHEDULE_MS = [2_000, 3_000, 5_000, 8_000, 12_000, 15_000, 15_000]
  * says so, and the badge turns green on the next page load.
  *
  * ⚠ AND IT IS ABORTABLE, WHICH IS NOT OPTIONAL FOR SOMETHING THAT OUTLIVES A
- * SCREEN. Every caller is a component that can unmount — a form that navigates,
- * an onboarding step that advances — and a timer left running against an
+ * SCREEN. Every caller is a component that can unmount - a form that navigates,
+ * an onboarding step that advances - and a timer left running against an
  * unmounted tree sets state on it a minute later.
  */
 export async function watchUntilVerified({
@@ -181,13 +181,13 @@ export async function watchUntilVerified({
     if (!waited) return { verified: false, domain: last }
 
     /*
-     * ⚠ RE-PROVE WHILE THERE IS NO IDENTITY, REFRESH ONCE THERE IS — AND THIS
+     * ⚠ RE-PROVE WHILE THERE IS NO IDENTITY, REFRESH ONCE THERE IS - AND THIS
      * LOOP USED TO ONLY REFRESH, WHICH IS WHY DOMAINS SAT AT `not_started`
      * UNTIL SOMEBODY PRESSED VERIFY.
      *
      * `verify` is the only thing in the product that creates the SES identity.
      * `refresh` READS the identity's status and writes nothing at all for a row
-     * that has none — so a domain whose one verify attempt missed (DNS not
+     * that has none - so a domain whose one verify attempt missed (DNS not
      * serving yet, which is the ordinary case a second after publishing) was
      * polled seven times by a call that could never change its state, and the
      * loop then gave up reporting exactly the status it started with.
@@ -195,7 +195,7 @@ export async function watchUntilVerified({
      * ⚠ AND IT IS SAFE TO REPEAT, WHICH IS WHAT MAKES THIS THE FIX RATHER THAN A
      * RETRY STORM. `verify` proves ownership from the customer's own
      * nameservers and checks SES before registering, so calling it again is the
-     * same call the Verify button makes — the button is now just the manual
+     * same call the Verify button makes - the button is now just the manual
      * spelling of what this already does.
      *
      * ⚠ AND `null` COUNTS AS "NO IDENTITY". The first tick has no answer yet,
@@ -205,7 +205,7 @@ export async function watchUntilVerified({
     const unregistered: boolean = last === null || last.status === "not_started"
     /*
      * ⚠ NARROWED TO `Domain` DELIBERATELY. `verifyDomain` answers with
-     * `VerifiedDomain` — the same row plus what DNS said — and this loop wants
+     * `VerifiedDomain` - the same row plus what DNS said - and this loop wants
      * only the part both calls agree on. Letting the union through makes `last`
      * depend on a type that depends on `last`, which TypeScript reports as a
      * circular inference rather than as the design smell it is.
@@ -217,8 +217,8 @@ export async function watchUntilVerified({
     /*
      * ⚠ THE PAYLOAD IS CHECKED, NOT ASSUMED, AND THAT IS NOT PARANOIA. `ok`
      * means the request did not throw; it does not promise a body of the shape
-     * this loop wants. A route answering with something else — a fixture that
-     * does not exist, a proxy's error page, a later change to the envelope —
+     * this loop wants. A route answering with something else - a fixture that
+     * does not exist, a proxy's error page, a later change to the envelope -
      * reached `.status` on `undefined` and threw out of a timer, seven times a
      * minute, on a page nobody had touched.
      */

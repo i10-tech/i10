@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic"
  *
  * ⚠ IT RE-VALIDATES `redirect_url` RATHER THAN TRUSTING THE PAGE THAT SENT US.
  * The sign-in form forwards the RAW query parameter here, not the destination
- * it already resolved — because a resolved URL travelling through a query
+ * it already resolved - because a resolved URL travelling through a query
  * string is just an unvalidated URL again, and this page would be the one
  * honouring it. Every page that can finish a sign-in checks the allowlist
  * itself. See _lib/redirect.ts.

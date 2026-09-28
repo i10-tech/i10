@@ -7,14 +7,14 @@ import { useEffect } from "react"
  *
  * ⚠ IT EXISTS BECAUSE THIS APP HAD NOTHING, AND THE COST OF THAT WAS MEASURED
  * RATHER THAN IMAGINED. With no `error.tsx` anywhere in the tree, a thrown
- * render error falls all the way through to Next's OWN built-in boundary — a
+ * render error falls all the way through to Next's OWN built-in boundary - a
  * bare white page reading "This page couldn't load", with a Reload button and a
  * Back button and no styling of ours on it. That is what a missing
  * `TooltipProvider` produced on the two-factor step: the person was four screens
  * into creating an account and the interface simply ended.
  *
  * ⚠ AND THE PARTICULAR CRUELTY OF IT IS THAT THE ACCOUNT ALREADY EXISTS BY
- * THEN. This flow finalizes in the middle — see sign-up/sign-up-form.tsx — so a
+ * THEN. This flow finalizes in the middle - see sign-up/sign-up-form.tsx - so a
  * crash on passkey, two-factor or providers happens to somebody who is already
  * signed up and already signed in, and who has just been told the page is
  * broken. Reload sends them back to the start of a sign-up they have finished.
@@ -52,7 +52,7 @@ export default function AuthError({
            * to start again, and starting again with the same address is a
            * refusal from Clerk that looks like a second failure.
            */}
-          If you were part-way through signing up, your account was already created —
+          If you were part-way through signing up, your account was already created -
           you can carry on from the dashboard and add a passkey or two-factor from
           settings.
         </p>
@@ -72,7 +72,7 @@ export default function AuthError({
         {/*
          * ⚠ A PLAIN `<a>`, NOT `next/link`, AND THE LINT RULE IS WRONG HERE
          * RATHER THAN BEING WORKED AROUND. Its point is that `<Link>` gives a
-         * client-side transition and prefetching — which is exactly what this
+         * client-side transition and prefetching - which is exactly what this
          * link must not do. Something in the React tree has just thrown; a soft
          * navigation keeps that tree, its providers and whatever state got it
          * into this condition. A document load is the only escape hatch that is

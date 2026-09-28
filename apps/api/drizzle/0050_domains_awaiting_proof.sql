@@ -10,7 +10,7 @@
 --
 -- ⚠ SO THE ONLY THING THAT EVER REGISTERED AN IDENTITY WAS A HUMAN. `verify` is
 -- reachable from two HTTP routes and from nothing else, and the console fires
--- it exactly once — about a second after publishing the records. DNS is
+-- it exactly once - about a second after publishing the records. DNS is
 -- frequently not serving yet at that instant, and on the manual path the
 -- records go up hours later, so that one attempt missed and nothing ever made a
 -- second one. The row sat `not_started` for ever while the console's own watch
@@ -21,7 +21,7 @@
 -- different questions and the pair is what makes this safe to re-run. `status`
 -- is the state machine; `verified_at` is the send gate's column and the record
 -- that a domain has EVER worked. A row that has been verified is not waiting to
--- be proved, whatever its status has swung to since — that is
+-- be proved, whatever its status has swung to since - that is
 -- `domains_due_recheck`'s territory, and overlapping with it would mean two
 -- sweeps writing the same rows.
 --
@@ -53,7 +53,7 @@ AS $$
      -- ⚠ THE STALENESS CLOCK ONLY TICKS BECAUSE `verify` NOW STAMPS IT ON AN
      -- UNPROVEN OUTCOME TOO. Before that change every unproven exit returned
      -- without touching the row, so this column stayed NULL for exactly the
-     -- rows this function selects — and an oldest-first sweep would have taken
+     -- rows this function selects - and an oldest-first sweep would have taken
      -- the same head of the table on every single run while the rows behind it
      -- were never reached at all.
      AND (d.dns_checked_at IS NULL OR d.dns_checked_at < p_before)

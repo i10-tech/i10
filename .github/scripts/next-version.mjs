@@ -3,7 +3,7 @@
 // WHY THIS AND NOT release-please
 // -------------------------------
 // release-please's versioning LOGIC is what we want; its ceremony is not. It
-// maintains a long-lived "Release PR" that bumps a version file — valuable
+// maintains a long-lived "Release PR" that bumps a version file - valuable
 // when something consumes that file. Nothing here does: the git TAG is the
 // version. That removes a version file, a bump commit and an extra PR, which
 // is why this slots into workflows we already run instead of adding one.
@@ -19,7 +19,7 @@
 //
 // PRE-1.0 BUMP RULES
 // Semver calls 0.y.z initial development where anything may change, so a
-// breaking change must NOT force 1.0.0 — going 1.0 is a product decision, not
+// breaking change must NOT force 1.0.0 - going 1.0 is a product decision, not
 // something a commit message triggers.
 //   breaking (`!` or BREAKING CHANGE) → minor   0.2.1 → 0.3.0
 //   feat                              → minor   0.2.1 → 0.3.0
@@ -29,7 +29,7 @@
 // ⚠ A NON-CONVENTIONAL SUBJECT IS SKIPPED, NOT REJECTED. This script cannot
 // tell "no features this release" from "the feature commit was worded wrong",
 // so a whole release can bump patch when it should have bumped minor. That is
-// why commitlint runs in CI — the guard lives there, not here.
+// why commitlint runs in CI - the guard lives there, not here.
 //
 // Usage: bun .github/scripts/next-version.mjs [--prerelease rc] [--github-output]
 
@@ -44,7 +44,7 @@ const toOutput = args.includes("--github-output")
 const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim()
 
 // Latest STABLE tag: vX.Y.Z with no prerelease suffix. Prerelease tags are
-// excluded so a string of v0.3.0-rc.N candidates never becomes the baseline —
+// excluded so a string of v0.3.0-rc.N candidates never becomes the baseline -
 // the baseline is the last thing that actually shipped.
 function lastStableTag() {
   let tags = []
@@ -136,7 +136,7 @@ const bump =
         : "patch"
 
 console.error(
-  `base=${base ?? "(none — first release)"} conventional-commits=${counted} bump=${bump} → ${version}`,
+  `base=${base ?? "(none - first release)"} conventional-commits=${counted} bump=${bump} → ${version}`,
 )
 
 if (toOutput && process.env.GITHUB_OUTPUT) {

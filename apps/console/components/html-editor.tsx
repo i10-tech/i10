@@ -9,7 +9,7 @@ import { Textarea } from "@repo/ui/components/textarea"
  *
  * ⚠ IT IS A SOURCE EDITOR WITH A PREVIEW, NOT A WYSIWYG, AND THAT IS A DECISION
  * RATHER THAN A STAGING POST. A rich-text editor for email is not a text editor
- * with buttons — it is a table-layout generator that has to produce markup
+ * with buttons - it is a table-layout generator that has to produce markup
  * Outlook's Word rendering engine, Gmail's class stripper and Apple Mail all
  * agree on. Shipping a half-built one produces emails that look right here and
  * broken in the inbox, which is worse than no editor at all. The people using
@@ -19,7 +19,7 @@ import { Textarea } from "@repo/ui/components/textarea"
  * SAME REASON. It renders HTML that will be pasted in from anywhere;
  * `dangerouslySetInnerHTML` would execute its scripts in the console's origin
  * with the author's session. `sandbox=""` with no tokens gives it a unique
- * opaque origin — no scripts, no forms, no reach into `parent`.
+ * opaque origin - no scripts, no forms, no reach into `parent`.
  *
  * ⚠ AND THE PREVIEW IS DEBOUNCED. Re-creating the iframe document on every
  * keystroke makes typing visibly stutter on a long template, because each
@@ -80,7 +80,7 @@ export function HtmlEditor({
            * ⚠ NOT DECORATION. Several spam filters score a message with no
            * text/plain part higher, and a recipient on a text-only client sees
            * nothing at all. Left empty, the send path derives one from the HTML
-           * — which is better than nothing and worse than one somebody wrote.
+           * - which is better than nothing and worse than one somebody wrote.
            */}
           Left empty, we generate one from the HTML. A hand-written version reads better
           and scores better with spam filters.

@@ -89,7 +89,7 @@ describe("parseContactCsv", () => {
 
   /**
    * ⚠ POSTGRES REFUSES AN INSERT WHOSE OWN VALUES LIST HITS THE SAME UNIQUE KEY
-   * TWICE — "ON CONFLICT DO UPDATE command cannot affect row a second time". A
+   * TWICE - "ON CONFLICT DO UPDATE command cannot affect row a second time". A
    * file containing one address twice would therefore fail the WHOLE chunk of
    * five hundred rather than skip one, so the dedupe has to happen here.
    */
@@ -116,7 +116,7 @@ describe("parseContactCsv", () => {
 
   /**
    * ⚠ EVERY UNRECOGNISED COLUMN BECOMES A MERGE FIELD. That is what makes a
-   * templated broadcast work without anybody declaring a schema first — and it
+   * templated broadcast work without anybody declaring a schema first - and it
    * is why an import is worth doing at all rather than just pasting addresses.
    */
   it("turns unknown columns into merge fields", () => {
@@ -144,7 +144,7 @@ describe("parseContactCsv", () => {
    * EXPORT. `POST /contact-properties` has always refused anything the merge-tag
    * syntax cannot address; the import did not, so a spreadsheet with an
    * `Order Total` column produced a property that is stored, displayed, and
-   * unreferenceable from any template — a field that silently does nothing.
+   * unreferenceable from any template - a field that silently does nothing.
    */
   it("drops column headings that cannot be merge-tag names", () => {
     const { rows } = parseContactCsv(

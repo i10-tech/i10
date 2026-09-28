@@ -26,7 +26,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
      * start a second `billing()` inside the `Promise.all` so that the two could
      * run concurrently, which made the comment claiming they share a plan a
      * lie: two reads a few milliseconds apart can straddle a Polar webhook, and
-     * then the header renders one plan while the redirect decides on another —
+     * then the header renders one plan while the redirect decides on another -
      * a free tenant sent through onboarding with "Pro" in the corner. The
      * onboarding read is the only thing that has to wait, and it waits on a
      * query that was already in flight.
@@ -71,8 +71,8 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
      * DELIBERATELY WAS NOT HAD THE RIGHT REASON AND THE WRONG CONCLUSION. The
      * reason was real: keeping them in sync must not mean a write to somebody
      * else's API inside a database transaction, or a Clerk outage makes
-     * renaming a workspace impossible. The conclusion — leave them unconnected
-     * — produced the thing customers actually hit: an organization still called
+     * renaming a workspace impossible. The conclusion - leave them unconnected
+     * - produced the thing customers actually hit: an organization still called
      * "Mohamed" in the switcher months after the workspace became "i10 testing",
      * with no way to reconcile them and no explanation of why there are two.
      *
@@ -86,7 +86,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
      *
      * ⚠ AND IT DOES NOT LOOP. Clerk answers this with an `organization.updated`
      * webhook, which renames our row to the value it already holds and writes
-     * nothing back — see routes/webhooks.ts.
+     * nothing back - see routes/webhooks.ts.
      */
     if (d.organizations) {
       const profile = await d.profile.get(tenantId)
@@ -96,7 +96,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
         } catch (error) {
           d.log.warn(
             { err: String(error), tenantId, clerkOrgId: profile.clerk_org_id, name },
-            "renamed the workspace but could not rename its Clerk organization — " +
+            "renamed the workspace but could not rename its Clerk organization - " +
               "the switcher keeps the old name until somebody renames it again",
           )
         }
@@ -137,7 +137,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     /*
      * ⚠ THE PRODUCT COMES FROM OUR MAP, NEVER FROM THE REQUEST. A caller who
      * could name a Polar product id could name a free one, or a one-cent one,
-     * and buy the top plan with it — and the webhook would then grant it
+     * and buy the top plan with it - and the webhook would then grant it
      * perfectly correctly, because from Polar's side the payment really did
      * succeed. The same rule routes/billing.ts states at length.
      */
@@ -156,7 +156,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
        * ⚠ RECORDED BEFORE THE CUSTOMER IS SENT TO PAY, AND THIS ROW IS WHAT
        * ATTRIBUTES THE PAYMENT. Every subscription Polar creates carries
        * `checkout_id`, so this is how a webhook learns whose it is without
-       * asking Polar to remember a tenant for us — see billing/attribution.ts
+       * asking Polar to remember a tenant for us - see billing/attribution.ts
        * and migration 0055.
        *
        * ⚠ AND IT NEVER FAILS THE CHECKOUT. The customer has a working payment
@@ -175,9 +175,9 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       /*
        * ⚠ THE EMBED ORIGIN IS SENT, AND THE NOTE THAT USED TO SIT HERE SAYING
        * IT WAS UNNECESSARY WAS WRONG IN A WAY WORTH RECORDING. It reported a
-       * real measurement — the checkout page answers `frame-ancestors *` with
+       * real measurement - the checkout page answers `frame-ancestors *` with
        * or without the field, and renders fine under `?embed=true&
-       * embed_origin=…` because the SDK appends that query parameter itself —
+       * embed_origin=…` because the SDK appends that query parameter itself -
        * and then drew a conclusion the measurement did not support. Framing is
        * governed by the organisation's embedding host list; MESSAGING is
        * governed by `embed_origin` on the checkout object, and Polar's page
@@ -192,7 +192,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
        * ⚠ THE ID IS RETURNED SO THE CONSOLE CAN ASK US WHETHER THE MONEY
        * LANDED, RATHER THAN ONLY BELIEVING POLAR'S IFRAME. Their embedded
        * checkout is supposed to `postMessage` a `success` event to the parent
-       * when it completes; measured on 2026-09-18 it did not — the checkout
+       * when it completes; measured on 2026-09-18 it did not - the checkout
        * reached `succeeded` on Polar's side, their page's follow-up
        * `PATCH /v1/checkouts/client/…` answered 403, and no message was ever
        * posted. The customer sat in front of a modal saying "waiting for
@@ -235,7 +235,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
    *
    * ⚠ AND NO CARD NUMBER EVER TOUCHES US. The fields render inside Polar's own
    * iframe on Polar's origin, so the digits never enter this application's DOM
-   * or its logs — which is what keeps i10 in PCI SAQ A rather than in scope for
+   * or its logs - which is what keeps i10 in PCI SAQ A rather than in scope for
    * the questionnaire that asks how our servers handle cardholder data.
    */
   app.post("/billing/payment-method-session", async (c) => {
@@ -253,7 +253,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
        * again in a moment" is false advice for a condition that will never
        * clear on its own. Polar's organisation access tokens do not include
        * `customer_sessions:write` by default, so this is the FIRST thing that
-       * fails on a fresh deployment — and the generic message sent whoever hit
+       * fails on a fresh deployment - and the generic message sent whoever hit
        * it looking at the customer record instead of at the token.
        */
       const message = String(error)
@@ -262,7 +262,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
        * ⚠ NO POLAR CUSTOMER IS A 409, NOT A 502, BECAUSE NOTHING IS BROKEN.
        * Polar creates the customer at the first checkout, so a workspace that
        * has never subscribed genuinely has nothing to attach a card to. The
-       * console does not offer the button in that state — see the billing page —
+       * console does not offer the button in that state - see the billing page -
        * so reaching this means the two disagreed, and the status has to say
        * "not applicable" rather than "our fault".
        */
@@ -273,7 +273,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
             name: "no_billing_account" as const,
             message:
               "There is no payment account for this workspace yet. Start a plan " +
-              "first — the card is collected as part of that.",
+              "first - the card is collected as part of that.",
           },
           409,
         )
@@ -284,7 +284,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
        * again in a moment" is false advice for a condition that will never
        * clear on its own. Polar's organisation access tokens do not include
        * `customer_sessions:write` by default, so this is the FIRST thing that
-       * fails on a fresh deployment — and a generic message sends whoever hit
+       * fails on a fresh deployment - and a generic message sends whoever hit
        * it looking at the customer record instead of at the token.
        */
       if (message.includes("customer_sessions:write")) {
@@ -294,7 +294,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
             name: "internal_server_error" as const,
             message:
               "Card management is not configured on this deployment yet. This is " +
-              "on us, not on your account — please contact support.",
+              "on us, not on your account - please contact support.",
           },
           502,
         )
@@ -314,7 +314,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
   /**
    * ⚠ THIS IS WHY THE CUSTOMER NEVER SEES POLAR'S PORTAL. Their portal always
    * uses the organisation's default proration behaviour, and one default cannot
-   * be right for both directions — see billing/plan-change.ts.
+   * be right for both directions - see billing/plan-change.ts.
    */
   app.post("/billing/plan", async (c) => {
     if (!d.billing?.planChange) return c.json(notWired("Plan changes"), 501)
@@ -351,7 +351,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
    * Calling off a cancellation that has not taken effect yet.
    *
    * ⚠ ITS OWN ROUTE RATHER THAN A PLAN CHANGE TO THE PLAN THEY ARE ALREADY
-   * ON, which is what it would have to be otherwise — and which `to()`
+   * ON, which is what it would have to be otherwise - and which `to()`
    * correctly answers "unchanged" to. Nothing is bought here and no product
    * moves; the subscription stops being marked to end.
    *
@@ -427,19 +427,19 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
  * ⚠ SOMEBODY WHO BOUGHT A PLAN DURING ONBOARDING BELONGS BACK IN ONBOARDING.
  * `POLAR_SUCCESS_URL` names one page for every checkout in the product, so
  * everyone landed on the same confirmation regardless of what they were in the
- * middle of — and for a flow with steps after the payment, that is a dead end
+ * middle of - and for a flow with steps after the payment, that is a dead end
  * dressed as a success.
  *
  * ⚠ THE ORIGIN IS ALWAYS OURS, AND ONLY THE PATH IS THE CALLER'S. Polar will
  * redirect a browser to whatever `success_url` says, so accepting a whole URL
- * here would make this endpoint an open redirect that a payment page performs —
+ * here would make this endpoint an open redirect that a payment page performs -
  * and one that looks entirely legitimate, because the money really was taken.
  * The configured value supplies the origin; the request may only choose a path
  * beneath it.
  *
  * ⚠ AND `//` IS REFUSED ALONGSIDE AN ABSOLUTE URL, because it starts with a
  * slash and still resolves to another origin. Same rule, same reason, as
- * `safeReturnTo` in dns/oauth.ts — see the note there.
+ * `safeReturnTo` in dns/oauth.ts - see the note there.
  */
 function returnTo(
   configured: string | undefined,

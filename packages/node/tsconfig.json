@@ -6,7 +6,7 @@
     "moduleResolution": "Bundler",
     "module": "ESNext",
     // DOM, in a Node SDK, on purpose. The client uses global fetch and nothing
-    // else — that is what keeps it at zero runtime dependencies — so it needs
+    // else - that is what keeps it at zero runtime dependencies - so it needs
     // types for Response, Headers and AbortSignal. Taking them from `lib`
     // rather than @types/node keeps the emitted .d.ts free of Node-specific
     // references, which matters because this package is published and its

@@ -131,7 +131,7 @@ CREATE INDEX "tenants_owner_idx" ON "core"."tenants" USING btree ("owner_clerk_u
 -- ⚠ THE BOUNDS ARE WRITTEN WITH AN EXPLICIT +00 OFFSET. A bare date literal is
 -- cast to timestamptz using the SESSION's TimeZone, so the same migration run
 -- from two different clients would produce partitions with different boundaries
--- — and the rows that land either side of the seam are the ones you would never
+-- - and the rows that land either side of the seam are the ones you would never
 -- think to check.
 --
 -- The DEFAULT partition is a safety net for the day the maintenance job that
@@ -166,7 +166,7 @@ END $$;
 --
 -- ⚠ THE POLICIES READ `current_setting('app.tenant_id')` WITHOUT THE missing_ok
 -- FLAG, ON PURPOSE. Passing `true` would make an unset tenant context evaluate
--- to NULL, every policy fail closed, and every query return zero rows — which
+-- to NULL, every policy fail closed, and every query return zero rows - which
 -- is indistinguishable from an empty account and would be debugged as a data
 -- problem. Strict, it raises on the first query instead, naming the fault.
 --
@@ -176,11 +176,11 @@ END $$;
 -- inside an earlier transaction reverts to an EMPTY value on commit and raises
 -- `invalid input syntax for type uuid: ""` instead. Under PgBouncer the second
 -- is the one you will actually meet, and on its own it reads like a bad
--- parameter rather than a missing `withTenant()` — which is the only reason it
+-- parameter rather than a missing `withTenant()` - which is the only reason it
 -- is written down here.
 --
 -- ⚠ ENABLE, NOT FORCE. FORCE would apply the policies to the table owner too,
--- and the owner is what runs migrations and backfills — work that is legitimately
+-- and the owner is what runs migrations and backfills - work that is legitimately
 -- cross-tenant. The guarantee comes from the application never connecting as
 -- the owner, which `assertRlsSubject()` checks at boot rather than trusting.
 ALTER TABLE "core"."tenants" ENABLE ROW LEVEL SECURITY;
@@ -211,7 +211,7 @@ END $$;
 
 -- Least-privilege access for the application role.
 --
--- ⚠ THE ROLE IS CREATED BY CNPG, NOT HERE — `managed.roles` in
+-- ⚠ THE ROLE IS CREATED BY CNPG, NOT HERE - `managed.roles` in
 -- infra/k8s/i10/platform-db/cluster.yaml owns its existence and password, the
 -- same arrangement as `authd`. Running this before CNPG has reconciled it fails
 -- on the first GRANT, which is the correct order rather than a problem.
@@ -227,13 +227,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA core
 
 -- The sweeper is the other query that is legitimately cross-tenant: finding
 -- messages that no worker is going to pick up needs to look at every tenant's
--- rows before it knows whose they are. Same treatment as the key lookup — one
+-- rows before it knows whose they are. Same treatment as the key lookup - one
 -- narrow question, answered by the owner, returning only what the worker needs
 -- to re-enqueue.
 --
 -- Two populations, one purpose. `queued` rows older than the grace period are
 -- the dual-write gap: the row committed and the Redis enqueue never happened.
--- `sending` rows past the claim timeout are the ambiguous ones — SES was called
+-- `sending` rows past the claim timeout are the ambiguous ones - SES was called
 -- and the outcome was never recorded. Both are returned for re-enqueue, and
 -- what makes that safe for the second population is that the retry reuses the
 -- same Message-ID.

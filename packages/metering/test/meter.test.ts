@@ -262,7 +262,7 @@ describe("recording", () => {
 
   /**
    * ⚠ THE MAIL HAS ALREADY GONE. A plan that cannot be resolved must not be
-   * able to lose the record of what was sent — it is also how the reconciler
+   * able to lose the record of what was sent - it is also how the reconciler
    * finds a tenant whose plan was never assigned.
    */
   it("records usage for a tenant holding no plan", async () => {
@@ -311,8 +311,8 @@ describe("recording", () => {
 
 /**
  * ⚠ THE ANCHOR BELONGS TO THE TENANT, NOT TO THE PLAN. Anchoring to the plan
- * would hand every customer a free reset — exhaust the allowance, change plan,
- * start a new window — and would make two windows overlap at the moment of the
+ * would hand every customer a free reset - exhaust the allowance, change plan,
+ * start a new window - and would make two windows overlap at the moment of the
  * change, so the ledger's buckets stop partitioning time.
  */
 describe("a plan change mid-window", () => {
@@ -380,7 +380,7 @@ describe("windowOf", () => {
 })
 
 /**
- * The consumable half of the overage rule — the continuous half is in
+ * The consumable half of the overage rule - the continuous half is in
  * continuous.test.ts. Both must agree, because the resolution happens once in
  * `createMeter` for either kind.
  */

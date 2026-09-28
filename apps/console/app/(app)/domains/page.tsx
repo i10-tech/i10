@@ -41,8 +41,8 @@ export const metadata: Metadata = { title: "Domains" }
  *
  * ⚠ THE COLUMNS ARE CENTRED, WHICH IS NOT THIS CONSOLE'S DEFAULT and is a
  * deliberate choice for this table rather than a new house rule. Every column
- * here except the name is a short fixed-width token — a status, a badge, a
- * region, a relative date — and left-aligning those inside 9rem columns left
+ * here except the name is a short fixed-width token - a status, a badge, a
+ * region, a relative date - and left-aligning those inside 9rem columns left
  * each value stranded at the far edge of a gap, with its heading no nearer.
  * Lists with long or varied values (the logs, the emails) keep their left
  * edge, where a ragged one would be unreadable.
@@ -50,7 +50,7 @@ export const metadata: Metadata = { title: "Domains" }
 export default async function DomainsPage() {
   /*
    * ⚠ THE KEYS ARE FETCHED FOR THE DELETE DIALOG, AND A FAILURE HERE HIDES THE
-   * QUESTION RATHER THAN THE PAGE — the same rule the domain page follows. The
+   * QUESTION RATHER THAN THE PAGE - the same rule the domain page follows. The
    * domain still deletes; what is lost is the offer to tidy up the keys that
    * only worked for it.
    */
@@ -90,8 +90,8 @@ export default async function DomainsPage() {
        * stacks a `PageHeaderRow` above the description, so an action inside
        * that row lines up with the TITLE and sits visibly high against a
        * two-line description beneath it. Laying the header out as one row puts
-       * the button on the centre line of the whole block — title and
-       * description together — which is where the eye expects it.
+       * the button on the centre line of the whole block - title and
+       * description together - which is where the eye expects it.
        *
        * ⚠ AND IT IS DONE AT THE CALL SITE RATHER THAN IN `PageHeader`. Every
        * other screen in the console stacks, and changing the primitive would
@@ -110,7 +110,7 @@ export default async function DomainsPage() {
         {/*
          * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
          * CARRIES THIS ACTION. Two buttons for one action, eight inches apart,
-         * reads as two different things — and the one in the header is the
+         * reads as two different things - and the one in the header is the
          * smaller and less explained of the two, so it wins attention it has
          * not earned. The empty state's version says what will happen; this
          * one just says a noun.
@@ -138,7 +138,7 @@ export default async function DomainsPage() {
         ) : !hasRows ? (
           <EmptyState
             title="No domains yet"
-            description="Add the domain you send from. We will detect who hosts its DNS and tell you exactly what to publish — or do it for you."
+            description="Add the domain you send from. We will detect who hosts its DNS and tell you exactly what to publish - or do it for you."
             action={{ label: "Add your first domain", href: "/domains/new" }}
           />
         ) : (
@@ -157,7 +157,7 @@ export default async function DomainsPage() {
                    * than a left edge stranded in a 9rem gap.
                    *
                    * ⚠ AND THE HEADING CARRIES THE SAME PADDING AS ITS CELLS or
-                   * the two stop lining up — the one thing alignment cannot
+                   * the two stop lining up - the one thing alignment cannot
                    * hide.
                    */}
                   <TableHead className="pl-4">Domain</TableHead>

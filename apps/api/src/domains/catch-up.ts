@@ -10,26 +10,26 @@ import type { DomainStore } from "./store.js"
  * `domains_due_recheck` only reads domains that are ALREADY verified, because
  * its job is re-proving ownership. So between "we registered the identity" and
  * "somebody happens to press Verify at the right moment", the only thing
- * watching was the console's own poll — about a minute, on one open tab.
+ * watching was the console's own poll - about a minute, on one open tab.
  *
  * ⚠ THE CONSEQUENCE WAS A CUSTOMER SENDING REAL MAIL FROM A DOMAIN OUR
  * DASHBOARD CALLED PENDING. SES had verified it, so SES accepted the send and
  * delivered it; our row still said `pending` and would have said so for ever.
- * The mail working is not the problem — being unable to say so is, and it gets
+ * The mail working is not the problem - being unable to say so is, and it gets
  * considerably worse the moment anything starts REFUSING sends on the strength
  * of that column. See the send gate in `send/accept.ts`: gating on
  * `verified_at` is only honest if something keeps `verified_at` current. This
  * is that something.
  *
  * ⚠ IT IS `DomainStore.refresh` IN A LOOP, NOT A SECOND WRITER. The rules for
- * what a status write may do — never move `verified_at` backwards, never
- * contest a name a poll happened to collide with — are subtle, already written
+ * what a status write may do - never move `verified_at` backwards, never
+ * contest a name a poll happened to collide with - are subtle, already written
  * down once, and were got wrong once. A sweep with its own copy would be the
  * second place to get them wrong.
  *
  * ⚠ AND THE SELECTOR IS A DEFINER FUNCTION BECAUSE THE QUESTION SPANS TENANTS.
  * Every write underneath still goes through `withTenant`, so the row-level
- * policies apply exactly as they do on a request — only the "which rows are
+ * policies apply exactly as they do on a request - only the "which rows are
  * waiting" read is privileged.
  */
 
@@ -43,7 +43,7 @@ export interface CatchUpDeps {
    * How stale a domain's last check must be before it is asked again.
    *
    * ⚠ IT IS NOT THE CRON'S INTERVAL, AND THIS IS THE KNOB THAT ACTUALLY LIMITS
-   * SES — WHICH IS WHY THE SCHEDULE COULD BE TIGHTENED WITHOUT COSTING
+   * SES - WHICH IS WHY THE SCHEDULE COULD BE TIGHTENED WITHOUT COSTING
    * ANYTHING. The job runs every minute; this decides which rows a run is
    * allowed to touch. A domain is therefore asked about at most once per
    * `staleMs` no matter how often the job fires, so moving the schedule from
@@ -123,7 +123,7 @@ export async function catchUpWithProvider({
       /*
        * ⚠ ONE DOMAIN MUST NOT ABANDON THE REST. A throttled SES call, a
        * credential that lost a permission, a row deleted between the read and
-       * the write — none of them says anything about the other ninety-nine
+       * the write - none of them says anything about the other ninety-nine
        * domains in this batch, and stopping at the first would
        * leave every later one stale until somebody noticed by hand.
        */

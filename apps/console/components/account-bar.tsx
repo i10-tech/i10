@@ -22,14 +22,14 @@ import { useMounted } from "@/lib/react"
  *
  * ⚠ IT USED TO SIT IN THE TOP ROW BESIDE THE ORGANIZATION SWITCHER, AND THE TWO
  * ANSWER DIFFERENT QUESTIONS. The top of the rail says which workspace's data is
- * on screen — switching it changes every number on every page. The bottom says
+ * on screen - switching it changes every number on every page. The bottom says
  * which person is signed in, which changes nothing about the data. Sharing a row
  * gave a monthly control the same prominence as the one that reframes the whole
  * console, and squeezed both into half the width.
  *
  * ⚠ AND IT IS OUR MENU RATHER THAN CLERK'S `<UserButton />`, WHICH IS A CHANGE
  * WORTH JUSTIFYING BECAUSE EVERY OTHER IDENTITY SURFACE HERE IS THEIRS. Clerk's
- * menu offers exactly three things — manage account, switch account, sign out —
+ * menu offers exactly three things - manage account, switch account, sign out -
  * and none of the four that people actually reach for in this product: the
  * appearance toggle, the set-up flow, the marketing site, and a profile link
  * that stays inside the console. Those were reachable only from a settings page
@@ -43,7 +43,7 @@ export function AccountBar() {
   /*
    * ⚠ A SKELETON RATHER THAN NOTHING, BECAUSE THIS IS PINNED TO THE BOTTOM OF A
    * FIXED RAIL. Rendering nothing until Clerk loads lets the usage meter above
-   * it drop by thirty-six pixels and jump back — movement that is only
+   * it drop by thirty-six pixels and jump back - movement that is only
    * noticeable because it happens on every navigation.
    */
   if (!isLoaded) return <Skeleton className="h-9 w-full rounded-md" />
@@ -80,7 +80,7 @@ export function AccountBar() {
 
       {/*
        * ⚠ IT OPENS UPWARDS AND MATCHES THE TRIGGER'S WIDTH. The trigger is the
-       * last row of a full-height rail, so there is nothing below it — a menu
+       * last row of a full-height rail, so there is nothing below it - a menu
        * anchored downwards would be clipped by the viewport and Radix would flip
        * it anyway, one frame later and visibly.
        */}
@@ -115,7 +115,7 @@ export function AccountBar() {
         {/*
          * ⚠ THE SET-UP FLOW IS REACHABLE FOR EVER, ON PURPOSE. It re-runs after
          * an upgrade off the free plan, and somebody adding their second domain
-         * a year later wants exactly that screen — see the note at the top of
+         * a year later wants exactly that screen - see the note at the top of
          * app/onboarding/page.tsx. It was reachable only by typing the URL.
          */}
         <DropdownMenuItem asChild>
@@ -153,20 +153,20 @@ export function AccountBar() {
  * three targets in a 200px row and the third is the one nobody picks
  * deliberately; the full picker, including System, is still on the appearance
  * page. What this row shows while the preference is `system` is the theme that
- * preference RESOLVED to — see `resolvedTheme` below — so the control always has
+ * preference RESOLVED to - see `resolvedTheme` below - so the control always has
  * exactly one side lit, and it is the side matching what is on screen.
  */
 function AppearanceRow() {
   /*
    * ⚠ `resolvedTheme`, NOT `theme`, AND THE DIFFERENCE WAS A ROW WITH NOTHING
-   * LIT UP. `theme` is the stored PREFERENCE, and its default is `"system"` —
+   * LIT UP. `theme` is the stored PREFERENCE, and its default is `"system"` -
    * which is neither of the two values offered here, so a fresh account opened
    * this menu and saw a segmented control with no segment selected. Not wrong
    * exactly, but unreadable: there is no way to tell "no preference" from "this
    * control is broken".
    *
    * `resolvedTheme` is what `system` actually resolved to against
-   * `prefers-color-scheme` — always `"light"` or `"dark"` — so the highlight now
+   * `prefers-color-scheme` - always `"light"` or `"dark"` - so the highlight now
    * answers the question the person is really asking, which is "what am I
    * looking at". Somebody on a dark laptop sees Dark lit.
    *

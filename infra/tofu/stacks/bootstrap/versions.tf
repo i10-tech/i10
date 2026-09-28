@@ -1,5 +1,5 @@
 terraform {
-  # 1.10 is the floor for `use_lockfile` on the s3 backend — native state
+  # 1.10 is the floor for `use_lockfile` on the s3 backend - native state
   # locking through conditional writes, which is what lets R2 hold state with
   # no DynamoDB anywhere in the picture.
   required_version = ">= 1.10.0"

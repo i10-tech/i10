@@ -13,8 +13,8 @@ import { Toaster as Sonner, type ToasterProps } from "sonner"
 /**
  * ⚠ THE TONE IS CARRIED BY THE BORDER AND THE ICON, NOT BY THE BACKGROUND, AND
  * THE RESTRAINT IS THE POINT. A solid green toast and a solid red one are the
- * house style of products that shout; this console is monochrome by decision —
- * see the state-colour note in styles/tokens.css — and its five colours are
+ * house style of products that shout; this console is monochrome by decision -
+ * see the state-colour note in styles/tokens.css - and its five colours are
  * spent on meaning rather than emphasis. A tinted surface at 7%, a border at
  * 45% and a full-strength icon give a toast an unmistakable colour at a glance
  * while leaving the text on the popover's own foreground, which is the only
@@ -30,7 +30,7 @@ import { Toaster as Sonner, type ToasterProps } from "sonner"
  * scanning source text for literal strings; a `tone(token)` that returned
  * `` `text-${token}` `` is unreadable to that scanner, so the utility is never
  * generated and the toast renders with no tint, no coloured border and no
- * coloured icon — with nothing in any build log to say so. The repetition is
+ * coloured icon - with nothing in any build log to say so. The repetition is
  * the price of the classes existing at all.
  */
 const TONES = {
@@ -81,7 +81,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
            * ⚠ THE DESCRIPTION IS FORCED TO THE MUTED FOREGROUND. Sonner's own
            * default inherits the toast's text colour, so on a tinted surface
            * the second line renders at full strength and competes with the
-           * title — the opposite of the hierarchy a two-line toast exists for.
+           * title - the opposite of the hierarchy a two-line toast exists for.
            */
           description: "text-muted-foreground",
           success: TONES.success,

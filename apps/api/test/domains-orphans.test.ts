@@ -10,8 +10,8 @@ import { sweepOrphans } from "../src/domains/orphans.js"
  * ⚠ THIS IS THE MOST DANGEROUS CODE IN THE FEATURE AND THE TESTS ARE WEIGHTED
  * ACCORDINGLY. Most of what follows asserts that something is NOT deleted.
  * Removing a live sending identity stops a customer's mail with no warning and
- * no undo, so every removal has to clear two independent tests — our database
- * does not know the name, AND the identity carries our own BYODKIM selector —
+ * no undo, so every removal has to clear two independent tests - our database
+ * does not know the name, AND the identity carries our own BYODKIM selector -
  * and anything that cannot be proved twice must be left alone and reported.
  */
 
@@ -20,7 +20,7 @@ const queryText = (q: unknown) => dialect.sqlToQuery(q as SQL).sql
 
 /** Our own selector shape: `i10` plus twelve hex. See `generateSelector`. */
 const OURS = { origin: "EXTERNAL", tokens: ["i103c3c2cbc1a75"] }
-/** What Easy DKIM looks like — made by hand in the AWS console. */
+/** What Easy DKIM looks like - made by hand in the AWS console. */
 const THEIRS = { origin: "AWS_SES", tokens: ["abc123", "def456", "ghi789"] }
 
 function fakeDb(handlers: { known?: string[]; zones?: unknown[] }) {
@@ -79,8 +79,8 @@ describe("sweeping orphans", () => {
 
   /**
    * ⚠ THE FIRST TEST ON ITS OWN WOULD DELETE EVERY CUSTOMER'S IDENTITY. A domain
-   * that still has a row is in use by definition — that row is what the send
-   * path reads — so it is never a candidate, whatever its status.
+   * that still has a row is in use by definition - that row is what the send
+   * path reads - so it is never a candidate, whatever its status.
    */
   it("never touches an identity whose domain row still exists", async () => {
     const id = identity({
@@ -147,7 +147,7 @@ describe("sweeping orphans", () => {
 
   /**
    * ⚠ OUR OWN SENDING DOMAINS, WHICH CARRY EVERY PASSWORD RESET AND RECEIPT THIS
-   * PRODUCT SENDS. They have rows, so they would survive the first test anyway —
+   * PRODUCT SENDS. They have rows, so they would survive the first test anyway -
    * and the guard is here because the cost of being wrong about them is our own
    * mail stopping.
    */

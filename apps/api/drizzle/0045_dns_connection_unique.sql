@@ -17,8 +17,8 @@
 -- the one that found this.
 --
 -- ⚠ AND UNIQUENESS IS THE INTENT, NOT A WORKAROUND FOR THE UPSERT.
--- Re-authorising REPLACES a connection — two live tokens for one account is two
--- things to revoke and only one anybody remembers — and `get()` reads a single
+-- Re-authorising REPLACES a connection - two live tokens for one account is two
+-- things to revoke and only one anybody remembers - and `get()` reads a single
 -- row per provider. See apps/api/src/dns/connections.ts.
 --
 -- The name is kept so the lookup it already serves, (tenant_id, provider), is

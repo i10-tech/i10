@@ -8,13 +8,13 @@ import { Button } from "@repo/ui/components/button"
  * When a page throws.
  *
  * ⚠ THE MESSAGE IS SHOWN, BUT IN PRODUCTION NEXT REPLACES IT WITH A GENERIC
- * STRING AND A DIGEST — deliberately, so a server stack trace never reaches a
+ * STRING AND A DIGEST - deliberately, so a server stack trace never reaches a
  * browser. The digest is what correlates this screen with the entry in our
  * logs, which is why it is rendered rather than hidden: "it broke" plus an
  * eight-character code is a support conversation that takes one message.
  *
  * ⚠ AND `reset()` RE-RENDERS THE SEGMENT RATHER THAN RELOADING THE PAGE. A
- * transient failure — a database blip, a Clerk timeout — recovers without
+ * transient failure - a database blip, a Clerk timeout - recovers without
  * losing the rest of the console.
  */
 export default function ErrorBoundary({

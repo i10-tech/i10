@@ -26,8 +26,8 @@ export const metadata: Metadata = { title: "Overview" }
  *
  * ⚠ IT ANSWERS "IS MY MAIL GOING OUT", AND NOTHING ELSE. Every panel here is
  * either a number that would make somebody act or a shortcut to the page where
- * they would act. Resource counts that change monthly — how many domains, how
- * many keys — are a row of small links at the bottom rather than the headline,
+ * they would act. Resource counts that change monthly - how many domains, how
+ * many keys - are a row of small links at the bottom rather than the headline,
  * because a dashboard whose largest number is "3 domains" has buried the only
  * number that matters today.
  *
@@ -44,7 +44,7 @@ export default async function OverviewPage({
   const params = await searchParams
   // ⚠ CLAMPED HERE AS WELL AS ON THE API. The API clamps because it must; this
   // clamps so the picker never renders a selected state for a value it does not
-  // offer — `?days=7000` would otherwise show no option as active.
+  // offer - `?days=7000` would otherwise show no option as active.
   const days = [7, 14, 30, 90].includes(Number(params.days)) ? Number(params.days) : 30
 
   const [overview, recent] = await Promise.all([
@@ -88,7 +88,7 @@ export default async function OverviewPage({
                   /*
                    * ⚠ 4% IS SES'S THRESHOLD, NOT A NUMBER PICKED FOR THE
                    * COLOUR. Above it, Amazon puts the account under review and
-                   * eventually pauses sending — so this is the point at which
+                   * eventually pauses sending - so this is the point at which
                    * somebody has to act, which is exactly what a warning
                    * colour should mean. Below it, the number is neutral
                    * however large it looks.
@@ -171,7 +171,7 @@ export default async function OverviewPage({
                       {/*
                        * ⚠ THE LABEL IS VISUALLY HIDDEN HERE AND ONLY HERE, AND
                        * IT IS STILL IN THE DOM. This is a narrow panel beside a
-                       * chart, so the word does not fit — but `Status` renders
+                       * chart, so the word does not fit - but `Status` renders
                        * the state as a coloured dot, and a dot with no text is
                        * invisible to a screen reader AND to the roughly one man
                        * in twelve who cannot separate the green from the red.
@@ -190,7 +190,7 @@ export default async function OverviewPage({
                         )}
                       </span>
                       <span className="hidden min-w-0 shrink-0 truncate font-mono text-xs text-muted-foreground sm:block sm:max-w-[14rem]">
-                        {email.to[0] ? bareAddress(email.to[0]) : "—"}
+                        {email.to[0] ? bareAddress(email.to[0]) : "-"}
                       </span>
                       <span className="shrink-0 text-xs text-muted-foreground">
                         {formatRelative(email.created_at)}
@@ -233,7 +233,7 @@ export default async function OverviewPage({
             <div className="rounded-lg border p-4">
               <h2 className="text-sm font-medium">Set-up</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Add a domain, publish its records and send a test — the same flow you
+                Add a domain, publish its records and send a test - the same flow you
                 saw on your first visit, available whenever you need it.
               </p>
               <Button variant="outline" size="sm" className="mt-3" asChild>

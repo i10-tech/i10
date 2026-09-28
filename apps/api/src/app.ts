@@ -33,14 +33,14 @@ import type { MailboxProvisioning } from "./mailboxes/provision.js"
 
 /**
  * Read from package.json rather than `npm_package_version`, which is only set
- * when a script runs through the package manager — the container runs
+ * when a script runs through the package manager - the container runs
  * `bun dist/index.js` directly and would publish a spec claiming version 0.0.0.
  *
  * ⚠ A STATIC IMPORT, NOT `createRequire(import.meta.url)("../package.json")`,
  * BECAUSE THE BUILD NOW BUNDLES. That call resolved relative to the emitted
  * file, which worked while `tsc` mirrored src/ into dist/ one file at a time.
  * `bun build` collapses the tree into dist/index.js, so `../package.json`
- * became /app/package.json — a file the runtime image does not have — and the
+ * became /app/package.json - a file the runtime image does not have - and the
  * process died at import time with ERR_MODULE_NOT_FOUND. A static import is
  * resolved by the bundler and inlined, so there is nothing left to look up.
  */
@@ -64,7 +64,7 @@ export interface AppDeps {
   sendPath?: AcceptOps & { metering: Metering; log: AcceptLogger }
   /**
    * Reads a message back for `GET /emails/{id}`. Omitted in tests and in the
-   * OpenAPI generator, where the route answers 501 rather than 404 — a 404
+   * OpenAPI generator, where the route answers 501 rather than 404 - a 404
    * would say the message does not exist, which is a different and wrong claim.
    */
   emailLookup?: EmailLookup
@@ -73,7 +73,7 @@ export interface AppDeps {
   /**
    * Minting, listing, revoking and rotating a tenant's own API keys.
    *
-   * ⚠ THESE ROUTES CANNOT MINT A TENANT'S FIRST KEY — they authenticate with
+   * ⚠ THESE ROUTES CANNOT MINT A TENANT'S FIRST KEY - they authenticate with
    * one. See routes/api-keys.ts. Omitted in tests and in the OpenAPI generator,
    * where they answer 501.
    */
@@ -121,7 +121,7 @@ export interface AppDeps {
    *
    * ⚠ THE ONLY WIRING IN THE APPLICATION THAT CAN GRANT A PAID PLAN. Everything
    * it needs to do that is behind billing/grants.ts, which takes the two
-   * operations rather than a whole client — so no other route can reach `grantPlan`
+   * operations rather than a whole client - so no other route can reach `grantPlan`
    * by way of something it happens to have been passed.
    */
   polarWebhooks?: PolarWebhookDeps
@@ -136,7 +136,7 @@ export interface AppDeps {
    * The dashboard's own surface, at `/console`.
    *
    * ⚠ SESSION AUTHENTICATED AND DELIBERATELY OUTSIDE THE OPENAPI DOCUMENT. It is
-   * the console's private contract, not the product's API — publishing it would
+   * the console's private contract, not the product's API - publishing it would
    * put "list my invoices" in every generated SDK, and then it would have to be
    * supported there. Same rule `/billing` and `/webhooks` already follow.
    *
@@ -179,7 +179,7 @@ export interface AppDeps {
    *
    * ⚠ `reportError` WAS THE ONLY RECORD OF A FAILED REQUEST, AND IT IS THE ONE
    * THAT CAN BE TURNED OFF BY SOMEBODY ELSE. The handler below has said for a
-   * long time that "what went wrong is in the log and in Sentry" — and half of
+   * long time that "what went wrong is in the log and in Sentry" - and half of
    * that was not true: nothing ever wrote a line. When Sentry stopped
    * accepting events, every 500 in production became invisible. A customer
    * reported "Could not check the records" on a domain whose DNS was perfect,
@@ -249,16 +249,16 @@ export function createApp(deps: AppDeps = {}) {
    *
    * ⚠ IT IS A MIDDLEWARE RATHER THAN A CALL IN EACH ROUTE, BECAUSE THE VALUE OF
    * THIS LOG IS THAT IT IS COMPLETE. Somebody opens it to answer "did my server
-   * actually call you, and what did you say" — and a log that covers the routes
+   * actually call you, and what did you say" - and a log that covers the routes
    * whoever added it remembered answers that question wrongly in exactly the
    * case it is opened for. A wildcard covers the route somebody adds tomorrow.
    *
    * ⚠ ONLY API-KEY REQUESTS ARE RECORDED, WHICH THE `apiKeyId` GUARD ENFORCES
    * FOR FREE. `requireTenant` deliberately sets an EMPTY key id for a console
    * session (see middleware/tenant.ts), so a person clicking around the
-   * dashboard does not fill their own request log with their own page loads —
+   * dashboard does not fill their own request log with their own page loads -
    * which would bury the one integration call they came here to find. Anything
-   * unauthenticated — health probes, inbound webhooks — has no `auth` at all.
+   * unauthenticated - health probes, inbound webhooks - has no `auth` at all.
    *
    * ⚠ AND IT IS FIRE-AND-FORGET, DELIBERATELY. The insert happens after the
    * response is built, off the request's critical path; awaiting it would let a
@@ -283,7 +283,7 @@ export function createApp(deps: AppDeps = {}) {
         await requestLog.recordRequest({
           tenantId: auth.tenantId,
           apiKeyId: auth.apiKeyId,
-          // ⚠ THE ROUTE PATTERN, NOT THE URL — the invariant `core.api_requests`
+          // ⚠ THE ROUTE PATTERN, NOT THE URL - the invariant `core.api_requests`
           // states. `/emails/{id}` groups a tenant's calls into rows that can be
           // counted; the concrete path would make every message id its own.
           method: c.req.method,
@@ -304,13 +304,13 @@ export function createApp(deps: AppDeps = {}) {
 
   // Liveness vs readiness are deliberately different endpoints.
   //
-  // /healthz says the process is up. /readyz says it can serve — which means
+  // /healthz says the process is up. /readyz says it can serve - which means
   // its dependencies answer. Wiring a readiness probe to a liveness endpoint
   // is how a pod with a dead database keeps receiving traffic.
   app.get("/healthz", (c) => c.json({ ok: true }))
 
   app.get("/readyz", async (c) => {
-    // A readiness check that can hang is worse than none — it turns a slow
+    // A readiness check that can hang is worse than none - it turns a slow
     // dependency into a rollout that never completes. Hence the timeout.
     const checks: Record<string, boolean> = {}
 
@@ -376,7 +376,7 @@ export function createApp(deps: AppDeps = {}) {
   // middleware/session.ts.
   app.route("/mailboxes", mailboxes)
 
-  // ⚠ API-key authenticated, like everything above it — which is exactly why it
+  // ⚠ API-key authenticated, like everything above it - which is exactly why it
   // cannot issue a tenant's first key. See routes/api-keys.ts.
   app.route("/api-keys", createApiKeyRoutes(deps.apiKeys))
 
@@ -391,24 +391,24 @@ export function createApp(deps: AppDeps = {}) {
 
   // SES delivery events, over SNS. Same router prefix, same exclusion from the
   // document, and the same rule: nothing reaches the database before the
-  // signature verifies — here it protects a tenant's suppression list.
+  // signature verifies - here it protects a tenant's suppression list.
   app.route("/webhooks", createSesWebhooks(deps.sesWebhooks))
 
   // ⚠ THE SAME EVENTS FOR THE OTHER ROUTE, AND WITHOUT IT A DIRECT-ROUTED
   // MESSAGE STOPS AT `sent`. `core.message_events` was written only by the SES
   // ingest, so a customer watching webhooks saw SES mail progress and their own
-  // MTA's mail go silent — the one difference the per-domain route lever is
+  // MTA's mail go silent - the one difference the per-domain route lever is
   // supposed to keep invisible. Both interpreters write through `ingestEvent`,
   // so what a customer receives does not say which MTA carried the message.
   app.route("/webhooks", createStalwartWebhooks(deps.stalwartWebhooks))
 
   // Polar subscription events, same prefix and the same rule. This is the one
   // that moves money into entitlement, so the signature check is the whole of
-  // the authorisation — see routes/polar-events.ts.
+  // the authorisation - see routes/polar-events.ts.
   app.route("/webhooks", createPolarWebhooks(deps.polarWebhooks))
 
   // The dashboard. Mounted unconditionally so an unconfigured deployment
-  // answers 501 with a reason rather than 404 — which would read as the console
+  // answers 501 with a reason rather than 404 - which would read as the console
   // being pointed at the wrong origin.
   app.route("/console", createConsole(deps.console))
 
@@ -422,7 +422,7 @@ export function createApp(deps: AppDeps = {}) {
   // MAY CALL UNAUTHENTICATED. `/billing` guards `*` with requireApiKey, which
   // is fail-closed and worth keeping; an exception carved into that wildcard
   // would be one refactor away from unguarding its neighbours. It grants
-  // nothing — it reads back a row only the Polar webhook can move.
+  // nothing - it reads back a row only the Polar webhook can move.
   app.route("/checkout-status", createCheckoutStatus(deps.checkoutStatus))
 
   // Mounted for the same reason and with the same exclusion from the document.
@@ -443,7 +443,7 @@ export function createApp(deps: AppDeps = {}) {
 
   // ⚠ REGISTERED EVEN THOUGH NO CUSTOMER CODES AGAINST IT. `/mailboxes` names
   // this scheme, and a document that REFERENCES a security scheme it never
-  // DEFINES is invalid OpenAPI — the drift check would still pass, because the
+  // DEFINES is invalid OpenAPI - the drift check would still pass, because the
   // generated file matches the code that generated it, while Scalar renders a
   // dangling reference and a generator can emit a client with no way to
   // authenticate. Every name used in a `security:` block has to exist here.
@@ -451,8 +451,8 @@ export function createApp(deps: AppDeps = {}) {
   // ⚠ AND IT IS A COOKIE, NOT A BEARER TOKEN, WHICH IS THE POINT OF IT BEING A
   // SECOND SCHEME RATHER THAN A SECOND USE OF THE FIRST. Mailbox routes take
   // the session a browser already holds from auth.i10.tech; they deliberately
-  // do NOT accept an API key, so that a leaked sending key — whose whole
-  // advertised blast radius is "can send mail" — cannot also create mailboxes
+  // do NOT accept an API key, so that a leaked sending key - whose whole
+  // advertised blast radius is "can send mail" - cannot also create mailboxes
   // on the customer's domain.
   app.openAPIRegistry.registerComponent("securitySchemes", "sessionAuth", {
     type: "apiKey",
@@ -496,7 +496,7 @@ export function createApp(deps: AppDeps = {}) {
     /*
      * ⚠ A MALFORMED ID IS A 422, NOT A 500, AND IT IS NOT REPORTED. Ids on the
      * console surface are uuids, and `where id = 'banana'` does not return zero
-     * rows — Postgres raises `22P02 invalid_text_representation` before the
+     * rows - Postgres raises `22P02 invalid_text_representation` before the
      * planner looks at a tuple. Left alone, a typo in the address bar, a stale
      * bookmark or a crawler following a truncated link spends the error budget
      * and opens a Sentry issue for a request that was simply wrong.
@@ -505,12 +505,12 @@ export function createApp(deps: AppDeps = {}) {
      * BECAUSE HONO'S `compose` CATCHES AT EVERY LEVEL. A `try { await next() }`
      * wrapper never sees a handler's throw: the inner dispatch has its own
      * try/catch and routes the error straight to this function. A sub-app's own
-     * `onError` is no better — `app.route()` discards it. This handler is the
+     * `onError` is no better - `app.route()` discards it. This handler is the
      * one place that genuinely runs.
      *
      * ⚠ THE CONDITION IS ONE SQLSTATE, WHICH IS WHAT MAKES IT SAFE. A deadlock,
      * a constraint violation and a dead connection all still fall through to
-     * the 500 below and to the reporter — answering "your request was
+     * the 500 below and to the reporter - answering "your request was
      * malformed" while the database is on fire would tell a customer their
      * input is wrong and hide the outage from us.
      */

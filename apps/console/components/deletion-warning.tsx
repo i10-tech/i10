@@ -9,16 +9,16 @@ import type { BillingState } from "@/lib/types"
  * ⚠ IT SITS BESIDE CLERK'S PANEL BECAUSE IT CANNOT SIT INSIDE IT. "Delete
  * account" and "Delete organization" are rendered by `<UserProfile />` and
  * `<OrganizationProfile />`, whose confirmation dialogs are Clerk's own and
- * take no copy from us. Their wording is about identity — the account, the
- * members, the sessions — and says nothing about money, because Clerk has no
+ * take no copy from us. Their wording is about identity - the account, the
+ * members, the sessions - and says nothing about money, because Clerk has no
  * idea there is any. The consequence that actually costs something therefore
  * has to be stated next to the panel, where somebody reads it on the way in.
  *
  * ⚠ AND IT IS A PROMISE THE SYSTEM NOW KEEPS. Deleting used to leave the
  * subscription running: the tenant stayed `active`, the plan assignment stayed
  * on Pro, and Polar went on charging the card every month for a workspace
- * nobody could sign in to. `organization.deleted` now revokes it immediately —
- * see apps/api/src/tenants/lifecycle.ts — so this says "immediately" because
+ * nobody could sign in to. `organization.deleted` now revokes it immediately -
+ * see apps/api/src/tenants/lifecycle.ts - so this says "immediately" because
  * that is what happens, not as a deterrent.
  *
  * ⚠ THE DATE IS NAMED WHEN THERE IS ONE, because "you lose the rest of the
@@ -50,7 +50,7 @@ export function DeletionWarning({
         {paid ? (
           <p>
             Your {billing?.plan?.name ?? "paid"} subscription is cancelled the moment
-            this workspace is deleted — not at the end of the period.{" "}
+            this workspace is deleted - not at the end of the period.{" "}
             {endsAt
               ? `You lose the time you have already paid for, through to ${formatExact(endsAt)}, and it is not refunded.`
               : "You lose the remainder of the period you have already paid for, and it is not refunded."}{" "}
@@ -58,7 +58,7 @@ export function DeletionWarning({
           </p>
         ) : (
           <p>
-            There is no subscription to cancel — you are on the included allowance.
+            There is no subscription to cancel - you are on the included allowance.
             Deleting still removes the workspace, its domains and its mailboxes for
             good.
           </p>
@@ -73,7 +73,7 @@ export function DeletionWarning({
         {paid && (
           <p>
             To stop being charged without losing any of this, cancel the subscription on
-            the billing page instead — it runs to{" "}
+            the billing page instead - it runs to{" "}
             {endsAt ? formatExact(endsAt) : "the end of the period"} and then drops to
             the free allowance.
           </p>

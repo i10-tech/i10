@@ -4,7 +4,7 @@ import { createApp } from "../src/app.js"
 import { decide, type PolarEvent } from "../src/billing/events.js"
 
 // Fixed so the file does not start failing on the day `current_period_end`
-// below goes past — entitlement genuinely depends on the clock now.
+// below goes past - entitlement genuinely depends on the clock now.
 const NOW = new Date("2026-09-03T12:00:00Z")
 
 const options = {
@@ -253,7 +253,7 @@ describe("a change Polar has accepted but not yet applied", () => {
 
 /*
  * ⚠ NOTHING OF OURS HOLDS IT AND NO CHECKOUT OF OURS MADE IT, so attribution
- * falls through to `customer.external_id` — the legacy leg, and the path every
+ * falls through to `customer.external_id` - the legacy leg, and the path every
  * test below was written against. See billing/attribution.ts for the order.
  */
 const noAttribution = {
@@ -264,8 +264,8 @@ const noAttribution = {
 describe("POST /webhooks/polar", () => {
   /*
    * ⚠ THE WHOLE POINT OF `core.polar_checkouts`, END TO END. A returning
-   * customer's Polar record names the workspace they deleted — immutably, for
-   * ever — so this event arrives claiming a dead tenant. The checkout row we
+   * customer's Polar record names the workspace they deleted - immutably, for
+   * ever - so this event arrives claiming a dead tenant. The checkout row we
    * wrote before redirecting them is what says whose it really is.
    *
    * Before this, the same event bound the subscription to the dead tenant,
@@ -292,7 +292,7 @@ describe("POST /webhooks/polar", () => {
     })
 
     // ⚠ THE FIXTURE MUST CARRY ONE, because attribution deliberately does not
-    // look up a checkout that does not exist — see attribution.test.ts.
+    // look up a checkout that does not exist - see attribution.test.ts.
     const res = await post(app, JSON.stringify(event({ checkout_id: "chk_1" })))
 
     expect(res.status).toBe(202)
@@ -351,7 +351,7 @@ describe("POST /webhooks/polar", () => {
   })
 
   // ⚠ THE ONE TEST THIS FILE EXISTS FOR. An unverified request must not reach
-  // the grant path — a forged `subscription.active` is a free Pro account.
+  // the grant path - a forged `subscription.active` is a free Pro account.
   it("grants nothing when the signature does not verify", async () => {
     const apply = mock()
     const app = createApp({
@@ -395,7 +395,7 @@ describe("POST /webhooks/polar", () => {
       polarWebhooks: {
         secret: SECRET,
         // Nothing of ours holds it and no checkout of ours made it, so
-        // attribution falls through to `customer.external_id` — the path
+        // attribution falls through to `customer.external_id` - the path
         // these tests were written against.
         attribution: { ownerOf: async () => null, checkoutTenant: async () => null },
         grants: {

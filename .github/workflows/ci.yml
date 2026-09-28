@@ -15,9 +15,9 @@ permissions:
 
 env:
   # Pinned rather than read from the repository, because the toolchain is set up
-  # before the checkout is parsed. FOUR PLACES HOLD THIS VERSION — here,
+  # before the checkout is parsed. FOUR PLACES HOLD THIS VERSION - here,
   # `.bun-version`, `packageManager` in package.json, and every Dockerfile's
-  # base image tag — and they move together. The toolchain action asserts the
+  # base image tag - and they move together. The toolchain action asserts the
   # version it actually got, so a drift here fails fast rather than producing a
   # run that built against something else.
   BUN_VERSION: "1.4.2"
@@ -58,8 +58,8 @@ jobs:
   verify:
     name: ${{ matrix.task }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
-    # GitHub's default is 360 minutes. A job that hangs — a wedged pull, a step
-    # waiting on input that never arrives — holds a runner for six hours and
+    # GitHub's default is 360 minutes. A job that hangs - a wedged pull, a step
+    # waiting on input that never arrives - holds a runner for six hours and
     # reports nothing until it does. This is the bound at which that becomes a
     # red run instead.
     #
@@ -97,7 +97,7 @@ jobs:
       # came from. Regenerating and diffing is what keeps that true.
       #
       # A failure here means someone changed the API contract without committing
-      # the regenerated document — run `bunx turbo run openapi --filter=@i10/api`.
+      # the regenerated document - run `bunx turbo run openapi --filter=@i10/api`.
       - name: Regenerate and check for drift
         run: |
           bunx turbo run openapi --filter=@i10/api
@@ -135,12 +135,12 @@ jobs:
           git diff --exit-code -- go.mod go.sum
 
   # ⚠ ITS OWN LANE, NOT PART OF THE `verify` MATRIX, BECAUSE IT IS NOT A TURBO
-  # TASK — it reads Dockerfiles and manifests rather than building a package, so
+  # TASK - it reads Dockerfiles and manifests rather than building a package, so
   # there is nothing for turbo to cache and nothing to key a cache on. It also
   # guards a failure the matrix structurally cannot see: `lint`, `check-types`,
   # `test` and `build` all run against the real repository, where every workspace
   # is on disk. The image build is the only thing that runs against a pruned
-  # checkout, and it runs on push to `main` — after the merge.
+  # checkout, and it runs on push to `main` - after the merge.
   images:
     name: Image manifests
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}

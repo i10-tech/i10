@@ -6,13 +6,13 @@ import { cn } from "cn"
  *
  * ⚠ IT IS DELIBERATELY QUIET. A server component that throws takes its whole
  * route down to `error.tsx`, so every panel that fetches independently catches
- * its own failure and renders this instead — which means several of these can
+ * its own failure and renders this instead - which means several of these can
  * be on screen at once during a partial outage. Full-width red alerts would
  * make a degraded page look like a catastrophic one.
  *
- * ⚠ AND IT SHOWS THE API'S OWN MESSAGE. Those are written for the customer —
+ * ⚠ AND IT SHOWS THE API'S OWN MESSAGE. Those are written for the customer -
  * "You have used your sending allowance for this period", "The plan does not
- * include another domain" — and replacing them with "Something went wrong"
+ * include another domain" - and replacing them with "Something went wrong"
  * throws away the only actionable thing on screen.
  */
 export function PanelError({

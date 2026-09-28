@@ -10,7 +10,7 @@ import type { OutboundMessage } from "../src/send/transport.js"
 /**
  * The raw MIME builder.
  *
- * Nothing here validates that a mail client renders the result — that is what
+ * Nothing here validates that a mail client renders the result - that is what
  * an end-to-end send proves. What these assert are the properties whose failure
  * is silent: a header a receiver drops, a Bcc that stops being blind, a
  * boundary that could appear inside a body.
@@ -40,7 +40,7 @@ const AT = new Date("2026-09-02T10:00:00Z")
 
 describe("the envelope", () => {
   // ⚠ CRLF, INCLUDING THE BLANK LINES. A bare LF is accepted by some receivers,
-  // rejected by others, and can fail DKIM on the ones that accept it — a
+  // rejected by others, and can fail DKIM on the ones that accept it - a
   // "sometimes lands in spam" bug rather than an error.
   it("ends every line with CRLF", () => {
     const raw = buildRawMessage(message(), [file()], AT)
@@ -88,7 +88,7 @@ describe("the envelope", () => {
   })
 
   // ⚠ HEADER INJECTION. A newline in a header value would let a caller append
-  // headers — or a whole second MIME part — to their own message.
+  // headers - or a whole second MIME part - to their own message.
   it("flattens newlines in a caller header value", () => {
     const raw = buildRawMessage(
       message({ headers: { "X-Note": "one\r\nBcc: leak@evil.test" } }),
@@ -182,7 +182,7 @@ describe("attachments", () => {
 })
 
 describe("encoding", () => {
-  // ⚠ A RAW UTF-8 SUBJECT IS NOT LEGAL IN A HEADER AND FAILS QUIETLY — rendered
+  // ⚠ A RAW UTF-8 SUBJECT IS NOT LEGAL IN A HEADER AND FAILS QUIETLY - rendered
   // by some receivers, mojibake in others, dropped by the rest.
   it("encodes a non-ASCII subject as an encoded-word", () => {
     expect(encodeWord("Café")).toBe(
@@ -229,7 +229,7 @@ describe("addresses", () => {
  *
  * ⚠ THESE ARE NOT STYLE ASSERTIONS. `To:` accepts 50 addresses of up to 320
  * characters, so an unfolded recipient list reaches sixteen kilobytes on ONE
- * LINE — well past the 998-octet hard limit, and that is what this composer
+ * LINE - well past the 998-octet hard limit, and that is what this composer
  * emitted until folding existed. SES took those messages and did whatever it
  * does; the direct route's validator refuses them, so the same send worked or
  * failed depending on the route. That route-visible difference is the thing the
@@ -260,7 +260,7 @@ describe("line limits", () => {
 
   /**
    * ⚠ UNFOLDING MUST REPRODUCE THE ORIGINAL EXACTLY. RFC 5322 removes the CRLF
-   * before leading whitespace and KEEPS that whitespace — so breaking at a space
+   * before leading whitespace and KEEPS that whitespace - so breaking at a space
    * and starting the next line with one space is lossless, and adding a space
    * instead silently rewrites the header.
    */
@@ -294,7 +294,7 @@ describe("line limits", () => {
   })
 
   /**
-   * ⚠ RFC 2047 CAPS AN ENCODED-WORD AT 75 CHARACTERS, and one cannot be folded —
+   * ⚠ RFC 2047 CAPS AN ENCODED-WORD AT 75 CHARACTERS, and one cannot be folded -
    * folding needs whitespace and there is none inside one. A 200-character
    * accented subject produced a single 545-character word: illegal, unfoldable,
    * and unsendable on the direct route.
@@ -323,7 +323,7 @@ describe("line limits", () => {
   /**
    * ⚠ SPLIT ON CODE POINTS, NEVER ON BYTES. Each encoded-word is decoded
    * independently, so a multi-byte character cut across two of them decodes to
-   * replacement characters in both — mojibake at exactly one point in a subject,
+   * replacement characters in both - mojibake at exactly one point in a subject,
    * which is the kind of bug that gets blamed on the recipient's mail client.
    */
   it("never splits a multi-byte character across two encoded-words", () => {
@@ -356,7 +356,7 @@ describe("line limits", () => {
 /**
  * ⚠ HEADERS ARE ASCII, AND A FILENAME IN THE CUSTOMER'S OWN LANGUAGE IS NOT.
  * `réçu.pdf` used to go into `Content-Type` and `Content-Disposition` as raw
- * UTF-8 — not valid RFC 5322, and quiet about it. It became loud when the direct
+ * UTF-8 - not valid RFC 5322, and quiet about it. It became loud when the direct
  * route started classifying such a message as needing SMTPUTF8 and refusing to
  * send it to a server without that capability: the same attachment would arrive
  * through SES and fail permanently through our own MTA.

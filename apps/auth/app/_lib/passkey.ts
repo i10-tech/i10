@@ -2,20 +2,20 @@
  * What to say when a passkey prompt does not end in a passkey.
  *
  * ⚠ CLERK WRAPS THE BROWSER'S ERROR, AND EVERY CALLER HERE WAS CHECKING THE
- * UNWRAPPED ONE. WebAuthn rejects with a `DOMException` — `NotAllowedError`
+ * UNWRAPPED ONE. WebAuthn rejects with a `DOMException` - `NotAllowedError`
  * for "the person said no", `InvalidStateError` for "this device already has
- * one" — and both call sites branched on `error.name` to tell those apart.
+ * one" - and both call sites branched on `error.name` to tell those apart.
  * They cannot: `@clerk/shared` maps each of those exceptions to a
  * `ClerkWebAuthnError` whose `name` is `"ClerkWebAuthnError"` and whose real
  * meaning moves into `code`. So the branch never matched, and pressing Cancel
- * on the operating system's own sheet was reported as a failure — on sign-up
+ * on the operating system's own sheet was reported as a failure - on sign-up
  * as "We could not add a passkey on this device", and on sign-in as Clerk's
  * raw developer string, brackets and all:
  *
  *   Clerk: The operation either timed out or was not allowed. See:
  *   https://www.w3.org/TR/webauthn-2/… (code="passkey_retrieval_cancelled")
  *
- * ⚠ THE CODES ARE READ FROM THE MESSAGE TOO, AND THAT IS NOT PARANOIA — IT IS
+ * ⚠ THE CODES ARE READ FROM THE MESSAGE TOO, AND THAT IS NOT PARANOIA - IT IS
  * THE ONLY PLACE THE REAL REASON SURVIVES. clerk-js re-wraps the mapped error
  * a second time on the sign-in path, and the outer wrapper's `code` is the
  * generic `passkey_retrieval_failed`; `ClerkError.formatMessage` appends
@@ -26,7 +26,7 @@
  *
  * ⚠ AND DISMISSING THE SHEET IS NOT AN ERROR. WebAuthn deliberately returns
  * the same rejection for "declined" and "timed out" so a site cannot tell them
- * apart and fingerprint people by it — which means silence is the only correct
+ * apart and fingerprint people by it - which means silence is the only correct
  * response to both, and it is also what somebody who pressed Cancel expects.
  * `null` is that silence, and it is a return value rather than a thrown thing
  * so a caller cannot forget to handle it.
@@ -45,7 +45,7 @@ const CANCELLED = new Set([
  * ⚠ IT DOES NOT BLAME THE DEVICE, BECAUSE THE DEVICE WAS NEVER ASKED. A passkey
  * is created in two halves: clerk-js fetches a challenge from FAPI, and only
  * then opens the platform's sheet. This is the first half failing, so no sheet
- * ever appears — and "we could not add a passkey on this device" told somebody
+ * ever appears - and "we could not add a passkey on this device" told somebody
  * whose device is fine to go and look at their device. It is the same trade as
  * `passkey_invalid_rpID_or_domain`: when the fault is ours, the sentence says
  * so and points at the one route that can actually resolve it.
@@ -55,7 +55,7 @@ const CANCELLED = new Set([
  * advice is sending somebody round a loop we already know the shape of.
  */
 const OURS =
-  "We could not start a passkey — that is our side, not your device. Email support@i10.tech and we will fix it."
+  "We could not start a passkey - that is our side, not your device. Email support@i10.tech and we will fix it."
 
 /**
  * ⚠ EVERY SENTENCE NAMES A DIFFERENT NEXT STEP, which is the point of having
@@ -89,7 +89,7 @@ const REASONS: Record<string, string> = {
   /*
    * ⚠ THE SIGN-IN HALF OF THE MISSING CHALLENGE, AND IT IS THE HALF THAT HAS A
    * CODE. Both flows ask FAPI for a challenge before touching the platform, and
-   * both can be answered without one — but clerk-js raises this one as a coded
+   * both can be answered without one - but clerk-js raises this one as a coded
    * `ClerkRuntimeError` and the sign-up one as a bare `Error`. See
    * `MISSING_CHALLENGE` below, which is the same failure wearing no code.
    */
@@ -97,14 +97,14 @@ const REASONS: Record<string, string> = {
   /*
    * ⚠ A SAFETY NET UNDER `useReverification`, NOT A REPLACEMENT FOR IT. Adding
    * a passkey is a protected operation on an instance with reverification on,
-   * so FAPI answers `POST /v1/me/passkeys` with a 403 carrying this code — and
+   * so FAPI answers `POST /v1/me/passkeys` with a 403 carrying this code - and
    * `PasskeyStep` wraps the call in Clerk's hook precisely so that the 403 is
    * swallowed, the step-up prompt is shown, and the call is replayed. Nothing
    * here should ever run.
    *
    * ⚠ WHICH IS EXACTLY WHY IT IS WRITTEN DOWN. It was NOT here, so on the one
-   * occasion the hook did not intercept — a real 403, observed in production,
-   * reported from a live console — the code fell past every reader in this file
+   * occasion the hook did not intercept - a real 403, observed in production,
+   * reported from a live console - the code fell past every reader in this file
    * and came out as "we could not add a passkey on this device". A step-up
    * policy is not a broken device, and the person is not out of options: the
    * sentence says what the system wants and that the account is unharmed.
@@ -114,7 +114,7 @@ const REASONS: Record<string, string> = {
    * fresh page with a fresh session and is the route that actually works.
    */
   session_reverification_required:
-    "We need you to confirm it is you before adding a passkey. Your account is fine — add one from settings and we will ask you there.",
+    "We need you to confirm it is you before adding a passkey. Your account is fine - add one from settings and we will ask you there.",
 }
 
 /**
@@ -127,14 +127,14 @@ const REASONS: Record<string, string> = {
  *   Clerk: Missing publicKey. When calling 'navigator.credentials.create()'
  *   it is required to pass a publicKey object.
  *
- * There is no `code`, no `errors[]`, and no `(code="…")` fragment in the text —
+ * There is no `code`, no `errors[]`, and no `(code="…")` fragment in the text -
  * so `codesIn` finds nothing, `REASONS` cannot be consulted, and it fell all
  * the way to the generic sentence with an EMPTY reference under it. That is the
  * precise combination somebody reported: no system sheet, and no code to quote.
  *
  * ⚠ MATCHED ON THE MESSAGE, WHICH IS DISTASTEFUL AND IS THE ONLY HANDLE THERE
  * IS. The alternative is leaving the one failure we cannot otherwise name
- * indistinguishable from every unknown — and the string is clerk-js's own
+ * indistinguishable from every unknown - and the string is clerk-js's own
  * `errorThrower` template, not a localised or user-facing one, so it does not
  * move when copy does.
  */
@@ -160,8 +160,8 @@ function missingChallenge(error: unknown): boolean {
  * The exceptions that mean the authenticator was asked and could not.
  *
  * ⚠ `OperationError` IS THE ONE FROM THE REPORT, AND IT REACHED US NAMELESS.
- * `handlePublicKeyCreateError` in @clerk/shared maps four DOMExceptions —
- * `InvalidStateError`, `NotAllowedError`, `AbortError`, `SecurityError` — and
+ * `handlePublicKeyCreateError` in @clerk/shared maps four DOMExceptions -
+ * `InvalidStateError`, `NotAllowedError`, `AbortError`, `SecurityError` - and
  * returns everything else UNTOUCHED, so an `OperationError` arrives as the raw
  * browser exception with no `code` on it and lands in the fallback. It was only
  * identifiable at all because `passkeyReference` now falls back to the
@@ -173,7 +173,7 @@ function missingChallenge(error: unknown): boolean {
  * not hand one over" are different sentences and only the caller knows which.
  *
  * ⚠ AND THE SENTENCE NAMES THE PASSWORD MANAGER, WHICH IS NOT A GUESS ABOUT
- * BLAME — it is the one thing in that list somebody can actually change. A
+ * BLAME - it is the one thing in that list somebody can actually change. A
  * passkey request is intercepted by whatever provider claims it, so a browser
  * extension answers it before the operating system ever draws a sheet; that is
  * why this failure shows no prompt at all. If it were only ever the hardware,
@@ -203,7 +203,7 @@ function codesIn(error: unknown): string[] {
 
   if (typeof code === "string") found.push(code)
 
-  // API failures keep their real codes in `errors[]` — see _lib/errors.ts,
+  // API failures keep their real codes in `errors[]` - see _lib/errors.ts,
   // where the same shape cost us the entire identifier-first flow.
   if (Array.isArray(errors)) {
     for (const entry of errors) {
@@ -226,8 +226,8 @@ function codesIn(error: unknown): string[] {
 /**
  * ⚠ THE UNWRAPPED EXCEPTION IS STILL POSSIBLE, so its names are mapped too. The
  * conditional-mediation call in the sign-in form talks to `navigator.credentials`
- * through Clerk, but an abort raised by the browser before Clerk sees it — a
- * page navigating away mid-prompt is the common one — arrives here as the
+ * through Clerk, but an abort raised by the browser before Clerk sees it - a
+ * page navigating away mid-prompt is the common one - arrives here as the
  * `DOMException` itself.
  */
 const FROM_DOM: Record<string, string> = {
@@ -259,7 +259,7 @@ function allCodes(error: unknown): string[] {
  * ⚠ IT IS THE SAME TRADE AS THE CLOUDFLARE RAY ID, and the same shape: when a
  * failure is somebody else's to diagnose, the one useful thing an interface can
  * do is carry the identifier they will ask for. It is a code, not a stack trace
- * and not Clerk's developer sentence — `passkey_registration_failed` is a fact,
+ * and not Clerk's developer sentence - `passkey_registration_failed` is a fact,
  * `Clerk: The operation either timed out or was not allowed. See:
  * https://www.w3.org/TR/webauthn-2/…` is somebody else's debugging output
  * printed at a customer.
@@ -268,7 +268,7 @@ function allCodes(error: unknown): string[] {
  * to attach one to. `passkeyFailure` returns `null` there and nothing is shown.
  *
  * ⚠ BUT A FAILURE ALWAYS HAS ONE NOW, AND IT DID NOT BEFORE. An error carrying
- * no code at all — which is one real, reachable case, see `MISSING_CHALLENGE` —
+ * no code at all - which is one real, reachable case, see `MISSING_CHALLENGE` -
  * used to return `undefined` here, so the toast that most needed a reference
  * was the single toast that shipped without one. The exception `name` is a
  * weaker handle than a Clerk code and it is enormously better than a blank
@@ -287,7 +287,7 @@ export function passkeyReference(error: unknown): string | undefined {
   /*
    * ⚠ `api_response_error` IS AN ENVELOPE, NOT AN ANSWER, AND IT SORTS FIRST.
    * `ClerkAPIResponseError`'s constructor hardcodes it as the `code` of EVERY
-   * error it wraps, while the code that means something sits in `errors[]` — so
+   * error it wraps, while the code that means something sits in `errors[]` - so
    * `codes[0]` is the envelope and `codes[1]` is the fact. A real 403 from
    * `POST /v1/me/passkeys` would have printed `api_response_error` under the
    * toast, which is true of a rate limit, a bad parameter and a step-up policy
@@ -304,7 +304,7 @@ export function passkeyReference(error: unknown): string | undefined {
 /**
  * What to show somebody, or `null` if the honest answer is nothing.
  *
- * @param intent Which half of the product asked — the fallback sentence
+ * @param intent Which half of the product asked - the fallback sentence
  *   differs, because "we could not add one" and "that passkey did not work"
  *   send people to different places.
  */
@@ -312,7 +312,7 @@ export function passkeyFailure(error: unknown, intent: "add" | "use"): string | 
   const codes = allCodes(error)
 
   // ⚠ CANCELLATION WINS OVER EVERYTHING ELSE IN THE LIST, because the list is
-  // frequently `["passkey_retrieval_failed", "passkey_retrieval_cancelled"]` —
+  // frequently `["passkey_retrieval_failed", "passkey_retrieval_cancelled"]` -
   // a generic wrapper around the real answer. Taking the first code would
   // report the wrapper.
   if (codes.some((code) => CANCELLED.has(code))) return null
@@ -332,7 +332,7 @@ export function passkeyFailure(error: unknown, intent: "add" | "use"): string | 
   /*
    * ⚠ THE OPPOSITE END OF THE SAME STORY: here the request DID reach a
    * provider, and the provider refused it. The fallback's "we could not add a
-   * passkey on this device" is not wrong so much as useless — it names no next
+   * passkey on this device" is not wrong so much as useless - it names no next
    * step, and the next step that works is usually to stop whatever intercepted
    * the request from intercepting it.
    */

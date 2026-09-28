@@ -6,8 +6,8 @@ import { ActionButton, FallbackLink, Layout, styles } from "../layout.js"
  *
  * ⚠ TWO VERSIONS OF ONE SENTENCE, CHOSEN BY WHETHER THE ADDRESS HAS AN i10
  * ACCOUNT. Somebody without one has to sign up with THIS address before the
- * offer can be accepted — it is matched against the verified address, not
- * against whoever clicks — so the email says so before they click rather than
+ * offer can be accepted - it is matched against the verified address, not
+ * against whoever clicks - so the email says so before they click rather than
  * after they have signed up with a different one.
  */
 export default function DomainTransfer({
@@ -37,7 +37,7 @@ export default function DomainTransfer({
       <Text style={styles.text}>
         {hasAccount
           ? "Sign in with this address to accept it and choose which workspace it goes into."
-          : "Create your i10 account with this address first — the transfer can only be accepted by it — then choose which workspace the domain goes into."}
+          : "Create your i10 account with this address first - the transfer can only be accepted by it - then choose which workspace the domain goes into."}
       </Text>
       <ActionButton href={url}>
         {hasAccount ? "Review the transfer" : "Sign up and accept"}
@@ -45,7 +45,7 @@ export default function DomainTransfer({
       <FallbackLink href={url} />
       <Text style={styles.text}>
         The offer expires on {expires}. If you were not expecting it, ignore this email
-        — nothing moves unless you accept.
+        - nothing moves unless you accept.
       </Text>
     </Layout>
   )

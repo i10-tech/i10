@@ -4,7 +4,7 @@
  *
  * @scalar/astro defaults its `cdn` option to jsdelivr. That would mean every
  * reader of our API documentation makes a request to a third party, and that a
- * CDN outage — or a compromised package on it — takes out or rewrites the page
+ * CDN outage - or a compromised package on it - takes out or rewrites the page
  * describing how to authenticate to our API. Vendoring the bundle removes the
  * dependency entirely.
  *
@@ -23,7 +23,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 
 // Resolve through the package's own entry point rather than guessing a path
-// into node_modules — pnpm's layout is not something to hard-code.
+// into node_modules - pnpm's layout is not something to hard-code.
 const entry = require.resolve("@scalar/api-reference")
 const source = join(dirname(entry), "browser")
 const destination = join(here, "..", "public", "scalar")

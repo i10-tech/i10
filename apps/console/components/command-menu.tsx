@@ -21,8 +21,8 @@ import { allDestinations } from "@/lib/nav"
  *
  * ⚠ IT IS NAVIGATION AND ACTIONS, NOT SEARCH, AND THE DISTINCTION KEEPS IT
  * FAST. A palette that queries the API on every keystroke is a palette with a
- * spinner in it, and the thing people actually use it for — getting to Domains
- * in under a second — is the thing the spinner ruins. Searching a customer's
+ * spinner in it, and the thing people actually use it for - getting to Domains
+ * in under a second - is the thing the spinner ruins. Searching a customer's
  * mail is what the Emails page's own search field is for, where the results have
  * room to be useful.
  *
@@ -62,7 +62,7 @@ export function CommandMenu() {
     (href: string) => {
       // ⚠ CLOSED FIRST, THEN NAVIGATED. Navigating while the dialog is open
       // leaves Radix mid-transition on a tree that is being replaced, and the
-      // focus trap occasionally survives it — the new page renders and the
+      // focus trap occasionally survives it - the new page renders and the
       // keyboard still belongs to a dialog that is no longer visible.
       setOpen(false)
       router.push(href)

@@ -4,8 +4,8 @@ import type { ResetInterval } from "./interval.js"
 /**
  * Plans, and which allowance applies to a tenant right now.
  *
- * This is the third of the things worth taking from Autumn — entitlement
- * resolution — and like the other two it is taken as semantics rather than as
+ * This is the third of the things worth taking from Autumn - entitlement
+ * resolution - and like the other two it is taken as semantics rather than as
  * structure. Autumn resolves an entitlement through customer → product →
  * product_items → the Stripe subscription that paid for it. We have no Stripe,
  * one subscription per tenant, and Polar as the state of record, so the same
@@ -17,14 +17,14 @@ import type { ResetInterval } from "./interval.js"
  * Where a plan came from, and who is allowed to overwrite it.
  *
  * ⚠ THE DISCRIMINATOR IS THE WHOLE MECHANISM, NOT A LABEL. It is what lets the
- * catalogue keep the position a config file used to hold — "the dashboard is
- * not the source of truth, the checked-in definition is" — while still letting
+ * catalogue keep the position a config file used to hold - "the dashboard is
+ * not the source of truth, the checked-in definition is" - while still letting
  * a sales deal produce a bespoke plan without a pull request.
  *
- * - `catalog` — seeded from the config file. A config push reconciles these
+ * - `catalog` - seeded from the config file. A config push reconciles these
  *   DESTRUCTIVELY: the file wins, and anything edited by clicking is reverted
  *   on the next push. That is the behaviour we want rather than a hazard.
- * - `custom` — created for one tenant through the dashboard. A config push
+ * - `custom` - created for one tenant through the dashboard. A config push
  *   never touches them, which is the only reason a push can safely be
  *   destructive at all.
  */
@@ -40,7 +40,7 @@ export type PlanSource = "catalog" | "custom"
  * sells a fourth domain for thirty cents.
  *
  * So the plan says whether a feature MAY be exceeded at all, and the tenant's
- * own switch — `Assignment.overageEnabled` — only turns it on where the plan
+ * own switch - `Assignment.overageEnabled` - only turns it on where the plan
  * already permits it. Both must agree; see `createMeter`.
  */
 export type OveragePolicy =
@@ -56,7 +56,7 @@ interface EntitlementBase {
 }
 
 /**
- * A feature that is used up and replenished — emails, credits, API requests.
+ * A feature that is used up and replenished - emails, credits, API requests.
  *
  * It has a reset cycle, its usage is the SUM of events inside the current
  * window, and that sum only ever grows until the window moves.
@@ -69,18 +69,18 @@ export interface ConsumableEntitlement extends EntitlementBase {
 }
 
 /**
- * A feature that is held persistently — domains, mailboxes, storage.
+ * A feature that is held persistently - domains, mailboxes, storage.
  *
  * ⚠ IT HAS NO `interval`, AND THE UNION IS HOW THAT IS ENFORCED RATHER THAN
  * DOCUMENTED. Asking when a domain refills is a category error, and a shape
- * that can carry a reset interval is a shape somebody eventually sets one on —
+ * that can carry a reset interval is a shape somebody eventually sets one on -
  * after which `windowFor` computes a boundary, usage is scoped to it, and every
  * mailbox created before the boundary silently stops counting. Making the field
  * unrepresentable costs nothing and removes the failure entirely.
  *
  * ⚠ AND ITS USAGE IS A LEVEL, NOT A SUM. It is read from wherever the things
- * actually live — a count over `core.domains`, a count of mailboxes, bytes
- * reported by the mail server — because it can go DOWN. Domains are removed,
+ * actually live - a count over `core.domains`, a count of mailboxes, bytes
+ * reported by the mail server - because it can go DOWN. Domains are removed,
  * mailboxes are deleted, folders are emptied, and no sum of append-only events
  * can represent that.
  */
@@ -102,14 +102,14 @@ export interface Plan {
  * The plan a tenant holds, and the clock its windows are measured from.
  *
  * ⚠ THE ANCHOR BELONGS TO THE TENANT, NOT TO THE PLAN, AND THIS IS A DECISION
- * WITH TEETH. It is set once — when the tenant is first given any plan — and it
+ * WITH TEETH. It is set once - when the tenant is first given any plan - and it
  * survives every plan change afterwards.
  *
  * Anchoring to the plan instead is the obvious alternative and it is wrong in
  * two ways at once. It hands every customer a free reset: exhaust the daily
  * allowance, change plan, and a brand-new window starts immediately, over and
  * over. And it makes two windows overlap at the moment of the change, so the
- * same usage falls inside both the old plan's window and the new one's — which
+ * same usage falls inside both the old plan's window and the new one's - which
  * means the ledger's buckets no longer partition time, and a reconciler that
  * sums them either double-counts or drops the seam.
  *
@@ -144,7 +144,7 @@ export interface Assignment {
    * dollars you did not expect", and only one of those is a decision we are
    * entitled to make for somebody.
    *
-   * It grants nothing on its own — an entitlement with `overage: "never"` is a
+   * It grants nothing on its own - an entitlement with `overage: "never"` is a
    * hard cap whatever this says.
    */
   overageEnabled: boolean
@@ -154,8 +154,8 @@ export interface Assignment {
  * What this plan grants for one feature, or `undefined` if it grants nothing.
  *
  * ⚠ `undefined` IS NOT "ZERO", AND THE CALLERS MUST NOT COLLAPSE THE TWO. A
- * plan that grants no `emails` entitlement is a misconfiguration — a renamed
- * feature id, a half-written custom plan — and reporting it as an exhausted
+ * plan that grants no `emails` entitlement is a misconfiguration - a renamed
+ * feature id, a half-written custom plan - and reporting it as an exhausted
  * allowance tells a paying customer they are over quota when they have not sent
  * anything. Autumn's own config file carries this exact warning about renaming
  * `emails.id`: `check` answers "not allowed" for a feature the customer does
@@ -167,7 +167,7 @@ export function entitlementFor(plan: Plan, featureId: string): Entitlement | und
 
   // ⚠ TWO ENTITLEMENTS FOR ONE FEATURE IS AMBIGUOUS, SO IT THROWS RATHER THAN
   // PICKING. Taking the first would make the answer depend on the order rows
-  // came back from Postgres, which is unspecified without an ORDER BY — the
+  // came back from Postgres, which is unspecified without an ORDER BY - the
   // same plan would grant 100 on one request and 50,000 on the next. A custom
   // plan assembled through the dashboard is exactly where this arises.
   if (matches.length > 1) {

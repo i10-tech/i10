@@ -10,7 +10,7 @@ import { notFound, notWired, readJson, validation } from "./http.js"
  *
  * ⚠ THE WHOLE POINT IS THAT NOBODY TYPES SIX RECORDS. Delegation already got it
  * down to three names; this removes the typing entirely wherever we hold a
- * credential — which is also where the most expensive support conversation used
+ * credential - which is also where the most expensive support conversation used
  * to start, because a record typed into the wrong field looks identical to one
  * that has not propagated.
  *
@@ -28,7 +28,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
   /**
    * ⚠ THE API ANSWERS WHAT IS CONNECTABLE; THE CONSOLE DOES NOT ASSUME. Whether
    * a provider can be connected depends on an adapter existing AND, for the
-   * one-click path, on an OAuth app being registered — one is a deploy and the
+   * one-click path, on an OAuth app being registered - one is a deploy and the
    * other is configuration. A console that decided this from the registry alone
    * would render a live button for twenty-nine providers we cannot write to.
    */
@@ -92,7 +92,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
      * ⚠ WHERE TO GO AFTERWARDS, AND IT IS THE CALLER'S TO NAME BECAUSE ONLY THE
      * CALLER KNOWS. The same button is pressed from onboarding, from the add
      * form and from a domain page, and each of them is somewhere different to
-     * come back to — onboarding in particular was LOSING people, because the
+     * come back to - onboarding in particular was LOSING people, because the
      * callback lands in the console shell and the flow they were half-way
      * through is not there.
      *
@@ -114,7 +114,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
       if (error instanceof OAuthError) {
         /*
          * ⚠ 501, NOT 422, FOR AN UNREGISTERED APP. It is our configuration and
-         * not the customer's request, and it will never clear by retrying —
+         * not the customer's request, and it will never clear by retrying -
          * the console renders it as "paste a token instead" rather than as an
          * error against their account.
          */
@@ -138,7 +138,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
    * IS THE SECURITY PROPERTY OF THIS ROUTE. A callback is a plain browser
    * navigation; if the workspace were taken from whoever happens to be signed
    * in, anybody could complete an authorisation they started elsewhere against
-   * a workspace they are merely a member of — or trick somebody into attaching
+   * a workspace they are merely a member of - or trick somebody into attaching
    * an attacker's DNS credential to their own. The HMAC over the tenant is what
    * makes the two the same workspace. See dns/oauth.ts.
    *
@@ -171,7 +171,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
 
     /*
      * ⚠ BOTH HALVES ARE COMPARED. A state signed for another workspace, or for
-     * another provider, is a valid signature over the wrong thing — which is
+     * another provider, is a valid signature over the wrong thing - which is
      * precisely the attack the signature exists to stop, and checking only that
      * it verifies would let it through.
      */
@@ -215,7 +215,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
          * rendered as the connection's name, so putting the granted scope
          * string there made every OAuth connection display as
          * "dns.write zone.read offline_access". An authorisation supplies no
-         * name, and `null` is the honest answer — the console already shows the
+         * name, and `null` is the honest answer - the console already shows the
          * provider and the zones it reached.
          */
         label: null,
@@ -234,8 +234,8 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
       /*
        * ⚠ `detail` IS THE ONLY FIELD THAT SAYS WHAT ACTUALLY HAPPENED, AND IT
        * WAS BEING THROWN AWAY. `String(error)` renders an `OAuthError` as its
-       * `message`, which is the sentence written for the customer — "Cloudflare
-       * did not complete the authorisation." — and is identical for an expired
+       * `message`, which is the sentence written for the customer - "Cloudflare
+       * did not complete the authorisation." - and is identical for an expired
        * code, a rejected client secret, a PKCE mismatch and a WAF page. The
        * provider's own `error` / `error_description`, which distinguishes all
        * four, is carried on `detail` and appeared nowhere: not in the log, not
@@ -249,7 +249,7 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
        * standing in front of the failure; this is the page the provider
        * actually served, and it is the thing that ends an argument about what
        * happened rather than starting one. It exists only when the body was not
-       * JSON — see `transcript` in dns/oauth.ts for why that makes it safe.
+       * JSON - see `transcript` in dns/oauth.ts for why that makes it safe.
        */
       const evidence = error instanceof OAuthError ? error.evidence : undefined
       d.log.warn(
@@ -269,10 +269,10 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
           name: "internal_server_error" as const,
           /*
            * ⚠ ONLY AN `OAuthError`'S MESSAGE IS SAFE TO RETURN, AND `instanceof
-           * Error` WAS NOT A NEAR-MISS — IT PUBLISHED A CREDENTIAL. Those
+           * Error` WAS NOT A NEAR-MISS - IT PUBLISHED A CREDENTIAL. Those
            * messages are written for a customer to read. Every OTHER Error
            * reaching here is internal, and drizzle's in particular embeds the
-           * full failing statement WITH ITS PARAMETERS — which for this insert
+           * full failing statement WITH ITS PARAMETERS - which for this insert
            * means the sealed credential, the tenant id and the customer's zone
            * names, rendered in the browser on the callback page.
            *
@@ -289,8 +289,8 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
            * ON IT. This is a workspace administrator who just authorised their
            * own DNS account thirty seconds ago; "invalid_grant" or "the redirect
            * URI does not match" tells them whether to press the button again or
-           * to tell us. It carries no credential — it is the provider's own
-           * error string — and the alternative is a support conversation that
+           * to tell us. It carries no credential - it is the provider's own
+           * error string - and the alternative is a support conversation that
            * starts with no information at all.
            */
           ...(detail ? { detail } : {}),
@@ -335,8 +335,8 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
       if (zones.length === 0) {
         /*
          * ⚠ A CREDENTIAL THAT REACHES NO ZONES IS REFUSED RATHER THAN STORED.
-         * It is almost always the wrong kind of token — a Hetzner Cloud token
-         * instead of a DNS Console one is the documented example — and storing
+         * It is almost always the wrong kind of token - a Hetzner Cloud token
+         * instead of a DNS Console one is the documented example - and storing
          * it produces a connection that looks fine and can publish nothing.
          */
         return c.json(

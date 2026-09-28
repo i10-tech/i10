@@ -1,6 +1,6 @@
 # OpenTofu: format, validate, and plan. It never applies.
 #
-# ⚠ APPLY IS A HUMAN ACTION, DELIBERATELY. Tofu owns SHAPE — buckets, machines,
+# ⚠ APPLY IS A HUMAN ACTION, DELIBERATELY. Tofu owns SHAPE - buckets, machines,
 # DNS. An automated apply on merge means a bad plan reaches production DNS with
 # nobody having read it, and a DNS mistake on a mail domain is a deliverability
 # incident rather than a rollback.
@@ -37,7 +37,7 @@ jobs:
         run: tofu fmt -check -recursive infra/tofu
 
       # `-backend=false` initialises providers without touching R2. Validation
-      # needs the schemas, not the state — and this way a fork PR with no
+      # needs the schemas, not the state - and this way a fork PR with no
       # credentials still gets a real syntax and type check instead of a red
       # run nobody can act on.
       - name: Validate

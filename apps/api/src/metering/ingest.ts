@@ -7,7 +7,7 @@ import type { PolarClient, UsageIngestEvent } from "../billing/polar.js"
  *
  * ⚠ EVERY UNIT IS SENT, NOT ONLY THE ONES PAST THE ALLOWANCE, AND THAT IS THE
  * WHOLE REASON THIS FILE IS SHORT. The obvious design is to compute the
- * included/billable split ourselves and ship only the billable part — and it is
+ * included/billable split ourselves and ship only the billable part - and it is
  * wrong twice over. Polar's Meter Credits benefit already draws the included
  * allowance down before the metered price charges anything, so splitting here
  * would be a second implementation of arithmetic they own; and it would mean a
@@ -21,7 +21,7 @@ import type { PolarClient, UsageIngestEvent } from "../billing/polar.js"
 
 /**
  * ⚠ HOW MANY UNITS ONE PASS SHIPS. It bounds a single Polar request and the
- * transaction that marks the rows, not the backlog — a larger backlog is drained
+ * transaction that marks the rows, not the backlog - a larger backlog is drained
  * over more passes rather than in one request big enough to time out halfway and
  * leave us unsure whether it landed.
  */
@@ -42,11 +42,11 @@ export const unshippedStatement = (featureId: string, limit: number): SQL => sql
 /**
  * ⚠ SCOPED TO ONE TENANT AND TO THE EXACT IDS THAT WERE SENT. A bulk "mark
  * everything older than X" would sweep up rows that arrived during the request
- * and were never in it — under-billing, invisibly, with no row left un-shipped
+ * and were never in it - under-billing, invisibly, with no row left un-shipped
  * to notice.
  *
  * ⚠ `array[…]`, NOT `any(${ids})`. Interpolating the array directly expands to
- * `($1, $2, $3)` — a ROW CONSTRUCTOR — and Postgres answers `cannot cast type
+ * `($1, $2, $3)` - a ROW CONSTRUCTOR - and Postgres answers `cannot cast type
  * record to text[]`. The whole statement raised, so usage that had already
  * reached Polar was never marked shipped and was re-sent on every run
  * thereafter; only Polar's `external_id` dedupe stood between that and
@@ -54,7 +54,7 @@ export const unshippedStatement = (featureId: string, limit: number): SQL => sql
  *
  * ⚠ AND EVERY BOUND VALUE HERE IS A PLAIN STRING, DELIBERATELY. Binding the
  * whole array as one parameter would also work and would read better, but it
- * depends on the driver serialising a JS array the way this cast expects —
+ * depends on the driver serialising a JS array the way this cast expects -
  * exactly the class of assumption that has already produced several silent
  * failures on this path. One scalar per id needs nothing from the driver but a
  * string.
@@ -97,7 +97,7 @@ export interface FlushReport {
   shipped: number
   /** Units Polar had already seen. Normal on a retry; not a failure. */
   duplicates: number
-  /** ⚠ A full batch means there is more to come — run again. */
+  /** ⚠ A full batch means there is more to come - run again. */
   batchWasFull: boolean
 }
 
@@ -129,7 +129,7 @@ export async function flushUsage({
   // ⚠ POLAR FIRST, THE WATERMARK SECOND, AND NEVER THE OTHER WAY ROUND. If this
   // throws, nothing is marked and the next pass finds the same rows. If it
   // succeeds and the marking below fails, the next pass re-sends them and Polar
-  // answers `duplicates` — which costs a request and bills nobody twice. Only
+  // answers `duplicates` - which costs a request and bills nobody twice. Only
   // one of those two orders can lose revenue.
   const result = await polar.ingestEvents(events)
 
@@ -142,7 +142,7 @@ export async function flushUsage({
 
   // ⚠ ONE TRANSACTION PER TENANT, BECAUSE ROW LEVEL SECURITY IS PER TENANT.
   // The read above crosses tenants through a privileged function; the write
-  // cannot, and should not — a bulk cross-tenant UPDATE is exactly the shape
+  // cannot, and should not - a bulk cross-tenant UPDATE is exactly the shape
   // that turns one bad id into everyone's problem.
   for (const [tenantId, eventIds] of byTenant) {
     try {
@@ -151,10 +151,10 @@ export async function flushUsage({
       )
     } catch (error) {
       // The units are in Polar. Failing to record that costs a re-send, which
-      // is free — so this is worth a line and not worth failing the pass.
+      // is free - so this is worth a line and not worth failing the pass.
       log?.error(
         { err: error, tenantId, count: eventIds.length },
-        "usage reached polar but was not marked shipped — it will be re-sent",
+        "usage reached polar but was not marked shipped - it will be re-sent",
       )
     }
   }

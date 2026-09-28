@@ -1,9 +1,9 @@
 /**
- * Per-page `/<slug>/index.mdx` — the raw authored source for every
+ * Per-page `/<slug>/index.mdx` - the raw authored source for every
  * indexable entry of the primary `docs` collection that has a string body.
  *
  * Twin grammar: `index.md` is the downleveled render for reading,
- * `index.mdx` is the source — imports, JSX, and directives intact. The
+ * `index.mdx` is the source - imports, JSX, and directives intact. The
  * body is served verbatim; only the canonical frontmatter block (shared
  * with the `.md` twin) is framework-shaped.
  *

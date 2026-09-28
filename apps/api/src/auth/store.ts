@@ -8,7 +8,7 @@ import { hashKey, mintKey, type KeyLookup, type KeyRow, type Mode } from "./api-
  *
  * ⚠ THE LOOKUP IS THE ONE OPERATION THAT CANNOT USE `withTenant`, AND THAT IS
  * NOT AN OPTIMISATION. `core.api_keys` carries `tenant_isolation`, which reads
- * `current_setting('app.tenant_id')` strictly — but verification runs to
+ * `current_setting('app.tenant_id')` strictly - but verification runs to
  * DISCOVER the tenant, so at that moment there is none to set. Issued through an
  * ordinary connection the query does not return the wrong row; it raises
  * `unrecognized configuration parameter` on the first request after any deploy.
@@ -18,7 +18,7 @@ import { hashKey, mintKey, type KeyLookup, type KeyRow, type Mode } from "./api-
  * ⚠ EVERYTHING ELSE HERE IS TENANT-SCOPED AND MUST STAY THAT WAY. Listing,
  * revoking and rotating all name a tenant that is already known, so they go
  * through `withTenant` and let row level security be the thing that stops one
- * customer touching another's credentials — rather than a `WHERE` clause
+ * customer touching another's credentials - rather than a `WHERE` clause
  * somebody can forget.
  */
 
@@ -45,7 +45,7 @@ interface ResolveRow {
 /**
  * ⚠ COERCED, NOT CAST. postgres.js is documented to map timestamptz to `Date`
  * and has been observed handing back a string for a column beside one it
- * parsed — which is what broke `planRow` on the first real call to
+ * parsed - which is what broke `planRow` on the first real call to
  * `assignments.find()` in production. `new Date` on a `Date` is a copy, so
  * accepting both costs nothing and cannot be wrong in the direction that
  * matters. Same defensiveness as the `minted_at` read in send/accept-db.ts.
@@ -106,13 +106,13 @@ export interface KeyStore {
    *
    * ⚠ IT EXISTS SO A SCOPE IS NOT A DECISION MADE ONCE, IN A DIALOG, FOREVER.
    * Without it the only way to narrow a key that was minted unrestricted is to
-   * revoke it and deploy a new secret everywhere it is used — which is enough
+   * revoke it and deploy a new secret everywhere it is used - which is enough
    * friction that nobody does it, so every key stays unrestricted and the
    * feature is decorative.
    *
    * ⚠ THE SECRET IS UNTOUCHED, AND THE CACHE MUST STILL BE EVICTED. A verified
    * key lives in Redis with its scopes baked in for the TTL, so a narrowed key
-   * keeps its old permissions for up to a minute otherwise — the same failure
+   * keeps its old permissions for up to a minute otherwise - the same failure
    * `revoke` documents, with a quieter symptom. The hash comes back for that.
    */
   setScopes(
@@ -188,7 +188,7 @@ export function keyStore(db: Database): KeyStore {
         /*
          * ⚠ A REVOKED KEY IS NOT EDITABLE, AND REFUSING IS THE POINT. Changing
          * the scope of a withdrawn credential does nothing except make the list
-         * claim a dead key is restricted — and, if it were ever un-revoked,
+         * claim a dead key is restricted - and, if it were ever un-revoked,
          * would silently change what it could do.
          */
         const [row] = await tx
@@ -211,7 +211,7 @@ export function keyStore(db: Database): KeyStore {
       return withTenant(db, tenantId, async (tx) => {
         // ⚠ `isNull(revokedAt)` MAKES THIS IDEMPOTENT RATHER THAN DESTRUCTIVE.
         // Re-revoking would move the timestamp, rewriting when a credential was
-        // withdrawn — which is the one fact an incident review needs to be exact.
+        // withdrawn - which is the one fact an incident review needs to be exact.
         const [row] = await tx
           .update(apiKeys)
           .set({ revokedAt: sql`now()` })
@@ -229,7 +229,7 @@ export function keyStore(db: Database): KeyStore {
     },
 
     /**
-     * ⚠ MINT FIRST, THEN REVOKE, IN ONE TRANSACTION — AND WITH NO OVERLAP. The
+     * ⚠ MINT FIRST, THEN REVOKE, IN ONE TRANSACTION - AND WITH NO OVERLAP. The
      * button exists for the case where a secret has leaked, so leaving the old
      * key alive for a grace period would preserve exactly what the customer is
      * trying to end. Its real value is not the rotation: it is not having to

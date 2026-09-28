@@ -8,7 +8,7 @@ import { verifyPolarWebhook } from "../billing/signature.js"
  * Polar subscription events.
  *
  * ⚠ THIS IS THE ONE ENDPOINT IN THE PRODUCT THAT GRANTS PAID PLANS, and it is
- * unauthenticated by necessity — Polar has no API key of ours to present. The
+ * unauthenticated by necessity - Polar has no API key of ours to present. The
  * signature is the entire access control, so nothing is parsed for meaning
  * before it verifies, and the tenant id is read from the verified payload
  * rather than from anything in the URL or a header.
@@ -23,7 +23,7 @@ import { verifyPolarWebhook } from "../billing/signature.js"
  *
  *   403  the signature did not verify. A retry cannot help, and answering 2xx
  *        to an unverified request tells a forger their forgery worked.
- *   202  accepted, or an event that is not ours — an order, a benefit, a
+ *   202  accepted, or an event that is not ours - an order, a benefit, a
  *        product for some other purpose. "Not ours" is not a failure, and a
  *        non-2xx would have Polar retrying it all afternoon.
  *   500  a real event we could not apply. Retry is exactly right: the
@@ -36,7 +36,7 @@ export interface PolarWebhookDeps {
   /** The endpoint secret from Polar's dashboard. Sandbox and production differ. */
   secret: string
   /**
-   * Where "whose subscription is this" is answered — our own tables, never the
+   * Where "whose subscription is this" is answered - our own tables, never the
    * payload. See billing/attribution.ts.
    */
   attribution: AttributionSource
@@ -90,7 +90,7 @@ export function createPolarWebhooks(deps?: PolarWebhookDeps) {
     try {
       const parsed: unknown = JSON.parse(body)
       // `JSON.parse` succeeds on `null`, `1` and `"x"`, and `decide` reads
-      // `.type` off whatever this is — a four-byte body would be a TypeError
+      // `.type` off whatever this is - a four-byte body would be a TypeError
       // and a 500 rather than a rejection.
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         throw new TypeError("not an object")
@@ -108,7 +108,7 @@ export function createPolarWebhooks(deps?: PolarWebhookDeps) {
      * `customer.external_id` is the weakest of the three answers and the only
      * one that can be stale, so it is consulted last and only for customers
      * predating `core.polar_checkouts`. A resolution failure is not an error
-     * here — `toState` turns it into the `stranded` ignore below, which is the
+     * here - `toState` turns it into the `stranded` ignore below, which is the
      * one ignore that shouts.
      */
     const attributed =
@@ -119,7 +119,7 @@ export function createPolarWebhooks(deps?: PolarWebhookDeps) {
     const decided = decide(event, deps.options, attributed?.tenantId)
     if (decided.kind === "ignore") {
       /*
-       * ⚠ STILL 202, BECAUSE A RETRY CANNOT HELP EITHER WAY — BUT NOT STILL
+       * ⚠ STILL 202, BECAUSE A RETRY CANNOT HELP EITHER WAY - BUT NOT STILL
        * `info`. A stranded subscription is a customer who has paid, whom Polar
        * shows as active, and whom nothing on this side will ever grant: the
        * reconciler discards it by the same rule this line just applied. That is
@@ -130,7 +130,7 @@ export function createPolarWebhooks(deps?: PolarWebhookDeps) {
         deps.log.error(
           { webhookId: verified.id, type: event.type, reason: decided.reason },
           "a paid subscription could not be attributed to a tenant and was " +
-            "DISCARDED — no row of ours holds it, no checkout of ours created " +
+            "DISCARDED - no row of ours holds it, no checkout of ours created " +
             "it, and its customer carries no tenant id",
         )
       } else {

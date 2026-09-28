@@ -26,7 +26,7 @@ const mailboxRoute = (over: Partial<Parameters<typeof resolveMailboxRoute>[0]> =
 describe("transactional mail", () => {
   /**
    * ⚠ #155: EVERY PLAN GOES THROUGH SES, FREE INCLUDED. The plan is not even an
-   * input — a free sender direct would sit on the IP our human mailboxes share,
+   * input - a free sender direct would sit on the IP our human mailboxes share,
    * outside SES's per-tenant reputation, suppression and pause controls.
    */
   it("sends through SES by default", () => {
@@ -76,7 +76,7 @@ describe("reading the kill switch out of the environment", () => {
   /**
    * ⚠ THE REGRESSION: `SES_ENABLED=0` USED TO MEAN ENABLED. The parser was
    * `raw !== "false"`, so every conventional falsy spelling silently left SES
-   * on — on the one switch whose entire job is to be thrown mid-incident.
+   * on - on the one switch whose entire job is to be thrown mid-incident.
    */
   it("accepts the spellings an operator actually types", async () => {
     const { parseSesEnabled } = await import("../src/env.js")
@@ -99,14 +99,14 @@ describe("reading the kill switch out of the environment", () => {
  * ⚠ THE MAILBOX RULE EXISTS TWICE, AND THIS IS THE ONLY THING HOLDING THE TWO
  * TOGETHER. `resolveMailboxRoute` is the rule in TypeScript; `core.resolve_route`
  * is the one Stalwart actually evaluates, in Postgres, because mailbox mail is submitted straight into Stalwart's queue by a
- * person's mail client and no code of ours is in that path — the only way to ask
+ * person's mail client and no code of ours is in that path - the only way to ask
  * us is a query.
  *
  * Two implementations of one rule drift, and the drift is silent: the dashboard
  * renders `ses` while the mail goes direct, and nobody finds out until somebody
  * compares them by hand. So the table below is asserted here against the
  * TypeScript and, character for character, inside `0036_mailbox_lever.sql`
- * against the SQL — same order, same values, so the two read side by side in a
+ * against the SQL - same order, same values, so the two read side by side in a
  * diff. The migration's `ASSERT`s run on deploy, which means a wrong SQL rule
  * fails the deploy rather than misrouting mail.
  *
@@ -115,7 +115,7 @@ describe("reading the kill switch out of the environment", () => {
 describe("the mailbox rule, mirrored in SQL", () => {
   // ⚠ THE LAST COLUMN IS THE `DeliveryRoute` UNION, NOT `string`. bun types a
   // matcher against the value it received, so a widened `string` here stops the
-  // expectation being checked against the real return type — and a typo in an
+  // expectation being checked against the real return type - and a typo in an
   // expected value becomes a failing assertion instead of a compile error.
   const cases: [string, RouteOverride, string | null, boolean, DeliveryRoute][] = [
     // The kill switch beats everything, including an explicit override.

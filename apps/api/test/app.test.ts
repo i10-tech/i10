@@ -34,7 +34,7 @@ describe("api", () => {
 
 /**
  * ⚠ A THROW INSIDE A ROUTE DOES NOT CRASH THE PROCESS, so nothing in the SDK
- * sees it on its own — no uncaught-exception handler fires and, with tracing
+ * sees it on its own - no uncaught-exception handler fires and, with tracing
  * off, there is no HTTP instrumentation either. This hook is the entire path
  * from a failed request to an alert.
  */
@@ -67,7 +67,7 @@ describe("an unhandled route error", () => {
   /**
    * ⚠ THE LOG LINE IS THE ONE THAT SURVIVES A QUOTA, AND FOR A LONG TIME IT DID
    * NOT EXIST. This handler's own comment said "what went wrong is in the log
-   * and in Sentry" while writing nothing at all — so when Sentry stopped
+   * and in Sentry" while writing nothing at all - so when Sentry stopped
    * accepting events, every 500 in production became invisible. A customer
    * reported an error on a domain whose DNS was perfect, `kubectl logs` showed
    * nothing for the request, and the only way to find out what threw was to

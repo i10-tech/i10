@@ -22,7 +22,7 @@ import { useResetOnOpen } from "@/lib/react"
  * The word to type, and a one-click way to have it.
  *
  * ⚠ COPYABLE, WHICH SOUNDS LIKE IT DEFEATS THE POINT AND DOES NOT. The field
- * is there to make somebody READ which row they are on — the failure it
+ * is there to make somebody READ which row they are on - the failure it
  * prevents is deleting `acme.com` while looking at `mail.acme.dev`. It was
  * never a typing test, and a name long enough to mistype twice only teaches
  * people to resent the dialog. Paste and they have still had to look at the
@@ -30,7 +30,7 @@ import { useResetOnOpen } from "@/lib/react"
  *
  * ⚠ AND IT IS ITS OWN LINE ABOVE THE FIELD RATHER THAN THE FIELD'S HINT. That
  * row is `aria-live="polite"` and, when the hint is not reserved,
- * `pointer-events-none` — so a button in it would be unclickable on most
+ * `pointer-events-none` - so a button in it would be unclickable on most
  * fields and announced again on every change of validity on the rest.
  */
 function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void }) {
@@ -44,7 +44,7 @@ function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void })
         /*
          * ⚠ FOCUS GOES BACK TO THE BOX AFTER A COPY. The only reason to copy
          * the word is to paste it into the field below, and pressing this
-         * button had moved focus onto the button — so the paste went nowhere
+         * button had moved focus onto the button - so the paste went nowhere
          * until somebody clicked the field again.
          */
         onClick={() => {
@@ -54,7 +54,7 @@ function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void })
         /*
          * ⚠ AND WITH A POINTER, FOCUS NEVER LEAVES THE BOX AT ALL. Pressing a
          * button focuses it on mousedown, so the field blurred and was then
-         * refocused on click — a visible blip of the border. Refusing the
+         * refocused on click - a visible blip of the border. Refusing the
          * mousedown's focus keeps the field focused the whole way; a keyboard
          * press still lands on the button, and `onCopied` hands focus back.
          */
@@ -83,7 +83,7 @@ function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void })
  *
  * ⚠ THE ICON COLOUR HAS TO BE FORCED. `Kbd` paints its contents
  * `text-muted-foreground`, which is a grey chosen against the page, not
- * against a red or a near-black button — and `[&_svg]` rules inside `Button`
+ * against a red or a near-black button - and `[&_svg]` rules inside `Button`
  * reach the icons too.
  */
 const KBD_ON_BUTTON = {
@@ -107,7 +107,7 @@ const KBD_ON_BUTTON = {
  * of five similar rows. It is reserved for exactly that case.
  *
  * ⚠ AND `onConfirm` RETURNS A BOOLEAN RATHER THAN THROWING. A failed delete
- * must leave the dialog open with the error visible — closing it and firing a
+ * must leave the dialog open with the error visible - closing it and firing a
  * toast means the person believes the thing is gone when it is not, and the
  * list they return to still shows it.
  *
@@ -138,7 +138,7 @@ export function ConfirmDialog({
   description: string
   confirmLabel?: string
   /**
-   * What the button says once it worked — "Revoked", "Deleted". Past tense of
+   * What the button says once it worked - "Revoked", "Deleted". Past tense of
    * `confirmLabel`, shown for a beat before the dialog closes. See
    * lib/outcome.ts.
    */
@@ -146,13 +146,13 @@ export function ConfirmDialog({
   /** When set, the button stays disabled until this exact string is typed. */
   confirmWord?: string
   /**
-   * ⚠ FOR A DIALOG WHOSE CHILDREN HOLD A CHOICE THAT MUST BE MADE FIRST — a
+   * ⚠ FOR A DIALOG WHOSE CHILDREN HOLD A CHOICE THAT MUST BE MADE FIRST - a
    * destination, say. False keeps the button disabled whatever is typed.
    */
   ready?: boolean
   /**
    * The id of the field to put the caret in on open. `confirm-word` unless a
-   * dialog asks for something first — a recipient, say — that belongs above it.
+   * dialog asks for something first - a recipient, say - that belongs above it.
    */
   initialFocus?: string
   destructive?: boolean
@@ -175,7 +175,7 @@ export function ConfirmDialog({
   const pending = outcome.state === "pending"
 
   // ⚠ RESET ON OPEN, NOT ON CLOSE. Resetting on close races the exit animation
-  // — the field visibly empties while the dialog is still fading out, which
+  // - the field visibly empties while the dialog is still fading out, which
   // looks like the input being cleared out from under you. The tick on the
   // button is the same case.
   useResetOnOpen(open, () => {
@@ -204,7 +204,7 @@ export function ConfirmDialog({
         /*
          * ⚠ THE FIELD TAKES FOCUS, NOT WHATEVER HAPPENS TO BE FIRST. Radix
          * focuses the first tabbable element in the dialog, and since the word
-         * became copyable that is the copy chip — so the dialog opened with a
+         * became copyable that is the copy chip - so the dialog opened with a
          * focus ring around a button nobody has to press, and the field that
          * every one of these dialogs exists to have filled in was one Tab
          * away. Anything that changes the order of this markup would move the
@@ -219,7 +219,7 @@ export function ConfirmDialog({
            * here loses: Radix's focus scope mounts its trap immediately after
            * this event and pulls focus onto the content element, so the field
            * was focused for less than a frame and the dialog opened with the
-           * caret nowhere. Measured — `document.activeElement` was the
+           * caret nowhere. Measured - `document.activeElement` was the
            * `role="dialog"` div every time.
            */
           requestAnimationFrame(() => field.focus())
@@ -228,7 +228,7 @@ export function ConfirmDialog({
          * ⚠ ENTER IS BOUND ONCE, HERE, AND NOT ALSO ON THE FIELD. It was on
          * the field first; moving it up means a dialog with no `confirmWord`
          * has a keyboard route to its own primary action too, which it did
-         * not before. Binding it in BOTH places is the bug this replaced —
+         * not before. Binding it in BOTH places is the bug this replaced -
          * the field's handler fires, the event bubbles, and `confirm` runs
          * twice in one tick, before `pending` has re-rendered to stop the
          * second.
@@ -263,7 +263,7 @@ export function ConfirmDialog({
         {children}
 
         {/*
-         * ⚠ `space-y-5` — 20px, from 8. The line inside is a sentence ABOUT
+         * ⚠ `space-y-5` - 20px, from 8. The line inside is a sentence ABOUT
          * the field rather than its label, and the field now carries the name
          * as its own floating label, so the two were saying related things
          * eight pixels apart and reading as one block. 12px was tried first
@@ -276,7 +276,7 @@ export function ConfirmDialog({
              * ⚠ THE LABEL IS THE NAME ITSELF, NOT AN INSTRUCTION. The line
              * above already says what to do with it, and a field labelled
              * "Type mail.acme.dev to confirm" says it a second time in a
-             * smaller size — two sentences for one requirement. As the
+             * smaller size - two sentences for one requirement. As the
              * floating label it also does the work a placeholder would: the
              * word to match is in the empty field, and it rises out of the
              * way rather than vanishing the moment somebody starts typing,
@@ -344,12 +344,12 @@ export function ConfirmDialog({
              * invisible.
              *
              * ⚠ THE GLYPH IS A DRAWN ICON, NOT THE `↵` CHARACTER, which is
-             * typed at whatever weight and baseline the UI face gives it — in
+             * typed at whatever weight and baseline the UI face gives it - in
              * Geist it lands small and low.
              *
              * ⚠ AND IT IS `Redo2` TURNED HALF A TURN, WHICH IS NOT A BODGE.
-             * Lucide has no return-key glyph in the version we are on —
-             * `ArrowTurnDownLeft` arrived later — and `Redo2` upside down is
+             * Lucide has no return-key glyph in the version we are on -
+             * `ArrowTurnDownLeft` arrived later - and `Redo2` upside down is
              * exactly it: a curve that drops and turns back to the left.
              * `CornerDownLeft`, the usual stand-in, is drawn from straight
              * segments and reads as a corner rather than a key.

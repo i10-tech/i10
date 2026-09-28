@@ -35,7 +35,7 @@ export interface Mailbox {
  * Projects a Clerk user to a mailbox, or null when they should not have one.
  *
  * ⚠ THE HOSTED-DOMAIN FILTER IS A SAFETY GUARD, NOT A TIDINESS ONE. Most i10
- * users sign up with an address we do not host — a Gmail, a work address.
+ * users sign up with an address we do not host - a Gmail, a work address.
  * Projecting that address would put it in the directory, and Stalwart would
  * then accept inbound mail for `someone@gmail.com` as a LOCAL RECIPIENT:
  * silently swallowing mail addressed to a domain that is not ours. Only
@@ -65,7 +65,7 @@ export function projectUser(
 
   if (addresses.length === 0) return null
 
-  // Clerk's primary wins when it is hosted. Otherwise pick deterministically —
+  // Clerk's primary wins when it is hosted. Otherwise pick deterministically -
   // an arbitrary choice would make the mailbox address flap between webhook
   // deliveries, and that address is the user's identity.
   const sorted = [...addresses].sort((a, b) => a.address.localeCompare(b.address))
@@ -86,7 +86,7 @@ export function projectUser(
  *
  * There is no password-specific timestamp in Clerk's user object, so
  * `updated_at` is what authd serves to Stalwart as `pwdChangeTime`. It errs in
- * the safe direction — it moves on any profile change, invalidating cached
+ * the safe direction - it moves on any profile change, invalidating cached
  * tokens more often than strictly needed rather than less. It doubles as the
  * ordering guard for out-of-order webhook delivery.
  */

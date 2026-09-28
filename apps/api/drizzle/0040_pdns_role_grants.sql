@@ -2,7 +2,7 @@
 --
 -- ⚠ THIS IS THE MIGRATION 0023 PROMISED AND DEFERRED. That one created the
 -- `pdns` schema and wrote these five statements out in a comment, because
--- granting to a role nobody authenticated as would have bought nothing — and
+-- granting to a role nobody authenticated as would have bought nothing - and
 -- because `CREATE ROLE` is CNPG's job on this cluster, not a migration's. The
 -- role now exists: `platform-db/cluster.yaml` declares it under `managed.roles`
 -- with its password from Doppler, exactly as `stalwart`, `authd` and `i10_api`
@@ -10,11 +10,11 @@
 --
 -- ⚠ THE ORDER MATTERS ACROSS DEPLOYS, AND IT FAILS SAFE IN ONLY ONE DIRECTION.
 -- If this runs before CNPG has reconciled the role, every statement below fails
--- with `role "pdns" does not exist` and takes the whole PreSync hook with it —
+-- with `role "pdns" does not exist` and takes the whole PreSync hook with it -
 -- which is how 0023 originally took 0024 through 0028 down. The guard makes the
 -- migration a no-op in that case instead: the nameserver then starts, fails to
 -- authenticate, and crashloops visibly, which is a far cheaper failure than a
--- blocked migration chain. Re-running the migration is not needed — CNPG
+-- blocked migration chain. Re-running the migration is not needed - CNPG
 -- reconciles the role within a minute and the grants below are re-applied by
 -- the next deploy's PreSync.
 --

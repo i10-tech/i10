@@ -26,8 +26,8 @@ export { PROPERTY_KEY, parseContactCsv } from "./marketing/csv.js"
  *
  * ⚠ ONE INTERFACE, THREE MODULES, AND THE SEAM IS DELIBERATELY NOT AN
  * ABSTRACTION. `ConsoleDeps.marketing` is a single store because every route
- * that touches this data touches two halves of it — adding contacts to a
- * segment, counting a topic's subscribers, sending a broadcast to a segment —
+ * that touches this data touches two halves of it - adding contacts to a
+ * segment, counting a topic's subscribers, sending a broadcast to a segment -
  * and splitting the DEPENDENCY would mean four objects threaded through the
  * wiring to express a boundary that does not exist at runtime. What is split is
  * the SOURCE, because thirty-one methods in one file is a file nobody reads to

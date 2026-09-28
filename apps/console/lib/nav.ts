@@ -24,7 +24,7 @@ import {
  *
  * ⚠ ONE LIST, USED BY THREE THINGS: the sidebar, the mobile sheet and the
  * command menu. Three hand-written copies is how a page ends up reachable from
- * ⌘K and invisible in the sidebar — which is worse than it not existing,
+ * ⌘K and invisible in the sidebar - which is worse than it not existing,
  * because nobody will look for it.
  *
  * ⚠ AND `exact` IS NOT A STYLE PREFERENCE. Active state is a prefix match, so
@@ -153,8 +153,8 @@ export const NAV: NavGroup[] = [
      * ⚠ SETTINGS NEEDS A LINK IN THE SIDEBAR, AND FOR A WHILE IT HAD NONE AT
      * ALL. `SETTINGS_NAV` below has always described the settings pages, but
      * nothing rendered a route INTO them: not this list, not the workspace bar,
-     * not the mobile drawer. The only way to reach `/settings` — and therefore
-     * billing, the team, and the usage detail — was ⌘K, which is a shortcut
+     * not the mobile drawer. The only way to reach `/settings` - and therefore
+     * billing, the team, and the usage detail - was ⌘K, which is a shortcut
      * people learn after they have found a thing, not before. Billing in
      * particular was unreachable by clicking, so "there is nowhere to change my
      * plan" was literally true.
@@ -205,7 +205,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       /*
        * ⚠ ONE PAGE FOR PROFILE *AND* SECURITY, BECAUSE CLERK'S `<UserProfile />`
        * OWNS BOTH. Splitting them would mean rendering the same component twice
-       * with its internal navigation hidden and deep-linked by fragment — two
+       * with its internal navigation hidden and deep-linked by fragment - two
        * routes that are one component pretending to be two, and which drift the
        * moment Clerk adds a tab. Passkeys, MFA and sessions all live inside it.
        */
@@ -220,7 +220,7 @@ export const SETTINGS_NAV: NavGroup[] = [
  *
  * ⚠ DEDUPED BY `href`, BECAUSE `/settings` IS NOW IN BOTH LISTS. The sidebar
  * needs a door into settings and `SETTINGS_NAV` needs a "General" tab, and both
- * are the same route — so without this the command menu offers it twice, one
+ * are the same route - so without this the command menu offers it twice, one
  * line apart, labelled differently.
  */
 export function allDestinations(): NavItem[] {
@@ -237,7 +237,7 @@ export function allDestinations(): NavItem[] {
 /**
  * ⚠ A PREFIX MATCH EXCEPT WHERE `exact` SAYS OTHERWISE, AND THE `/` GUARD IS
  * WHAT STOPS `/emails` MATCHING `/emails-something`. Without it, adding a route
- * whose name starts with an existing one lights up the wrong sidebar item —
+ * whose name starts with an existing one lights up the wrong sidebar item -
  * which is exactly the kind of bug nobody reports and everybody notices.
  */
 export function isActive(pathname: string, item: NavItem): boolean {
@@ -252,7 +252,7 @@ export function isActive(pathname: string, item: NavItem): boolean {
  * ⚠ `/account` COUNTS, EVEN THOUGH IT IS NOT UNDER `/settings`. The profile and
  * appearance pages are listed in `SETTINGS_NAV` and reached from it, so a rail
  * that reverted to the console navigation on them would drop somebody out of
- * the section they were still in — with the links they had just been using
+ * the section they were still in - with the links they had just been using
  * gone from the screen.
  *
  * ⚠ AND IT MATCHES ON A SEGMENT BOUNDARY, for the same reason `isActive` does.

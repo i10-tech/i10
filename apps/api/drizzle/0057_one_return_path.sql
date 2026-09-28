@@ -1,7 +1,7 @@
 -- One return path for both routes.
 --
 -- ⚠ SES AND THE RELAY NOW WRITE THE SAME ENVELOPE SENDER, `<label>.<domain>`
--- (`mail_from_subdomain`, default `send`), and its SPF record authorises both —
+-- (`mail_from_subdomain`, default `send`), and its SPF record authorises both -
 -- see `returnPathDomain` in src/domains/zone.ts. The second label, with its MX
 -- pointed at us, existed only so late bounces for mail we delivered ourselves
 -- could come back; SES pins the return path's MX to Amazon, so the two could
@@ -18,13 +18,13 @@ ALTER TABLE "core"."domains" DROP COLUMN "bounce_subdomain";
 --
 -- ⚠ THE SHAPES CHANGED, SO THE MATCH HAD TO. 0052 recognised exactly
 -- `_domainkey.<d>`, `mail.<d>` and `_dmarc.<d>`. A delegated domain now
--- delegates its return path by its own name — `send.<d>`, or whatever label
--- the customer chose — so a fixed prefix list would never see the zone behind
+-- delegates its return path by its own name - `send.<d>`, or whatever label
+-- the customer chose - so a fixed prefix list would never see the zone behind
 -- a deleted domain with a custom label, and would keep matching a `mail.` shape
 -- nothing issues any more.
 --
 -- ⚠ EVERY SHAPE WE ISSUE IS ONE LABEL ON TOP OF THE DOMAIN, so stripping the
--- first label recovers `<d>` for all of them — the old `mail.<d>` included,
+-- first label recovers `<d>` for all of them - the old `mail.<d>` included,
 -- which is how zones left over from before this change still get found. The
 -- safety property is unchanged: a zone is reported only when NO workspace
 -- anywhere holds a domain row for the recovered name, and `pdns` holds nothing

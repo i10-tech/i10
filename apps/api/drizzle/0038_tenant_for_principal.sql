@@ -2,7 +2,7 @@
 --
 -- ⚠ THE SAME CHICKEN-AND-EGG 0011 AND 0032 DESCRIBE, ARRIVING FROM A THIRD
 -- DIRECTION. `core.tenants` is protected by `id = current_setting('app.tenant_id')`,
--- and the console's whole first request is "which tenant is this person's?" —
+-- and the console's whole first request is "which tenant is this person's?" -
 -- so the caller would have to know the answer to be allowed to ask. A definer
 -- function is the only shape that works, and it is held to the same rule as its
 -- four siblings: one narrow question, answered by the owner, returning the
@@ -10,7 +10,7 @@
 --
 -- ⚠ IT IS NOT AN AUTHORISATION CHECK AND MUST NEVER BE MISTAKEN FOR ONE. Both
 -- arguments come from a Clerk session that `clerk.authenticateRequest` has
--- already verified — Clerk is what proves the person is signed in and what
+-- already verified - Clerk is what proves the person is signed in and what
 -- proves the active organization is one they belong to. This function TRANSLATES
 -- a verified principal into our id for it. Passing it an org id from a request
 -- body would hand any signed-in person any tenant, which is why the only caller
@@ -19,8 +19,8 @@
 --
 -- ⚠ AND THE ORGANIZATION WINS WHEN ONE IS ACTIVE, WITH NO FALLBACK. Somebody
 -- who has switched to "Acme" in Clerk's switcher is asking about Acme's mail.
--- If Acme has no tenant row yet — a sign-up mid-flight, a webhook still in
--- Svix's retry queue — the honest answer is NULL, and the console provisions
+-- If Acme has no tenant row yet - a sign-up mid-flight, a webhook still in
+-- Svix's retry queue - the honest answer is NULL, and the console provisions
 -- and retries. Falling back to their personal tenant would quietly show them
 -- their own domains under Acme's name, and the first they would know of it is
 -- sending a customer's mail from the wrong account.
@@ -45,7 +45,7 @@ AS $$
            -- (see tenants/provision.ts), so this branch is the ordinary case for
            -- a solo developer whose session has never activated anything.
            -- Requiring ownership is what stops it from resolving to a TEAM
-           -- tenant somebody merely belongs to — membership is Clerk's to
+           -- tenant somebody merely belongs to - membership is Clerk's to
            -- assert, through `p_clerk_org_id`, and inferring it here would be a
            -- second and weaker implementation of a rule Clerk already enforces.
            ELSE t.owner_clerk_user_id = p_clerk_user_id
@@ -53,7 +53,7 @@ AS $$
    -- ⚠ OLDEST FIRST, WHICH RESOLVES THE ONE AMBIGUOUS CASE DETERMINISTICALLY.
    -- Somebody who created a team organization by hand owns two tenants and may
    -- have neither active. Their personal organization is the older row by
-   -- construction — it is made during sign-up — so this picks the account they
+   -- construction - it is made during sign-up - so this picks the account they
    -- would expect, and picks the SAME one on every request rather than
    -- whichever the planner happened to return first.
    ORDER BY t.created_at
@@ -64,8 +64,8 @@ $$;
 -- ON A NEW FUNCTION TO PUBLIC BY DEFAULT. This one is SECURITY DEFINER: it runs
 -- as its owner and answers "which tenant is this principal", which is exactly
 -- the lookup RLS exists to prevent anybody doing for themselves. Leaving the
--- default in place would mean every role in the database — including any future
--- read-only or analytics login — could call it. Same rule 0002 follows for
+-- default in place would mean every role in the database - including any future
+-- read-only or analytics login - could call it. Same rule 0002 follows for
 -- `sweep_stuck_messages`.
 REVOKE EXECUTE ON FUNCTION "core"."tenant_for_principal"(text, text) FROM PUBLIC;
 --> statement-breakpoint
@@ -74,7 +74,7 @@ GRANT EXECUTE ON FUNCTION "core"."tenant_for_principal"(text, text) TO i10_api;
 
 -- What the console shows on the overview, and why it is a definer too.
 --
--- ⚠ THIS ONE IS *NOT* CROSS-TENANT AND DOES NOT NEED TO BE — it exists for
+-- ⚠ THIS ONE IS *NOT* CROSS-TENANT AND DOES NOT NEED TO BE - it exists for
 -- speed, not for reach. Six aggregates over a partitioned table, each of which
 -- the ordinary policy would allow, issued as six round trips on the first
 -- screen a person sees. One function is one round trip, and it takes the tenant
@@ -135,7 +135,7 @@ AS $$
     FROM core.message_events me
     WHERE me.tenant_id = p_tenant_id
       -- ⚠ TRUNCATED TO MATCH THE SERIES ABOVE, WHICH IS THE WHOLE POINT. The
-      -- series starts at `date_trunc('day', p_from)` — midnight — while this
+      -- series starts at `date_trunc('day', p_from)` - midnight - while this
       -- filter used the raw `p_from`, which callers pass as "now minus N days"
       -- and is therefore mid-afternoon. The oldest bucket then counted only the
       -- part of that day after the current time of day and rendered as a dip at

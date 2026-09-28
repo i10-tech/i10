@@ -1,6 +1,6 @@
 ---
 /**
- * DocsLayout — three-column docs layout.
+ * DocsLayout - three-column docs layout.
  *
  * Named slots for overrides (all optional, defaults render otherwise):
  *   header, sidebar, toc, page-title, content-footer, pagination
@@ -30,7 +30,7 @@ const isCustom = mode === "custom";
 
 // `sidebar: false` / `tableOfContents: false` in frontmatter come through
 // from the route as literal `false` (not coerced to `[]`). They drive
-// per-column suppression — chrome, mobile dialog, header menu button.
+// per-column suppression - chrome, mobile dialog, header menu button.
 const showSidebar = sidebar !== false;
 
 // Versioning: per-page status drives Pagefind faceting, deprecation
@@ -99,7 +99,7 @@ const hasPagination = Astro.slots.has("pagination");
             </aside>
           )}
 
-          {/* Sidebar state restore — pre-sets data attributes before the
+          {/* Sidebar state restore - pre-sets data attributes before the
               disclosure module loads so collapsed/scrolled state survives nav.
               The `aria-hidden` attribute keeps Astro from bundling this as a
               deferred module: it MUST stay inline to run before the disclosure
@@ -261,7 +261,7 @@ const hasPagination = Astro.slots.has("pagination");
   </div>
 
   {showSidebar && (
-    /* Mobile sidebar — native <dialog> for free focus trap, escape, backdrop. */
+    /* Mobile sidebar - native <dialog> for free focus trap, escape, backdrop. */
     <dialog
       data-mobile-sidebar
       data-state="closed"

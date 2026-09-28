@@ -5,8 +5,8 @@ through SES on every plan, free included; the plan now decides only the
 **mailbox** route. See "Free transactional mail moved to SES" below.
 
 i10 sends mail two ways and they are not the same product. Transactional mail
-goes out through the SES **API**, from `apps/api`. Human mail — the mailboxes
-Stalwart serves — goes out through Stalwart's own queue, and this document is
+goes out through the SES **API**, from `apps/api`. Human mail - the mailboxes
+Stalwart serves - goes out through Stalwart's own queue, and this document is
 about which MTA that queue hands a message to.
 
 ---
@@ -15,7 +15,7 @@ about which MTA that queue hands a message to.
 
 **The customer publishes one set of records, once. We decide the route.**
 
-Not "the customer picks a plan and gets a matching record set" — that makes a
+Not "the customer picks a plan and gets a matching record set" - that makes a
 plan change a DNS change, which is a support conversation and a window in which
 nothing verifies. The records are fixed at domain creation and the routing
 decision moves underneath them, per message.
@@ -46,7 +46,7 @@ signature, both routes, one record.
 
 ⚠ **The private key is sealed with `WEBHOOK_SECRET_KEY` before it reaches a
 row.** `core.domains` already said a backup, a replica or a read-only analytics
-grant must never be enough to sign as a customer's domain — sealing is what
+grant must never be enough to sign as a customer's domain - sealing is what
 makes that true. It is never returned by the API, for the same reason a webhook
 signing secret is not.
 
@@ -82,7 +82,7 @@ send.<domain>    TXT   v=spf1 include:_spf.i10.tech ~all
 
 ⚠ **An `ip4:` would pin our infrastructure into records we cannot edit.**
 Changing a relay, adding a second, or moving provider would mean asking every
-customer to re-publish — and the ones who did not would start failing SPF with
+customer to re-publish - and the ones who did not would start failing SPF with
 nothing to tell them why. Behind an include it is one record we own.
 
 ⚠ **A dedicated subdomain, not the apex.** SPF allows ten DNS lookups per
@@ -94,24 +94,24 @@ connected to customer deliverability. `MAIL_SPF_INCLUDE` is the variable.
 ### One return path
 
 **Decided 2026-09-26, replacing "Custom MAIL FROM stays" (2026-09-14).** SES
-and the relay write the same envelope sender, `<label>.<domain>` — the
+and the relay write the same envelope sender, `<label>.<domain>` - the
 `mail_from_subdomain` column, default `send`, Resend's `custom_return_path`.
 Every reader derives it from `returnPathDomain` in `src/domains/zone.ts`: the
 records we tell customers to publish, the zone we serve for a delegated domain,
 the MAIL FROM registered with SES, and the envelope the worker writes.
 
 ⚠ **WHY THERE WERE TWO.** A name has one MX, and SES requires its own feedback
-host there — it re-checks, and on a mismatch silently falls back to its own
+host there - it re-checks, and on a mismatch silently falls back to its own
 return path, which keeps sending and loses SPF alignment. So the direct route
 had its own name, `bounce.<domain>`, with the MX pointed at us, so that bounces
 mailed back later for messages we delivered ourselves would reach Stalwart.
 
 ⚠ **WHY THERE IS ONE NOW.** Those late bounces were never read: nothing
 accepts inbound mail for a customer's return path, and the delivery events we
-do act on — in-session rejections, delivery, our own final failures — come from
+do act on - in-session rejections, delivery, our own final failures - come from
 Stalwart's webhook, not from DSN mail. Against that, the second name cost two
 records per customer and, for delegated domains, a `mail.` container whose
-return paths sat at `bounce.mail.<domain>` — while the worker wrote
+return paths sat at `bounce.mail.<domain>` - while the worker wrote
 `bounce.<domain>`. Every direct send arrived `SPF: none` until 2026-09-26.
 
 ⚠ **THE PRICE, STATED SO NOBODY RE-DERIVES IT.** A receiver that accepts a
@@ -122,10 +122,10 @@ means a second return path again, with the naming bug it invited.
 ⚠ **DMARC STILL PASSES ON SPF _and_ DKIM ON BOTH ROUTES.** One include
 authorises both senders; BYODKIM aligns on the customer's domain either way.
 
-⚠ **AND THE ENVELOPE SENDER IS VERP, NOT A BARE ADDRESS** —
+⚠ **AND THE ENVELOPE SENDER IS VERP, NOT A BARE ADDRESS** -
 `bounce+<messageId>@send.<domain>`. Stalwart's delivery events carry the
 envelope, so attributing one to a message is a parse rather than a heuristic
-over `Message-ID` headers that intermediate MTAs are free to mangle — and the
+over `Message-ID` headers that intermediate MTAs are free to mangle - and the
 relay admits only a `bounce+` local part.
 
 ---
@@ -134,22 +134,22 @@ relay admits only a `bounce+` local part.
 
 Verified against `stalwartlabs/stalwart` v0.16, 2026-09-05.
 
-- A routing strategy is `Mx` (direct), `Relay` (a smart host — SES SMTP) or
+- A routing strategy is `Mx` (direct), `Relay` (a smart host - SES SMTP) or
   `Local`. `crates/common/src/config/smtp/queue.rs`.
 - `MtaOutboundStrategy.route` is an **expression evaluated per recipient**, not
-  a constant — `crates/smtp/src/outbound/delivery.rs:241`.
+  a constant - `crates/smtp/src/outbound/delivery.rs:241`.
 - It sees `Sender` and `SenderDomain`. `crates/smtp/src/queue/mod.rs:325`.
 - Expressions can call `key_get`, `sql_query`, `dns_query` and `counter_get`
-  (`crates/common/src/expr/functions/mod.rs`), and the route is awaited — so
+  (`crates/common/src/expr/functions/mod.rs`), and the route is awaited - so
   **async lookups work there**.
 
 ⚠ **Which means the tier is a live lookup, not a config push.** The expression
-asks a `SECURITY DEFINER` function — the same pattern as every other
-cross-tenant question in this repo — and a plan change takes effect on the next
+asks a `SECURITY DEFINER` function - the same pattern as every other
+cross-tenant question in this repo - and a plan change takes effect on the next
 message rather than on the next deploy.
 
 ⚠ **Relay over SMTP for mailbox mail; the API stays for transactional.**
-Stalwart's outbound is SMTP only — there is no HTTP hook — so using the SES API
+Stalwart's outbound is SMTP only - there is no HTTP hook - so using the SES API
 for mailbox mail would mean taking messages out of Stalwart's queue and
 rebuilding queueing, retries and DSN generation that it already does properly.
 
@@ -168,8 +168,8 @@ send.example.com.        NS  <claim>.ns1.i10.tech.  <claim>.ns2.i10.tech.
 _dmarc.example.com.      NS  <claim>.ns1.i10.tech.  <claim>.ns2.i10.tech.
 ```
 
-We then serve every record that matters and can change any of them — rotate a
-DKIM key, move a return path, flip a domain between SES and direct — with no
+We then serve every record that matters and can change any of them - rotate a
+DKIM key, move a return path, flip a domain between SES and direct - with no
 customer action at all.
 
 ⚠ **THREE SUBDOMAINS, NEVER THE APEX.** Taking the whole zone would make i10
@@ -178,7 +178,7 @@ verification record: a bad day for our nameserver takes their marketing site
 down, not just their mail. It also asks a company to hand its most load-bearing
 infrastructure to a mail vendor, which established ones decline.
 
-⚠ **THE RETURN PATH IS DELEGATED BY ITS OWN NAME** — `send.example.com`,
+⚠ **THE RETURN PATH IS DELEGATED BY ITS OWN NAME** - `send.example.com`,
 the same name a manual domain publishes. Until 2026-09-26 both return paths
 sat under a `mail.` container (`send.mail.` and `bounce.mail.`), which made the
 delegated name differ from the manual one; that difference is exactly how the
@@ -192,7 +192,7 @@ The zone is **rows we write**, not an API we call: `pdns.domains` and
 ⚠ **A SCHEMA, NOT A SEPARATE DATABASE LIKE STALWART'S.** Creating a domain and
 publishing its zone have to succeed or fail together, and Postgres cannot span
 two databases in one transaction. The trade is that a PowerDNS upgrade may want
-columns we did not write — their schema is stable and they publish the ALTERs,
+columns we did not write - their schema is stable and they publish the ALTERs,
 so that is a migration to write rather than a surprise.
 
 ⚠ **THE `pdns` ROLE REACHES NOTHING BUT ITS OWN SCHEMA.** It is the one process
@@ -208,21 +208,21 @@ go to **their** nameservers; we are never consulted and cannot answer. Creating
 `app.example.com` on a customer's behalf is not something delegation makes
 possible.
 
-What it does grant is everything under the delegated names — we could serve
+What it does grant is everything under the delegated names - we could serve
 `anything.send.example.com`. That is inherent to NS delegation: the subtree is
 the smallest unit DNS has. Anything narrower means them keeping control and
 handing us an API credential to their whole zone instead, which is a strictly
 worse trust trade.
 
 ⚠ **TWO OF THE THREE NAMES CANNOT HOST ANYTHING.** `_domainkey` and `_dmarc` are
-underscore-prefixed, which RFC 1123 excludes from hostnames — no browser
+underscore-prefixed, which RFC 1123 excludes from hostnames - no browser
 resolves them, no public CA issues for them. Only `mail.` is an ordinary label,
 and it has to be: SMTP envelope domains must be valid hostnames, so the return
 paths cannot hide behind an underscore.
 
 **A narrower mode is available if that residual still matters:** delegate
 `_domainkey` and `_dmarc` only, and leave the return paths as manual records.
-DKIM rotation — the thing that actually needs to change without asking — stays
+DKIM rotation - the thing that actually needs to change without asking - stays
 ours, and the delegated surface becomes names that cannot serve a website at
 all. The cost is four manual records instead of zero.
 
@@ -232,42 +232,42 @@ Verified against their docs, 2026-09-05.
 
 | feature                                                          | plan required                                         |
 | ---------------------------------------------------------------- | ----------------------------------------------------- |
-| **Subdomain setup** (hosting `mail.example.com` as its own zone) | **Enterprise only** — Free, Pro and Business all "No" |
+| **Subdomain setup** (hosting `mail.example.com` as its own zone) | **Enterprise only** - Free, Pro and Business all "No" |
 | Zone custom nameservers                                          | Business or Enterprise                                |
 | Account custom nameservers                                       | Business (via support) or Enterprise                  |
 
 ⚠ **AND THE BLOCKER IS NOT THE BRANDING.** Accepting Cloudflare-branded
-nameservers removes the custom-nameserver requirement entirely — but subdomain
+nameservers removes the custom-nameserver requirement entirely - but subdomain
 zones are a separate Enterprise feature, and that is what this design needs.
 Zone custom nameservers would not help either: their names must be subdomains
 of the zone itself, so they would be `ns1.<customer>.com`, never `ns1.i10.tech`.
 
 **Route 53 hosts a subdomain zone natively on no particular tier**, at $0.50 per
-hosted zone per month plus queries — trivial at ten customers, $500/month at a
+hosted zone per month plus queries - trivial at ten customers, $500/month at a
 thousand. That is the realistic first move off the box.
 
 ### ⚠ One machine is the real cost, and it is not hypothetical
 
 A customer publishing records in their own provider keeps resolving whatever
-happens to us. **A delegating customer stops resolving at all** — no DKIM, no
-SPF, no return path — and their mail fails while their domain looks fine.
+happens to us. **A delegating customer stops resolving at all** - no DKIM, no
+SPF, no return path - and their mail fails while their domain looks fine.
 Listing two nameserver names that point at one box buys the appearance of
 redundancy, not the fact of it.
 
-That is the reason to move this to **Cloudflare** (preferred — their anycast and
+That is the reason to move this to **Cloudflare** (preferred - their anycast and
 edge are the point) or Route 53, not a reason the current shape is fine. The
 port is `DnsZones`; the zone contents do not change with the provider.
 
 ⚠ **AND THE SOA SERIAL IS A CONSTANT TODAY.** That is safe only because nothing
-transfers these zones. The moment a secondary exists — which is how this stops
-being a single point of failure — it has to increase on every write.
+transfers these zones. The moment a secondary exists - which is how this stops
+being a single point of failure - it has to increase on every write.
 
 ---
 
 ## Open
 
 - [x] **The mailbox lever. Built 2026-09-17.** `core.mailbox_route(sender_domain)`
-      (0036) returns the name of a Stalwart route — `mx` or `ses-relay` — and
+      (0036) returns the name of a Stalwart route - `mx` or `ses-relay` - and
       `MtaOutboundStrategy.route` calls it with
       `sql_query('i10', 'SELECT core.mailbox_route($1)', [sender_domain])`. The
       expression is evaluated per recipient and awaited, so the tier is a live
@@ -278,7 +278,7 @@ being a single point of failure — it has to increase on every write.
       owns the message; mailbox mail is submitted straight into Stalwart's queue
       by a person's mail client, so the only place left to decide is Stalwart and
       the only way to ask us is a query. `core.resolve_route` mirrors
-      `resolveRoute`, and the case table is asserted in BOTH — `ASSERT`s in the
+      `resolveRoute`, and the case table is asserted in BOTH - `ASSERT`s in the
       migration, which fail the DEPLOY if the SQL is wrong, and the identical
       table in test/domains-route.test.ts. Same order, same values, so they read
       side by side in a diff.
@@ -286,14 +286,14 @@ being a single point of failure — it has to increase on every write.
       THE TRAP.** `QueueEnvelope::resolve_variable` maps it to
       `return_path.domain_part()`. This expression sees EVERY message in the
       queue including our own transactional sends, whose envelope is
-      `send.<domain>` — so without a guard it could re-route a direct-routed
+      `send.<domain>` - so without a guard it could re-route a direct-routed
       message onto SES, silently moving it off the route its plan chose. The
       `hosts_mailboxes` join is the guard: a return-path subdomain matches no
       row, a send-only domain is not a mailbox domain, and both answer `mx`.
       ⚠ **TWO SWITCHES, NOT ONE.** The transactional route uses the SES API;
       mailbox mail can only use SES SMTP, because Stalwart's outbound has no HTTP
       hook. Different credentials, independently available, so
-      `SES_RELAY_ENABLED` is separate from `SES_ENABLED` — and it defaults OFF,
+      `SES_RELAY_ENABLED` is separate from `SES_ENABLED` - and it defaults OFF,
       where `SES_ENABLED` defaults on. Shipping this migration moves no mail.
       ⚠ **AND THE RULE'S OTHER TWO INPUTS ARE ENVIRONMENT VARIABLES A FUNCTION IN
       POSTGRES CANNOT SEE.** `core.routing_settings` is a one-row projection the
@@ -305,7 +305,7 @@ being a single point of failure — it has to increase on every write.
       missing environment variable is a plan that may not apply. Paste-ready
       block and the exact order of operations are in
       `infra/k8s/i10/stalwart/config/README.md`.
-      ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX**, logging `Smtp(IdNotFound)` —
+      ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX**, logging `Smtp(IdNotFound)` -
       `get_route_or_default` in crates/common/src/network/mta.rs. So the failure
       mode of shipping the lever early is mail leaving the way it does today.
 - [x] ~~**`resolveRoute`'s comment and its code disagree, and the code wins.**~~
@@ -323,7 +323,7 @@ being a single point of failure — it has to increase on every write.
       ⚠ **THE ROUTE IS PER CLASS, NOT PER DOMAIN, AND ONE COLUMN COULD NOT SAY
       SO.** `delivery_route` was a single value, so it could not express a
       customer whose humans send through our MTA while their API traffic goes
-      through SES — which is the control this was built for. Split into
+      through SES - which is the control this was built for. Split into
       `transactional_route` and `mailbox_route`, each read by a different
       reader, neither entitled to a different answer for its own class.
       ⚠ **AND METERING NEEDED NOTHING.** `handleBatch` bills on the `sent`
@@ -332,11 +332,11 @@ being a single point of failure — it has to increase on every write.
       billed by seats and storage and is not a send at all.
 - [x] ~~DKIM on the direct route.~~ **Decided 2026-09-14: the transport signs,
       not Stalwart.** `dkim_private_key_sealed` was written at domain creation
-      and read by NOTHING — uploaded to SES as BYODKIM and thereafter inert. On
+      and read by NOTHING - uploaded to SES as BYODKIM and thereafter inert. On
       the direct route nothing would have signed at all.
       ⚠ **UNSIGNED IS NOT A DELIVERABILITY NIT HERE, IT IS A DMARC FAILURE.**
       Both routes now align on SPF as well, so this is no longer load-bearing
-      alone — but it was the whole of DMARC on the direct route for as long as
+      alone - but it was the whole of DMARC on the direct route for as long as
       the return path was ours.
       ⚠ **THE WORKER SIGNS BEFORE SUBMISSION** so Stalwart needs no per-domain
       key and no config push per customer, and the key stays where
@@ -346,14 +346,14 @@ being a single point of failure — it has to increase on every write.
       ⚠ **THE LIBRARY IS upyo AS OF 2026-09-17, AFTER mailauth AND THEN
       nodemailer.** mailauth cost 1.4 MB and ten transitive dependencies for one
       function out of a full SPF/DKIM/DMARC/ARC/BIMI suite, and its types
-      disagreed with its runtime — passing the options the way `DKIMSignOptions`
+      disagreed with its runtime - passing the options the way `DKIMSignOptions`
       demanded returned `{ signatures: "\r\n", errors: [] }`, no signature and
       no error, and the message went out unsigned. nodemailer replaced it and was
       correct, but it fails a constraint that is not negotiable: it needs
       `node:net` and `node:crypto`, so it can never run in a Worker.
       ⚠ **upyo SIGNS WITH WEB CRYPTO, WHICH IS THE WHOLE REASON.** Only its
-      `smtp` package imports `node:` at all — `core`, `mime`, `jmap`, `ses` and
-      the rest are edge-safe — so the signer, the SES route and a future JMAP
+      `smtp` package imports `node:` at all - `core`, `mime`, `jmap`, `ses` and
+      the rest are edge-safe - so the signer, the SES route and a future JMAP
       transport all run wherever `fetch` does. Stalwart implements JMAP
       `EmailSubmission/set` natively, so the direct route has a path off sockets
       entirely when sending moves to Workers.
@@ -365,27 +365,27 @@ being a single point of failure — it has to increase on every write.
       ⚠ **THE SIGNER IS `@upyo/mime/internal`, A DECLARED SUBPATH WITH A WEAKER
       PROMISE THAN THE ROOT.** The package documents it as "additively
       compatible within a minor release line", so `@upyo/mime` is PINNED EXACTLY
-      rather than carried on a caret — a minor bump is the one thing allowed to
+      rather than carried on a caret - a minor bump is the one thing allowed to
       move this surface. The root API is not an option: `composeMessage` signs a
       message it builds itself, and we need the signature over the bytes
       `buildRawMessage` already produced, because the SES route sends those same
       bytes. Composing twice is how a route lever stops being invisible.
       ⚠ **VERIFIED AGAINST AN INDEPENDENT VERIFIER, NOT AGAINST ITSELF.**
-      Seventeen message shapes — plain, `multipart/alternative`,
+      Seventeen message shapes - plain, `multipart/alternative`,
       `multipart/mixed`, unicode subjects and bodies, emoji, 50 recipients,
-      custom headers, attachments with non-ASCII and apostrophed filenames — were
+      custom headers, attachments with non-ASCII and apostrophed filenames - were
       signed and then checked with mailauth's verifier, plus one full SMTP round
       trip against a local server. All `pass`. A signer tested only by its own
       library is a signer tested by nobody.
 - [x] **Two latent composer bugs, found because upyo validates the bytes.**
       `sendRaw` is handed the message with no `encoding`, which makes upyo read
-      it once to classify it — and that pass enforces CRLF endings, the
+      it once to classify it - and that pass enforces CRLF endings, the
       998-octet line limit and the absence of NUL. It immediately refused two
       messages the SES route had been accepting.
       ⚠ **`To:` WAS NEVER FOLDED, AND THE CONTRACT ALLOWS 50 ADDRESSES OF 320
       CHARACTERS.** That is sixteen kilobytes on ONE LINE, against RFC 5322's
       998-octet hard limit. SES took those messages and did whatever it does;
-      the direct route refuses them outright — so the same send worked or failed
+      the direct route refuses them outright - so the same send worked or failed
       depending on the route, which is precisely the difference this design
       exists to prevent. `mime.ts` now folds address lists between addresses,
       unstructured headers at whitespace, and splits over-long RFC 2047
@@ -396,14 +396,14 @@ being a single point of failure — it has to increase on every write.
       `Content-Disposition`. Headers are ASCII; upyo classified such a message
       as needing SMTPUTF8 and would refuse it to a server without that
       capability. Now RFC 2047 for the deprecated `name=` and RFC 2231
-      (`filename*=UTF-8''…`) for `Content-Disposition` — with `'`, `(`, `)` and
+      (`filename*=UTF-8''…`) for `Content-Disposition` - with `'`, `(`, `)` and
       `*` percent-escaped, since `encodeURIComponent` leaves all four and the
       first two are the delimiters of the syntax itself. An ASCII filename is
       untouched, byte for byte.
       ⚠ **THE ENVELOPE ALSO NEEDED UNWRAPPING, WHICH nodemailer DID FOR US.**
       `RCPT TO` takes a bare addr-spec; `Bob <bob@x.test>` parses as a local part
       of `Bob <bob` and is invalid. Every send with a display name in `to` was
-      relying on behaviour the new client does not have — `addressOf` in
+      relying on behaviour the new client does not have - `addressOf` in
       send/address.ts is now the one place that strips it, and an unparseable
       recipient REJECTS the message rather than being quietly dropped from the
       envelope and reported as sent.
@@ -415,25 +415,25 @@ being a single point of failure — it has to increase on every write.
       carry a verdict about this message.
       ⚠ **AND `receipt.retryable` IS NOT TRUSTED.** upyo sets it from a
       structured classification when it recognises the failure and from
-      SUBSTRING MATCHING ON THE ERROR TEXT when it does not — a fallback that
+      SUBSTRING MATCHING ON THE ERROR TEXT when it does not - a fallback that
       ends `{ category: "unknown", retryable: false }`. Taken at face value, an
       expired certificate ("unable to verify the first certificate" matches
       nothing) would be permanent and would destroy every message in the queue.
       The `smtp.` prefix is the discriminator: upyo emits it only from branches
       where it recognised a specific condition, and its guessing fallback
-      produces bare codes. Our rule is unchanged — an error we cannot read is
+      produces bare codes. Our rule is unchanged - an error we cannot read is
       temporary.
 - [x] ~~Automatic failover when SES is unhealthy.~~ **Rejected 2026-09-14 in
       favour of an operator kill switch** (`SES_ENABLED`, an input to
       `resolveRoute`). `Transport` already absorbs a bad SES day: a throttle or
       a 500 returns `deferred` and the message goes back on the queue. A health
       probe only helps in a sustained outage, and it would make the route
-      time-varying — so the dashboard, the API and Stalwart could disagree about
+      time-varying - so the dashboard, the API and Stalwart could disagree about
       one domain at one moment, which is exactly what `route.ts` exists to
       prevent. It would also move a paying customer onto our IP reputation with
       no human deciding to.
 - [ ] The `pdns` ROLE ITSELF, WHICH 0023 NO LONGER CREATES. `CREATE ROLE` needs
-      CREATEROLE and the migration connects as `i10`, which does not have it —
+      CREATEROLE and the migration connects as `i10`, which does not have it -
       so 0023 failed on its first real run and blocked 0024-0028 behind the
       PreSync hook. Roles are CNPG's job here (`platform-db/cluster.yaml`,
       `managed.roles`), so the role, its Doppler config and its password secret
@@ -441,23 +441,23 @@ being a single point of failure — it has to increase on every write.
       lists in a comment instead of applying.
 - [ ] The PowerDNS deployment: a manifest, the `pdns` role's password, and the
       glue records for `ns1`/`ns2` at the registrar. ⚠ **None of this exists
-      yet** — the zones are written and nothing serves them.
+      yet** - the zones are written and nothing serves them.
 - [ ] Moving zones off the box. ⚠ **Cloudflare is not the answer for this, and
-      it is verified rather than suspected** — see below.
+      it is verified rather than suspected** - see below.
 - [x] ~~`_spf.i10.tech` does not resolve.~~ **Applied and verified
       2026-09-17.** `dig TXT _spf.i10.tech` answers
       `v=spf1 include:amazonses.com a:mail.i10.tech -all`, and
-      `mail.i10.tech` resolves to an unproxied address — which is the whole
+      `mail.i10.tech` resolves to an unproxied address - which is the whole
       point of the `a:` mechanism, since a Cloudflare-proxied name would
       authorise their anycast range to send as every customer.
       ⚠ **THIS WAS THE RELEASE GATE ON THE DIRECT ROUTE.** Until it applied,
       every `bounce.<domain>` TXT included a domain that did not exist, which is
-      an SPF **permerror** — strictly worse than publishing nothing.
+      an SPF **permerror** - strictly worse than publishing nothing.
 - [x] ~~Ingesting direct-route DSNs into `core.message_events`.~~ **Done
       2026-09-17, and NOT by parsing DSNs.** Stalwart pushes its own delivery
       outcomes to `/webhooks/stalwart`, signed HMAC-SHA256 over the raw body in
       `X-Signature`. It is the process attempting delivery, so it knows the
-      answer before any DSN could be written — and it reports `delivered`, which
+      answer before any DSN could be written - and it reports `delivered`, which
       a DSN never does unless success notification was requested. The alternative
       needed an MX for every customer's `bounce.<domain>`, Stalwart configured to
       accept those domains, a mailbox to read and an RFC 3464
@@ -468,21 +468,21 @@ being a single point of failure — it has to increase on every write.
       set on `delivery.attempt-start`, which opens the span. Stalwart's collector
       attaches the open span to every event sharing its id and the webhook
       serializer is built `.with_spans()`, so the span's keys merge into `data`.
-      Read out of the source rather than assumed — the alternative, correlating
+      Read out of the source rather than assumed - the alternative, correlating
       outcomes to an earlier `attempt-start` by `queueId`, needs state we would
       have to keep and expire ourselves.
       ⚠ **STALWART'S OWN EVENT `id` IS NOT A DEDUPE KEY, AND USING IT WOULD HAVE
       BEEN THE BUG.** It is `{timestamp}{counter}{typeId}` where the counter is a
       process-global atomic incremented AT SERIALISATION TIME. A failed POST puts
       the same events back on the pending list and the next batch serialises them
-      again with fresh values — so the "unique identifier" differs on every
+      again with fresh values - so the "unique identifier" differs on every
       redelivery, and keying `(source_event_id, occurred_at)` on it would turn
       each retry into a second `email.bounced`, a second suppression and a second
       customer webhook. `sourceEventIdFor` derives a stable key from type,
       timestamp, queue id and recipient, namespaced `stalwart_` so it cannot
       collide with an SNS message id in the same column.
       ⚠ **AND THAT DEDUPE IS A SECURITY CONTROL HERE, NOT TIDINESS.** Stalwart's
-      signature covers the body and nothing else — no timestamp, no nonce — so a
+      signature covers the body and nothing else - no timestamp, no nonce - so a
       captured request is replayable forever.
       ⚠ **ONE SUPPRESSION PATH, AND ONLY ON A 5xx REFUSAL OF THE RECIPIENT.**
       `delivery.failed` is the retry window expiring (the receiver was down,
@@ -492,13 +492,13 @@ being a single point of failure — it has to increase on every write.
       different vocabulary.
       ⚠ **BOTH ROUTES WRITE THROUGH ONE `ingestEvent`.** The dedupe, the
       suppression write, the endpoint fan-out and the customer payload shape are
-      one implementation rather than two that agree today — a customer must not
+      one implementation rather than two that agree today - a customer must not
       be able to tell from a webhook which MTA carried their message.
 - [ ] **Asynchronous bounces on the direct route.** A receiver that answers `250`
       and only later decides the mailbox is gone sends a DSN to the envelope
       sender, and we accept no inbound mail for customer `bounce.` domains. Those
       bounces are invisible. This is the half the VERP envelope was originally
-      built for and it is still open — it needs the MX, the accepted domains, a
+      built for and it is still open - it needs the MX, the accepted domains, a
       mailbox and a `multipart/report` parser.
 - [ ] **Complaints on the direct route.** Feedback loops arrive as ARF reports by
       mail, not as delivery outcomes. SES subscribes to them on our behalf; our
@@ -507,8 +507,8 @@ being a single point of failure — it has to increase on every write.
       above, plus FBL enrolment per sending IP.
 - [x] ~~The NetworkPolicy does not admit the API pods on 587.~~ **It never
       needed to. Disproved 2026-09-17.** NetworkPolicies are ADDITIVE, and
-      `i10-prod` carries `allow-same-namespace` — `podSelector: {}` with
-      `from: namespaceSelector(i10-prod)` — which admits every pod in the
+      `i10-prod` carries `allow-same-namespace` - `podSelector: {}` with
+      `from: namespaceSelector(i10-prod)` - which admits every pod in the
       namespace to every other pod on EVERY port. `allow-public-mail` governs
       only what the INTERNET may reach, because it has no `from` at all.
       Confirmed by probing from a throwaway pod in the namespace: EHLO answered,
@@ -516,21 +516,21 @@ being a single point of failure — it has to increase on every write.
 - [x] ~~The worker dials 587.~~ **Wrong port, fixed 2026-09-17.** The real
       blocker was never the policy: **Stalwart has no 587 listener.** Its
       `NetworkListener` set is `smtp` on 25, `submissions` on 465, plus IMAP,
-      POP3, ManageSieve and HTTP — `ss -ltn` in the pod agrees. A worker pointed
+      POP3, ManageSieve and HTTP - `ss -ltn` in the pod agrees. A worker pointed
       at 587 gets no connection at all.
       ⚠ **AND 465 IS THE BETTER PORT, NOT A WORKAROUND.** It is implicit TLS
       from the first byte; 587 is cleartext until STARTTLS succeeds. RFC 8314 §3
       prefers the former precisely because there is no plaintext phase to strip,
       so there is no reason to add a listener. `STALWART_SUBMISSION_PORT` now
       defaults to 465 and `submissionConfig` derives the TLS mode from it.
-      _(Superseded 2026-09-26: the worker now uses the `relay` listener on 2525
-      — `STALWART_RELAY_PORT`, `relayConfig`.)_
+      _(Superseded 2026-09-26: the worker now uses the `relay` listener on 2525 -
+      `STALWART_RELAY_PORT`, `relayConfig`.)_
       ⚠ **THE OLD DEFAULT WAS 587, WHICH MEANS THE DEFAULT WAS UNUSABLE.** A
       deployment that set the host, user and password and trusted the rest would
-      have had every direct send refused at the socket — `deferred`, in the
+      have had every direct send refused at the socket - `deferred`, in the
       queue, behind an ECONNREFUSED nobody reads.
 - [x] ~~The submission account's password.~~ **Superseded 2026-09-26 by the
-      internal relay — the account could never have authenticated.** Stalwart
+      internal relay - the account could never have authenticated.** Stalwart
       refuses to hold a password for ANY account while authd is the directory
       (`Cannot set credentials for accounts in an external directory`), and
       authd answers binds only for Clerk users and its one service DN. The
@@ -540,29 +540,29 @@ being a single point of failure — it has to increase on every write.
       `MtaStageAuth.mustMatchSender` is `true`, so even an authenticated
       `submission@i10.tech` could not have sent as `bounce+…@bounce.<customer>`.
       **Now:** the worker hands mail to the `relay` listener on 2525 with no
-      account and no credential. Trust is network position — no hostPort, not in
-      `allow-public-mail`, ClusterIP only — and Stalwart relays there only for a
+      account and no credential. Trust is network position - no hostPort, not in
+      `allow-public-mail`, ClusterIP only - and Stalwart relays there only for a
       `bounce+` envelope, with AUTH, the spam filter and the inbound throttles
       off for that port. All of it is in `plan.ndjson`; nothing is in Doppler.
       See infra/k8s/i10/stalwart/config/README.md, "The internal relay".
       ⚠ **A RELAY REFUSAL IS OURS, SO THE WORKER DEFERS IT.** With no AUTH step,
-      a misconfiguration answers in the message phase — `550 5.1.2` at
-      `RCPT TO` — and would have failed the whole queue as undeliverable.
+      a misconfiguration answers in the message phase - `550 5.1.2` at
+      `RCPT TO` - and would have failed the whole queue as undeliverable.
       `send/stalwart.ts` defers exactly Stalwart's three relay refusals.
 - [x] ~~Sender validation would refuse arbitrary customer domains.~~ **Not a
       problem, checked 2026-09-17.** `MtaStageMail.isSenderAllowed` is
       `!is_empty(authenticated_as) || !key_exists('spam-block', sender_domain)`
-      and `MtaStageRcpt.allowRelaying` is `!is_empty(authenticated_as)` — so an
+      and `MtaStageRcpt.allowRelaying` is `!is_empty(authenticated_as)` - so an
       authenticated session may already send as any domain to any recipient. No
       MTA rule changes are needed for the direct route. _(2026-09-26: the direct
       route no longer authenticates; `allowRelaying` now also admits
       `local_port == 2525` for a `bounce+` sender. See the item above.)_
 - [x] ~~i10's own bounce domain for the direct route.~~ **Superseded
-      2026-09-14** — the return path is the customer's `bounce.<domain>`, not a
+      2026-09-14** - the return path is the customer's `bounce.<domain>`, not a
       name on i10.tech, so that SPF aligns. See "Custom MAIL FROM stays".
 - [x] ~~`MAIL_BOUNCE_HOST` pointing at a proxied name.~~ **Fixed 2026-09-14.**
       It defaulted to `mx.i10.tech`, which resolves to Cloudflare's anycast
-      proxy and does not carry SMTP — every direct-route bounce would have been
+      proxy and does not carry SMTP - every direct-route bounce would have been
       delivered nowhere. Now `mail.i10.tech`, which is unproxied precisely
       because `spf_include` names it with `a:`.
 - [x] ~~Which tier gets which route.~~ **Decided 2026-09-05: free sends direct,
@@ -570,13 +570,13 @@ being a single point of failure — it has to increase on every write.
       `resolveRoute` in `src/domains/route.ts`.
       ⚠ **`auto` is stored, not the resolved answer.** Freezing today's policy
       into rows would make a pricing change a backfill.
-      ⚠ **Free is the default branch, not a special case** — anything not
+      ⚠ **Free is the default branch, not a special case** - anything not
       recognised as a paid plan sends direct, so a plan id renamed in the
       catalogue cannot start spending SES money on tenants who pay nothing.
       ⚠ Free traffic on our own IP is still the abuse surface, on an address
       shared with PSL. Revisit when there is volume.
 - [x] **A readout for `sent_route`. Added 2026-09-17.** The column had been
-      written on every `sent` row since 0033 and read by NOTHING — the only way
+      written on every `sent` row since 0033 and read by NOTHING - the only way
       to ask "how much went direct" was to open psql and write the query by
       hand, which is how a column quietly stops being correct.
       `core.route_split_snapshot(from, to)` (0035) returns tenant, day, route and
@@ -585,14 +585,14 @@ being a single point of failure — it has to increase on every write.
       already looking at. An HTTP endpoint was the alternative and would have
       been dead weight from the first commit.
       ⚠ **IT IS NOT METERING AND MUST NEVER BECOME IT.** `sent_usage_snapshot`
-      counts `sent` rows with NO route predicate — one price, both routes, which
+      counts `sent` rows with NO route predicate - one price, both routes, which
       is the whole commercial decision. This asks a different question of the
       same rows: how much SES are we buying, and how much of our own IP
       reputation are we spending. There is a test asserting the billing query
       contains no route predicate, because the day one migrates into the other,
       free-tier mail silently stops being billable.
       ⚠ **AND IT IS OURS, NOT THE CUSTOMER'S.** Publishing the split on the
-      customer API would make the route visible in the product — a customer
+      customer API would make the route visible in the product - a customer
       would see their mail move to our MTA when their plan changed and would
       reasonably ask to choose. The lever is an operational decision with no
       product surface, so the readout is privileged and stops at the reconciler.
@@ -622,5 +622,5 @@ blocklisted mailbox IP costs every mailbox customer at once.
 `SES_RELAY_ENABLED` is on (#191).
 
 ⚠ **THE CLAIM NO LONGER READS THE PLAN.** `plan_id` rode along on every claimed
-row only to feed this rule, so it went with it — one correlated subquery fewer
+row only to feed this rule, so it went with it - one correlated subquery fewer
 on the worker's hot path.

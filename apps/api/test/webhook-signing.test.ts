@@ -61,7 +61,7 @@ describe("signing", () => {
    * ⚠ THE MISTAKE THAT LOOKS CORRECT FROM INSIDE THIS REPOSITORY. Keying the
    * HMAC with the printable `whsec_…` string instead of its decoded bytes
    * round-trips perfectly against our own verifier and fails against every
-   * off-the-shelf library — which is the one thing the move to this format was
+   * off-the-shelf library - which is the one thing the move to this format was
    * for. Nothing else in the suite would catch it.
    */
   it("keys the HMAC with the decoded secret, not the printable string", () => {
@@ -147,7 +147,7 @@ describe("signing", () => {
     }
   })
 
-  // A length mismatch must not throw out of `timingSafeEqual` — a malformed
+  // A length mismatch must not throw out of `timingSafeEqual` - a malformed
   // header from anywhere would otherwise crash a delivery worker.
   it("refuses a truncated signature without throwing", () => {
     const ts = timestampFor(AT)
@@ -167,7 +167,7 @@ describe("the generated secret", () => {
 
   /**
    * ⚠ THE PAYLOAD IS BASE64 AND MUST DECODE INTO THE SPEC'S 24–64 BYTE RANGE.
-   * A hex secret — what this generated until 2026-09-04 — is still valid base64
+   * A hex secret - what this generated until 2026-09-04 - is still valid base64
    * on its face, so nothing throws; it simply decodes to different bytes than
    * the customer's library will use, and every delivery 401s.
    */

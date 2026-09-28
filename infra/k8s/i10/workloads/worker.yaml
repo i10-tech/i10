@@ -1,7 +1,7 @@
 # The send worker.
 #
 # ⚠ THE SAME IMAGE AS THE API, WITH A DIFFERENT COMMAND. There is no
-# `i10-worker` image and no extra entry in build.yml's matrix — this runs
+# `i10-worker` image and no extra entry in build.yml's matrix - this runs
 # `bun dist/worker.js` out of `i10-api`, exactly as the migration Job above it
 # runs `bun dist/migrate.js`. One artifact means the worker cannot drift from
 # the API's schema, contracts or environment validation, and it means the deploy
@@ -11,7 +11,7 @@
 # job used to rewrite a single named file per built image; a second file
 # referencing `i10-api` would have been left on a stale digest, silently, with
 # nothing to notice it. The pin step now rewrites every reference under
-# `infra/k8s/` instead — so adding another manifest for an existing image needs
+# `infra/k8s/` instead - so adding another manifest for an existing image needs
 # no change anywhere else, which is the property that was missing.
 ---
 apiVersion: apps/v1
@@ -20,18 +20,18 @@ metadata:
   name: i10-worker
   namespace: i10-prod
 spec:
-  # ⚠ NO `replicas` HERE, BECAUSE KEDA OWNS IT — see worker-autoscale.yaml. A
+  # ⚠ NO `replicas` HERE, BECAUSE KEDA OWNS IT - see worker-autoscale.yaml. A
   # number in this file would be re-applied by Argo's selfHeal within about 35
   # seconds of every scaling decision, and the two would fight indefinitely.
   #
   # The ceiling still belongs to SES rather than to load: what SES sees is
   # `maxReplicaCount × WORKER_CONCURRENCY` messages in flight, so raising either
   # without raising the account's send rate converts throughput into a wall of
-  # 429s, which the transport correctly defers — a scaling change that makes the
+  # 429s, which the transport correctly defers - a scaling change that makes the
   # queue drain slower and looks like SES being slow.
   # Never two versions of the worker at once during a rollout: the old one may
   # hold claims the new one would have to wait out. Cheap here because sending
-  # is asynchronous — nobody is watching an HTTP request.
+  # is asynchronous - nobody is watching an HTTP request.
   strategy:
     type: Recreate
   selector:
@@ -45,7 +45,7 @@ spec:
       # ⚠ LONGER THAN A SEND TAKES, SHORTER THAN THE STALE CLAIM. On SIGTERM the
       # worker stops taking jobs and lets what is in flight finish. Killed
       # sooner, its rows sit in `sending` until WORKER_CLAIM_STALE_AFTER expires
-      # — mail late by minutes, and a duplicate for anything SES had already
+      # - mail late by minutes, and a duplicate for anything SES had already
       # accepted. This makes an ordinary deploy produce neither.
       #
       # ⚠ AND IT ONLY MEANS ANYTHING BECAUSE worker.ts NOW PASSES ITS OWN CLOSE
@@ -67,7 +67,7 @@ spec:
           env:
             # ⚠ `i10_api`, NOT THE `i10` OWNER. Row level security does not
             # apply to a table's owner, and the worker reads and writes message
-            # bodies for every tenant it serves — so it is the one process where
+            # bodies for every tenant it serves - so it is the one process where
             # losing the boundary would be worst and least visible.
             # assertRlsSubject() refuses to start on the wrong role.
             - name: PGUSER
@@ -84,7 +84,7 @@ spec:
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
             # The direct route's hand-off: Stalwart's `relay` listener. HERE, NOT
-            # IN DOPPLER — it is an address, and there is no credential to go
+            # IN DOPPLER - it is an address, and there is no credential to go
             # with it. The port defaults to 2525 in env.ts.
             - name: STALWART_RELAY_HOST
               value: i10-stalwart-mail.i10-prod.svc.cluster.local
@@ -94,14 +94,14 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            # Numeric, matching the Dockerfile's USER - see api.yaml.
             runAsUser: 1001
             runAsGroup: 1001
             capabilities: { drop: ["ALL"] }
           # ⚠ NO HTTP PROBES, BECAUSE THERE IS NO LISTENER. The worker serves
           # nothing; a readiness probe would need a port opened purely to answer
           # it. Liveness is the process being alive, which the kubelet already
-          # knows — and a worker that is merely idle because the queue is empty
+          # knows - and a worker that is merely idle because the queue is empty
           # must not be restarted for it.
           #
           # What failure looks like here is queue depth rising with no

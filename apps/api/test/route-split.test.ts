@@ -51,7 +51,7 @@ describe("summarising a route split", () => {
 
   /**
    * ⚠ WHICH TENANTS ARE ON OUR OWN IPs IS THE ABUSE SURFACE. Free traffic goes
-   * direct, which means it leaves on an address shared with PSL — so "how many
+   * direct, which means it leaves on an address shared with PSL - so "how many
    * tenants" is a different and more useful question than "how many messages".
    */
   it("counts the tenants that sent anything direct", () => {
@@ -69,7 +69,7 @@ describe("summarising a route split", () => {
   /**
    * ⚠ `unknown` IS A FAULT AND NOT A CATEGORY. `sent_route` is nullable, 0033
    * backfilled everything that existed and `markSentStatement` has written it on
-   * every row since — so a `sent` message with no route means a write path
+   * every row since - so a `sent` message with no route means a write path
    * skipped it. Folding those into `ses` would make the fault add up to a
    * plausible number and disappear; the reconcile job raises on a non-zero.
    */
@@ -112,7 +112,7 @@ describe("summarising a route split", () => {
 })
 
 /**
- * ⚠ A DRIZZLE `SQL` DOES NOT STRINGIFY — `String(sql)` is `[object Object]`, and
+ * ⚠ A DRIZZLE `SQL` DOES NOT STRINGIFY - `String(sql)` is `[object Object]`, and
  * an assertion against that passes or fails for reasons that have nothing to do
  * with the query. The text lives in `queryChunks` as `StringChunk`s interleaved
  * with the bound parameters.
@@ -133,7 +133,7 @@ describe("the statement", () => {
   /**
    * ⚠ postgres.js BINDS A PARAMETER BY WRITING ITS BYTES, AND A `Date` IS NOT A
    * STRING. Passing one directly throws `ERR_INVALID_ARG_TYPE` before the query
-   * is ever sent — which is exactly what kept usage reconciliation from
+   * is ever sent - which is exactly what kept usage reconciliation from
    * completing once already, so the same mistake is worth pinning here.
    */
   it("serialises its dates and casts them", () => {
@@ -153,7 +153,7 @@ describe("the statement", () => {
 
   /**
    * ⚠ THE ONE THAT MATTERS MOST. Billing counts `sent` rows with NO route
-   * predicate — one price, both routes, which is the whole commercial decision.
+   * predicate - one price, both routes, which is the whole commercial decision.
    * If this readout's `where` ever migrated into the billing query, free-tier
    * mail would stop being billable and nobody would notice until a customer's
    * invoice was wrong in their favour.

@@ -22,8 +22,8 @@ import {
  *
  * ⚠ AND IT ASKS `balanceOf`, NOT `check({ requested: 0 })`. It used to ask the
  * second, and the second CANNOT ANSWER THIS QUESTION. A zero-unit request is
- * always allowed — it consumes nothing, so refusing it would report a quota
- * error for a non-event — and the `remaining` it publishes is clamped at zero so
+ * always allowed - it consumes nothing, so refusing it would report a quota
+ * error for a non-event - and the `remaining` it publishes is clamped at zero so
  * that no customer ever reads "-1,204 remaining". Both rules are right for
  * enforcement, and together they make a tenant at 60,000 of 50,000 indis-
  * tinguishable from one at exactly 50,000. This page exists to show the first
@@ -60,7 +60,7 @@ export interface FeatureUsage {
    * no allowance to show.
    */
   allowance: number | null
-  /** What is left, clamped at zero — the same number enforcement publishes. */
+  /** What is left, clamped at zero - the same number enforcement publishes. */
   remaining: number | null
   resets_at: string | null
   /**
@@ -72,9 +72,9 @@ export interface FeatureUsage {
    */
   overage: boolean
   /**
-   * `ok` — metered normally.
-   * `unentitled` — the plan grants nothing for this feature. OUR bug, usually.
-   * `unreadable` — the meter threw. Shown as a dash, never as a zero.
+   * `ok` - metered normally.
+   * `unentitled` - the plan grants nothing for this feature. OUR bug, usually.
+   * `unreadable` - the meter threw. Shown as a dash, never as a zero.
    */
   status: "ok" | "unentitled" | "unreadable"
 }
@@ -107,7 +107,7 @@ export interface BillingState {
      * ⚠ THE CONSOLE HAD NO WAY TO SHOW THAT A DOWNGRADE HAD BEEN ACCEPTED.
      * Downgrades are requested with `next_period` so the customer keeps what
      * they paid for, which means `plan_id` above still names the plan they are
-     * leaving for the rest of the period — so the page said "Pro, renews on the
+     * leaving for the rest of the period - so the page said "Pro, renews on the
      * 4th" to somebody who had just pressed Downgrade, and the only
      * acknowledgement was a toast that disappeared.
      */
@@ -173,7 +173,7 @@ export function usageStore({
               /*
                * ⚠ `unentitled` IS REPORTED AS ITSELF AND NEVER AS "0 of 0". It
                * means the tenant holds no plan, or the plan grants nothing for
-               * this feature — both of which are OUR misconfiguration. Rendering
+               * this feature - both of which are OUR misconfiguration. Rendering
                * it as a full meter would tell a customer who has sent nothing
                * that they are out of allowance, and they would go and upgrade,
                * which makes our bug invisible to us.
@@ -190,9 +190,9 @@ export function usageStore({
             }
 
             // ⚠ UNLIMITED IS CARRIED AS A NULL ALLOWANCE, NOT AS `Infinity`.
-            // `Infinity` does not survive JSON — it serialises as `null` anyway,
+            // `Infinity` does not survive JSON - it serialises as `null` anyway,
             // but only after every arithmetic on the way there has produced
-            // `NaN` — and a very large number would draw a bar that is always
+            // `NaN` - and a very large number would draw a bar that is always
             // empty, which is a claim that an end exists somewhere off-screen.
             const allowance =
               balance.allowance === "unlimited" ? null : balance.allowance
@@ -209,7 +209,7 @@ export function usageStore({
           } catch (error) {
             // ⚠ `describeErrorChain`, NOT `String(error)`. This exact line printed
             // "Failed query: select coalesce(sum(value)…" sixty-nine times in
-            // production without once saying WHY the query failed — the driver's
+            // production without once saying WHY the query failed - the driver's
             // reason was on `cause` and never made it to the log. See errors.ts.
             log?.warn(
               { err: describeErrorChain(error), tenantId, featureId: feature.id },

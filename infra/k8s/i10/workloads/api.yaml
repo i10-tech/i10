@@ -11,12 +11,12 @@
 # CNPG-generated secret already points at i10-platform-rw.
 #
 # HookSucceeded deletes the Job once it passes, so a failed migration leaves its
-# pod behind with the logs still readable — which is when you actually want them.
+# pod behind with the logs still readable - which is when you actually want them.
 #
 # ⚠ AND BeforeHookCreation IS WHAT STOPS THAT FROM WEDGING EVERY LATER DEPLOY.
 # A Job's `spec.template` is IMMUTABLE. With HookSucceeded alone, a failed Job
-# stays under a fixed name forever, and the next sync — which has to recreate
-# the hook with a different image — is rejected by the API server with
+# stays under a fixed name forever, and the next sync - which has to recreate
+# the hook with a different image - is rejected by the API server with
 # `Job.batch "i10-api-migrate" is invalid: spec.template: Invalid value`. The
 # PreSync hook then never completes, so NOTHING downstream of it syncs: every
 # Deployment and CronJob in this Application sits OutOfSync behind a single dead
@@ -25,12 +25,12 @@
 #
 # This happened on 2026-09-12, and the trigger is worth knowing because it can
 # recur. `command:` here changed from `node` to `bun` in the merge commit, while
-# the image below still pointed at the last NODE image — the Build workflow
+# the image below still pointed at the last NODE image - the Build workflow
 # writes the new digest in a SEPARATE commit a few minutes later. Argo polled
 # inside that window, ran `bun dist/migrate.js` against an image with no bun in
 # it, and the Job failed with `exec: "bun": executable file not found in $PATH`.
 # The window is inherent to "the commit is the deploy" and it self-heals once
-# the digest lands — but only if the corpse gets cleared, which is this policy.
+# the digest lands - but only if the corpse gets cleared, which is this policy.
 #
 # The two policies together keep both properties: a failed Job's pod survives
 # for inspection until the NEXT sync, and that next sync is never blocked by it.
@@ -75,8 +75,8 @@ spec:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
             # ⚠ NUMERIC, AND IT MUST MATCH THE Dockerfile'S `USER`. kubelet
-            # cannot check a named user against runAsNonRoot — it will not read
-            # the image's /etc/passwd — so a name gets the container rejected
+            # cannot check a named user against runAsNonRoot - it will not read
+            # the image's /etc/passwd - so a name gets the container rejected
             # with "image has non-numeric user" before it ever runs. Setting it
             # here as well as in the image means the guarantee survives a base
             # image that quietly renumbers its users.
@@ -141,7 +141,7 @@ spec:
             # ⚠ `i10_api`, NOT THE `i10` OWNER THE MIGRATION JOB USES. Row
             # level security does not apply to a table's owner, so connecting as
             # `i10` would turn every tenant policy in the `core` schema into a
-            # no-op — silently, with no error and nothing in the log. This role
+            # no-op - silently, with no error and nothing in the log. This role
             # owns nothing, which is what makes the policies bind.
             #
             # assertRlsSubject() in apps/api/src/db/client.ts checks this at
@@ -149,7 +149,7 @@ spec:
             # wrong secret fails the rollout instead of removing the boundary.
             #
             # It points at the POOLER, not the primary. The application holds
-            # many short connections and that is what PgBouncer is for — see the
+            # many short connections and that is what PgBouncer is for - see the
             # transaction-pooling warning in apps/api/src/env.ts. The migration
             # Job above deliberately does the opposite.
             - name: PGUSER
@@ -166,7 +166,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            # Numeric, matching the Dockerfile's USER - see api.yaml.
             runAsUser: 1001
             runAsGroup: 1001
             capabilities: { drop: ["ALL"] }

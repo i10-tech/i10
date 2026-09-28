@@ -4,9 +4,9 @@
 # reconciler and the migration Job. `bun dist/recheck.js` runs one pass and exits.
 #
 # ⚠ WHY THIS EXISTS. Verification was one-shot. A workspace that proved
-# `example.com` once kept the verified badge for ever — through the registration
+# `example.com` once kept the verified badge for ever - through the registration
 # lapsing, through somebody else buying the domain, through every record being
-# deleted — because nothing ever asked again. "Verified" therefore meant "was
+# deleted - because nothing ever asked again. "Verified" therefore meant "was
 # true once", which is not what the send path reads it as. The visible shape of
 # that bug is the new owner of a domain being told it belongs to another
 # workspace while the previous owner still holds a sending identity for it.
@@ -14,8 +14,8 @@
 # ⚠ AND IT IS THE CAUTIOUS HALF OF A PAIR. `domainStore.verify` stands a holder
 # down the moment a challenger PROVES the name, because that is positive
 # evidence the domain has moved. This pass has no challenger and no evidence
-# except an absence — which has a dozen innocent causes, from a zone being
-# migrated to a record mid-edit — so it only starts a clock, in
+# except an absence - which has a dozen innocent causes, from a zone being
+# migrated to a record mid-edit - so it only starts a clock, in
 # `core.domains.proof_missing_since`, and a domain has to fail EVERY check for a
 # week before anything happens to it. A single bad reading must never cost a
 # paying customer their ability to send.
@@ -32,7 +32,7 @@ metadata:
   name: i10-domain-recheck
   namespace: i10-prod
 spec:
-  # Once a day, off-peak, and deliberately not on the hour — a nameserver that
+  # Once a day, off-peak, and deliberately not on the hour - a nameserver that
   # rate-limits sees this as ordinary traffic rather than as a burst.
   #
   # ⚠ THIS STRING IS ALSO IN apps/api/src/recheck.ts, AND THEY MUST AGREE.
@@ -41,7 +41,7 @@ spec:
   # working and the alerting wrong.
   schedule: "17 3 * * *"
   # ⚠ NEVER TWO AT ONCE. Two passes would make the same DNS queries about the
-  # same customers, and both would write `proof_missing_since` — harmless, since
+  # same customers, and both would write `proof_missing_since` - harmless, since
   # `coalesce` keeps the first, but it is twice the queries to reach the same
   # place and twice the load on somebody else's nameservers.
   concurrencyPolicy: Forbid
@@ -75,7 +75,7 @@ spec:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }
               env:
-                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # ⚠ `i10_api`, NOT THE OWNER - the same rule as everywhere else.
                 # This pass reaches across every tenant, and it does it through
                 # narrow SECURITY DEFINER functions (`core.domains_due_recheck`,
                 # `core.note_domain_proof`, `core.displace_domain`) rather than

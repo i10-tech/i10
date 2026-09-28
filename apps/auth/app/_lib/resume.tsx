@@ -7,7 +7,7 @@ import * as React from "react"
  * on the same step.
  *
  * ⚠ `sessionStorage`, NOT THE URL, AND NOT A COOKIE. The URL is the address of
- * the page, not of a step — `?step=passkey` leaked into history, into shared
+ * the page, not of a step - `?step=passkey` leaked into history, into shared
  * links and into the address bar somebody was reading while they typed. A
  * cookie is shared by every tab, so two sign-ins in two tabs would overwrite
  * each other. `sessionStorage` is exactly one tab's memory: it survives a
@@ -16,8 +16,8 @@ import * as React from "react"
  * ⚠ ONLY WHAT WAS TYPED IN THE CLEAR, NEVER A SECRET. Names, the email address
  * and which step it was. Passwords, codes, TOTP secrets and backup codes are
  * never written: storage is readable by any script on the origin, and each of
- * those can be asked for again or re-issued by Clerk. The ATTEMPT itself —
- * the half that makes a code or a password land on something — lives in
+ * those can be asked for again or re-issued by Clerk. The ATTEMPT itself -
+ * the half that makes a code or a password land on something - lives in
  * Clerk's client, which already survives a reload.
  *
  * ⚠ AND IT IS FORGOTTEN ON THE WAY OUT. `leaveFor` in _lib/finish.ts is the one
@@ -55,7 +55,7 @@ function write<T>(key: string, value: T, initial: T): void {
     const storage = window.sessionStorage
     // ⚠ THE STARTING VALUE IS REMOVED, NOT STORED. An untouched form must leave
     // nothing behind, or the next visit would be hidden while it "resumed"
-    // nothing — see `HIDE_WHILE_RESUMING` in ./resume-keys.
+    // nothing - see `HIDE_WHILE_RESUMING` in ./resume-keys.
     if (JSON.stringify(value) === JSON.stringify(initial)) {
       storage.removeItem(PREFIX + key)
       if (
@@ -71,7 +71,7 @@ function write<T>(key: string, value: T, initial: T): void {
     storage.setItem(TOUCHED, String(Date.now()))
   } catch {
     // Private mode or a full quota: the flow still works, it just will not
-    // survive a reload — which is what it did before this file existed.
+    // survive a reload - which is what it did before this file existed.
   }
 }
 
@@ -94,7 +94,7 @@ export function forgetFlow(): void {
  *
  * ⚠ FALSE DURING THE SERVER RENDER AND HYDRATION, TRUE AFTER. The server has no
  * `sessionStorage`, so a form that read it in its first render would hydrate
- * different markup from what was sent — React discards the lot and warns.
+ * different markup from what was sent - React discards the lot and warns.
  */
 const Live = React.createContext(false)
 
@@ -103,7 +103,7 @@ const isClient = () => true
 const isServer = () => false
 
 /**
- * The client half of `ResumeBoundary` — see _components/resume-boundary.tsx.
+ * The client half of `ResumeBoundary` - see _components/resume-boundary.tsx.
  *
  * ⚠ IT REMOUNTS ITS CHILDREN ONCE, BEFORE THE FIRST PAINT, AND THAT IS THE
  * MECHANISM. The server render and hydration use every field's starting value;
@@ -135,10 +135,10 @@ export function ResumeRemount({ children }: { children: React.ReactNode }) {
  * Shows the flow again once the restored step is in place.
  *
  * ⚠ A FIRST CHILD, NOT AN EFFECT IN THE BOUNDARY, AND THE ORDER IS THE FIX.
- * React runs layout effects — and focuses `autoFocus` inputs — in tree order,
+ * React runs layout effects - and focuses `autoFocus` inputs - in tree order,
  * children before their parent. From the boundary this ran AFTER the restored
  * step's input had tried to take focus while still `visibility: hidden`, which
- * browsers refuse — so a reload on the name step left the caret nowhere. As the
+ * browsers refuse - so a reload on the name step left the caret nowhere. As the
  * first child it runs before the inputs that follow it.
  */
 function Unhide() {
@@ -174,7 +174,7 @@ export function useResumable<T>(
   return [value, setValue]
 }
 
-/** Whether this render may have restored anything — false until live. */
+/** Whether this render may have restored anything - false until live. */
 export function useResumeLive(): boolean {
   return React.useContext(Live)
 }

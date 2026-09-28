@@ -5,7 +5,7 @@ import { AnimatePresence, motion, type Transition } from "motion/react"
 import { cn } from "cn"
 
 /**
- * A short piece of status that changes in place — "Unsaved changes" becoming
+ * A short piece of status that changes in place - "Unsaved changes" becoming
  * "Saved", "Unpublished changes" becoming "v3 live since …".
  *
  * ⚠ THE SAME SWAP `ActionButton` DOES INSIDE ITSELF, OFFERED TO THE TEXT BESIDE
@@ -20,7 +20,7 @@ import { cn } from "cn"
  * two overlap in one cell for the few frames they share rather than stacking
  * and shoving whatever sits beside them.
  *
- * ⚠ `initial={false}` — a status that animates in on page load is a load
+ * ⚠ `initial={false}` - a status that animates in on page load is a load
  * animation. Only a CHANGE moves.
  */
 

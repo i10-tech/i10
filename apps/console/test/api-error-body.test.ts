@@ -6,20 +6,20 @@ import { normaliseError } from "../lib/api-error"
  *
  * ⚠ THIS EXISTS BECAUSE THREE SHIPPED FEATURES WERE INERT AND NOTHING SAID SO.
  * `lib/api.ts` rebuilt an error body from `statusCode`, `name` and `message`
- * and dropped every other field — so the publish dialog's conflict list, the
+ * and dropped every other field - so the publish dialog's conflict list, the
  * DNS callback's `detail`, and the step-up prompt's `clerk_error` were all
  * written, all correct on the API, and all invisible. Each one failed by
  * showing a slightly less useful message, which is the failure nobody reports.
  *
  * ⚠ IT CALLS THE REAL FUNCTION. An earlier draft of this file re-implemented
- * the normaliser next to the assertions, which would have passed for ever —
+ * the normaliser next to the assertions, which would have passed for ever -
  * including after somebody changed the original back.
  */
 
 describe("an error body the console has to act on", () => {
   /*
    * ⚠ CLERK LOOKS FOR THIS EXACT KEY AND NOTHING ELSE. Drop it and the
-   * verification dialog never opens — the person sees a 403 toast on a button
+   * verification dialog never opens - the person sees a 403 toast on a button
    * that is supposed to ask them a question.
    */
   it("keeps the reverification hint", () => {

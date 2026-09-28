@@ -5,7 +5,7 @@ import type { Redis } from "ioredis"
  * The webhook delivery queue.
  *
  * ⚠ THE GROUP IS THE ENDPOINT, NOT THE TENANT, AND THAT CHOICE BUYS TWO THINGS
- * AT ONCE. groupmq runs one job per group at a time, in order — so grouping by
+ * AT ONCE. groupmq runs one job per group at a time, in order - so grouping by
  * endpoint means a customer's events arrive at that endpoint in the order they
  * happened (`email.sent` before `email.delivered`, or their state machine reads
  * backwards), and a staging endpoint that has been timing out for an hour
@@ -16,7 +16,7 @@ import type { Redis } from "ioredis"
  *
  * ⚠ AND A JOB IS ONE DELIVERY, UNLIKE THE SEND QUEUE. There, batching is what
  * keeps per-group serialisation from capping throughput. Here serialisation IS
- * the feature, and a batch would have to be delivered in order anyway — so the
+ * the feature, and a batch would have to be delivered in order anyway - so the
  * batch would buy nothing and would make a single failing event retry the ones
  * beside it.
  */
@@ -61,7 +61,7 @@ export function createWebhookQueue(opts: WebhookQueueOptions): Queue<WebhookJob>
      * that is down for a deploy should not lose events; one that has been gone
      * for a day is not coming back within this job's life. Five attempts on
      * `webhookBackoff` spans roughly a quarter of an hour, which covers a
-     * deploy, a restart and a brief outage — and `consecutive_failures` on the
+     * deploy, a restart and a brief outage - and `consecutive_failures` on the
      * endpoint is what handles the longer kind by switching it off.
      */
     maxAttempts: opts.maxAttempts ?? 5,
@@ -96,13 +96,13 @@ export async function enqueueDelivery(
  *
  * ⚠ IT LIVES ON THE WORKER RATHER THAN THE QUEUE, WHICH IS EASY TO GET WRONG:
  * groupmq takes `maxAttempts` on both and `backoff` on the Worker only. Passed
- * to the Queue it is silently ignored — TypeScript catches it today, and the
+ * to the Queue it is silently ignored - TypeScript catches it today, and the
  * failure if it ever stopped catching it is retries hammering a dead endpoint
  * every half second.
  *
  * ⚠ AND `maxAttempts` ON BOTH IS NOT BELT-AND-BRACES, IT IS TWO HALVES OF ONE
- * BUDGET. The Worker's value is what actually dead-letters — `handleJobFailure`
- * compares the next attempt against the WORKER's number — while the value the
+ * BUDGET. The Worker's value is what actually dead-letters - `handleJobFailure`
+ * compares the next attempt against the WORKER's number - while the value the
  * enqueuing side stamps on the job is enforced separately, as a ceiling, inside
  * `retry.lua`. So the effective budget is the smaller of the two, and the two
  * have to come from the same variable. An earlier note here had this backwards

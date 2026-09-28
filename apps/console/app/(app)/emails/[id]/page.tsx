@@ -37,7 +37,7 @@ export async function generateMetadata({
  * ⚠ THE EVENT TIMELINE IS THE POINT OF THE PAGE, NOT THE BODY. Somebody opens
  * this because a customer says they did not receive something; the body is
  * confirmation that the right thing was sent, and the timeline is the answer.
- * It is therefore on the right at desktop width and FIRST on mobile — a phone
+ * It is therefore on the right at desktop width and FIRST on mobile - a phone
  * that shows the HTML preview first makes you scroll past a whole email to
  * reach the one line that matters.
  */
@@ -51,7 +51,7 @@ export default async function EmailDetailPage({
 
   if (!result.ok) {
     // ⚠ A 404 FROM THE API IS A REAL 404 HERE. RLS makes another tenant's id
-    // indistinguishable from a nonexistent one, deliberately — a 403 would
+    // indistinguishable from a nonexistent one, deliberately - a 403 would
     // confirm the id exists and turn this page into an oracle for enumerating
     // other people's message ids.
     if (result.error.statusCode === 404) notFound()
@@ -85,7 +85,7 @@ export default async function EmailDetailPage({
          * ⚠ `order` FLIPS AT `lg`, WHICH IS WHY THE TIMELINE IS DECLARED SECOND
          * AND SHOWN FIRST ON SMALL SCREENS. Declaring it first and reordering on
          * desktop would put it first in the DOM, which is also the reading order
-         * for a screen reader — and for somebody reading linearly the metadata
+         * for a screen reader - and for somebody reading linearly the metadata
          * before the message is the wrong way round.
          */}
         <div className="min-w-0 space-y-6 lg:order-1">
@@ -112,7 +112,7 @@ export default async function EmailDetailPage({
                 ))}
               </ul>
               {/*
-               * ⚠ METADATA ONLY — THE BYTES ARE NOT FETCHED. An attachment is
+               * ⚠ METADATA ONLY - THE BYTES ARE NOT FETCHED. An attachment is
                * stored base64-encoded in a jsonb column; a ten-megabyte PDF
                * would be a thirteen-megabyte JSON response for a page that only
                * ever renders the filename.
@@ -185,7 +185,7 @@ export default async function EmailDetailPage({
           {email.last_error && (
             /*
              * ⚠ THE FULL ERROR, UNTRUNCATED, IN MONOSPACE. This is the one
-             * place the whole SMTP response belongs — it is what somebody
+             * place the whole SMTP response belongs - it is what somebody
              * pastes into a support ticket or a search engine, and the log
              * table's one-line summary deliberately cuts it.
              */

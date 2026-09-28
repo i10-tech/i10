@@ -8,7 +8,7 @@
 -- own no row.
 --
 -- ⚠ `verified_at IS NOT NULL` IS A SECURITY BOUNDARY, NOT A TIDINESS FILTER.
--- A row in this result makes Stalwart treat the domain as a LOCAL RECIPIENT —
+-- A row in this result makes Stalwart treat the domain as a LOCAL RECIPIENT -
 -- it accepts and stores mail addressed to it. Returning an unverified domain
 -- would let anyone who typed a name they do not own start receiving that
 -- domain's mail. Verification is what makes the claim mean anything, and
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS "accounts_tenant_idx"
 --
 -- ⚠ A NO-OP ON A DEPLOYMENT WHOSE ONLY MAILBOXES ARE i10's OWN, and that is the
 -- expected outcome rather than a sign it did not run. Addresses on i10.tech
--- have no `core.domains` row, so they stay NULL — which the column allows, on
+-- have no `core.domains` row, so they stay NULL - which the column allows, on
 -- purpose, because inventing an owner for them would be worse than admitting
 -- they have none.
 UPDATE authd.accounts a

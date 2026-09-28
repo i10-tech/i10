@@ -2,7 +2,7 @@
  * What an endpoint can subscribe to.
  *
  * ⚠ THESE STRINGS ARE THE API'S PUBLIC CONTRACT AND ARRIVE IN CUSTOMER CODE AS
- * LITERALS — see `webhookEventType` in apps/api/src/db/core.ts. A rename is a
+ * LITERALS - see `webhookEventType` in apps/api/src/db/core.ts. A rename is a
  * breaking change to every `if (event.type === …)` anybody has written, and it
  * breaks SILENTLY: their handler stops matching and does nothing. Add, never
  * rename.
@@ -25,7 +25,7 @@ export const WEBHOOK_EVENTS = [
   {
     value: "email.delivery_delayed",
     label: "Delayed",
-    description: "A temporary failure — a full mailbox, a greylist. Still trying.",
+    description: "A temporary failure - a full mailbox, a greylist. Still trying.",
   },
   {
     value: "email.bounced",

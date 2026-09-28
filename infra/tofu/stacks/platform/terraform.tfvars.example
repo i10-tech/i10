@@ -1,4 +1,4 @@
-# Empty on purpose. i10 has no machine of its own yet — it shares psl-vps.
+# Empty on purpose. i10 has no machine of its own yet - it shares psl-vps.
 # The first real entry looks like:
 #
 # nodes = {

@@ -4,12 +4,12 @@
 -- WHEN THE RENAME HAPPENS ON CLERK'S SIDE. The console renames our row and then
 -- asks Clerk to match; but the Team page mounts Clerk's own
 -- `<OrganizationProfile />`, which has a rename field of its own. Without this,
--- using that field puts the two names back out of step — the exact state the
+-- using that field puts the two names back out of step - the exact state the
 -- sync was added to end, reachable from a panel we render ourselves.
 --
 -- ⚠ SECURITY DEFINER FOR THE SAME REASON `provision_tenant` IS. A webhook
 -- carries an organization id, never a tenant id, and `core.tenants` is
--- protected by `id = current_setting('app.tenant_id')` — so under the policy
+-- protected by `id = current_setting('app.tenant_id')` - so under the policy
 -- this row is invisible and a plain UPDATE would report success having changed
 -- nothing. One narrow question, answered by the owner, returning the minimum.
 --

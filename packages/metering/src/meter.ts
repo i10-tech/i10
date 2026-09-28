@@ -17,7 +17,7 @@ import type {
  * The meter: the two questions, answered against the ports.
  *
  * ⚠ IT ORCHESTRATES, IT DOES NOT PERFORM. No `fetch`, no driver, no `Date.now()`
- * — the storage arrives as an adapter and the current time arrives as an
+ * - the storage arrives as an adapter and the current time arrives as an
  * argument. That is what lets the same object answer a quota check inside
  * `POST /emails` on the box today and inside a Durable Object at the edge later,
  * with the adapters swapped and nothing here rewritten.
@@ -25,8 +25,8 @@ import type {
  * ⚠ AND IT ROUTES ON THE ENTITLEMENT'S KIND, WHICH IS THE ONLY PLACE THAT
  * DIFFERENCE LIVES. A consumable feature has a window and its usage is summed
  * from the ledger; a continuous one has no window at all and its usage is read
- * as a level from wherever the things exist. Everything after that — the
- * arithmetic, the outcomes, the overage rule — is identical, which is why
+ * as a level from wherever the things exist. Everything after that - the
+ * arithmetic, the outcomes, the overage rule - is identical, which is why
  * `draw()` is shared rather than duplicated per kind.
  */
 
@@ -37,14 +37,14 @@ export interface CheckInput {
   requested: number
   /** The moment being asked about. Injected; never read from a clock here. */
   at: Date
-  /** Always 0 today — see key.ts for why it is a parameter anyway. */
+  /** Always 0 today - see key.ts for why it is a parameter anyway. */
   shard?: number
 }
 
 export type CheckOutcome =
   | { status: "allowed"; remaining: number; resetsAt: Date | null }
   /**
-   * Accepted, and part of it is billable. ⚠ Accepted WHOLE — see `draw`.
+   * Accepted, and part of it is billable. ⚠ Accepted WHOLE - see `draw`.
    */
   | {
       status: "overage"
@@ -61,8 +61,8 @@ export type CheckOutcome =
   /**
    * ⚠ THE OUTCOME THAT IS NOT A POLITE WAY OF SAYING `exceeded`. The tenant has
    * no plan, or their plan grants nothing for this feature. Both are
-   * misconfigurations on our side — a tenant that was never assigned a free
-   * plan at signup, a feature id renamed out from under a running catalogue —
+   * misconfigurations on our side - a tenant that was never assigned a free
+   * plan at signup, a feature id renamed out from under a running catalogue -
    * and both would otherwise surface to a customer as "you have used your
    * sending allowance" when they have sent nothing.
    *
@@ -79,7 +79,7 @@ export type CheckOutcome =
  * than deciding.
  *
  * ⚠ THIS EXISTS BECAUSE `check` CANNOT ANSWER IT, AND THAT IS NOT A FLAW IN
- * `check`. Enforcement needs one number — is there room for this request — and
+ * `check`. Enforcement needs one number - is there room for this request - and
  * every number it publishes is shaped for that: `remaining` is clamped at zero
  * because a negative one ends up in an `X-RateLimit-Remaining` header, and a
  * zero-unit request is always allowed because refusing it would report a quota
@@ -100,7 +100,7 @@ export type BalanceOutcome =
       /** The plan's grant. `"unlimited"` is a value, not a very large number. */
       allowance: Allowance
       /**
-       * ⚠ TRUE USAGE, AND DELIBERATELY NOT CLAMPED. It can exceed `allowance` —
+       * ⚠ TRUE USAGE, AND DELIBERATELY NOT CLAMPED. It can exceed `allowance` -
        * by design when the plan bills overage, and after a downgrade when a
        * continuous level is above the new plan's line. A dashboard that hides
        * that is hiding the number somebody opened it to see.
@@ -127,7 +127,7 @@ export interface Meter {
   record(input: RecordInput): Promise<RecordResult>
   /**
    * Usage, allowance and window in one read, for reporting. See
-   * `BalanceOutcome` — it decides nothing and must never be used to.
+   * `BalanceOutcome` - it decides nothing and must never be used to.
    */
   balanceOf(input: {
     tenantId: string
@@ -218,8 +218,8 @@ export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
 
     // ⚠ THE READ IS SCOPED TO THE WINDOW, NOT TO "SINCE THE LAST RESET". There
     // is no last reset: nothing resets anything, the window simply moves. An
-    // event whose `sent_at` lands before `window.start` — a late flush from the
-    // far side of a boundary — belongs to the window it happened in and is
+    // event whose `sent_at` lands before `window.start` - a late flush from the
+    // far side of a boundary - belongs to the window it happened in and is
     // correctly excluded from this one.
     return usage.usedIn(key, window!)
   }
@@ -269,7 +269,7 @@ export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
       // ⚠ NO ENTITLEMENT LOOKUP HERE, ON PURPOSE. The mail has already gone; a
       // plan that cannot be resolved must not be able to lose the record of it.
       // Usage is a fact about what happened, and it is written whether or not we
-      // can currently say what it was allowed to be — which is also what lets
+      // can currently say what it was allowed to be - which is also what lets
       // the reconciler find a tenant whose plan was never assigned.
       //
       // ⚠ AND A CONTINUOUS FEATURE IS NEVER RECORDED HERE. Its level lives

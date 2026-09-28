@@ -15,19 +15,19 @@ import { cn } from "cn"
  *
  * ⚠ IT WRITES CSS VARIABLES AND NEVER SETS STATE, WHICH IS THE ONLY REASON IT
  * IS AFFORDABLE. A `pointermove` handler that called `setState` would re-render
- * this subtree on every mouse position — sixty times a second, through React,
+ * this subtree on every mouse position - sixty times a second, through React,
  * for a background gradient. Writing two custom properties straight onto the
  * node skips React entirely and leaves the work to the compositor, which is what
  * it is for.
  *
  * ⚠ AND IT IS ONE WRAPPER AROUND A GROUP RATHER THAN ONE PER TILE. Six stat
  * tiles each tracking their own pointer is six listeners, six client components
- * and six gradients that stop at their own edges — so the wash would visibly
+ * and six gradients that stop at their own edges - so the wash would visibly
  * break at every divider. One listener over the whole strip means the highlight
  * crosses them.
  *
  * ⚠ AND IT IS INERT ON A TOUCH SCREEN. There is no pointer to follow there, so
- * the wash would appear wherever a finger last landed and stay put — a
+ * the wash would appear wherever a finger last landed and stay put - a
  * rendering artefact rather than a hover state. Tailwind emits `group-hover:`
  * inside `@media (hover: hover)` already, so the layer simply never leaves
  * opacity 0 on a phone.
@@ -96,7 +96,7 @@ export function PointerGlow({
           "opacity-0 transition-opacity duration-(--duration-dismiss) ease-(--ease-linear)",
           // ⚠ NOTHING GATES THIS FOR TOUCH BECAUSE TAILWIND ALREADY DOES.
           // `group-hover:` is emitted inside `@media (hover: hover)` by default
-          // in v4 — checked by compiling it rather than assumed — so a device
+          // in v4 - checked by compiling it rather than assumed - so a device
           // with no pointer never runs the rule and the wash cannot end up
           // frozen wherever a finger last landed. An explicit
           // `[@media(hover:hover)]:` wrapper was written here first and

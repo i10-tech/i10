@@ -1,7 +1,7 @@
 -- The four questions the reconciler asks that no tenant-scoped connection can
 -- answer.
 --
--- ⚠ THESE ARE NOT AN OPTIMISATION — WITHOUT THEM THE RECONCILER CANNOT RUN AT
+-- ⚠ THESE ARE NOT AN OPTIMISATION - WITHOUT THEM THE RECONCILER CANNOT RUN AT
 -- ALL. Every policy in `core` reads `current_setting('app.tenant_id')` strictly,
 -- and only a `withTenant()` transaction sets it, so a cross-tenant read issued
 -- from the job raises `unrecognized configuration parameter` on its first
@@ -11,7 +11,7 @@
 -- Same shape as `sweep_stuck_messages`, `message_owner`, `subscriptions_snapshot`
 -- and `provision_tenant`, and held to the same rule: one narrow question,
 -- answered by the owner, returning the minimum. None of them exposes an
--- address, a subject or a message body — only counts, ids and the tenant names
+-- address, a subject or a message body - only counts, ids and the tenant names
 -- the reconciler already prints in its own report.
 --
 -- ⚠ AND THEY ARE `STABLE`, NOT `VOLATILE`, so each can be planned as one scan
@@ -50,9 +50,9 @@ GRANT EXECUTE ON FUNCTION "core"."sent_usage_snapshot"(timestamptz, timestamptz)
 
 -- What the ledger holds, in the same buckets.
 --
--- ⚠ `sum(value)`, NOT `count(*)`. A row is not necessarily one unit — the
+-- ⚠ `sum(value)`, NOT `count(*)`. A row is not necessarily one unit - the
 -- column exists so a future metered feature can consume more than one per
--- event — and counting rows would silently bill every such feature at one.
+-- event - and counting rows would silently bill every such feature at one.
 CREATE FUNCTION "core"."meter_usage_snapshot"(
   p_feature text,
   p_from timestamptz,
@@ -108,7 +108,7 @@ GRANT EXECUTE ON FUNCTION "core"."active_tenants_snapshot"() TO i10_api;
 -- USAGE ONE. A usage discrepancy is a number that drifted. A tenant with no
 -- assignment has no allowance at all: every quota check for them resolves to
 -- `unentitled`, which fails open, so they send unmetered and unbilled forever
--- — and the usage reconciler cannot notice, because both sides read zero and
+-- - and the usage reconciler cannot notice, because both sides read zero and
 -- agree.
 CREATE FUNCTION "core"."assigned_tenant_ids"()
 RETURNS TABLE (tenant_id uuid)

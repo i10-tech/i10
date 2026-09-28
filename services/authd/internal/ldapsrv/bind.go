@@ -79,7 +79,7 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 	if account == nil {
-		// No such account, or it is inactive — suspended, unpaid, or
+		// No such account, or it is inactive - suspended, unpaid, or
 		// deprovisioned. Indistinguishable from a wrong password by design.
 		s.log.Info("bind rejected", "reason", "no_active_account", "uid", uid)
 		w.Write(res)
@@ -90,13 +90,13 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	//
 	// After, because the projection is what knows whether the account is still
 	// active. A suspended, unpaid or deprovisioned account has already been
-	// turned away above, so this can only ever skip the PASSWORD check — never
+	// turned away above, so this can only ever skip the PASSWORD check - never
 	// the account check. And it needs `account.ClerkUpdatedAt`, which is the
 	// invalidation key: a password change moves it and the entry stops
 	// matching.
 	//
 	// Before, because the limiter exists to protect the Clerk request budget.
-	// A cache hit spends no budget, so it should spend no tokens either —
+	// A cache hit spends no budget, so it should spend no tokens either -
 	// otherwise Apple Mail opening six connections at once would still be
 	// throttled for calls it never makes. A wrong password still misses the
 	// cache and still meets the limiter.
@@ -135,7 +135,7 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	default:
 		// ⚠ THE ONE THAT MATTERS. Clerk did not answer. Reporting
 		// invalidCredentials here would make every mail client in the fleet
-		// conclude the stored password is wrong — Apple Mail and Outlook
+		// conclude the stored password is wrong - Apple Mail and Outlook
 		// respond by prompting the user, and people start changing passwords
 		// to fix an outage that was never theirs. LDAP "unavailable" makes
 		// clients back off and retry instead.

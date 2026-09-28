@@ -32,8 +32,8 @@ import {
  * ⚠ EVERY ONE OF THEM NEEDS A SESSION, WHICH IS WHY THEY CANNOT BE PART OF THE
  * SIGN-UP ATTEMPT. `createPasskey`, `createTOTP` and `createExternalAccount` are
  * methods on `UserResource`, and there is no user until `signUp.finalize()` has
- * run. So the flow finalizes in the MIDDLE — see `finalizeWithoutLeaving` in
- * _lib/finish.ts — and these steps operate on a person who is, as far as the
+ * run. So the flow finalizes in the MIDDLE - see `finalizeWithoutLeaving` in
+ * _lib/finish.ts - and these steps operate on a person who is, as far as the
  * backend is concerned, already signed up.
  *
  * ⚠ AND THAT MAKES "SKIP" A REAL GUARANTEE RATHER THAN A POLITENESS. The
@@ -81,12 +81,12 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
    * production instance, so Clerk refuses `createPasskey` on a session it does
    * not consider recently verified and answers with a hint rather than a
    * result. Unwrapped, that hint fell into the catch below and was reported as
-   * "we could not add a passkey on this device" — which blamed the device for a
+   * "we could not add a passkey on this device" - which blamed the device for a
    * policy decision, and left the person with no way to satisfy it.
    *
    * ⚠ THE HOOK IS THE WHOLE FIX: it shows the reverification prompt and REPLAYS
    * the original call once it is satisfied. Doing it by hand would mean
-   * detecting the hint, driving the prompt and remembering what to retry — in
+   * detecting the hint, driving the prompt and remembering what to retry - in
    * three places, because `createExternalAccount` below needs exactly the same
    * treatment.
    */
@@ -99,12 +99,12 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
     /*
      * ⚠ THE BROWSER ALLOWS ONE WEBAUTHN REQUEST PER DOCUMENT, AND THE PAGE
      * UNDERNEATH THIS ONE ALREADY TOOK IT. The sign-in form arms conditional
-     * mediation — the passkey offered inside the email field's autofill menu —
+     * mediation - the passkey offered inside the email field's autofill menu -
      * on mount, and it stays pending for the life of the document because it is
      * waiting for a choice nobody may ever make. Since an unknown address turns
      * that page into this flow WITHOUT navigating, the request is still open
      * here, and Chromium answers `create()` with `OperationError: A request is
-     * already pending.` — which clerk-js does not translate, so it surfaced as
+     * already pending.` - which clerk-js does not translate, so it surfaced as
      * "we could not add a passkey on this device" with no prompt ever shown.
      *
      * ⚠ AND IT IS CALLED UNCONDITIONALLY, because this step is reachable two
@@ -122,15 +122,15 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
     } catch (error) {
       /*
        * ⚠ THE CATCH IS LOAD-BEARING, AND DISMISSING THE SHEET IS NOT AN ERROR.
-       * WebAuthn rejects at the PLATFORM level — a person who closes the Touch
-       * ID dialog, a browser with no authenticator, a cross-origin iframe — and
+       * WebAuthn rejects at the PLATFORM level - a person who closes the Touch
+       * ID dialog, a browser with no authenticator, a cross-origin iframe - and
        * "something went wrong" to somebody who deliberately pressed Cancel is
        * the interface arguing with them.
        *
        * ⚠ IT USED TO CHECK `error.name`, WHICH COULD NOT WORK. Clerk maps the
        * browser's `NotAllowedError` onto a `ClerkWebAuthnError` before we ever
        * see it, so the name is always `"ClerkWebAuthnError"` and the branch
-       * below never ran — every cancelled sign-up prompt ended in "We could not
+       * below never ran - every cancelled sign-up prompt ended in "We could not
        * add a passkey on this device", blaming the device for a decision the
        * person had just made. See _lib/passkey.ts, which reads the code.
        */
@@ -149,7 +149,7 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
          * passkey on this device" is answerable by nobody. Clerk has nine
          * passkey codes and answers with API codes besides, and a report that
          * arrives without one costs a round trip through a person, a browser
-         * and a device we do not have. See _lib/passkey.ts — the same trade
+         * and a device we do not have. See _lib/passkey.ts - the same trade
          * as printing Cloudflare's ray id.
          */
         toast.error(reason, { description: passkeyReference(error) })
@@ -280,7 +280,7 @@ export function TwoFactorScanStep({
   const [rejected, setRejected] = useState<string | null>(null)
   /**
    * ⚠ HELD FOR THE MOMENT BETWEEN ACCEPTANCE AND LEAVING. Two-factor is on by
-   * the time `onVerified` fires and this screen is replaced — so without this
+   * the time `onVerified` fires and this screen is replaced - so without this
    * the six boxes simply vanish, which is the one outcome that looks identical
    * to a page glitching.
    */
@@ -307,7 +307,7 @@ export function TwoFactorScanStep({
        * ⚠ HERE, NOT AFTER THE BACKUP CODES, AND THE ORDER IS THE WHOLE
        * DIFFERENCE BETWEEN A CONFIRMATION AND A DEAD PROP. Set after the fetch
        * below it would land in the same tick as `onVerified`, which replaces
-       * this screen — the state would be true for no frames anybody sees.
+       * this screen - the state would be true for no frames anybody sees.
        * Here, the green is on screen for exactly as long as the round trip
        * that follows it, which is the moment worth filling.
        */
@@ -317,7 +317,7 @@ export function TwoFactorScanStep({
        * ⚠ THE BACKUP CODES ARE FETCHED HERE AND THEIR FAILURE IS NOT FATAL.
        * Recovery codes are a separate Clerk resource and a separate instance
        * setting, so `createBackupCode` throws on an instance that does not
-       * issue them — and two-factor is already ON by this point. Refusing to
+       * issue them - and two-factor is already ON by this point. Refusing to
        * advance would strand somebody whose account is now MORE secure than it
        * was, on a screen telling them something failed.
        */
@@ -332,7 +332,7 @@ export function TwoFactorScanStep({
       onVerified(codes)
     } catch {
       // ⚠ THE BOXES ARE CLEARED, because a rejected six-digit code is never
-      // salvaged by editing one of them — and a TOTP code that was right
+      // salvaged by editing one of them - and a TOTP code that was right
       // thirty seconds ago is now wrong for a reason nobody can see.
       //
       // ⚠ AND THE REASON STAYS ON SCREEN. See mfa-form: this one especially,
@@ -488,7 +488,7 @@ export function ConnectStep({
 
   /*
    * ⚠ ALREADY-LINKED PROVIDERS ARE SHOWN AS LINKED RATHER THAN HIDDEN. Somebody
-   * arrives back here FROM Google, having just connected it — a button that
+   * arrives back here FROM Google, having just connected it - a button that
    * simply vanished would read as the thing not having worked. And anyone who
    * signed up with Google in the first place has one linked before they get
    * here at all.
@@ -503,7 +503,7 @@ export function ConnectStep({
    * ⚠ THE SAME GUARD AS THE PASSKEY STEP, FOR THE SAME REASON. Connecting an
    * external account is a protected operation on an instance with
    * reverification enabled, and without this Clerk's hint arrived here as an
-   * ordinary rejection — reported as "we could not start that connection",
+   * ordinary rejection - reported as "we could not start that connection",
    * which is both untrue and unactionable.
    */
   const startConnection = useReverification(
@@ -523,13 +523,13 @@ export function ConnectStep({
         /*
          * ⚠ BUILT HERE, AT CLICK TIME, RATHER THAN PASSED IN AS A PROP. It
          * needs `window.location.origin`, which does not exist while this
-         * component is being server-rendered — and a prop computed in the
+         * component is being server-rendered - and a prop computed in the
          * parent would have the same problem one level up. A click is by
          * definition in the browser.
          *
          * ⚠ AND IT COMES BACK TO PLAIN `/sign-in`, WITH NO STEP IN THE URL. The
          * provider's redirect is a full page load, so every piece of React
-         * state is gone by the time the person returns — but this tab's
+         * state is gone by the time the person returns - but this tab's
          * `sessionStorage` is not, and the flow resumes from it exactly as it
          * does after a reload. See _lib/resume.tsx.
          */
@@ -550,7 +550,7 @@ export function ConnectStep({
        * ⚠ `assign`, NOT `replace`, AND THIS IS THE ONE PLACE THAT IS RIGHT.
        * Everywhere else in this app leaves nothing to go back to, because the
        * page being left is finished. Here the person is going OUT to a provider
-       * and expected back — the browser's back button during an OAuth consent
+       * and expected back - the browser's back button during an OAuth consent
        * screen has to return them to this step, not to whatever preceded the
        * whole sign-up.
        *
@@ -561,8 +561,8 @@ export function ConnectStep({
       window.location.assign(target.toString())
     } catch (error) {
       /*
-       * ⚠ THE ERROR USED TO BE DISCARDED ENTIRELY — `catch {}` with no binding
-       * — and every failure here became "check your connection". That is the
+       * ⚠ THE ERROR USED TO BE DISCARDED ENTIRELY - `catch {}` with no binding
+       * - and every failure here became "check your connection". That is the
        * wrong story for all of the likely ones: a session Clerk refuses on
        * policy grounds, a redirect origin the instance does not allow, a
        * provider that is enabled for sign-in but not for linking. None of them
@@ -643,8 +643,8 @@ function SkipButton({
 /** Back to the connect step, carrying the destination the person arrived with. */
 function returnUrl(redirectRaw: string | undefined): string {
   /*
-   * ⚠ `/sign-in`, WHICH IS THE ONLY PAGE NOW. `/sign-up` still resolves — it
-   * redirects here carrying every parameter — but pointing a provider's return
+   * ⚠ `/sign-in`, WHICH IS THE ONLY PAGE NOW. `/sign-up` still resolves - it
+   * redirects here carrying every parameter - but pointing a provider's return
    * URL at a redirect costs an extra round trip on the one journey that has
    * already been out to a third party and back.
    */

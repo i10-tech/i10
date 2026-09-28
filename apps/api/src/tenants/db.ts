@@ -9,7 +9,7 @@ import type { TenantLifecycleStore } from "./lifecycle.js"
  * ⚠ THROUGH A SECURITY DEFINER FUNCTION, BECAUSE OF A CHICKEN AND EGG IN THE
  * POLICY ITSELF. `core.tenants` is protected by
  * `id = current_setting('app.tenant_id')`, so inserting a tenant requires
- * already knowing the id of the tenant being created — and reading back one
+ * already knowing the id of the tenant being created - and reading back one
  * that already exists requires being scoped to it, which is exactly the thing
  * we are trying to find out.
  *
@@ -17,7 +17,7 @@ import type { TenantLifecycleStore } from "./lifecycle.js"
  * `app.tenant_id` to it and inserting that id. That works for the insert and
  * fails for the far more common case: the retry, where the row already exists
  * under a different id that the policy then hides. The function answers both in
- * one round trip, and answers exactly one question — see the migration.
+ * one round trip, and answers exactly one question - see the migration.
  */
 export function tenantStore(db: Database): TenantStore {
   return {
@@ -50,7 +50,7 @@ export function tenantStore(db: Database): TenantStore {
  * `organization.deleted` webhook carries an organization id; a Polar customer
  * carries a tenant id that may belong to somebody who deleted their account
  * last week. Under `core.tenants`'s policy both questions return nothing at
- * all, which reads identically to "no such thing" — and acting on that reading
+ * all, which reads identically to "no such thing" - and acting on that reading
  * is how a paid subscription goes on billing a deleted workspace.
  *
  * See migration 0046 for what each one may answer and why it is the minimum.
@@ -81,7 +81,7 @@ export function tenantLifecycleStore(db: Database): TenantLifecycleStore {
 
       const row = rows[0]
       // No row means Clerk deleted an organization we never provisioned a
-      // tenant for — an organization created and removed before its webhook
+      // tenant for - an organization created and removed before its webhook
       // landed, or one from another instance. Not an error, and nothing to do.
       if (!row) return null
 
@@ -99,7 +99,7 @@ export function tenantLifecycleStore(db: Database): TenantLifecycleStore {
       `)) as unknown as { tenant_id: string; renamed: boolean }[]
 
       const row = rows[0]
-      // No row means no tenant for that organization — one from another Clerk
+      // No row means no tenant for that organization - one from another Clerk
       // instance, or one already terminated. Not an error and nothing to do.
       return row ? { tenantId: row.tenant_id, renamed: row.renamed } : null
     },

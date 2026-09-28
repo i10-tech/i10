@@ -14,7 +14,7 @@ import {
 /**
  * ⚠ THESE USED TO ASSERT A WRAPPING THAT NO LONGER EXISTS. Clerk owned the
  * secret and published no way to change its `ak_` prefix, so every key was
- * rewritten to `i10_live_…` on the way out and stripped on the way back — and
+ * rewritten to `i10_live_…` on the way out and stripped on the way back - and
  * because both our prefixes are nine characters, the two variants unwrapped to
  * ONE Clerk secret. That is why the mode had to come from Clerk's claims and
  * never from the string a caller sent.
@@ -116,7 +116,7 @@ describe("the displayed prefix", () => {
 describe("the cache key", () => {
   /**
    * ⚠ DERIVED FROM THE HASH, WHICH IS WHAT MAKES REVOCATION IMMEDIATE. A route
-   * revoking a key holds its ROW — never the secret, which nothing stores — so
+   * revoking a key holds its ROW - never the secret, which nothing stores - so
    * a cache keyed on the plaintext could not be evicted at that moment, and
    * "instant revocation" would silently mean "within the TTL".
    */
@@ -199,7 +199,7 @@ describe("keys that exist but must not work", () => {
   /**
    * ⚠ REVOKED IS `rejected`, NOT `unavailable`, AND THE LOOKUP MUST STILL
    * RETURN THE ROW. A store that filtered revoked keys out would make
-   * "withdrawn" and "never existed" indistinguishable here — different things
+   * "withdrawn" and "never existed" indistinguishable here - different things
    * to log after a leak.
    */
   it("rejects a revoked key and says so", async () => {
@@ -249,7 +249,7 @@ describe("when the dependency underneath is broken", () => {
    * ⚠ THE DISTINCTION SURVIVED THE MOVE OFF CLERK, ONLY THE FAILING THING
    * CHANGED. This used to mean "Clerk did not answer"; it now means "Postgres
    * did not answer". Collapsing it into a 401 tells a customer their key is
-   * wrong during an outage that was never theirs — the same rule authd follows
+   * wrong during an outage that was never theirs - the same rule authd follows
    * answering LDAP `unavailable` rather than `invalidCredentials`.
    */
   it("reports a database failure as unavailable", async () => {

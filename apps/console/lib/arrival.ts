@@ -1,6 +1,6 @@
 /**
- * One-off facts a page is told on arrival — "you just paid", "we just wrote
- * your records" — carried in cookies rather than in the URL.
+ * One-off facts a page is told on arrival - "you just paid", "we just wrote
+ * your records" - carried in cookies rather than in the URL.
  *
  * ⚠ THE ADDRESS BAR IS THE PAGE, NOT ITS NEWS. `?checkout_id=` and
  * `?published=` used to ride in the URL, so they sat in history, in every link
@@ -9,7 +9,7 @@
  * showing it anywhere.
  *
  * ⚠ SHORT-LIVED, AND SCOPED TO THE PAGE THAT OWNS IT. A checkout id outlives a
- * reload — the banner is still polling — but not ten minutes, and it is never
+ * reload - the banner is still polling - but not ten minutes, and it is never
  * sent to any other page. The published count is one-shot: the page that shows
  * it deletes it.
  *

@@ -2,11 +2,11 @@
 --
 -- ⚠ WITHOUT IT, REFUSING A DUPLICATE COSTS THE OTHER TENANT THEIR DKIM KEY.
 -- `domainStore.create` calls SES before it inserts the row, because the row
--- stores the status SES reports — so a create that is about to be refused by
+-- stores the status SES reports - so a create that is about to be refused by
 -- `domains_verified_name_unique` has ALREADY called `CreateEmailIdentity`. SES
 -- identities are keyed on the domain name in one AWS account, so that call does
 -- not create anything: it raises `AlreadyExistsException`, and the adapter's
--- recovery is `PutEmailIdentityDkimSigningAttributes` — which REPLACES the
+-- recovery is `PutEmailIdentityDkimSigningAttributes` - which REPLACES the
 -- signing key of whoever owns the name with the newcomer's.
 --
 -- The verified tenant then signs with a key their DNS does not publish, every

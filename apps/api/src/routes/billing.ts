@@ -11,7 +11,7 @@ import { requireApiKey } from "../middleware/auth.js"
  * ⚠ NEITHER OF THESE GRANTS ANYTHING. `POST /checkout` hands back a URL and
  * writes nothing; the plan moves only when Polar tells us the money arrived,
  * through the signature-verified webhook in routes/polar-events.ts. `GET /plan`
- * is what the page Polar redirects to should poll — it shows a spinner until
+ * is what the page Polar redirects to should poll - it shows a spinner until
  * this reports the new plan, which is a second or two, and it is honest for the
  * whole of that second in a way that granting on the redirect would not be.
  *
@@ -65,7 +65,7 @@ export function createBilling(deps?: BillingDeps) {
 
     // ⚠ THE PRODUCT COMES FROM OUR MAP, NEVER FROM THE REQUEST. A caller who
     // could name a Polar product id could name a free one, or a one-cent one,
-    // and buy Pro with it — the webhook would then grant the plan perfectly
+    // and buy Pro with it - the webhook would then grant the plan perfectly
     // correctly, because from Polar's side the payment really did succeed.
     const productId = deps.products[plan]
     if (!productId) {
@@ -90,12 +90,12 @@ export function createBilling(deps?: BillingDeps) {
        * ⚠ RECORDED BEFORE THE CUSTOMER IS SENT TO PAY, AND THIS ROW IS WHAT
        * ATTRIBUTES THE PAYMENT. Every subscription Polar creates carries
        * `checkout_id`, so this is how a webhook learns whose it is without
-       * asking Polar to remember a tenant for us — see billing/attribution.ts
+       * asking Polar to remember a tenant for us - see billing/attribution.ts
        * and migration 0055.
        *
        * ⚠ IT NEVER FAILS THE CHECKOUT. The customer has a working payment link
        * either way, and attribution falls back to the subscription holder and
-       * then to `external_id` — so losing this row costs a legacy fallback, not
+       * then to `external_id` - so losing this row costs a legacy fallback, not
        * a sale.
        */
       try {
@@ -124,7 +124,7 @@ export function createBilling(deps?: BillingDeps) {
   /**
    * ⚠ THIS IS WHY THE CUSTOMER NEVER SEES POLAR'S PORTAL. Their portal always
    * uses the organisation's default proration behaviour, and one default cannot
-   * be right for both directions — see billing/plan-change.ts.
+   * be right for both directions - see billing/plan-change.ts.
    */
   app.post("/plan", async (c) => {
     if (!deps?.planChange) return c.json(notWired, 501)
@@ -181,7 +181,7 @@ export function createBilling(deps?: BillingDeps) {
    *
    * ⚠ MINTED HERE BECAUSE THE ALTERNATIVE IS OUR POLAR TOKEN IN A BROWSER. The
    * session lasts an hour and is scoped to one customer, and the card fields it
-   * opens render inside Polar's iframe — so card data never reaches our page or
+   * opens render inside Polar's iframe - so card data never reaches our page or
    * our server, and we stay SAQ A.
    */
   app.post("/payment-method-session", async (c) => {
@@ -217,7 +217,7 @@ export function createBilling(deps?: BillingDeps) {
         currentPeriodEnd: current.currentPeriodEnd?.toISOString() ?? null,
         // ⚠ A DEFERRED DOWNGRADE IS INVISIBLE IN EVERY OTHER FIELD HERE. It is
         // applied at the period boundary, so `plan` is still the plan they are
-        // leaving and `status` is still `active` — see billing/events.ts.
+        // leaving and `status` is still `active` - see billing/events.ts.
         scheduledPlan: current.scheduledPlan,
         scheduledAt: current.scheduledAt?.toISOString() ?? null,
       },
@@ -237,7 +237,7 @@ const notWired = {
 /**
  * ⚠ STRUCTURAL, NOT `req: Request`, AND THE REASON IS A TYPES COLLISION RATHER
  * THAN A STYLE PREFERENCE. Under @types/bun the global `Request` is the merged
- * declaration — Bun's members and Node's — but `clone()` comes from Node's
+ * declaration - Bun's members and Node's - but `clone()` comes from Node's
  * half and is declared as returning undici's `Request`, which lacks the members
  * Bun's half adds. So `readJson(c.req.raw.clone())` failed to typecheck against
  * a nominal `Request` while being, at runtime, exactly the object this wants.

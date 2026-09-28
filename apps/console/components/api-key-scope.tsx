@@ -32,7 +32,7 @@ import { useResetOnOpen } from "@/lib/react"
  * ⚠ "ANY DOMAIN" OR "SPECIFIC", AND SPECIFIC MAY BE SEVERAL. It used to be
  * one domain, on the argument that two keys say the same thing as one key for
  * two domains. That holds until a key is already deployed somewhere that sends
- * for two products — then the only honest restriction is both, and forcing a
+ * for two products - then the only honest restriction is both, and forcing a
  * choice of one leaves the key unrestricted instead.
  *
  * ⚠ AND IT IS DOMAIN NAMES RATHER THAN IDS. The API validates the names against
@@ -103,7 +103,7 @@ export function ApiKeyScopeField({
            */}
           <SelectItem value="some" disabled={domains.length === 0}>
             {domains.length === 0
-              ? "Specific domain — you have no domains added"
+              ? "Specific domain - you have no domains added"
               : specific}
           </SelectItem>
         </SelectContent>
@@ -141,8 +141,8 @@ export function ApiKeyScopeField({
       </Reveal>
 
       {/*
-       * ⚠ THE LINE CHANGES LENGTH AS DOMAINS ARE TICKED — one short prompt, then
-       * a two-line sentence naming them — so it grows on a spring rather than
+       * ⚠ THE LINE CHANGES LENGTH AS DOMAINS ARE TICKED - one short prompt, then
+       * a two-line sentence naming them - so it grows on a spring rather than
        * pushing the buttons down in one frame.
        */}
       <GrowHeight>
@@ -153,7 +153,7 @@ export function ApiKeyScopeField({
            * and this line says why in the ordinary tone.
            *
            * ⚠ AND IT NAMES THE LIMIT OF THE LIMIT. A restricted key still reads
-           * everything the workspace can read, and cannot manage keys at all —
+           * everything the workspace can read, and cannot manage keys at all -
            * which is what stops it widening itself.
            */}
           {domains.length === 0
@@ -173,8 +173,8 @@ export function ApiKeyScopeField({
  * Changing the scope of a key that is already deployed.
  *
  * ⚠ IT IS NOT A CONFIRMATION DIALOG, AND IT DELIBERATELY DOES NOT WARN. Both
- * directions are reversible — narrow it, find out something broke, widen it
- * back — and the action it needs to be easy is narrowing. A "are you sure"
+ * directions are reversible - narrow it, find out something broke, widen it
+ * back - and the action it needs to be easy is narrowing. A "are you sure"
  * over a change somebody can undo in ten seconds is how confirmations become
  * noise, and the one in front of `Revoke` is the one that has to be read.
  *
@@ -199,7 +199,7 @@ export function ApiKeyScopeDialog({
   /*
    * ⚠ SEEDED FROM THE KEY EACH TIME THE DIALOG OPENS, NOT ONCE. The same
    * component serves every row, so without this the second key somebody opens
-   * shows the first one's scope — and the Save button would then quietly apply
+   * shows the first one's scope - and the Save button would then quietly apply
    * it.
    */
   useResetOnOpen(apiKey !== null, () =>

@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip"
  *
  * ⚠ THE CLIPBOARD API IS NOT AVAILABLE ON HTTP, AND A DEV BUILD ON A LAN
  * ADDRESS IS HTTP. `navigator.clipboard` is gated on a secure context, so it is
- * simply `undefined` at http://192.168.x.x:3000 — the exact URL somebody uses
+ * simply `undefined` at http://192.168.x.x:3000 - the exact URL somebody uses
  * to check the console on their phone. The fallback below is the deprecated
  * `document.execCommand("copy")` against an off-screen textarea, which still
  * works everywhere and is the only thing that does in that context. Without it
@@ -32,12 +32,12 @@ async function writeToClipboard(text: string): Promise<boolean> {
     }
   } catch {
     // Permission denied, or a context that lied about having the API. Fall
-    // through — the legacy path below often still works.
+    // through - the legacy path below often still works.
   }
 
   /*
    * ⚠ THE FALLBACK HAS TO SELECT A TEXTAREA, WHICH TAKES FOCUS, SO FOCUS IS PUT
-   * BACK — caret and selection included — before the browser can paint. Without
+   * BACK - caret and selection included - before the browser can paint. Without
    * this, copying the word in a type-to-confirm dialog left the field unfocused
    * (or blinking out and back) whenever the async clipboard was refused.
    */
@@ -85,7 +85,7 @@ export function useCopy(timeout = 2000) {
   const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // ⚠ CLEARED ON UNMOUNT. Copying and immediately navigating away otherwise
-  // sets state on a component that is gone — React 19 no longer warns about it,
+  // sets state on a component that is gone - React 19 no longer warns about it,
   // which makes it quieter rather than less wrong.
   React.useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -109,7 +109,7 @@ export function useCopy(timeout = 2000) {
  *
  * ⚠ IT REQUIRES A `TooltipProvider` ABOVE IT AND THERE IS NO TYPE THAT SAYS SO.
  * Radix's tooltip parts read their provider through a context whose consumer
- * THROWS when nothing provided it — so dropping this component into an app that
+ * THROWS when nothing provided it - so dropping this component into an app that
  * never mounted one does not degrade, it takes the page down. That is not
  * hypothetical: it is what replaced the two-factor step of the sign-up flow with
  * Next's built-in "This page couldn't load" screen, because apps/auth had no
@@ -117,7 +117,7 @@ export function useCopy(timeout = 2000) {
  *
  * ⚠ AND THE FIX IS AT THE ROOT RATHER THAN HERE, DELIBERATELY. Wrapping every
  * `Tooltip` in its own provider is what shadcn does upstream and it would make
- * this component self-sufficient — but Radix resolves to the NEAREST provider,
+ * this component self-sufficient - but Radix resolves to the NEAREST provider,
  * so it would also silently override the console's tuned `delayDuration={300}`
  * on every tooltip in the product. One provider per app, mounted in the root
  * layout, is the arrangement the console already had; apps/auth was simply

@@ -30,7 +30,7 @@ export const metadata: Metadata = { title: "Set up" }
  * ⚠ AND IT IS REACHABLE AT ANY TIME, BY ANYONE, FOREVER. That is a requirement
  * rather than a side effect: the flow re-runs after an upgrade from the free
  * plan, and somebody adding their second domain a year later wants exactly this
- * screen. Nothing here checks whether onboarding is "allowed" — the flag
+ * screen. Nothing here checks whether onboarding is "allowed" - the flag
  * decides where we SEND people, never where they may go. See
  * docs/decisions/console.md §4.
  *
@@ -47,7 +47,7 @@ export default async function OnboardingPage({
   searchParams,
 }: {
   // ⚠ ONLY POLAR'S FULL-PAGE REDIRECT STILL ARRIVES WITH `checkout_id` IN THE
-  // QUERY; our own embedded flow and the DNS callback write cookies instead —
+  // QUERY; our own embedded flow and the DNS callback write cookies instead -
   // see lib/arrival.ts. Somebody who buys a plan on the last step of set-up
   // lands back here and the plan step reports the outcome in place.
   //
@@ -58,7 +58,7 @@ export default async function OnboardingPage({
   searchParams: Promise<{ checkout_id?: string; published?: string }>
 }) {
   const query = await searchParams
-  // ⚠ FROM COOKIES, NOT THE URL — the query is only read for a page reached by
+  // ⚠ FROM COOKIES, NOT THE URL - the query is only read for a page reached by
   // Polar's own redirect, and `ArrivalQuery` then clears it. See lib/arrival.ts.
   const checkoutId = await readArrival(ARRIVAL.checkout, query.checkout_id)
   const published = await readArrival(ARRIVAL.published, query.published)
@@ -111,17 +111,17 @@ export default async function OnboardingPage({
          *
          * ⚠ AND IT POINTS AT `/onboarding/skip`, NOT AT `/`. The console layout
          * redirects here while `should_onboard` is true, so a link straight to
-         * `/` was bounced back to this page — the button appeared to do nothing
+         * `/` was bounced back to this page - the button appeared to do nothing
          * at all. The route records the choice for this browser and then sends
          * them on. See lib/onboarding-skip.ts.
          *
          * ⚠ IT IS A PLAIN `<a>`, AND THAT IS THE WHOLE OF THE THIRD VERSION OF
-         * THIS BUG. `next/link` does not navigate — it fetches the destination
+         * THIS BUG. `next/link` does not navigate - it fetches the destination
          * as an RSC payload and swaps the tree client-side. `/onboarding/skip`
          * is a ROUTE HANDLER: it has no RSC payload, it answers a 307 with a
          * `Set-Cookie`, and the router has nothing it can do with that. So the
          * click fired `GET /onboarding/skip?_rsc=…`, the router discarded the
-         * answer, the URL never changed and the cookie was never kept — the
+         * answer, the URL never changed and the cookie was never kept - the
          * button did nothing, again, for the third distinct reason, having twice
          * been fixed for doing nothing.
          *
@@ -145,7 +145,7 @@ export default async function OnboardingPage({
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
         checkoutId={checkoutId}
-        // ⚠ HOW THEY LAND ON THE STEP THEY LEFT FROM — a reload, or a return
+        // ⚠ HOW THEY LAND ON THE STEP THEY LEFT FROM - a reload, or a return
         // from checkout, would otherwise re-derive from the facts and put
         // somebody who paid on the last step back on "Verify". From a cookie,
         // not `?step=`; see lib/onboarding-step.ts.
@@ -155,7 +155,7 @@ export default async function OnboardingPage({
         )}
         // ⚠ ONLY THIS WORKSPACE'S DOMAINS COUNT. The cookie is the browser's,
         // not the account's, so it carries the ids the DNS callback published
-        // and the list above — scoped by the API to whoever is signed in — is
+        // and the list above - scoped by the API to whoever is signed in - is
         // what decides which of them are news here. See the callback handler.
         justPublished={ownPublished(published, domains.ok ? domains.data.data : [])}
       />
@@ -167,7 +167,7 @@ export default async function OnboardingPage({
  * How many of the domains the DNS callback just published belong to this
  * workspace.
  *
- * ⚠ A BARE NUMBER — THE OLD COOKIE FORMAT — COUNTS AS NOTHING. It cannot say
+ * ⚠ A BARE NUMBER - THE OLD COOKIE FORMAT - COUNTS AS NOTHING. It cannot say
  * whose publish it was, and a missing green banner is a far smaller wrong
  * than announcing another account's records.
  */

@@ -2,8 +2,8 @@
 //
 // authd stores nothing of its own: an Entry is a rendering of a row in the
 // Clerk projection. Passwords never appear here. Stalwart is configured with
-// bindAuthentication=true, which means it never reads a password attribute —
-// it binds as the user and trusts the result — so there is deliberately no
+// bindAuthentication=true, which means it never reads a password attribute -
+// it binds as the user and trusts the result - so there is deliberately no
 // userPassword attribute anywhere in this package.
 package directory
 
@@ -37,7 +37,7 @@ const (
 // Entry is one LDAP entry: a DN plus multi-valued attributes.
 //
 // Attribute names are matched case-insensitively, because LDAP attribute
-// descriptions are case-insensitive and clients are inconsistent about it —
+// descriptions are case-insensitive and clients are inconsistent about it -
 // Stalwart's default filters say "objectClass" while plenty of tooling sends
 // "objectclass".
 type Entry struct {
@@ -52,7 +52,7 @@ func NewEntry(dn string) *Entry {
 
 // Set replaces an attribute. Empty values are dropped, so a NULL column in the
 // projection yields an absent attribute rather than an attribute with an empty
-// string — those are different things to a presence filter.
+// string - those are different things to a presence filter.
 func (e *Entry) Set(name string, values ...string) *Entry {
 	kept := values[:0:0]
 	for _, v := range values {

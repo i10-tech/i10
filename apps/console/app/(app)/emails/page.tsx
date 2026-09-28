@@ -38,8 +38,8 @@ const PAGE_SIZE = 50
  * The delivery log.
  *
  * ⚠ THE FILTERS LIVE IN THE URL AND THE PAGE IS A SERVER COMPONENT, which is
- * what makes this fast on a large account. The alternative — fetching in the
- * browser — puts a spinner over the one screen people keep open all day, and
+ * what makes this fast on a large account. The alternative - fetching in the
+ * browser - puts a spinner over the one screen people keep open all day, and
  * turns every filter change into a round trip with nothing on screen. In the
  * URL the state is also shareable: "here is the bounce" is a link.
  *
@@ -80,8 +80,8 @@ export default async function EmailsPage({
 
   /*
    * ⚠ AN EMPTY PAGE WITH A CURSOR IS A REAL STATE, AND IT USED TO BE A DEAD END.
-   * The status filter is applied in TypeScript after the page is fetched — see
-   * `listEmails`, where the reason is written up — so filtering by a rare status
+   * The status filter is applied in TypeScript after the page is fetched - see
+   * `listEmails`, where the reason is written up - so filtering by a rare status
    * routinely returns a page of fifty rows with none of them matching, while the
    * next page does. Rendering the terminal empty state there tells somebody
    * "nothing matches those filters" about a message that exists forty rows
@@ -110,7 +110,7 @@ export default async function EmailsPage({
           <PanelError title="Could not load the log" message={result.error.message} />
         ) : rows.length === 0 && nextCursor ? (
           /*
-           * ⚠ NOT AN `EmptyState`, BECAUSE THE LIST IS NOT EMPTY — this page of
+           * ⚠ NOT AN `EmptyState`, BECAUSE THE LIST IS NOT EMPTY - this page of
            * it is. The distinction is the difference between "you have no
            * bounces" and "no bounces in the last fifty messages", and only one
            * of those is true here.
@@ -178,7 +178,7 @@ export default async function EmailsPage({
                           className="block truncate px-3 py-2.5 font-mono text-xs"
                           title={email.to.join(", ")}
                         >
-                          {email.to[0] ? bareAddress(email.to[0]) : "—"}
+                          {email.to[0] ? bareAddress(email.to[0]) : "-"}
                           {email.to.length > 1 && (
                             <span className="text-muted-foreground">
                               {" "}
@@ -192,7 +192,7 @@ export default async function EmailsPage({
                          * ⚠ THE ERROR SITS UNDER THE SUBJECT, NOT AFTER IT. Both
                          * used to share one truncating line, so a failed message
                          * read "131871 is your verification code MessageRejected:
-                         * Email addr…" — the reason was cut off exactly where it
+                         * Email addr…" - the reason was cut off exactly where it
                          * started to say something, and it ran into the subject
                          * as though it were part of it. Two lines let each
                          * truncate on its own, which is the only way both can be

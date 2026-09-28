@@ -1,23 +1,23 @@
 -- i10 issues its own API keys. Clerk no longer holds them.
 --
 -- ⚠ THIS IS A LATENCY CHANGE BEFORE IT IS ANYTHING ELSE. Verification was a
--- network call to Clerk on every cache miss, and the cache TTL is 60 seconds —
+-- network call to Clerk on every cache miss, and the cache TTL is 60 seconds -
 -- so a customer sending anything less often than once a minute paid it on
 -- essentially every request. Measured on the live API 2026-09-08: 1119ms cold
 -- against 353ms warm, and an unauthenticated 401 costs 180ms, which is pure
 -- network round trip. The ~900ms difference was Clerk, and it was the single
--- largest cost in a send — larger than SES.
+-- largest cost in a send - larger than SES.
 --
 -- ⚠ AND CLERK WAS NEVER THE THING TYING A KEY TO A TENANT. Its `subject` is a
 -- `user_…` or `org_…` and our tenant is neither; auth/api-key.ts read
--- `claims.tenantId` — a claim WE stamped at creation — and ignored `subject`
+-- `claims.tenantId` - a claim WE stamped at creation - and ignored `subject`
 -- entirely. The link has always been this table's `tenant_id`. Removing Clerk
 -- moves nothing; it stops a network round trip from being needed to read a
 -- column we already own.
 --
 -- ⚠ WHAT IT DELETES IS AS IMPORTANT AS WHAT IT ADDS. Clerk publishes no way to
 -- change its `ak_` prefix, so every key was rewritten to `i10_live_…` on the
--- way out and back on the way in — and because both our prefixes are nine
+-- way out and back on the way in - and because both our prefixes are nine
 -- characters, `i10_live_X` and `i10_test_X` unwrapped to ONE Clerk secret. The
 -- mode had to come from Clerk's claims, never from the string, or editing one
 -- character promoted a test key to a live one. Self-issued, the whole key
@@ -29,7 +29,7 @@
 
 -- ⚠ SHA-256, AND DELIBERATELY NOT bcrypt OR argon2. Slow hashes exist because
 -- passwords are low-entropy and guessable. An API key here is 256 bits from a
--- CSPRNG — there is nothing to guess, and a deliberately slow hash would move
+-- CSPRNG - there is nothing to guess, and a deliberately slow hash would move
 -- the very latency this migration exists to remove from the network onto the
 -- CPU, on every request. Fast hashing of high-entropy secrets is correct.
 --
@@ -43,14 +43,14 @@ ALTER TABLE "core"."api_keys" ADD CONSTRAINT "api_keys_secret_hash_unique" UNIQU
 
 -- ⚠ THE EXISTING `mode` COLUMN BECOMES AUTHORITATIVE, WITHOUT CHANGING. It
 -- carried a comment warning it must never decide behaviour, because the prefix
--- a caller sent could not be trusted — true while both prefixes were nine
+-- a caller sent could not be trusted - true while both prefixes were nine
 -- characters and unwrapped to one shared Clerk secret. It is not true now: mode
 -- is read off the row the hash matched, and the hash covers the prefix, so
 -- `i10_live_X` and `i10_test_X` are simply different keys.
 --
 -- Scopes moved here from Clerk's claims for the same reason everything else
 -- did. Empty means "no scope restriction", which is what every key carries
--- today — nothing in the request path enforces them yet.
+-- today - nothing in the request path enforces them yet.
 ALTER TABLE "core"."api_keys" ADD COLUMN "scopes" text[] NOT NULL DEFAULT '{}';
 --> statement-breakpoint
 
@@ -93,7 +93,7 @@ ALTER TABLE "core"."api_keys" DROP COLUMN "clerk_key_id";
 --
 -- ⚠ SECURITY DEFINER, BECAUSE AUTHENTICATION RUNS BEFORE THERE IS A TENANT.
 -- `api_keys` carries `tenant_isolation`, which reads
--- `current_setting('app.tenant_id')` strictly — and only a `withTenant()`
+-- `current_setting('app.tenant_id')` strictly - and only a `withTenant()`
 -- transaction sets it. But the whole purpose of this lookup is to DISCOVER the
 -- tenant: at the moment it runs, nobody knows who is calling. Issued through an
 -- ordinary connection it would not return the wrong row, it would raise
@@ -102,13 +102,13 @@ ALTER TABLE "core"."api_keys" DROP COLUMN "clerk_key_id";
 --
 -- ⚠ VOLATILE, BECAUSE IT WRITES `last_used_at`. Folding the touch into the
 -- lookup makes it one round trip instead of two, and it happens only on a cache
--- miss — so the write rate is bounded by the cache TTL per key, not by request
+-- miss - so the write rate is bounded by the cache TTL per key, not by request
 -- volume. A per-request write on the send path would be a far worse trade than
 -- the network call this whole change removes.
 --
 -- ⚠ AND IT STAMPS A REVOKED KEY TOO, DELIBERATELY. The caller refuses the
 -- request either way; what this preserves is the evidence that somebody is
--- still presenting a credential that was withdrawn — which is exactly what you
+-- still presenting a credential that was withdrawn - which is exactly what you
 -- want to know after a leak, and exactly what is lost if the stamp is skipped
 -- for keys that fail.
 --
@@ -149,7 +149,7 @@ AS $$
   -- THE SECOND REQUEST INSIDE A MINUTE WOULD READ AS A BAD KEY. `NOT EXISTS`
   -- rather than repeating the staleness predicate: the CTE runs exactly once,
   -- so this asks whether the update fired rather than re-deriving why it did
-  -- not — one definition of "already stamped" instead of two that can drift.
+  -- not - one definition of "already stamped" instead of two that can drift.
   SELECT k.id, k.tenant_id, k.scopes, k.mode, k.revoked_at, k.expires_at
     FROM core.api_keys k
    WHERE k.secret_hash = p_hash

@@ -17,7 +17,7 @@ import type { ConflictingRecord, DnsConnection } from "@/lib/types"
  * ⚠ THIS IS THE BUTTON THAT MAKES DELEGATION WORTH HAVING. Three delegated names
  * is still six NS records typed by hand into somebody else's dashboard, and a
  * record typed into the wrong field looks exactly like one that has not
- * propagated — which is the single most expensive support conversation this
+ * propagated - which is the single most expensive support conversation this
  * product has. Where we hold a credential for the provider that hosts the
  * domain, none of it needs typing.
  *

@@ -8,7 +8,7 @@ import { createSocket } from "node:dgram"
  * ⚠ AN ORDINARY RESOLVER CANNOT ANSWER THIS, AND THAT IS THE WHOLE REASON THIS
  * FILE EXISTS. Ask any recursive resolver for `mail.example.com NS` and it
  * FOLLOWS the delegation and returns the NS records from the zone at the far
- * end — ours. That tells us what we ourselves published, which was never in
+ * end - ours. That tells us what we ourselves published, which was never in
  * question. What we need is what the CUSTOMER published, and that lives only in
  * the parent's referral: rcode NOERROR, an empty ANSWER section, and the NS
  * records in AUTHORITY, with no AA flag. `dns.resolveNs` reads the ANSWER
@@ -16,7 +16,7 @@ import { createSocket } from "node:dgram"
  *
  * ⚠ AND IT IS WHAT LETS THE DELEGATION IDENTIFY THE ACCOUNT. Every delegating
  * customer used to be told to publish the same two nameservers, so nothing
- * reaching DNS said which workspace produced it — which is why there had to be
+ * reaching DNS said which workspace produced it - which is why there had to be
  * a separate challenge TXT record beside the delegation. Give each claim its
  * own nameserver hostnames and the delegation proves itself: only the holder of
  * `example.com`'s DNS can publish `mail.example.com NS <claim>.ns1.i10.tech`,
@@ -24,7 +24,7 @@ import { createSocket } from "node:dgram"
  *
  * ⚠ THE QUERY IS SENT WITH RD=0, WHICH IS NOT COSMETIC. With recursion desired
  * a server that happens to also be a resolver would go and fetch the answer for
- * us — returning the child's own NS records again and defeating the entire
+ * us - returning the child's own NS records again and defeating the entire
  * point. We want the referral, so we must ask not to be helped.
  */
 
@@ -65,7 +65,7 @@ function encodeName(name: string): Buffer {
  *
  * ⚠ AND THE JUMP BUDGET IS THE DEFENCE AGAINST A MALICIOUS ANSWER. A pointer
  * that points at itself, or two that point at each other, is a packet that
- * hangs this process for ever — and the packet comes from a nameserver chosen
+ * hangs this process for ever - and the packet comes from a nameserver chosen
  * by the customer's own DNS configuration.
  */
 function decodeName(buf: Buffer, offset: number): { name: string; next: number } {
@@ -112,7 +112,7 @@ interface Parsed {
 /**
  * ⚠ BOTH SECTIONS ARE READ, AND THAT IS DELIBERATE ROBUSTNESS RATHER THAN
  * SLOPPINESS. A referral puts the NS records in AUTHORITY, which is the case
- * this exists for — but a server that is authoritative for the child as well as
+ * this exists for - but a server that is authoritative for the child as well as
  * the parent answers from ANSWER with AA set, and a handful of hosted DNS
  * products do exactly that for a subdomain they also host. Reading only one
  * section would report "undelegated" for a delegation that plainly exists.
@@ -301,8 +301,8 @@ export async function readDelegation(
       continue
     }
 
-    // NXDOMAIN and NOERROR both mean the parent answered. Anything else —
-    // SERVFAIL, REFUSED — means this server could not or would not tell us.
+    // NXDOMAIN and NOERROR both mean the parent answered. Anything else -
+    // SERVFAIL, REFUSED - means this server could not or would not tell us.
     if (parsed.rcode !== 0 && parsed.rcode !== 3) {
       lastError = `rcode ${parsed.rcode}`
       continue

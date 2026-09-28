@@ -15,7 +15,7 @@ import { Spinner } from "@repo/ui/components/spinner"
  * `redirect_uri`, carrying the authorization code. A `fetch` would follow that
  * redirect in the background, hand us a response nobody can act on, and leave
  * the browser sitting on this page with the code spent. `buildConsentActionUrl`
- * exists precisely for this — Clerk documents it as the value for a form's
+ * exists precisely for this - Clerk documents it as the value for a form's
  * `action` when you build your own consent UI.
  *
  * ⚠ THE TWO BUTTONS ARE BOTH `type="submit"` AND DIFFER ONLY BY VALUE. Allow is
@@ -34,7 +34,7 @@ export function ConsentForm({
   clientId?: string
   scope?: string
   redirectUri?: string
-  /** Every query parameter, re-emitted as hidden inputs — see page.tsx. */
+  /** Every query parameter, re-emitted as hidden inputs - see page.tsx. */
   forwarded: [string, string][]
 }) {
   const clerk = useClerk()
@@ -70,7 +70,7 @@ export function ConsentForm({
    * ⚠ CLERK NORMALLY SIGNS SOMEBODY IN BEFORE SENDING THEM HERE, so this is the
    * expired-mid-flow case rather than the common one. The link keeps the whole
    * authorization request in `redirect_url` so approving can continue after
-   * signing in — but see _lib/redirect.ts: that only works if this app's own
+   * signing in - but see _lib/redirect.ts: that only works if this app's own
    * origin is in `AUTH_ALLOWED_REDIRECT_ORIGINS`. Without it the person lands
    * on the dashboard instead, which is safe and merely means starting over.
    */
@@ -103,7 +103,7 @@ export function ConsentForm({
   /*
    * ⚠ `offline_access` IS HIDDEN FROM THE LIST AND MENTIONED SEPARATELY, which
    * is what Clerk's own component does. It is not a thing the application reads
-   * — it is a request to keep access working after the person closes the tab —
+   * - it is a request to keep access working after the person closes the tab -
    * so listing it among "can read your…" permissions describes it wrongly.
    */
   const wantsOfflineAccess = data.scopes.some((s) => s.scope === "offline_access")
@@ -118,7 +118,7 @@ export function ConsentForm({
    * ⚠ AND THERE IS NO ORGANISATION PICKER HERE, WHICH IS A KNOWN GAP. Clerk's
    * prebuilt screen lets somebody choose WHICH organisation to grant; this
    * sends the active one. Nothing requests `user:org:read` today, so the gap is
-   * unreachable — but an application that does would silently get the active
+   * unreachable - but an application that does would silently get the active
    * organisation rather than a chosen one, and this needs building first.
    */
   const includeOrganization = permissions.some((s) => s.scope === "user:org:read")
@@ -132,7 +132,7 @@ export function ConsentForm({
         <div className="flex flex-col items-center gap-3 text-center">
           {data.oauthApplicationLogoUrl ? (
             /*
-             * ⚠ A PLAIN <img> — the application's own logo, on whatever host
+             * ⚠ A PLAIN <img> - the application's own logo, on whatever host
              * uploaded it. Routing a third party's arbitrary image through the
              * Next optimiser would mean allowing arbitrary remote patterns,
              * which is a far larger surface than one 48px mark.
@@ -178,7 +178,7 @@ export function ConsentForm({
          * one fact that makes the screen safe to act on: an application is only
          * as trustworthy as where it sends the code. `redirectDomain` is null
          * when the URI is not registered to the application, or points at an IP
-         * or localhost — so a missing domain is exactly when somebody should be
+         * or localhost - so a missing domain is exactly when somebody should be
          * told, rather than when the line should quietly disappear.
          */}
         <FieldDescription>

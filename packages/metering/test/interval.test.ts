@@ -41,7 +41,7 @@ describe("month boundaries", () => {
   /**
    * ⚠ THE REGRESSION TEST FOR THE BUG THIS PACKAGE EXISTS NOT TO HAVE. Autumn's
    * `addInterval` steps from the PREVIOUS boundary with date-fns `addMonths`,
-   * which clamps — so a 31st anchor becomes the 28th after one February and
+   * which clamps - so a 31st anchor becomes the 28th after one February and
    * stays there for good. Deriving from the anchor keeps the clamp local.
    */
   it("returns to the anchor day after a short month", () => {
@@ -59,7 +59,7 @@ describe("month boundaries", () => {
 
     // ⚠ THE ASSERTION THE WHOLE FILE EXISTS FOR. February clamped to the 28th,
     // and March goes straight back to the 31st. Stepping from the previous
-    // boundary — what Autumn does — would give 28 March here and stay on the
+    // boundary - what Autumn does - would give 28 March here and stay on the
     // 28th for good.
     const second = windowFor({
       anchor,
@@ -69,7 +69,7 @@ describe("month boundaries", () => {
     expect(iso(second.start)).toBe("2026-02-28T00:00:00.000Z")
     expect(iso(second.end)).toBe("2026-03-31T00:00:00.000Z")
 
-    // April has 30 days, so it clamps too — again without affecting May.
+    // April has 30 days, so it clamps too - again without affecting May.
     const third = windowFor({
       anchor,
       interval: "month",
@@ -189,7 +189,7 @@ describe("the properties that make this stateless", () => {
 describe("lifetime", () => {
   const anchor = at("2026-01-15T00:00:00.000Z")
 
-  // ⚠ NOT "very long" — never. A lifetime allowance is consumed once.
+  // ⚠ NOT "very long" - never. A lifetime allowance is consumed once.
   it("starts at the anchor and never ends", () => {
     const w = windowFor({
       anchor,

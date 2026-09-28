@@ -3,7 +3,7 @@
 -- ⚠ ALL THREE FUNCTIONS EXIST BECAUSE THE QUESTION IS ASKED FROM OUTSIDE ANY
 -- TENANT'S SCOPE. `core.tenants` is protected by
 -- `id = current_setting('app.tenant_id')`, so `i10_api` can only ever see the
--- one tenant a request is scoped to — and a Clerk `organization.deleted`
+-- one tenant a request is scoped to - and a Clerk `organization.deleted`
 -- webhook carries an organization id, not a tenant id, while a Polar customer
 -- carries a tenant id belonging to somebody who may no longer exist. Same shape
 -- as `provision_tenant`, `subscriptions_snapshot` and `message_owner`, and held
@@ -17,7 +17,7 @@
 -- deduplicates customers by email: somebody who subscribed, deleted their
 -- account and signed up again is handed back the SAME Polar customer, still
 -- carrying the FIRST tenant's `external_id`. `routes/checkout-status.ts` has to
--- decide between two readings of that — a collision between two live workspaces,
+-- decide between two readings of that - a collision between two live workspaces,
 -- where overwriting would move somebody else's billing onto this one, and a
 -- tenant that is gone, where refusing to overwrite means the payment can never
 -- be attributed to anybody, for ever. The difference is exactly this boolean.
@@ -30,7 +30,7 @@
 --
 -- ⚠ AND `suspended` IS NOT LIVE FOR THIS PURPOSE, DELIBERATELY. Suspension is a
 -- billing decision about a tenant that still exists and whose owner can still
--- sign in — its Polar customer is still theirs, and handing it to somebody else
+-- sign in - its Polar customer is still theirs, and handing it to somebody else
 -- would be the same mistake as the collision case. Only `active` is live.
 CREATE FUNCTION "core"."tenant_is_live"(p_tenant_id text)
 RETURNS boolean
@@ -68,8 +68,8 @@ GRANT EXECUTE ON FUNCTION "core"."tenant_is_live"(text) TO i10_api;
 --
 -- ⚠ IT RETURNS THE POLAR SUBSCRIPTION ID BECAUSE THE CALLER CANNOT READ IT
 -- EITHER. `core.subscriptions` carries the same policy as `core.tenants`, and
--- the caller is a webhook that has never been scoped to this tenant and — the
--- tenant now being dead — never will be.
+-- the caller is a webhook that has never been scoped to this tenant and - the
+-- tenant now being dead - never will be.
 --
 -- ⚠ AND IT IS IDEMPOTENT, ANSWERING `already_dead` RATHER THAN NOTHING. Svix
 -- redelivers; a second delivery must not read as "no such organization", which
@@ -143,7 +143,7 @@ GRANT EXECUTE ON FUNCTION "core"."terminate_tenant"(text, text) TO i10_api;
 --
 -- ⚠ IT EXISTS BECAUSE CLERK'S CASCADE IS NOT SOMETHING WE CAN ASSERT. Deleting
 -- a user in Clerk may or may not fire `organization.deleted` for the personal
--- organization that user was the only member of — the behaviour is not stated
+-- organization that user was the only member of - the behaviour is not stated
 -- anywhere we can point at, and the failure mode if it does not fire is a
 -- subscription that bills a person who deleted their account. This is what lets
 -- `user.deleted` ask Clerk directly whether each organization still exists,
@@ -176,11 +176,11 @@ GRANT EXECUTE ON FUNCTION "core"."tenants_owned_by"(text) TO i10_api;
 -- What a deferred plan change is waiting to become.
 --
 -- ⚠ POLAR APPLIES A `next_period` CHANGE AT THE PERIOD BOUNDARY AND NOT BEFORE,
--- which is the whole reason downgrades are requested that way — the customer
+-- which is the whole reason downgrades are requested that way - the customer
 -- keeps what they paid for. The consequence is that `product_id` still names the
 -- OLD plan for the rest of the period, so nothing in our copy of the
 -- subscription could say a change had been accepted at all. A customer who
--- downgraded saw "Pro — renews on the 4th" and no other acknowledgement, which
+-- downgraded saw "Pro - renews on the 4th" and no other acknowledgement, which
 -- reads exactly like a button that did nothing.
 --
 -- Polar states it on the subscription as `pending_update`, with `product_id` and

@@ -21,13 +21,13 @@ import {
  *
  * ⚠ THE TOKEN IS A SESSION JWT, NOT AN API KEY, AND THE DISTINCTION IS THE
  * WHOLE SECURITY MODEL. `/console/*` on the API accepts a session and refuses a
- * key; `/emails` accepts a key and refuses a session. Nothing accepts both —
+ * key; `/emails` accepts a key and refuses a session. Nothing accepts both -
  * see apps/api/src/middleware/tenant.ts. If this file ever grew a fallback to
  * an API key, a leaked sending key would become an account takeover.
  *
  * ⚠ AND THE BASE URL IS READ AT REQUEST TIME FROM AN UNPREFIXED VARIABLE. Next
  * inlines `NEXT_PUBLIC_*` at BUILD time, even in server code, and the console
- * image is built once in CI with no access to any environment — so a prefixed
+ * image is built once in CI with no access to any environment - so a prefixed
  * name would be compiled in as `undefined` and no amount of setting it in the
  * pod would bring it back. The same reasoning as the Clerk keys in
  * middleware.ts, and the same trap.
@@ -37,13 +37,13 @@ import {
  * Where `apps/api` is.
  *
  * ⚠ THE LOCAL DEFAULT IS THE API'S DEV PORT, SO A FRESH CHECKOUT WORKS WITH NO
- * ENVIRONMENT AT ALL — and it must NOT apply in production. An earlier version
+ * ENVIRONMENT AT ALL - and it must NOT apply in production. An earlier version
  * of this file defaulted unconditionally and carried a comment saying the
  * variable "is always set" in production and that the fallback "fails loudly
  * and immediately" if it were not. All of that was wrong, and it shipped:
  * `API_BASE_URL` was absent from the console's deployment, every server
  * component fetched `http://localhost:3001`, and bun answered `Unable to
- * connect. Is the computer able to access the url?` — which reaches the browser
+ * connect. Is the computer able to access the url?` - which reaches the browser
  * as a minified React error and an error boundary. Nothing in that names a
  * missing variable. A default that is right for a laptop is a silent
  * misconfiguration in a pod.
@@ -51,7 +51,7 @@ import {
  * ⚠ IT IS RESOLVED PER CALL RATHER THAN AT MODULE SCOPE, WHICH IS THE WHOLE
  * REASON THIS IS A FUNCTION. `next build` evaluates module scope while
  * collecting page data, with `NODE_ENV=production` and no deployment
- * environment — exactly the state this refuses. Throwing at module scope would
+ * environment - exactly the state this refuses. Throwing at module scope would
  * fail every CI build to guard against a misconfiguration that can only exist
  * at runtime. The header note above makes the same point about `NEXT_PUBLIC_`.
  */
@@ -66,7 +66,7 @@ function baseUrl(): string {
       message:
         "API_BASE_URL is not set. The console cannot reach the API. Set it on " +
         "the deployment to the in-cluster address of the api Service, e.g. " +
-        "http://i10-api.i10-prod.svc.cluster.local — see " +
+        "http://i10-api.i10-prod.svc.cluster.local - see " +
         "infra/k8s/i10/workloads/console.yaml.",
     })
   }
@@ -75,7 +75,7 @@ function baseUrl(): string {
 }
 
 // ⚠ RE-EXPORTED SO NOTHING ELSE MOVES. It is defined next to the normaliser
-// that guarantees its shape — see ./api-error — and a dozen files import it
+// that guarantees its shape - see ./api-error - and a dozen files import it
 // from here.
 export type { ApiError }
 
@@ -123,7 +123,7 @@ async function authorization(): Promise<string | null> {
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
   /*
    * ⚠ THE PREVIEW BRANCH IS DEAD CODE IN A PRODUCTION BUILD. `PREVIEW` folds to
-   * a literal `false` — see lib/preview.ts — so the bundler deletes this block
+   * a literal `false` - see lib/preview.ts - so the bundler deletes this block
    * outright: the compiled function goes from the path guard straight to
    * `fetch`. The fixture data itself is still emitted into the chunk, and is
    * unreachable because nothing left in the build reads it. There is no
@@ -132,7 +132,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
    * ⚠ AND A MUTATION IN PREVIEW IS A NO-OP THAT REPORTS SUCCESS, DELIBERATELY.
    * The point of the mode is reviewing the interface; a create dialog that
    * refused to close would make half the screens unreviewable. Nothing
-   * persists, so a refresh puts the fixture back — which is the honest
+   * persists, so a refresh puts the fixture back - which is the honest
    * behaviour for a mode with no database.
    */
   if (PREVIEW) {
@@ -141,7 +141,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     /*
      * ⚠ "THE ROW IS NOT HERE" IS A 404, NOT A MISSING FIXTURE. Without this the
      * detail routes fell back to the first row and rendered a convincing page
-     * for an id that does not exist — and `not-found.tsx` was unreachable, so
+     * for an id that does not exist - and `not-found.tsx` was unreachable, so
      * the 404 nobody looks at until it matters could never be reviewed. The
      * status matters too: the pages branch on 404 to call `notFound()`, and
      * anything else there is an error boundary instead.
@@ -204,7 +204,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
    * A PUBLIC POST ENDPOINT AND ITS ARGUMENTS ARE THE CALLER'S, NOT THE UI'S.
    * Every action in lib/actions.ts interpolates an id into a template string;
    * nothing stops somebody invoking `deleteDomain("../../mailboxes/x")`
-   * directly, and `new URL()` normalises `..` away — so that request would leave
+   * directly, and `new URL()` normalises `..` away - so that request would leave
    * here as `DELETE /mailboxes/x`, carrying this person's session token, at a
    * path the console was never meant to reach.
    *
@@ -277,7 +277,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
         response.status,
       )
     } catch {
-      // A non-JSON error body — an ingress 502 page, usually. The fallback
+      // A non-JSON error body - an ingress 502 page, usually. The fallback
       // already says something true.
     }
 
@@ -297,7 +297,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
  *
  * ⚠ FOR PAGES THAT MUST RENDER SOMETHING EVEN WHEN ONE PANEL FAILS. A
  * dashboard that throws because the usage endpoint is having a bad minute
- * shows nothing at all — including the five panels that were fine. Server
+ * shows nothing at all - including the five panels that were fine. Server
  * components have no error boundary granularity below a `error.tsx` for the
  * whole route, so the granularity has to be here.
  */

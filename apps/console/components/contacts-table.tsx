@@ -29,7 +29,7 @@ import { Time } from "@/components/time"
  * The contact list, with selection.
  *
  * ⚠ SELECTION IS PER PAGE AND THE UI SAYS SO. "Select all" here means the fifty
- * rows on screen, not the forty thousand behind the cursor — and a bulk delete
+ * rows on screen, not the forty thousand behind the cursor - and a bulk delete
  * that silently meant the latter would be catastrophic and irreversible. The
  * count on the action bar is the honest number.
  *
@@ -103,8 +103,8 @@ export function ContactsTable({
        * the filters and the table, inserted on the first tick: measured, the
        * table moved 66px in one frame, so the row somebody had just ticked
        * left the cursor and the next click landed on its neighbour. Now both
-       * are always rendered in the same cell — which is therefore always as
-       * tall as the taller of them — and ticking a row crossfades one for the
+       * are always rendered in the same cell - which is therefore always as
+       * tall as the taller of them - and ticking a row crossfades one for the
        * other with a 4px rise. The table does not move at all.
        *
        * ⚠ `inert` ON WHICHEVER IS HIDDEN, NOT ONLY `opacity-0`. An invisible
@@ -161,7 +161,7 @@ export function ContactsTable({
           inert={selected.size === 0}
         >
           <span className="tabular text-sm">
-            {/* Holds its last count while fading out — see `useRetained`. */}
+            {/* Holds its last count while fading out - see `useRetained`. */}
             {shownCount} selected{" "}
             <span className="text-muted-foreground">on this page</span>
           </span>
@@ -282,7 +282,7 @@ export function ContactsTable({
                         {[contact.first_name, contact.last_name]
                           .filter(Boolean)
                           .join(" ") || (
-                          <span className="text-muted-foreground">—</span>
+                          <span className="text-muted-foreground">-</span>
                         )}
                       </span>
                     </td>
@@ -320,7 +320,7 @@ export function ContactsTable({
           }
         }}
         title={`Delete ${selected.size} ${selected.size === 1 ? "contact" : "contacts"}?`}
-        description="They are removed from every segment and their topic preferences go with them. If any of them had unsubscribed, that record is lost — re-importing the same address would start sending to them again."
+        description="They are removed from every segment and their topic preferences go with them. If any of them had unsubscribed, that record is lost - re-importing the same address would start sending to them again."
         confirmLabel="Delete"
         doneLabel="Deleted"
         // ⚠ `DELETE` FOR EVERY BULK DELETE. There is no single name to type, and

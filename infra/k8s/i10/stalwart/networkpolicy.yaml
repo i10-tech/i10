@@ -3,18 +3,18 @@
 # ⚠ WITHOUT THIS, EVERY MAIL CONNECTION IS DROPPED WITH NO LOG ANYWHERE. The
 # namespace carries `default-deny-ingress`, and the only allows are for
 # `cnpg-system`, `i10-prod` itself, and `traefik`. HTTP works because Traefik is
-# an allowed namespace — it proxies from inside the cluster. Mail does not go
+# an allowed namespace - it proxies from inside the cluster. Mail does not go
 # through Traefik: it arrives from the internet straight onto the pod's
 # hostPorts, matches no allow rule, and kube-router drops it in FORWARD.
 #
 # The symptom is exceptionally misleading. The port accepts a TCP handshake from
 # the node, `CNI-HOSTPORT-DNAT` counts the packets arriving, the firewall is
-# correct, the server is listening — and the client times out while the mail
+# correct, the server is listening - and the client times out while the mail
 # server's log stays completely empty, because the packet never reaches it.
 #
 # ⚠ THE INGRESS RULE HAS `ports` AND NO `from`, DELIBERATELY. An empty `from`
 # means every source, which is what a public mail server needs, and it covers
-# IPv4 and IPv6 in one rule — an `ipBlock` would need `0.0.0.0/0` and `::/0` as
+# IPv4 and IPv6 in one rule - an `ipBlock` would need `0.0.0.0/0` and `::/0` as
 # separate entries, and forgetting the second is how you ship a server that
 # works until a client prefers the AAAA record.
 #
@@ -29,7 +29,7 @@
 # no rule here needs to change for it. Verified 2026-09-17 by probing 465 from a
 # throwaway pod in the namespace.
 #
-# What this rule governs is traffic from OUTSIDE the namespace — which is to say
+# What this rule governs is traffic from OUTSIDE the namespace - which is to say
 # the internet, since it has no `from`. The ports below are the ones the world
 # is allowed to reach.
 #

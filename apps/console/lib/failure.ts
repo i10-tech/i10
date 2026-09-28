@@ -5,8 +5,8 @@ import type { ApiError } from "@/lib/api"
  * What a failure is allowed to say to the person looking at the screen.
  *
  * ⚠ THIS EXISTS BECAUSE THE CONSOLE USED TO PUT `error.message` ON SCREEN
- * VERBATIM, AND MOST OF THOSE MESSAGES ARE NOT OURS TO SHOW. Two call sites —
- * `run()` in lib/actions.ts and `tryApi()` in lib/api.ts — both ended with
+ * VERBATIM, AND MOST OF THOSE MESSAGES ARE NOT OURS TO SHOW. Two call sites -
+ * `run()` in lib/actions.ts and `tryApi()` in lib/api.ts - both ended with
  * `error instanceof Error ? error.message : …`, which is correct for an error
  * the API wrote and wrong for every other kind. What actually reaches that
  * branch is the runtime's own wording:
@@ -25,15 +25,15 @@ import type { ApiError } from "@/lib/api"
  * on its own is a dead end; "we could not reach the service, try again shortly"
  * names no internals and tells somebody whether waiting will help.
  *
- * ⚠ AND THE REAL ERROR IS NOT DISCARDED — IT IS LOGGED. Sanitising without
+ * ⚠ AND THE REAL ERROR IS NOT DISCARDED - IT IS LOGGED. Sanitising without
  * logging would trade a customer-facing leak for an operator-facing blind spot,
  * which is a worse deal: the leak is at least visible.
  */
 
 /**
  * ⚠ THE API'S OWN MESSAGES PASS THROUGH UNTOUCHED, AND THAT IS DELIBERATE.
- * They are written for the customer — "You have used your sending allowance for
- * this period", "That domain is already verified on another workspace" — and
+ * They are written for the customer - "You have used your sending allowance for
+ * this period", "That domain is already verified on another workspace" - and
  * they are the only actionable thing on the screen. Replacing them with a
  * generic apology is the failure mode this function is trying to avoid, in the
  * opposite direction.
@@ -50,7 +50,7 @@ export function isCustomerFacing(error: unknown): error is { body: ApiError } {
 /**
  * ⚠ MATCHED ON THE WHOLE CAUSE CHAIN, NOT JUST THE TOP MESSAGE. `fetch failed`
  * is what bun and undici throw for every transport problem, with the useful
- * part — ECONNREFUSED, ENOTFOUND, the timeout — hidden one level down in
+ * part - ECONNREFUSED, ENOTFOUND, the timeout - hidden one level down in
  * `cause`. Reading only the top would classify every network failure as
  * "unknown" and lose the one distinction worth drawing.
  */
@@ -71,7 +71,7 @@ const TIMED_OUT = /AbortError|TimeoutError|timed out|ETIMEDOUT/i
 /**
  * Turn any thrown thing into something this console is willing to display.
  *
- * `context` names the operation for the log line only — it is never shown.
+ * `context` names the operation for the log line only - it is never shown.
  */
 export function safeFailure(error: unknown, context: string): ApiError {
   if (isCustomerFacing(error)) return error.body
@@ -100,7 +100,7 @@ export function safeFailure(error: unknown, context: string): ApiError {
       statusCode: 503,
       name: "service_unavailable",
       message:
-        "We could not reach the service just now. This is on our side — try again shortly.",
+        "We could not reach the service just now. This is on our side - try again shortly.",
     }
   }
 

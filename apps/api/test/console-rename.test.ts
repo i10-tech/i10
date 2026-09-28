@@ -8,7 +8,7 @@ import type { ConsoleDeps } from "../src/routes/console/deps.js"
  *
  * ⚠ THESE WERE TWO NAMES ON PURPOSE, AND THE PURPOSE WAS HALF RIGHT. Syncing
  * them must not put a write to somebody else's API inside our rename
- * transaction, or a Clerk outage makes renaming a workspace impossible — that
+ * transaction, or a Clerk outage makes renaming a workspace impossible - that
  * reasoning still holds and the ordering below is what preserves it. What the
  * reasoning did not survive was contact with a customer: an organization still
  * called "Mohamed" in the switcher long after the workspace became "i10
@@ -24,7 +24,7 @@ function appWith(over: Partial<ConsoleDeps>) {
     /*
      * ⚠ EXACTLY WHAT `requireTenant` SETS FOR A CONSOLE SESSION, INCLUDING THE
      * EMPTY `apiKeyId`. There is no key behind a browser session, and the empty
-     * string is how that is said rather than a placeholder for one — see
+     * string is how that is said rather than a placeholder for one - see
      * middleware/tenant.ts. Scopes are empty for the same reason: the person
      * here IS the owner, so there is nothing to narrow.
      */
@@ -36,7 +36,7 @@ function appWith(over: Partial<ConsoleDeps>) {
   // ⚠ CAST RATHER THAN A FULL STUB, AND ONLY BECAUSE THE ROUTES UNDER TEST
   // TOUCH THREE FIELDS. Building the whole of `ConsoleDeps` here would be forty
   // lines of doubles for queries, usage, marketing and onboarding, none of
-  // which this endpoint calls — and every one of them a thing to keep in step
+  // which this endpoint calls - and every one of them a thing to keep in step
   // with a type that is not what these tests are about.
   mountAccount(app, { log, ...over } as unknown as ConsoleDeps)
   return app
@@ -77,7 +77,7 @@ describe("PATCH /console/me/tenant", () => {
   /*
    * ⚠ OURS COMMITS FIRST, AND THE ORDER IS THE WHOLE DESIGN. Renaming Clerk
    * first and then failing our own write would leave the switcher showing a
-   * name the invoice does not — and would make a Clerk outage able to stop a
+   * name the invoice does not - and would make a Clerk outage able to stop a
    * rename, which is the objection the original split was built around.
    */
   it("commits our own rename before it calls Clerk at all", async () => {
@@ -101,8 +101,8 @@ describe("PATCH /console/me/tenant", () => {
   /*
    * ⚠ A CLERK FAILURE IS NOT THE CALLER'S PROBLEM, BECAUSE THE RENAME ALREADY
    * HAPPENED. Reporting an error for a workspace that IS renamed would invite
-   * somebody to do it again, and the state it leaves — two names briefly apart
-   * — is exactly the state the old behaviour was in permanently.
+   * somebody to do it again, and the state it leaves - two names briefly apart
+   * - is exactly the state the old behaviour was in permanently.
    */
   it("still answers 200 when Clerk refuses", async () => {
     const res = await rename(
@@ -122,7 +122,7 @@ describe("PATCH /console/me/tenant", () => {
   })
 
   // ⚠ WITHOUT THE PORT IT BEHAVES EXACTLY AS IT DID BEFORE. Absence is the old
-  // behaviour — the two names drift — rather than a crash.
+  // behaviour - the two names drift - rather than a crash.
   it("renames ours alone when no Clerk client is wired", async () => {
     const p = profile()
     const res = await rename(appWith({ profile: p }), "i10 testing")
@@ -131,7 +131,7 @@ describe("PATCH /console/me/tenant", () => {
     expect(p.rename).toHaveBeenCalledWith("ten-1", "i10 testing")
   })
 
-  // A tenant with no organization — provisioned before one existed, or made by
+  // A tenant with no organization - provisioned before one existed, or made by
   // hand. There is nothing on Clerk's side to rename.
   it("calls Clerk about nothing when the tenant has no organization", async () => {
     const organizations = { rename: mock(async () => {}) }

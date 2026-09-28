@@ -2,7 +2,7 @@
 #
 # ⚠ WITHOUT THIS THE SCALEDOBJECT IS PERMANENTLY `READY: False`, AND THE ERROR
 # NAMES THE WRONG LAYER. `i10-prod` carries `default-deny-ingress`, and the
-# allows are for `cnpg-system`, `i10-prod` itself and `traefik` — KEDA runs in
+# allows are for `cnpg-system`, `i10-prod` itself and `traefik` - KEDA runs in
 # `keda` and matches none of them. Its polls are dropped, and what KEDA reports
 # is:
 #
@@ -11,18 +11,18 @@
 # which reads as "the API is down" and sends you to look at the Service, the
 # endpoints and the container's bind address. All three are correct: the Service
 # maps 80 to the pod's 3001, the endpoint is populated, the route exists at
-# app.ts, and the very same URL answers fine through Traefik — because Traefik
+# app.ts, and the very same URL answers fine through Traefik - because Traefik
 # is an allowed namespace and everything else is not.
 #
 # ⚠ AND IT COSTS THE WHOLE APPLICATION'S HEALTH, NOT JUST SCALING. Argo has a
 # built-in health check for KEDA `ScaledObject`s, so a trigger that cannot reach
-# its metric holds `i10-workloads` at **Degraded** indefinitely — which is how a
+# its metric holds `i10-workloads` at **Degraded** indefinitely - which is how a
 # Degraded app becomes something nobody reads, taking every real finding beside
 # it down too. It sat that way from 2026-09-03 until it was traced.
 #
 # ⚠ SCOPED TO THE API POD AND TO ONE PORT, rather than opening the namespace to
-# `keda`. KEDA needs exactly one endpoint here — `/internal/queue-depth` on the
-# API — and nothing else in `i10-prod` has any reason to accept traffic from it.
+# `keda`. KEDA needs exactly one endpoint here - `/internal/queue-depth` on the
+# API - and nothing else in `i10-prod` has any reason to accept traffic from it.
 #
 # ⚠ AND THE POD SELECTOR MATTERS AS MUCH AS THE SOURCE. `namespaceSelector` and
 # `podSelector` inside ONE `from` entry are ANDed; splitting them into two list

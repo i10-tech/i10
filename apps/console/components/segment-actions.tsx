@@ -16,7 +16,7 @@ import { deleteSegment } from "@/lib/actions"
 /**
  * ⚠ DELETING A SEGMENT DELETES THE GROUPING, NOT THE PEOPLE. The dialog says so
  * explicitly, because "delete segment" reads to most people as "delete these
- * 4,000 contacts" — and hesitating over that is the correct instinct to reward
+ * 4,000 contacts" - and hesitating over that is the correct instinct to reward
  * with an answer rather than to punish with ambiguity.
  */
 export function SegmentActions({ id, name }: { id: string; name: string }) {
@@ -42,7 +42,7 @@ export function SegmentActions({ id, name }: { id: string; name: string }) {
         open={confirming}
         onOpenChange={setConfirming}
         title={`Delete ${name}?`}
-        description="The contacts in it are not deleted — only the grouping. Any broadcast already sent to this segment keeps its record."
+        description="The contacts in it are not deleted - only the grouping. Any broadcast already sent to this segment keeps its record."
         confirmLabel="Delete segment"
         doneLabel="Deleted"
         confirmWord={name}

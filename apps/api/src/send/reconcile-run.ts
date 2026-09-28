@@ -32,8 +32,8 @@ import {
  * Running the two send-side reconciliations.
  *
  * ⚠ THIS FILE EXISTS BECAUSE THE OTHER TWO WERE NEVER CALLED. `reconcile.ts` and
- * `reconcile-ses.ts` are pure — statements and arithmetic, tested to the last
- * boundary case — and nothing outside their own tests ever imported them. Every
+ * `reconcile-ses.ts` are pure - statements and arithmetic, tested to the last
+ * boundary case - and nothing outside their own tests ever imported them. Every
  * argument they make about closing the gaps the hot path deliberately leaves
  * (`handle-batch.ts` logs "the reconciler will close the gap" on a swallowed
  * `recordSent`) described a job that did not run.
@@ -54,9 +54,9 @@ import {
 const FINDING_LIMIT = 500
 
 /**
- * ⚠ HOW MANY MESSAGES ONE PASS WILL TOP UP. It was a vendor rate limit — Autumn
+ * ⚠ HOW MANY MESSAGES ONE PASS WILL TOP UP. It was a vendor rate limit - Autumn
  * allowed ten requests per second per organisation, and only its single `track`
- * took an idempotency key — and against our own ledger it is a bound on how
+ * took an idempotency key - and against our own ledger it is a bound on how
  * much work one pass does instead: each id is its own idempotent write, so a
  * large deficit is carried to the next run rather than held open in one long
  * loop while the send path is using the same pool.
@@ -75,7 +75,7 @@ const toDate = (v: unknown): Date => new Date(v as string | Date)
  * known, expected residue of the at-least-once design and is safe to write
  * down. A message we billed that SES never confirmed, and an event naming a
  * message we have no row for, are both ambiguous in ways where the automatic
- * fix would destroy the evidence — see the notes on each statement.
+ * fix would destroy the evidence - see the notes on each statement.
  */
 export async function reconcileSes(
   db: Database,
@@ -105,7 +105,7 @@ export async function reconcileSes(
         ),
       )) as unknown as Row[]
 
-      // No row back means it reached `sent` between the read and the write —
+      // No row back means it reached `sent` between the read and the write -
       // another pass, or the worker finishing late. Not a repair, not a
       // failure, and nothing to report either way.
       if (repaired.length > 0) unbilled.push({ messageId, tenantId })
@@ -141,7 +141,7 @@ export interface UsageReport extends ReconcileResult {
  *
  * ⚠ THE DEFICIT IS TOPPED UP BY MESSAGE ID, NEVER BY COUNT. `track`
  * answers 409 to a replayed idempotency key, so submitting the same message
- * again — two passes racing, one retried after a timeout — cannot double-bill.
+ * again - two passes racing, one retried after a timeout - cannot double-bill.
  * Submitting "seventeen more" is not safe in the same way, and that difference
  * is why `unbilledIdsStatement` returns ids at all.
  *
@@ -179,7 +179,7 @@ export async function reconcileUsage(
 
     try {
       // ⚠ INSIDE `withTenant`, UNLIKE THE TWO SNAPSHOTS ABOVE. This one names a
-      // single tenant, so it needs no privileged function — but `core.messages`
+      // single tenant, so it needs no privileged function - but `core.messages`
       // is still under row level security, and a read issued without a tenant
       // context raises rather than returning rows.
       const ids = (
@@ -204,7 +204,7 @@ export async function reconcileUsage(
           messageId: id,
           // ⚠ THE BUCKET'S OWN START, NOT `now()`. The meter buckets on the event's
           // timestamp, so stamping the repair time would file the message in the
-          // day it was noticed — and the next pass would then find the same
+          // day it was noticed - and the next pass would then find the same
           // deficit in the original day and the same surplus in this one,
           // forever.
           at: bucket.periodStart,
@@ -215,7 +215,7 @@ export async function reconcileUsage(
     } catch (error) {
       // ⚠ PER BUCKET, SO ONE TENANT'S PROBLEM IS NOT EVERY TENANT'S. The rows
       // are unchanged, so an unfinished bucket is simply found again by the
-      // next run — but abandoning the loop would let one bad tenant block
+      // next run - but abandoning the loop would let one bad tenant block
       // everybody else's billing indefinitely.
       failed += 1
       log.error(
@@ -237,7 +237,7 @@ export interface TenantCustomerReport {
    * ⚠ REPORTED, NEVER CREATED. `ensureCustomer` would put them on the free
    * plan, and a tenant that should be on a paid one would then be quietly
    * wrong in a way nothing else looks at. The fix is a person, or the
-   * onboarding path that should have done it — see `missingCustomers`.
+   * onboarding path that should have done it - see `missingCustomers`.
    */
   missing: TenantRef[]
   /**
@@ -256,13 +256,13 @@ export interface TenantCustomerReport {
  *
  * ⚠ IT IS A DIFFERENT KIND OF ERROR FROM THE TWO ABOVE, WHICH IS WHY IT IS ITS
  * OWN PASS. Those find a number that drifted. This finds a customer that does
- * not exist — which means every `track` for that tenant has been failing since
+ * not exist - which means every `track` for that tenant has been failing since
  * the tenant was created: no usage, no invoice, nothing in the Polar dashboard,
  * and nothing in the usage reconciler to notice it, because both sides read
  * zero and agree.
  *
  * ⚠ LIST TO FIND CANDIDATES, THEN CONFIRM EACH ONE INDIVIDUALLY. `customers.list`
- * is cursor-paginated over a list that can change underneath the walk — a
+ * is cursor-paginated over a list that can change underneath the walk - a
  * customer created between two pages is sorted ahead of where we already are
  * and is simply missed. Reporting that would be an alarming finding caused by
  * nothing but a paging race. The point lookup settles it, and on a healthy
@@ -274,7 +274,7 @@ export async function reconcileTenantCustomers(
   log: Logger,
   /**
    * ⚠ REQUIRED, AND NOT DEFAULTED TO `"free"`. A wrong value here does not
-   * fail — it silently changes the population being checked. Defaulting would
+   * fail - it silently changes the population being checked. Defaulting would
    * let a deployment that renamed its free plan check every tenant again, which
    * is the exact behaviour this parameter exists to remove.
    */
@@ -324,7 +324,7 @@ export { needsAttention }
  * ⚠ A READOUT, NOT A RECONCILIATION, AND IT REPAIRS NOTHING. The other legs of
  * this job compare two sources and fix a disagreement; this one asks a question
  * of a single table. It lives here because the column it reads had no reader at
- * all — `sent_route` has been written on every row since 0033 and nothing has
+ * all - `sent_route` has been written on every row since 0033 and nothing has
  * ever looked at it, which is how a column quietly stops being correct.
  *
  * ⚠ IT RUNS IN THE RECONCILE JOB BECAUSE THAT IS WHERE SOMEBODY IS ALREADY

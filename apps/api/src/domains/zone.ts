@@ -7,7 +7,7 @@ import { dkimRecordValue } from "./dkim.js"
  *
  * ⚠ THREE SUBDOMAINS, NEVER THE WHOLE ZONE. Taking their apex would make i10
  * responsible for their website, their inbound MX and every other vendor's
- * verification record — so a bad day for our nameserver takes their marketing
+ * verification record - so a bad day for our nameserver takes their marketing
  * site down, not just their mail. It also asks a company to hand its most
  * load-bearing infrastructure to a mail vendor, which established ones will
  * decline. Delegating only what we need is strictly better on both counts.
@@ -37,7 +37,7 @@ export interface Zone {
 /**
  * ⚠ A PORT, SO THE BOX IS NOT THE COMMITMENT. PowerDNS over our own Postgres is
  * what runs today because it costs nothing and the zone data becomes rows we
- * already own. Cloudflare or Route 53 later is an adapter, not a migration —
+ * already own. Cloudflare or Route 53 later is an adapter, not a migration -
  * the zone contents below are the same either way.
  */
 export interface DnsZones {
@@ -61,7 +61,7 @@ export interface DelegationInput {
    *
    * ⚠ THE ZONE'S OWN NS RECORDS MUST MATCH WHAT THE PARENT PUBLISHES. A
    * delegation whose child zone names different nameservers than the parent is
-   * "lame" — resolvers accept it, most of the time, and some caches do not.
+   * "lame" - resolvers accept it, most of the time, and some caches do not.
    */
   claim: string
   /** Defaults to `RECORD_TTL`. Overridden only by tests. */
@@ -74,7 +74,7 @@ export interface DelegationInput {
  * ⚠ PER CLAIM, NOT PER DEPLOYMENT, AND THAT IS WHAT MAKES THE DELEGATION PROVE
  * ITSELF. Every delegating customer used to publish the same `ns1.i10.tech` and
  * `ns2.i10.tech`, so nothing that reached DNS said which workspace had put it
- * there — a stranger could add a domain, publish nothing, and have the real
+ * there - a stranger could add a domain, publish nothing, and have the real
  * owner's NS records resolve to the stranger's zone. That is why there had to
  * be a separate challenge TXT record beside the delegation, carrying a token,
  * doing the identifying the delegation could not do.
@@ -82,11 +82,11 @@ export interface DelegationInput {
  * ⚠ GIVE THE CLAIM ITS OWN HOSTNAMES AND THE EXTRA RECORD DISAPPEARS. Only
  * somebody holding `example.com`'s DNS can publish
  * `send.example.com NS <claim>.ns1.i10.tech`, and the label says whose claim it
- * is — the same property the DKIM selector already gives a manual domain, which
+ * is - the same property the DKIM selector already gives a manual domain, which
  * is why a manual domain never needed a challenge record either. One fact, read
  * out of the parent's referral by domains/referral.ts.
  *
- * ⚠ IT NEEDS A WILDCARD A RECORD ON EACH NAMESERVER NAME — `*.ns1.i10.tech` and
+ * ⚠ IT NEEDS A WILDCARD A RECORD ON EACH NAMESERVER NAME - `*.ns1.i10.tech` and
  * `*.ns2.i10.tech`, pointed at the nameserver's address and NOT PROXIED. Without
  * it every delegated label resolves to nothing and no zone is served at all.
  */
@@ -96,7 +96,7 @@ export const delegatedNameservers = (
 ): string[] => nameservers.map((ns) => `${claim}.${ns}`)
 
 /**
- * The envelope sender's domain — the Return-Path — for BOTH routes.
+ * The envelope sender's domain - the Return-Path - for BOTH routes.
  *
  * ⚠ ONE RETURN PATH, AND EVERY CALLER DERIVES IT HERE. The zone we publish, the
  * MAIL FROM we register with SES and the envelope the direct route writes are
@@ -109,7 +109,7 @@ export const delegatedNameservers = (
  * two setups to disagree about.
  *
  * ⚠ ITS MX IS AMAZON'S AND MUST STAY SO. SES re-checks the MX of a custom MAIL
- * FROM and, finding anything else, silently falls back to its own return path —
+ * FROM and, finding anything else, silently falls back to its own return path -
  * SES mail keeps sending and loses SPF alignment. So a bounce that a receiver
  * mails back LATER for a message we delivered ourselves lands at Amazon and is
  * dropped. That is the price of one name, and it buys little we had: in-session
@@ -124,7 +124,7 @@ export const returnPathDomain = (domain: string, label: string): string =>
  *
  * ⚠ ONE INCLUDE COVERS BOTH SENDERS, BECAUSE IT IS OURS. `_spf.i10.tech` lists
  * Amazon and our own MTA, so SES mail and relay mail both pass and both align
- * with the customer's `From:`. It stays an `include:`, never an `ip4:` — a
+ * with the customer's `From:`. It stays an `include:`, never an `ip4:` - a
  * literal address in a customer's DNS is our infrastructure pinned into a
  * record we cannot edit.
  *
@@ -138,7 +138,7 @@ export const returnPathSpf = (spfInclude: string): string =>
  * The delegated names that prove who holds a domain.
  *
  * ⚠ THE TWO THAT DO NOT DEPEND ON THE RETURN PATH'S LABEL. Any one of a
- * domain's delegations carries its claim, so either proves ownership — and
+ * domain's delegations carries its claim, so either proves ownership - and
  * these two can be asked with nothing but the name, which is all the recheck
  * and contest paths are handed. DKIM first: it is the one nothing sends without.
  */
@@ -168,15 +168,15 @@ export const delegatedZoneNames = (domain: string, returnPathLabel: string) => (
  * RATHER THAN FOR STEADY STATE. This TTL matters most in exactly one window:
  * somebody is watching a screen waiting for records to appear, and every
  * second of it is a second of somebody's attention. Sixty is the lowest value
- * every provider we write to accepts — Cloudflare's floor is 60, Hetzner's is
- * 60, DigitalOcean's is 30 — so it is the fastest we can be everywhere at once.
+ * every provider we write to accepts - Cloudflare's floor is 60, Hetzner's is
+ * 60, DigitalOcean's is 30 - so it is the fastest we can be everywhere at once.
  *
  * ⚠ THE NEGATIVE TTL IS THE HALF THAT ACTUALLY BITES, AND IT IS THE LAST FIELD
  * OF THE SOA RATHER THAN A PROPERTY OF ANY RECORD. It governs how long a
- * resolver remembers that a name did NOT exist — so it is the cost of asking
+ * resolver remembers that a name did NOT exist - so it is the cost of asking
  * one second too early, paid by whoever asks next. Ours was 300; for
- * comparison, Cloudflare publishes 1800 on the zones we delegate out of — half
- * an hour of remembering that a record was not there — which is why the
+ * comparison, Cloudflare publishes 1800 on the zones we delegate out of - half
+ * an hour of remembering that a record was not there - which is why the
  * delegation proof reads the parent's nameservers directly rather than through
  * a recursive resolver. See `domains/referral.ts`.
  */
@@ -186,7 +186,7 @@ export const RECORD_TTL = 60
  * ⚠ THE SOA'S SERIAL IS A CONSTANT, AND THAT IS SAFE ONLY BECAUSE NOTHING
  * TRANSFERS THESE ZONES. A serial matters to a secondary deciding whether to
  * pull; with a single primary and no AXFR there is no such reader. The moment a
- * secondary exists — which is how this stops being a single point of failure —
+ * secondary exists - which is how this stops being a single point of failure -
  * this has to become a value that increases on every write.
  */
 const SOA_SERIAL = 1
@@ -206,7 +206,7 @@ const soa = (zone: string, primary: string, ttl: number): ZoneRecord => ({
  * ⚠ THE RETURN PATH IS DELEGATED BY ITS OWN NAME. There used to be a `mail.`
  * container holding two return paths, one per route; with one return path the
  * container buys nothing, and it made the delegated name differ from the manual
- * one — which is how the worker came to write a name nobody published.
+ * one - which is how the worker came to write a name nobody published.
  */
 export function delegatedZones({
   domain,
@@ -259,7 +259,7 @@ export function delegatedZones({
         ...apex(names.dkim),
         // ⚠ ABSENT UNTIL THE KEY EXISTS. An empty zone answers NOERROR for the
         // selector, which a verifier reads as "published but malformed" rather
-        // than "not yet" — the first is a permanent failure, the second is not.
+        // than "not yet" - the first is a permanent failure, the second is not.
         ...(dkimSelector && dkimPublicKey
           ? [
               {
@@ -299,7 +299,7 @@ export function delegationRecordsFor(
   const names = delegatedZoneNames(domain, returnPathLabel)
   const ours = delegatedNameservers(nameservers, claim)
   /*
-   * ⚠ SIX NS RECORDS AND NOTHING ELSE — THE CHALLENGE TXT RECORD IS GONE, and
+   * ⚠ SIX NS RECORDS AND NOTHING ELSE - THE CHALLENGE TXT RECORD IS GONE, and
    * its disappearance is the point rather than a simplification. It existed
    * only because every customer published the SAME two nameservers, so the
    * delegation said that somebody had delegated the name and nothing about who;
@@ -307,7 +307,7 @@ export function delegationRecordsFor(
    *
    * ⚠ NOW THE NAMESERVER NAMES CARRY IT. `<claim>.ns1.i10.tech` can only be
    * published by whoever holds this domain's DNS, and the label says whose
-   * claim it is — so the delegation proves itself, exactly as a manual domain's
+   * claim it is - so the delegation proves itself, exactly as a manual domain's
    * DKIM record always did. One less record to publish, one less to get wrong,
    * and one less thing to explain.
    */
@@ -316,7 +316,7 @@ export function delegationRecordsFor(
       record: "NS",
       name: zone,
       type: "NS",
-      // ⚠ THE SAME NUMBER WE PUBLISH AND SERVE — see `RECORD_TTL`. It used to
+      // ⚠ THE SAME NUMBER WE PUBLISH AND SERVE - see `RECORD_TTL`. It used to
       // say "Auto", which named nothing and disagreed with both.
       ttl: String(RECORD_TTL),
       status,

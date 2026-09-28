@@ -29,7 +29,7 @@ spec:
       # whole list as changed.
       #
       # The sync therefore succeeds (`serverside-applied`, `all tasks run`) and
-      # the app stays OutOfSync, so Argo backs off — measured at 2s, 6s, 18s,
+      # the app stays OutOfSync, so Argo backs off - measured at 2s, 6s, 18s,
       # 54s, then capping near 5 minutes. Not a hot loop, but OutOfSync stops
       # distinguishing real drift from normal, which is the status worth
       # alerting on.
@@ -41,6 +41,6 @@ spec:
       #
       # Tried first and REJECTED: ignoreDifferences with managedFieldsManagers.
       # It matches nothing, because `manager` (CNPG) and `k3s` own no fields in
-      # spec at all — the defaults come from a mutating webhook and end up
+      # spec at all - the defaults come from a mutating webhook and end up
       # unowned. Verified by reading managedFields directly.
       - ServerSideDiff=true

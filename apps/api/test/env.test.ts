@@ -23,7 +23,7 @@ describe("reading a Postgres interval", () => {
 
   // ⚠ NULL RATHER THAN A GUESS. Postgres accepts more than this understands,
   // and a parser that returned a plausible number for `P1DT2H` would make the
-  // check below fail on correct configuration — which is worse than not
+  // check below fail on correct configuration - which is worse than not
   // checking, because it stops a deploy that was fine.
   it("declines what it does not fully understand", () => {
     expect(intervalToMs("P1DT2H")).toBeNull()
@@ -70,7 +70,7 @@ describe("the claim must outlive the lease", () => {
 
 /**
  * ⚠ THE FAILURE THIS PREVENTS LEAVES NOTHING BEHIND. An unset
- * SENTRY_ENVIRONMENT does not error, does not warn and does not lose an event —
+ * SENTRY_ENVIRONMENT does not error, does not warn and does not lose an event -
  * it files production's errors under "development", where every dashboard and
  * alert that filters by environment quietly skips them. The only symptom is a
  * Sentry project that looks calm.
@@ -96,7 +96,7 @@ describe("production must name its environment", () => {
     }
   })
 
-  // ⚠ And it stays silent everywhere else — a developer's machine and CI both
+  // ⚠ And it stays silent everywhere else - a developer's machine and CI both
   // want the fallback, and a check that fired there would be turned off.
   it("leaves development and test alone", () => {
     expect(loadEnv(base).SENTRY_ENVIRONMENT).toBe("development")
@@ -109,7 +109,7 @@ describe("production must name its environment", () => {
 /**
  * ⚠ THE DEFAULT PORT IS A FACT ABOUT OUR SERVER, NOT A CONVENTION. The `relay`
  * listener on 2525 is the only one that relays for a client presenting no
- * credential — 25 is the public MX and 465 is authenticated submission for
+ * credential - 25 is the public MX and 465 is authenticated submission for
  * people. A worker pointed at either would have every direct send refused at
  * `RCPT TO`, which the transport defers, so the symptom would be a backlog that
  * never drains rather than an error anyone reads.
@@ -131,8 +131,8 @@ describe("the relay port", () => {
  *
  * ⚠ THESE WERE ONE JSON OBJECT AND THE BLAST RADIUS WAS THE WHOLE API. `loadEnv`
  * throws on an invalid value and the process exits, so a trailing comma typed
- * into Doppler while adding the second provider stopped SENDING — the API, the
- * console's backend, the cron jobs mounting the same secret — for a convenience
+ * into Doppler while adding the second provider stopped SENDING - the API, the
+ * console's backend, the cron jobs mounting the same secret - for a convenience
  * feature nobody had finished configuring.
  *
  * ⚠ SO THEY ARE DISCOVERED PER PROVIDER NOW, and the tests that matter are the
@@ -210,7 +210,7 @@ describe("collecting the DNS OAuth apps", () => {
   /**
    * ⚠ AN EMPTY SECRET IS NOT AN ABSENT ONE. Absent means a public client using
    * PKCE alone; empty means a value somebody meant to fill in, and forwarding
-   * it produces `invalid_client` — which reads in a log exactly like a real
+   * it produces `invalid_client` - which reads in a log exactly like a real
    * secret that has been rotated.
    */
   it("skips a provider whose secret is present but empty", () => {

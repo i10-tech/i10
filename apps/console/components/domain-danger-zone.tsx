@@ -16,7 +16,7 @@ import { toast } from "sonner"
  * ⚠ IT IS A ZONE AT THE FOOT OF THE PAGE, NOT A ✕✕✕ MENU IN THE HEADER, AND
  * THE MENU IS WHY THIS EXISTS. One destructive item behind an unlabelled
  * affordance, sitting inches from "Verify", is a control somebody opens to see
- * what is in it — and the only thing in it deletes their mail. Putting it at
+ * what is in it - and the only thing in it deletes their mail. Putting it at
  * the bottom, behind its own heading, in its own red-bordered box, means
  * nobody arrives at it by browsing: reaching it takes scrolling past everything
  * the page is actually for, which is the correct amount of friction for the
@@ -27,8 +27,8 @@ import { toast } from "sonner"
  * the page's primary action, where the only thing inside it is destructive; a
  * row menu in a table is a different affordance in a different place, and it
  * is how every other list in this console already offers a delete. Both go
- * through the same dialog, so the friction that matters — typing the name,
- * proving who you are, being asked about the keys — is identical either way.
+ * through the same dialog, so the friction that matters - typing the name,
+ * proving who you are, being asked about the keys - is identical either way.
  *
  * ⚠ AND EVERYTHING THAT MAKES THE DELETE SAFE MOVED TO THAT DIALOG rather than
  * being copied into the row menu. See delete-domain-dialog.tsx.
@@ -73,8 +73,8 @@ export function DomainDangerZone({
     <>
       {/*
        * ⚠ THE BORDER IS THE WHOLE SIGNAL, AND THE BOX IS NOT FILLED RED. A
-       * panel flooded with colour reads as an error the page is currently in —
-       * something has gone wrong — rather than as a control that is dangerous
+       * panel flooded with colour reads as an error the page is currently in -
+       * something has gone wrong - rather than as a control that is dangerous
        * to press. The border and the button carry the warning; the box itself
        * stays the same surface as every other section on the page.
        */}
@@ -119,7 +119,7 @@ export function DomainDangerZone({
                 <p className="text-sm font-medium">Transfer this domain</p>
                 <p className="text-sm text-muted-foreground">
                   Offer <span className="font-mono text-foreground">{name}</span> to
-                  someone by email — in this workspace or any other. Its records and
+                  someone by email - in this workspace or any other. Its records and
                   verification go with it, so your DNS does not change; it stops sending
                   from here once they accept.
                 </p>

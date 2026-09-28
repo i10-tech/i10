@@ -2,7 +2,7 @@
 #
 # Every stack calls this rather than hand-writing a label map. A typo'd label
 # is a resource that the durable-delete guard silently stops protecting, and
-# labels cannot be retrofitted usefully — a resource created without them is
+# labels cannot be retrofitted usefully - a resource created without them is
 # an orphan nobody can attribute later.
 locals {
   # Hetzner label values must match

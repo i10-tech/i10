@@ -6,19 +6,19 @@ import { createVerify } from "node:crypto"
  * ⚠ THIS ENDPOINT IS PUBLIC AND WHAT IT WRITES IS DESTRUCTIVE. A forged
  * `Bounce` adds an address to a tenant's suppression list, which stops their
  * mail to that person permanently and silently; a forged `Complaint` does the
- * same and damages the reputation record. Anyone who learns the URL — and a URL
- * in a config file is not a secret — can do that to every customer at once
+ * same and damages the reputation record. Anyone who learns the URL - and a URL
+ * in a config file is not a secret - can do that to every customer at once
  * unless each message is proved to be Amazon's.
  *
  * ⚠ AND THE SIGNATURE IS OVER A CANONICAL STRING SNS DEFINES, NOT OVER THE BODY.
- * It is the message's own fields, in a fixed order, each as `key\nvalue\n` —
+ * It is the message's own fields, in a fixed order, each as `key\nvalue\n` -
  * so re-serialising the JSON is harmless here, unlike the Svix scheme next
  * door. Which fields depends on the message type, and getting that list wrong
  * fails closed: every message is rejected.
  *
  * ⚠ THE CERTIFICATE URL IS ATTACKER-CONTROLLED UNTIL IT IS CHECKED. It arrives
  * inside the message being verified, so fetching it before validating the host
- * is an SSRF with a signature check bolted on afterwards — the attacker points
+ * is an SSRF with a signature check bolted on afterwards - the attacker points
  * it at their own server, serves their own certificate, and signs whatever they
  * like. The host allowlist below is the whole of that defence.
  */
@@ -43,7 +43,7 @@ export interface SnsMessage {
  *
  * ⚠ THE TWO CONFIRMATION TYPES SHARE ONE LIST BECAUSE THEY SHARE ONE FORMAT.
  * Written twice, a correction to Amazon's field order gets applied to one and
- * missed on the other — and the symptom is that unsubscribes stop verifying
+ * missed on the other - and the symptom is that unsubscribes stop verifying
  * while subscriptions still do, which reads like an AWS fault.
  */
 const CONFIRMATION_FIELDS = [
@@ -93,7 +93,7 @@ export function cachingCertificateFetcher(
   ttlMs = CERT_CACHE_TTL_MS,
 ): CertificateFetcher {
   // ⚠ THE PROMISE IS CACHED, NOT THE RESOLVED STRING. SES publishes events in
-  // bursts, so a cold pod takes a burst of notifications at once — and a cache
+  // bursts, so a cold pod takes a burst of notifications at once - and a cache
   // that only fills after `await` lets every one of them issue its own outbound
   // fetch for the same certificate, which is precisely what this exists to
   // stop. Storing the in-flight promise makes the burst share one request.
@@ -142,7 +142,7 @@ export async function verifySnsMessage(
   }
 
   // SignatureVersion 1 is SHA1, 2 is SHA256. ⚠ The version travels in the
-  // message, so an attacker chooses it — which is only safe because both are
+  // message, so an attacker chooses it - which is only safe because both are
   // verified against Amazon's certificate and neither is forgeable without the
   // private key. Anything else is refused rather than guessed.
   const algorithm =
@@ -179,7 +179,7 @@ export async function verifySnsMessage(
 /**
  * `key\nvalue\n` for each present field, in SNS's order.
  *
- * A field that is absent is SKIPPED rather than written empty — `Subject` is
+ * A field that is absent is SKIPPED rather than written empty - `Subject` is
  * optional on a Notification, and including it as an empty string produces a
  * string Amazon never signed.
  */

@@ -12,12 +12,12 @@ import (
 
 // handleSearch answers the three lookups Stalwart performs.
 //
-//	filterLogin     "(&(objectClass=inetOrgPerson)(mail=?))"     — resolve a login to a DN
-//	filterMailbox   "(|(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))…)" — is this a local recipient?
-//	filterMemberOf  "(&(objectClass=groupOfNames)(member=?))"    — group membership
+//	filterLogin     "(&(objectClass=inetOrgPerson)(mail=?))"     - resolve a login to a DN
+//	filterMailbox   "(|(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))…)" - is this a local recipient?
+//	filterMemberOf  "(&(objectClass=groupOfNames)(member=?))"    - group membership
 //
 // None of them touch Clerk. They are answered entirely from the projection,
-// which is what keeps delivery off the Clerk request budget — and what lets an
+// which is what keeps delivery off the Clerk request budget - and what lets an
 // account that has never signed in still receive mail, the limitation that
 // ruled the OIDC directory out.
 //
@@ -76,8 +76,8 @@ func (s *Server) handleSearch(w ldap.ResponseWriter, m *ldap.Message) {
 
 // candidates fetches the rows any entry matching this filter could come from.
 //
-// The set only has to be a superset — Match does the authoritative filtering
-// afterwards — so it errs towards fetching too much rather than too little.
+// The set only has to be a superset - Match does the authoritative filtering
+// afterwards - so it errs towards fetching too much rather than too little.
 func (s *Server) candidates(ctx context.Context, filter message.Filter) ([]*directory.Entry, error) {
 	var entries []*directory.Entry
 	seen := map[string]bool{}
