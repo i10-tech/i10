@@ -144,14 +144,7 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
               -- "no override".
               (select d.transactional_route
                  from core.domains d
-                where d.id = m.domain_id) as transactional_route,
-              -- The plan is per tenant and a batch is per tenant, so this is
-              -- the same value on every row. It rides along anyway rather than
-              -- being fetched separately: one statement cannot disagree with
-              -- itself halfway through a batch the way two can.
-              (select p.plan_id
-                 from core.plan_assignments p
-                where p.tenant_id = m.tenant_id) as plan_id
+                where d.id = m.domain_id) as transactional_route
   `
 }
 

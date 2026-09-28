@@ -1,17 +1,21 @@
 import { describe, expect, it } from "bun:test"
 import {
+  resolveMailboxRoute,
   resolveRoute,
   type DeliveryRoute,
   type RouteOverride,
 } from "../src/domains/route.js"
 
 /**
- * Which MTA a domain's mail leaves through. Stalwart enforces this per
- * recipient by evaluating its own expression; this is the same rule where our
- * code can read it, and the two must never be able to disagree.
+ * Which MTA a domain's mail leaves through. The transactional rule is ours
+ * alone; the mailbox rule is also evaluated by Stalwart, through
+ * `core.resolve_route`, and the two must never be able to disagree.
  */
 const route = (over: Partial<Parameters<typeof resolveRoute>[0]> = {}) =>
-  resolveRoute({
+  resolveRoute({ override: "auto", sesEnabled: true, ...over })
+
+const mailboxRoute = (over: Partial<Parameters<typeof resolveMailboxRoute>[0]> = {}) =>
+  resolveMailboxRoute({
     override: "auto",
     planId: "pro",
     freePlanId: "free",
@@ -19,59 +23,52 @@ const route = (over: Partial<Parameters<typeof resolveRoute>[0]> = {}) =>
     ...over,
   })
 
-describe("what the plan decides", () => {
-  it("sends free through our own MTA", () => {
-    expect(route({ planId: "free" })).toBe("direct")
+describe("transactional mail", () => {
+  /**
+   * ⚠ #155: EVERY PLAN GOES THROUGH SES, FREE INCLUDED. The plan is not even an
+   * input — a free sender direct would sit on the IP our human mailboxes share,
+   * outside SES's per-tenant reputation, suppression and pause controls.
+   */
+  it("sends through SES by default", () => {
+    expect(route()).toBe("ses")
   })
 
-  it("sends paid through SES", () => {
-    expect(route({ planId: "pro" })).toBe("ses")
+  it("lets an override move one domain off SES, or pin it there", () => {
+    expect(route({ override: "direct" })).toBe("direct")
+    expect(route({ override: "ses" })).toBe("ses")
   })
 
   /**
-   * ⚠ FREE IS THE DEFAULT, NOT THE EXCEPTION. A plan id renamed in the
-   * catalogue would otherwise start spending SES money on tenants who pay
-   * nothing — silently, and in the direction nobody reports.
+   * ⚠ THE KILL SWITCH BEATS THE OVERRIDE, WHICH BEATS EVERYTHING ELSE. The
+   * switch is thrown during an incident, so the one thing it must not do is
+   * leave the domains somebody deliberately pinned to SES still pointed at SES.
    */
-  it("treats a tenant with no plan as free", () => {
-    expect(route({ planId: null })).toBe("direct")
-  })
-})
-
-describe("the override", () => {
-  /**
-   * ⚠ IT BEATS THE PLAN, INCLUDING FOR A PAYING CUSTOMER. That is the reason it
-   * exists: somebody moved off a route that is having a bad day must not be
-   * moved back by their own subscription.
-   */
-  it("wins over the plan in both directions", () => {
-    expect(route({ override: "direct", planId: "pro" })).toBe("direct")
-    expect(route({ override: "ses", planId: "free" })).toBe("ses")
-  })
-
-  // ⚠ `auto` is not a third MTA — it is "ask the plan". Something must send.
-  it("resolves auto to a real route", () => {
-    expect(["ses", "direct"]).toContain(route({ override: "auto" }))
-  })
-})
-
-describe("the operator kill switch", () => {
-  /**
-   * ⚠ IT BEATS THE OVERRIDE, WHICH BEATS EVERYTHING ELSE. The switch is thrown
-   * during an incident, so the one thing it must not do is leave the domains
-   * somebody deliberately pinned to SES still pointed at SES.
-   */
-  it("routes everything direct, over any plan and any override", () => {
-    expect(route({ sesEnabled: false, planId: "pro" })).toBe("direct")
-    expect(route({ sesEnabled: false, override: "ses", planId: "pro" })).toBe("direct")
+  it("routes everything direct while SES is switched off", () => {
+    expect(route({ sesEnabled: false })).toBe("direct")
+    expect(route({ sesEnabled: false, override: "ses" })).toBe("direct")
     expect(route({ sesEnabled: false, override: "direct" })).toBe("direct")
   })
+})
 
-  // The ordinary state, stated so a regression in the default is visible here
-  // rather than only in production.
-  it("changes nothing while SES is enabled", () => {
-    expect(route({ sesEnabled: true, planId: "pro" })).toBe("ses")
-    expect(route({ sesEnabled: true, planId: "free" })).toBe("direct")
+describe("mailbox mail", () => {
+  // Still decided by plan until the ses-relay route exists (#191).
+  it("sends free direct and paid through SES", () => {
+    expect(mailboxRoute({ planId: "free" })).toBe("direct")
+    expect(mailboxRoute({ planId: "pro" })).toBe("ses")
+  })
+
+  it("treats a tenant with no plan as free", () => {
+    expect(mailboxRoute({ planId: null })).toBe("direct")
+  })
+
+  /**
+   * ⚠ IT BEATS THE PLAN, INCLUDING FOR A PAYING CUSTOMER. Somebody moved off a
+   * route that is having a bad day must not be moved back by their own
+   * subscription.
+   */
+  it("lets the override win over the plan in both directions", () => {
+    expect(mailboxRoute({ override: "direct", planId: "pro" })).toBe("direct")
+    expect(mailboxRoute({ override: "ses", planId: "free" })).toBe("ses")
   })
 })
 
@@ -99,10 +96,9 @@ describe("reading the kill switch out of the environment", () => {
 })
 
 /**
- * ⚠ THE SAME RULE EXISTS TWICE, AND THIS IS THE ONLY THING HOLDING THE TWO
- * TOGETHER. `resolveRoute` decides the TRANSACTIONAL route in TypeScript, where
- * our worker owns the message. `core.resolve_route` decides the MAILBOX route in
- * Postgres, because mailbox mail is submitted straight into Stalwart's queue by a
+ * ⚠ THE MAILBOX RULE EXISTS TWICE, AND THIS IS THE ONLY THING HOLDING THE TWO
+ * TOGETHER. `resolveMailboxRoute` is the rule in TypeScript; `core.resolve_route`
+ * is the one Stalwart actually evaluates, in Postgres, because mailbox mail is submitted straight into Stalwart's queue by a
  * person's mail client and no code of ours is in that path — the only way to ask
  * us is a query.
  *
@@ -116,7 +112,7 @@ describe("reading the kill switch out of the environment", () => {
  *
  * ⚠ IF YOU ADD A CASE HERE, ADD IT THERE.
  */
-describe("the rule, mirrored in SQL", () => {
+describe("the mailbox rule, mirrored in SQL", () => {
   // ⚠ THE LAST COLUMN IS THE `DeliveryRoute` UNION, NOT `string`. bun types a
   // matcher against the value it received, so a widened `string` here stops the
   // expectation being checked against the real return type — and a typo in an
@@ -137,20 +133,10 @@ describe("the rule, mirrored in SQL", () => {
 
     // No plan, and a plan id nobody recognises.
     ["no plan at all sends direct", "auto", null, true, "direct"],
-    // ⚠ THIS CASE CONTRADICTS THE COMMENT ABOVE `resolveRoute`, AND IT IS
-    // PINNED HERE RATHER THAN QUIETLY CORRECTED. That comment says "free is the
-    // DEFAULT, not the exception: anything we do not recognise as a paid plan
-    // lands here [direct]", and warns that otherwise "a plan id renamed in the
-    // catalogue would start spending SES money on free tenants".
-    //
-    // The code does the opposite: it recognises FREE by name and treats
-    // everything else as paid. So renaming the free plan in the catalogue
-    // without moving `METERING_FREE_PLAN_ID` puts every free tenant on SES —
-    // exactly the outcome the comment says it prevents.
-    //
-    // This is asserted as-is because the mailbox lever's SQL must mirror the
-    // CODE, not the comment, or the two levers disagree. Whether the rule itself
-    // should change is a pricing decision, not a refactor.
+    // ⚠ FREE IS RECOGNISED BY NAME AND EVERYTHING ELSE IS TREATED AS PAID, so
+    // renaming the free plan without moving `METERING_FREE_PLAN_ID` routes free
+    // mailboxes to SES. Pinned as-is because the SQL does the same, and the two
+    // must agree. Whether free mailbox mail should use SES at all is #191.
     [
       "an unrecognised plan id is treated as paid",
       "auto",
@@ -162,9 +148,9 @@ describe("the rule, mirrored in SQL", () => {
 
   for (const [name, override, planId, sesEnabled, expected] of cases) {
     it(name, () => {
-      expect(resolveRoute({ override, planId, freePlanId: "free", sesEnabled })).toBe(
-        expected,
-      )
+      expect(
+        resolveMailboxRoute({ override, planId, freePlanId: "free", sesEnabled }),
+      ).toBe(expected)
     })
   }
 })
