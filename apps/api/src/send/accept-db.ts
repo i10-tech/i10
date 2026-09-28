@@ -10,6 +10,7 @@ import {
 } from "../db/core.js"
 import { enqueueBatch, type SendClass, type SendJob } from "../queue/send-queue.js"
 import { addrSpec, asList, type AcceptOps } from "./accept.js"
+import { domainOf } from "./address.js"
 
 /**
  * The accept path, bound to Postgres and to the two queues.
@@ -136,6 +137,42 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
         // and means a driver that hands back a string is not a silent NaN.
         const createdAt = new Date(minted[0]!.minted_at as string | Date)
 
+        /*
+         * ⚠ THE DOMAIN EACH MESSAGE IS SENT AS (#205). Nothing wrote this
+         * column for the product's whole life, and the claim reads everything
+         * per-domain through it - the SES tenant, and which configuration set
+         * carries the tracking. With it null, every send went untenanted and
+         * untracked whatever the workspace had configured, and nothing
+         * anywhere said so.
+         *
+         * ⚠ LOOKED UP HERE, NOT RETURNED BY THE GATE. `sendableFrom` has
+         * already refused anything this workspace may not send from, so this
+         * only turns a name into a row id; keeping the gate's answer a set
+         * keeps it failing closed. A name with no row - our own mail, which the
+         * gate exempts - stays null, which is exactly what it was before.
+         */
+        const names = [
+          ...new Set(
+            input.messages
+              .map((m) => domainOf(m.payload.from)?.toLowerCase())
+              .filter((d): d is string => !!d),
+          ),
+        ]
+        const rows = names.length
+          ? await tx
+              .select({ id: domainsTable.id, name: domainsTable.name })
+              .from(domainsTable)
+              .where(
+                and(
+                  eq(domainsTable.tenantId, input.tenantId),
+                  inArray(domainsTable.name, names),
+                ),
+              )
+          : []
+        const domainIds = new Map(rows.map((r) => [r.name.toLowerCase(), r.id]))
+        const domainIdOf = (from: string) =>
+          domainIds.get(domainOf(from)?.toLowerCase() ?? "") ?? null
+
         // ⚠ NO LOOKUP ANY MORE, AND ONE FEWER STATEMENT ON THE SEND PATH. This
         // used to translate Clerk's `ak_…` into our own row id, best-effort,
         // because a key minted seconds earlier might not have reached this
@@ -147,6 +184,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
             id: ids[i]!,
             createdAt,
             tenantId: input.tenantId,
+            domainId: domainIdOf(m.payload.from),
             apiKeyId: input.apiKeyId,
             queue: input.queue,
             fromAddress: m.payload.from,

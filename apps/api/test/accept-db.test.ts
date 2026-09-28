@@ -33,8 +33,11 @@ interface Canned {
   /** The existing idempotency row, read after losing the insert. */
   priorKey?: { requestHash: string; messageIds: string[] | null }[]
   suppressed?: { address: string }[]
-  /** Rows `sendableFrom`'s query gives back - i.e. the verified domains. */
-  verified?: { name: string }[]
+  /**
+   * Rows a `core.domains` query gives back - the verified domains for
+   * `sendableFrom`, and the id lookup `persist` makes (#205).
+   */
+  verified?: { name: string; id?: string }[]
 }
 
 type Op = {
@@ -179,6 +182,34 @@ const wrote = (recorded: Op[], table: unknown) =>
   recorded.find((op) => op.kind === "insert" && op.table === table)?.values ?? []
 
 describe("persist", () => {
+  /**
+   * ⚠ #205: NOTHING WROTE THIS FOR THE PRODUCT'S WHOLE LIFE. The claim reads the
+   * SES tenant and the tracking set through `domain_id`, so with it null every
+   * send was untenanted and untracked - and every test still passed.
+   */
+  it("records the domain each message is sent as", async () => {
+    const o = ops({ verified: [{ name: "acme.com", id: "dom-acme" }] })
+    await o.persist(
+      input({
+        messages: [
+          prepared({ from: "Acme <hello@Acme.com>" }),
+          prepared({ from: "hello@acme.com" }),
+        ],
+      }),
+    )
+    expect(wrote(o.recorded, messages).map((m) => m.domainId)).toEqual([
+      "dom-acme",
+      "dom-acme",
+    ])
+  })
+
+  // Our own mail: the gate exempts the domain and there is no row for it.
+  it("leaves the domain null for a from address with no row", async () => {
+    const o = ops({ verified: [] })
+    await o.persist(input({ messages: [prepared({ from: "no-reply@i10.tech" })] }))
+    expect(wrote(o.recorded, messages)[0]?.domainId).toBeNull()
+  })
+
   // ⚠ THE TENANT BOUNDARY IS A TRANSACTION SETTING, NOT A WHERE CLAUSE. Without
   // it every policy in `core` raises rather than returning nothing - so its
   // absence is loud, but its presence is what makes every statement below legal.
