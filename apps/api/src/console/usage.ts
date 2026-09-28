@@ -9,6 +9,7 @@ import {
   SENDING_DOMAINS,
   STORAGE,
 } from "../metering/levels.js"
+import type { SendingTierStore } from "../metering/tiers.js"
 
 /**
  * What the console shows on the usage and billing pages.
@@ -129,6 +130,11 @@ export interface UsageStore {
 export interface UsageDeps {
   db: Database
   meter: Meter
+  /**
+   * The free workspaces' tier ceiling (#165). With it, a free workspace's usage
+   * gains an "Emails this month" row naming its tier; paid ones never do.
+   */
+  tiers?: { meter: Meter; store: Pick<SendingTierStore, "current"> }
   now?: () => Date
   log?: { warn: (o: object, m: string) => void }
 }
@@ -136,6 +142,7 @@ export interface UsageDeps {
 export function usageStore({
   db,
   meter,
+  tiers,
   now = () => new Date(),
   log,
 }: UsageDeps): UsageStore {
@@ -154,7 +161,7 @@ export function usageStore({
        * A plain `Promise.all` would turn that into a 500 on the whole usage
        * page; catching per feature renders four real numbers and one dash.
        */
-      return Promise.all(
+      const reported = Promise.all(
         REPORTED_FEATURES.map(async (feature): Promise<FeatureUsage> => {
           const base = {
             feature_id: feature.id,
@@ -227,6 +234,11 @@ export function usageStore({
           }
         }),
       )
+      const [features, monthly] = await Promise.all([
+        reported,
+        tiers ? tierUsage(tiers, tenantId, at, log) : null,
+      ])
+      return monthly ? [...features, monthly] : features
     },
 
     async billing(tenantId) {
@@ -327,5 +339,46 @@ function toPlanSummary(plan: typeof plans.$inferSelect): PlanSummary {
         ...(typeof raw.overage === "string" ? { overage: raw.overage } : {}),
       }
     }),
+  }
+}
+
+const TIER_LABEL = { strict: "Strict", normal: "Normal" } as const
+
+/**
+ * A free workspace's monthly ceiling as one more usage row (#165), or null for
+ * a paid workspace - which has no tier and must not be shown one.
+ *
+ * ⚠ SILENT ON FAILURE. The row is extra information; a failed read leaves the
+ * page with its ordinary rows rather than a dash that reads like a problem.
+ */
+async function tierUsage(
+  tiers: NonNullable<UsageDeps["tiers"]>,
+  tenantId: string,
+  at: Date,
+  log: UsageDeps["log"],
+): Promise<FeatureUsage | null> {
+  try {
+    const [balance, current] = await Promise.all([
+      tiers.meter.balanceOf({ tenantId, featureId: "emails", at }),
+      tiers.store.current(tenantId),
+    ])
+    if (balance.status !== "ok" || balance.allowance === "unlimited") return null
+    return {
+      feature_id: "emails.monthly",
+      label: `Emails this month (${TIER_LABEL[current.tier]} tier)`,
+      unit: "",
+      used: balance.used,
+      allowance: balance.allowance,
+      remaining: balance.remaining,
+      resets_at: balance.window?.end?.toISOString() ?? null,
+      overage: false,
+      status: "ok",
+    }
+  } catch (error) {
+    log?.warn(
+      { err: describeErrorChain(error), tenantId },
+      "could not read the sending tier's usage",
+    )
+    return null
   }
 }

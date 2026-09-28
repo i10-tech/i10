@@ -169,6 +169,25 @@ describe("POST /emails", () => {
     })
   })
 
+  // ⚠ A free workspace's tier ceiling (#165) names itself: waiting for
+  // tomorrow does not help, so it must not read as the daily one.
+  it("answers 429 monthly_quota_exceeded when the tier ceiling is spent", async () => {
+    const { app: a } = app(
+      {},
+      {
+        checkQuota: async () => ({
+          status: "exceeded",
+          message: "monthly limit",
+          code: "monthly_quota_exceeded",
+        }),
+        recordSent: async () => {},
+      },
+    )
+    const res = await post(a, "/emails", body)
+    expect(res.status).toBe(429)
+    expect(await res.json()).toMatchObject({ name: "monthly_quota_exceeded" })
+  })
+
   it("still validates the body", async () => {
     const { app: a } = app()
     const res = await post(a, "/emails", { from: "x@i10.tech" })

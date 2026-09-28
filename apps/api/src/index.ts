@@ -51,6 +51,7 @@ import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
 import { systemSenderFor } from "./auth-email/system.js"
 import { ownerNotice } from "./ses-status/notice.js"
+import { sendingTierStore, tierMeter } from "./metering/tiers.js"
 import { reputationService } from "./ses-status/reputation.js"
 import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
@@ -207,7 +208,12 @@ queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailabl
  * password resets.
  */
 const metering = resilient(
-  postgresMetering({ db, featureId: env.METERING_FEATURE_ID, log }),
+  postgresMetering({
+    db,
+    featureId: env.METERING_FEATURE_ID,
+    freePlanId: env.METERING_FREE_PLAN_ID,
+    log,
+  }),
   log,
 )
 log.info({ feature: env.METERING_FEATURE_ID }, "metering via postgres")
@@ -865,7 +871,18 @@ const app = createApp({
     sesStatus,
     sesReputation,
     suppressions,
-    usage: usageStore({ db, meter: postgresMeter(db), log }),
+    usage: usageStore({
+      db,
+      meter: postgresMeter(db),
+      tiers: {
+        meter: tierMeter(db, {
+          freePlanId: env.METERING_FREE_PLAN_ID,
+          featureId: env.METERING_FEATURE_ID,
+        }),
+        store: sendingTierStore(db),
+      },
+      log,
+    }),
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
     marketing: marketingStore(db),
     profile: tenantProfileStore(db),

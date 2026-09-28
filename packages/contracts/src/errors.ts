@@ -14,6 +14,13 @@ export const errorNames = [
   "method_not_allowed",
   "rate_limit_exceeded",
   "daily_quota_exceeded",
+  /**
+   * ⚠ ADDITIVE (#165). A free workspace's monthly ceiling - its sending tier -
+   * is spent. A 429 like `daily_quota_exceeded` and just as un-retryable, but
+   * named apart because the remedy differs: waiting until tomorrow does not
+   * help, upgrading or waiting for the month does.
+   */
+  "monthly_quota_exceeded",
   "invalid_from_address",
   "invalid_to_address",
   "domain_not_verified",

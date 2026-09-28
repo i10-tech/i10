@@ -104,7 +104,7 @@ function acceptError(outcome: AcceptOutcome) {
     return {
       body: {
         statusCode: 429,
-        name: "daily_quota_exceeded" as const,
+        name: outcome.code,
         message: outcome.message,
       },
       status: 429 as const,

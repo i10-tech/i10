@@ -176,7 +176,11 @@ describe("quota", () => {
 
     const result = await accept(deps)
 
-    expect(result).toEqual({ status: "quota_exceeded", message: "out of credits" })
+    expect(result).toEqual({
+      status: "quota_exceeded",
+      message: "out of credits",
+      code: "daily_quota_exceeded",
+    })
     expect(persist).not.toHaveBeenCalled()
     expect(enqueue).not.toHaveBeenCalled()
   })

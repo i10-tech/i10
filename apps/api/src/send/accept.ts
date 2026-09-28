@@ -39,7 +39,11 @@ export type AcceptOutcome =
    * is unknowable. Their key is ambiguous and only they can resolve it.
    */
   | { status: "conflict"; message: string }
-  | { status: "quota_exceeded"; message: string }
+  | {
+      status: "quota_exceeded"
+      message: string
+      code: "daily_quota_exceeded" | "monthly_quota_exceeded"
+    }
   /**
    * The key is restricted to other domains than the one it tried to send from.
    *
@@ -394,6 +398,7 @@ export async function acceptSend(
     return {
       status: "quota_exceeded",
       message: quota.status === "exceeded" ? quota.message : "Sending quota exceeded.",
+      code: (quota.status === "exceeded" && quota.code) || "daily_quota_exceeded",
     }
   }
 

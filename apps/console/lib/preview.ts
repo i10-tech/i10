@@ -890,6 +890,18 @@ const ROUTES: [
           overage: false,
           status: "unreadable" as const,
         },
+        // A free workspace's tier ceiling (#165).
+        {
+          feature_id: "emails.monthly",
+          label: "Emails this month (Normal tier)",
+          unit: "",
+          used: 1840,
+          allowance: 3000,
+          remaining: 1160,
+          resets_at: ago(-12),
+          overage: false,
+          status: "ok" as const,
+        },
       ],
       billing: BILLING,
     }),

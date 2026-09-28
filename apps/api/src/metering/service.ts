@@ -9,6 +9,7 @@ import {
   usageSnapshotStatement,
 } from "./postgres.js"
 import { postgresLevels } from "./levels.js"
+import { tierMeter } from "./tiers.js"
 import type { Metering, QuotaOutcome, SentMessage } from "../send/metering.js"
 import type { UsageBucket } from "../send/reconcile.js"
 
@@ -40,6 +41,11 @@ export interface MeteringOptions {
   log?: Logger
   /** Injected in tests. The one impure edge in this file. */
   now?: () => Date
+  /**
+   * The free plan's id. With it, free workspaces are also held to their
+   * sending tier's monthly ceiling (#165); without it, tiers are not enforced.
+   */
+  freePlanId?: string
 }
 
 /**
@@ -67,19 +73,26 @@ export function postgresMetering({
   featureId,
   log,
   now = () => new Date(),
+  freePlanId,
 }: MeteringOptions): Metering {
   const meter = postgresMeter(db)
+  const tiers = freePlanId ? tierMeter(db, { freePlanId, featureId }) : null
 
   return {
     async checkQuota(tenantId, count): Promise<QuotaOutcome> {
+      const at = now()
       const outcome = await meter.check({
         tenantId,
         featureId,
         requested: count,
-        at: now(),
+        at,
       })
 
-      if (outcome.status === "allowed") return { status: "allowed" }
+      if (outcome.status === "allowed") {
+        return tiers
+          ? tierCeiling(tiers, tenantId, featureId, count, at)
+          : { status: "allowed" }
+      }
 
       // ⚠ `overage` IS A SEND, NOT A REFUSAL, AND THE SPLIT IS NOT COMPUTED HERE.
       // The customer opted in to being billed past their plan, so the answer at
@@ -136,6 +149,39 @@ export function postgresMetering({
         )
       }
     },
+  }
+}
+
+/**
+ * A free workspace's monthly tier ceiling (#165), checked after the plan said
+ * yes.
+ *
+ * ⚠ SECOND, SO THE PLAN'S ANSWER WINS WHEN BOTH ARE SPENT. A free workspace
+ * out of today's 100 is told about today; the monthly line only speaks when
+ * the daily one still had room.
+ *
+ * ⚠ ONLY AFTER `allowed`, NEVER AFTER `overage`. Overage is a paid-plan
+ * outcome, and paid workspaces have no tier.
+ *
+ * ⚠ `unentitled` HERE MEANS "NO TIER", NOT A MISCONFIGURATION. A paid
+ * workspace has no tier by design, so the plan's yes stands.
+ */
+async function tierCeiling(
+  tiers: Meter,
+  tenantId: string,
+  featureId: string,
+  count: number,
+  at: Date,
+): Promise<QuotaOutcome> {
+  const outcome = await tiers.check({ tenantId, featureId, requested: count, at })
+  if (outcome.status !== "exceeded") return { status: "allowed" }
+  return {
+    status: "exceeded",
+    code: "monthly_quota_exceeded",
+    message:
+      "This free workspace has used its monthly sending limit. Upgrade to a paid " +
+      "plan to keep sending, or wait for the limit to reset.",
+    ...(outcome.resetsAt === null ? {} : { resetsAt: outcome.resetsAt }),
   }
 }
 
