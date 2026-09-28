@@ -125,7 +125,18 @@ describe("last_event", () => {
   })
 
   it("ignores event types it does not know", () => {
-    expect(lastEvent("sent", null, ["opened", "clicked"])).toBe("sent")
+    expect(lastEvent("sent", null, ["teleported"])).toBe("sent")
+  })
+
+  // #154: engagement is past delivery, and every failure still outranks it.
+  it("ranks an open or a click above delivery", () => {
+    expect(lastEvent("sent", null, ["delivered", "opened"])).toBe("opened")
+    expect(lastEvent("sent", null, ["delivered", "opened", "clicked"])).toBe("clicked")
+  })
+
+  it("lets a bounce or a complaint beat an open on another recipient", () => {
+    expect(lastEvent("sent", null, ["opened", "clicked", "bounced"])).toBe("bounced")
+    expect(lastEvent("sent", null, ["clicked", "complained"])).toBe("complained")
   })
 })
 
@@ -179,7 +190,7 @@ describe("/webhook-endpoints", () => {
   it("refuses an unknown event name", async () => {
     const res = await post("/webhook-endpoints", {
       url: "https://hooks.example.com/i10",
-      events: ["email.opened"],
+      events: ["email.teleported"],
     })
     expect(res.status).toBe(422)
   })

@@ -150,3 +150,62 @@ describe("refusals", () => {
     expect(res.status).toBe(501)
   })
 })
+
+/**
+ * #154: open and click tracking, changed on a live domain.
+ *
+ * ⚠ PATCH, WITH RESEND'S FIELD NAMES, so `domains.update({ id, openTracking })`
+ * from their SDK maps onto it one to one.
+ */
+describe("PATCH /domains/{id}", () => {
+  const patch = (body: unknown) => ({
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
+  it("passes only the fields sent to the store", async () => {
+    const calls: unknown[] = []
+    const res = await app(
+      store({
+        update: async (_tenant, _id, input) => {
+          calls.push(input)
+          return {
+            ...domain,
+            delegated: false,
+            open_tracking: true,
+            click_tracking: false,
+          }
+        },
+      }),
+    ).request(`/domains/${ID}`, patch({ open_tracking: true }))
+
+    expect(res.status).toBe(200)
+    expect(calls).toEqual([{ open_tracking: true }])
+    expect(await res.json()).toMatchObject({
+      open_tracking: true,
+      click_tracking: false,
+    })
+  })
+
+  it("refuses an empty update with a 422", async () => {
+    const res = await app(store()).request(`/domains/${ID}`, patch({}))
+    expect(res.status).toBe(422)
+  })
+
+  it("refuses a non-boolean with a 422", async () => {
+    const res = await app(store()).request(
+      `/domains/${ID}`,
+      patch({ click_tracking: "yes" }),
+    )
+    expect(res.status).toBe(422)
+  })
+
+  it("answers 404 for a domain that is not this workspace's", async () => {
+    const res = await app(store({ update: async () => null })).request(
+      `/domains/${ID}`,
+      patch({ click_tracking: true }),
+    )
+    expect(res.status).toBe(404)
+  })
+})

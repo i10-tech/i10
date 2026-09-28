@@ -428,6 +428,20 @@
       "when": 1790451129709,
       "tag": "0060_drop_domain_verified_elsewhere",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1790557478340,
+      "tag": "0061_ses_engagement_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790557543559,
+      "tag": "0062_ses_tenant_layout",
+      "breakpoints": true
     }
   ]
 }

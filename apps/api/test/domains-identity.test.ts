@@ -241,19 +241,20 @@ describe("SES tenants", () => {
   const options = {
     region: "eu-central-1",
     accountId: "123456789012",
-    configurationSet: "i10-prod",
+    configurationSets: ["i10-prod", "i10-prod-tracked"],
   }
   const exists = (name: string) =>
     Object.assign(new Error(`${name} already exists`), {
       name: "AlreadyExistsException",
     })
 
-  it("creates the tenant and associates both the identity and the configuration set", async () => {
+  it("creates the tenant and associates the identity and every configuration set", async () => {
     const { client: c, sent } = tenantClient()
     await sesIdentity(c, options).attach("example.com", "i10-ten")
 
     expect(sent.map((s) => s.name)).toEqual([
       "CreateTenantCommand",
+      "CreateTenantResourceAssociationCommand",
       "CreateTenantResourceAssociationCommand",
       "CreateTenantResourceAssociationCommand",
       "ListResourceTenantsCommand",
@@ -265,6 +266,11 @@ describe("SES tenants", () => {
     expect(sent[2]!.input).toEqual({
       TenantName: "i10-ten",
       ResourceArn: "arn:aws:ses:eu-central-1:123456789012:configuration-set/i10-prod",
+    })
+    expect(sent[3]!.input).toEqual({
+      TenantName: "i10-ten",
+      ResourceArn:
+        "arn:aws:ses:eu-central-1:123456789012:configuration-set/i10-prod-tracked",
     })
   })
 
@@ -298,7 +304,7 @@ describe("SES tenants", () => {
   it("refuses to attach without the account and configuration set it needs", async () => {
     const { client: c } = tenantClient()
     await expect(sesIdentity(c, {}).attach("example.com", "i10-ten")).rejects.toThrow(
-      /configurationSet/,
+      /configurationSets/,
     )
   })
 

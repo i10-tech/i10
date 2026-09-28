@@ -88,6 +88,25 @@ describe("what reaches SES", () => {
     expect(inputOf(c as never).TenantName).toBe("i10-ten")
   })
 
+  // #154: the domain's tracking picks the set; the base name is only a prefix.
+  it("sends a tracked domain's mail through the tracking set", async () => {
+    const c = client()
+    await sesTransport({ client: c, configurationSetName: "i10-events" }).send({
+      ...message,
+      tracking: { opens: true, clicks: true },
+    })
+    expect(inputOf(c as never).ConfigurationSetName).toBe("i10-events-tracked")
+  })
+
+  it("sends untracked mail through the base set", async () => {
+    const c = client()
+    await sesTransport({ client: c, configurationSetName: "i10-events" }).send({
+      ...message,
+      tracking: null,
+    })
+    expect(inputOf(c as never).ConfigurationSetName).toBe("i10-events")
+  })
+
   it("names no tenant when the message carries none", async () => {
     const c = client()
     await sesTransport({ client: c }).send({ ...message, sesTenant: null })

@@ -500,6 +500,9 @@
               "sent",
               "delivered",
               "delivery_delayed",
+              "opened",
+              "clicked",
+              "unsubscribed",
               "bounced",
               "complained",
               "failed",
@@ -550,7 +553,10 @@
                 "email.delivery_delayed",
                 "email.bounced",
                 "email.complained",
-                "email.failed"
+                "email.failed",
+                "email.opened",
+                "email.clicked",
+                "email.unsubscribed"
               ]
             }
           },
@@ -598,7 +604,10 @@
                 "email.delivery_delayed",
                 "email.bounced",
                 "email.complained",
-                "email.failed"
+                "email.failed",
+                "email.opened",
+                "email.clicked",
+                "email.unsubscribed"
               ]
             },
             "minItems": 1
@@ -645,7 +654,10 @@
                       "email.delivery_delayed",
                       "email.bounced",
                       "email.complained",
-                      "email.failed"
+                      "email.failed",
+                      "email.opened",
+                      "email.clicked",
+                      "email.unsubscribed"
                     ]
                   }
                 },
@@ -762,6 +774,12 @@
           },
           "delegated": {
             "type": "boolean"
+          },
+          "open_tracking": {
+            "type": "boolean"
+          },
+          "click_tracking": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -772,7 +790,9 @@
           "created_at",
           "region",
           "records",
-          "delegated"
+          "delegated",
+          "open_tracking",
+          "click_tracking"
         ]
       },
       "CreateDomain": {
@@ -856,6 +876,17 @@
         "required": [
           "data"
         ]
+      },
+      "UpdateDomain": {
+        "type": "object",
+        "properties": {
+          "open_tracking": {
+            "type": "boolean"
+          },
+          "click_tracking": {
+            "type": "boolean"
+          }
+        }
       },
       "DeletedDomain": {
         "type": "object",
@@ -1691,6 +1722,91 @@
           },
           "404": {
             "description": "No domain with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Domains are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update a domain",
+        "description": "Turns open and click tracking on or off for mail sent from this domain. Both are off by default. Opens are recorded with a tracking pixel and clicks by rewriting links through a redirect, so turn them on only where you have a lawful basis to track your recipients. The change applies to the next message sent, including ones already accepted but not yet sent.",
+        "tags": [
+          "Domains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDomain"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The domain, with the new settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No domain with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Nothing to update, or a field is not a boolean.",
             "content": {
               "application/json": {
                 "schema": {

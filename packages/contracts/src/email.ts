@@ -185,6 +185,9 @@ export const emailEventName = z.enum([
   "sent",
   "delivered",
   "delivery_delayed",
+  "opened",
+  "clicked",
+  "unsubscribed",
   "bounced",
   "complained",
   "failed",
@@ -222,6 +225,20 @@ export const webhookEventName = z.enum([
   "email.bounced",
   "email.complained",
   "email.failed",
+  /**
+   * ⚠ ONLY FOR DOMAINS WITH TRACKING TURNED ON, and off is the default. SES
+   * inserts a pixel for opens and rewrites every link for clicks, which is a
+   * privacy decision the domain's owner makes - see `open_tracking` and
+   * `click_tracking` on the domain.
+   */
+  "email.opened",
+  "email.clicked",
+  /**
+   * The recipient unsubscribed through SES's own list management. i10 does not
+   * use SES contact lists today, so this is published and carried rather than
+   * dropped, but does not currently fire.
+   */
+  "email.unsubscribed",
 ])
 
 /** `POST /webhook-endpoints` - where a customer wants their events delivered. */

@@ -108,6 +108,10 @@ export function databaseOps(
             routeOverride: (row.transactional_route as RouteOverride | null) ?? null,
             sesTenant:
               row.ses_tenant_name === null ? null : String(row.ses_tenant_name),
+            tracking: {
+              opens: row.open_tracking === true,
+              clicks: row.click_tracking === true,
+            },
             tenantId: String(row.tenant_id),
             from: String(row.from_address),
             to: (row.to_addresses as string[] | null) ?? [],

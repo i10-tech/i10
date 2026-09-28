@@ -92,9 +92,11 @@ export interface DomainIdentity {
    * and SES lets a resource belong to several tenants - so without the detach,
    * the old workspace's tenant could keep sending as it.
    *
-   * ⚠ IT ALSO ATTACHES THE CONFIGURATION SET. SES refuses a tenant send whose
-   * configuration set is not associated with that tenant, and every send names
-   * ours. Idempotent: an association that already exists is the state wanted.
+   * ⚠ IT ALSO ATTACHES EVERY CONFIGURATION SET A SEND MAY NAME. SES refuses a
+   * tenant send whose set is not associated with that tenant, and which of the
+   * four a message uses depends on its domain's tracking settings - see
+   * send/configuration-sets.ts. Idempotent: an association that already exists
+   * is the state wanted.
    */
   attach(domain: string, tenant: string): Promise<void>
 
@@ -121,6 +123,18 @@ export interface DomainIdentity {
  * this prefix is 40.
  */
 export const sesTenantName = (tenantId: string): string => `i10-${tenantId}`
+
+/**
+ * The shape of a complete attach, recorded beside the tenant name.
+ *
+ * ⚠ BUMP IT WHENEVER `attach` STARTS ASSOCIATING SOMETHING NEW. Every domain
+ * recorded at an older layout is then sent untenanted by the worker, rather
+ * than refused by SES, until the re-check brings it up to date.
+ *
+ *   1  #156: the identity and the base configuration set (never recorded)
+ *   2  #154: the identity and all four configuration sets
+ */
+export const TENANT_LAYOUT = 2
 
 /** Ours, as opposed to a tenant somebody made by hand in the console. */
 const OUR_TENANT = /^i10-[0-9a-f-]{36}$/
@@ -177,8 +191,11 @@ export interface SesIdentityOptions {
    * dependency and a round trip to learn a constant.
    */
   accountId?: string
-  /** The configuration set every send names. `SES_CONFIGURATION_SET`. */
-  configurationSet?: string
+  /**
+   * Every configuration set a send may name - `configurationSetsFor` of
+   * `SES_CONFIGURATION_SET`.
+   */
+  configurationSets?: readonly string[]
 }
 
 const isNamed = (error: unknown, name: string) =>
@@ -188,7 +205,7 @@ export function sesIdentity(
   client: SESv2Client,
   options: SesIdentityOptions = {},
 ): DomainIdentity {
-  const { log, region, accountId, configurationSet } = options
+  const { log, region, accountId, configurationSets } = options
 
   function arn(kind: "identity" | "configuration-set", name: string): string {
     if (!region || !accountId) {
@@ -472,8 +489,8 @@ export function sesIdentity(
     },
 
     async attach(domain, tenant) {
-      if (!configurationSet) {
-        throw new Error("sesIdentity needs `configurationSet` to attach a tenant")
+      if (!configurationSets?.length) {
+        throw new Error("sesIdentity needs `configurationSets` to attach a tenant")
       }
 
       /*
@@ -490,7 +507,9 @@ export function sesIdentity(
 
       const identityArn = arn("identity", domain)
       await associate(tenant, identityArn)
-      await associate(tenant, arn("configuration-set", configurationSet))
+      for (const set of configurationSets) {
+        await associate(tenant, arn("configuration-set", set))
+      }
 
       /*
        * ⚠ ONLY OUR OWN TENANTS ARE DETACHED. A tenant somebody made by hand in

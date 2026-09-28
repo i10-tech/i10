@@ -86,15 +86,34 @@ interface SesNotification {
   }
   reject?: { reason?: string }
   send?: Record<string, unknown>
+  open?: { timestamp?: string; userAgent?: string; ipAddress?: string }
+  click?: {
+    timestamp?: string
+    link?: string
+    linkTags?: Record<string, string[]>
+    userAgent?: string
+    ipAddress?: string
+  }
+  subscription?: {
+    contactList?: string
+    timestamp?: string
+    source?: string
+    newTopicPreferences?: unknown
+    oldTopicPreferences?: unknown
+  }
+  failure?: { errorMessage?: string; templateName?: string }
 }
 
 /**
- * ⚠ AN UNRECOGNISED EVENT TYPE IS IGNORED, NOT AN ERROR. Turning on `Open` or
- * `Click` in the SES console - which someone will, to see what it does - would
- * otherwise make this endpoint 500 on every notification, and SNS would retry
- * each one for hours. Ignoring is also the correct answer for the two we
- * deliberately do not carry: open and click tracking is a privacy decision, not
- * an oversight, and it is not made by whoever last edited a configuration set.
+ * ⚠ EVERY EVENT TYPE SES PUBLISHES IS CARRIED (#154), and an unrecognised one is
+ * still ignored rather than an error: a type SES adds tomorrow would otherwise
+ * make this endpoint 500 on every notification, and SNS would retry each one
+ * for hours.
+ *
+ * ⚠ `Open` AND `Click` ONLY ARRIVE FOR DOMAINS THAT OPTED IN. Tracking is a
+ * privacy decision, and it is made per domain by its owner - the worker picks a
+ * configuration set that publishes these only when the domain asked for them.
+ * Nothing here decides it.
  */
 const TYPES: Record<string, WebhookEventType> = {
   Send: "email.sent",
@@ -109,6 +128,9 @@ const TYPES: Record<string, WebhookEventType> = {
   // to render would show as `sent` forever.
   "Rendering Failure": "email.failed",
   RENDERING_FAILURE: "email.failed",
+  Open: "email.opened",
+  Click: "email.clicked",
+  Subscription: "email.unsubscribed",
 }
 
 export function interpretSesEvent(
@@ -140,6 +162,9 @@ export function interpretSesEvent(
       event.complaint?.timestamp,
       event.delivery?.timestamp,
       event.deliveryDelay?.timestamp,
+      event.open?.timestamp,
+      event.click?.timestamp,
+      event.subscription?.timestamp,
       event.mail?.timestamp,
     ],
     fallbackAt,
@@ -239,7 +264,35 @@ function publicData(
         },
       }
     case "email.failed":
-      return { ...base, reason: event.reject?.reason ?? "rejected" }
+      return {
+        ...base,
+        reason: event.reject?.reason ?? event.failure?.errorMessage ?? "rejected",
+      }
+    /*
+     * ⚠ NO IP ADDRESS. SES reports the opener's and clicker's IP, and
+     * forwarding it would hand every customer a location-grade identifier for
+     * each of their recipients by default. The user agent is enough to tell a
+     * person from a mail client's image proxy; the raw notification keeps the
+     * rest for support.
+     */
+    case "email.opened":
+      return { ...base, open: { user_agent: event.open?.userAgent ?? null } }
+    case "email.clicked":
+      return {
+        ...base,
+        click: {
+          link: event.click?.link ?? null,
+          user_agent: event.click?.userAgent ?? null,
+        },
+      }
+    case "email.unsubscribed":
+      return {
+        ...base,
+        unsubscribe: {
+          list: event.subscription?.contactList ?? null,
+          source: event.subscription?.source ?? null,
+        },
+      }
     default:
       return base
   }

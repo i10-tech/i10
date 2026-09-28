@@ -18,6 +18,7 @@ import {
 import { Status } from "@/components/status"
 import { DnsRecords } from "@/components/dns-records"
 import { DomainDangerZone } from "@/components/domain-danger-zone"
+import { DomainTracking } from "@/components/domain-tracking"
 import { DelegationNote } from "@/components/delegation-note"
 import { PublishRecords } from "@/components/publish-records"
 import { VerificationWatch } from "@/components/verification-watch"
@@ -275,6 +276,21 @@ export default async function DomainDetailPage({
               <Detail label="Added" value={formatExact(domain.created_at)} />
               <Detail label="Domain ID" value={domain.id} mono />
             </dl>
+          </SectionContent>
+        </Section>
+
+        <Section>
+          <SectionTitle>Tracking</SectionTitle>
+          <SectionDescription>
+            Off by default. Turn these on only if you have a basis to track the people
+            you send to. Changes apply to the next message sent.
+          </SectionDescription>
+          <SectionContent>
+            <DomainTracking
+              id={domain.id}
+              openTracking={domain.open_tracking}
+              clickTracking={domain.click_tracking}
+            />
           </SectionContent>
         </Section>
 

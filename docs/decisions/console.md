@@ -380,7 +380,7 @@ insufficient_scope`, so the card form never opens - for anybody, with no
      first real deployment.
 
 - **Filtering the log by delivery state, in SQL.** `last_event` is not a column -
-  it is the worst-by-severity of a message's events — so the status filter is
+  it is the worst-by-severity of a message's events - so the status filter is
   applied in TypeScript after the page. The consequence is visible and
   documented at the route: a filtered page can return fewer rows than the limit
   while more exist further down, and paging never stalls because the cursor

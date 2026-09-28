@@ -29,6 +29,7 @@ import pino from "pino"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { offlineIdentity, sesIdentity } from "./domains/identity.js"
+import { configurationSetsFor } from "./send/configuration-sets.js"
 import { sweepOrphans } from "./domains/orphans.js"
 import { powerDnsZones } from "./domains/powerdns.js"
 import { loadEnv } from "./env.js"
@@ -81,7 +82,7 @@ await withMonitor(
               log,
               region: env.AWS_REGION,
               accountId: env.AWS_ACCOUNT_ID,
-              configurationSet: env.SES_CONFIGURATION_SET,
+              configurationSets: configurationSetsFor(env.SES_CONFIGURATION_SET),
             })
           : offlineIdentity(),
         zones: powerDnsZones(db),

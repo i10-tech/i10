@@ -150,6 +150,10 @@ const DOMAINS = [
     created_at: ago(180),
     region: "us-east-1",
     delegated: true,
+    // The one healthy domain opted into opens, so the Tracking section shows
+    // both states side by side.
+    open_tracking: true,
+    click_tracking: false,
   },
   {
     object: "domain" as const,
@@ -159,6 +163,8 @@ const DOMAINS = [
     created_at: ago(2),
     region: "us-east-1",
     delegated: false,
+    open_tracking: false,
+    click_tracking: false,
   },
   {
     object: "domain" as const,
@@ -168,6 +174,8 @@ const DOMAINS = [
     created_at: ago(96),
     region: "us-east-1",
     delegated: false,
+    open_tracking: false,
+    click_tracking: false,
   },
 ]
 
@@ -549,10 +557,13 @@ const ROUTES: [
 
   [
     /^\/console\/domains\/([^/]+)$/,
-    (m) => {
+    (m, _q, method) => {
       const domain = DOMAINS.find((d) => d.id === m[1])
       // ⚠ NOT A FALLBACK TO THE FIRST ROW - see `PREVIEW_NOT_FOUND`.
       if (!domain) return PREVIEW_NOT_FOUND
+      // A tracking PATCH answers with the domain as it was: the switch keeps its
+      // own optimistic state, and preview has no store to write to.
+      if (method === "PATCH") return { ...domain, records: recordsFor(domain) }
       /*
        * ⚠ THE BADGE STAYS `pending` HERE EVEN AFTER THE WATCH BELOW REPORTS
        * VERIFIED, AND THAT IS A LIMIT OF THE MODE RATHER THAN A BUG IN IT. A

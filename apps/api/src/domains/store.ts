@@ -1,5 +1,11 @@
 import { eq, and, desc, isNotNull, sql } from "drizzle-orm"
-import type { CreateDomain, Domain, DomainStatus, DomainSummary } from "@repo/contracts"
+import type {
+  CreateDomain,
+  Domain,
+  DomainStatus,
+  DomainSummary,
+  UpdateDomain,
+} from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
 import { delegations, domains } from "../db/core.js"
 import { dnsRecordsFor } from "./records.js"
@@ -87,6 +93,16 @@ export interface DomainStore {
    */
   refusal(tenantId: string, name: string): Promise<string | null>
   get(tenantId: string, id: string): Promise<Domain | null>
+  /**
+   * Changes what can change on a live domain without touching its DNS - today,
+   * open and click tracking (#154). `null` when the domain is not this
+   * workspace's.
+   *
+   * ⚠ TAKES EFFECT ON THE NEXT MESSAGE THE WORKER CLAIMS, because the claim
+   * reads the flags. Mail already accepted but not yet sent goes out with the
+   * new setting, which is the reading a customer expects of "turn it off".
+   */
+  update(tenantId: string, id: string, input: UpdateDomain): Promise<Domain | null>
   list(tenantId: string): Promise<DomainSummary[]>
   remove(tenantId: string, id: string): Promise<boolean>
   /** Re-reads the provider and stores what it says. */
@@ -342,6 +358,8 @@ interface Row {
   delegationToken: string
   /** Set when another workspace proved the name and took it. See the column. */
   displacedAt: Date | null
+  openTracking: boolean
+  clickTracking: boolean
 }
 
 /** Another workspace's row for the same name, as the definer functions return it. */
@@ -367,6 +385,8 @@ const COLUMNS = {
   createdAt: domains.createdAt,
   delegationToken: domains.delegationToken,
   displacedAt: domains.displacedAt,
+  openTracking: domains.openTracking,
+  clickTracking: domains.clickTracking,
 }
 
 /**
@@ -388,6 +408,8 @@ const summarise = (row: Row, region: string): DomainSummary => ({
 
 const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
   ...summarise(row, region),
+  open_tracking: row.openTracking,
+  click_tracking: row.clickTracking,
   // ⚠ THE SAME FIELD EITHER WAY. A delegating customer publishes NS records and
   // a manual one publishes four; a client renders `records` and does not need to
   // know which it is looking at.
@@ -899,6 +921,24 @@ export function domainStore({
           .from(domains)
           .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
           .limit(1)
+        return row ? present(row as Row, region, dns) : null
+      })
+    },
+
+    async update(tenantId, id, input) {
+      return withTenant(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .update(domains)
+          .set({
+            ...(input.open_tracking === undefined
+              ? {}
+              : { openTracking: input.open_tracking }),
+            ...(input.click_tracking === undefined
+              ? {}
+              : { clickTracking: input.click_tracking }),
+          })
+          .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id)))
+          .returning(COLUMNS)
         return row ? present(row as Row, region, dns) : null
       })
     },

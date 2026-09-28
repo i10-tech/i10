@@ -1,0 +1,1 @@
+ALTER TABLE "core"."domains" ADD COLUMN "ses_tenant_layout" integer;

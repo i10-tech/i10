@@ -49,8 +49,88 @@ describe("interpreting an SES notification", () => {
   // ⚠ IGNORED, NOT AN ERROR. Someone turning on Open tracking in the SES console
   // would otherwise make this endpoint 500 on every notification, and SNS would
   // retry each one for hours.
-  it("ignores a type we do not carry", () => {
-    expect(interpretSesEvent({ eventType: "Open", mail: mail() }, "sns-1")).toBeNull()
+  // ⚠ A type SES adds tomorrow must not make the endpoint 500 for hours.
+  it("ignores a type it does not know", () => {
+    expect(
+      interpretSesEvent({ eventType: "Teleport", mail: mail() }, "sns-1"),
+    ).toBeNull()
+  })
+
+  // #154: every type SES publishes is carried.
+  it("carries an open, with the user agent and without the IP", () => {
+    const event = interpretSesEvent(
+      {
+        eventType: "Open",
+        mail: mail(),
+        open: {
+          timestamp: "2026-09-28T10:00:00.000Z",
+          userAgent: "Mozilla/5.0",
+          ipAddress: "203.0.113.9",
+        },
+      },
+      "sns-1",
+    )
+    expect(event?.type).toBe("email.opened")
+    expect(event?.occurredAt.toISOString()).toBe("2026-09-28T10:00:00.000Z")
+    expect(event?.data.open).toEqual({ user_agent: "Mozilla/5.0" })
+    expect(JSON.stringify(event?.data)).not.toContain("203.0.113.9")
+    expect(event?.suppress).toEqual([])
+  })
+
+  it("carries a click with the link", () => {
+    const event = interpretSesEvent(
+      {
+        eventType: "Click",
+        mail: mail(),
+        click: {
+          timestamp: "2026-09-28T10:01:00.000Z",
+          link: "https://example.com/welcome",
+          userAgent: "Mozilla/5.0",
+          ipAddress: "203.0.113.9",
+        },
+      },
+      "sns-1",
+    )
+    expect(event?.type).toBe("email.clicked")
+    expect(event?.data.click).toEqual({
+      link: "https://example.com/welcome",
+      user_agent: "Mozilla/5.0",
+    })
+    expect(JSON.stringify(event?.data)).not.toContain("203.0.113.9")
+  })
+
+  it("carries an SES list-management unsubscribe", () => {
+    const event = interpretSesEvent(
+      {
+        eventType: "Subscription",
+        mail: mail(),
+        subscription: {
+          contactList: "news",
+          source: "UnsubscribeHeader",
+          timestamp: "2026-09-28T10:02:00.000Z",
+        },
+      },
+      "sns-1",
+    )
+    expect(event?.type).toBe("email.unsubscribed")
+    expect(event?.data.unsubscribe).toEqual({
+      list: "news",
+      source: "UnsubscribeHeader",
+    })
+  })
+
+  // ⚠ A rendering failure carries its reason in `failure`, not `reject`.
+  it("reports a rendering failure's own message", () => {
+    const event = interpretSesEvent(
+      {
+        eventType: "Rendering Failure",
+        mail: mail(),
+        failure: { errorMessage: "Attribute 'name' is not present" },
+      },
+      "sns-1",
+    )
+    expect(event?.type).toBe("email.failed")
+    expect(event?.data.reason).toBe("Attribute 'name' is not present")
   })
 
   // ⚠ SES RENDERS TAG VALUES AS ARRAYS. Reading it as a string yields undefined

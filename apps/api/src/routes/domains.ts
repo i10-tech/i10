@@ -6,6 +6,7 @@ import {
   domainSchema,
   domainSummarySchema,
   dnsRecordSchema,
+  updateDomainSchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
@@ -32,6 +33,7 @@ const Domain = domainSchema.openapi("Domain")
 const DomainList = domainListSchema.openapi("DomainList")
 const CreateDomain = createDomainSchema.openapi("CreateDomain")
 const DeletedDomain = deletedDomainSchema.openapi("DeletedDomain")
+const UpdateDomain = updateDomainSchema.openapi("UpdateDomain")
 const notWired = notWiredFor("Domains")
 
 const notFound = {
@@ -178,6 +180,61 @@ domains.openapi(get, async (c) => {
   const domain = await store.get(auth.tenantId, c.req.valid("param").id)
   return domain ? c.json(domain, 200) : c.json(notFound, 404)
 })
+
+const update = createRoute({
+  method: "patch",
+  path: "/{id}",
+  summary: "Update a domain",
+  description:
+    "Turns open and click tracking on or off for mail sent from this domain. " +
+    "Both are off by default. Opens are recorded with a tracking pixel and " +
+    "clicks by rewriting links through a redirect, so turn them on only where " +
+    "you have a lawful basis to track your recipients. The change applies to " +
+    "the next message sent, including ones already accepted but not yet sent.",
+  tags: ["Domains"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: {
+    params: idParam,
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateDomain } },
+    },
+  },
+  responses: {
+    200: {
+      description: "The domain, with the new settings.",
+      content: { "application/json": { schema: Domain } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No domain with that id."),
+    422: errorResponse("Nothing to update, or a field is not a boolean."),
+    501: errorResponse("Domains are not configured."),
+  },
+})
+
+domains.openapi(
+  update,
+  async (c) => {
+    const store = c.get("domains")
+    if (!store) return c.json(notWired, 501)
+    const auth = c.get("auth")
+    const domain = await store.update(
+      auth.tenantId,
+      c.req.valid("param").id,
+      c.req.valid("json"),
+    )
+    return domain ? c.json(domain, 200) : c.json(notFound, 404)
+  },
+  (result, c) => {
+    if (!result.success) {
+      return c.json(
+        validation(result.error.issues[0]?.message ?? "Invalid request body."),
+        422,
+      )
+    }
+  },
+)
 
 const verify = createRoute({
   method: "post",
