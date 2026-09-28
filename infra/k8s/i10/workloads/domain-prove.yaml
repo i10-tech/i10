@@ -82,7 +82,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: prove
-              image: ghcr.io/i10-tech/i10-api:prod-97b1aa8cc3bd7d1418378431f14757227b6add3f@sha256:dad9b512897099642d69587aec62dfb11965a3ca77b4ff0d4d5207631ad56572
+              image: ghcr.io/i10-tech/i10-api:prod-466fc5ccc4dceec1eb22917276a060cb73b5acaa@sha256:bfa7d6771319d5b6afac0bc4f4374bb5f5a912ef32ed4551ab9563966f6f05d7
               imagePullPolicy: Always
               command: ["bun", "dist/domain-prove.js"]
               envFrom:
