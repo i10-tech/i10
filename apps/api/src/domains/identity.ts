@@ -9,7 +9,9 @@ import {
   ListResourceTenantsCommand,
   PutEmailIdentityDkimSigningAttributesCommand,
   PutEmailIdentityMailFromAttributesCommand,
+  PutTenantSuppressionAttributesCommand,
   type SESv2Client,
+  type TenantSuppressionAttributes,
 } from "@aws-sdk/client-sesv2"
 import type { DomainStatus } from "@repo/contracts"
 
@@ -97,6 +99,9 @@ export interface DomainIdentity {
    * four a message uses depends on its domain's tracking settings - see
    * send/configuration-sets.ts. Idempotent: an association that already exists
    * is the state wanted.
+   *
+   * ⚠ AND IT GIVES THE TENANT ITS OWN SUPPRESSION LIST (#159). See
+   * `TENANT_SUPPRESSION`.
    */
   attach(domain: string, tenant: string): Promise<void>
 
@@ -127,14 +132,52 @@ export const sesTenantName = (tenantId: string): string => `i10-${tenantId}`
 /**
  * The shape of a complete attach, recorded beside the tenant name.
  *
- * ⚠ BUMP IT WHENEVER `attach` STARTS ASSOCIATING SOMETHING NEW. Every domain
- * recorded at an older layout is then sent untenanted by the worker, rather
- * than refused by SES, until the re-check brings it up to date.
+ * ⚠ BUMP IT WHENEVER `attach` STARTS DOING SOMETHING NEW. The re-check
+ * re-attaches every domain recorded at an older layout, which is how a change
+ * to `attach` reaches domains attached before it.
  *
  *   1  #156: the identity and the base configuration set (never recorded)
  *   2  #154: the identity and all four configuration sets
+ *   3  #159: the tenant keeps its own suppression list
  */
-export const TENANT_LAYOUT = 2
+export const TENANT_LAYOUT = 3
+
+/**
+ * The oldest recorded layout the worker may still name a tenant for.
+ *
+ * ⚠ SEPARATE FROM `TENANT_LAYOUT`, BECAUSE ONLY SOME BUMPS MAKE AN OLD ATTACH
+ * UNSENDABLE. A missing configuration set association is refused by SES, so
+ * #154 had to raise this too. A tenant still on the account suppression list is
+ * not refused - it behaves exactly as an untenanted send does - so #159 leaves
+ * it alone. Tying the two together would have sent EVERY domain untenanted from
+ * the deploy until the next 03:17 re-check, for a change that needed no send to
+ * wait at all.
+ *
+ * ⚠ RAISE IT ONLY WHEN SES WOULD REFUSE A SEND FROM AN OLDER ATTACH.
+ */
+export const SENDABLE_LAYOUT = 2
+
+/**
+ * How every tenant of ours suppresses: its own list, for both reasons (#159).
+ *
+ * ⚠ THE DEFAULT IS THE ACCOUNT LIST, AND THAT IS THE CONTAMINATION. With it,
+ * one workspace's hard bounce or complaint makes SES refuse that address for
+ * every workspace. With `TENANT` scope SES checks and records only this
+ * tenant's list and skips the account list entirely for its sends.
+ *
+ * ⚠ A CONFIGURATION SET'S `SuppressionOptions` WOULD OVERRIDE THIS FOR EVERY
+ * TENANT AT ONCE - SES resolves set, then tenant, then account. Ours set none;
+ * see send/configuration-sets.ts.
+ *
+ * ⚠ THE ACCOUNT LIST STAYS ON, DELIBERATELY. Untenanted sends - a domain whose
+ * attach has not succeeded yet, and our own mail from `MAIL_DOMAINS` - still
+ * use it, and it is the only SES-side check they have. Tenanted sends never
+ * consult it, so it cannot leak into them.
+ */
+export const TENANT_SUPPRESSION: TenantSuppressionAttributes = {
+  SuppressionScope: "TENANT",
+  SuppressedReasons: ["BOUNCE", "COMPLAINT"],
+}
 
 /** Ours, as opposed to a tenant somebody made by hand in the console. */
 const OUR_TENANT = /^i10-[0-9a-f-]{36}$/
@@ -500,9 +543,26 @@ export function sesIdentity(
        * learn nothing the write would not tell us anyway.
        */
       try {
-        await client.send(new CreateTenantCommand({ TenantName: tenant }))
+        await client.send(
+          new CreateTenantCommand({
+            TenantName: tenant,
+            SuppressionAttributes: TENANT_SUPPRESSION,
+          }),
+        )
       } catch (error) {
         if (!isNamed(error, "AlreadyExistsException")) throw error
+        /*
+         * ⚠ ONLY AN EXISTING TENANT NEEDS THE SEPARATE CALL. A tenant created
+         * before #159 is on the account list, and `CreateTenant` does not touch
+         * one that exists. Idempotent, so repeating it on every re-attach is
+         * one request spent to be sure, not a change.
+         */
+        await client.send(
+          new PutTenantSuppressionAttributesCommand({
+            TenantName: tenant,
+            ...TENANT_SUPPRESSION,
+          }),
+        )
       }
 
       const identityArn = arn("identity", domain)

@@ -1,6 +1,14 @@
 import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
-import { clampInt, notFound, parseDate, readJson, validation } from "./http.js"
+import { removalRefusal, suppressionsCsv } from "../../suppressions/store.js"
+import {
+  clampInt,
+  notFound,
+  notWired,
+  parseDate,
+  readJson,
+  validation,
+} from "./http.js"
 
 /**
  * The mail itself: what was sent, what happened to it, and who is blocked.
@@ -60,9 +68,11 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
 
   app.get("/suppressions", async (c) => {
     const { tenantId } = c.get("auth")
+    const store = d.suppressions
+    if (!store) return c.json(notWired("Suppressions"), 501)
     const q = c.req.query()
     return c.json(
-      await d.queries.listSuppressions(tenantId, {
+      await store.list(tenantId, {
         ...(q.search ? { search: q.search.slice(0, 200) } : {}),
         ...(q.cursor ? { cursor: q.cursor } : {}),
         ...(q.limit ? { limit: Number(q.limit) } : {}),
@@ -72,16 +82,20 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
 
   app.post("/suppressions", async (c) => {
     const { tenantId } = c.get("auth")
+    const store = d.suppressions
+    if (!store) return c.json(notWired("Suppressions"), 501)
     const body = await readJson(c)
     const address = typeof body?.address === "string" ? body.address.trim() : ""
     if (!address.includes("@")) return c.json(validation("`address` is required."), 422)
 
-    await d.queries.addSuppression(tenantId, address)
+    await store.add(tenantId, address)
     return c.json({ address: address.toLowerCase(), suppressed: true }, 201)
   })
 
   app.delete("/suppressions/:address", async (c) => {
     const { tenantId } = c.get("auth")
+    const store = d.suppressions
+    if (!store) return c.json(notWired("Suppressions"), 501)
     /*
      * ⚠ NOT DECODED AGAIN - HONO HAS ALREADY DONE IT. An address in a path is
      * percent-encoded (`bob+news@acme.com` arrives as `bob%2Bnews@acme.com`),
@@ -92,10 +106,29 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
      * again is a malformed-URI exception, i.e. a 500 on a valid request.
      */
     const address = c.req.param("address")
-    const removed = await d.queries.removeSuppression(tenantId, address)
-    return removed
-      ? c.json({ address, deleted: true })
-      : c.json(notFound("That address is not suppressed."), 404)
+    const outcome = await store.remove(tenantId, address, {
+      confirmComplaint: c.req.query("confirm") === "complaint",
+    })
+    if (outcome === "removed") return c.json({ address, deleted: true })
+    const refusal = removalRefusal(outcome)
+    return c.json(refusal.body, refusal.status)
+  })
+
+  /*
+   * ⚠ A GET ON `/suppressions/:address` ADDED LATER WOULD HAVE TO BE
+   * REGISTERED BELOW THIS ONE. Today `:address` is DELETE only, so nothing can
+   * read `export.csv` as an address; a GET registered above this route would.
+   */
+  app.get("/suppressions/export.csv", async (c) => {
+    const { tenantId } = c.get("auth")
+    const store = d.suppressions
+    if (!store) return c.json(notWired("Suppressions"), 501)
+    const csv = suppressionsCsv(await store.exportAll(tenantId))
+    return c.body(csv, 200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="suppressions.csv"',
+      "Cache-Control": "no-store",
+    })
   })
 
   // ───────────────────────────────────────────────────────────────────────────

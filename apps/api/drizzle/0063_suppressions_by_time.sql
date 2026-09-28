@@ -1,0 +1,1 @@
+CREATE INDEX "suppressions_tenant_created_idx" ON "core"."suppressions" USING btree ("tenant_id","created_at");

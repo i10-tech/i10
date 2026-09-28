@@ -54,6 +54,8 @@ import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
+import { offlineTenantSuppressions, sesTenantSuppressions } from "./suppressions/ses.js"
+import { suppressionStore } from "./suppressions/store.js"
 
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
@@ -679,7 +681,23 @@ const transferNotice =
       }
     : undefined
 
+/**
+ * The suppression list, shared by the console and `/suppressions` (#159).
+ *
+ * ⚠ GATED ON `SES_ENABLED` LIKE THE IDENTITY. A laptop holding production AWS
+ * credentials must not delete entries from a real tenant's list because
+ * somebody clicked Remove in a local console.
+ */
+const suppressions = suppressionStore({
+  db,
+  ses: env.SES_ENABLED
+    ? sesTenantSuppressions(new SESv2Client({ region: env.AWS_REGION }))
+    : offlineTenantSuppressions(),
+  log,
+})
+
 const app = createApp({
+  suppressions,
   apiKeyAuth: {
     // ⚠ OUR OWN TABLE, NOT CLERK. See auth/api-key.ts for why, and note the
     // client above is still built - Clerk remains the identity provider for
@@ -894,6 +912,7 @@ const app = createApp({
     activeOrg,
     freshAuth,
     queries: consoleQueries(db),
+    suppressions,
     usage: usageStore({ db, meter: postgresMeter(db), log }),
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
     marketing: marketingStore(db),

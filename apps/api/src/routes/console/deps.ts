@@ -2,6 +2,7 @@ import type { SubscriptionOps } from "../../billing/db.js"
 import type { TenantAuthDeps } from "../../middleware/tenant.js"
 import type { FreshAuthReader } from "../../middleware/session.js"
 import type { ConsoleQueries } from "../../console/queries.js"
+import type { SuppressionStore } from "../../suppressions/store.js"
 import type { MarketingStore } from "../../console/marketing.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
 import type { UsageStore } from "../../console/usage.js"
@@ -29,6 +30,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   freshAuth?: FreshAuthReader
   queries: ConsoleQueries
+  /**
+   * The suppression list - the same store `/suppressions` uses. Optional like
+   * the other stores the tests leave out; its routes then answer 501.
+   */
+  suppressions?: SuppressionStore
   usage: UsageStore
   onboarding: OnboardingStore
   marketing: MarketingStore
