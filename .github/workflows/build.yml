@@ -470,7 +470,7 @@ jobs:
           fi
 
           git commit -m "chore(deploy): pin ${PINNED} at ${GITHUB_SHA:0:7} [skip ci]"
-          
+
           # ⚠ RETRY BY REBASE, NOT BY FORCE. Two merges landing close together
           # each produce a deploy commit, and the second finds main moved. The
           # change is confined to image lines in files nothing else edits, so a
