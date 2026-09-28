@@ -70,6 +70,16 @@ export type AcceptOutcome =
    * callers to go and look at the wrong thing.
    */
   | { status: "unverified_domain"; message: string }
+  /**
+   * SES has paused this workspace's tenant (#157).
+   *
+   * ⚠ REFUSED HERE, NOT LEFT TO SES. A paused tenant's sends reach SES and come
+   * back `SendingPausedException`, which the worker defers - so without this
+   * the caller would get an id and a success for mail that sits retrying until
+   * it gives up, which is the silent shape `unverified_domain` exists to
+   * prevent.
+   */
+  | { status: "paused"; message: string }
 
 /**
  * A stable fingerprint of the request body.
@@ -245,6 +255,17 @@ export interface AcceptOps {
   sendableFrom: (tenantId: string, domains: string[]) => Promise<Set<string>>
 
   /**
+   * Whether SES has paused this workspace's sending, and why (#157). Null when
+   * it has not.
+   *
+   * ⚠ OPTIONAL, AND ABSENT MEANS NOT PAUSED. The status is SES's to report and
+   * a deployment without it (tests, SES off) has nothing to refuse on. Our own
+   * mail's ops leave it out on purpose: it sends through its own SES tenant,
+   * and a pause on our workspace's tenant must not stop sign-in codes.
+   */
+  sendingPaused?: (tenantId: string) => Promise<{ cause: string | null } | null>
+
+  /**
    * Pushes the batch. Called only after the transaction commits.
    *
    * `runAt` delays the job - see the scheduling note in `acceptSend`.
@@ -351,6 +372,17 @@ export async function acceptSend(
           ? "The `from` address has no domain we can check. Use an address on a domain you have verified."
           : `${unverified} is not verified for this workspace, so mail cannot be sent from it yet. ` +
             `Add it under Domains, publish the records, and verify it first.`,
+    }
+  }
+
+  const paused = await deps.sendingPaused?.(input.tenantId)
+  if (paused) {
+    return {
+      status: "paused",
+      message:
+        "Sending is paused for this workspace because of its recent bounce or complaint " +
+        "rate. The console explains what happened and what to do." +
+        (paused.cause ? ` Reason: ${paused.cause}` : ""),
     }
   }
 

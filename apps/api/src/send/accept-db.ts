@@ -6,6 +6,7 @@ import {
   idempotencyKeys,
   messageBodies,
   messages,
+  sesTenantStatus,
   suppressions,
 } from "../db/core.js"
 import { enqueueBatch, type SendClass, type SendJob } from "../queue/send-queue.js"
@@ -55,6 +56,12 @@ export interface SendPathOptions {
    * where both are constructed in index.ts.
    */
   alwaysSendable?: readonly string[]
+  /**
+   * Refuse sends while SES has the workspace's tenant paused (#157). On unless
+   * set false - which only our own mail's ops do, because it sends through its
+   * own tenant (`SYSTEM_SES_TENANT`), not the workspace's.
+   */
+  honourSesPause?: boolean
 }
 
 type Row = Record<string, unknown>
@@ -279,6 +286,26 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
      * domain would keep its ability to send, which is precisely backwards: the
      * one case where we are most sure the sender is no longer the owner.
      */
+    ...(opts.honourSesPause === false
+      ? {}
+      : {
+          async sendingPaused(tenantId: string) {
+            const [row] = await withTenant(opts.db, tenantId, (tx) =>
+              tx
+                .select({ cause: sesTenantStatus.cause })
+                .from(sesTenantStatus)
+                .where(
+                  and(
+                    eq(sesTenantStatus.tenantId, tenantId),
+                    eq(sesTenantStatus.status, "disabled"),
+                  ),
+                )
+                .limit(1),
+            )
+            return row ? { cause: row.cause } : null
+          },
+        }),
+
     async sendableFrom(tenantId, domains) {
       const wanted = [...new Set(domains.map((d) => d.trim().toLowerCase()))].filter(
         Boolean,

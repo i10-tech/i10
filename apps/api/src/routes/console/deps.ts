@@ -2,6 +2,7 @@ import type { SubscriptionOps } from "../../billing/db.js"
 import type { TenantAuthDeps } from "../../middleware/tenant.js"
 import type { FreshAuthReader } from "../../middleware/session.js"
 import type { ConsoleQueries } from "../../console/queries.js"
+import type { SesStatusStore } from "../../ses-status/store.js"
 import type { SuppressionStore } from "../../suppressions/store.js"
 import type { MarketingStore } from "../../console/marketing.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
@@ -30,6 +31,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   freshAuth?: FreshAuthReader
   queries: ConsoleQueries
+  /**
+   * SES's sending status for the workspace (#157), for the console banner.
+   * Optional; without it the banner never shows.
+   */
+  sesStatus?: Pick<SesStatusStore, "current">
   /**
    * The suppression list - the same store `/suppressions` uses. Optional like
    * the other stores the tests leave out; its routes then answer 501.

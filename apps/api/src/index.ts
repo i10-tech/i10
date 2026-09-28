@@ -44,10 +44,12 @@ import { configurationSetsFor } from "./send/configuration-sets.js"
 import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
-import { authEmailSender } from "./auth-email/sender.js"
+import { systemSenderFor } from "./auth-email/system.js"
+import { ownerNotice } from "./ses-status/notice.js"
+import { sesStatusService } from "./ses-status/service.js"
+import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
 import { domainTransferStore } from "./domains/transfers.js"
-import { domainOf } from "./send/address.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
@@ -494,78 +496,6 @@ const depthSources = {
   ...(webhookQueue ? { webhooks: webhookQueue } : {}),
 }
 
-/**
- * i10's own tenant, for the mail i10 sends about itself.
- *
- * ⚠ RESOLVED ONCE AT BOOT AND ALLOWED TO BE ABSENT. A fresh database has no
- * `i10` tenant - migration 0029 inserts one only where it already exists - so
- * this is `null` on a new deployment and authentication mail simply stays with
- * Clerk. Failing to boot over it would make the API refuse to start on exactly
- * the deployments that have no customers to email.
- */
-/**
- * The domain i10's own authentication mail leaves from.
- *
- * ⚠ IT IS THE ONE DOMAIN THE SEND GATE EXEMPTS, and it has to be derived here
- * rather than assumed, because `AUTH_EMAIL_FROM` is configuration and may be a
- * subdomain. See `SendPathOptions.alwaysSendable` for why the exemption exists
- * at all and why it is attached to an ops object rather than to a request.
- */
-const authEmailDomain = domainOf(env.AUTH_EMAIL_FROM) ?? null
-
-/*
- * ⚠ AN UNPARSEABLE OVERRIDE IS A MISCONFIGURATION THAT MUST NOT PASS QUIETLY.
- * `AUTH_EMAIL_FROM` defaults to a good address (`SYSTEM_FROM`), but Doppler can
- * override it with a value that has no address in it at all - and without a
- * domain there is no exemption and the send gate refuses our own mail, which
- * is a sign-up nobody can complete. So this says so loudly and the block below
- * declines to take over, which leaves Clerk delivering - the safe outcome
- * rather than the degraded one.
- */
-if (!authEmailDomain) {
-  log.error(
-    { from: env.AUTH_EMAIL_FROM },
-    "AUTH_EMAIL_FROM has no parseable domain - clerk keeps delivering its own",
-  )
-}
-
-const authEmailTenantId = await (async () => {
-  try {
-    // ⚠ THROUGH THE DEFINER, NOT `select … from core.tenants`. That table is
-    // under RLS and its policy reads `current_setting('app.tenant_id')`
-    // strictly, which nothing has set this early - so the direct read did not
-    // return zero rows, it RAISED. It cannot be repaired with `withTenant()`
-    // either: that needs the tenant id, and the id is what this is looking
-    // for. See migration 0032.
-    //
-    // The postgres client directly rather than drizzle: this is a function
-    // call, not a table, and one query at boot does not earn a definition.
-    const rows = await sql<{ id: string | null }[]>`
-      select core.tenant_id_by_slug(${env.AUTH_EMAIL_TENANT_SLUG})::text as id`
-
-    const id = rows[0]?.id ?? null
-    if (!id) {
-      log.warn(
-        { slug: env.AUTH_EMAIL_TENANT_SLUG },
-        "no tenant for auth email - clerk keeps delivering its own",
-      )
-    }
-    return id
-  } catch (err) {
-    // ⚠ CAUGHT, BECAUSE THE RLS FAULT ABOVE TOOK THE WHOLE API DOWN WITH IT.
-    // One question about who signs the verification mail crashlooped the send
-    // path, the webhooks and the mailbox projection along with it. However
-    // this fails, the right outcome is the one this value already has a name
-    // for - no tenant, and Clerk keeps delivering. Loud in the log, not in the
-    // exit code.
-    log.error(
-      { slug: env.AUTH_EMAIL_TENANT_SLUG, err: String(err) },
-      "could not resolve the auth email tenant - clerk keeps delivering its own",
-    )
-    return null
-  }
-})()
-
 /*
  * Clerk session verification, built ONCE.
  *
@@ -599,31 +529,19 @@ const freshAuth = clerkFreshAuth(clerk, {
 
 /**
  * The one sender for mail i10 sends as itself - Clerk's auth emails and our
- * own notices alike, through our own send path as the system tenant.
+ * own notices alike, through our own send path as the system tenant. Built by
+ * the same helper the daily re-check uses, so the two cannot drift; see
+ * auth-email/system.ts.
  */
-const systemSender =
-  authEmailTenantId && authEmailDomain
-    ? authEmailSender({
-        tenantId: authEmailTenantId,
-        from: env.AUTH_EMAIL_FROM,
-        /*
-         * ⚠ ITS OWN OPS OBJECT, CARRYING THE ONE EXEMPTION THE SEND GATE
-         * ALLOWS. `DomainStore.create` refuses to create a row for our
-         * own sending domains, so `AUTH_EMAIL_FROM` can never be a
-         * verified domain and the gate would refuse every password reset
-         * in the product. Scoping the exemption to the object the
-         * auth-email path builds - rather than to a flag on a request -
-         * is what keeps it unreachable from a customer's send.
-         */
-        ops: acceptDatabaseOps({
-          db,
-          queues: sendQueues,
-          alwaysSendable: [authEmailDomain],
-        }),
-        metering,
-        log,
-      })
-    : null
+const systemSender = await systemSenderFor({
+  sql,
+  db,
+  queues: sendQueues,
+  metering,
+  from: env.AUTH_EMAIL_FROM,
+  tenantSlug: env.AUTH_EMAIL_TENANT_SLUG,
+  log,
+})
 
 /**
  * The email that tells somebody a domain has been offered to them.
@@ -675,6 +593,21 @@ const transferNotice =
         },
       }
     : undefined
+
+/**
+ * SES tenant sending status (#157): recorded, refused at accept, told to the
+ * owner. The EventBridge events reach it through the SES webhook below; the
+ * daily re-check polls for the ones that went missing.
+ */
+const sesStatus = sesStatusStore(db)
+const sesStatusChanges = sesStatusService({
+  store: sesStatus,
+  ...(systemSender && consoleUrl
+    ? { notice: ownerNotice({ db, clerk, sender: systemSender, consoleUrl }) }
+    : {}),
+  log,
+  alert: captureError,
+})
 
 /**
  * The suppression list, shared by the console and `/suppressions` (#159).
@@ -907,6 +840,7 @@ const app = createApp({
     activeOrg,
     freshAuth,
     queries: consoleQueries(db),
+    sesStatus,
     suppressions,
     usage: usageStore({ db, meter: postgresMeter(db), log }),
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
@@ -1111,6 +1045,7 @@ const app = createApp({
         sesWebhooks: {
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,
+          tenantStatus: sesStatusChanges,
         },
         // ⚠ THE SAME OPS, A DIFFERENT INTERPRETER. Both routes write through
         // `ingestEvent`, so the dedupe, the suppression write and the customer

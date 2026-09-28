@@ -15,6 +15,7 @@ import OrganizationInvitation from "./templates/organization-invitation.js"
 import OrganizationMemberJoined from "./templates/organization-member-joined.js"
 import WaitlistConfirmation from "./templates/waitlist-confirmation.js"
 import DomainTransfer from "./templates/domain-transfer.js"
+import SendingStatus from "./templates/sending-status.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -294,6 +295,24 @@ export async function renderDomainTransfer(
   const element = DomainTransfer(props)
   return {
     subject: `${props.offeredBy} wants to transfer ${props.domain} to you`,
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * The email telling a workspace owner that sending was paused or resumed. Not a
+ * Clerk template - sent by the API on an SES tenant status change; see
+ * apps/api/src/ses-status (#157).
+ */
+export async function renderSendingStatus(
+  props: React.ComponentProps<typeof SendingStatus>,
+): Promise<RenderedEmail> {
+  const element = SendingStatus(props)
+  return {
+    subject: props.paused
+      ? `Sending is paused for ${props.workspace}`
+      : `Sending has resumed for ${props.workspace}`,
     html: await render(element),
     text: await render(element, { plainText: true }),
   }

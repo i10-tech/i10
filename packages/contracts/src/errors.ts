@@ -101,6 +101,14 @@ export const errorNames = [
    * permission - it is the state of the address that stands in the way.
    */
   "confirmation_required",
+  /**
+   * Our email provider has paused sending for the workspace (#157), usually on
+   * its bounce or complaint rate.
+   *
+   * ⚠ A 403, NOT A 429. Waiting does not lift a pause; a review does. An SDK
+   * that backs off on it retries until it gives up.
+   */
+  "sending_paused",
   "internal_server_error",
 ] as const
 

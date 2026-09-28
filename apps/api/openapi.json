@@ -71,6 +71,7 @@
               "mailbox_already_exists",
               "restricted_api_key",
               "confirmation_required",
+              "sending_paused",
               "internal_server_error"
             ]
           },

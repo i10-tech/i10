@@ -34,6 +34,22 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
     return c.json(await d.queries.overview(tenantId, days))
   })
 
+  /*
+   * SES's sending status for the workspace (#157), for the banner.
+   *
+   * ⚠ ALWAYS 200, AND `enabled` WHEN NOTHING IS KNOWN. The banner is advisory;
+   * a missing store or no row must never paint a pause that did not happen.
+   */
+  app.get("/sending-status", async (c) => {
+    const { tenantId } = c.get("auth")
+    const current = await d.sesStatus?.current(tenantId)
+    return c.json({
+      status: current?.status ?? "enabled",
+      cause: current?.cause ?? null,
+      changed_at: current?.changedAt.toISOString() ?? null,
+    })
+  })
+
   // ───────────────────────────────────────────────────────────────────────────
   // Emails
   // ───────────────────────────────────────────────────────────────────────────

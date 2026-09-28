@@ -183,6 +183,18 @@ export const TENANT_SUPPRESSION: TenantSuppressionAttributes = {
 const OUR_TENANT = /^i10-[0-9a-f-]{36}$/
 
 /**
+ * The workspace an SES tenant belongs to, or null for one that is not a
+ * workspace's - `i10-internal`, or anything made by hand.
+ *
+ * ⚠ THE INVERSE OF `sesTenantName`, AND THE ONLY WAY BACK. SES reports status
+ * changes by tenant name (#157); nothing stores a mapping because the name is
+ * a pure function of the workspace id.
+ */
+export function workspaceOfSesTenant(name: string): string | null {
+  return OUR_TENANT.test(name) ? name.slice("i10-".length) : null
+}
+
+/**
  * SES's DKIM vocabulary, mapped to ours.
  *
  * ⚠ `TEMPORARY_FAILURE` IS NOT `FAILED`, AND FLATTENING THEM IS A SUPPORT

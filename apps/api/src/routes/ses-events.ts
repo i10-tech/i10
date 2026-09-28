@@ -1,4 +1,6 @@
 import { Hono, type Context } from "hono"
+import { isSesEventBridgeEvent, parseTenantStatusEvent } from "../ses-status/event.js"
+import type { StatusService } from "../ses-status/service.js"
 import { ingestSesEvent, type EventOps, type Logger } from "../webhooks/events.js"
 import {
   cachingCertificateFetcher,
@@ -44,6 +46,12 @@ export interface SesWebhookDeps {
    */
   confirmSubscriptions?: boolean
   fetch?: typeof fetch
+  /**
+   * SES tenant sending-status changes (#157), forwarded to the same topic by
+   * an EventBridge rule. Optional: without it those events are acknowledged
+   * and dropped, and the daily poll still catches the change.
+   */
+  tenantStatus?: StatusService
 }
 
 export function createSesWebhooks(deps?: SesWebhookDeps) {
@@ -111,6 +119,43 @@ export function createSesWebhooks(deps?: SesWebhookDeps) {
       // attack. Retrying will not fix it, so take it off the queue and be loud.
       deps.log.error({ snsMessageId: message.MessageId }, "SNS payload is not JSON")
       return c.json({ ok: true }, 200)
+    }
+
+    /*
+     * ⚠ AN EVENTBRIDGE ENVELOPE, NOT AN SES EVENT RECORD. Tenant status changes
+     * (#157) share this topic and this signature check, and must never reach
+     * `ingestSesEvent`, which would find no message id and drop them quietly.
+     * Reputation findings (`Advisor Recommendation …`) are #158's and are
+     * acknowledged here until then.
+     */
+    if (isSesEventBridgeEvent(payload)) {
+      const change = parseTenantStatusEvent(payload)
+      if (!change || !deps.tenantStatus) {
+        deps.log.info(
+          { detailType: payload["detail-type"], snsMessageId: message.MessageId },
+          "acknowledged an SES EventBridge event without acting on it",
+        )
+        return c.json({ ok: true, outcome: "ignored" }, 200)
+      }
+      try {
+        const outcome = await deps.tenantStatus.apply(change, "event")
+        return c.json({ ok: true, outcome }, 200)
+      } catch (err) {
+        // ⚠ 500, SO SNS REDELIVERS. A status we failed to write is a pause we
+        // would otherwise not enforce until the daily poll.
+        deps.log.error(
+          { err, snsMessageId: message.MessageId },
+          "failed to record a tenant status",
+        )
+        return c.json(
+          {
+            statusCode: 500,
+            name: "internal_server_error",
+            message: "Could not record the status change.",
+          },
+          500,
+        )
+      }
     }
 
     try {
