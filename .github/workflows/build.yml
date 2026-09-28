@@ -399,19 +399,9 @@ jobs:
           merge-multiple: true
           path: /tmp/digests
 
-      # ⚠ REPLACE THE WHOLE REFERENCE, INCLUDING ANY EXISTING `@sha256:`.
-      # The manifests start life pinned to `:prod-latest` and end up pinned to
-      # `:prod-<sha>@sha256:<digest>`; a pattern that only matched the tag
-      # would append a second digest to an already-pinned line and produce a
-      # reference Kubernetes rejects at pull time, not at apply time.
-      #
-      # ⚠ IT SCANS EVERY MANIFEST RATHER THAN A MAPPED FILE PER IMAGE. There
-      # used to be a `manifest:` column in the app table above; it broke the
-      # moment one image appeared in two files - `i10-api` runs both the API and
-      # the worker - and it broke SILENTLY, leaving the second file on a stale
-      # digest with nothing to notice. A mapping you must remember to update is
-      # a mapping that will be forgotten, so there is no mapping: every
-      # reference to a built image is rewritten wherever it appears.
+      # ⚠ THE REWRITE ITSELF IS .github/scripts/pin-image.py, shared with the
+      # push step's retry (#210). It replaces the whole reference, digest
+      # included, in every manifest that names the image.
       - name: Pin each built image
         id: pin
         env:
@@ -425,68 +415,26 @@ jobs:
               echo "::error::No digest artifact for ${image} - the build job did not record one."
               exit 1
             fi
-            digest=$(cat "$digest_file")
-            ref="${REGISTRY}/${NAMESPACE}/${image}:prod-${GITHUB_SHA}@${digest}"
-            python3 - "${REGISTRY}/${NAMESPACE}/${image}" "$ref" <<'PY'
-          import pathlib, re, sys
-          repo, ref = sys.argv[1], sys.argv[2]
-          # A repo name is a prefix of no other repo name here, so anchoring on
-          # `<registry>/<ns>/<image>:` is unambiguous.
-          pattern = re.compile(rf"{re.escape(repo)}:\S+")
-          total = 0
-          for path in sorted(pathlib.Path("infra/k8s").rglob("*.yaml")):
-              src = path.read_text()
-              out, n = pattern.subn(ref, src)
-              if n:
-                  path.write_text(out)
-                  total += n
-                  print(f"  {path}: {n} reference(s)")
-          if total == 0:
-              sys.exit(f"no reference to {repo} under infra/k8s - is the image still deployed?")
-          print(f"  → {ref}")
-          PY
+            python3 .github/scripts/pin-image.py "${REGISTRY}/${NAMESPACE}/${image}" \
+              "${REGISTRY}/${NAMESPACE}/${image}:prod-${GITHUB_SHA}@$(cat "$digest_file")"
             pinned+=("$image")
           done < <(jq -r '.[].image' <<<"$MATRIX")
           echo "pinned=${pinned[*]}" >> "$GITHUB_OUTPUT"
 
+      # ⚠ A REJECTED PUSH IS PINNED AGAIN ON THE NEW HEAD, NOT REBASED (#210).
+      # Two deploy commits for the same image rewrite the same lines, so the
+      # rebase this used to do conflicted whenever two merges landed close
+      # together - and the second merge built and never deployed. The script
+      # also leaves alone any image already pinned at a newer commit. Its
+      # `pinned` output is what this run actually deployed, which can be fewer
+      # images than the pin step rewrote.
       - name: Commit and push
         id: push
         env:
           PINNED: ${{ steps.pin.outputs.pinned }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- infra/k8s
-
-          if git diff --cached --quiet; then
-            echo "Manifests already reference these digests - nothing to deploy."
-            # ⚠ RECORDED, BECAUSE THE VERIFY STEP MUST NOT RUN. With no new
-            # commit there is nothing for Argo to move to, so waiting for one
-            # would spend the whole timeout and then report a failed rollout
-            # for a deploy that correctly did nothing.
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git commit -m "chore(deploy): pin ${PINNED} at ${GITHUB_SHA:0:7} [skip ci]"
-
-          # ⚠ RETRY BY REBASE, NOT BY FORCE. Two merges landing close together
-          # each produce a deploy commit, and the second finds main moved. The
-          # change is confined to image lines in files nothing else edits, so a
-          # rebase is safe; a force push would silently drop the first deploy.
-          for attempt in 1 2 3; do
-            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-              echo "Pushed on attempt ${attempt}."
-              echo "pushed=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "Push rejected - rebasing onto origin/${GITHUB_REF_NAME} and retrying."
-            git fetch origin "${GITHUB_REF_NAME}"
-            git rebase "origin/${GITHUB_REF_NAME}" || { git rebase --abort; exit 1; }
-          done
-          echo "::error::Could not push the deploy commit after 3 attempts."
-          exit 1
+          DIGESTS_DIR: /tmp/digests
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/push-deploy.sh
 
       # ⚠ THE DEPLOY COMMIT'S SHA, NOT `GITHUB_SHA`. Argo syncs to whatever is at
       # the head of `main`, and the head is now the commit the step above
@@ -578,7 +526,7 @@ jobs:
         env:
           DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST || secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER || 'i10-deploy' }}
-          PINNED: ${{ steps.pin.outputs.pinned }}
+          PINNED: ${{ steps.push.outputs.pinned }}
           REVISION: ${{ steps.revision.outputs.sha }}
         run: |
           set -euo pipefail
@@ -601,7 +549,7 @@ jobs:
 
       - name: Summarise
         env:
-          PINNED: ${{ steps.pin.outputs.pinned }}
+          PINNED: ${{ steps.push.outputs.pinned }}
           VERIFIED: ${{ steps.verify.outcome }}
           REVISION: ${{ steps.revision.outputs.sha }}
           PUSHED: ${{ steps.push.outputs.pushed }}
