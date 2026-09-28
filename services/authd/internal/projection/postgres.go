@@ -3,6 +3,7 @@ package projection
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -26,7 +27,7 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 	if err != nil {
 		return nil, fmt.Errorf("projection: connect: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
+	if err := pingUntilReachable(ctx, pool.Ping, startupDial, slog.Default()); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("projection: ping: %w", err)
 	}
