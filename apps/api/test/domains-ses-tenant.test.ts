@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from "bun:test"
 import type { Database } from "../src/db/client.js"
+import { TENANT_LAYOUT } from "../src/domains/identity.js"
 import { ensureSesTenant } from "../src/domains/ses-tenant.js"
 
 /**
@@ -15,12 +16,16 @@ const TENANT = "0190a3e4-5b6c-7d8e-9f00-112233445566"
 const WANTED = `i10-${TENANT}`
 
 /** A database whose one domain row is `row`, recording every update. */
-const fakeDb = (row: { name: string; current: string | null } | null) => {
+const fakeDb = (
+  row: { name: string; current: string | null; layout?: number | null } | null,
+) => {
   const updates: unknown[] = []
   const tx = {
     execute: async () => [],
     select: () => ({
-      from: () => ({ where: () => ({ limit: async () => (row ? [row] : []) }) }),
+      from: () => ({
+        where: () => ({ limit: async () => (row ? [{ layout: null, ...row }] : []) }),
+      }),
     }),
     update: () => ({
       set: (values: unknown) => ({
@@ -45,11 +50,15 @@ describe("ensureSesTenant", () => {
       "attached",
     )
     expect(attach).toHaveBeenCalledWith("example.com", WANTED)
-    expect(updates).toEqual([{ sesTenantName: WANTED }])
+    expect(updates).toEqual([{ sesTenantName: WANTED, sesTenantLayout: TENANT_LAYOUT }])
   })
 
   it("leaves a domain already recorded in the right tenant alone", async () => {
-    const { db, updates } = fakeDb({ name: "example.com", current: WANTED })
+    const { db, updates } = fakeDb({
+      name: "example.com",
+      current: WANTED,
+      layout: TENANT_LAYOUT,
+    })
     const attach = mock(async () => {})
 
     expect(await ensureSesTenant({ db, identity: { attach } }, TENANT, "dom-1")).toBe(
@@ -57,6 +66,18 @@ describe("ensureSesTenant", () => {
     )
     expect(attach).not.toHaveBeenCalled()
     expect(updates).toEqual([])
+  })
+
+  // ⚠ #154 added configuration sets; an older attach is missing them, and SES
+  // refuses a tenant send through a set the tenant does not hold.
+  it("re-attaches a domain recorded at an older layout", async () => {
+    const { db, updates } = fakeDb({ name: "example.com", current: WANTED, layout: 1 })
+    const attach = mock(async () => {})
+
+    expect(await ensureSesTenant({ db, identity: { attach } }, TENANT, "dom-1")).toBe(
+      "attached",
+    )
+    expect(updates).toEqual([{ sesTenantName: WANTED, sesTenantLayout: TENANT_LAYOUT }])
   })
 
   // ⚠ After a (re-)registration SES may still hold a previous owner's tenant.
@@ -76,7 +97,7 @@ describe("ensureSesTenant", () => {
 
     await ensureSesTenant({ db, identity: { attach } }, TENANT, "dom-1")
     expect(attach).toHaveBeenCalledWith("example.com", WANTED)
-    expect(updates).toEqual([{ sesTenantName: WANTED }])
+    expect(updates).toEqual([{ sesTenantName: WANTED, sesTenantLayout: TENANT_LAYOUT }])
   })
 
   it("records nothing, and does not throw, when the attach fails", async () => {

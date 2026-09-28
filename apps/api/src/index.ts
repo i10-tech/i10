@@ -40,6 +40,7 @@ import { tenantResolver } from "./middleware/tenant.js"
 import { projectClerkUser } from "./projection/writer.js"
 import { MAILBOXES } from "./metering/levels.js"
 import { offlineIdentity, sesIdentity } from "./domains/identity.js"
+import { configurationSetsFor } from "./send/configuration-sets.js"
 import { powerDnsZones } from "./domains/powerdns.js"
 import { postgresMeter } from "./metering/service.js"
 import { authEmailDelivery } from "./auth-email/deliver.js"
@@ -358,7 +359,7 @@ const domains = secrets
             log,
             region: env.AWS_REGION,
             accountId: env.AWS_ACCOUNT_ID,
-            configurationSet: env.SES_CONFIGURATION_SET,
+            configurationSets: configurationSetsFor(env.SES_CONFIGURATION_SET),
           })
         : offlineIdentity(),
       capacity: postgresMeter(db),

@@ -26,6 +26,8 @@ const domain = (records: Domain["records"] = []): Domain => ({
   created_at: NOW.toISOString(),
   region: "eu-central-1",
   delegated: true,
+  open_tracking: false,
+  click_tracking: false,
   records,
 })
 

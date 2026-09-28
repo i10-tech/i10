@@ -1,4 +1,5 @@
 import type { Attachment, Tag } from "@repo/contracts"
+import type { Tracking } from "./configuration-sets.js"
 import { domainOf } from "./address.js"
 
 /**
@@ -55,6 +56,12 @@ export interface OutboundMessage {
    * ignores it.
    */
   sesTenant?: string | null
+  /**
+   * The domain's open and click tracking (#154), which picks the SES
+   * configuration set — see send/configuration-sets.ts. Absent means neither.
+   * The direct route cannot track and ignores it.
+   */
+  tracking?: Tracking | null
 }
 
 export type SendOutcome =

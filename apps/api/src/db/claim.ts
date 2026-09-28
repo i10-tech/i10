@@ -1,4 +1,5 @@
 import { sql, type SQL } from "drizzle-orm"
+import { TENANT_LAYOUT } from "../domains/identity.js"
 
 /**
  * Claiming a message for delivery.
@@ -146,11 +147,21 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
                  from core.domains d
                 where d.id = m.domain_id) as transactional_route,
               -- The SES tenant the domain's identity is RECORDED as attached
-              -- to. Null until an attach has succeeded, and a null names no
-              -- tenant -- see domains/ses-tenant.ts.
-              (select d.ses_tenant_name
+              -- to, and only at the current layout. Null until an attach has
+              -- succeeded with every association a send may need, and a null
+              -- names no tenant -- see domains/ses-tenant.ts.
+              (select case when d.ses_tenant_layout = ${TENANT_LAYOUT}
+                           then d.ses_tenant_name end
                  from core.domains d
-                where d.id = m.domain_id) as ses_tenant_name
+                where d.id = m.domain_id) as ses_tenant_name,
+              -- Which configuration set carries it (#154). False for a message
+              -- with no domain, which is the untracked set.
+              coalesce((select d.open_tracking
+                          from core.domains d
+                         where d.id = m.domain_id), false) as open_tracking,
+              coalesce((select d.click_tracking
+                          from core.domains d
+                         where d.id = m.domain_id), false) as click_tracking
   `
 }
 

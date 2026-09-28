@@ -37,10 +37,16 @@ const SEVERITY: Record<string, number> = {
   sent: 1,
   delivery_delayed: 2,
   delivered: 3,
-  complained: 4,
-  bounced: 5,
-  rejected: 6,
-  failed: 7,
+  // ⚠ ENGAGEMENT RANKS ABOVE DELIVERY AND BELOW EVERY FAILURE. An open proves
+  // delivery to that recipient, but on a message with several, a bounce or a
+  // complaint from another must still win — "did this work" wants the worst.
+  opened: 4,
+  clicked: 5,
+  unsubscribed: 6,
+  complained: 7,
+  bounced: 8,
+  rejected: 9,
+  failed: 10,
 }
 
 export interface EmailLookup {
@@ -117,7 +123,7 @@ export function emailLookup(db: Database): EmailLookup {
           // takes a maximum over a severity table, so order buys nothing — and
           // a `limit` on an ordered scan could cut off the very event that
           // matters, reporting `delivered` for a message that later bounced.
-          // There are eight event types, so distinct is bounded by design.
+          // There are eleven event types, so distinct is bounded by design.
           tx
             .selectDistinct({ type: messageEvents.type })
             .from(messageEvents)

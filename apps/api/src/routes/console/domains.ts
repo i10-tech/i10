@@ -1,4 +1,5 @@
 import type { Hono } from "hono"
+import { updateDomainSchema } from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
@@ -110,6 +111,22 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
     return domain
       ? c.json({ ...domain, displaced_at: displaced[domain.id] ?? null })
       : c.json(notFound("No domain with that id."), 404)
+  })
+
+  /*
+   * Open and click tracking (#154). The same contract as the public
+   * `PATCH /domains/{id}`, validated with the same schema, so the two surfaces
+   * cannot accept different things.
+   */
+  app.patch("/domains/:id", async (c) => {
+    if (!d.domains) return c.json(notWired("Domains"), 501)
+    const { tenantId } = c.get("auth")
+    const parsed = updateDomainSchema.safeParse(await readJson(c))
+    if (!parsed.success) {
+      return c.json(validation(parsed.error.issues[0]?.message ?? "Invalid body."), 422)
+    }
+    const domain = await d.domains.update(tenantId, c.req.param("id"), parsed.data)
+    return domain ? c.json(domain) : c.json(notFound("No domain with that id."), 404)
   })
 
   app.post("/domains/:id/verify", async (c) => {

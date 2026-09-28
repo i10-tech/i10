@@ -28,6 +28,7 @@ import pino from "pino"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { sesIdentity } from "./domains/identity.js"
+import { configurationSetsFor } from "./send/configuration-sets.js"
 import { recheckDomains } from "./domains/recheck.js"
 import { ensureSesTenant } from "./domains/ses-tenant.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
@@ -84,7 +85,7 @@ await withMonitor(
             log,
             region: env.AWS_REGION,
             accountId: env.AWS_ACCOUNT_ID,
-            configurationSet: env.SES_CONFIGURATION_SET,
+            configurationSets: configurationSetsFor(env.SES_CONFIGURATION_SET),
           })
         : null
 

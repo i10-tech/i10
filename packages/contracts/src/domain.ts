@@ -99,7 +99,28 @@ export const domainSchema = z.object({
   records: z.array(dnsRecordSchema),
   /** Whether i10 serves this domain's mail records. See `records`. */
   delegated: z.boolean(),
+  /**
+   * Whether mail from this domain carries an open-tracking pixel. Off by
+   * default: it is the domain owner's decision, and under GDPR it needs a lawful
+   * basis the owner holds, not us.
+   */
+  open_tracking: z.boolean(),
+  /** Whether links in mail from this domain are rewritten to record clicks. */
+  click_tracking: z.boolean(),
 })
+
+/**
+ * `PATCH /domains/{id}`. Only what can change on a live domain without
+ * touching its DNS — which is why `delegated` is not here.
+ */
+export const updateDomainSchema = z
+  .object({
+    open_tracking: z.boolean().optional(),
+    click_tracking: z.boolean().optional(),
+  })
+  .refine((v) => v.open_tracking !== undefined || v.click_tracking !== undefined, {
+    message: "Nothing to update. Send `open_tracking`, `click_tracking`, or both.",
+  })
 
 /** ⚠ NO `records`. Resend's list is the summary; the records are on the get. */
 export const domainSummarySchema = z.object({
@@ -130,5 +151,6 @@ export const verifyDomainSchema = z.object({
 export type DomainStatus = z.infer<typeof domainStatus>
 export type DnsRecord = z.infer<typeof dnsRecordSchema>
 export type CreateDomain = z.infer<typeof createDomainSchema>
+export type UpdateDomain = z.infer<typeof updateDomainSchema>
 export type Domain = z.infer<typeof domainSchema>
 export type DomainSummary = z.infer<typeof domainSummarySchema>

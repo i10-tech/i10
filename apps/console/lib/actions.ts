@@ -222,6 +222,24 @@ export async function deleteDomain(id: string) {
 }
 
 /**
+ * Turns open or click tracking on or off for one domain (#154). Takes effect on
+ * the next message the worker picks up.
+ */
+export async function updateDomainTracking(
+  id: string,
+  change: { open_tracking?: boolean; click_tracking?: boolean },
+) {
+  return run(
+    () =>
+      api(`/console/domains/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: change,
+      }),
+    [`/domains/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
  * Offers a domain to whoever holds an email address. Moves nothing yet.
  *
  * ⚠ `emailed` IS FALSE WHEN THE NOTICE COULD NOT BE SENT. The offer still

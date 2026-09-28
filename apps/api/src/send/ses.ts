@@ -3,6 +3,7 @@ import {
   SESv2Client,
   type SendEmailCommandInput,
 } from "@aws-sdk/client-sesv2"
+import { configurationSetFor, NO_TRACKING } from "./configuration-sets.js"
 import { buildRawMessage } from "./mime.js"
 import { type OutboundMessage, type SendOutcome, type Transport } from "./transport.js"
 
@@ -78,7 +79,11 @@ function toSesInput(
       BccAddresses: m.bcc.length ? [...m.bcc] : undefined,
     },
     ReplyToAddresses: m.replyTo.length ? [...m.replyTo] : undefined,
-    ConfigurationSetName: configurationSetName,
+    // ⚠ THE BASE NAME IS NOT NECESSARILY THE SET. The domain's tracking picks
+    // one of four — see send/configuration-sets.ts.
+    ConfigurationSetName: configurationSetName
+      ? configurationSetFor(configurationSetName, m.tracking ?? NO_TRACKING)
+      : undefined,
     // ⚠ Per-workspace reputation, pause and suppression — see `sesTenant`.
     TenantName: m.sesTenant ?? undefined,
 

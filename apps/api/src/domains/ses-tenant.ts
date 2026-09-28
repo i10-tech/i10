@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { domains } from "../db/core.js"
-import { sesTenantName, type DomainIdentity } from "./identity.js"
+import { sesTenantName, TENANT_LAYOUT, type DomainIdentity } from "./identity.js"
 
 /**
  * Keeps a domain's SES identity in its workspace's SES tenant (#156).
@@ -49,14 +49,22 @@ export async function ensureSesTenant(
 
   const row = await withTenant(db, tenantId, async (tx) => {
     const [found] = await tx
-      .select({ name: domains.name, current: domains.sesTenantName })
+      .select({
+        name: domains.name,
+        current: domains.sesTenantName,
+        layout: domains.sesTenantLayout,
+      })
       .from(domains)
       .where(and(eq(domains.tenantId, tenantId), eq(domains.id, domainId)))
       .limit(1)
     return found ?? null
   })
   if (row === null) return "missing"
-  if (row.current === wanted && !opts.force) return "current"
+  // ⚠ THE LAYOUT TOO. A domain attached before a configuration set existed is
+  // in the right tenant and still missing an association SES will demand.
+  if (row.current === wanted && row.layout === TENANT_LAYOUT && !opts.force) {
+    return "current"
+  }
 
   try {
     await identity.attach(row.name, wanted)
@@ -71,7 +79,7 @@ export async function ensureSesTenant(
   await withTenant(db, tenantId, (tx) =>
     tx
       .update(domains)
-      .set({ sesTenantName: wanted })
+      .set({ sesTenantName: wanted, sesTenantLayout: TENANT_LAYOUT })
       .where(and(eq(domains.tenantId, tenantId), eq(domains.id, domainId))),
   )
   return "attached"

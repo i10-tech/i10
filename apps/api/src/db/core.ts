@@ -82,6 +82,11 @@ export const messageEventType = core.enum("message_event_type", [
   "complained",
   "rejected",
   "failed",
+  // Engagement, only for domains that opted in (#154). Added last: Postgres
+  // enum order is fixed once written, and nothing sorts on it.
+  "opened",
+  "clicked",
+  "unsubscribed",
 ])
 
 /**
@@ -106,6 +111,9 @@ export const webhookEventType = core.enum("webhook_event_type", [
   "email.bounced",
   "email.complained",
   "email.failed",
+  "email.opened",
+  "email.clicked",
+  "email.unsubscribed",
 ])
 
 export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
@@ -332,6 +340,18 @@ export const domains = core.table(
     delegated: boolean("delegated").notNull().default(false),
 
     /**
+     * Open and click tracking (#154), which the worker turns into a choice of
+     * SES configuration set — see `configurationSetFor` in send/ses.ts.
+     *
+     * ⚠ OFF BY DEFAULT, AND A PER-DOMAIN DECISION RATHER THAN OURS. Opens need
+     * a pixel and clicks rewrite every link through a redirect; both are
+     * personal data about the recipient, and the lawful basis for collecting
+     * it is the domain owner's to hold.
+     */
+    openTracking: boolean("open_tracking").notNull().default(false),
+    clickTracking: boolean("click_tracking").notNull().default(false),
+
+    /**
      * BYODKIM. Both halves are published in the customer's DNS and neither is
      * secret: the selector is the label the key is served under, the public key
      * is the TXT record's payload. The private half is `dkimPrivateKeySealed`
@@ -347,6 +367,17 @@ export const domains = core.table(
 
     /** The SES tenant this domain's sending is attributed to. */
     sesTenantName: text("ses_tenant_name"),
+    /**
+     * Which set of tenant associations `sesTenantName` was recorded with —
+     * `TENANT_LAYOUT` in domains/identity.ts.
+     *
+     * ⚠ A NAME ALONE CANNOT SAY WHETHER THE ATTACH IS STILL ENOUGH. Adding a
+     * configuration set (#154 added three) leaves every existing attach missing
+     * it, and SES refuses a tenant send whose set the tenant does not hold. The
+     * worker names a tenant only at the current layout, and the re-check
+     * re-attaches anything older.
+     */
+    sesTenantLayout: integer("ses_tenant_layout"),
 
     /**
      * The DKIM private key, sealed with `WEBHOOK_SECRET_KEY`.

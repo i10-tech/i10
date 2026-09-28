@@ -33,6 +33,9 @@ const EVENT_TO_LOG: Record<WebhookEventType, string> = {
   "email.bounced": "bounced",
   "email.complained": "complained",
   "email.failed": "failed",
+  "email.opened": "opened",
+  "email.clicked": "clicked",
+  "email.unsubscribed": "unsubscribed",
 }
 
 /**

@@ -176,6 +176,9 @@ export interface DomainSummary {
 
 export interface Domain extends DomainSummary {
   records: DnsRecord[]
+  /** Open and click tracking (#154). Off unless the owner turned it on. */
+  open_tracking: boolean
+  click_tracking: boolean
 }
 
 /**
