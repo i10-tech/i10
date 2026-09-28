@@ -22,6 +22,9 @@ import { resilient } from "./send/metering.js"
 import { SmtpTransport } from "@upyo/smtp"
 import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
 import { sesTransport } from "./send/ses.js"
+import { systemTenancy, withSystemTenant } from "./send/system-tenant.js"
+import { sesIdentity } from "./domains/identity.js"
+import { configurationSetsFor } from "./send/configuration-sets.js"
 import { domainSendingLookup } from "./send/signing-key.js"
 import { stalwartTransport } from "./send/stalwart.js"
 import { relayConfig } from "./send/relay.js"
@@ -103,10 +106,30 @@ try {
 const queueRedis = createQueueClient(env.REDIS_URL)
 queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
 
-const ses = sesTransport({
-  client: new SESv2Client({ region: env.AWS_REGION }),
-  configurationSetName: env.SES_CONFIGURATION_SET,
-})
+const sesClient = new SESv2Client({ region: env.AWS_REGION })
+
+/*
+ * ⚠ OUR OWN MAIL NAMES ITS TENANT HERE, NOT IN THE CLAIM (#206). Customer mail
+ * takes its tenant from its domain row; ours has none by design - its sender
+ * and tenant are code, see system-mail.ts. The wrapper leaves every message
+ * that already names a tenant, or comes from any other domain, untouched.
+ */
+const ses = withSystemTenant(
+  sesTransport({
+    client: sesClient,
+    configurationSetName: env.SES_CONFIGURATION_SET,
+  }),
+  systemTenancy({
+    from: env.AUTH_EMAIL_FROM,
+    identity: sesIdentity(sesClient, {
+      log,
+      region: env.AWS_REGION,
+      accountId: env.AWS_ACCOUNT_ID,
+      configurationSets: configurationSetsFor(env.SES_CONFIGURATION_SET),
+    }),
+    log,
+  }),
+)
 
 /**
  * ⚠ HELD SO SHUTDOWN CAN CLOSE IT, WHICH THE PREVIOUS CLIENT'S POOL NEVER WAS.
