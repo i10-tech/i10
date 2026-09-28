@@ -76,9 +76,20 @@ Give it read access to the cluster. It needs no write verbs at all - the script
 annotates one Application to trigger a refresh, and reads:
 
 ```bash
+# ⚠ STATEFULSETS AND DAEMONSETS ARE NOT OPTIONAL. §3 of the script lists
+# `deployments,statefulsets,daemonsets` in one call, and kubectl answers a
+# partly forbidden list by printing what it CAN read and sending "forbidden"
+# to stderr - which the script discards. So with only `deployments` here the
+# Stalwart StatefulSet, the one that carries i10-authd, is silently never
+# waited for, and §4 passes or fails on timing. That is how the role stood
+# until 2026-09-28.
+#
+# `create --dry-run | apply` rather than `create`, so re-running this on a box
+# that already has the role updates it instead of failing "already exists".
 sudo k3s kubectl create clusterrole i10-deploy-verify \
   --verb=get,list,watch \
-  --resource=applications.argoproj.io,deployments,pods
+  --resource=applications.argoproj.io,deployments,statefulsets,daemonsets,pods \
+  --dry-run=client -o yaml | sudo k3s kubectl apply -f -
 
 # ⚠ `patch` ON APPLICATIONS ONLY, AND ONLY SO THE REFRESH ANNOTATION CAN BE
 # SET. Without it the script still works and every deploy waits out Argo's
