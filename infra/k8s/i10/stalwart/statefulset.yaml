@@ -33,6 +33,53 @@ spec:
         seccompProfile:
           type: RuntimeDefault
 
+      # ⚠ A NEW POD'S FIRST CONNECTION TO A ClusterIP IS REFUSED while kube-proxy
+      # and the CNI finish programming rules for it. Stalwart dials the pooler
+      # once at startup, gets `Connection refused (os error 111)`, logs "Failed
+      # to create tables" and exits - on a database that is perfectly healthy.
+      # Every rollout of this pod has crashed at least once for it, and each
+      # crash is a CrashLoopBackOff delay the deploy's rollout check has to sit
+      # through. authd has the same wait in-process (projection/dial.go); we
+      # cannot change Stalwart's code, so the wait goes here.
+      #
+      # ⚠ AN INIT CONTAINER WORKS BECAUSE IT SHARES THE POD'S NETWORK NAMESPACE.
+      # The race is about rules for THIS pod's IP, so once one connection from
+      # the pod lands, the containers that start after it inherit a network that
+      # is already programmed. A wait in a different pod would prove nothing.
+      #
+      # ⚠ THE STALWART IMAGE, NOT busybox:latest. It is already on the node, is
+      # pinned to a version, and its busybox `nc` exits 0 on connect and 1 on a
+      # refusal or an unresolvable name - verified in the running pod. Pulling a
+      # second image to run one loop would add a supply chain for nothing.
+      #
+      # ⚠ BOUNDED, SO A DATABASE THAT IS REALLY DOWN STILL FAILS. After ~60s the
+      # container exits 1, the pod shows Init:Error with the reason in this
+      # container's log, and the kubelet retries it - the same end state as
+      # before, just not for the one-second race.
+      initContainers:
+        - name: wait-for-db
+          image: stalwartlabs/stalwart:v0.16.19-alpine
+          command:
+            - sh
+            - -c
+            - |
+              host=i10-platform-pooler.i10-prod.svc.cluster.local
+              for i in $(seq 1 60); do
+                nc -w 2 "$host" 5432 </dev/null && exit 0
+                echo "wait-for-db: $host:5432 unreachable (attempt $i), retrying"
+                sleep 1
+              done
+              echo "wait-for-db: $host:5432 still unreachable, giving up"
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+
       containers:
         - name: stalwart
           image: stalwartlabs/stalwart:v0.16.19-alpine
