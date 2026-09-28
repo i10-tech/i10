@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SYSTEM_FROM } from "./system-mail.js"
 
 /**
  * Validated once at boot, and the process refuses to start without it.
@@ -75,15 +76,22 @@ const schema = z.object({
   CLERK_WEBHOOK_SECRET: z.string().min(1),
 
   /**
-   * Who i10's own authentication mail comes from, e.g. `i10 <no-reply@i10.tech>`.
+   * Who i10's own mail comes from. Defaults to `SYSTEM_FROM` in system-mail.ts;
+   * set it in Doppler only to override that (#206).
    *
-   * ⚠ UNSET MEANS CLERK KEEPS SENDING, WHICH IS THE SAFE DEFAULT RATHER THAN A
-   * DEGRADED ONE. Clerk's per-template "Delivered by Clerk" switch is still on
-   * until somebody turns it off, so an unconfigured deployment simply does not
-   * take over - it must never be the case that we stop Clerk sending and then
-   * fail to send ourselves, because that is a sign-up nobody can complete.
+   * ⚠ A CODED DEFAULT RATHER THAN "UNSET MEANS CLERK SENDS", AND IT IS STILL
+   * SAFE. Which Clerk templates we deliver is decided per template by Clerk's
+   * `delivered_by_clerk`, not by this variable - so a default never stops Clerk
+   * sending anything. What it removes is the one bad state the old rule
+   * guarded against from the other side: a template switched off in Clerk on a
+   * deployment that had forgotten this variable, and so a sign-up nobody could
+   * complete.
+   *
+   * ⚠ THE API AND THE WORKER BOTH READ IT, from the same `i10-api` secret. The
+   * worker names our SES tenant only for mail from this exact domain, so the two
+   * must agree - which one Doppler config for both guarantees.
    */
-  AUTH_EMAIL_FROM: z.string().min(1).optional(),
+  AUTH_EMAIL_FROM: z.string().min(1).default(SYSTEM_FROM),
 
   /**
    * The tenant i10's own mail is attributed to.

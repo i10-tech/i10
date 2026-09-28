@@ -511,21 +511,18 @@ const depthSources = {
  * subdomain. See `SendPathOptions.alwaysSendable` for why the exemption exists
  * at all and why it is attached to an ops object rather than to a request.
  */
-const authEmailDomain = env.AUTH_EMAIL_FROM
-  ? (domainOf(env.AUTH_EMAIL_FROM) ?? null)
-  : null
+const authEmailDomain = domainOf(env.AUTH_EMAIL_FROM) ?? null
 
 /*
- * ⚠ SET BUT UNPARSEABLE IS A MISCONFIGURATION THAT MUST NOT PASS QUIETLY.
- * `AUTH_EMAIL_FROM` is only `z.string().min(1)`, so it accepts a value with no
- * address in it at all - and without a domain there is no exemption, the send
- * gate refuses our own mail, and the env's own note names that exact outcome:
- * "it must never be the case that we stop Clerk sending and then fail to send
- * ourselves, because that is a sign-up nobody can complete." So this says so
- * loudly and the block below declines to take over, which leaves Clerk
- * delivering - the safe default rather than the degraded one.
+ * ⚠ AN UNPARSEABLE OVERRIDE IS A MISCONFIGURATION THAT MUST NOT PASS QUIETLY.
+ * `AUTH_EMAIL_FROM` defaults to a good address (`SYSTEM_FROM`), but Doppler can
+ * override it with a value that has no address in it at all - and without a
+ * domain there is no exemption and the send gate refuses our own mail, which
+ * is a sign-up nobody can complete. So this says so loudly and the block below
+ * declines to take over, which leaves Clerk delivering - the safe outcome
+ * rather than the degraded one.
  */
-if (env.AUTH_EMAIL_FROM && !authEmailDomain) {
+if (!authEmailDomain) {
   log.error(
     { from: env.AUTH_EMAIL_FROM },
     "AUTH_EMAIL_FROM has no parseable domain - clerk keeps delivering its own",
@@ -533,8 +530,6 @@ if (env.AUTH_EMAIL_FROM && !authEmailDomain) {
 }
 
 const authEmailTenantId = await (async () => {
-  if (!env.AUTH_EMAIL_FROM) return null
-
   try {
     // ⚠ THROUGH THE DEFINER, NOT `select … from core.tenants`. That table is
     // under RLS and its policy reads `current_setting('app.tenant_id')`
@@ -607,7 +602,7 @@ const freshAuth = clerkFreshAuth(clerk, {
  * own notices alike, through our own send path as the system tenant.
  */
 const systemSender =
-  env.AUTH_EMAIL_FROM && authEmailTenantId && authEmailDomain
+  authEmailTenantId && authEmailDomain
     ? authEmailSender({
         tenantId: authEmailTenantId,
         from: env.AUTH_EMAIL_FROM,
