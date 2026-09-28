@@ -77,7 +77,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: catchup
-              image: ghcr.io/i10-tech/i10-api:prod-77677c0fe1a8df47caeb76a95390276fe091e832@sha256:5f2d8b2b9114e418a4091141ec3e65fca8abf81f31317c69a79ff7dae2900dc9
+              image: ghcr.io/i10-tech/i10-api:prod-0e811102e4f7f2c7546434a8ea084f550a9b864e@sha256:27b1cdd368cfe930d0c70feeafce39b62202bae351a3cac627b771c9cad537b9
               imagePullPolicy: Always
               command: ["bun", "dist/domain-catchup.js"]
               envFrom:
