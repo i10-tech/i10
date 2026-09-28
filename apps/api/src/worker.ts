@@ -235,7 +235,12 @@ const routeFor = (message: ClaimedMessage): DeliveryRoute =>
 // has already gone, and throwing here would return the row to the queue and
 // send it twice to fix a billing record.
 const metering = resilient(
-  postgresMetering({ db, featureId: env.METERING_FEATURE_ID, log }),
+  postgresMetering({
+    db,
+    featureId: env.METERING_FEATURE_ID,
+    freePlanId: env.METERING_FREE_PLAN_ID,
+    log,
+  }),
   log,
 )
 log.info({ feature: env.METERING_FEATURE_ID }, "metering via postgres")

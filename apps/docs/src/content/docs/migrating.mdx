@@ -29,7 +29,9 @@ volume matters. See [DNS setup](/dns).
 
 **Quota and rate limit are separate errors.** `rate_limit_exceeded` means too
 fast and is worth retrying. `daily_quota_exceeded` means the account is out of
-sending budget and retrying will never help. Resend's clients often collapse
+sending budget and retrying will never help. `monthly_quota_exceeded` is the
+same for a free workspace's monthly limit: it lifts at the next monthly reset,
+or with a paid plan. Resend's clients often collapse
 both into one 429 handler; `@i10/node` exposes `error.retryable` so you do not
 have to.
 

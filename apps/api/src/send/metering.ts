@@ -35,7 +35,17 @@ export type QuotaOutcome =
    * Out of budget. A 429 with `daily_quota_exceeded`, and NOT retryable - the
    * SDKs back off on 429, and backing off will not create budget.
    */
-  | { status: "exceeded"; message: string; resetsAt?: Date }
+  | {
+      status: "exceeded"
+      message: string
+      resetsAt?: Date
+      /**
+       * Which error the API answers with. `daily_quota_exceeded` when absent -
+       * the plan's allowance; `monthly_quota_exceeded` for a free workspace's
+       * tier ceiling (#165). Both are 429 and neither is retryable.
+       */
+      code?: "daily_quota_exceeded" | "monthly_quota_exceeded"
+    }
   /**
    * ⚠ THE ONE THAT MATTERS. The meter did not answer, so we do not know. Same rule
    * as `verifyApiKey` and as authd answering LDAP `unavailable`: a metering

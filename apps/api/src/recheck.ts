@@ -189,7 +189,12 @@ async function pollSesStatuses(
       db,
       queues: { transactional: queue("transactional"), bulk: queue("bulk") },
       metering: resilient(
-        postgresMetering({ db, featureId: env.METERING_FEATURE_ID, log }),
+        postgresMetering({
+          db,
+          featureId: env.METERING_FEATURE_ID,
+          freePlanId: env.METERING_FREE_PLAN_ID,
+          log,
+        }),
         log,
       ),
       from: env.AUTH_EMAIL_FROM,

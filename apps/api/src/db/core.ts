@@ -1284,6 +1284,85 @@ export const sesTenantStatusEvents = core.table(
   ],
 )
 
+/**
+ * A FREE workspace's sending tier (#165): how much it may send in a month, on
+ * top of the free plan's 100 a day.
+ *
+ * ⚠ FREE WORKSPACES ONLY. A paid plan's allowance is what the customer bought
+ * and no tier narrows it; abuse on paid plans is the risk score's job (#170).
+ * Free workspaces get both - a hard monthly ceiling here, and the score.
+ *
+ * ⚠ NO `trusted`. #165 sketched one for paying customers, and paying customers
+ * have no tier. Enterprise limits are custom plans, which already exist.
+ */
+export const sendingTier = core.enum("sending_tier", ["strict", "normal"])
+
+/**
+ * The tier a free workspace is on, when it is not the default (#165).
+ *
+ * ⚠ NO ROW MEANS `normal`. New workspaces start there (#170: "don't punish new
+ * legitimate users"), so a row exists only once the score or a person moved it.
+ *
+ * ⚠ WHO MAY WRITE IT: the risk score (`source = 'score'`, #170) and staff
+ * (`source = 'staff'`) through the future admin app (#217). Neither exists yet; the
+ * store's `set` is the one door both will use, and it writes the audit row in
+ * the same transaction.
+ */
+export const sendingTiers = core.table(
+  "sending_tiers",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    tier: sendingTier("tier").notNull(),
+    /** `score` (#170) or `staff`. */
+    source: text("source").notNull(),
+    /** Why, in words a reviewer and an appeal can read. */
+    reason: text("reason").notNull(),
+    /** The staff member, or `risk-score`. */
+    setBy: text("set_by").notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy("sending_tiers_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Every tier change, append-only (#165). "Every change is audited" - and the
+ * risk score (#170) reads how often a workspace was demoted.
+ */
+export const sendingTierEvents = core.table(
+  "sending_tier_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The tier before; `normal` when there was no row. */
+    fromTier: sendingTier("from_tier").notNull(),
+    toTier: sendingTier("to_tier").notNull(),
+    source: text("source").notNull(),
+    reason: text("reason").notNull(),
+    setBy: text("set_by").notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("sending_tier_events_tenant_idx").on(t.tenantId, t.changedAt),
+    pgPolicy("sending_tier_events_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
 /** How bad SES says a reputation finding is (#158). `high` is what pauses. */
 export const sesFindingImpact = core.enum("ses_finding_impact", ["high", "low"])
 

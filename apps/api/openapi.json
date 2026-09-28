@@ -60,6 +60,7 @@
               "method_not_allowed",
               "rate_limit_exceeded",
               "daily_quota_exceeded",
+              "monthly_quota_exceeded",
               "invalid_from_address",
               "invalid_to_address",
               "domain_not_verified",

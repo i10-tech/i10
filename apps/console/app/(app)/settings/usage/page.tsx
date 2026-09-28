@@ -52,6 +52,8 @@ export default async function UsagePage() {
             : "No plan is assigned to this workspace yet."}{" "}
           Allowances reset on a rolling window from when your plan started, not on the
           first of the month.
+          {usage.some((u) => u.feature_id === "emails.monthly") &&
+            " Free workspaces can also send a set number of emails each month, which depends on their sending tier. A paid plan has no monthly cap beyond its own allowance."}
         </SectionDescription>
         <SectionContent className="max-w-2xl space-y-6">
           {usage.map((feature) => {
