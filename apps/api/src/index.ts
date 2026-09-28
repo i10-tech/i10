@@ -357,6 +357,8 @@ const domains = secrets
         ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }), {
             log,
             region: env.AWS_REGION,
+            accountId: env.AWS_ACCOUNT_ID,
+            configurationSet: env.SES_CONFIGURATION_SET,
           })
         : offlineIdentity(),
       capacity: postgresMeter(db),

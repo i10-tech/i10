@@ -1,8 +1,12 @@
 import {
   CreateEmailIdentityCommand,
+  CreateTenantCommand,
+  CreateTenantResourceAssociationCommand,
   DeleteEmailIdentityCommand,
+  DeleteTenantResourceAssociationCommand,
   GetEmailIdentityCommand,
   ListEmailIdentitiesCommand,
+  ListResourceTenantsCommand,
   PutEmailIdentityDkimSigningAttributesCommand,
   PutEmailIdentityMailFromAttributesCommand,
   type SESv2Client,
@@ -75,8 +79,51 @@ export interface DomainIdentity {
    */
   signature(domain: string): Promise<{ origin: string | null; tokens: string[] }>
 
+  /**
+   * Puts the identity in the SES tenant that sends as it, and in no other.
+   *
+   * ⚠ ONE SES TENANT PER WORKSPACE (#156). SES then keeps reputation, pauses
+   * and suppression per workspace instead of across the whole account, so one
+   * workspace's bounces cannot pause everybody else. `sesTenantName` is the
+   * name.
+   *
+   * ⚠ "AND IN NO OTHER" IS WHAT MAKES A TRANSFER SAFE. A domain that moved
+   * between workspaces is still associated with the tenant that held it before,
+   * and SES lets a resource belong to several tenants — so without the detach,
+   * the old workspace's tenant could keep sending as it.
+   *
+   * ⚠ IT ALSO ATTACHES THE CONFIGURATION SET. SES refuses a tenant send whose
+   * configuration set is not associated with that tenant, and every send names
+   * ours. Idempotent: an association that already exists is the state wanted.
+   */
+  attach(domain: string, tenant: string): Promise<void>
+
+  /**
+   * ⚠ DETACHES FROM EVERY TENANT FIRST, BECAUSE SES REFUSES TO DELETE AN
+   * IDENTITY A TENANT STILL HOLDS. Without that, every delete of a domain that
+   * had been attached would fail — and `tidy` swallows the failure by design,
+   * so it would leak a live, billable identity exactly the way the missing IAM
+   * permission once did.
+   */
   remove(domain: string): Promise<void>
 }
+
+/**
+ * The SES tenant a workspace sends through.
+ *
+ * ⚠ DERIVED, NOT STORED AS THE SOURCE OF TRUTH. The name is a pure function of
+ * the workspace id, so the worker, the store and the sweep can never disagree
+ * about it. `core.domains.ses_tenant_name` records which tenant an identity was
+ * last successfully attached to — the fact the worker needs before naming a
+ * tenant on a send — not which one it should be.
+ *
+ * SES allows up to 64 letters, digits, hyphens and underscores; a UUID with
+ * this prefix is 40.
+ */
+export const sesTenantName = (tenantId: string): string => `i10-${tenantId}`
+
+/** Ours, as opposed to a tenant somebody made by hand in the console. */
+const OUR_TENANT = /^i10-[0-9a-f-]{36}$/
 
 /**
  * SES's DKIM vocabulary, mapped to ours.
@@ -121,13 +168,86 @@ export interface SesIdentityOptions {
    * and neither is a bug in it.
    */
   region?: string
+  /**
+   * What tenant associations need to name resources by ARN. Without both,
+   * `attach` refuses rather than guessing.
+   *
+   * ⚠ THE ACCOUNT IS CONFIGURATION, NOT A LOOKUP. Nothing SES returns for an
+   * identity carries its ARN, and asking STS on every attach would add a
+   * dependency and a round trip to learn a constant.
+   */
+  accountId?: string
+  /** The configuration set every send names. `SES_CONFIGURATION_SET`. */
+  configurationSet?: string
 }
+
+const isNamed = (error: unknown, name: string) =>
+  (error as { name?: string }).name === name
 
 export function sesIdentity(
   client: SESv2Client,
   options: SesIdentityOptions = {},
 ): DomainIdentity {
-  const { log, region } = options
+  const { log, region, accountId, configurationSet } = options
+
+  function arn(kind: "identity" | "configuration-set", name: string): string {
+    if (!region || !accountId) {
+      throw new Error(
+        "sesIdentity needs `region` and `accountId` to name SES resources",
+      )
+    }
+    return `arn:aws:ses:${region}:${accountId}:${kind}/${name}`
+  }
+
+  /** Every tenant this resource is associated with, by name. */
+  async function tenantsOf(resourceArn: string): Promise<string[]> {
+    const names: string[] = []
+    let token: string | undefined
+    do {
+      try {
+        const page = await client.send(
+          new ListResourceTenantsCommand({
+            ResourceArn: resourceArn,
+            NextToken: token,
+          }),
+        )
+        for (const t of page.ResourceTenants ?? [])
+          if (t.TenantName) names.push(t.TenantName)
+        token = page.NextToken
+      } catch (error) {
+        // An identity that does not exist belongs to nobody.
+        if (isNamed(error, "NotFoundException")) return names
+        throw error
+      }
+    } while (token)
+    return names
+  }
+
+  async function detach(tenant: string, resourceArn: string): Promise<void> {
+    try {
+      await client.send(
+        new DeleteTenantResourceAssociationCommand({
+          TenantName: tenant,
+          ResourceArn: resourceArn,
+        }),
+      )
+    } catch (error) {
+      if (!isNamed(error, "NotFoundException")) throw error
+    }
+  }
+
+  async function associate(tenant: string, resourceArn: string): Promise<void> {
+    try {
+      await client.send(
+        new CreateTenantResourceAssociationCommand({
+          TenantName: tenant,
+          ResourceArn: resourceArn,
+        }),
+      )
+    } catch (error) {
+      if (!isNamed(error, "AlreadyExistsException")) throw error
+    }
+  }
   /**
    * ⚠ "NO SUCH IDENTITY" IS AN ANSWER, NOT A FAILURE, AND LETTING IT THROW WAS
    * A 500 ON THE ONE BUTTON THIS FEATURE HAS. `GetEmailIdentity` raises
@@ -351,7 +471,47 @@ export function sesIdentity(
       }
     },
 
+    async attach(domain, tenant) {
+      if (!configurationSet) {
+        throw new Error("sesIdentity needs `configurationSet` to attach a tenant")
+      }
+
+      /*
+       * ⚠ CREATE, AND TREAT "ALREADY EXISTS" AS SUCCESS, rather than asking
+       * first. Every non-send SES call shares one request per second across the
+       * account, so a read to decide whether to write is a second call spent to
+       * learn nothing the write would not tell us anyway.
+       */
+      try {
+        await client.send(new CreateTenantCommand({ TenantName: tenant }))
+      } catch (error) {
+        if (!isNamed(error, "AlreadyExistsException")) throw error
+      }
+
+      const identityArn = arn("identity", domain)
+      await associate(tenant, identityArn)
+      await associate(tenant, arn("configuration-set", configurationSet))
+
+      /*
+       * ⚠ ONLY OUR OWN TENANTS ARE DETACHED. A tenant somebody made by hand in
+       * the console is not ours to reason about — the same line the orphan
+       * sweep draws around identities.
+       */
+      for (const other of await tenantsOf(identityArn)) {
+        if (other !== tenant && OUR_TENANT.test(other)) await detach(other, identityArn)
+      }
+
+      log?.info(
+        { domain, tenant, region: region ?? null },
+        "ses identity attached to tenant",
+      )
+    },
+
     async remove(domain) {
+      const identityArn = arn("identity", domain)
+      for (const tenant of await tenantsOf(identityArn))
+        await detach(tenant, identityArn)
+
       try {
         await client.send(new DeleteEmailIdentityCommand({ EmailIdentity: domain }))
       } catch (error) {
@@ -403,6 +563,9 @@ export function offlineIdentity(): DomainIdentity {
     async signature() {
       return { origin: null, tokens: [] }
     },
+    // ⚠ A NO-OP, NOT A THROW: there is no tenant to join without SES, and the
+    // store must not fail a local verify for want of one.
+    async attach() {},
     async remove() {},
   }
 }

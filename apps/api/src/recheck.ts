@@ -25,8 +25,11 @@
  * long as it lasted.
  */
 import pino from "pino"
+import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { assertRlsSubject, createDb } from "./db/client.js"
+import { sesIdentity } from "./domains/identity.js"
 import { recheckDomains } from "./domains/recheck.js"
+import { ensureSesTenant } from "./domains/ses-tenant.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
 import { readDelegation } from "./domains/referral.js"
 import { loadEnv } from "./env.js"
@@ -74,13 +77,41 @@ await withMonitor(
     }
 
     try {
+      // ⚠ THE SAME GATE THE API USES: with SES off there is no tenant to join,
+      // so the step is simply absent rather than pointed at an offline stub.
+      const identity = env.SES_ENABLED
+        ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }), {
+            log,
+            region: env.AWS_REGION,
+            accountId: env.AWS_ACCOUNT_ID,
+            configurationSet: env.SES_CONFIGURATION_SET,
+          })
+        : null
+
       const summary = await recheckDomains({
         db,
         probes: { txt: nodeTxtLookup(), delegation: readDelegation },
         nameservers: env.MAIL_NAMESERVERS,
         log,
+        tenancy: identity
+          ? (tenantId, domainId) =>
+              ensureSesTenant({ db, identity, log }, tenantId, domainId)
+          : undefined,
       })
       log.info(summary, "domain re-check complete")
+
+      // ⚠ SAID OUT LOUD, NOT ONLY RETRIED. A domain that cannot be attached
+      // keeps sending without tenant isolation, and a sweep that quietly tried
+      // again every night would hide a broken IAM policy for as long as it
+      // lasted — which is how the identity-delete gap survived for weeks.
+      if (summary.tenantsFailed > 0) {
+        captureError(
+          new Error(
+            `${summary.tenantsFailed} domain(s) could not join their SES tenant`,
+          ),
+          { phase: "recheck-tenancy" },
+        )
+      }
 
       /*
        * ⚠ EVERY LOOKUP FAILING IS OUR PROBLEM, NOT THE CUSTOMERS'. A pass that

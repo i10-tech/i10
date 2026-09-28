@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, mock } from "bun:test"
 import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
 import { recheckDomains } from "../src/domains/recheck.js"
@@ -172,6 +172,8 @@ describe("a domain we could not ask about", () => {
       unreachable: 1,
       missing: 0,
       displaced: 0,
+      tenantsAttached: 0,
+      tenantsFailed: 0,
     })
     // ⚠ NOT EVEN THE CHECK TIMESTAMP — the row must come back next run untouched.
     expect(statements.some((s) => s.includes("note_domain_proof"))).toBe(false)
@@ -210,7 +212,47 @@ describe("choosing what to re-check", () => {
       missing: 0,
       unreachable: 0,
       displaced: 0,
+      tenantsAttached: 0,
+      tenantsFailed: 0,
     })
     expect(statements).toHaveLength(1)
+  })
+})
+
+/**
+ * #156: the re-check is where "every domain is in its SES tenant" is kept true
+ * — an attach that failed at registration, and every domain that predates
+ * tenants, is repaired here.
+ */
+describe("keeping proven domains in their SES tenant", () => {
+  it("asks for the tenant of a proven domain, with its workspace", async () => {
+    const tenancy = mock(async () => "attached" as const)
+    const { summary } = await run(
+      [due()],
+      { delegation: delegating(TOKEN) },
+      { tenancy },
+    )
+
+    expect(tenancy).toHaveBeenCalledTimes(1)
+    expect(summary).toMatchObject({ proven: 1, tenantsAttached: 1, tenantsFailed: 0 })
+  })
+
+  it("counts a failed attach and carries on", async () => {
+    const tenancy = mock(async () => "failed" as const)
+    const { summary } = await run(
+      [due(), due()],
+      { delegation: delegating(TOKEN) },
+      { tenancy },
+    )
+
+    expect(tenancy).toHaveBeenCalledTimes(2)
+    expect(summary).toMatchObject({ proven: 2, tenantsAttached: 0, tenantsFailed: 2 })
+  })
+
+  // ⚠ One failing its proof may be on its way to being stood down.
+  it("leaves a domain that failed its proof alone", async () => {
+    const tenancy = mock(async () => "attached" as const)
+    await run([due()], { delegation: delegating() }, { tenancy })
+    expect(tenancy).not.toHaveBeenCalled()
   })
 })
