@@ -10,7 +10,7 @@
 # silently ignores it, because a pooled connection is not the same backend
 # twice. Schema-qualify every statement, or use SET LOCAL inside an explicit
 # transaction. The same applies to prepared statements across transactions,
-# LISTEN/NOTIFY, and session advisory locks — use pg_advisory_xact_lock, which
+# LISTEN/NOTIFY, and session advisory locks - use pg_advisory_xact_lock, which
 # releases at commit and therefore survives pooling.
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler

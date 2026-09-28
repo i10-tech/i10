@@ -12,7 +12,7 @@ import type { Database } from "../src/db/client.js"
  * security. Every statement runs under row level security for whichever
  * workspace `app.tenant_id` names at that moment; the move reads and deletes as
  * the sender and inserts as the receiver. Get the order wrong and a statement
- * either fails under RLS or — worse — runs as the wrong workspace.
+ * either fails under RLS or - worse - runs as the wrong workspace.
  */
 
 const dialect = new PgDialect()
@@ -159,7 +159,7 @@ describe("accepting an offer", () => {
     })
     expect(settings(f.events)).toEqual([
       ["app.tenant_id", SESSION],
-      // ⚠ LOWERCASED, AND FROM THE CALLER'S VERIFIED LIST — never the request.
+      // ⚠ LOWERCASED, AND FROM THE CALLER'S VERIFIED LIST - never the request.
       ["app.recipient_emails", "new@owner.test"],
       ["app.tenant_id", SENDER],
       ["app.tenant_id", RECEIVER],
@@ -185,7 +185,7 @@ describe("accepting an offer", () => {
   })
 
   /**
-   * ⚠ SOMEBODY IN THE SAME WORKSPACE AS THE SENDER MAY BE THE RECIPIENT — they
+   * ⚠ SOMEBODY IN THE SAME WORKSPACE AS THE SENDER MAY BE THE RECIPIENT - they
    * take it into one of their OTHER workspaces. Taking it into the one it is
    * already in is the only refusal, and it moves nothing.
    */

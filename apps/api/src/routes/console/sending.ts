@@ -83,7 +83,7 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
   app.delete("/suppressions/:address", async (c) => {
     const { tenantId } = c.get("auth")
     /*
-     * ⚠ NOT DECODED AGAIN — HONO HAS ALREADY DONE IT. An address in a path is
+     * ⚠ NOT DECODED AGAIN - HONO HAS ALREADY DONE IT. An address in a path is
      * percent-encoded (`bob+news@acme.com` arrives as `bob%2Bnews@acme.com`),
      * and `c.req.param` decodes any segment containing a `%`. A second
      * `decodeURIComponent` is a no-op for almost every address and a THROWN

@@ -41,7 +41,7 @@ import { Time } from "@/components/time"
  * The key list.
  *
  * ⚠ REVOKED KEYS STAY IN THE TABLE, GREYED, RATHER THAN DISAPPEARING. During an
- * incident the question is "did we revoke that one, and when" — and a key that
+ * incident the question is "did we revoke that one, and when" - and a key that
  * vanishes on revocation makes that unanswerable from the console. It is also
  * the difference between "I revoked it" and "I think I revoked it".
  *
@@ -62,7 +62,7 @@ export function ApiKeysTable({
   const [rotating, setRotating] = React.useState<ApiKeyRow | null>(null)
   const [rotated, setRotated] = React.useState<CreatedApiKey | null>(null)
 
-  // What the dialogs DISPLAY while they animate out — see `useRetained`.
+  // What the dialogs DISPLAY while they animate out - see `useRetained`.
   const shownRevoking = useRetained(revoking)
   const shownRotating = useRetained(rotating)
   const shownRotated = useRetained(rotated)
@@ -70,7 +70,7 @@ export function ApiKeysTable({
   /*
    * ⚠ THE NEW SECRET WAITS FOR THE CONFIRMATION TO LEAVE. It used to be set the
    * instant the rotate returned, which opened the "Your new key" dialog on top
-   * of the rotate dialog still standing there — two modals, one over the other,
+   * of the rotate dialog still standing there - two modals, one over the other,
    * for one click. It is held here and handed over when the first one closes,
    * so the tick is seen, the panel goes, and the secret arrives in its own.
    */
@@ -80,7 +80,7 @@ export function ApiKeysTable({
     return (
       <EmptyState
         title="No API keys yet"
-        description="Create one and paste it into your server's environment. It is shown once — we store only a hash."
+        description="Create one and paste it into your server's environment. It is shown once - we store only a hash."
       />
     )
   }
@@ -127,7 +127,7 @@ export function ApiKeysTable({
                     {/*
                      * ⚠ THE PREFIX ONLY, AND IT IS ALL WE HAVE. Nothing stores
                      * the key, so this is not a redaction of something we could
-                     * show — it is the whole of what exists. The trailing dots
+                     * show - it is the whole of what exists. The trailing dots
                      * say so without claiming there is a reveal.
                      */}
                     <span className="font-mono text-xs text-muted-foreground">
@@ -213,7 +213,7 @@ export function ApiKeysTable({
         open={revoking !== null}
         onOpenChange={(open) => !open && setRevoking(null)}
         title={`Revoke ${shownRevoking?.name ?? "this key"}?`}
-        description="Anything using it stops sending immediately — not at the end of a cache window. This cannot be undone; create a new key instead."
+        description="Anything using it stops sending immediately - not at the end of a cache window. This cannot be undone; create a new key instead."
         confirmLabel="Revoke key"
         doneLabel="Revoked"
         confirmWord={revoking?.name}
@@ -223,8 +223,8 @@ export function ApiKeysTable({
            * ⚠ PROVED BEFORE THE KEY DIES, NOT AFTER. Revoking the key
            * production sends with is an outage nobody can undo from this
            * dialog, and a session cookie is a credential that outlives the
-           * person sitting at the machine. The API refuses this on its own —
-           * see `requireFreshAuth` — so this is the prompt, not the guard.
+           * person sitting at the machine. The API refuses this on its own -
+           * see `requireFreshAuth` - so this is the prompt, not the guard.
            */
           if (!(await stepUp())) return false
 
@@ -269,7 +269,7 @@ export function ApiKeysTable({
       {/*
        * ⚠ THE ROTATED SECRET GETS THE SAME ONE-CHANCE TREATMENT AS A NEW ONE,
        * for the same reason: nothing stores it. Rotation is the more dangerous
-       * of the two, because the old key is already dead — losing this value
+       * of the two, because the old key is already dead - losing this value
        * means an outage, not just an unused row.
        */}
       <Dialog
@@ -288,7 +288,7 @@ export function ApiKeysTable({
             <DialogTitle>Your new key</DialogTitle>
             <DialogDescription>
               The previous key stopped working the moment this one was issued. Copy it
-              now — it will not be shown again.
+              now - it will not be shown again.
             </DialogDescription>
           </DialogHeader>
           {shownRotated && <CopyField value={shownRotated.secret} className="py-2" />}

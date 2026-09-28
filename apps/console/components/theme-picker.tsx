@@ -14,11 +14,11 @@ const OPTIONS = [
 
 /**
  * ⚠ NO OPTION IS MARKED SELECTED UNTIL HYDRATION, AND THAT IS NOT A LOADING
- * STATE — IT IS A HYDRATION FIX. `useTheme()` cannot know the stored preference
+ * STATE - IT IS A HYDRATION FIX. `useTheme()` cannot know the stored preference
  * on the server, so the first render always says "system"; if the person has
  * chosen dark, the server HTML and the client's first paint disagree, React
  * logs a mismatch, and the wrong option is briefly highlighted. `useMounted`
- * answers "are we past hydration" without a state update — see lib/react.ts.
+ * answers "are we past hydration" without a state update - see lib/react.ts.
  */
 export function ThemePicker() {
   const { theme, setTheme } = useTheme()

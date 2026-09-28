@@ -3,7 +3,7 @@
 -- ⚠ `core.domains.delivery_route` HELD ONE VALUE AND A DOMAIN HAS TWO KINDS OF
 -- MAIL LEAVING IT. What the API sends and what the domain's mailboxes send are
 -- different products with different economics, and one column forced the same
--- answer on both — so a customer whose people send through our own MTA could
+-- answer on both - so a customer whose people send through our own MTA could
 -- not also have their transactional traffic on SES. That control is the whole
 -- reason the column exists. See docs/decisions/mail-routing.md.
 --
@@ -56,7 +56,7 @@ ALTER TABLE "core"."messages"
 -- `sent_route` null on old rows would make "how much went direct" answerable
 -- only for messages sent after this migration, and every total would silently
 -- exclude everything before it. SES was the only transport the worker had, so
--- the value is known rather than assumed — but only where we actually sent
+-- the value is known rather than assumed - but only where we actually sent
 -- something, which is what the predicate says.
 --
 -- ⚠ IDEMPOTENT, SO A RE-RUN IS CHEAP RATHER THAN A SECOND FULL REWRITE. The
@@ -67,7 +67,7 @@ ALTER TABLE "core"."messages"
 -- ⚠ AND IT IS STILL ONE UNBOUNDED STATEMENT, WHICH IS A VOLUME BET RATHER THAN
 -- AN OVERSIGHT. `core.messages` is the billing record, so at a few million rows
 -- this rewrite and the index build below both block inserts for as long as they
--- run — with the deploy's PreSync hook holding the rollout behind them. Batching
+-- run - with the deploy's PreSync hook holding the rollout behind them. Batching
 -- it properly needs separate transactions, which a drizzle migration does not
 -- get, and `CREATE INDEX CONCURRENTLY` cannot run inside one either. If this
 -- table grows past comfortable, both move to a one-off job outside the
@@ -86,7 +86,7 @@ CREATE INDEX IF NOT EXISTS "messages_provider_id_idx"
 -- ⚠ THE REPAIR WRITES THE NEW COLUMN NOW, AND IT MUST WRITE BOTH. `0028`'s
 -- version set `ses_message_id`; while the old column still exists, a repair
 -- that filled only one of them would leave the pair disagreeing on a row the
--- reconciler had just touched — and the contract half of this function is that
+-- reconciler had just touched - and the contract half of this function is that
 -- the row it repairs is indistinguishable from one the worker wrote.
 --
 -- Everything else about it is unchanged and deliberately so: the guards stay
@@ -96,8 +96,8 @@ CREATE INDEX IF NOT EXISTS "messages_provider_id_idx"
 -- cleared so the stale-claim sweep does not find a row it no longer owns.
 --
 -- ⚠ THE PARAMETER IS `p_sent_at` AND MUST STAY `p_sent_at`. `CREATE OR REPLACE
--- FUNCTION` refuses to rename an input parameter — it raises rather than
--- replacing — so a tidier name here would fail at deploy, inside a migration,
+-- FUNCTION` refuses to rename an input parameter - it raises rather than
+-- replacing - so a tidier name here would fail at deploy, inside a migration,
 -- after the ALTERs above had already committed.
 CREATE OR REPLACE FUNCTION "core"."repair_from_ses"(
   p_message_id uuid,
@@ -132,14 +132,14 @@ GRANT EXECUTE ON FUNCTION "core"."repair_from_ses"(uuid, timestamptz, timestampt
 
 -- ⚠ WITHOUT THIS PREDICATE EVERY DIRECT-ROUTED MESSAGE IS AN ALARM, FOREVER.
 -- The snapshot finds rows we call `sent` for which no SES `sent` event ever
--- arrived. For a message our own MTA carried, no such event will EVER arrive —
+-- arrived. For a message our own MTA carried, no such event will EVER arrive -
 -- that is not a discrepancy, it is the route working. Left as it was, the
 -- reconciler would report the entire free tier as unconfirmed on every run and
 -- the finding would stop meaning anything.
 --
 -- ⚠ `IS DISTINCT FROM` RATHER THAN `<>`, BECAUSE THE COLUMN IS NULLABLE. A row
 -- still in flight has no route yet, and `sent_route <> 'direct'` is NULL for
--- it — which a WHERE clause treats as false, silently excluding exactly the
+-- it - which a WHERE clause treats as false, silently excluding exactly the
 -- rows most likely to be worth reporting.
 CREATE OR REPLACE FUNCTION "core"."ses_unconfirmed_snapshot"(
   p_from timestamptz,

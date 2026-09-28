@@ -31,7 +31,7 @@ describe("normaliseLookupName", () => {
 
   /**
    * ⚠ THE RECONNAISSANCE CASE. Each of these is a well-formed hostname that
-   * resolves only from inside a private network — a Kubernetes service, a cloud
+   * resolves only from inside a private network - a Kubernetes service, a cloud
    * instance's private record, a reverse lookup of the metadata address. None
    * can be registered by anybody, so none is a domain somebody could be adding.
    */

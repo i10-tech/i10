@@ -11,8 +11,8 @@ import * as Sentry from "@sentry/node"
  * Nothing was broken except that no one was told.
  *
  * ⚠ AND CHECK-INS CATCH THE FAILURE THAT NOTHING ELSE CAN. A job that runs and
- * fails leaves a pod behind to find. A job that never starts — a suspended
- * CronJob, a schedule someone edited, a cluster too full to place the pod —
+ * fails leaves a pod behind to find. A job that never starts - a suspended
+ * CronJob, a schedule someone edited, a cluster too full to place the pod -
  * leaves nothing at all, and no in-process error handler can report an absence.
  * Sentry knows the schedule, so it can tell the difference between "failed" and
  * "never arrived". That is the whole reason the schedule is declared here in
@@ -73,7 +73,7 @@ export function initObservability(opts: ObservabilityOptions): boolean {
   if (!opts.dsn) {
     opts.log.warn(
       { service: opts.service },
-      "SENTRY_DSN not set — errors are logged here and reported nowhere",
+      "SENTRY_DSN not set - errors are logged here and reported nowhere",
     )
     enabled = false
     return false
@@ -122,7 +122,7 @@ export function initObservability(opts: ObservabilityOptions): boolean {
  * ⚠ THE PATTERNS BELOW ARE THE PRIVACY BOUNDARY, NOT A TIDINESS PASS.
  *
  * `describeError` deliberately puts the name and message of a failure into
- * strings that get written wherever a person can read them — and in this
+ * strings that get written wherever a person can read them - and in this
  * codebase those messages carry recipient addresses, the tenant's API key and
  * the Postgres URL, because that is exactly what makes them useful at three in
  * the morning. Locally that is right. Leaving the process it stops being our
@@ -130,7 +130,7 @@ export function initObservability(opts: ObservabilityOptions): boolean {
  *
  * ⚠ TENANT IDS ARE DELIBERATELY NOT REDACTED. They are opaque UUIDs that
  * identify an account rather than a person, and they are the one dimension that
- * makes an issue actionable — "which customer is this happening to" is the
+ * makes an issue actionable - "which customer is this happening to" is the
  * first question anyone asks. Redacting them would leave reports nobody can act
  * on, which is the same as having none.
  */
@@ -152,13 +152,13 @@ const PATTERNS: [RegExp, string][] = [
   // narrowings exist because the obvious pattern ate stack traces: a package
   // store path is `.../groupmq@1.2.3/node_modules/...`, which is a
   // slash-bearing "local part" and a numeric "domain", so every dependency
-  // frame came out as `[redacted-email]`. Nothing leaked — but the frames that
+  // frame came out as `[redacted-email]`. Nothing leaked - but the frames that
   // say WHICH library failed were destroyed, which costs exactly what the
   // report was for. An address with a slash in it is legal and effectively
   // nonexistent; a version number that ends in letters is not an address.
   //
   // The shape of that path changed with the package manager and the narrowing
-  // still holds for both — `.pnpm/groupmq@1.2.3_ioredis@5.8.2_/` and
+  // still holds for both - `.pnpm/groupmq@1.2.3_ioredis@5.8.2_/` and
   // `.bun/groupmq@1.1.0/` alike. Both are pinned by tests.
   [
     /[\w.!#$%&'*+=?^`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
@@ -177,8 +177,8 @@ export function scrub(value: string): string {
  * Every string in the event, cleaned.
  *
  * ⚠ IT WALKS THE WHOLE OBJECT RATHER THAN A LIST OF FIELDS. A list is a
- * promise to remember every place Sentry might put a string — exception values,
- * breadcrumb messages, `extra`, request headers, the culprit line — and to
+ * promise to remember every place Sentry might put a string - exception values,
+ * breadcrumb messages, `extra`, request headers, the culprit line - and to
  * update it when the SDK adds one. The walk cannot fall behind.
  */
 const MAX_DEPTH = 12
@@ -217,7 +217,7 @@ function walk(value: unknown, depth: number, seen: WeakSet<object>): unknown {
  * THIS WAS BUILT FOR. `captureException` queues; the transport sends on a
  * timer. A CronJob that captures an error and returns immediately exits with
  * the event still in the buffer, so the failure that started all of this would
- * still be invisible — only now with a Sentry integration to make it look
+ * still be invisible - only now with a Sentry integration to make it look
  * covered.
  */
 export async function flushObservability(timeoutMs = 4000): Promise<void> {
@@ -226,7 +226,7 @@ export async function flushObservability(timeoutMs = 4000): Promise<void> {
 }
 
 export interface MonitorOptions {
-  /** Must match the monitor in Sentry. Stable — renaming it orphans history. */
+  /** Must match the monitor in Sentry. Stable - renaming it orphans history. */
   slug: string
   /** Crontab, and it must be the CronJob's own schedule. */
   schedule: string
@@ -240,7 +240,7 @@ export interface MonitorOptions {
  *
  * ⚠ THE VERDICT COMES FROM `process.exitCode`, NOT FROM WHETHER `run` THREW,
  * and that is the point rather than a shortcut. The reconciler reports a failed
- * repair by setting an exit code and returning normally — a run where every
+ * repair by setting an exit code and returning normally - a run where every
  * tenant failed is not an exception, it is a report. Reading the exit code is
  * the only way the check-in and the pod's own status cannot disagree, and
  * "green in Sentry, red in kubectl" is precisely the confusion this is meant to
@@ -255,7 +255,7 @@ export async function withMonitor<T>(
   // ⚠ ONE CHECK-IN, NOT AN `in_progress` FOLLOWED BY A VERDICT, AND THIS WAS
   // LEARNED THE EXPENSIVE WAY. The two-envelope form is what Sentry documents,
   // and on the first real run it left the monitor stuck: the `in_progress`
-  // arrived, the `ok` never did, and the pod had already exited — a job that
+  // arrived, the `ok` never did, and the pod had already exited - a job that
   // lives two seconds gives the transport almost no room, and the terminal
   // check-in has to reference an id the ingest pipeline may not have processed
   // yet. `max_runtime` then turns a run that SUCCEEDED into a timeout alert.
@@ -264,7 +264,7 @@ export async function withMonitor<T>(
   //
   // A single terminal check-in is self-contained: no id to correlate, no window
   // between two envelopes, and it carries the schedule so a missed run is still
-  // caught. What it gives up is `max_runtime` — Sentry cannot time out a run it
+  // caught. What it gives up is `max_runtime` - Sentry cannot time out a run it
   // was never told had started. Nothing is lost by that here: the CronJob sets
   // `activeDeadlineSeconds: 300`, so Kubernetes kills a hung run, and a killed
   // run sends no check-in at all and is reported as MISSED. Same alert, one
@@ -311,7 +311,7 @@ export function captureError(error: unknown, context?: Record<string, unknown>):
  * exception.
  *
  * ⚠ IT EXISTS BECAUSE `new Error(...)` FOR THIS IS A LIE THAT COSTS LATER. A
- * sweep that hit its row cap has not failed — every line of it worked — but the
+ * sweep that hit its row cap has not failed - every line of it worked - but the
  * system around it is losing ground, and that is exactly the kind of thing the
  * codebase keeps discovering by reading pod logs by hand. Sent as a message, it
  * groups by its own text and carries no fabricated stack pointing at whichever

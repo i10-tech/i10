@@ -20,7 +20,7 @@ import type { SecretBox } from "./signing.js"
  * ⚠ EVERY STATEMENT THAT TOUCHES A TENANT'S ROWS RUNS INSIDE `withTenant`. The
  * one exception is `ownerOf`, which cannot: it is the lookup that discovers
  * which tenant to set, and it is a `SECURITY DEFINER` function precisely so it
- * is the only cross-tenant read in this file — see migration 0009.
+ * is the only cross-tenant read in this file - see migration 0009.
  */
 
 type Row = Record<string, unknown>
@@ -39,7 +39,7 @@ const EVENT_TO_LOG: Record<WebhookEventType, string> = {
  * Slack around the id's embedded millisecond.
  *
  * The column defaults to `now()` in the same statement that mints the id, so
- * the two are microseconds apart rather than equal — but a partition is a
+ * the two are microseconds apart rather than equal - but a partition is a
  * month wide, so a day of slack costs nothing and absorbs any clock skew
  * between the application and the database.
  */
@@ -53,8 +53,8 @@ export interface WebhookDbOptions {
   secrets: SecretBox
 }
 
-// ⚠ NO `secrets`. Nothing in the ingest path signs anything — only the
-// delivery worker does — and this object lives for the life of the process, so
+// ⚠ NO `secrets`. Nothing in the ingest path signs anything - only the
+// delivery worker does - and this object lives for the life of the process, so
 // taking the SecretBox here would pin the AES key in memory for a use that does
 // not exist.
 export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventOps {
@@ -62,11 +62,11 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
     async ownerOf(messageId) {
       // ⚠ THE WINDOW COMES FROM THE ID ITSELF, WHICH IS THE ONLY REASON THIS IS
       // CHEAP. `core.messages` is partitioned by `created_at`, so a lookup by
-      // bare id scans every partition — and this runs once per SES event, which
+      // bare id scans every partition - and this runs once per SES event, which
       // is several times per email sent. A UUIDv7 carries its own creation
       // millisecond, so the partition is derivable without asking.
       //
-      // An id we cannot date — a v4 from a fixture, a future scheme — falls
+      // An id we cannot date - a v4 from a fixture, a future scheme - falls
       // back to an unbounded range rather than to a guess: slow beats a null
       // for a message that exists.
       const minted = timestampFromUuidV7(messageId)
@@ -121,7 +121,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
         //
         // ⚠ ONE STATEMENT, NOT ONE PER RECIPIENT. A bounce can name every
         // recipient of a fifty-address send, and a loop of awaits holds the
-        // transaction — and its row locks — open for fifty round trips.
+        // transaction - and its row locks - open for fifty round trips.
         if (event.suppress.length > 0) {
           await tx
             .insert(suppressions)
@@ -190,7 +190,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
     async enqueue(deliveries) {
       // ⚠ TOGETHER, BECAUSE EACH GOES TO A DIFFERENT ENDPOINT. groupmq orders
       // within a group and every delivery here belongs to a different one, so
-      // nothing depends on the order these are written — and serialising them
+      // nothing depends on the order these are written - and serialising them
       // puts N Redis round trips on the SNS ingest path, which SES retries if
       // it takes too long.
       await Promise.all(
@@ -256,8 +256,8 @@ export function webhookDeliveryOps(
 
         // ⚠ A DISABLED ENDPOINT IS A TERMINAL ANSWER, NOT A SKIP. Returning null
         // and leaving the row `pending` would strand every delivery already
-        // queued for an endpoint that has just been switched off — permanently,
-        // because nothing sweeps them — and would make the pending count
+        // queued for an endpoint that has just been switched off - permanently,
+        // because nothing sweeps them - and would make the pending count
         // useless as a measure of what is still being retried.
         if (!row.enabled) {
           await tx

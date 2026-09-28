@@ -5,8 +5,8 @@
 # has not changed with the runtime.
 #
 # ⚠ THE TAG IS PINNED TO THE EXACT VERSION, not `1-alpine`. Four places hold
-# this version — `.bun-version`, `packageManager` in package.json, BUN_VERSION
-# in ci.yml, and every Dockerfile base image — and they move together. A
+# this version - `.bun-version`, `packageManager` in package.json, BUN_VERSION
+# in ci.yml, and every Dockerfile base image - and they move together. A
 # floating major would let the image drift away from what CI tested.
 FROM oven/bun:1.4.2-alpine AS base
 
@@ -18,7 +18,7 @@ COPY bun.lock bunfig.toml package.json ./
 
 # ⚠ EVERY WORKSPACE MANIFEST, NOT JUST THIS APP'S DEPENDENCIES. The build stage
 # does `COPY . .`, which brings in the manifests this stage skipped. bun then
-# sees a workspace larger than the one it installed and re-resolves mid-build —
+# sees a workspace larger than the one it installed and re-resolves mid-build -
 # which fails against `--frozen-lockfile`, with the error pointing at the build
 # script rather than at the missing manifests. Listing them all keeps the deps
 # layer cacheable and keeps that check quiet.
@@ -49,7 +49,7 @@ COPY . .
 # ⚠ TURBO, NOT A HAND-WRITTEN LIST OF PACKAGES. `build` declares
 # `dependsOn: ["^build"]`, so this one filter builds @repo/contracts,
 # @repo/emails and @repo/metering first, in topological order. It replaces
-# pnpm's `--filter "@i10/api..."`, whose `...` suffix meant the same thing —
+# pnpm's `--filter "@i10/api..."`, whose `...` suffix meant the same thing -
 # and the failure mode if the dependencies are skipped is not a build error but
 # a runtime one, because `bun build` would resolve @repo/contracts through its
 # `exports` to a dist/ that does not exist yet.
@@ -58,7 +58,7 @@ RUN bunx turbo run build --filter=@i10/api
 # ⚠ EVERY ENTRYPOINT THE MANIFESTS NAME, ASSERTED HERE, BECAUSE THE LAYOUT OF
 # dist/ IS NOT STABLE AND MOVED ONCE WITHOUT ANYTHING NOTICING. `bun build`
 # derives its output root from the COMMON ANCESTOR of the entrypoints unless
-# `--root` says otherwise — so adding one more `src/*.ts` to the build script
+# `--root` says otherwise - so adding one more `src/*.ts` to the build script
 # silently moved all nine outputs from `dist/x.js` to `dist/src/x.js`. The build
 # succeeded, CI went green, the image pushed, and every Deployment and CronJob
 # in it then died with `Module not found "dist/migrate.js"`. The PreSync
@@ -75,7 +75,7 @@ RUN set -eu; \
     for entry in index worker migrate sweep reconcile recheck \
                  domain-catchup domain-prove domain-orphans; do \
       if [ ! -f "apps/api/dist/${entry}.js" ]; then \
-        echo "dist/${entry}.js is missing — bun build moved the output layout."; \
+        echo "dist/${entry}.js is missing - bun build moved the output layout."; \
         echo "Found instead:"; ls apps/api/dist; \
         exit 1; \
       fi; \
@@ -95,10 +95,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # A writable HOME. Tooling writes to $HOME at startup, and a non-root user
-# without one exits EACCES at boot — a failure that reads like a permissions
+# without one exits EACCES at boot - a failure that reads like a permissions
 # bug in the app.
 # ⚠ THE UID IS PINNED, AND NUMERICALLY. `adduser -S` without -u picks the first
-# free system UID, which is a property of the base image rather than of us — it
+# free system UID, which is a property of the base image rather than of us - it
 # moves when the base image does. More importantly kubelet cannot verify a
 # NAMED user against `runAsNonRoot`: it has no way to resolve the name without
 # reading the image's /etc/passwd, so it refuses to start the container with
@@ -116,7 +116,7 @@ COPY --from=build --chown=i10:i10 /repo/apps/api/dist /app/dist
 # itself, and the PreSync hook Job runs from this same image so the schema and
 # the code that expects it are always the same artifact. Without this COPY the
 # Job starts, finds an empty folder, reports "migrations applied", and changes
-# nothing — a silent no-op is the worst possible outcome for a migration step.
+# nothing - a silent no-op is the worst possible outcome for a migration step.
 COPY --from=build --chown=i10:i10 /repo/apps/api/drizzle /app/drizzle
 
 # ⚠ groupmq's LUA SCRIPTS SHIP BESIDE THE BUNDLE, AND WITHOUT THIS EVERY QUEUE
@@ -126,13 +126,13 @@ COPY --from=build --chown=i10:i10 /repo/apps/api/drizzle /app/drizzle
 #     candidates = [ <dir>/<name>.lua, <dir>/lua/<name>.lua ]
 #
 # Under pnpm that `<dir>` was `/app/node_modules/groupmq/dist`, with the scripts
-# sitting right there. `bun build` erases that layout — the library is inlined
+# sitting right there. `bun build` erases that layout - the library is inlined
 # into the bundle, so `<dir>` becomes `/app/dist` and the runtime stage has no
 # node_modules to fall back to. Both candidates miss and the library throws
 # `ENOENT ... /app/dist/enqueue.lua` on the FIRST Redis call.
 #
 # ⚠ AND IT FAILS AS SILENCE, NOT AS A CRASH, WHICH IS WHY IT COST A DAY. The
-# api answers 200 and logs "enqueue failed after commit — the sweep will pick
+# api answers 200 and logs "enqueue failed after commit - the sweep will pick
 # these up"; the worker stays Running with every probe green while `reserveBatch`
 # throws on every loop; `/internal/queue-depth` 500s because `getJobCounts()` is
 # three more of these scripts, which is what leaves the KEDA ScaledObject in
@@ -150,7 +150,7 @@ RUN test -s /app/dist/lua/enqueue.lua && test -s /app/dist/lua/reserve-batch.lua
 USER 1001:1001
 EXPOSE 3001
 
-# Baked at build time and reported by /version. Not part of turbo's cache key —
+# Baked at build time and reported by /version. Not part of turbo's cache key -
 # a promotion re-tags the same artifact, so one image serves both environments
 # and learns which it is at runtime.
 ARG GIT_SHA=dev

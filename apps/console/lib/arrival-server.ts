@@ -2,7 +2,7 @@ import { cookies } from "next/headers"
 import type { Arrival } from "@/lib/arrival"
 
 /**
- * An arrival fact for this render — see ./arrival.ts.
+ * An arrival fact for this render - see ./arrival.ts.
  *
  * ⚠ THE QUERY STILL WINS WHEN IT IS THERE, BECAUSE SOMETHING WE DO NOT OWN
  * PUT IT THERE. Polar appends `?checkout_id=` to its success URL on the

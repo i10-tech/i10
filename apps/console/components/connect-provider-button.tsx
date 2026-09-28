@@ -23,7 +23,7 @@ import { startDnsConnect } from "@/lib/actions"
  * the whole of a step. One copy, so they cannot drift into saying different
  * things about the same capability.
  *
- * ⚠ AND IT IS THE SAME SHAPE AS THE SIGN-IN PAGE'S PROVIDER BUTTONS — a pill,
+ * ⚠ AND IT IS THE SAME SHAPE AS THE SIGN-IN PAGE'S PROVIDER BUTTONS - a pill,
  * the provider's mark on the left, "Continue with…" wording. Somebody who
  * signed in with Google pressed this exact control twenty minutes ago, and the
  * step that asks them to authorise something is the wrong place to be
@@ -47,7 +47,7 @@ export function ConnectProviderButton({
    *
    * ⚠ ONBOARDING WAS LOSING PEOPLE WITHOUT IT. The callback lands inside the
    * console shell, so somebody who pressed this half-way through the setup
-   * flow came back to a page that knew nothing about it — the connection was
+   * flow came back to a page that knew nothing about it - the connection was
    * made and the flow was gone. Every caller that is somewhere worth returning
    * to passes its own path.
    */
@@ -85,7 +85,7 @@ export function ConnectProviderButton({
        * ⚠ PENDING IS CLEARED ONLY HERE, ON THE PATH THAT STAYS ON THIS PAGE.
        * It used to be cleared the moment the action returned, which meant the
        * button went back to being pressable a beat BEFORE the browser started
-       * leaving — so the last thing somebody saw was a live button that had
+       * leaving - so the last thing somebody saw was a live button that had
        * apparently done nothing, and the honest response to that is to press it
        * again. The navigation below is not instant: it is a full document load
        * of somebody else's domain, and the spinner has to cover all of it.
@@ -95,7 +95,7 @@ export function ConnectProviderButton({
        * ⚠ THE DEPLOYMENT'S OWN MISCONFIGURATION READS DIFFERENTLY FROM A
        * FAILURE. An OAuth app that has not been registered answers "not
        * configured on this deployment", which is not something the customer can
-       * fix and will never clear on its own — so it must not be phrased as
+       * fix and will never clear on its own - so it must not be phrased as
        * "try again".
        */
       toast.error(`Could not connect ${providerName}`, { description: result.error })
@@ -119,7 +119,7 @@ export function ConnectProviderButton({
            * ⚠ THE `dark:` COUNTERPARTS ARE NOT OPTIONAL HERE, AND LEAVING THEM
            * OFF PRODUCED A BUTTON WITH NO VISIBLE LABEL. The `outline` variant
            * carries `dark:bg-input/30`, and tailwind-merge treats a prefixed
-           * utility as a DIFFERENT key from its unprefixed form — so `bg-white`
+           * utility as a DIFFERENT key from its unprefixed form - so `bg-white`
            * did not replace it, the pill stayed dark, and `text-neutral-950`
            * applied on top of it.
            */

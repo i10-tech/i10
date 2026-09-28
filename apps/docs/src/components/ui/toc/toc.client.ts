@@ -52,7 +52,7 @@ function initToc(root: HTMLElement): () => void {
 
     // Measure each command in isolation (O(1)) and accumulate, rather than
     // re-measuring the whole cumulatively-growing path with getTotalLength()
-    // on every iteration — the latter is O(n^2) and blocks the main thread on
+    // on every iteration - the latter is O(n^2) and blocks the main thread on
     // pages with hundreds of headings. Arc length is additive across
     // contiguous commands, so summing isolated sub-paths matches the total.
     // activePath doubles as the scratch measurer here; the full `d` is written

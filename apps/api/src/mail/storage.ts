@@ -5,7 +5,7 @@ import { withTenant, type Database } from "../db/client.js"
  * How much disk each tenant's mailboxes occupy.
  *
  * ⚠ SAMPLED, NOT COUNTED, BECAUSE STORAGE GOES DOWN. A deleted folder frees
- * space, and no sum of append-only events can represent that — which is the
+ * space, and no sum of append-only events can represent that - which is the
  * same reason `domains.sending` and `mailboxes` are levels rather than ledgers.
  * The difference here is that the number lives in another server, so we ask for
  * it on a schedule and keep the answer.
@@ -14,7 +14,7 @@ import { withTenant, type Database } from "../db/client.js"
  * CALL IS ENTERPRISE. Stalwart's registry exposes `usedDiskQuota` on both an
  * account and a tenant, but `validate_tenant_quota` in
  * `crates/jmap/src/registry/mapping/principal.rs` is `#[cfg(feature =
- * "enterprise")]` under their SEL licence — so on the community build we run,
+ * "enterprise")]` under their SEL licence - so on the community build we run,
  * the tenant object is not ours to read. `authd.accounts.tenant_id` is what
  * makes the grouping possible at all.
  */
@@ -48,7 +48,7 @@ export const mailboxesStatement = (): SQL => sql`
 
 /**
  * ⚠ ONE ROW PER TENANT, OVERWRITTEN. A level has no history worth keeping in
- * the table the gate reads — and an append-only version would need the gate to
+ * the table the gate reads - and an append-only version would need the gate to
  * find the latest row on every check, which is a sort where an index lookup
  * would do.
  */
@@ -109,7 +109,7 @@ export async function sampleStorage({
       if (used === undefined) {
         // ⚠ ONE UNREADABLE MAILBOX POISONS THE TENANT'S TOTAL, so the total is
         // not written. A partial sum is a number that looks right and is
-        // silently low — which on a cap means letting a tenant past their limit
+        // silently low - which on a cap means letting a tenant past their limit
         // and on billing means under-charging, both invisibly. Keeping the
         // previous sample is stale and honest; writing a partial one is neither.
         //

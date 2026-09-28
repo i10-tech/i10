@@ -89,7 +89,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
    * ⚠ REGISTERED ABOVE `/domains/:id`, OR `check` IS READ AS AN ID.
    *
    * ⚠ 200 EITHER WAY. A refusal is the answer to the question, not a failure
-   * to ask it — and the console treats any error here as "no objection" so a
+   * to ask it - and the console treats any error here as "no objection" so a
    * slow check never blocks somebody adding a domain; `create` still decides.
    */
   app.get("/domains/check", async (c) => {
@@ -121,7 +121,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       /*
        * ⚠ 200, NOT AN ERROR. The challenge record simply is not published yet,
        * which is the ordinary state of every delegated domain between being added
-       * and being set up — the same state a manual domain is in before its six
+       * and being set up - the same state a manual domain is in before its six
        * records resolve, which also answers 200. The domain comes back carrying
        * its record list, where the outstanding `Ownership` row is the signal.
        */
@@ -130,8 +130,8 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
        * ⚠ `ownership` IS THE ANSWER THIS ROUTE USED TO THROW AWAY, AND ITS
        * ABSENCE WAS MOST OF "I PUBLISHED THE RECORDS AND NOTHING HAPPENS".
        * `verify` distinguishes three outcomes that matter to the person
-       * pressing the button — we proved the domain, we asked and the records
-       * were not there, we could not ask at all — and all three arrived at the
+       * pressing the button - we proved the domain, we asked and the records
+       * were not there, we could not ask at all - and all three arrived at the
        * console as the same unchanged domain row. The console then read
        * `status`, which is SES's opinion, and said "the records have not
        * propagated" to somebody whose records were fine and whose nameservers
@@ -146,7 +146,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       /*
        * ⚠ `leftover_records` ONLY WHEN THIS VERIFY TOOK THE NAME FROM ANOTHER
        * WORKSPACE AND THEIR RECORDS STILL RESOLVE. The latest proof wins, so
-       * while those are published the old holder can take it straight back —
+       * while those are published the old holder can take it straight back -
        * removing them is how the person who just proved it keeps it.
        */
       case "ok":
@@ -166,7 +166,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
         /*
          * ⚠ 409, NOT 403 AND NOT A `failed` DOMAIN. Their records may well be
          * perfect. Proving a name takes it from whoever holds it, so this is
-         * only ever a race — another workspace proved it in the same moment —
+         * only ever a race - another workspace proved it in the same moment -
          * and pressing Verify again settles it.
          */
         return c.json(
@@ -192,7 +192,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
    * seconds until the badge turns green.
    *
    * ⚠ IT IS A POST BECAUSE IT WRITES, even though it reads like a GET. What it
-   * writes is SES's current opinion and the check timestamp — see the note on
+   * writes is SES's current opinion and the check timestamp - see the note on
    * `DomainStore.refresh` for what it deliberately does NOT do, which is
    * everything expensive or consequential in `verify`.
    */
@@ -207,7 +207,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       /*
        * ⚠ 200 AND THE DOMAIN, NOT AN ERROR. "Nothing has been registered yet"
        * is the ordinary state of a domain whose records are still being
-       * published, which is precisely when something is polling — answering
+       * published, which is precisely when something is polling - answering
        * 409 would turn the normal case into an error in somebody's console.
        */
       case "not_registered":
@@ -227,7 +227,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
    * resolver look like a failed verification.
    *
    * ⚠ IT IS ONLY MEANINGFUL FOR A DELEGATED DOMAIN. A manual one publishes six
-   * records into its own zone and there is no delegation to diagnose — the
+   * records into its own zone and there is no delegation to diagnose - the
    * record-by-record status the domain already carries is the better answer
    * there.
    */
@@ -250,7 +250,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
      * ⚠ THE NAMES COME OFF THE DOMAIN'S OWN RECORD LIST, which is the list the
      * customer is looking at three inches below this note. Per-claim
      * delegation gives every domain its own nameserver hostnames, so checking
-     * against the deployment's `MAIL_NAMESERVERS` — which is what this did —
+     * against the deployment's `MAIL_NAMESERVERS` - which is what this did -
      * told a customer who had published exactly what we asked for that their
      * records pointed at somebody else, and named our own nameserver as the
      * somebody else.
@@ -284,7 +284,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
    *
    * ⚠ THE ANSWER TO "WHY AM I STILL TYPING SIX RECORDS". Where we hold a
    * credential for the provider that hosts the domain, nothing needs typing at
-   * all — the same records the table below shows are written directly.
+   * all - the same records the table below shows are written directly.
    *
    * ⚠ IT REFUSES BEFORE IT DESTROYS, AND THE FIRST CALL IS ALWAYS A DRY RUN
    * WHERE ANYTHING WOULD BE REMOVED. A domain that already has DMARC configured
@@ -370,7 +370,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
 
   /*
    * ⚠ STEP-UP. A deleted domain stops every message the workspace sends from
-   * it, and re-adding one means re-proving ownership and re-publishing DNS —
+   * it, and re-adding one means re-proving ownership and re-publishing DNS -
    * so this is the most expensive thing a stolen session could do here. See
    * `requireFreshAuth`.
    */
@@ -384,7 +384,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   })
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Transfers — offering a domain to an email address, and answering one
+  // Transfers - offering a domain to an email address, and answering one
   // ───────────────────────────────────────────────────────────────────────────
 
   /** The open offer for this domain, if the workspace has made one. */
@@ -414,7 +414,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       d.profile.get(tenantId),
     ])
 
-    // ⚠ NOT TO YOURSELF — any address verified on your own account. A transfer
+    // ⚠ NOT TO YOURSELF - any address verified on your own account. A transfer
     // hands a domain to another person; colleagues in this workspace are fine.
     if (person.verifiedEmails.includes(email.trim().toLowerCase())) {
       return c.json(
@@ -473,7 +473,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
    * Offers addressed to the signed-in person, whichever workspace they are in.
    *
    * ⚠ MATCHED ON CLERK'S VERIFIED ADDRESSES, ASKED NOW. Never on anything in the
-   * request, and never on an unverified address — see `people`.
+   * request, and never on an unverified address - see `people`.
    */
   app.get("/transfers", async (c) => {
     if (!d.transfers || !d.people) return c.json(notWired("Transfers"), 501)
@@ -486,7 +486,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
    * One offer, and where it could land.
    *
    * ⚠ THE DESTINATIONS ARE EVERY WORKSPACE THIS PERSON BELONGS TO EXCEPT THE
-   * ONE THE DOMAIN IS ALREADY IN — which is what lets somebody in the SAME
+   * ONE THE DOMAIN IS ALREADY IN - which is what lets somebody in the SAME
    * workspace as the sender take it into one of their others. The sender's
    * tenant id is used to filter and never returned.
    */
@@ -525,7 +525,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
     const workspace = typeof body?.workspace === "string" ? body.workspace : ""
 
     /*
-     * ⚠ NO `workspace` MEANS THIS ONE — the workspace the session already
+     * ⚠ NO `workspace` MEANS THIS ONE - the workspace the session already
      * resolved to, which needs no membership lookup. That is onboarding's case:
      * a new account has one workspace and accepts into it.
      *
@@ -642,7 +642,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
    * ⚠ IT TAKES A NAME RATHER THAN AN ID, BECAUSE IT IS USED *BEFORE* THE DOMAIN
    * EXISTS. The onboarding flow asks "who is your DNS provider" while the
    * person is still typing the apex, so requiring a `core.domains` row first
-   * would mean creating one to find out we cannot help with it — and then
+   * would mean creating one to find out we cannot help with it - and then
    * having to delete it.
    */
   app.get("/dns/lookup", async (c) => {
@@ -656,7 +656,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       d.log.warn({ err: String(error), domain: name }, "dns lookup failed")
       /*
        * ⚠ 200 WITH AN `unknown` PROVIDER, NOT A 5xx. A failed NS lookup is an
-       * ordinary outcome of typing a domain that does not exist yet — which is
+       * ordinary outcome of typing a domain that does not exist yet - which is
        * most of what happens in an onboarding form. Answering with an error
        * status makes the console render a red box while somebody is still
        * halfway through typing.

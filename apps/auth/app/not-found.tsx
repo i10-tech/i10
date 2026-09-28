@@ -16,13 +16,13 @@ export const metadata: Metadata = {
  * two apps on two subdomains and one product; somebody who mistypes a path on
  * `auth.` and one who mistypes on `dash.` should not be able to tell they were
  * handled by different codebases. Without this file Next serves its own built-in
- * 404 — unstyled Times New Roman on white, in dark mode, with no way back.
+ * 404 - unstyled Times New Roman on white, in dark mode, with no way back.
  *
  * ⚠ THE WAY OUT IS SIGN-IN RATHER THAN THE DASHBOARD, AND THAT IS THE ONE THING
  * THAT DIFFERS. This origin exists for people who do not have a session yet;
  * sending them to the console means a bounce straight back here with a
  * `redirect_url` they never asked for. The sign-in page is the thing this app
- * is for, and it is the correct destination whether or not they are signed in —
+ * is for, and it is the correct destination whether or not they are signed in -
  * `/sign-in` with a live session forwards on by itself.
  */
 export default function NotFound() {

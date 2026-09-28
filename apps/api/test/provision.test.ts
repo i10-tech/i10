@@ -54,12 +54,12 @@ describe("a new user", () => {
   })
 
   // Clerk slugs are unique across the instance, so two people with the same
-  // name would collide on the second sign-up — a 500 in somebody's first minute.
+  // name would collide on the second sign-up - a 500 in somebody's first minute.
   it("gets a slug that cannot collide with another person of the same name", async () => {
     const d = deps()
     await tenantProvisioning(d).onUserCreated(user)
 
-    // The name, then the last eight characters of the user id — lowercase,
+    // The name, then the last eight characters of the user id - lowercase,
     // alphanumeric and hyphens, which is all Clerk accepts.
     expect(d.organizations.create).toHaveBeenCalledWith(
       expect.objectContaining({ slug: "mohamed-12345678" }),
@@ -109,7 +109,7 @@ describe("a new organization", () => {
     expect(d.entitlements.ensureCustomer).not.toHaveBeenCalled()
   })
 
-  // ⚠ A TENANT THAT EXISTS AND CANNOT YET SEND IS RECOVERABLE — the reconciler's
+  // ⚠ A TENANT THAT EXISTS AND CANNOT YET SEND IS RECOVERABLE - the reconciler's
   // `missingCustomers()` finds it. A sign-up that fails outright is not.
   it("still provisions the tenant when Autumn is unreachable", async () => {
     const d = deps({
@@ -136,7 +136,7 @@ describe("a new organization", () => {
 
 describe("the Clerk webhook route", () => {
   // ⚠ PROVISIONING CREATES ORGANIZATIONS IN CLERK AND TENANTS IN OUR DATABASE,
-  // so an unsigned request must not reach it — otherwise anyone who learns the
+  // so an unsigned request must not reach it - otherwise anyone who learns the
   // URL can mint tenants. The signature gate runs before anything else.
   //
   // What this file cannot cover is the ordering that matters most: that

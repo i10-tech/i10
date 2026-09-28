@@ -22,8 +22,8 @@ export type { KnownSlug } from "./slugs.js"
  * Billing templates, re-exported by name for whatever ends up driving them.
  *
  * ⚠ NOT WIRED TO ANY WEBHOOK. Clerk's billing product emits its own events and
- * i10 does not use it — Polar takes the money, `packages/metering` counts the
- * usage — so these are exported for our own future sender rather than reached
+ * i10 does not use it - Polar takes the money, `packages/metering` counts the
+ * usage - so these are exported for our own future sender rather than reached
  * through `renderClerkEmail`.
  */
 export { default as PaymentSucceeded } from "./templates/billing/payment-succeeded.js"
@@ -33,7 +33,7 @@ export { default as SubscriptionPriceChanged } from "./templates/billing/subscri
 /**
  * One `email.created` payload, narrowed to what rendering needs.
  *
- * ⚠ ALMOST EVERY FIELD IS OPTIONAL BECAUSE CLERK'S OWN TYPE SAYS SO — `slug`,
+ * ⚠ ALMOST EVERY FIELD IS OPTIONAL BECAUSE CLERK'S OWN TYPE SAYS SO - `slug`,
  * `subject`, `body` and the rest are all nullable in `EmailJSON`. Treating any
  * of them as guaranteed is how a webhook for an unusual template throws inside
  * the handler and is retried until Svix gives up.
@@ -57,7 +57,7 @@ export interface RenderedEmail {
  *
  * ⚠ IT WALKS A DOTTED PATH, BECAUSE HALF OF CLERK'S VARIABLES ARE NESTED.
  * The templates say `{{invitation.expires_in_days}}`, `{{org.name}}` and
- * `{{app.url}}` — those are objects in the payload, not flat keys with dots in
+ * `{{app.url}}` - those are objects in the payload, not flat keys with dots in
  * their names. Reading `data["org_name"]` finds nothing and the value silently
  * disappears from the email, which is exactly what an earlier version of this
  * file did.
@@ -119,7 +119,7 @@ function magicLink(
  *
  * ⚠ EVERY BRANCH THAT NEEDS A VARIABLE RETURNS `null` WITHOUT IT. A code email
  * rendered with an empty box, or a link email with no link, is worse than
- * Clerk's version of the same message — so a missing variable sends us down the
+ * Clerk's version of the same message - so a missing variable sends us down the
  * passthrough path rather than producing a broken email confidently.
  */
 function templateFor(payload: ClerkEmailPayload) {
@@ -251,7 +251,7 @@ function templateFor(payload: ClerkEmailPayload) {
  * NULL. Clerk sends more templates than we will ever style, and adds new ones;
  * a handler that dropped them would silently stop delivering mail the product
  * depends on the first time somebody enabled a feature in the dashboard.
- * Falling through means the worst outcome is an email that looks like Clerk's —
+ * Falling through means the worst outcome is an email that looks like Clerk's -
  * which is exactly what customers get today.
  *
  * ⚠ AND IT RETURNS NULL ONLY WHEN THERE IS GENUINELY NOTHING TO SEND. The
@@ -285,7 +285,7 @@ export async function renderClerkEmail(
 }
 
 /**
- * The email offering a domain to somebody. Not a Clerk template — sent by the
+ * The email offering a domain to somebody. Not a Clerk template - sent by the
  * API when a workspace transfers a domain; see apps/api/src/domains/transfers.ts.
  */
 export async function renderDomainTransfer(

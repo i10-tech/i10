@@ -12,7 +12,7 @@ import { useResetOnOpen } from "@/lib/react"
 /**
  * ⚠ IT ASKS FOR A NAME AND NOTHING ELSE, THEN OPENS THE EDITOR. A create dialog
  * that collected the subject, the segment, the from address and the body would
- * be the editor — in a box, with no preview, that loses everything if you press
+ * be the editor - in a box, with no preview, that loses everything if you press
  * escape. The name is the only field needed to have something to save.
  */
 export function NewBroadcastButton() {
@@ -20,7 +20,7 @@ export function NewBroadcastButton() {
   const [name, setName] = React.useState("")
   const [open, setOpen] = React.useState(false)
 
-  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES — emptying the fields on
+  // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES - emptying the fields on
   // close does it while the dialog is still animating out, which reads as
   // the input being wiped from under you. Adjusted during render rather
   // than in an effect; see lib/react.ts.

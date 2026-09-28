@@ -21,7 +21,7 @@ import type { DomainSummary } from "@/lib/types"
  * changing records that were correct. Saying the number out loud is the whole
  * intervention.
  *
- * ⚠ AND IT POLLS RATHER THAN ASKING SOMEBODY TO KEEP PRESSING A BUTTON — but it
+ * ⚠ AND IT POLLS RATHER THAN ASKING SOMEBODY TO KEEP PRESSING A BUTTON - but it
  * stops after a few minutes rather than hammering the API forever on a tab
  * somebody left open. The manual Verify button is always there.
  */
@@ -37,7 +37,7 @@ export function StepVerify({
    * ⚠ IT IS A PROP RATHER THAN A SCREEN OF ITS OWN, AND THAT IS THE FIX FOR A
    * BLIP. Connecting a provider used to end on the callback page's own
    * "Connected and published" tick, which then navigated here a few hundred
-   * milliseconds later — so the confirmation appeared and was snatched away,
+   * milliseconds later - so the confirmation appeared and was snatched away,
    * which reads as the interface glitching rather than as a step finishing.
    * The news arrives with the step instead: one screen, once, already carrying
    * it.
@@ -53,16 +53,16 @@ export function StepVerify({
 
   /*
    * ⚠ EACH TICK ASKS THE QUESTION, NOT JUST THE PAGE. This used to be a bare
-   * `router.refresh()`, which re-reads our table — and a domain whose one
+   * `router.refresh()`, which re-reads our table - and a domain whose one
    * verify after publishing arrived before DNS was serving sits at
    * `not_started` in that table, with no SES identity, until somebody presses
    * Verify or the minutely prover gets round to it. So a domain added through
    * the Cloudflare hand-off reached SES a minute or more late, while the same
-   * domain added from /domains/new — whose page runs `VerificationWatch` —
+   * domain added from /domains/new - whose page runs `VerificationWatch` -
    * reached it within seconds. Now both ask the same way: `verify` while a
    * domain is unregistered, `refresh` once SES has it. See
    * `watchUntilVerified` for the rule, and lib/actions.ts for why neither needs
-   * a refresh afterwards — each re-renders this page in its own response.
+   * a refresh afterwards - each re-renders this page in its own response.
    *
    * ⚠ THE FIRST TICK IS QUICK FOR THE SAME REASON. Ten seconds was a fine
    * interval for re-reading a list; it is a long time for the moment
@@ -97,7 +97,7 @@ export function StepVerify({
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Verify your domain</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Nothing to verify yet — add a domain first.
+            Nothing to verify yet - add a domain first.
           </p>
         </div>
         <EmptyState
@@ -112,7 +112,7 @@ export function StepVerify({
     <div className="space-y-6">
       {/*
        * ⚠ THE CONFIRMATION THE CALLBACK USED TO KEEP FOR ITSELF. It painted a
-       * green tick, waited a few hundred milliseconds and navigated here — so
+       * green tick, waited a few hundred milliseconds and navigated here - so
        * the one moment worth confirming was the one that flickered. It sits at
        * the top of the screen it was going to send you to anyway.
        *
@@ -131,7 +131,7 @@ export function StepVerify({
             {/*
              * ⚠ THE COUNT IS DOMAINS, NOT RECORDS, AND THE OLD COPY SPENT IT
              * AS THOUGH IT WERE RECORDS. One domain read "Your record was
-             * added" — singular, about the six records we had just written —
+             * added" - singular, about the six records we had just written -
              * and two domains read "Your 2 records were added", which names
              * the wrong unit and a number a third of the real one. The
              * sentence beneath it has always said "We wrote them".
@@ -143,7 +143,7 @@ export function StepVerify({
             </p>
             <p className="text-sm text-muted-foreground">
               We wrote them at your DNS provider and started checking. Nothing below
-              needs doing — this page updates itself as they resolve.
+              needs doing - this page updates itself as they resolve.
             </p>
           </div>
         </div>
@@ -155,8 +155,8 @@ export function StepVerify({
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {justPublished > 0
-            ? "DNS usually propagates within minutes, but providers are allowed up to 72 hours — a pending domain is not a broken one."
-            : "Open each domain to copy its records. DNS usually propagates within minutes, but providers are allowed up to 72 hours — a pending domain is not a broken one."}
+            ? "DNS usually propagates within minutes, but providers are allowed up to 72 hours - a pending domain is not a broken one."
+            : "Open each domain to copy its records. DNS usually propagates within minutes, but providers are allowed up to 72 hours - a pending domain is not a broken one."}
         </p>
       </div>
 
@@ -170,8 +170,8 @@ export function StepVerify({
               <p className="truncate font-mono text-sm">{domain.name}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {domain.delegated
-                  ? "Delegated — NS records to publish"
-                  : "Manual — six records to publish"}
+                  ? "Delegated - NS records to publish"
+                  : "Manual - six records to publish"}
               </p>
             </div>
 
@@ -182,7 +182,7 @@ export function StepVerify({
                * ⚠ THROUGH `/onboarding/skip`, NOT STRAIGHT AT THE DOMAIN PAGE,
                * AND THE DIRECT LINK IS WHY THIS BUTTON DID NOTHING. `/domains/…`
                * is under the console layout, which redirects to `/onboarding`
-               * for as long as `should_onboard` is true — so the click
+               * for as long as `should_onboard` is true - so the click
                * navigated, was bounced, and landed back on the screen it
                * started from. Exactly the bug "Skip to the console" had, which
                * is why that one is a route and not a link either.
@@ -204,7 +204,7 @@ export function StepVerify({
       {/*
        * ⚠ EVERYTHING BELOW THE LIST CHANGES WHILE SOMEBODY IS WATCHING IT, SO
        * NONE OF IT MAY APPEAR IN ONE FRAME. This page polls: a domain verifies
-       * on its own, the "checking" line goes, and Continue arrives — each of
+       * on its own, the "checking" line goes, and Continue arrives - each of
        * which used to be conditional JSX that popped in and shoved the rest.
        * Now the line changes its words in place and the button grows into the
        * space it needs, on the same spring as every other reveal.
@@ -218,8 +218,8 @@ export function StepVerify({
           <p className="text-xs text-muted-foreground">
             <Swap id={polls < MAX_POLLS ? "polling" : "waiting"}>
               {polls < MAX_POLLS
-                ? "Checking automatically every few seconds. You can carry on and come back — verification continues without this page open."
-                : "Still waiting. That is normal — leave it with us and check back later, or press Verify to look again now."}
+                ? "Checking automatically every few seconds. You can carry on and come back - verification continues without this page open."
+                : "Still waiting. That is normal - leave it with us and check back later, or press Verify to look again now."}
             </Swap>
           </p>
         </Reveal>

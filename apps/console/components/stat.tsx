@@ -78,7 +78,7 @@ export function StatRow({ children }: { children: React.ReactNode }) {
   return (
     /*
      * ⚠ THE ONLY CLIENT COMPONENT ON THIS SCREEN, AND IT WRAPS THE STRIP RATHER
-     * THAN THE TILES. `Stat` stays a server component — six of them tracking
+     * THAN THE TILES. `Stat` stays a server component - six of them tracking
      * their own pointer would be six listeners, six bundles and six gradients
      * that stop at their own edges, so the wash would visibly break at every
      * divider. See @repo/ui/components/pointer-glow: it sets two CSS variables

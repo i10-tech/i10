@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ============================================================
- * Nimbus Theme — THE file you edit to customize your site.
+ * Nimbus Theme - THE file you edit to customize your site.
  *
  * Architecture:
  *   1. CSS custom properties (--nb-*) define the design tokens
@@ -15,7 +15,7 @@
  *   - Functional names: `primary` (action), `accent` (hover surface),
  *     `muted` (de-emphasized), not visual relationships
  *   - Reserved Tailwind keywords avoided (no `text-base`, `font-sans`,
- *     `shadow-lg`, etc. as color names — they collide with built-ins)
+ *     `shadow-lg`, etc. as color names - they collide with built-ins)
  * ============================================================ */
 
 /* ---- Light mode (default) ---- */
@@ -46,7 +46,7 @@
 	--nb-selected: oklch(0.89 0 0);
 	--nb-ring: oklch(0.145 0 0 / 0.35);
 
-	/* Status colors — paired (saturated for text/border + muted for bg) */
+	/* Status colors - paired (saturated for text/border + muted for bg) */
 	--nb-info: oklch(0.45 0.18 255);
 	--nb-info-foreground: oklch(0.45 0.18 255);
 	--nb-info-muted: oklch(0.965 0.015 255);
@@ -68,7 +68,7 @@
 	--nb-toc-width: 18rem;
 	--nb-content-max: 43.5rem;
 
-	/* Typography — self-hosted via @fontsource-variable in BaseLayout.astro */
+	/* Typography - self-hosted via @fontsource-variable in BaseLayout.astro */
 	--nb-font-sans:
 		"Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
 		sans-serif;
@@ -220,7 +220,7 @@ body {
 @layer base {
 	/* Default the outline to the focus ring's resting values so turning the
 	   ring on (outline-style: none → solid) changes nothing a transition can
-	   animate — no color/width/offset flash under transition-colors/-all. */
+	   animate - no color/width/offset flash under transition-colors/-all. */
 	*,
 	::before,
 	::after {
@@ -337,7 +337,7 @@ pre.astro-code span {
 
 /* Every Shiki block is wrapped in a .nb-code-figure (titled or not).
    Chrome lives on the figure so the language badge + copy button can sit
-   on a non-scrolling ancestor — iOS Safari slides absolutely-positioned
+   on a non-scrolling ancestor - iOS Safari slides absolutely-positioned
    children of overflow:auto containers. */
 .nb-code-figure {
 	position: relative;
@@ -383,7 +383,7 @@ pre.astro-code span {
 	text-transform: uppercase;
 }
 
-/* Language badge — pinned to the figure (which doesn't scroll), so it
+/* Language badge - pinned to the figure (which doesn't scroll), so it
    stays at top-right even when the pre overflows horizontally. Hidden
    when a figcaption is already showing the language (titled blocks). */
 .nb-code-figure[data-nb-lang]:not(.nb-code-figure-titled)::before {
@@ -407,7 +407,7 @@ pre.astro-code span {
 .nb-code-figure:hover::before {
 	opacity: 0;
 }
-/* Hide plaintext/text "language" — it's noise. */
+/* Hide plaintext/text "language" - it's noise. */
 .nb-code-figure[data-nb-lang="text"]::before,
 .nb-code-figure[data-nb-lang="plaintext"]::before,
 .nb-code-figure[data-nb-lang="plain"]::before,
@@ -463,7 +463,7 @@ pre.astro-code .line.diff.remove::before {
 	color: var(--nb-danger);
 }
 
-/* Focus mode — dim non-focused lines; clears on hover. */
+/* Focus mode - dim non-focused lines; clears on hover. */
 pre.astro-code.has-focused .line:not(.focused) {
 	opacity: 0.45;
 	filter: blur(0.25px);
@@ -474,7 +474,7 @@ pre.astro-code.has-focused:hover .line:not(.focused) {
 	filter: none;
 }
 
-/* Error / warning lines — use muted tokens for theme-tuned tints. */
+/* Error / warning lines - use muted tokens for theme-tuned tints. */
 pre.astro-code .line.highlighted.error {
 	background: var(--nb-danger-muted);
 	box-shadow: inset 2px 0 0 var(--nb-danger);
@@ -502,7 +502,7 @@ body:not(:has([data-mobile-sidebar])) [data-menu-btn] {
 
 /* ---- View transitions ---- */
 
-/* Scoped to <main transition:name="nb-content"> only — chrome snap-swaps
+/* Scoped to <main transition:name="nb-content"> only - chrome snap-swaps
    via the root rule below so the visual field doesn't shift on nav. */
 @media (prefers-reduced-motion: no-preference) {
 	::view-transition-old(nb-content) {

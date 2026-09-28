@@ -10,16 +10,16 @@
 --
 -- ⚠ AND IT FAILED LOUDLY, WHICH IS THE ONLY REASON IT WAS SURVIVABLE. A
 -- reconciler that returned zero findings because RLS filtered every row would
--- have reported a clean account forever — the exact failure the file's own
+-- have reported a clean account forever - the exact failure the file's own
 -- comments call the worst possible one for a reconciler.
 --
 -- Held to 0013's rule: one narrow question each, answered by the owner,
--- returning the minimum. No address, subject or body — ids, timestamps and the
+-- returning the minimum. No address, subject or body - ids, timestamps and the
 -- tenant the report already prints.
 --
 -- ⚠ THE GRACE IS A PARAMETER, NOT A LITERAL. `EVENT_GRACE` lives in
 -- reconcile-ses.ts with the reasoning that sets it, and duplicating the value
--- here would let the two drift — at which point the job manufactures findings
+-- here would let the two drift - at which point the job manufactures findings
 -- and the comment explaining why it cannot is still true of the wrong number.
 
 -- Messages SES accepted that our books do not count as sent.
@@ -130,12 +130,12 @@ GRANT EXECUTE ON FUNCTION "core"."ses_orphan_snapshot"(timestamptz, interval, in
 -- THAT REASON. A SECURITY DEFINER routine runs as the owner with RLS bypassed,
 -- so anything the caller could omit is a row they could rewrite. `status <>
 -- 'sent'` and the `created_at` match are not optimisations and not caller
--- courtesy — they are what stops this from being "set any message to sent at
+-- courtesy - they are what stops this from being "set any message to sent at
 -- any timestamp", which in a billing table is the whole of the damage.
 --
 -- ⚠ AND IT MUST NOT OVERWRITE A ROW THAT IS ALREADY `sent`. Two reconcilers, or
 -- one retried, would otherwise rewrite `sent_at` and move the message into a
--- different billing bucket — turning a repair into a double-count in the usage
+-- different billing bucket - turning a repair into a double-count in the usage
 -- reconciler that reads this table next.
 --
 -- ⚠ `sent_at` COMES FROM SES'S EVENT, NOT FROM `now()`. The usage reconciler

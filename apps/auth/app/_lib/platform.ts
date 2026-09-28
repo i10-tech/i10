@@ -5,7 +5,7 @@
  *
  * ⚠ A HEURISTIC, AND NOTHING HERE CAN BE BETTER THAN ONE. The WebAuthn dialog
  * is drawn by the browser or the operating system, outside the page and outside
- * anything script may measure — there is no API that reports its position, and
+ * anything script may measure - there is no API that reports its position, and
  * there is deliberately not going to be one, because that would let a page
  * trace a fake dialog over a real one. So this reads the platform and picks the
  * place that is right MOST of the time, and the copy never claims certainty.
@@ -51,7 +51,7 @@ function computeEnvironment(): PasskeyEnvironment {
   const ua = navigator.userAgent
   // `maxTouchPoints` rather than a phone regex: it is what actually separates a
   // device that shows a bottom sheet from one that shows a window, and it gets
-  // an iPad — which reports a desktop UA — right.
+  // an iPad - which reports a desktop UA - right.
   const touch = navigator.maxTouchPoints > 1
 
   if (touch) {

@@ -30,7 +30,7 @@ variable "role" {
 }
 
 variable "durable" {
-  description = "True if losing this resource is unrecoverable, or if its identity must survive a full rebuild. Set it honestly — the delete guard reads it."
+  description = "True if losing this resource is unrecoverable, or if its identity must survive a full rebuild. Set it honestly - the delete guard reads it."
   type        = bool
   default     = false
 }

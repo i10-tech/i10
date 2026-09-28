@@ -6,14 +6,14 @@
 #
 # ⚠ THIS NEEDS A CHANGE IN THE PSL REPO BEFORE IT WORKS. Traefik must gain TCP
 # entrypoints for these ports, and the Traefik chart nests the Service spec
-# under `service.spec` — keys placed directly on `service` are accepted and
+# under `service.spec` - keys placed directly on `service` are accepted and
 # then SILENTLY IGNORED. That is how a dual-stack rebuild left the Service
 # IPv4-only while every value looked correct. Set `ipFamilyPolicy` under
 # `service.spec` and verify with `kubectl get svc -o yaml`, not by reading values.
 #
 # ⚠ AND A DNS CONSEQUENCE. mx.i10.tech must be a GREY-CLOUD (DNS-only) A *and*
 # AAAA record pointing straight at the box, with the MX pointing at that name.
-# Grey-clouding publishes the origin IP — unavoidable for mail, and worth
+# Grey-clouding publishes the origin IP - unavoidable for mail, and worth
 # knowing: the box stops being hidden the day i10's MX goes live.
 ---
 apiVersion: v1
@@ -38,13 +38,13 @@ spec:
   # ⚠ ClusterIP, AND THE MAIL PORTS ARE NOT EXPOSED THROUGH IT.
   #
   # This was briefly `type: LoadBalancer`. On k3s that is served by klipper-lb,
-  # whose path DNATs twice and re-enters the host on a NodePort — unreachable
+  # whose path DNATs twice and re-enters the host on a NodePort - unreachable
   # behind a firewall that allows 993, and MASQUERADEd so Stalwart would see the
   # node as every client's address. The container claims the host ports directly
   # instead; see the note on `ports:` in statefulset.yaml.
   #
-  # The Service remains because in-cluster callers still need a stable name —
-  # the send worker dials `relay` through it — and because the ports document
+  # The Service remains because in-cluster callers still need a stable name -
+  # the send worker dials `relay` through it - and because the ports document
   # what the pod serves.
   #
   # ⚠ AND IT MUST NOT BECOME A LoadBalancer AGAIN while the hostPorts exist.
@@ -52,7 +52,7 @@ spec:
   # would sit unschedulable, which reads as a broken LoadBalancer rather than a
   # port conflict.
   # Both families. The cluster was rebuilt dual-stack on 2026-08-31 precisely
-  # so mail can answer on IPv6 — receivers increasingly prefer it and score its
+  # so mail can answer on IPv6 - receivers increasingly prefer it and score its
   # reputation separately from IPv4.
   ipFamilyPolicy: PreferDualStack
   ports:

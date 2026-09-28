@@ -16,7 +16,7 @@ import { useStepUp } from "@/lib/step-up"
  * of this inline; adding a row action on the list would have meant a second
  * copy of the step-up call, the revoke-first ordering and the checkbox that
  * defaults to ticked. Two copies of a destructive flow do not stay identical
- * — one of them gets the next fix — and the divergence is invisible until
+ * - one of them gets the next fix - and the divergence is invisible until
  * somebody deletes a domain from the list and their scoped keys survive.
  *
  * ⚠ IT OWNS NO TRIGGER. The two callers disagree about what opens it (a
@@ -48,11 +48,11 @@ export function DeleteDomainDialog({
    * Where the caller goes once the domain is gone.
    *
    * ⚠ THE DIFFERENCE BETWEEN THE TWO CALLERS, AND THE ONLY ONE. The page has
-   * to leave — it is a page about a domain that no longer exists — and the
+   * to leave - it is a page about a domain that no longer exists - and the
    * list only has to re-read itself.
    */
   /**
-   * Called once the "Deleted" tick has been seen — see lib/outcome.ts. A list
+   * Called once the "Deleted" tick has been seen - see lib/outcome.ts. A list
    * page passes nothing: the row is already gone behind the dialog.
    */
   onDeleted?: () => void
@@ -60,7 +60,7 @@ export function DeleteDomainDialog({
   const stepUp = useStepUp()
   /*
    * ⚠ IT DEFAULTS TO REVOKING THEM, WHICH IS THE OPPOSITE OF THE USUAL RULE
-   * FOR A DESTRUCTIVE CHECKBOX. The alternative — leaving them — is the one
+   * FOR A DESTRUCTIVE CHECKBOX. The alternative - leaving them - is the one
    * that ends with a valid credential nobody can use and nobody remembers why
    * they made. Anybody who wants to keep a key for a domain they are about to
    * re-add can untick it, and the label says exactly what it will do.
@@ -80,7 +80,7 @@ export function DeleteDomainDialog({
        * not ceremony: typing it is the difference between losing a staging
        * domain and losing production, and it is the only confirmation that
        * requires reading which domain you are actually on. It matters more
-       * from the list than it ever did from the page — on the page you had at
+       * from the list than it ever did from the page - on the page you had at
        * least arrived at that domain deliberately.
        */
       confirmWord={name}
@@ -88,10 +88,10 @@ export function DeleteDomainDialog({
         /*
          * ⚠ PROVED ONCE, BEFORE ANY OF IT, RATHER THAN PER CALL. The prompt
          * works by replaying the request it refused, and this flow is up to
-         * three requests — replaying it half-done would try to revoke keys
+         * three requests - replaying it half-done would try to revoke keys
          * that are already revoked and report a failure for work that
          * succeeded. `stepUp` asks against a route that does nothing, so
-         * retrying it costs nothing. See lib/step-up.ts — and note the API
+         * retrying it costs nothing. See lib/step-up.ts - and note the API
          * refuses the delete on its own, so this is the prompt rather than the
          * protection.
          *
@@ -103,7 +103,7 @@ export function DeleteDomainDialog({
         /*
          * ⚠ THE KEYS GO FIRST, AND THE ORDER IS THE SAFE ONE RATHER THAN THE
          * TIDY ONE. If the domain delete fails after the keys are revoked,
-         * somebody has a working domain and some dead keys — annoying, and
+         * somebody has a working domain and some dead keys - annoying, and
          * fixable by creating new ones. The other order risks a deleted domain
          * and live keys still pointing at it, which is the exact state this is
          * here to prevent.
@@ -136,7 +136,7 @@ export function DeleteDomainDialog({
       {/*
        * ⚠ IT ASKS ABOUT THE KEYS THAT ONLY WORKED HERE, BECAUSE NOTHING ELSE
        * EVER WILL. A key restricted to this domain becomes, the moment the
-       * domain goes, a live credential that can send from nothing — it does
+       * domain goes, a live credential that can send from nothing - it does
        * not fail, it does not warn, it simply sits in somebody's environment
        * being valid. The person deleting the domain is the only one who will
        * ever be in a position to connect the two, and this is the only moment
@@ -144,7 +144,7 @@ export function DeleteDomainDialog({
        *
        * ⚠ AN UNRESTRICTED KEY IS NOT MENTIONED, DELIBERATELY. It works
        * perfectly well for every other domain, so offering to revoke it would
-       * be offering to break something unrelated — and a prompt that appears
+       * be offering to break something unrelated - and a prompt that appears
        * whether or not it is relevant is a prompt people stop reading.
        */}
       {scopedKeys.length > 0 && (
@@ -167,7 +167,7 @@ export function DeleteDomainDialog({
                * "production-api" is the thing they recognise, and naming it is
                * what makes the checkbox answerable without leaving.
                */}
-              {scopedKeys.map((key) => key.name).join(", ")} — leaving{" "}
+              {scopedKeys.map((key) => key.name).join(", ")} - leaving{" "}
               {scopedKeys.length === 1 ? "it" : "them"} means a live key that can send
               from nothing.
             </span>

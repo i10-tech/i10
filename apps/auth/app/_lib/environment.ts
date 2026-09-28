@@ -15,13 +15,13 @@ import "server-only"
  * whole of turning it on.
  *
  * ⚠ THE ENDPOINT NEEDS NO CREDENTIALS. It is the same document clerk-js fetches
- * from the browser on every page load, and it is public by design — verified by
+ * from the browser on every page load, and it is public by design - verified by
  * fetching it with a bare curl and no cookie. So this needs no secret and no
  * new environment variable.
  *
  * ⚠ AND IT IS FETCHED ON THE SERVER, WHICH IS WHAT KEEPS THE FIRST PAINT
  * HONEST. Deciding this in the browser would draw the steps we guessed at and
- * then correct them a moment later — on a stepped flow that means the number of
+ * then correct them a moment later - on a stepped flow that means the number of
  * steps changes under somebody who has already started counting them.
  */
 
@@ -94,7 +94,7 @@ export async function clerkEnvironment(): Promise<ClerkEnvironment | null> {
  *
  * ⚠ `used_for_second_factor` IS CHECKED SEPARATELY FROM `enabled`, AND THE
  * DISTINCTION IS REAL. Clerk can have the authenticator-app attribute enabled
- * as a FIRST factor — signing in with a TOTP code instead of a password —
+ * as a FIRST factor - signing in with a TOTP code instead of a password -
  * without it being available as a second one. Offering "turn on two-factor
  * authentication" in that configuration produces a secret Clerk will not accept
  * as a second factor, so the person enrols something that never challenges them.
@@ -175,7 +175,7 @@ export async function passwordRules(): Promise<PasswordRules> {
  *
  * ⚠ THE KEY ENCODES IT, SO THERE IS NOTHING NEW TO CONFIGURE. A publishable key
  * is `pk_live_` (or `pk_test_`) followed by base64 of the FAPI host with a `$`
- * terminator — `pk_live_Y2xlcmsuaTEwLnRlY2gk` decodes to `clerk.i10.tech$`.
+ * terminator - `pk_live_Y2xlcmsuaTEwLnRlY2gk` decodes to `clerk.i10.tech$`.
  * Deriving it means this cannot drift from the key the rest of the app uses,
  * which a second `AUTH_CLERK_FAPI_URL` variable certainly would.
  */
@@ -189,7 +189,7 @@ function frontendApiHost(): string | null {
   try {
     const decoded = Buffer.from(encoded, "base64").toString("utf8")
     // ⚠ THE `$` IS THE CHECK, NOT A CHARACTER TO TRIM. Base64 decoding never
-    // fails loudly on junk — it produces mojibake — so the terminator is the
+    // fails loudly on junk - it produces mojibake - so the terminator is the
     // only evidence that what came back is really a host and not a key of some
     // other shape.
     return decoded.endsWith("$") ? decoded.slice(0, -1) : null

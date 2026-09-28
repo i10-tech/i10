@@ -13,7 +13,7 @@ import type { TransferOffer } from "@/lib/types"
  * is seen first.
  *
  * ⚠ IT SHOWS IN EVERY WORKSPACE THE PERSON OPENS, because the offer is to the
- * PERSON — matched on their verified email — and they choose where it lands
+ * PERSON - matched on their verified email - and they choose where it lands
  * when they review it.
  */
 export function IncomingTransfers({ offers }: { offers: TransferOffer[] }) {

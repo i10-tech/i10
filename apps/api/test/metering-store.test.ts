@@ -11,7 +11,7 @@ import type { MeterKey } from "@repo/metering"
  * What is being tested is everything between the SQL and the port: that a
  * missing row is not the same as a broken one, that counts are taken against
  * what the caller handed us, and that every statement is wrapped in a tenant
- * transaction — which is the only thing standing between one customer's usage
+ * transaction - which is the only thing standing between one customer's usage
  * and another's balance.
  */
 const dialect = new PgDialect()
@@ -82,7 +82,7 @@ describe("finding an assignment", () => {
   /**
    * ⚠ THE ROW AS THE DRIVER ACTUALLY HANDS IT BACK, WHICH IS NOT WHAT THE
    * FIXTURE ABOVE SAYS. postgres.js maps timestamptz to `new Date(x)`, so
-   * `PLAN_ROW.anchor` being a real `Date` looked like the honest shape — and
+   * `PLAN_ROW.anchor` being a real `Date` looked like the honest shape - and
    * the first call to `find()` ever made in production threw
    * `expected date, received string` on this column.
    *
@@ -109,7 +109,7 @@ describe("finding an assignment", () => {
 
   /**
    * ⚠ THE DISTINCTION THE WHOLE OUTCOME TYPE RESTS ON. `null` is a fact about
-   * the customer — they hold no plan. A catalogue row we cannot read is a fact
+   * the customer - they hold no plan. A catalogue row we cannot read is a fact
    * about us. Letting the second wear the first's clothes tells a paying
    * customer they are over quota because somebody mistyped an interval.
    */
@@ -187,7 +187,7 @@ describe("recording", () => {
     expect(insert?.match(/\(\s*\$/g)).toHaveLength(1)
   })
 
-  // Not a send, so it must not become an INSERT with an empty VALUES list —
+  // Not a send, so it must not become an INSERT with an empty VALUES list -
   // which is a syntax error, raised on the send path, after the mail has gone.
   it("does no work for an empty batch", async () => {
     const { db, seen } = fakeDb(() => [])
@@ -208,7 +208,7 @@ describe("recording", () => {
 
 describe("reading usage", () => {
   // ⚠ `sum()` over bigint arrives as a STRING from postgres-js, and `"90" > 100`
-  // is false in the same way `"0" > 100` is — a comparison that looks like it
+  // is false in the same way `"0" > 100` is - a comparison that looks like it
   // works right up until the balance is wrong.
   it("converts the driver's bigint string to a number", async () => {
     const { db } = fakeDb((s) => (s.includes("sum(value)") ? [{ used: "12345" }] : []))

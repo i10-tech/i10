@@ -11,7 +11,7 @@ import { FloatingInput, FloatingTextarea, type FieldState } from "./floating-fie
  * ⚠ THE TIMING RULES WERE CORRECT AND COPIED BY HAND INTO TWO SCREENS, WHICH IS
  * WHY THIS EXISTS. Red only once somebody has stopped typing, green only where
  * a value was shown wrong and has since been fixed, empty never red until the
- * button is pressed — three rules, each with a failure mode that looks like a
+ * button is pressed - three rules, each with a failure mode that looks like a
  * design choice rather than a bug, reproduced at every call site by whoever
  * remembered. The sign-in box and the add-domain box got them right. The
  * eighteen other inputs in the product got nothing at all: `required` on the
@@ -20,12 +20,12 @@ import { FloatingInput, FloatingTextarea, type FieldState } from "./floating-fie
  *
  * ⚠ SO THE CALLER SUPPLIES THE RULE AND NOTHING ELSE. `check` returns the
  * sentence to show or `null`; `required` is the sentence for an empty box at
- * submit time. Everything between — when to redden, when to go green, when to
- * stay quiet, whether to block the submit — is here, once.
+ * submit time. Everything between - when to redden, when to go green, when to
+ * stay quiet, whether to block the submit - is here, once.
  *
  * ⚠ AND IT FINDS ITS OWN FORM RATHER THAN BEING WIRED TO ONE. `input.form` is
  * the element the browser already associates with this control, so a field
- * refuses its own submit by listening for it — no context, no provider, no
+ * refuses its own submit by listening for it - no context, no provider, no
  * registry, and no change to the twenty forms that already exist. A new input
  * works by being rendered.
  */
@@ -44,7 +44,7 @@ export interface ValidatedFieldProps {
    *
    * ⚠ IT IS THE MESSAGE RATHER THAN A BOOLEAN, AND IT REPLACES THE `required`
    * ATTRIBUTE RATHER THAN JOINING IT. The DOM attribute summons the browser's
-   * own validation bubble — a grey tooltip in the operating system's font,
+   * own validation bubble - a grey tooltip in the operating system's font,
    * positioned by the browser, saying "Please fill out this field." It arrives
    * BEFORE the submit event, so it pre-empts everything below, and it is the
    * one piece of this product's interface nobody here designed. Passing a
@@ -57,7 +57,7 @@ export interface ValidatedFieldProps {
    *
    * ⚠ THE DEFAULT IS DERIVED FROM WHETHER THERE IS A DESCRIPTION, AND THAT IS
    * THE WHOLE ANSWER TO "WHY DID THE FORM JUMP". There are two kinds of line
-   * under a field and they want opposite layouts — see `Frame` in
+   * under a field and they want opposite layouts - see `Frame` in
    * floating-field. A description is content and belongs in the flow; a
    * validation message is absent most of the time, so reserving a strip for it
    * makes every field permanently taller against a moment that may never come.
@@ -77,7 +77,7 @@ export interface ValidatedFieldProps {
   /**
    * Show the waiting tone regardless of the verdict.
    *
-   * ⚠ FOR WORK THE FIELD CANNOT DO ITSELF — the add-domain box asking DNS who
+   * ⚠ FOR WORK THE FIELD CANNOT DO ITSELF - the add-domain box asking DNS who
    * hosts a name. A verdict is about the shape of the value; this is about
    * something still being in flight, and the two are different colours.
    */
@@ -86,17 +86,17 @@ export interface ValidatedFieldProps {
    * What the server said about the value in the box, when it said no.
    *
    * ⚠ FOR RULES ONLY THE SERVER CAN CHECK, WHICH IS WHY IT IS NOT A `check`.
-   * The console cannot know that `i10.tech` is ours — only the API holds
-   * `MAIL_DOMAINS` — so that verdict arrives after a round trip, and it used to
+   * The console cannot know that `i10.tech` is ours - only the API holds
+   * `MAIL_DOMAINS` - so that verdict arrives after a round trip, and it used to
    * arrive as a toast: in a corner, on a timer, a long way from the value it
    * was about, which sat in the box looking accepted.
    *
    * ⚠ IT IS RED AT ONCE, NOT AFTER A BLUR, AND THAT DOES NOT BREAK "RED
    * WAITS". Red waits so nobody is told off mid-keystroke; a refusal only
-   * exists once they have stopped — the caller asks after a debounce, or
+   * exists once they have stopped - the caller asks after a debounce, or
    * because somebody pressed the button.
-   * It also has to survive a remount — the onboarding step sends the person
-   * back to a fresh field — where a blur-gated verdict would start hidden.
+   * It also has to survive a remount - the onboarding step sends the person
+   * back to a fresh field - where a blur-gated verdict would start hidden.
    *
    * ⚠ THE CALLER CLEARS IT BY PASSING `undefined` once the value changes. The
    * field does not compare values itself, because only the caller knows what
@@ -110,7 +110,7 @@ export interface ValidatedFieldProps {
  *
  * ⚠ IT IS THE SAME FUNCTION `emailVerdict` AND `domainVerdict` BOTH WERE. Those
  * two were written months apart from the same set of rules and agreed, which
- * is luck rather than design — the third copy is where they stop agreeing, and
+ * is luck rather than design - the third copy is where they stop agreeing, and
  * the symptom is one screen reddening a field somebody is still typing into
  * while another waits.
  */
@@ -134,7 +134,7 @@ export function fieldVerdict(
 
   /*
    * ⚠ CORRECT IS NOT THE SAME AS GREEN. Most fields are filled in correctly
-   * first time and saying so is not news — green is spent only on a value that
+   * first time and saying so is not news - green is spent only on a value that
    * was SHOWN wrong and has since been fixed, and only while the caret is
    * still in the box asking the question green answers.
    */
@@ -144,8 +144,8 @@ export function fieldVerdict(
     typeof problem === "string" ? { message: problem, early: false } : problem
 
   /*
-   * ⚠ AND RED WAITS. Every value is wrong while it is being typed — `m`, `mi`,
-   * `mid` — so a field that reddens on the first keystroke is red for the whole
+   * ⚠ AND RED WAITS. Every value is wrong while it is being typed - `m`, `mi`,
+   * `mid` - so a field that reddens on the first keystroke is red for the whole
    * time anybody is using it, and the colour stops meaning anything at all.
    */
   if (focus.blurred) return { state: "invalid", hint: message }
@@ -166,12 +166,12 @@ export function fieldBlocks(
  *
  * ⚠ IT LISTENS ON THE FORM ELEMENT, WHICH RUNS BEFORE REACT'S `onSubmit`. React
  * delegates events to the root container, so a native listener on the form
- * itself is reached first as the event passes through its target — early enough
+ * itself is reached first as the event passes through its target - early enough
  * to stop it.
  *
  * ⚠ AND IT STOPS PROPAGATION AS WELL AS THE DEFAULT, WHICH IS THE ONLY PART
  * THAT ACTUALLY BLOCKS ANYTHING. `preventDefault()` alone suppresses the
- * browser's native navigation, which these forms never use — every one of them
+ * browser's native navigation, which these forms never use - every one of them
  * is a React `onSubmit` that calls an action. That handler lives at the root
  * and would run regardless, so the invalid form would submit anyway with a
  * red border next to it. Stopping propagation is what keeps it from being
@@ -179,12 +179,12 @@ export function fieldBlocks(
  *
  * ⚠ EVERY FIELD STILL GETS ITS TURN. `stopPropagation` ends the journey to the
  * root but not the listeners already registered on this same element, so the
- * other fields on the form reveal themselves in the same pass — which is the
+ * other fields on the form reveal themselves in the same pass - which is the
  * behaviour anybody expects from pressing a button on a form with three empty
  * boxes.
  *
  * ⚠ AND THE FOCUS IS RELEASED FIRST. Pressing Enter inside a box submits
- * without blurring it, and a focused field is never painted red — so without
+ * without blurring it, and a focused field is never painted red - so without
  * this the guard refuses and nothing on screen changes, which is a button that
  * visibly does nothing. See `releaseFocus`.
  */
@@ -195,7 +195,7 @@ function useSubmitGuard(
 ) {
   /*
    * ⚠ THE LATEST VALUE THROUGH A REF, so the listener is attached once rather
-   * than removed and re-added on every keystroke — a `submit` handler that is
+   * than removed and re-added on every keystroke - a `submit` handler that is
    * swapped on each render is a handler that can be missing at the moment the
    * button is pressed.
    *
@@ -237,7 +237,7 @@ function useSubmitGuard(
  * ⚠ THIS FIELD USED TO ASSUME IT WAS CONTROLLED, AND THE ONE INPUT IN THE
  * PRODUCT THAT IS NOT WAS THE SIGN-IN PASSWORD. Reading `value` off the props
  * of an uncontrolled input gives `undefined` on every render, which became the
- * empty string, which `required` reads as "they left it blank" — so typing a
+ * empty string, which `required` reads as "they left it blank" - so typing a
  * perfectly good password and pressing Login painted the field red and said
  * "Enter your password" over a box with a password in it, and the submit guard
  * refused the form on top of that. It was not a sign-in bug; it was this
@@ -253,7 +253,7 @@ function useSubmitGuard(
  *
  * ⚠ IT LISTENS FOR `input` **AND** `change`, because a password manager is not
  * a keyboard. 1Password and the browser's own autofill set `.value` and
- * dispatch one or the other depending on the browser — missing that would put
+ * dispatch one or the other depending on the browser - missing that would put
  * us straight back to "there is text on screen and this component thinks the
  * box is empty", which is the bug.
  *
@@ -330,18 +330,18 @@ export function ValidatedInput({
       /*
        * ⚠ OFF BY DEFAULT, BECAUSE THE BROWSER'S RED IS OUR RED. A spell-checker
        * draws a red wavy line under `i10.tech`, `acme-corp`, `prod-api-key` and
-       * most surnames — a claim about correctness, in the one colour this
+       * most surnames - a claim about correctness, in the one colour this
        * component spends its whole existence making mean something, about words
        * it has no opinion worth having on. Two different systems marking the
        * same field wrong for different reasons is worse than either alone.
        *
        * ⚠ A SINGLE-LINE FIELD IS NOT PROSE, WHICH IS WHAT MAKES THIS SAFE AS A
        * DEFAULT RATHER THAN A DECISION PER CALL SITE. It holds a name, an
-       * address, a domain, a key — identifiers, where a dictionary is wrong by
+       * address, a domain, a key - identifiers, where a dictionary is wrong by
        * construction. `ValidatedTextarea` deliberately does NOT do this: that
        * one holds sentences somebody wrote, and a spell-checker is earning its
-       * keep there. Anything single-line that really is prose — a subject line
-       * — passes `spellCheck` back on.
+       * keep there. Anything single-line that really is prose - a subject line
+       * - passes `spellCheck` back on.
        */
       spellCheck={spellCheck ?? false}
       ref={mergeRefs(own, ref)}
@@ -350,7 +350,7 @@ export function ValidatedInput({
       state={busy && !refused ? "pending" : verdict.state}
       // ⚠ THE CALLER'S HINT IS THE RESTING STATE, NOT A COMPETITOR. Guidance
       // shows while there is nothing to complain about and steps aside for a
-      // correction, which is the same row either way — so nothing moves.
+      // correction, which is the same row either way - so nothing moves.
       hint={verdict.hint ?? hint}
       // See `reserveHint` above: a row only exists where there is something
       // permanent to put in it.
@@ -363,12 +363,12 @@ export function ValidatedInput({
 }
 
 /**
- * Enter submits the field's form — done here, not left to the browser.
+ * Enter submits the field's form - done here, not left to the browser.
  *
  * ⚠ THE BROWSER'S OWN "ENTER SUBMITS" IS THE DEFAULT ACTION OF THE KEY, AND
  * ANYTHING THAT CANCELS THE KEYDOWN CANCELS IT. The sign-in email box carries
  * `autocomplete="email webauthn"`, which puts the passkey and password
- * autofill UI on it — and password-manager extensions (iCloud Passwords is the
+ * autofill UI on it - and password-manager extensions (iCloud Passwords is the
  * one reported) listen on exactly that kind of field and cancel the keydown to
  * drive their own menu. The key then did nothing at all: typed address,
  * Enter, no Continue. Nothing in the product handled Enter, so nothing noticed
@@ -382,7 +382,7 @@ export function ValidatedInput({
  *
  * ⚠ AND IT KEEPS THE BROWSER'S RULES: not while an IME is composing (Enter
  * there confirms a character), not with a modifier, not without a form, and
- * not when the form's default button is disabled — the cases in which the
+ * not when the form's default button is disabled - the cases in which the
  * browser itself would not have submitted either.
  */
 function submitOnEnter(

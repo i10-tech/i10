@@ -3,7 +3,7 @@ import { z } from "zod"
 /**
  * Error semantics are part of the compatibility surface. An SDK that maps a
  * 422 to a thrown exception and a 429 to a retry is reading these fields, so
- * changing one is a breaking change to every customer's error handling — not
+ * changing one is a breaking change to every customer's error handling - not
  * a message tweak.
  */
 export const errorNames = [
@@ -20,8 +20,8 @@ export const errorNames = [
   // ⚠ ADDITIVE, AND THE ONLY HONEST ANSWER FOR A REUSED Idempotency-Key. The
   // same key with a DIFFERENT body cannot be a replay (the caller would get an
   // id for an email they did not send) and cannot be a second send (the key
-  // says they did not mean to). It is not a validation error either — the body
-  // is fine, the key is ambiguous — so it needs a name of its own.
+  // says they did not mean to). It is not a validation error either - the body
+  // is fine, the key is ambiguous - so it needs a name of its own.
   //
   // Adding a name is safe in a way that changing one is not: an SDK switching
   // on these already needs a default branch.
@@ -41,7 +41,7 @@ export const errorNames = [
    * Another workspace verified the name in the same moment as the caller.
    *
    * ⚠ ONLY A RACE NOW. It used to mean "somebody else holds this name
-   * verified, talk to us if it is yours" — but proving a name now takes it from
+   * verified, talk to us if it is yours" - but proving a name now takes it from
    * whoever holds it, so the only way to meet this is two proofs landing at
    * once. Verifying again settles it.
    *
@@ -51,7 +51,7 @@ export const errorNames = [
    */
   "domain_already_claimed",
   /**
-   * ⚠ NOT `daily_quota_exceeded`, AND NOT A 429. That one is volume — a
+   * ⚠ NOT `daily_quota_exceeded`, AND NOT A 429. That one is volume - a
    * customer who waits gets more. This is a plan limit on a resource that is
    * held rather than consumed: a fourth domain does not become available by
    * waiting, and an SDK that backs off on it retries forever. The fix is an
@@ -61,7 +61,7 @@ export const errorNames = [
   /**
    * ⚠ A PRECONDITION THE CALLER CAN FIX, WHICH IS WHY IT IS NOT
    * `invalid_access`. The account is authenticated and permitted; it simply has
-   * no password, and a mailbox is unusable without one — an IMAP login is an
+   * no password, and a mailbox is unusable without one - an IMAP login is an
    * LDAP bind that authd delegates to Clerk, so a user who signed up with
    * Google or an email link has no credential for the mail server to check.
    * The client's correct response is to send the person to set one and retry
@@ -70,7 +70,7 @@ export const errorNames = [
    */
   "password_required",
   /**
-   * ⚠ SAYS "TAKEN", NEVER BY WHOM — the same rule as `domain_already_exists`.
+   * ⚠ SAYS "TAKEN", NEVER BY WHOM - the same rule as `domain_already_exists`.
    * It covers both the caller already having a mailbox and the address
    * belonging to somebody else, because distinguishing them would turn this
    * endpoint into a way to test which addresses exist on a domain.
@@ -81,7 +81,7 @@ export const errorNames = [
    *
    * ⚠ RESEND'S OWN NAME, WHICH IS WHY IT IS NOT `forbidden`. A customer
    * pointing an SDK at us is switching on these strings, and `restricted_api_key`
-   * is the one already in their error handling — see the note at the top of
+   * is the one already in their error handling - see the note at the top of
    * this file about the compatibility surface.
    *
    * ⚠ AND IT IS A 403, NOT A 401, WHICH IS THE DISTINCTION THAT MATTERS MORE
@@ -108,7 +108,7 @@ export type ApiError = z.infer<typeof errorSchema>
  *
  * `rate_limit_exceeded` answers "too fast" and is retryable with backoff.
  * `daily_quota_exceeded` answers "this customer has no sending budget left"
- * and is not retryable — it is a billing state, owned by the meter, not by the
+ * and is not retryable - it is a billing state, owned by the meter, not by the
  * request path. Collapsing the two into one 429 makes it impossible to sell a
  * plan that differs only by volume.
  */

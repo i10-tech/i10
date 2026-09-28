@@ -157,7 +157,7 @@ func TestEmptyInputsNeverCache(t *testing.T) {
 	c := newAt(time.Minute, &now)
 
 	// RFC 4513 §5.1.2 makes an empty password an unauthenticated bind, and
-	// handleBind rejects it before reaching here — but a cache that could be
+	// handleBind rejects it before reaching here - but a cache that could be
 	// primed with one would be a bypass, so it refuses independently.
 	c.Store("user_1", "", nil)
 	c.Store("", "hunter2", nil)
@@ -169,7 +169,7 @@ func TestEmptyInputsNeverCache(t *testing.T) {
 	}
 }
 
-// The MAC key is generated per process, so two caches never agree — a restart
+// The MAC key is generated per process, so two caches never agree - a restart
 // invalidates everything, which is the correct failure mode for this data.
 func TestKeysAreNotShared(t *testing.T) {
 	a, b := New(time.Minute), New(time.Minute)

@@ -17,7 +17,7 @@ export const metadata: Metadata = { title: "Logs" }
 /**
  * Every API request this workspace has made.
  *
- * ⚠ THE ENVELOPE ONLY — NEVER THE BODY. A request body on this API contains the
+ * ⚠ THE ENVELOPE ONLY - NEVER THE BODY. A request body on this API contains the
  * customer's mail: subject lines, recipients, and the HTML of whatever they
  * sent. Logging it would turn an operational log into a copy of every email the
  * platform has carried, retained under a policy nobody wrote and readable by
@@ -25,7 +25,7 @@ export const metadata: Metadata = { title: "Logs" }
  * used answer every question this page exists to answer.
  *
  * ⚠ AND THE PATH IS THE ROUTE PATTERN, NOT THE URL. `/emails/{id}`, never a
- * concrete message id — otherwise this page becomes a list of message ids and a
+ * concrete message id - otherwise this page becomes a list of message ids and a
  * filter on it becomes a way to enumerate them.
  */
 export default async function LogsPage({
@@ -49,7 +49,7 @@ export default async function LogsPage({
         </PageHeaderRow>
         <PageDescription>
           Requests your servers have made to the API, with what we answered. Bodies are
-          never recorded — they contain your customers&rsquo; mail.
+          never recorded - they contain your customers&rsquo; mail.
         </PageDescription>
       </PageHeader>
 

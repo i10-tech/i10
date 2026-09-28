@@ -8,7 +8,7 @@ import type { AssignmentStore, LevelStore, UsageStore } from "../src/ports.js"
  * Continuous features: domains, mailboxes, storage.
  *
  * ⚠ THREE OF THE FOUR THINGS WE METER ARE THIS KIND, and the one the package
- * was originally built for — `emails` — is the exception. What these assert is
+ * was originally built for - `emails` - is the exception. What these assert is
  * that nothing consumable leaks in: no window, no reset, no ledger read, and a
  * level that is allowed to go DOWN.
  */
@@ -120,7 +120,7 @@ describe("a domain limit", () => {
   /**
    * ⚠ SENDING AND MAILBOX DOMAINS ARE TWO FEATURES, AND A DOMAIN THAT DOES BOTH
    * COUNTS IN BOTH. Each level is a count over its own flag rather than a
-   * partition of one total — otherwise the cheapest way to hold a domain is to
+   * partition of one total - otherwise the cheapest way to hold a domain is to
    * claim both roles for it.
    */
   it("counts sending and mailbox domains separately", async () => {
@@ -176,7 +176,7 @@ describe("no window, ever", () => {
     ).toBeNull()
   })
 
-  // The level is read as-is, at any distance from the anchor — there is no
+  // The level is read as-is, at any distance from the anchor - there is no
   // boundary that could scope it and nothing that "expires".
   it("gives the same answer years after the anchor", async () => {
     const levelOf = mock(async () => 4)

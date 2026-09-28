@@ -19,7 +19,7 @@ export const metadata: Metadata = { title: "General settings" }
  * ⚠ THE WORKSPACE NAME AND THE ORGANIZATION NAME ARE ONE NAME, AND THIS PAGE
  * USED TO EXPLAIN WHY THEY WERE TWO. The explanation was sound and the outcome
  * was not: renaming here left the organization in the switcher on its old name
- * — "Mohamed" months after the workspace became "i10 testing" — with nothing
+ * - "Mohamed" months after the workspace became "i10 testing" - with nothing
  * anywhere to reconcile them and no reason a customer could see for there being
  * two names at all.
  *
@@ -62,17 +62,17 @@ export default async function GeneralSettingsPage() {
       <Section>
         <SectionTitle>Identifiers</SectionTitle>
         <SectionDescription>
-          Quote the workspace ID if you ever contact support — it is what we look you up
+          Quote the workspace ID if you ever contact support - it is what we look you up
           by.
         </SectionDescription>
         <SectionContent className="grid max-w-md gap-4">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Workspace ID</p>
-            <CopyField value={tenant?.id ?? "—"} />
+            <CopyField value={tenant?.id ?? "-"} />
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Slug</p>
-            <CopyField value={tenant?.slug ?? "—"} />
+            <CopyField value={tenant?.slug ?? "-"} />
           </div>
         </SectionContent>
       </Section>
@@ -81,7 +81,7 @@ export default async function GeneralSettingsPage() {
         <SectionTitle>Created</SectionTitle>
         <SectionContent>
           <p className="text-sm text-muted-foreground">
-            {tenant ? formatExact(tenant.created_at) : "—"}
+            {tenant ? formatExact(tenant.created_at) : "-"}
           </p>
         </SectionContent>
       </Section>
@@ -97,8 +97,8 @@ export default async function GeneralSettingsPage() {
            * ⚠ THE BILLING CONSEQUENCE IS STATED HERE BECAUSE DELETION HAPPENS
            * SOMEWHERE ELSE. The control is "Delete organization" inside Clerk's
            * own panel on the Team page; its dialog is Clerk's and says nothing
-           * about money. What deleting does to the subscription is now real —
-           * `organization.deleted` revokes it immediately — so it has to be
+           * about money. What deleting does to the subscription is now real -
+           * `organization.deleted` revokes it immediately - so it has to be
            * readable before somebody goes and presses it.
            */}
           <DeletionWarning billing={me.ok ? me.data.billing : null} scope="workspace" />
@@ -109,7 +109,7 @@ export default async function GeneralSettingsPage() {
            * message history that a customer may be legally required to retain,
            * and through mailboxes that other people are still using. Until
            * there is an export and a grace period, deleting through Clerk's own
-           * confirmation — which at least asks for the name — or a support
+           * confirmation - which at least asks for the name - or a support
            * conversation are the honest mechanisms; a one-click button here
            * would be the single most destructive control in the product.
            */}

@@ -19,7 +19,7 @@ spec:
     #
     # ⚠ selfHeal IS THE HALF WORTH KNOWING BEFORE DEBUGGING ON THE BOX: a
     # hand-applied change to anything under this path is reverted within about
-    # 35 seconds. To test a fix live, remove `automated` first — and put it back.
+    # 35 seconds. To test a fix live, remove `automated` first - and put it back.
     automated:
       prune: true
       selfHeal: true

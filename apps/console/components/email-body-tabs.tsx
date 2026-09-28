@@ -9,7 +9,7 @@ import { CopyButton } from "@repo/ui/components/copy"
  *
  * ⚠ THE PREVIEW IS A SANDBOXED IFRAME WITH `srcDoc`, AND THIS IS THE SINGLE
  * MOST IMPORTANT DECISION ON THIS PAGE. The HTML being rendered is a CUSTOMER'S
- * — it arrived through `POST /emails` from whatever system they run, and on a
+ * - it arrived through `POST /emails` from whatever system they run, and on a
  * shared console it is attacker-controlled the moment one tenant can get a
  * message into another's log. Rendering it with `dangerouslySetInnerHTML` would
  * execute its scripts in the console's own origin, with the person's session:
@@ -17,7 +17,7 @@ import { CopyButton } from "@repo/ui/components/copy"
  *
  * ⚠ THE `sandbox` ATTRIBUTE IS PRESENT AND CARRIES NO TOKENS. An empty
  * `sandbox=""` is the maximally restrictive setting: no scripts, no forms, no
- * top-level navigation, and — critically — a UNIQUE OPAQUE ORIGIN, so the frame
+ * top-level navigation, and - critically - a UNIQUE OPAQUE ORIGIN, so the frame
  * cannot reach `parent`, cannot read our cookies, and cannot touch
  * `localStorage`. Adding `allow-scripts` would defeat the whole thing;
  * `allow-scripts` together with `allow-same-origin` would be strictly worse
@@ -28,7 +28,7 @@ import { CopyButton } from "@repo/ui/components/copy"
  * would be fighting and only one of them is load-bearing.
  *
  * What we accept in exchange: remote images do not load, because the frame has
- * no network permission the parent can grant it beyond the default — which is
+ * no network permission the parent can grant it beyond the default - which is
  * fine and arguably correct, since loading them would fire the sender's own
  * tracking pixels every time somebody opened the log.
  */
@@ -95,7 +95,7 @@ export function EmailBodyTabs({
               className="h-[36rem] w-full bg-white"
               // ⚠ `referrerPolicy` AND `loading` ARE BELT AND BRACES. The frame
               // cannot navigate, but any subresource it references would
-              // otherwise carry our URL — which contains the message id — to a
+              // otherwise carry our URL - which contains the message id - to a
               // third-party image host.
               referrerPolicy="no-referrer"
               loading="lazy"

@@ -15,7 +15,7 @@ import type { KeyStore } from "../src/auth/store.js"
  *
  * ⚠ AND THE FAILURE MODE TO WATCH IS OPEN, NOT CLOSED. A guard that wrongly
  * refuses is a support ticket within the hour; a guard that wrongly allows is
- * invisible until somebody's domain is gone — so "not wired up" and "Clerk did
+ * invisible until somebody's domain is gone - so "not wired up" and "Clerk did
  * not answer" both have a test, and neither of them is a 204.
  */
 

@@ -11,7 +11,7 @@ import type { ActiveOrgReader, SessionVerifier } from "./session.js"
  * THE SEPARATION IS THE SECURITY PROPERTY. `requireApiKey` authenticates a
  * machine; `requireUser` authenticates a human and stops there, because
  * `/mailboxes` is about the person rather than the account. This one does both
- * halves — verifies the human, then answers "whose account is this" — and it is
+ * halves - verifies the human, then answers "whose account is this" - and it is
  * the ONLY thing that lets a browser session reach tenant-scoped data. Folding
  * it into `requireApiKey` as a fallback would mean one refactor away from a
  * cookie being able to send mail, and folding it into `requireUser` would give
@@ -28,7 +28,7 @@ export interface TenantResolver {
   /**
    * Translates a verified Clerk principal into i10's tenant id.
    *
-   * Returns null when the person has no tenant yet — a sign-up whose
+   * Returns null when the person has no tenant yet - a sign-up whose
    * `organization.created` webhook has not landed, or an organization created
    * in Clerk's dashboard that we have not seen. The console's answer to that is
    * a 409 and a retry, not a 403: nothing is forbidden, the row is just late.
@@ -42,7 +42,7 @@ export function tenantResolver(db: Database): TenantResolver {
       /*
        * ⚠ NOT INSIDE `withTenant`, WHICH WOULD BE CIRCULAR. The whole point of
        * this call is to find the value `withTenant` needs. The function is a
-       * SECURITY DEFINER for exactly that reason — see 0038 — and it takes the
+       * SECURITY DEFINER for exactly that reason - see 0038 - and it takes the
        * principal as arguments rather than reading a session, so it cannot be
        * asked anything broader than "translate this verified identity".
        */
@@ -71,7 +71,7 @@ export interface TenantAuthDeps {
    * DEPLOYMENT decision: every session then resolves through the personal
    * branch of `tenant_for_principal`, which is correct for a solo developer and
    * simply cannot see team accounts. A configured reader that FAILS is a
-   * different thing — the operator said organizations exist, so a null would be
+   * different thing - the operator said organizations exist, so a null would be
    * a guess about which workspace the caller is in. That is why it reports
    * `unknown` rather than null, and why `requireTenant` turns that into a 503.
    */
@@ -104,14 +104,14 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
    * `Authorization` header OR from Clerk's `__session` COOKIE, and this API has
    * no CORS policy, no Origin check and no custom-header requirement. Without
    * this line, a page on any other site could issue
-   * `fetch(…, { credentials: "include" })` against `/console/*` — a simple
-   * request, so no preflight — and although the attacker could not READ the
+   * `fetch(…, { credentials: "include" })` against `/console/*` - a simple
+   * request, so no preflight - and although the attacker could not READ the
    * response, the side effect would land: contacts deleted, a key rotated, a
    * domain removed, a plan changed.
    *
    * ⚠ IT COSTS NOTHING, BECAUSE THE ONLY CLIENT ALREADY SENDS IT. The console
    * calls this surface server-side with an explicit `Authorization: Bearer
-   * <session jwt>` — see apps/console/lib/api.ts. A browser cannot attach that
+   * <session jwt>` - see apps/console/lib/api.ts. A browser cannot attach that
    * header cross-origin without a preflight the API would answer with no CORS
    * headers, so requiring it makes cookie-borne CSRF structurally impossible
    * rather than dependent on Clerk's cookie-domain configuration.
@@ -143,7 +143,7 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
   }
 
   if (outcome.status === "unavailable") {
-    // ⚠ 503, NEVER 401 — the rule `requireApiKey` and `requireUser` both
+    // ⚠ 503, NEVER 401 - the rule `requireApiKey` and `requireUser` both
     // follow. Clerk did not answer, so we do not know whether the session is
     // good, and telling somebody their sign-in is bad during a Clerk outage
     // makes them sign out of the one session that still works.
@@ -161,7 +161,7 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
   /*
    * ⚠ A FAILED ORG LOOKUP IS A 503, NOT A FALLBACK TO THE PERSONAL TENANT.
    * `tenant_for_principal` reads a null org as "personal", so answering null
-   * here would not degrade the request — it would silently perform it against a
+   * here would not degrade the request - it would silently perform it against a
    * DIFFERENT WORKSPACE. On a mutating route that is an API key minted into the
    * wrong tenant, a rename of the wrong workspace, a checkout billing the wrong
    * one; and none of it looks wrong on screen, because the personal tenant is a

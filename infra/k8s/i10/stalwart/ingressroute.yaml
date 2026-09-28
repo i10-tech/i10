@@ -46,7 +46,7 @@ spec:
     # in web.yaml, and "our rule happens to be longer" is not a property anyone
     # will preserve while editing an unrelated file.
 
-    # 1 — the Apple configuration profile, from the API.
+    # 1 - the Apple configuration profile, from the API.
     - match: Host(`autoconfig.i10.tech`) && Path(`/apple.mobileconfig`)
       kind: Rule
       priority: 100
@@ -56,7 +56,7 @@ spec:
         - name: i10-api
           port: 80
 
-    # 2 — everything Stalwart generates itself.
+    # 2 - everything Stalwart generates itself.
     #
     # PathRegexp with `(?i)` for autodiscover is not defensive programming:
     # Outlook probes `/autodiscover/`, `/Autodiscover/` and `/AutoDiscover/`,
@@ -73,7 +73,7 @@ spec:
         - name: i10-stalwart
           port: 8080
 
-    # 3 — the apex fallback. Thunderbird and several others try
+    # 3 - the apex fallback. Thunderbird and several others try
     # `https://<domain>/.well-known/autoconfig/...` before, or instead of, the
     # autoconfig subdomain. i10.tech is the marketing site; this carves out one
     # prefix from it.
@@ -84,7 +84,7 @@ spec:
         - name: i10-stalwart
           port: 8080
 
-    # 4 — MTA-STS. A sending server fetches this over HTTPS and will not trust
+    # 4 - MTA-STS. A sending server fetches this over HTTPS and will not trust
     # it any other way: the policy's whole security value is that it arrived
     # under a certificate for `mta-sts.<domain>`.
     #

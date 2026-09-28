@@ -8,7 +8,7 @@ import type { DelegationProbe } from "../src/domains/ownership.js"
  * ⚠ `delegation_token` IS GENERATED PER ROW, so deleting a domain and adding it
  * again issues a NEW claim and every NS record the customer already published
  * names the OLD one. Those records resolve, they point at our nameservers, and
- * they look exactly right in a DNS panel — and until this distinction existed
+ * they look exactly right in a DNS panel - and until this distinction existed
  * the check reported them as `absent`, which tells somebody to go and fix DNS
  * that is present and correct.
  */

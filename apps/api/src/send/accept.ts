@@ -9,7 +9,7 @@ import { maySendFrom, scopedDomains } from "../auth/scope.js"
  * Accepting a send.
  *
  * `POST /emails` returns an id synchronously, and that id has to be real before
- * the response is written — it is what the caller stores, logs and later asks
+ * the response is written - it is what the caller stores, logs and later asks
  * about. So the order is fixed:
  *
  *   1. QUOTA     cheap, cached, before anything is written.
@@ -20,12 +20,12 @@ import { maySendFrom, scopedDomains } from "../auth/scope.js"
  * ⚠ ENQUEUE AFTER COMMIT, NEVER BEFORE OR WITHIN. A job whose rows are not
  * committed yet finds nothing to claim and is dropped, and the message is then
  * lost with no error anywhere. Committing first means the worst case is a
- * committed row that no job points at — which the stale-claim sweep picks up.
+ * committed row that no job points at - which the stale-claim sweep picks up.
  * Late is recoverable; lost is not.
  *
  * ⚠ AND A FAILED ENQUEUE IS NOT A FAILED REQUEST. The rows exist and the sweep
  * will find them, so returning 500 would tell the caller nothing was accepted
- * while the mail goes out anyway — and an SDK that retries on 500 would then
+ * while the mail goes out anyway - and an SDK that retries on 500 would then
  * send it twice.
  */
 
@@ -44,8 +44,8 @@ export type AcceptOutcome =
    * The key is restricted to other domains than the one it tried to send from.
    *
    * ⚠ IT IS CHECKED HERE RATHER THAN IN THE ROUTES, THOUGH IT IS
-   * AUTHORIZATION. There are two send routes and there will be more — a
-   * scheduled resend, a broadcast — and a restriction that has to be
+   * AUTHORIZATION. There are two send routes and there will be more - a
+   * scheduled resend, a broadcast - and a restriction that has to be
    * remembered at each entry point is a restriction that will be missed at one
    * of them. This function is the throat every send passes through, and it
    * already refuses over-quota tenants for the same reason.
@@ -55,7 +55,7 @@ export type AcceptOutcome =
    * The `from` domain is not one this tenant has verified.
    *
    * ⚠ NOTHING ENFORCED THIS, AND THE FAILURE IT LEFT WAS THE WORST SHAPE THERE
-   * IS: the API answered 200, wrote the message, queued it — and SES refused it
+   * IS: the API answered 200, wrote the message, queued it - and SES refused it
    * at delivery as "an identity that is not verified". The caller got an id and
    * a success, the mail went nowhere, and the only trace was a `failed` row in
    * a log they had no reason to open. Somebody following the onboarding snippet
@@ -75,8 +75,8 @@ export type AcceptOutcome =
  * A stable fingerprint of the request body.
  *
  * ⚠ IT IS WHAT MAKES `Idempotency-Key` SAFE RATHER THAN DANGEROUS. Without it,
- * a client that reuses a key for a different email — a loop with a fixed key, a
- * copy-pasted example — silently gets the first message's id back and the
+ * a client that reuses a key for a different email - a loop with a fixed key, a
+ * copy-pasted example - silently gets the first message's id back and the
  * second email is never sent. With it, that is a 409 they can see.
  *
  * ⚠ KEY ORDER MUST NOT MATTER. `JSON.stringify` preserves insertion order, so
@@ -108,7 +108,7 @@ export interface PreparedMessage {
   bcc: string[]
   /**
    * When it is due, parsed once here rather than at each of the three places
-   * that need it — the row, the queue delay and the claim.
+   * that need it - the row, the queue delay and the claim.
    *
    * Null means now. A time in the past also means now: the contract says so,
    * and a delayed job whose moment has passed is just a job.
@@ -120,13 +120,13 @@ export interface PreparedMessage {
  * Removes suppressed recipients.
  *
  * ⚠ BEFORE THE SEND, NOT AFTER THE BOUNCE. A suppression exists because an
- * address hard-bounced, complained, or unsubscribed — sending to it again costs
+ * address hard-bounced, complained, or unsubscribed - sending to it again costs
  * reputation that is shared by every tenant on the same SES account, so one
  * customer ignoring their list degrades deliverability for all of them.
  *
  * ⚠ AND A MESSAGE WITH NO SURVIVING `to` IS NOT AN ERROR. The caller did
  * nothing wrong; the address is simply unreachable and they were told so when
- * it bounced. It is accepted, recorded, and never queued — so the dashboard
+ * it bounced. It is accepted, recorded, and never queued - so the dashboard
  * shows what happened, which "422 invalid recipient" would not.
  */
 export function withoutSuppressed(
@@ -149,7 +149,7 @@ export function withoutSuppressed(
  * The requested send time, or null for now.
  *
  * The contract has already validated the format, so an unparseable value here
- * would be a bug rather than a bad request — and null (send now) is a safer
+ * would be a bug rather than a bad request - and null (send now) is a safer
  * answer to a bug than a crash or a message that silently never goes.
  */
 function scheduleOf(payload: SendEmail): Date | null {
@@ -163,7 +163,7 @@ function scheduleOf(payload: SendEmail): Date | null {
  *
  * ⚠ SUPPRESSION IS COMPARED ON THIS, NOT ON THE RAW STRING. `to` accepts a
  * display name, so a hard-bounced address that has been suppressed would
- * otherwise become sendable again simply by writing `Bob <bob@x.com>` — a
+ * otherwise become sendable again simply by writing `Bob <bob@x.com>` - a
  * bypass that costs shared SES reputation and that nobody would ever notice,
  * because the send succeeds.
  *
@@ -183,8 +183,8 @@ export function asList(value: string | string[] | undefined): string[] {
 
 /**
  * ⚠ THE CLASS DECIDES WHICH QUEUE, AND THE TWO NEVER SHARE ONE. `POST /emails`
- * is a single message somebody is probably waiting for — a password reset, a
- * receipt — so it is transactional. `POST /emails/batch` is by definition not
+ * is a single message somebody is probably waiting for - a password reset, a
+ * receipt - so it is transactional. `POST /emails/batch` is by definition not
  * that. Routing them together would let a thousand-message batch queue in front
  * of a reset, which is the failure the split exists to prevent.
  */
@@ -199,14 +199,14 @@ export interface AcceptOps {
    *
    * Returns `replayed` when the key has been seen with the same request hash,
    * and `conflict` when it has been seen with a different one. Both decisions
-   * belong inside the transaction — made outside, two concurrent replays of the
+   * belong inside the transaction - made outside, two concurrent replays of the
    * same key would both miss and both insert.
    */
   persist: (input: {
     tenantId: string
     /**
      * ⚠ NULLABLE, BECAUSE i10'S OWN MAIL HAS NO KEY. Authentication email is
-     * sent by the `email.created` webhook rather than by a customer's request —
+     * sent by the `email.created` webhook rather than by a customer's request -
      * there is no key to attribute it to, and `core.messages.api_key_id` was
      * always nullable for exactly this. Inventing a sentinel uuid would put a
      * row in the message log pointing at a key that does not exist.
@@ -223,7 +223,7 @@ export interface AcceptOps {
   >
 
   /**
-   * Addresses this tenant may not send to, in `addrSpec()` form — bare and
+   * Addresses this tenant may not send to, in `addrSpec()` form - bare and
    * lowercased, because that is what `withoutSuppressed` compares against.
    */
   suppressedFor: (tenantId: string, addresses: string[]) => Promise<Set<string>>
@@ -247,7 +247,7 @@ export interface AcceptOps {
   /**
    * Pushes the batch. Called only after the transaction commits.
    *
-   * `runAt` delays the job — see the scheduling note in `acceptSend`.
+   * `runAt` delays the job - see the scheduling note in `acceptSend`.
    */
   enqueue: (queue: SendClass, job: SendJob, opts?: { runAt?: Date }) => Promise<void>
 }
@@ -279,14 +279,14 @@ function refusedDomain(
 export async function acceptSend(
   input: {
     tenantId: string
-    /** Null for i10's own mail — see `AcceptOps.persist`. */
+    /** Null for i10's own mail - see `AcceptOps.persist`. */
     apiKeyId: string | null
     /**
      * What the presenting key is allowed to send from.
      *
      * ⚠ OPTIONAL, AND ABSENT MEANS UNRESTRICTED. i10's own mail has no key at
      * all, and a caller that has not been taught about scopes must not be
-     * silently prevented from sending — the failure mode of getting this
+     * silently prevented from sending - the failure mode of getting this
      * backwards is every message in the product refused at once.
      */
     scopes?: readonly string[]
@@ -301,7 +301,7 @@ export async function acceptSend(
   /*
    * ⚠ BEFORE THE QUOTA CHECK AND BEFORE ANYTHING IS WRITTEN. A refusal that
    * has already spent a quota unit, or already persisted a message, is a
-   * refusal that cost the customer something — and on a batch it would leave
+   * refusal that cost the customer something - and on a batch it would leave
    * some elements written and some not.
    *
    * ⚠ AND EVERY PAYLOAD IS CHECKED, NOT THE FIRST. A batch is one request with
@@ -323,7 +323,7 @@ export async function acceptSend(
    * ⚠ AFTER THE SCOPE CHECK AND BEFORE EVERYTHING ELSE, because it costs a
    * query and the scope check does not. A key that may not touch this domain
    * at all should be refused without asking the database whether the domain is
-   * verified — the answer would not change the outcome.
+   * verified - the answer would not change the outcome.
    *
    * ⚠ AND IT IS THE SAME PLACE FOR THE SAME REASON AS THE SCOPE CHECK: this
    * function is the throat every send passes through. There are two send routes
@@ -402,7 +402,7 @@ export async function acceptSend(
   //
   // ⚠ AND ONE JOB PER DUE TIME, NOT ONE JOB PER REQUEST. A job carries a single
   // delay, so a batch whose elements are scheduled differently cannot be one
-  // job — the earliest due time would drag the rest forward, or the latest
+  // job - the earliest due time would drag the rest forward, or the latest
   // would hold the rest back. Partitioning is what keeps `scheduled_at` a
   // per-message promise rather than a per-request one.
   for (const [dueAt, refs] of byDueTime(written.refs, messages)) {
@@ -410,7 +410,7 @@ export async function acceptSend(
       // ⚠ THE DELAY IS THE OPTIMISATION; THE DATABASE IS THE GUARANTEE. Redis
       // holding a job back is what keeps a scheduled message off the worker
       // until it is due, but the claim ALSO refuses a row whose `scheduled_at`
-      // is in the future — so a promoted-early job, or a sweep that re-enqueues
+      // is in the future - so a promoted-early job, or a sweep that re-enqueues
       // one, still cannot send it ahead of time.
       const job = { tenantId: input.tenantId, messages: refs }
       if (dueAt !== null && dueAt > Date.now()) {
@@ -420,11 +420,11 @@ export async function acceptSend(
       }
     } catch (err) {
       // The rows are committed. The stale-claim sweep will find them, so this
-      // is late rather than lost — and reporting a failure would make an SDK
+      // is late rather than lost - and reporting a failure would make an SDK
       // retry and send everything twice.
       deps.log.error(
         { err, tenantId: input.tenantId, count: refs.length, dueAt },
-        "enqueue failed after commit — the sweep will pick these up",
+        "enqueue failed after commit - the sweep will pick these up",
       )
     }
   }

@@ -124,7 +124,7 @@ describe("what each failure is called", () => {
    * ⚠ THE STATE A RE-ADDED DOMAIN LEAVES BEHIND, AND THE REASON IT WENT
    * UNNOTICED FOR SO LONG: it resolves. Deleting a domain here cannot reach
    * into the customer's zone, so the previous claim's nameservers are still
-   * published beside the new ones — `some(ours)` is true, the SOA answers,
+   * published beside the new ones - `some(ours)` is true, the SOA answers,
    * and the old code called that `ok`. Whichever nameserver a resolver picks
    * decides whether the mail records are found.
    */
@@ -180,8 +180,8 @@ describe("what each failure is called", () => {
 
 describe("whether our own nameservers are up", () => {
   /**
-   * ⚠ THE PRODUCTION STATE WHEN THIS WAS WRITTEN. The hostnames resolve — to
-   * Cloudflare's HTTP proxy — and nothing answers DNS at those addresses. A
+   * ⚠ THE PRODUCTION STATE WHEN THIS WAS WRITTEN. The hostnames resolve - to
+   * Cloudflare's HTTP proxy - and nothing answers DNS at those addresses. A
    * checker that only looked at whether the names resolved would call this
    * healthy.
    */
@@ -202,7 +202,7 @@ describe("whether our own nameservers are up", () => {
   /**
    * ⚠ ONE LIVE SERVER SERVES THE ZONE. Resolvers try every nameserver in a
    * delegation before giving up, so a single survivor is a redundancy problem
-   * rather than an outage — and reporting it as "this is on us" would send
+   * rather than an outage - and reporting it as "this is on us" would send
    * somebody chasing a fault while their domain verifies perfectly well.
    */
   it("is true when only one of them answers", async () => {
@@ -256,7 +256,7 @@ describe("the per-claim regression", () => {
    * ⚠ THE BARE DEPLOYMENT NAME IS NOT THIS CLAIM'S, AND ACCEPTING IT WOULD
    * REOPEN THE HOLE PER-CLAIM NAMESERVERS CLOSED. `mail.example.com NS
    * ns1.i10.tech` says somebody delegated the name to i10 and nothing about
-   * which workspace — which is exactly the evidence this design refuses.
+   * which workspace - which is exactly the evidence this design refuses.
    */
   it("does not accept the deployment's own nameservers", async () => {
     const report = await check({

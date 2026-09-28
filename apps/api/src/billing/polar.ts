@@ -5,8 +5,8 @@ import type { PolarSubscription } from "./events.js"
  *
  * ⚠ RAW `fetch` RATHER THAN `@polar-sh/sdk`, AND THE RETIRED AUTUMN CLIENT WAS
  * WRITTEN THE SAME WAY. The
- * SDK is a generated client for the whole API — checkouts, benefits, orders,
- * seats, discounts — and this uses two endpoints of it. What it would buy is
+ * SDK is a generated client for the whole API - checkouts, benefits, orders,
+ * seats, discounts - and this uses two endpoints of it. What it would buy is
  * types we can write in twenty lines; what it costs is a large dependency on
  * the path that grants paid plans, and a version bump that can change the wire
  * format underneath us.
@@ -29,7 +29,7 @@ import type { PolarSubscription } from "./events.js"
  * change reported "Polar could not apply the change. Check the payment
  * method." for a 401 on a token from the wrong environment, a 404 on a
  * subscription belonging to another organisation, and a 422 on a product id
- * that is not ours — none of which a customer can fix by looking at their
+ * that is not ours - none of which a customer can fix by looking at their
  * card, and all of which sent somebody to their bank instead of to the log
  * line that says what happened. The status is the one fact that separates
  * them, so it travels with the error.
@@ -124,7 +124,7 @@ export interface CustomerState {
   /**
    * ⚠ OURS TO SET AND POLAR'S TO KEEP, AND IT IS NULLABLE FOR A REASON THAT
    * COSTS MONEY. `external_customer_id` on a checkout sets this only when Polar
-   * CREATES the customer; their own field documentation says so — "a new
+   * CREATES the customer; their own field documentation says so - "a new
    * customer will be created with this external ID set". A checkout that
    * resolves to a customer Polar already had leaves whatever that record
    * already carried, which for a customer created any other way is nothing.
@@ -135,7 +135,7 @@ export interface CustomerState {
 export interface PolarClient {
   createCheckout(input: CheckoutInput): Promise<Checkout>
   /**
-   * One checkout, by id. `null` when Polar does not know it — which is the
+   * One checkout, by id. `null` when Polar does not know it - which is the
    * answer for a made-up id, and must not be confused with "not paid".
    */
   getCheckout(checkoutId: string): Promise<CheckoutState | null>
@@ -145,7 +145,7 @@ export interface PolarClient {
    * ⚠ IT EXISTS FOR EXACTLY ONE QUESTION: does this customer carry our tenant
    * id. Every subscription event is attributed by `customer.external_id` and
    * nothing else, so a customer without one is a paying customer whose events
-   * are discarded by `toState` — silently, in the webhook AND in the
+   * are discarded by `toState` - silently, in the webhook AND in the
    * reconciler, for ever. This is how that becomes something we can say out
    * loud rather than something nobody can see.
    */
@@ -155,8 +155,8 @@ export interface PolarClient {
    *
    * ⚠ THIS IS THE REPAIR FOR THE ONE FAILURE NOTHING ELSE CAN REACH. Polar sets
    * `external_id` only on a customer it CREATES from a checkout's
-   * `external_customer_id`; a customer that already existed — bought something
-   * before, or was made by hand in their dashboard — keeps a null one. Every
+   * `external_customer_id`; a customer that already existed - bought something
+   * before, or was made by hand in their dashboard - keeps a null one. Every
    * subscription event for that customer is then dropped by `toState`, in the
    * webhook and in the reconciler alike, so the payment succeeds and no plan is
    * ever granted. Writing the id back is the only thing that unblocks it.
@@ -189,8 +189,8 @@ export interface PolarClient {
    * Moves a live subscription to another product.
    *
    * ⚠ THIS IS THE ONLY WAY PRORATION HAPPENS THE WAY ANYONE EXPECTS. Polar's
-   * `update.py` has no upgrade/downgrade branch — it acts on
-   * `proration_behavior` alone — so "charge an upgrade now, defer a downgrade"
+   * `update.py` has no upgrade/downgrade branch - it acts on
+   * `proration_behavior` alone - so "charge an upgrade now, defer a downgrade"
    * exists only because WE choose the behaviour per direction. An organisation
    * default cannot be right for both, and the customer portal only ever uses
    * the default.
@@ -202,7 +202,7 @@ export interface PolarClient {
    *
    * ⚠ THIS IS HOW SOMEBODY GETS BACK TO THE FREE PLAN, and without it there was
    * no way down at all. `updateSubscription` moves between Polar PRODUCTS, and
-   * the free plan deliberately has none — nothing is charged for it, so there
+   * the free plan deliberately has none - nothing is charged for it, so there
    * is nothing to sell. A customer on Pro could therefore upgrade, and could
    * move sideways, and could not leave: the console showed a "Downgrade" button
    * for free that answered `No such plan: free`.
@@ -220,21 +220,21 @@ export interface PolarClient {
    *
    * ⚠ THE MISSING HALF OF `cancelSubscription`, AND ITS ABSENCE WAS A TRAP
    * SOMEBODY COULD WALK INTO AND NOT WALK OUT OF. Cancelling is deferred to
-   * the period boundary — deliberately, they have paid for the rest of the
-   * month — so for up to a month the subscription is alive, billed for, and
+   * the period boundary - deliberately, they have paid for the rest of the
+   * month - so for up to a month the subscription is alive, billed for, and
    * marked to end. Every control in the console read that state as "already
    * decided": the free card said "Ending", the paid card said "Current plan",
    * and there was no way to say "actually, keep it" short of waiting for the
    * subscription to lapse and buying it again.
    *
    * ⚠ IT IS A `PATCH`, NOT A NEW SUBSCRIPTION. Nothing is bought and nothing
-   * is charged — the same subscription simply stops being marked, which is
+   * is charged - the same subscription simply stops being marked, which is
    * why this is safe to offer as an ordinary button rather than a checkout.
    */
   resumeSubscription(subscriptionId: string): Promise<void>
 
   /**
-   * Ends a live subscription NOW — benefits revoked, billing stopped, no
+   * Ends a live subscription NOW - benefits revoked, billing stopped, no
    * remainder of the period.
    *
    * ⚠ THE OPPOSITE OF `cancelSubscription`, AND THE DIFFERENCE IS WHO ASKED.
@@ -242,14 +242,14 @@ export interface PolarClient {
    * paid for the rest of the month and taking it away would be both a refund
    * question and a nasty surprise. Deleting a workspace is not that: the
    * account is gone, the mailboxes are gone, nobody is left to use what the
-   * remainder of the period would buy — and leaving the subscription running to
+   * remainder of the period would buy - and leaving the subscription running to
    * the boundary means charging somebody who has deleted their account, which
    * is the one billing failure a customer will never accept an explanation for.
    * The console says immediately, so this has to mean immediately.
    *
    * ⚠ `already_ended` IS A SUCCESS, NOT AN ERROR. Polar answers 403 for a
    * subscription it has already revoked and 404 for one it does not know, and
-   * this runs from a webhook Svix redelivers — turning either into a throw
+   * this runs from a webhook Svix redelivers - turning either into a throw
    * would make every retry of a completed deletion a 500, retried until the
    * budget runs out, against a subscription that is already off.
    *
@@ -287,7 +287,7 @@ export interface UsageIngestEvent {
   /** ⚠ Our tenant id, which Polar already holds as `customer.external_id`. */
   tenantId: string
   /**
-   * ⚠ WHEN IT HAPPENED, NOT WHEN WE SENT IT — and Polar rejects a timestamp in
+   * ⚠ WHEN IT HAPPENED, NOT WHEN WE SENT IT - and Polar rejects a timestamp in
    * the future outright. Their billing period attributes by RECEIPT time, so a
    * flush that straddles a period boundary moves revenue between months
    * whatever this says; the timestamp is what makes the meter's own reporting
@@ -327,14 +327,14 @@ export function polarClient(opts: PolarOptions): PolarClient {
    * substitutes the literal `{CHECKOUT_ID}` into `success_url` before
    * redirecting, and `/billing` reads `?checkout_id=` to know what to poll for.
    * `POLAR_SUCCESS_URL` is a free-text environment variable: set to
-   * `https://dash.i10.tech/billing` — which is the obvious thing to type — the
+   * `https://dash.i10.tech/billing` - which is the obvious thing to type - the
    * customer lands on a page that immediately answers "we could not find that
    * checkout" for a payment that went through. An operator should not be able
    * to break the confirmation page by leaving a placeholder off a URL.
    *
    * ⚠ APPENDED AS TEXT RATHER THAN THROUGH `URLSearchParams`, which would
    * percent-encode the braces into `%7BCHECKOUT_ID%7D` and leave Polar nothing
-   * to substitute — a URL that looks right in the dashboard and interpolates
+   * to substitute - a URL that looks right in the dashboard and interpolates
    * nothing.
    */
   function withCheckoutId(successUrl: string): string {
@@ -351,12 +351,12 @@ export function polarClient(opts: PolarOptions): PolarClient {
           /*
            * ⚠ THE TENANT IS NO LONGER SENT AS `external_customer_id`, AND THAT
            * REMOVAL IS THE FIX FOR A WHOLE CLASS OF BUG RATHER THAN A TIDY-UP.
-           * Polar stores that value on the CUSTOMER — a record it scopes to a
+           * Polar stores that value on the CUSTOMER - a record it scopes to a
            * person, deduplicates by EMAIL, stamps only at creation, and refuses
            * to update ever after (`422 Customer external ID cannot be
            * updated`). A workspace and a person do not share a lifetime: delete
            * the workspace, sign up again, and Polar hands back the same
-           * customer still naming the workspace that is gone — permanently,
+           * customer still naming the workspace that is gone - permanently,
            * repairable from neither side.
            *
            * Attribution now comes from `core.polar_checkouts`, written here by
@@ -380,7 +380,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
                  *
                  * `loaded`, `confirmed` and `success` carry the identical
                  * guard. Unset, the iframe still renders and still takes the
-                 * money — and says nothing to the page it is sitting on, for
+                 * money - and says nothing to the page it is sitting on, for
                  * ever. That is the whole of the bug we spent two rounds
                  * working around: their ✕ "not working" is their ✕ returning
                  * early, and the `success` event that "never arrived" was
@@ -388,15 +388,15 @@ export function polarClient(opts: PolarOptions): PolarClient {
                  *
                  * ⚠ AN EARLIER PROBE CONCLUDED THIS FIELD WAS UNNECESSARY, AND
                  * IT MEASURED THE WRONG THING. It checked whether the checkout
-                 * would FRAME without it — it does, `frame-ancestors` is
+                 * would FRAME without it - it does, `frame-ancestors` is
                  * governed separately by the organisation's embedding host
-                 * list — and generalised that to messaging. Two mechanisms,
+                 * list - and generalised that to messaging. Two mechanisms,
                  * one of them load-bearing.
                  *
                  * ⚠ IT IS THE ORIGIN OF `success_url` RATHER THAN A SETTING OF
                  * ITS OWN. Both name the console, and a second environment
                  * variable is a second thing that can disagree with the first
-                 * — silently, because the only symptom is a modal that stops
+                 * - silently, because the only symptom is a modal that stops
                  * talking. Polar does not validate it against anything at
                  * creation time, so a wrong value fails exactly as an absent
                  * one does, which is the argument for deriving it.
@@ -434,12 +434,12 @@ export function polarClient(opts: PolarOptions): PolarClient {
 
       // ⚠ 404 IS AN ANSWER, NOT A FAILURE. The id arrives from a query string,
       // so "Polar has never heard of this" is the ordinary case for a typo or a
-      // probe — and it is emphatically NOT "the payment failed". The caller
+      // probe - and it is emphatically NOT "the payment failed". The caller
       // renders those two differently.
       //
       // ⚠ AND 422 IS THE SAME ANSWER, WHICH IT WAS NOT BEING TREATED AS. Polar
       // validates the id before looking it up, so a well-formed UUID that is
-      // not one of theirs comes back 422 rather than 404 — measured against the
+      // not one of theirs comes back 422 rather than 404 - measured against the
       // sandbox with an all-zeros UUID. That fell through to the throw below and
       // surfaced to the browser as 503 "Could not reach the payment provider",
       // which says a payment system is down when in fact it answered
@@ -479,12 +479,12 @@ export function polarClient(opts: PolarOptions): PolarClient {
       /*
        * ⚠ A 403 HERE IS A MISSING SCOPE ON OUR OWN TOKEN, AND IT NEVER CLEARS.
        * `customers:read` is NOT in the set a Polar organisation access token is
-       * created with by default — the same trap `createCustomerSession`
+       * created with by default - the same trap `createCustomerSession`
        * already documents for `customer_sessions:write`. Measured against
        * production 2026-09-20: every call to this endpoint answered
        * `403 insufficient_scope`, which the caller caught and treated as "Polar
        * is briefly unreachable, assume attribution is fine". So the whole
-       * attribution repair — detect AND fix — was dead on that deployment, and
+       * attribution repair - detect AND fix - was dead on that deployment, and
        * nothing said so. It is named here so the message points at the token
        * rather than at the customer.
        */
@@ -555,7 +555,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
 
       // ⚠ POLAR APPLIES THE CHANGE ONLY IF THE PAYMENT SUCCEEDS, for `invoice`
       // and `prorate`. A failed card is an error here and the subscription is
-      // untouched — which is why this throws rather than reporting a partial
+      // untouched - which is why this throws rather than reporting a partial
       // success the caller would have to reconcile.
       if (!response.ok) {
         const detail = await response.text()
@@ -589,7 +589,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
     async cancelSubscription(subscriptionId) {
       /*
        * ⚠ `PATCH` WITH `cancel_at_period_end`, NEVER `DELETE`. Polar's DELETE on
-       * a subscription revokes it there and then — benefits gone, mail stops —
+       * a subscription revokes it there and then - benefits gone, mail stops -
        * for a customer who has paid through to the end of the month. This marks
        * it to end when the period does, which is what every other downgrade in
        * this file already does and what the console's copy already promises.
@@ -623,7 +623,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
       /*
        * ⚠ 403 IS TWO DIFFERENT ANSWERS AND ONLY ONE OF THEM IS SUCCESS. Polar
        * documents it as "subscription already revoked", which is exactly what
-       * this call wanted — but a token missing `subscriptions:write` answers
+       * this call wanted - but a token missing `subscriptions:write` answers
        * 403 too, and reading that as "already done" would mean every deletion
        * in the deployment silently leaves the subscription billing while the
        * log says it was revoked. The body is what tells them apart.
@@ -652,7 +652,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
     async createCustomerSession(tenantId) {
       const response = await call("/v1/customer-sessions", {
         method: "POST",
-        // ⚠ `external_customer_id`, so neither side needs a lookup table — the
+        // ⚠ `external_customer_id`, so neither side needs a lookup table - the
         // same id Polar already echoes on every subscription webhook.
         body: JSON.stringify({ external_customer_id: tenantId }),
       })
@@ -662,7 +662,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
 
         /*
          * ⚠ A 403 HERE IS ALMOST ALWAYS A MISSING SCOPE ON OUR OWN TOKEN, NOT
-         * ANYTHING ABOUT THE CUSTOMER — and the generic message sent somebody
+         * ANYTHING ABOUT THE CUSTOMER - and the generic message sent somebody
          * looking at the customer record instead. `/v1/customer-sessions`
          * requires `customer_sessions:write`, which is NOT included in the
          * scope set a Polar organisation access token is created with by
@@ -681,7 +681,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
 
         /*
          * ⚠ A 422 HERE MEANS POLAR HAS NEVER HEARD OF THIS TENANT, which is the
-         * normal state of anybody who has not been through checkout — Polar
+         * normal state of anybody who has not been through checkout - Polar
          * creates the customer at the first payment, not at our sign-up. The
          * caller has to be able to tell that apart from a real failure, because
          * the answer is "you have nothing to pay with yet", not "try again".

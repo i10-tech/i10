@@ -1,6 +1,6 @@
 ---
 /**
- * LinkButton — an anchor styled as a button.
+ * LinkButton - an anchor styled as a button.
  *
  *   <LinkButton href="/start" variant="primary">Get started</LinkButton>
  *   <LinkButton href="/docs" variant="secondary">Read the docs</LinkButton>
@@ -11,7 +11,7 @@
  *
  * Styling is delegated to the shared `ui/button/variants`, so LinkButton and
  * Button stay visually identical. The original props are preserved (used by
- * MDX): the LinkButton-only aliases map onto the shared vocabulary —
+ * MDX): the LinkButton-only aliases map onto the shared vocabulary -
  * `minimal → ghost`, `md → base`.
  */
 import { cn } from "@/lib/cn";
@@ -31,7 +31,7 @@ interface Props extends HTMLAttributes<"a"> {
   variant?: ButtonVariant | "minimal";
   /** Original `sm | md | lg`, plus Button's `xs | base`. */
   size?: ButtonSize | "md";
-  /** `base` (default) · `square` · `circle` (icon-only — pass `aria-label`). */
+  /** `base` (default) · `square` · `circle` (icon-only - pass `aria-label`). */
   shape?: ButtonShape;
   /** Append a caret-right that nudges on hover. */
   icon?: boolean;

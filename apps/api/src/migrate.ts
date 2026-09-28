@@ -10,7 +10,7 @@
  * ⚠ THIS USES THE PRIMARY, NOT THE POOLER. Migrations run DDL inside a
  * transaction and take advisory locks; PgBouncer in transaction pooling mode can
  * hand consecutive statements to different backends, which breaks both. The
- * application connects through the pooler — this does not.
+ * application connects through the pooler - this does not.
  */
 import { drizzle } from "drizzle-orm/postgres-js"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -38,7 +38,7 @@ const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "dr
  *
  * A brand-new pod's FIRST outbound connection to a ClusterIP is refused while
  * kube-proxy and the CNI finish programming rules for it. postgres.js connects
- * LAZILY — the socket is opened by the first query — and it makes exactly one
+ * LAZILY - the socket is opened by the first query - and it makes exactly one
  * attempt with no retry. So a refusal in that window surfaced as
  *
  *   migration failed: Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"
@@ -50,7 +50,7 @@ const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "dr
  * ⚠ AND IT ONLY STARTED FAILING WHEN THE IMAGE GOT FASTER. Under Node the
  * process spent long enough loading files off disk that the window had closed
  * by the time it dialled; the bundled bun image starts in milliseconds and
- * lands inside it. The race was always there — nothing about it was introduced
+ * lands inside it. The race was always there - nothing about it was introduced
  * by bun, and going back to a slower runtime would hide it rather than fix it.
  * Every attempt is a NEW pod, so `backoffLimit` does not help: each retry gets
  * its own fresh, unready network. The retry has to be in here.
@@ -78,7 +78,7 @@ async function waitForDatabase() {
 /**
  * ⚠ THE WHOLE CHAIN, NOT `err.message`. drizzle wraps a driver error as
  * `Failed query: <sql>` and hangs the real one off `cause`, so printing only
- * the message reports the statement and discards the reason — the difference
+ * the message reports the statement and discards the reason - the difference
  * between "ECONNREFUSED" and a silent wall. A migration that fails invisibly is
  * the worst outcome this file has.
  */

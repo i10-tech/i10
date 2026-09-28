@@ -15,7 +15,7 @@ import { Time } from "@/components/time"
  *
  * ⚠ `response_status` IS THE COLUMN PEOPLE COME FOR. "It is not working" almost
  * always resolves to a 401 from their own auth middleware, a 404 from a route
- * that moved, or a 500 from their handler — and each of those is a completely
+ * that moved, or a 500 from their handler - and each of those is a completely
  * different fix. Showing the status code turns a support conversation into a
  * glance.
  *
@@ -111,7 +111,7 @@ export function DeliveriesTable({
                     </td>
                     <td className="px-3 py-2.5">
                       {delivery.response_status === null ? (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <span className="text-xs text-muted-foreground">-</span>
                       ) : (
                         <span
                           className={cn(
@@ -127,7 +127,7 @@ export function DeliveriesTable({
                     <td className="hidden max-w-0 px-3 py-2.5 lg:table-cell">
                       <span className="block truncate font-mono text-xs text-muted-foreground">
                         {/*
-                         * ⚠ A DELETED ENDPOINT LEAVES ITS DELIVERIES BEHIND —
+                         * ⚠ A DELETED ENDPOINT LEAVES ITS DELIVERIES BEHIND -
                          * the API left-joins for exactly this reason. Showing
                          * "(deleted)" is more useful than an empty cell,
                          * because the history of a removed endpoint is usually
@@ -160,7 +160,7 @@ export function DeliveriesTable({
                               {delivery.delivered_at ? (
                                 <Time iso={delivery.delivered_at} mode="exact" />
                               ) : (
-                                "—"
+                                "-"
                               )}
                             </dd>
                           </div>

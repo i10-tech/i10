@@ -53,7 +53,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            # Numeric — matches the USER pinned in apps/docs/Dockerfile. See
+            # Numeric - matches the USER pinned in apps/docs/Dockerfile. See
             # api.yaml for why a named user is not enough.
             runAsUser: 1001
             runAsGroup: 1001

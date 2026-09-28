@@ -27,7 +27,7 @@ describe("drawing down", () => {
   /**
    * ⚠ ALL-OR-NOTHING, NEVER PARTIAL. Trimming a batch would mean answering one
    * `POST /emails` with "some of these were accepted" and leaving the caller to
-   * work out which recipients were dropped — a quota error turned into silent
+   * work out which recipients were dropped - a quota error turned into silent
    * data loss.
    */
   it("refuses a batch outright rather than trimming it", () => {
@@ -53,8 +53,8 @@ describe("overdraft", () => {
     })
   })
 
-  // ⚠ A NEGATIVE REMAINING REACHES CUSTOMERS — a rate-limit header, a usage
-  // dashboard — and reads as our bug rather than as a tolerated overdraft.
+  // ⚠ A NEGATIVE REMAINING REACHES CUSTOMERS - a rate-limit header, a usage
+  // dashboard - and reads as our bug rather than as a tolerated overdraft.
   it("never reports a negative remaining", () => {
     expect(remainingOf({ allowance: 100, used: 140 })).toBe(0)
   })
@@ -101,7 +101,7 @@ describe("refusals", () => {
 
 /**
  * ⚠ ACCEPTED WHOLE, ATTRIBUTED IN TWO PARTS. This is NOT the partial acceptance
- * refused above — the batch still goes in full. What splits is which units are
+ * refused above - the batch still goes in full. What splits is which units are
  * covered by the plan and which land on an invoice.
  */
 describe("overage", () => {
@@ -128,7 +128,7 @@ describe("overage", () => {
   })
 
   // ⚠ THE DEFAULT IS A HARD CAP. A caller that forgets the flag gets a refusal,
-  // never a surprise invoice — the safe direction for the customer.
+  // never a surprise invoice - the safe direction for the customer.
   it("refuses rather than bills when the flag is absent", () => {
     expect(draw({ allowance: 100, used: 100, requested: 5 })).toEqual({
       status: "exceeded",
@@ -151,7 +151,7 @@ describe("overage", () => {
     })
   })
 
-  // ⚠ There is no allowance to be past, so there is nothing to bill — an
+  // ⚠ There is no allowance to be past, so there is nothing to bill - an
   // unlimited feature producing billable units is a contradiction on an invoice.
   it("never bills an unlimited allowance", () => {
     expect(

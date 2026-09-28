@@ -12,12 +12,12 @@
   // staging and production produce different images, which is exactly what the
   // promotion model exists to avoid.
   //
-  // They are listed at all — rather than left out — because
+  // They are listed at all - rather than left out - because
   // `turbo/no-undeclared-env-vars` is an error here, and that rule is a
   // correctness guard, not style: reading an undeclared variable produces a
   // build cached against the wrong key and silently reused with stale values.
   // ⚠ IT IS AN ALLOWLIST, AND IT WAS MISSING 47 OF THE 62 VARIABLES THE CODE
-  // READS — WHICH MEANT `bun run dev` COULD NOT START THE API AT ALL. Turbo
+  // READS - WHICH MEANT `bun run dev` COULD NOT START THE API AT ALL. Turbo
   // strips anything not named here before it spawns a task, so `doppler run --
   // bun run dev` injected a complete environment and the API still died with
   // "Invalid environment: REDIS_URL … MAIL_DOMAINS … SES_CONFIGURATION_SET".
@@ -55,7 +55,7 @@
     // replaced by discovery over `DNS_OAUTH_<PROVIDER>_CLIENT_ID` and its two
     // siblings, and the list was never widened. So every provider anybody
     // configured was stripped one layer below `doppler run --` and the API
-    // booted with no OAuth apps at all — the console then said "Connecting
+    // booted with no OAuth apps at all - the console then said "Connecting
     // Cloudflare is not configured on this deployment", which is the API
     // truthfully reporting an environment turbo had emptied.
     //
@@ -111,7 +111,7 @@
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"],
       // Baked into the artifact and reported by /version, so they ARE build
-      // inputs — unlike the passThrough list above.
+      // inputs - unlike the passThrough list above.
       "env": ["GIT_SHA", "GIT_BRANCH", "BUILD_TIME", "NODE_ENV"]
     },
     "lint": { "dependsOn": ["^lint"] },
@@ -121,7 +121,7 @@
     "check-types": { "dependsOn": ["^build", "^check-types"] },
     "test": { "dependsOn": ["^build"], "outputs": [] },
     // Regenerating the published document reads @repo/contracts at RUNTIME, so
-    // it needs the same `^build` as check-types — the package's exports point at
+    // it needs the same `^build` as check-types - the package's exports point at
     // dist/. Without it the script dies with ERR_MODULE_NOT_FOUND on a clean
     // checkout, which looks like a broken dependency rather than a missing build.
     //

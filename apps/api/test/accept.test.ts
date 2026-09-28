@@ -35,7 +35,7 @@ function ops(over: Partial<AcceptOps> = {}) {
    * ⚠ PERMISSIVE HERE, AND EXPLICITLY SO. These tests are about quota,
    * suppression, idempotency and scheduling; the verified-domain gate has its
    * own file. Echoing back whatever was asked keeps it out of the way without
-   * hiding it — a fake that omitted this refused every send in the suite,
+   * hiding it - a fake that omitted this refused every send in the suite,
    * which is how a fail-closed gate is supposed to behave.
    */
   const sendableFrom = mock(
@@ -87,7 +87,7 @@ describe("the request hash", () => {
     expect(hashRequest(email())).not.toBe(hashRequest(email({ subject: "Other" })))
   })
 
-  // Order in an array is meaningful — a different recipient order is a
+  // Order in an array is meaningful - a different recipient order is a
   // different email.
   it("respects array order", () => {
     expect(hashRequest([1, 2])).not.toBe(hashRequest([2, 1]))
@@ -120,7 +120,7 @@ describe("suppression", () => {
   })
 
   // ⚠ THE BYPASS THAT WOULD NEVER BE NOTICED. A display name around a
-  // suppressed address must not make it sendable again — the send would
+  // suppressed address must not make it sendable again - the send would
   // succeed, and the cost would land on the SES reputation every tenant shares.
   it("sees through a display name", () => {
     const prepared = withoutSuppressed(
@@ -136,7 +136,7 @@ describe("suppression", () => {
   })
 
   // ⚠ Accepted and recorded, never queued. The caller did nothing wrong and the
-  // dashboard needs to be able to explain it — a 422 would show nothing.
+  // dashboard needs to be able to explain it - a 422 would show nothing.
   it("accepts a message whose recipients are all suppressed, but never queues it", async () => {
     const { deps, enqueue, persist } = ops({
       suppressedFor: async () => new Set(["user@example.com"]),
@@ -218,7 +218,7 @@ describe("idempotency", () => {
     expect(enqueue).not.toHaveBeenCalled()
   })
 
-  // ⚠ Neither a silent replay nor a second send — both are wrong and which one
+  // ⚠ Neither a silent replay nor a second send - both are wrong and which one
   // the caller wanted is unknowable.
   it("reports a conflict for a reused key with a different body", async () => {
     const { deps, enqueue } = ops({
@@ -300,7 +300,7 @@ describe("scheduling", () => {
     })
   })
 
-  // A time that has already passed means now, which the contract says plainly —
+  // A time that has already passed means now, which the contract says plainly -
   // and a delayed job whose moment has gone is just a job.
   it("treats a past time as immediate", async () => {
     const { deps, enqueue } = ops()
@@ -314,7 +314,7 @@ describe("scheduling", () => {
 
   // ⚠ ONE JOB PER DUE TIME. A job carries a single delay, so a mixed batch in
   // one job would drag the later messages forward or hold the earlier ones
-  // back — either way `scheduled_at` would stop being a per-message promise.
+  // back - either way `scheduled_at` would stop being a per-message promise.
   it("splits a mixed batch into one job per due time", async () => {
     const later = new Date(Date.now() + 2 * 60 * 60 * 1000)
     const { deps, enqueue } = ops()

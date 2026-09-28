@@ -5,12 +5,12 @@ import { beforeEach, describe, expect, it, mock } from "bun:test"
 // a real `init` here would mean every later test in the process holds a live
 // client pointed at a fake DSN.
 //
-// Typed, so `mock.calls` below is a real tuple rather than `[]` — the
+// Typed, so `mock.calls` below is a real tuple rather than `[]` - the
 // assertions are the point of the file.
 //
 // ⚠ AND THE IMPORT BELOW MUST STAY DYNAMIC. Vitest hoisted `vi.mock` above
 // every const, which is why these doubles needed `vi.hoisted` to exist in
-// time. bun's `mock.module` runs where it is written instead — simpler — but
+// time. bun's `mock.module` runs where it is written instead - simpler - but
 // that makes ORDER the thing holding this together: a static
 // `import … from "../src/observability.js"` would be evaluated first and the
 // module would close over the real Sentry client.
@@ -76,7 +76,7 @@ describe("scrubbing what leaves the process", () => {
   })
 
   // ⚠ REGRESSION TEST FOR A REAL LOSS OF SIGNAL. The first pattern's local part
-  // allowed `/`, and its domain allowed a bare number — so a pnpm store path
+  // allowed `/`, and its domain allowed a bare number - so a pnpm store path
   // read as an address and every dependency frame in a stack trace came back as
   // `[redacted-email]`. Nothing leaked; the report simply stopped saying which
   // library had failed, which is the only thing it was for.
@@ -172,7 +172,7 @@ describe("check-ins for a scheduled job", () => {
 
   // ⚠ REGRESSION TEST FOR A REAL OUTAGE OF THIS FEATURE. The first version sent
   // `in_progress` and then a verdict. On the first production run the verdict
-  // never arrived — the pod lived two seconds — and the monitor sat
+  // never arrived - the pod lived two seconds - and the monitor sat
   // `in_progress` until `max_runtime` turned a successful run into a timeout
   // alert. One self-contained envelope has no second packet to lose.
   it("sends exactly one check-in, with no in_progress to be left hanging", async () => {
@@ -190,7 +190,7 @@ describe("check-ins for a scheduled job", () => {
   })
 
   // ⚠ THE WHOLE POINT OF READING THE EXIT CODE. The reconciler reports a run
-  // where every tenant failed by setting an exit code and returning normally —
+  // where every tenant failed by setting an exit code and returning normally -
   // no exception is thrown. A check-in that only watched for throws would call
   // that run a success while kubectl showed it red.
   it("calls a run that set a failing exit code an error, though nothing threw", async () => {

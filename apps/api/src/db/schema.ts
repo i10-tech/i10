@@ -14,7 +14,7 @@ import {
 export * from "./core.js"
 
 /**
- * The Clerk projection — a read model of Clerk's users, maintained by webhook.
+ * The Clerk projection - a read model of Clerk's users, maintained by webhook.
  *
  * ⚠ THIS SCHEMA HAS TWO READERS IN TWO LANGUAGES. `services/authd` (Go, pgx)
  * queries these tables directly to answer Stalwart's LDAP searches. Drizzle is
@@ -23,7 +23,7 @@ export * from "./core.js"
  * not fail to compile. Changing a column name means changing both, together.
  *
  * It exists so that LDAP searches cost zero Clerk API calls. Clerk allows 1000
- * requests per 10 seconds across all of i10, and IMAP clients are chatty —
+ * requests per 10 seconds across all of i10, and IMAP clients are chatty -
  * Apple Mail opens several connections per account and re-authenticates on a
  * timer. Serving filterLogin, filterMailbox and filterMemberOf from here means
  * only the bind itself reaches Clerk: one call per authentication, none per
@@ -31,7 +31,7 @@ export * from "./core.js"
  *
  * Nothing here is authoritative. Where it disagrees with Clerk, Clerk wins and
  * the projection is repaired. In particular there is NO password material of
- * any kind — no hash, no verifier, no salt. Stalwart runs with
+ * any kind - no hash, no verifier, no salt. Stalwart runs with
  * bindAuthentication=true and never reads a password attribute.
  */
 export const authd = pgSchema("authd")
@@ -59,7 +59,7 @@ export const accounts = authd.table("accounts", {
    * and binds fail. That takes effect on the next query rather than on a
    * reconciliation run, which is what SCIM deprovisioning would have bought us.
    *
-   * Clerk webhooks must never set this — identity events say nothing about
+   * Clerk webhooks must never set this - identity events say nothing about
    * whether an invoice cleared.
    */
   active: boolean("active").notNull().default(false),
@@ -70,7 +70,7 @@ export const accounts = authd.table("accounts", {
    *
    * ⚠ NULLABLE, AND NOT YET WRITTEN. i10's own mailboxes on i10.tech predate
    * tenancy and have no owner row; a NOT NULL column would have to invent one.
-   * It is here now because the table is empty now — adding a column to a
+   * It is here now because the table is empty now - adding a column to a
    * populated projection means a backfill against Clerk, and adding it later is
    * the only version of this change that costs anything.
    *
@@ -86,7 +86,7 @@ export const accounts = authd.table("accounts", {
    * authd serves it to Stalwart as `pwdChangeTime` (attrSecretChanged), which
    * Stalwart compares to decide when cached OAuth tokens are stale. Clerk
    * publishes no password-specific timestamp, so this is the closest available
-   * signal — and it errs safely: it moves on any profile change, invalidating
+   * signal - and it errs safely: it moves on any profile change, invalidating
    * tokens MORE often than strictly needed, never less. A password change that
    * failed to move it would leave tokens minted under the old password valid.
    *

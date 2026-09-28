@@ -26,7 +26,7 @@ export const metadata: Metadata = { title: "Templates" }
  * WHICH. A template is referenced by `template_id` from production code that is
  * sending mail right now; editing it must not change what goes out mid-
  * sentence. "Unpublished changes" on a row means the editor and the live
- * version have diverged — which is exactly the state somebody forgets they are
+ * version have diverged - which is exactly the state somebody forgets they are
  * in.
  */
 export default async function TemplatesPage() {
@@ -34,7 +34,7 @@ export default async function TemplatesPage() {
   const hasRows = result.ok && result.data.data.length > 0
 
   // ⚠ GROUPED IN THE RENDER RATHER THAN BY THE API. Folders are a display
-  // concept — the column is a flat string — so the grouping belongs where the
+  // concept - the column is a flat string - so the grouping belongs where the
   // tree is drawn. An API that returned a nested shape would make every other
   // consumer unpack it.
   const grouped = new Map<string, TemplateSummary[]>()
@@ -55,7 +55,7 @@ export default async function TemplatesPage() {
           {/*
            * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
            * CARRIES THIS ACTION. Two buttons for one action, eight inches
-           * apart, reads as two different things — and the one in the header is
+           * apart, reads as two different things - and the one in the header is
            * the smaller and less explained of the two, so it wins attention it
            * has not earned. The empty state's version says what will happen;
            * this one just says a noun.

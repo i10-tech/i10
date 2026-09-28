@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# ⚠ THE TAG IS PINNED TO THE EXACT VERSION, not `1-alpine` — see
+# ⚠ THE TAG IS PINNED TO THE EXACT VERSION, not `1-alpine` - see
 # apps/api/Dockerfile. `.bun-version`, `packageManager`, ci.yml's BUN_VERSION
 # and every base image here move together.
 #
@@ -34,8 +34,8 @@ ARG GIT_SHA=dev
 ARG BUILD_TIME
 ENV GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME NEXT_TELEMETRY_DISABLED=1
 # ⚠ TURBO, NOT `bun run --filter`. `build` declares `dependsOn: ["^build"]`, so
-# the workspace packages this app imports through their `exports` — which point
-# at dist/ — are built first and in order. The pnpm command this replaced had
+# the workspace packages this app imports through their `exports` - which point
+# at dist/ - are built first and in order. The pnpm command this replaced had
 # no `...` suffix and so did NOT build them; it survived on whatever a previous
 # stage had left behind, which is exactly the kind of thing that works until it
 # does not.
@@ -46,7 +46,7 @@ WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3002
 
 # ⚠ THE UID IS PINNED, AND NUMERICALLY. `adduser -S` without -u picks the first
-# free system UID, which is a property of the base image rather than of us — it
+# free system UID, which is a property of the base image rather than of us - it
 # moves when the base image does. More importantly kubelet cannot verify a
 # NAMED user against `runAsNonRoot`: it has no way to resolve the name without
 # reading the image's /etc/passwd, so it refuses to start the container with
@@ -59,7 +59,7 @@ RUN addgroup -S -g 1001 i10 && adduser -S -u 1001 -G i10 -h /home/i10 i10 \
 ENV HOME=/home/i10
 
 # The three pieces `output: standalone` splits a build into. static/ and
-# public/ are NOT inside the standalone tree — copying only server.js gives a
+# public/ are NOT inside the standalone tree - copying only server.js gives a
 # site that renders with every stylesheet and image 404ing.
 #
 # ⚠ standalone STILL CARRIES A node_modules, UNLIKE THE API IMAGE. Next traces

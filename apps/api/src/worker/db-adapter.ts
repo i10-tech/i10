@@ -28,7 +28,7 @@ import type { BatchDeps } from "./handle-batch.js"
  * A claimed message carries its partition key.
  *
  * ⚠ `createdAt` IS THREADED THROUGH RATHER THAN RE-DERIVED. `core.messages` is
- * partitioned by `created_at`, so recording the result needs the exact value —
+ * partitioned by `created_at`, so recording the result needs the exact value -
  * and the UUIDv7's embedded timestamp is microseconds away from the column's
  * `now()` default, close enough to look right and wrong for an equality match.
  * The claim returns the real one; it rides along to `markSent` from there.
@@ -48,7 +48,7 @@ export type ClaimedMessage = OutboundMessage & {
    * of the transactional rule.
    *
    * ⚠ AND `routeOverride` IS NULLABLE BECAUSE `domain_id` IS. A message with no
-   * domain has no override, which `resolveRoute` reads as `auto` — the same
+   * domain has no override, which `resolveRoute` reads as `auto` - the same
    * answer it would give for a domain that never set one.
    */
   routeOverride: RouteOverride | null
@@ -61,7 +61,7 @@ export interface AdapterOptions {
   workerId: string
   /**
    * How long a row may sit in `sending` before another worker may take it.
-   * Must exceed groupmq's `jobTimeoutMs` — see db/claim.ts.
+   * Must exceed groupmq's `jobTimeoutMs` - see db/claim.ts.
    */
   staleAfter: string
 }
@@ -82,7 +82,7 @@ export function databaseOps(
         if (claimed.length === 0) return []
 
         // ⚠ FETCHED SEPARATELY, AND ONLY FOR WHAT WAS WON. Bodies live in their
-        // own table so the claim — which scans and updates — never drags an HTML
+        // own table so the claim - which scans and updates - never drags an HTML
         // body through it. Joining them into that UPDATE would undo the split,
         // and would read bodies for rows another worker owns.
         const ids = claimed.map((r) => String(r.id))
@@ -126,7 +126,7 @@ export function databaseOps(
     },
 
     // ⚠ RETURNS THE STORED `sent_at`, WHICH THE METER IS THEN BILLED ON. Null
-    // means the row was not ours to record — the claim moved on — and the caller
+    // means the row was not ours to record - the claim moved on - and the caller
     // must not invent a timestamp for a write that did not happen.
     async markSent(message, providerMessageId, route) {
       const rows = (await withTenant(opts.db, message.tenantId, (tx) =>

@@ -1,7 +1,7 @@
 import { Text } from "@react-email/components"
 import { ActionButton, FallbackLink, Layout, styles } from "../layout.js"
 
-/** An invitation to i10 itself — the app invitation and the waitlist one. */
+/** An invitation to i10 itself - the app invitation and the waitlist one. */
 export default function Invitation({
   url,
   expiresInDays,
@@ -34,7 +34,7 @@ export default function Invitation({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

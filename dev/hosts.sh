@@ -10,7 +10,7 @@
 # which is a confusing half-hour the first time.
 #
 # ⚠ IT IS IDEMPOTENT AND SCOPED TO A MARKED BLOCK, so running it twice does not
-# append a second copy and `dev:unhosts` can remove exactly what it added —
+# append a second copy and `dev:unhosts` can remove exactly what it added -
 # rather than a regex over /etc/hosts, which is a file where a bad edit costs
 # somebody their afternoon.
 
@@ -46,7 +46,7 @@ echo "dev:hosts: adding ${#NAMES[@]} names to /etc/hosts (sudo)…"
   echo "$BEGIN"
   for name in "${NAMES[@]}"; do
     # ⚠ BOTH FAMILIES. macOS prefers IPv6 for a name that has both, and a name
-    # with only an A record still resolves — but a browser that has cached
+    # with only an A record still resolves - but a browser that has cached
     # `::1` from somewhere else will try it first and hang. Listing both is
     # cheaper than diagnosing that once.
     echo "127.0.0.1 $name"

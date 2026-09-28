@@ -38,21 +38,21 @@ import {
  * ⚠ THE FLOW HAS A SEAM IN THE MIDDLE OF IT, AND EVERYTHING ELSE FOLLOWS FROM
  * THAT. The first four steps BUILD an account: name, surname, credentials, and
  * the emailed code Clerk will not skip. The last three ENRICH one that already
- * exists — a passkey, an authenticator app, a linked provider — and every one of
+ * exists - a passkey, an authenticator app, a linked provider - and every one of
  * those is a method on `UserResource`, which does not exist until a session
  * does. So `finalize()` is called in the middle of the flow rather than at the
  * end of it, and the browser is only sent onward once the person is finished
  * being offered things. See `finalizeWithoutLeaving` in _lib/finish.ts.
  *
  * ⚠ THE EMAIL CODE SITS WHERE IT DOES BECAUSE IT CANNOT SIT ANYWHERE ELSE. It
- * is not part of the requested order — that was "first name, last name, email
- * and password, passkey, two-factor, providers" — but the three steps after it
+ * is not part of the requested order - that was "first name, last name, email
+ * and password, passkey, two-factor, providers" - but the three steps after it
  * need a session, the session needs a complete sign-up, and the sign-up is not
  * complete until the address is verified. Putting it later would mean offering
  * a passkey to somebody who does not yet have an account to attach it to.
  *
  * ⚠ HOW MANY STEPS THERE ARE IS DECIDED BY CLERK, NOT BY THIS FILE. An instance
- * with passkeys off simply has no passkey step and a shorter progress bar — see
+ * with passkeys off simply has no passkey step and a shorter progress bar - see
  * _lib/environment.ts. The alternative is a step that opens a WebAuthn prompt
  * and then fails, which is how a "Continue with Apple" button once shipped for
  * a provider the instance had never had.
@@ -65,7 +65,7 @@ import {
 /**
  * ⚠ THE SUB-STAGES OF TWO-FACTOR ARE STAGES, NOT STATE INSIDE A COMPONENT.
  * Offering it, scanning the code and saving the recovery codes are three full
- * screens, and they have to animate and morph like every other step — which
+ * screens, and they have to animate and morph like every other step - which
  * means they have to be keys the one `StepStage` can see. A nested stage would
  * be a second `layout` animation inside the first, both measuring the same box.
  */
@@ -86,7 +86,7 @@ const ACCOUNT_STAGES = ["name", "surname", "credentials", "verify"] as const
 /**
  * ⚠ THE THREE TWO-FACTOR SCREENS COUNT AS ONE SEGMENT. The progress bar
  * measures how much of the FLOW is left, and "turn on two-factor" is one
- * decision — a bar that grew two extra segments the moment somebody said yes
+ * decision - a bar that grew two extra segments the moment somebody said yes
  * would punish them for it.
  */
 const SEGMENT: Record<Stage, Stage> = {
@@ -111,7 +111,7 @@ export function SignUpForm({
   initialEmail,
 }: {
   afterAuthUrl: string
-  /** "Already have an account? Sign in" — back to the email box, in place. */
+  /** "Already have an account? Sign in" - back to the email box, in place. */
   onSignIn: () => void
   redirectRaw?: string
   providers: SsoProvider[]
@@ -133,7 +133,7 @@ export function SignUpForm({
    * ⚠ THE SIGN-UP FLOW IS ENTERED FROM ONE SHARED BOX NOW, so by the time this
    * form renders the person has already typed their email once. Asking for it
    * again at the credentials step would be the single most obvious thing wrong
-   * with a merged page — it is still editable there, because arriving in
+   * with a merged page - it is still editable there, because arriving in
    * sign-up is itself a decent hint that the address might have a typo in it.
    */
   initialEmail?: string
@@ -143,7 +143,7 @@ export function SignUpForm({
 
   /*
    * ⚠ THE STEP AND WHAT WAS TYPED SURVIVE A RELOAD; THE PASSWORD AND THE CODE DO
-   * NOT. See _lib/resume.tsx for why nothing secret is stored — and the check
+   * NOT. See _lib/resume.tsx for why nothing secret is stored - and the check
    * below for what happens when the step stored no longer matches what Clerk
    * holds.
    */
@@ -163,7 +163,7 @@ export function SignUpForm({
   /*
    * ⚠ THE PASSWORD IS CONTROLLED NOW, WHICH IT DELIBERATELY WAS NOT BEFORE. The
    * old form read it out of `FormData` at submit time precisely so that React
-   * never held it — a reasonable instinct, and the wrong trade here. Nothing can
+   * never held it - a reasonable instinct, and the wrong trade here. Nothing can
    * tell somebody their password is eleven characters of a required fifteen
    * without knowing what they have typed, and the alternative is what this
    * replaced: a round trip to Clerk to be told.
@@ -177,7 +177,7 @@ export function SignUpForm({
   /*
    * ⚠ "IS THIS FIELD WRONG **AND** NOT BEING EDITED", which is a stricter test
    * than "has it been blurred once". Red has to mean "you stopped, and it is
-   * still wrong" — a field that stays red through the keystrokes of its own
+   * still wrong" - a field that stays red through the keystrokes of its own
    * correction is reporting on a value that no longer exists. See
    * @repo/ui/hooks/field-focus, which owns the two booleans and why there are two.
    *
@@ -188,7 +188,7 @@ export function SignUpForm({
   /*
    * ⚠ THE POLICY IS CLOSED OVER ONCE, NOT READ AT EVERY CALL SITE. It comes
    * from the Clerk instance at runtime, so the field, its hint and the guard
-   * below all have to be looking at the same numbers — see `passwordProblem`.
+   * below all have to be looking at the same numbers - see `passwordProblem`.
    */
   const secretProblem = passwordProblem(passwordPolicy)
   const [totp, setTotp] = useState<TotpEnrolment | null>(null)
@@ -202,7 +202,7 @@ export function SignUpForm({
    * ⚠ A REF HOLDING A CLOSURE, BECAUSE THE DESTINATION IS DECORATED BY CLERK AT
    * FINALIZE TIME AND CANNOT BE ASKED FOR AGAIN. `decorateUrl` is offered only
    * inside `finalize`'s navigate callback; `clerk.buildUrlWithAuth` is not an
-   * equivalent — its own type says "for development instances" and it does not
+   * equivalent - its own type says "for development instances" and it does not
    * produce the production ITP hop. See _lib/finish.ts.
    */
   const leaveRef = useRef<(() => void) | null>(null)
@@ -225,7 +225,7 @@ export function SignUpForm({
    * DISAGREE. A code box whose sign-up attempt has expired would collect six
    * digits and then fail with something unrelated; a passkey step with nobody
    * signed in would fail on the button. So once Clerk has loaded, a restored
-   * step that has nothing behind it moves to the nearest one that does —
+   * step that has nothing behind it moves to the nearest one that does -
    * never forward past something the person has not done.
    *
    * ⚠ ONCE, ON THE FIRST LIVE RENDER. After that every step change is one the
@@ -267,7 +267,7 @@ export function SignUpForm({
 
     /*
      * ⚠ THE TOTP SECRET IS NOT STORED, SO THE SCAN STEP CANNOT COME BACK. It
-     * goes back to the offer, which enrols afresh — a new secret, and the old
+     * goes back to the offer, which enrols afresh - a new secret, and the old
      * unverified one is simply never confirmed.
      */
     if (stage === "totp-scan") setStage("totp-offer")
@@ -275,7 +275,7 @@ export function SignUpForm({
 
   /*
    * ⚠ A LISTENER, NOT A CHECK IN THE EFFECT BODY, because the answer arrives
-   * when Clerk has loaded — which is after this mounts. It fires once with the
+   * when Clerk has loaded - which is after this mounts. It fires once with the
    * loaded client and is then dropped.
    */
   useEffect(() => {
@@ -362,7 +362,7 @@ export function SignUpForm({
     /*
      * ⚠ THE CHECK HAPPENS HERE AND THE BUTTON STAYS ENABLED, WHICH IS THE
      * DELIBERATE HALF OF THIS. Pressing Create account with both boxes empty
-     * used to show a spinner, spend a round trip on Clerk, and return a toast —
+     * used to show a spinner, spend a round trip on Clerk, and return a toast -
      * for two questions this page can answer without asking anybody. Disabling
      * the button until both are valid would also stop the round trip, and it
      * would replace a wasted two seconds with a control that is dead for no
@@ -375,8 +375,8 @@ export function SignUpForm({
     /*
      * ⚠ THE TWO FIELDS REFUSE THIS SUBMIT THEMSELVES, so there is nothing to
      * check here. Each one blurs the caret so its red can be seen, reddens
-     * only if it is the field actually at fault — revealing a valid field
-     * would arm green on it for nothing — and blocks the submit before this
+     * only if it is the field actually at fault - revealing a valid field
+     * would arm green on it for nothing - and blocks the submit before this
      * handler is reached. Both were written out by hand in this file; see
      * @repo/ui/components/validated-field.
      */
@@ -469,8 +469,8 @@ export function SignUpForm({
    * ⚠ THE LOCK IS RELEASED HERE, WHICH IS THE OPPOSITE OF EVERY OTHER FLOW IN
    * THIS APP AND IS CORRECT FOR THIS ONE. Elsewhere `finalize` is immediately
    * followed by leaving, so re-enabling a button during the redirect is an
-   * invitation to press it twice. Here the page is STAYING — there are steps
-   * after this one — so holding the lock would grey out the passkey button the
+   * invitation to press it twice. Here the page is STAYING - there are steps
+   * after this one - so holding the lock would grey out the passkey button the
    * person is about to be shown.
    */
   async function createSession() {
@@ -492,7 +492,7 @@ export function SignUpForm({
      * BUTTONS WERE RECORDING IT. `OAuthButtons` marks the attempt on both pages,
      * so a Google sign-up already earned its badge; an email-and-password
      * sign-up recorded nothing, so the very first time that person came back
-     * — the moment the badge exists for — there was nothing to show them. They
+     * - the moment the badge exists for - there was nothing to show them. They
      * had used exactly one method in their life and we knew which.
      *
      * ⚠ IT IS THE PENDING MARKER RATHER THAN THE CONFIRMED ONE, on the same
@@ -522,14 +522,14 @@ export function SignUpForm({
    * ⚠ THE FIRST EMPTY BOX, NOT THE FIRST BOX, AND THE DIFFERENCE IS THE WHOLE
    * POINT OF ARRIVING HERE WITH AN ADDRESS ALREADY IN HAND. Almost everybody
    * reaching this step came through the one shared box on the sign-in page, so
-   * their email is filled in before the step renders — and focusing it put the
+   * their email is filled in before the step renders - and focusing it put the
    * caret at the end of a correct value and left the only thing still being
    * asked for one tab key away. Coming BACK from the last-name step is the same
    * situation and was the same waste: the address survives the round trip, so
    * the field that needs typing is the password.
    *
    * ⚠ IT IS READ AT MOUNT AND NEVER AGAIN, which is what `autoFocus` means in
-   * React — the attribute focuses the element as it is created and does nothing
+   * React - the attribute focuses the element as it is created and does nothing
    * on a later render. So this is not a rule about where focus should live; it
    * is a decision made once, each time the step is entered.
    */
@@ -539,7 +539,7 @@ export function SignUpForm({
    * ⚠ BACK IS OFFERED ONLY WHERE GOING BACK IS HARMLESS. The first three steps
    * hold nothing but strings, so returning to one is free. From `verify`
    * onwards there is an attempt on Clerk's servers and then a real account, and
-   * a back arrow that appeared to undo those would be lying — the address is
+   * a back arrow that appeared to undo those would be lying - the address is
    * changed from the verify step's own "Change" control instead, which re-runs
    * the call rather than pretending it never happened.
    */
@@ -550,7 +550,7 @@ export function SignUpForm({
   const back = backTo[stage]
   /*
    * ⚠ BACK FROM THE FIRST STEP LEAVES SIGN-UP, AND LEAVING IS DESTRUCTIVE.
-   * Stepping back inside sign-up keeps what was typed — last name to first name
+   * Stepping back inside sign-up keeps what was typed - last name to first name
    * loses nothing. Stepping back out of it to the email box forgets the lot:
    * names, address, the stored steps. Whoever continues from there may be a
    * different person, or the same person with a different address, and a
@@ -666,7 +666,7 @@ export function SignUpForm({
                 // ⚠ NOT `required`, DELIBERATELY. Plenty of people have one
                 // legal name, and Clerk stores a sign-up with no last name
                 // without complaint. A required surname is a form that cannot be
-                // completed truthfully by someone who has none — which is also
+                // completed truthfully by someone who has none - which is also
                 // why the button below says Continue rather than Skip.
               />
               <Button type="submit" size="xl" disabled={locked}>
@@ -723,7 +723,7 @@ export function SignUpForm({
                 /*
                  * ⚠ THE HINT IS THE INSTANCE'S OWN RULE, AND THAT REPLACED A
                  * SENTENCE THAT WAS SIMPLY UNTRUE. It said "At least 8
-                 * characters" while Clerk was configured to require fifteen —
+                 * characters" while Clerk was configured to require fifteen -
                  * so the form invited a password it would then refuse, and the
                  * refusal arrived from a server two seconds later. Now the
                  * count ticks up as you type and the border only turns red
@@ -762,8 +762,8 @@ export function SignUpForm({
               {/*
                * ⚠ THE ADDRESS IS A BUTTON, FOR THE SAME REASON IT IS ONE ON THE
                * SIGN-IN PASSWORD STEP. Somebody who mistyped their email has no
-               * other way back — the browser's back button abandons Clerk's
-               * attempt and produces a confusing half-state — and this is
+               * other way back - the browser's back button abandons Clerk's
+               * attempt and produces a confusing half-state - and this is
                * exactly where they are already looking for it.
                */}
               <div className="flex justify-center">
@@ -887,7 +887,7 @@ export function SignUpForm({
        * ⚠ OUTSIDE THE STAGE, SO CLERK'S BOT PROTECTION IS NEVER UNMOUNTED. With
        * Smart CAPTCHA on and no `#clerk-captcha` in the DOM, `signUp.password`
        * either falls back to an invisible widget or rejects the attempt
-       * outright — and the person sees a sign-up that simply refuses, with
+       * outright - and the person sees a sign-up that simply refuses, with
        * nothing on screen to act on. Inside the step swap it would be torn out
        * from under Clerk halfway through the flow.
        */}

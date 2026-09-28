@@ -8,7 +8,7 @@ lands at the layers that are expensive to retrofit.
 ## Shared, deliberately
 
 The machine, the tailnet, the k3s cluster, the CNPG **operator**, one Argo CD
-instance, cert-manager, Traefik, and OneUptime — which watches both products
+instance, cert-manager, Traefik, and OneUptime - which watches both products
 but owns neither, so it costs nothing at extraction.
 
 ## Separate, from day one
@@ -35,10 +35,10 @@ an oversight:
 
 | Object                                 | Where                               | Why                                                                                                                                                                                                                    |
 | -------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `i10-prod` Namespace + NetworkPolicies | psl repo, `platform` project        | A Namespace is cluster-scoped, and the `i10` AppProject deliberately has an empty `clusterResourceWhitelist`. i10 cannot widen its own permissions by committing to its own repo — that restriction _is_ the boundary. |
+| `i10-prod` Namespace + NetworkPolicies | psl repo, `platform` project        | A Namespace is cluster-scoped, and the `i10` AppProject deliberately has an empty `clusterResourceWhitelist`. i10 cannot widen its own permissions by committing to its own repo - that restriction _is_ the boundary. |
 | The `i10` AppProject itself            | psl repo, `argocd/projects.yaml`    | Same reason. A project that could edit its own trust boundary is not one.                                                                                                                                              |
 | `cloudflare-token-i10` DopplerSecret   | psl repo, `doppler-operator-system` | It feeds **cert-manager**, which is shared platform infrastructure. i10's own workload secrets live here, in `i10-prod`.                                                                                               |
-| StorageClasses `psl-zfs`, `psl-zfs-db` | psl repo, `platform` project        | Cluster-scoped platform objects. They are named `psl-*` for historical reasons, not ownership — worth renaming before i10 leaves, so nothing reads as borrowed.                                                        |
+| StorageClasses `psl-zfs`, `psl-zfs-db` | psl repo, `platform` project        | Cluster-scoped platform objects. They are named `psl-*` for historical reasons, not ownership - worth renaming before i10 leaves, so nothing reads as borrowed.                                                        |
 
 **Also needed in the psl repo before Stalwart can serve mail:** Traefik TCP
 entrypoints for 25, 465, 587 and 993. The chart nests the Service spec under
@@ -60,14 +60,14 @@ i10/
   platform-db/       CNPG Cluster, ObjectStore, Pooler, ScheduledBackup
   redis/             The queues' Redis, i10's own
   stalwart/          the mail engine (kustomize, for config hashing)
-  bulwark/           JMAP webmail — AGPL-3.0, read the header before editing
+  bulwark/           JMAP webmail - AGPL-3.0, read the header before editing
   workloads/         api, console, web, docs, and the TLS certificate
 ```
 
 ## Bootstrap
 
 Argo CD, cert-manager, Traefik, CNPG and the Doppler operator are already on
-the cluster — installed by the psl repo's `platform` project. i10 adds itself
+the cluster - installed by the psl repo's `platform` project. i10 adds itself
 in three steps.
 
 **1. Doppler service tokens.** The one thing in `i10/doppler/` that is not in
@@ -84,7 +84,7 @@ because a `tokenSecret` must share a namespace with the `DopplerSecret` naming
 it, and the `i10` AppProject cannot create objects outside `i10-*`. Following
 PSL's one-namespace convention would mean a PSL-repo commit per i10 workload.
 
-Check each token's prefix — it encodes the config it was minted from
+Check each token's prefix - it encodes the config it was minted from
 (`dp.st.prod_api.…` vs `dp.st.prod.…`), and a token from the wrong config syncs
 the wrong key set **without erroring**.
 
@@ -104,12 +104,12 @@ AppProject i10          sourceNamespaces: [i10-prod]
 
 The application controller and server must be restarted after the ConfigMap
 changes. With only one of the two in place, Applications in `i10-prod` are
-**silently ignored** — no error, no event, they simply never reconcile.
+**silently ignored** - no error, no event, they simply never reconcile.
 
 Why not the ordinary app-of-apps in `argocd`: the `i10` project's destinations
 are `i10-*`, so a root in `argocd` is rejected by the very boundary that makes
 i10 extractable. Of the three ways out, this is the only one where the boundary
-still holds — Argo refuses to let an Application outside `argocd` claim a
+still holds - Argo refuses to let an Application outside `argocd` claim a
 project that does not list its namespace.
 
 **3. Verify the secrets actually arrived.**
@@ -136,7 +136,7 @@ envFrom:
 ```
 
 Later entries win on conflict. A Deployment mounting only its own config starts
-without `SENTRY_DSN`, and **nothing errors** — errors go to stdout and are
+without `SENTRY_DSN`, and **nothing errors** - errors go to stdout and are
 reported nowhere, forever.
 
 `SENTRY_ENVIRONMENT` used to fail the same way and no longer can: `loadEnv`
@@ -157,7 +157,7 @@ in the same commit that first pins a real digest.
 
 ## Traps already paid for
 
-- **`kubectl apply` cannot create large CRDs** — they exceed the 262144-byte
+- **`kubectl apply` cannot create large CRDs** - they exceed the 262144-byte
   `last-applied-configuration` annotation limit. Every Application here sets
   `ServerSideApply=true`.
 - **A default-deny NetworkPolicy blocks the CNPG operator, not just users.** The

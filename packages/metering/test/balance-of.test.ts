@@ -7,8 +7,8 @@ import type { AssignmentStore, LevelStore, UsageStore } from "../src/ports.js"
  * `balanceOf`: the read a usage page makes.
  *
  * ⚠ WHAT THESE PIN IS THE ONE THING `check` CANNOT SAY. `check({ requested: 0 })`
- * is always `allowed` — a zero-unit request consumes nothing, so refusing it
- * would be a quota error for a non-event — and the `remaining` it publishes is
+ * is always `allowed` - a zero-unit request consumes nothing, so refusing it
+ * would be a quota error for a non-event - and the `remaining` it publishes is
  * clamped at zero so that no customer ever reads "-1,204 remaining". Both rules
  * are right for enforcement and both destroy the information a dashboard needs:
  * a tenant at 60,000 of 50,000 comes back from `check` looking exactly like one
@@ -55,7 +55,7 @@ const assigned = (plan: Plan, overageEnabled = false): AssignmentStore => ({
  * A ledger holding one total, which is all these need.
  *
  * ⚠ IT IGNORES THE KEY AND THE WINDOW ON PURPOSE. What is under test is the
- * arithmetic `balanceOf` does with a usage figure, not the scoping of the read —
+ * arithmetic `balanceOf` does with a usage figure, not the scoping of the read -
  * `meter.test.ts` already pins that an event outside the window is excluded.
  */
 const ledger = (total: number): UsageStore => ({
@@ -95,8 +95,8 @@ describe("balanceOf", () => {
 
   /**
    * ⚠ THE TEST THIS WHOLE METHOD EXISTS FOR. Derived from `check`, this tenant
-   * reads as 50,000 of 50,000 — identical to somebody who stopped exactly on
-   * the line — and the usage page can never draw the 10,000 they are being
+   * reads as 50,000 of 50,000 - identical to somebody who stopped exactly on
+   * the line - and the usage page can never draw the 10,000 they are being
    * billed for. `used` has to come back raw.
    */
   it("reports usage PAST the allowance rather than saturating at it", async () => {
@@ -116,8 +116,8 @@ describe("balanceOf", () => {
 
   /**
    * ⚠ AND `remaining` STAYS CLAMPED WHILE `used` DOES NOT. The asymmetry is the
-   * design: `remaining` is the number enforcement publishes — into headers, into
-   * error messages — and it must equal what `check` would say, to the unit.
+   * design: `remaining` is the number enforcement publishes - into headers, into
+   * error messages - and it must equal what `check` would say, to the unit.
    */
   it("clamps remaining at zero even when usage is past the line", async () => {
     const meter = createMeter({
@@ -236,7 +236,7 @@ describe("balanceOf", () => {
   /**
    * ⚠ NO LEVEL STORE IS A WIRING MISTAKE AND THROWS, exactly as it does in
    * `check`. Answering zero would tell the console the tenant holds no domains,
-   * which reads as "you have your whole allowance left" — the most dangerous
+   * which reads as "you have your whole allowance left" - the most dangerous
    * wrong answer available.
    */
   it("throws for a continuous feature with no level store, like check does", async () => {

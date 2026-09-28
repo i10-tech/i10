@@ -3,7 +3,7 @@ import { ActionButton, Detail, Layout, styles } from "../../layout.js"
 
 /**
  * ⚠ THIS ONE HAS A NOTICE PERIOD BAKED INTO ITS PURPOSE. A price change mail
- * sent on the day it takes effect is not a notice, it is an invoice surprise —
+ * sent on the day it takes effect is not a notice, it is an invoice surprise -
  * `effectiveFrom` is required rather than optional so a caller cannot send one
  * without saying when it starts.
  */
@@ -44,7 +44,7 @@ export default function SubscriptionPriceChanged({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

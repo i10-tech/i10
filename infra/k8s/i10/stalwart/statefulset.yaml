@@ -37,14 +37,14 @@ spec:
         - name: stalwart
           image: stalwartlabs/stalwart:v0.16.19-alpine
           # ⚠ THE FLAG IS NOT OPTIONAL. Without --config the server looks
-          # elsewhere, finds nothing, and enters bootstrap mode — serving a setup
+          # elsewhere, finds nothing, and enters bootstrap mode - serving a setup
           # wizard instead of mail.
           args: ["--config", "/etc/stalwart/config.json"]
 
           # ⚠ NET_BIND_SERVICE IS REQUIRED WHILE ANY LISTENER IS BELOW 1024.
           # The image runs `setcap cap_net_bind_service=+ep` on the binary. When
           # the kernel execs a file with effective capabilities, they must also be
-          # in the caller's bounding set — `drop: [ALL]` empties it and the exec
+          # in the caller's bounding set - `drop: [ALL]` empties it and the exec
           # fails outright with "operation not permitted", before any log line.
           securityContext:
             allowPrivilegeEscalation: false
@@ -60,7 +60,7 @@ spec:
           # which DNATs again to nodeIP:<NodePort> and re-enters the host on a
           # port in the 30000-32767 range. A firewall rule naming 993 is never
           # consulted for that second leg, so the connection dies somewhere with
-          # no log line on either side — the mail server never sees a packet.
+          # no log line on either side - the mail server never sees a packet.
           # Opening the NodePort range to the internet to fix it would be worse
           # than the problem.
           #
@@ -68,7 +68,7 @@ spec:
           # this container, port unchanged, so a `ufw route allow ... port 993`
           # matches and the packet arrives.
           #
-          # ⚠ AND IT IS WHAT MAKES THE CLIENT IP REAL. klipper-lb MASQUERADEs —
+          # ⚠ AND IT IS WHAT MAKES THE CLIENT IP REAL. klipper-lb MASQUERADEs -
           # every connection would reach Stalwart looking like it came from the
           # node. For a mail server that is not cosmetic: inbound SPF is
           # evaluated against the connecting address, and greylisting and rate
@@ -83,7 +83,7 @@ spec:
             - { name: submissions, containerPort: 465, hostPort: 465 }
             # ⚠ DECLARED, NOT LISTENED ON, AND THAT IS NOT CHANGING. Stalwart
             # serves `smtp` on 25 and `submissions` on 465; there is no 587
-            # listener and the send worker does not want one — 465 is implicit
+            # listener and the send worker does not want one - 465 is implicit
             # TLS from the first byte, which RFC 8314 prefers over STARTTLS
             # because it has no cleartext phase to downgrade.
             #
@@ -94,7 +94,7 @@ spec:
             - { name: submission, containerPort: 587 }
             - { name: imaps, containerPort: 993, hostPort: 993 }
             # ⚠ THE SEND WORKER'S RELAY, AND THE ABSENCE OF A hostPort IS THE
-            # SECURITY. `relay` on 2525 takes mail WITHOUT authentication — the
+            # SECURITY. `relay` on 2525 takes mail WITHOUT authentication - the
             # trust is where the connection comes from, not what it presents. No
             # hostPort means nothing on the node's public addresses answers here,
             # and `allow-public-mail` does not list it, so only pods inside the
@@ -118,7 +118,7 @@ spec:
           # Secret when it renews (2026-10-31 for the current one), and this
           # container will keep serving the old certificate until it restarts.
           # A mounted file would refresh in place, but Stalwart wants the PEM as
-          # a value, not a path. So renewal REQUIRES a pod restart — today that
+          # a value, not a path. So renewal REQUIRES a pod restart - today that
           # is manual, and a watcher that rolls the StatefulSet when the Secret
           # changes is the thing to add before the first renewal, not after the
           # certificate has silently expired.
@@ -153,7 +153,7 @@ spec:
 
           # ⚠ HTTP, NOT tcpSocket. A TCP probe against the mail ports reports
           # healthy for a server that is accepting connections and failing every
-          # request — which is exactly what a Stalwart with an unreachable
+          # request - which is exactly what a Stalwart with an unreachable
           # DataStore looks like. These endpoints answer for the server's own
           # view of itself.
           startupProbe:
@@ -210,7 +210,7 @@ spec:
               valueFrom:
                 secretKeyRef: { name: i10-authd-db-role, key: password }
             # ⚠ THE `i10` DATABASE, NOT `stalwart`. The projection is i10's
-            # data — written by apps/api, read here — so it belongs with the
+            # data - written by apps/api, read here - so it belongs with the
             # product, not inside the mail server's database. Stalwart is
             # pre-1.0 and migrates its own schema on upgrade; putting our tables
             # in there is the same mistake as putting its tables in ours, just
@@ -221,7 +221,7 @@ spec:
               valueFrom:
                 secretKeyRef: { name: i10-shared, key: CLERK_SECRET_KEY }
             # Protects the shared Clerk budget (1000 req/10s across all of i10)
-            # from one mail client stuck in a retry loop. NOT lockout protection —
+            # from one mail client stuck in a retry loop. NOT lockout protection -
             # the backend verify_password endpoint does not feed Clerk's counter.
             - { name: AUTHD_BINDS_PER_MINUTE, value: "30" }
             - { name: AUTHD_LOG_LEVEL, value: "info" }
@@ -231,7 +231,7 @@ spec:
             limits: { memory: 128Mi }
 
           # ⚠ NO PROBES, AND THAT IS NOT AN OVERSIGHT. authd binds 127.0.0.1
-          # only — the security property this whole sidecar arrangement exists
+          # only - the security property this whole sidecar arrangement exists
           # for. The kubelet runs probes against the POD IP, so a tcpSocket
           # probe on 3893 can never connect, and Kubernetes kills a perfectly
           # healthy process every liveness period. That is exactly what
@@ -250,7 +250,7 @@ spec:
           #
           # Real health checking needs authd to serve a second, health-only
           # listener on the pod IP. That is a deliberate addition, not a probe
-          # stanza — see services/authd/README.md.
+          # stanza - see services/authd/README.md.
 
       volumes:
         - name: config

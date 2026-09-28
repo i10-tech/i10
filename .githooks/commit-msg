@@ -6,14 +6,14 @@
 # DIFFERENCE IS WHAT IT COSTS TO FIX. Rejected here, the message has not been
 # written yet: git leaves it in `.git/COMMIT_EDITMSG`, `git commit` again with a
 # corrected one and nothing has happened. Caught at push time, the commit
-# already exists — so fixing it is `--amend` if it is the tip and an interactive
+# already exists - so fixing it is `--amend` if it is the tip and an interactive
 # rebase if it is not, and then a force-push over a branch somebody may have
 # pulled. Same check, two very different afternoons.
 #
 # ⚠ AND THE RULES ARE NOT A STYLE PREFERENCE. `.github/scripts/next-version.mjs`
 # derives every release version by reading `feat:` / `fix:` / `!` out of the
 # commit log, and it SKIPS a non-conventional subject silently rather than
-# failing — so a malformed message does not break a release, it quietly makes it
+# failing - so a malformed message does not break a release, it quietly makes it
 # the wrong version. `commitlint.config.mjs` says the same thing at more length.
 #
 # ⚠ THE SCOPE LIST IS THE PART THAT ACTUALLY CATCHES PEOPLE. `fix(docker):`
@@ -38,7 +38,7 @@ fi
 
 # ⚠ THE CONFIG IS NAMED EXPLICITLY RATHER THAN DISCOVERED. commitlint resolves
 # `commitlint.config.mjs` upward from the CURRENT DIRECTORY, and git does not
-# promise that a hook runs at the top of the working tree — a linked worktree or
+# promise that a hook runs at the top of the working tree - a linked worktree or
 # a `GIT_DIR` set by tooling can leave it elsewhere. When the lookup misses, it
 # does not skip the check: it fails with "Please add rules to your
 # commitlint.config.js", which rejects a perfectly good message for a reason
@@ -47,7 +47,7 @@ config="$(git rev-parse --show-toplevel)/commitlint.config.mjs"
 
 # ⚠ `--edit "$1"` READS THE FILE GIT IS ABOUT TO COMMIT, which is the whole
 # point of this hook's argument. It also makes commitlint apply its default
-# ignores — merge commits, reverts, `fixup!` and `squash!` — so an ordinary
+# ignores - merge commits, reverts, `fixup!` and `squash!` - so an ordinary
 # `git merge` or an autosquash workflow is not rejected for a message neither
 # git nor we wrote.
 if ! bunx commitlint --config "$config" --edit "$1"; then
@@ -60,11 +60,11 @@ commit-msg: that message does not match this repository's rules.
   type   feat fix docs style refactor perf test build ci chore revert
   scope  api auth console web docs sdk ui contracts emails metering
          authd billing send stalwart bulwark infra ci deps repo
-         (optional — `chore: …` with no scope is fine)
+         (optional - `chore: …` with no scope is fine)
 
 The scope list is in commitlint.config.mjs, with a note on each of the
 non-obvious ones. Releases are versioned from these messages, so a malformed
-one does not fail the release — it silently produces the wrong version.
+one does not fail the release - it silently produces the wrong version.
 
 Your message is still in .git/COMMIT_EDITMSG. Commit again with a corrected
 one, or use --no-verify if you know what you are doing.

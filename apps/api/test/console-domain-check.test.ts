@@ -8,7 +8,7 @@ import type { DomainStore } from "../src/domains/store.js"
  *
  * ⚠ THE ONE THING THAT CAN SILENTLY BREAK IT IS ROUTE ORDER. `/domains/check`
  * sits beside `/domains/:id`, and if it is ever registered below it the check
- * becomes a lookup of a domain whose id is "check" — a 404 the console reads
+ * becomes a lookup of a domain whose id is "check" - a 404 the console reads
  * as "no objection", so the box goes quiet and nothing fails.
  */
 

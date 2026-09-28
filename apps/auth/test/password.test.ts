@@ -15,7 +15,7 @@ import { describeRules, isPasswordUsable, passwordProblem } from "../app/_lib/va
  *
  * ⚠ AND THE TIMING IS STILL ASSERTED HERE, THROUGH THE SHARED `fieldVerdict`.
  * The password field is the only one in the product that says something while
- * somebody is still typing — see `early` — so "when" is not purely generic for
+ * somebody is still typing - see `early` - so "when" is not purely generic for
  * this rule and is worth pinning next to it.
  */
 
@@ -95,7 +95,7 @@ describe("a password", () => {
   /*
    * ⚠ THE RULES COME FROM CLERK AND ARE NEVER WRITTEN DOWN IN THE APP. These
    * assert that turning a requirement on in the Clerk dashboard reaches the
-   * hint and the border with no deploy — which is the whole reason
+   * hint and the border with no deploy - which is the whole reason
    * `passwordRules()` reads the environment document instead of a constant.
    */
   it("names one unmet requirement at a time, in order", () => {

@@ -8,7 +8,7 @@ import type { ClerkUser } from "../projection/clerk-user.js"
  * writes `authd.accounts` directly. It establishes that the person may have a
  * mailbox, adds the address to their Clerk user, and then lets the existing
  * projection derive the row exactly as it does for a webhook. One writer, one
- * derivation — a second INSERT path would be free to disagree with the
+ * derivation - a second INSERT path would be free to disagree with the
  * projection about aliases, display names or the owning tenant, and the
  * disagreement would surface as mail being accepted for the wrong person.
  *
@@ -25,7 +25,7 @@ export interface MailboxIdentity {
    * The user as Clerk has them now, in the shape the projection reads, plus
    * whether they hold a password.
    *
-   * `null` means Clerk has no such user — which, for a caller we authenticated
+   * `null` means Clerk has no such user - which, for a caller we authenticated
    * from a Clerk session, means the account was deleted mid-request.
    */
   get(userId: string): Promise<{ user: ClerkUser; passwordEnabled: boolean } | null>
@@ -50,7 +50,7 @@ export interface MailboxDirectory {
    *
    * ⚠ THE SAME QUESTION `core.mailbox_domains()` ANSWERS FOR THE PROJECTION,
    * asked before we change anything in Clerk. Skipping it would let somebody
-   * attach `me@microsoft.com` to their Clerk user as a verified address — the
+   * attach `me@microsoft.com` to their Clerk user as a verified address - the
    * projection would correctly refuse to make a row, but we would have written
    * a verified claim to a domain they do not own into an identity provider,
    * where it outlives the request and may be trusted by something else.
@@ -67,7 +67,7 @@ export interface MailboxDirectory {
    * Flips the subscription gate on and reads the row back.
    *
    * ⚠ A SEPARATE STATEMENT FROM THE PROJECTION'S UPSERT, ON PURPOSE. The
-   * projection must never write `active` — a Clerk profile edit says nothing
+   * projection must never write `active` - a Clerk profile edit says nothing
    * about whether an invoice cleared, and putting it in that upsert would
    * switch every suspended mailbox back on the next time its owner changed
    * their name. Provisioning may write it because it just checked the
@@ -77,7 +77,7 @@ export interface MailboxDirectory {
 }
 
 /**
- * ⚠ THE SLICE OF THE METER THIS NEEDS, AND NOTHING MORE — the same narrowing,
+ * ⚠ THE SLICE OF THE METER THIS NEEDS, AND NOTHING MORE - the same narrowing,
  * for the same reason, as `Capacity` in domains/store.ts. Taking the whole
  * `Meter` would hand mailbox provisioning `record()`, which writes billable
  * usage; creating a mailbox is not a metered event, it is a level that is
@@ -109,7 +109,7 @@ export type ProvisionOutcome =
   | { status: "created"; mailbox: Mailbox }
   /** They signed up passwordless. See `create`. */
   | { status: "password_required"; reason: string }
-  /** The address cannot be a mailbox here — wrong domain, or not ours. */
+  /** The address cannot be a mailbox here - wrong domain, or not ours. */
   | { status: "rejected"; reason: string }
   /** Taken, or they already have one. */
   | { status: "conflict"; reason: string }
@@ -142,7 +142,7 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
      *
      * ⚠ AND THE REASON IT IS A HARD REFUSAL RATHER THAN A PROMPT IS authd. An
      * IMAP or SMTP login is an LDAP bind, and authd answers that bind by
-     * delegating the password to Clerk — that is the whole design, and it is
+     * delegating the password to Clerk - that is the whole design, and it is
      * why no password material is stored anywhere in our database. A user who
      * signed up with Google or a magic link has no password for Clerk to
      * verify, so a mailbox created for them would be one nobody could ever log
@@ -194,7 +194,7 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
       }
 
       // ⚠ AGAINST THE TENANT THAT OWNS THE DOMAIN, NOT THE CALLER'S OWN. A
-      // mailbox on acme.com consumes acme's seats, whoever holds it — the same
+      // mailbox on acme.com consumes acme's seats, whoever holds it - the same
       // derivation the projection uses for `accounts.tenant_id`, and the only
       // one that cannot disagree with how the seat is later counted.
       const capacity = await deps.capacity.check({
@@ -205,7 +205,7 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
       })
 
       // ⚠ ONLY `exceeded` REFUSES, WHICH IS THE SAME READING domains/store.ts
-      // TAKES. `overage` means the plan allows it and it is billable — turning
+      // TAKES. `overage` means the plan allows it and it is billable - turning
       // that into a refusal would silently make every metered plan a hard cap
       // and sell nobody the seat they were willing to pay for.
       if (capacity.status === "exceeded") {
@@ -218,7 +218,7 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
       await deps.identity.addVerifiedAddress({ userId, address })
 
       // ⚠ RE-READ RATHER THAN PATCHED LOCALLY. The projection derives the
-      // mailbox from the WHOLE user — which address is primary, what the other
+      // mailbox from the WHOLE user - which address is primary, what the other
       // verified ones are, the `updated_at` that guards out-of-order webhooks.
       // Constructing that from the address we just sent would be a second,
       // drifting copy of Clerk's state.

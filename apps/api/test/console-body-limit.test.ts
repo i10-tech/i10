@@ -11,8 +11,8 @@ import type { TenantResolver } from "../src/middleware/tenant.js"
  * 500 MB body buffers the whole thing in this process before a line of
  * validation runs, so one account could take the API down for every tenant on
  * it. What these pin is that the limit exists, that it is enforced as the body
- * STREAMS rather than from a `Content-Length` header nobody has to send, and —
- * the part that is easy to get wrong — that the CSV import's larger limit is
+ * STREAMS rather than from a `Content-Length` header nobody has to send, and -
+ * the part that is easy to get wrong - that the CSV import's larger limit is
  * scoped to exactly one route.
  */
 
@@ -109,7 +109,7 @@ describe("console body limits", () => {
   /**
    * ⚠ AND THE EXEMPTION CANNOT BE WIDENED BY INVENTING SEGMENTS. The first
    * version matched `c.req.path.endsWith("/contacts/import")`, which also
-   * matched paths with no handler at all — a wildcard middleware still runs
+   * matched paths with no handler at all - a wildcard middleware still runs
    * before the 404, so the process read twenty megabytes and then threw them
    * away. `except()` matches the router's own route pattern instead.
    */

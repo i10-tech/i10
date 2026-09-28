@@ -6,7 +6,7 @@ import { cookies } from "next/headers"
  * ⚠ THIS EXISTS BECAUSE "Skip to the console" DID NOTHING AT ALL. The link
  * pointed at `/`, the app layout redirects to `/onboarding` whenever
  * `should_onboard` is true, and that flag stays true until a domain is verified
- * — so the skip went to the console and was bounced straight back, landing
+ * - so the skip went to the console and was bounced straight back, landing
  * exactly where it started. The button looked broken because, from where
  * somebody was sitting, it was.
  *
@@ -18,14 +18,14 @@ import { cookies } from "next/headers"
  * this browser. Skipping is a view preference; finishing is a fact.
  *
  * ⚠ AND IT IS SHORT-LIVED ON PURPOSE. Somebody who skips today should still be
- * met by the flow next week if they never finished it — the whole point of the
+ * met by the flow next week if they never finished it - the whole point of the
  * redirect is that an account with no verified domain cannot send, and quietly
  * forgetting to mention that for ever is not a kindness. A week is long enough
  * that the skip is not nagging and short enough that it is not a dead end.
  *
  * ⚠ THE VALUE IS THE TENANT ID, NOT `"1"`, AND THAT IS A FIX RATHER THAN A
  * REFINEMENT. A bare flag is a claim about the BROWSER, but the question being
- * asked is about a WORKSPACE — so one skip suppressed the flow for every
+ * asked is about a WORKSPACE - so one skip suppressed the flow for every
  * workspace that browser went on to see, for a week. The reproduction is
  * ordinary: skip once, sign up again with a different account, and the new
  * workspace lands on an empty dashboard having never been offered the flow that

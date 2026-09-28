@@ -57,7 +57,7 @@ export function contactsStore(
         if (opts.segmentId) {
           /*
            * ⚠ `EXISTS`, NOT A JOIN. A join to `segment_contacts` would multiply
-           * the result if the contact were ever in the segment twice — which
+           * the result if the contact were ever in the segment twice - which
            * the primary key prevents today and which a future "add with a
            * label" feature would not. `EXISTS` is a semi-join and cannot
            * duplicate a row regardless.
@@ -119,7 +119,7 @@ export function contactsStore(
             .where(eq(segmentContacts.contactId, id)),
 
           /*
-           * ⚠ EVERY TOPIC, LEFT-JOINED TO THIS CONTACT'S ANSWER — not only the
+           * ⚠ EVERY TOPIC, LEFT-JOINED TO THIS CONTACT'S ANSWER - not only the
            * topics they have answered. A preference page that showed just the
            * rows in `contact_topics` would hide every topic somebody has never
            * touched, which is all of them for a new contact. The effective
@@ -176,8 +176,8 @@ export function contactsStore(
             target: [contacts.tenantId, contacts.email],
             /*
              * ⚠ `unsubscribed` IS DELIBERATELY ABSENT FROM THIS SET, AND THAT IS
-             * THE MOST IMPORTANT LINE IN THE FILE. Re-adding a contact — by
-             * hand, or by re-importing last quarter's CSV — must never
+             * THE MOST IMPORTANT LINE IN THE FILE. Re-adding a contact - by
+             * hand, or by re-importing last quarter's CSV - must never
              * re-subscribe somebody who opted out. Their choice outlives our
              * imports. Changing it takes the explicit `updateContact` path,
              * which is a different act with a different button.
@@ -202,15 +202,15 @@ export function contactsStore(
            * else in the transaction.
            *
            * ⚠ IT READS AN IMPLEMENTATION DETAIL RATHER THAN A DOCUMENTED API,
-           * AND IT DRIVES NOTHING MORE THAN A STATUS CODE — WHICH IS THE REASON
+           * AND IT DRIVES NOTHING MORE THAN A STATUS CODE - WHICH IS THE REASON
            * IT IS ACCEPTABLE HERE. `xmax` is a system column whose meaning is
            * not part of Postgres's compatibility promise, so the honest bound on
            * this is: if a future release changed it, `POST /contacts` would
            * answer 200 where 201 belonged for a contact that was genuinely
            * created. Nothing branches on that but a cache and a reader. If this
-           * ever has to be exact, the deterministic form is a CTE — `INSERT …
+           * ever has to be exact, the deterministic form is a CTE - `INSERT …
            * ON CONFLICT DO NOTHING RETURNING *` beside an `UPDATE … WHERE NOT
-           * EXISTS (SELECT 1 FROM ins)` — which costs a more complicated
+           * EXISTS (SELECT 1 FROM ins)` - which costs a more complicated
            * statement to buy a guarantee this route does not need. There is no
            * local Postgres in this repo, so this has been reasoned about rather
            * than executed; it is the first thing to check on the first real run.
@@ -374,8 +374,8 @@ export function contactsStore(
          * Stripping the key out of every `contacts.properties` bag would be an
          * unbounded UPDATE over the whole table triggered by a click, and it
          * would destroy data that a re-created property would otherwise still
-         * find. The orphaned values are inert — nothing reads a key with no
-         * declaration — and re-creating the property brings them back.
+         * find. The orphaned values are inert - nothing reads a key with no
+         * declaration - and re-creating the property brings them back.
          */
         const deleted = await tx
           .delete(contactProperties)

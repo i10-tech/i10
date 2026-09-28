@@ -11,14 +11,14 @@ import {
  *
  * ⚠ THE ENDPOINT IS PUBLIC AND WHAT IT WRITES IS PERMANENT, EXACTLY AS THE SES
  * ONE IS. A forged `delivery.rcpt-to-rejected` with a 5xx suppresses an address
- * for a tenant — their mail to that person stops, quietly and for good. Nothing
+ * for a tenant - their mail to that person stops, quietly and for good. Nothing
  * reaches the database before the HMAC verifies.
  *
  * ⚠ AND THE SIGNATURE CARRIES NO TIMESTAMP, SO IT NEVER EXPIRES. Stalwart signs
  * the raw body and nothing else, which means a captured request stays valid
  * forever and can be posted again at will. The `(source_event_id, occurred_at)`
  * dedupe is what makes that harmless, and it only works because the id is
- * derived from the event's content rather than from Stalwart's own event id —
+ * derived from the event's content rather than from Stalwart's own event id -
  * see `sourceEventIdFor`. That is a security property here, not a tidiness one.
  *
  * ⚠ THE STATUS CODES ARE A RETRY POLICY. Stalwart holds an undelivered batch and
@@ -32,7 +32,7 @@ import {
  *
  * ⚠ A BATCH IS MANY EVENTS AND ONE STATUS CODE, WHICH IS THE AWKWARD PART.
  * Stalwart groups everything inside its `throttle` window into one POST, so a
- * 500 replays events that already committed. The dedupe absorbs that — which is
+ * 500 replays events that already committed. The dedupe absorbs that - which is
  * the same reason it exists above, and why partial failure is allowed to be
  * loud rather than clever.
  */
@@ -62,7 +62,7 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
     // ⚠ THE RAW TEXT, AND IT MUST BE READ BEFORE ANYTHING PARSES IT. The HMAC
     // is over the exact bytes Stalwart serialised; `c.req.json()` would give us
     // an object, and re-serialising it changes key order, whitespace and number
-    // formatting — a signature that can never match, on a body that is
+    // formatting - a signature that can never match, on a body that is
     // genuinely Stalwart's.
     const body = await c.req.text()
 
@@ -97,7 +97,7 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
 
     for (const event of events) {
       const normalised = interpretStalwartEvent(event)
-      // Not an event we act on, or not one of our messages — Stalwart's queue
+      // Not an event we act on, or not one of our messages - Stalwart's queue
       // carries mailbox mail and its own reports through the same path.
       if (!normalised) {
         ignored++
@@ -105,8 +105,8 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
       }
 
       // ⚠ NOT `Promise.all`, AND THE ORDER IS THE REASON. Events for one message
-      // arrive in the order they happened — `delivered` after `attempt-start`,
-      // `failed` after a retry — and `webhook_deliveries` is drained per
+      // arrive in the order they happened - `delivered` after `attempt-start`,
+      // `failed` after a retry - and `webhook_deliveries` is drained per
       // endpoint in insertion order. Writing a batch concurrently would let a
       // customer's endpoint receive `bounced` before the `delivery_delayed` that
       // preceded it, and their state machine would read backwards.
@@ -120,7 +120,7 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
         // ⚠ 500 SO STALWART REDELIVERS, AND THE EVENTS ALREADY WRITTEN IN THIS
         // BATCH ARE REPLAYED WITH IT. That is the right trade: the dedupe makes
         // a replay a no-op, and losing a bounce means an address we keep
-        // sending to. Failing the whole batch also keeps the ordering promise —
+        // sending to. Failing the whole batch also keeps the ordering promise -
         // skipping the failure and continuing would let a later event land
         // without the one it follows.
         deps.log.error(

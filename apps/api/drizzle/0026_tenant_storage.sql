@@ -8,7 +8,7 @@ ALTER TABLE "core"."tenant_storage" ADD CONSTRAINT "tenant_storage_tenant_id_ten
 
 -- ⚠ A NEW TABLE IN `core` IS NOT PROTECTED UNTIL THIS RUNS, and nothing fails
 -- while it is not. Without it every tenant can read every other tenant's
--- storage figure — which is a usage disclosure, not just a number.
+-- storage figure - which is a usage disclosure, not just a number.
 ALTER TABLE "core"."tenant_storage" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 CREATE POLICY tenant_isolation ON "core"."tenant_storage"
   USING (tenant_id = current_setting('app.tenant_id')::uuid)
@@ -17,7 +17,7 @@ CREATE POLICY tenant_isolation ON "core"."tenant_storage"
 
 -- Every mailbox the sampler has to ask about, grouped by who owns it.
 --
--- ⚠ CROSS-TENANT, SO A SECURITY DEFINER FUNCTION — the sampling job holds no
+-- ⚠ CROSS-TENANT, SO A SECURITY DEFINER FUNCTION - the sampling job holds no
 -- tenant context. It reads `authd.accounts`, which has no row level security of
 -- its own, so this is about the job being able to ask one question rather than
 -- about a policy standing in its way.

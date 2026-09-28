@@ -9,7 +9,7 @@ import type { DomainStore, VerifyOutcome } from "../src/domains/store.js"
  *
  * ⚠ REGISTRATION HAD EXACTLY ONE ATTEMPT AND NO RETRY ANYWHERE. `verify` is the
  * only thing that may create an SES identity, and it is reachable from two HTTP
- * routes and nothing else — the console calls it once, about a second after
+ * routes and nothing else - the console calls it once, about a second after
  * writing the records. DNS is usually not serving yet at that instant, and on
  * the manual path the customer publishes hours later, so the single attempt
  * missed and nothing ever made another.
@@ -96,7 +96,7 @@ describe("proving the domains that are waiting to be proved", () => {
 
   /**
    * ⚠ THE ONE THING THIS SWEEP MUST NEVER DO. `verify` on the route may take a
-   * name from a workspace that can no longer prove it — a deliberate transfer,
+   * name from a workspace that can no longer prove it - a deliberate transfer,
    * with a person waiting for the answer. Run from a cron across every unproved
    * row in the table, that same code would migrate domains between customers on
    * its own schedule with nobody asking. If this assertion ever fails, the
@@ -151,7 +151,7 @@ describe("proving the domains that are waiting to be proved", () => {
   /**
    * ⚠ `missing` IS A RACE, NOT A FAILURE. The row was deleted between the
    * selector's read and this write, which is ordinary and must not be counted
-   * against the pass — a batch of them would otherwise trip the "every attempt
+   * against the pass - a batch of them would otherwise trip the "every attempt
    * failed" alarm in the entry point.
    */
   it("says nothing about a row that was deleted underneath it", async () => {

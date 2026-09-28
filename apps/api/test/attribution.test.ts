@@ -36,7 +36,7 @@ describe("attributing a Polar subscription", () => {
     expect(checkoutTenant).not.toHaveBeenCalled()
   })
 
-  // The first event for a new subscription — the case that used to need
+  // The first event for a new subscription - the case that used to need
   // `external_id` and is the reason this module exists.
   it("falls back to the checkout that bought it", async () => {
     const got = await attribute(
@@ -50,7 +50,7 @@ describe("attributing a Polar subscription", () => {
   /*
    * ⚠ THE LEGACY LEG, AND IT MUST STAY LAST. Customers created before
    * `core.polar_checkouts` have no checkout row, and their `external_id` is the
-   * only thing naming a tenant — but it is also the field that goes stale on a
+   * only thing naming a tenant - but it is also the field that goes stale on a
    * re-signup and cannot be corrected, so anything we know ourselves beats it.
    */
   it("uses external_id only when nothing of ours knows the subscription", async () => {

@@ -6,8 +6,8 @@ import type { WebhookEventName } from "@repo/contracts"
  * ⚠ EVERY CUSTOMER EVENT ORIGINATES HERE, INCLUDING `email.sent`. The send
  * worker emits nothing: SES's configuration set publishes `Send` the moment it
  * accepts a message, so one ingestion path produces every event, in one order,
- * from one clock. The alternative — `sent` from our worker and the rest from
- * SES — gives a customer two sources that can disagree, and a `sent` for a
+ * from one clock. The alternative - `sent` from our worker and the rest from
+ * SES - gives a customer two sources that can disagree, and a `sent` for a
  * message SES went on to reject.
  *
  * ⚠ AND THE JOIN KEY IS THE TAG, NOT SES'S MESSAGE ID. `mail.messageId` is
@@ -21,7 +21,7 @@ import type { WebhookEventName } from "@repo/contracts"
  * ⚠ ONE NAME FOR ONE SET. `webhookEventName` in @repo/contracts is what the
  * OpenAPI document publishes and what the SDKs type against, and `core.ts`
  * mirrors it as a Postgres enum. A third hand-written union here would be a
- * third thing to remember on the day an event is added — and the one that
+ * third thing to remember on the day an event is added - and the one that
  * fails silently, because a union that is merely out of date still compiles.
  */
 export type WebhookEventType = WebhookEventName
@@ -40,7 +40,7 @@ export interface NormalisedEvent {
   /**
    * ⚠ SNS's OWN MESSAGE ID, WHICH IS WHAT MAKES REDELIVERY FREE. SNS retries a
    * notification the same way we retry a webhook, and the retry is byte-identical
-   * — including this. A unique index on it turns "SNS sent it twice" into a
+   * - including this. A unique index on it turns "SNS sent it twice" into a
    * no-op instead of two bounces, two suppressions and two customer webhooks.
    */
   sourceEventId: string
@@ -90,7 +90,7 @@ interface SesNotification {
 
 /**
  * ⚠ AN UNRECOGNISED EVENT TYPE IS IGNORED, NOT AN ERROR. Turning on `Open` or
- * `Click` in the SES console — which someone will, to see what it does — would
+ * `Click` in the SES console - which someone will, to see what it does - would
  * otherwise make this endpoint 500 on every notification, and SNS would retry
  * each one for hours. Ignoring is also the correct answer for the two we
  * deliberately do not carry: open and click tracking is a privacy decision, not
@@ -105,7 +105,7 @@ const TYPES: Record<string, WebhookEventType> = {
   Reject: "email.failed",
   // ⚠ SES SPELLS THIS WITH A SPACE IN THE NOTIFICATION BODY. `RENDERING_FAILURE`
   // is the configuration-set API's spelling and never appears in a payload;
-  // both are here because getting it wrong is silent — a template that failed
+  // both are here because getting it wrong is silent - a template that failed
   // to render would show as `sent` forever.
   "Rendering Failure": "email.failed",
   RENDERING_FAILURE: "email.failed",
@@ -118,7 +118,7 @@ export function interpretSesEvent(
    * ⚠ THE DEDUPE KEY'S LAST RESORT, AND IT MUST BE STABLE ACROSS REDELIVERIES.
    * `occurred_at` is half of the unique index that makes an SNS retry a no-op,
    * so falling back to `new Date()` would let a notification with no usable
-   * timestamp be recorded twice — two delivery rows and two customer webhooks
+   * timestamp be recorded twice - two delivery rows and two customer webhooks
    * for one real event. SNS's own `Timestamp` is always present and identical
    * on every redelivery, which is exactly what this needs to be.
    */
@@ -158,7 +158,7 @@ export function interpretSesEvent(
 
 /**
  * ⚠ A TRANSIENT BOUNCE IS NOT A SUPPRESSION, AND CONFUSING THE TWO LOSES REAL
- * MAIL. A full mailbox, a greylisting, a receiver having a bad afternoon — all
+ * MAIL. A full mailbox, a greylisting, a receiver having a bad afternoon - all
  * arrive as `Bounce` and all recover on their own. Suppressing on those would
  * permanently stop mail to a customer who did nothing wrong, and the customer
  * would never find out why. Only `Permanent` means the address does not exist.
@@ -192,8 +192,8 @@ const addressesOf = (recipients: SesRecipient[] | undefined): string[] =>
  *
  * ⚠ NOT THE RAW SES NOTIFICATION, AND THE REASON IS THAT WE WOULD NEVER BE ABLE
  * TO TAKE IT BACK. Forwarding SES's shape verbatim makes AWS's schema our
- * public API — every field name, every quirk, and the fact that we use SES at
- * all — so changing relay, or SES changing a field, becomes a breaking change
+ * public API - every field name, every quirk, and the fact that we use SES at
+ * all - so changing relay, or SES changing a field, becomes a breaking change
  * for every customer. A small deliberate shape is one we own.
  */
 function publicData(
@@ -253,7 +253,7 @@ function firstDate(candidates: (string | undefined)[], fallback: Date): Date {
   }
   // ⚠ THE CALLER'S FALLBACK, RATHER THAN A THROW OR `new Date()`. A missing or
   // unparseable timestamp is a malformed notification, and dropping a real
-  // bounce over a bad date field costs more than a little imprecision — but the
+  // bounce over a bad date field costs more than a little imprecision - but the
   // value has to be the same on every redelivery or the dedupe stops working.
   return fallback
 }
@@ -289,7 +289,7 @@ export interface EventOps {
 
   /**
    * Writes the event, any suppressions, and one delivery row per subscribed
-   * endpoint — in ONE transaction, so a crash leaves either all of it or none.
+   * endpoint - in ONE transaction, so a crash leaves either all of it or none.
    *
    * Returns `duplicate` when SNS has already delivered this notification, in
    * which case nothing is written and nothing is queued.
@@ -311,7 +311,7 @@ export type IngestOutcome =
   | { status: "duplicate" }
   /** The tag named a message we have no row for. */
   | { status: "unknown_message" }
-  /** A type we do not carry — open, click, or something new. */
+  /** A type we do not carry - open, click, or something new. */
   | { status: "ignored" }
 
 /**
@@ -340,7 +340,7 @@ export async function ingestSesEvent(
  *
  * ⚠ ONE PERSISTENCE PATH FOR EVERY ROUTE, WHICH IS THE POINT OF SPLITTING IT OUT
  * OF `ingestSesEvent`. The direct route's outcomes arrive from Stalwart in a
- * completely different shape and reach exactly this function — so the dedupe,
+ * completely different shape and reach exactly this function - so the dedupe,
  * the suppression write, the endpoint fan-out and the ordering guarantees are
  * the same code, not two copies that agree today. A customer must not be able to
  * tell from a webhook which MTA carried their message, and the surest way to
@@ -355,7 +355,7 @@ export async function ingestEvent(
     // ⚠ NOT AN ERROR, AND NOT A RETRY. The likeliest cause is retention: the
     // partition holding a months-old message was dropped and a very late event
     // arrived for it. Answering non-2xx would make the sender retry for hours
-    // over a message that no longer exists — SNS for hours, Stalwart until its
+    // over a message that no longer exists - SNS for hours, Stalwart until its
     // `discardAfter` elapses.
     //
     // ⚠ AND ON THE DIRECT ROUTE IT IS ALSO THE ORDINARY CASE FOR MAIL THAT IS
@@ -383,10 +383,10 @@ export async function ingestEvent(
     } catch (err) {
       // The rows are committed and `status = 'pending'` is a queryable backlog.
       // Reporting a failure would make SNS redeliver, and the unique index
-      // would then discard the event — losing the webhook to fix the queue.
+      // would then discard the event - losing the webhook to fix the queue.
       deps.log.error(
         { err, tenantId: owner.tenantId, count: written.deliveries.length },
-        "webhook enqueue failed after commit — deliveries left pending",
+        "webhook enqueue failed after commit - deliveries left pending",
       )
     }
   }
@@ -398,8 +398,8 @@ export async function ingestEvent(
  * The envelope a customer's endpoint receives.
  *
  * ⚠ `id` IS THE DELIVERY ID AND IT IS STABLE ACROSS RETRIES, WHICH IS WHAT
- * MAKES THE RECEIVER ABLE TO BE IDEMPOTENT. We deliver at least once — a
- * timeout after their handler committed looks exactly like a failure — so the
+ * MAKES THE RECEIVER ABLE TO BE IDEMPOTENT. We deliver at least once - a
+ * timeout after their handler committed looks exactly like a failure - so the
  * only way a customer can avoid double-processing is a key they can store. A
  * fresh id per attempt would take that away.
  */

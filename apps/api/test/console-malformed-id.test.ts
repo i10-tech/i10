@@ -11,7 +11,7 @@ import type { TenantResolver } from "../src/middleware/tenant.js"
  * ONE AS "NO ROWS". `where id = 'banana'` raises `22P02` before the planner
  * looks at a single tuple, so without the translation this is a 500: an entry
  * in the error budget and a Sentry issue, for a stale bookmark. These pin that
- * it is a 422, and — just as important — that a genuine failure is still a 500.
+ * it is a 422, and - just as important - that a genuine failure is still a 500.
  */
 
 const TENANT = "11111111-1111-4111-8111-111111111111"
@@ -80,7 +80,7 @@ describe("a malformed id", () => {
    * ⚠ THE CONDITION HAS TO BE NARROW, WHICH IS THE HALF THAT COULD GO WRONG
    * QUIETLY. A catch that answered 422 for any database error would turn a
    * deadlock, a failed constraint or a dead connection into "your request was
-   * malformed" — telling a customer their input is wrong while our database is
+   * malformed" - telling a customer their input is wrong while our database is
    * on fire, and hiding the outage from our own error reporting.
    */
   it("does not swallow any other database failure", async () => {

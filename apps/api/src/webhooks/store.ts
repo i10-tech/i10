@@ -70,7 +70,7 @@ export function webhookEndpointStore(
     async create(tenantId, input) {
       // ⚠ THE URL IS CHECKED BEFORE IT IS STORED, NOT BEFORE IT IS FETCHED.
       // Validating at delivery time would mean a customer can register anything
-      // and only find out it is refused when the first event silently fails —
+      // and only find out it is refused when the first event silently fails -
       // and it would put the check in the worker, where a bug is a live SSRF
       // rather than a 422.
       const verdict = checkEndpointUrl(input.url)

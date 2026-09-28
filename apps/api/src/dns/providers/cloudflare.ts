@@ -24,7 +24,7 @@ import { DNS_USER_AGENT } from "../user-agent.js"
  * so a second run changes nothing.
  *
  * ⚠ AND THE TOKEN MAY BE EITHER AN OAUTH ACCESS TOKEN OR A PASTED API TOKEN.
- * Both are `Authorization: Bearer`, which is why one adapter serves both paths —
+ * Both are `Authorization: Bearer`, which is why one adapter serves both paths -
  * Cloudflare's OAuth is not open to every developer, so the pasted-token route
  * has to keep working regardless of whether the OAuth application is ever
  * approved. See `dns/oauth.ts`.
@@ -55,7 +55,7 @@ async function call<T>(
    * ⚠ READ BEFORE THE `try`, AND THAT IS NOT A STYLE CHOICE. `tokenOf` throws
    * `unauthorized` for a credential that has lost its token, and inside the
    * block below that throw is caught by the network handler and re-wrapped as
-   * `unavailable` — so a connection that can only be fixed by reconnecting
+   * `unavailable` - so a connection that can only be fixed by reconnecting
    * reports itself as a Cloudflare outage, the console says "try again", and
    * trying again produces the identical failure for ever. The port's own note
    * on `DnsWriteFailure` is about exactly this collapse, in the other
@@ -152,7 +152,7 @@ export function cloudflareWriter(): ZoneWriter {
        * ⚠ CONFLICTS ARE COLLECTED BEFORE ANYTHING IS WRITTEN, so a refusal
        * leaves the zone exactly as it was. Discovering the third record
        * conflicts after creating the first two would leave a half-published
-       * delegation — which resolves inconsistently and is worse than either
+       * delegation - which resolves inconsistently and is worse than either
        * outcome on its own.
        */
       const conflicts = shadowedBy(records, existing)
@@ -169,7 +169,7 @@ export function cloudflareWriter(): ZoneWriter {
 
       /*
        * ⚠ OUR OWN LEFTOVERS GO AFTER THE CONFLICT DECISION AND BEFORE THE
-       * WRITES. After, because a refusal must leave the zone untouched —
+       * WRITES. After, because a refusal must leave the zone untouched -
        * tidying up on a call that then declines to publish would delete a
        * working set and put nothing in its place. Before, because creating
        * the new record first is what briefly gives the zone two of them, and
@@ -228,7 +228,7 @@ export function cloudflareWriter(): ZoneWriter {
             ttl: record.ttl,
             ...(record.priority === undefined ? {} : { priority: record.priority }),
             // ⚠ NEVER PROXIED. An orange-clouded record answers with
-            // Cloudflare's HTTP addresses instead of the value — which is
+            // Cloudflare's HTTP addresses instead of the value - which is
             // exactly how `ns1.i10.tech` came to resolve to 104.21.27.97 and
             // serve no DNS at all. It is only meaningful for A/AAAA/CNAME, and
             // sending it for the others is ignored.
@@ -272,7 +272,7 @@ const sameName = (a: string, b: string) =>
 /**
  * ⚠ TXT VALUES ARE COMPARED UNQUOTED. Cloudflare stores a TXT record's content
  * without the surrounding quotes a zone file would carry, and a caller that
- * sends them would create a second record every single run — each one a
+ * sends them would create a second record every single run - each one a
  * duplicate of the last, none of them ever matching.
  */
 const sameValue = (type: string, stored: string, wanted: string) => {
@@ -289,7 +289,7 @@ const sameValue = (type: string, stored: string, wanted: string) => {
  * ⚠ ONLY AT THE EXACT DELEGATED NAME, AND ONLY WHEN WE ARE PUBLISHING NS THERE.
  * Putting an NS record at `_dmarc.example.com` hands that whole name to another
  * server, so a TXT record left behind in the parent zone is not merely
- * redundant — it is unreachable, and most providers will refuse to hold both.
+ * redundant - it is unreachable, and most providers will refuse to hold both.
  * That is the state a customer who already had DMARC configured lands in, and
  * it is why delegation "did nothing" for them.
  *

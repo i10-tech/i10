@@ -5,7 +5,7 @@
  * the per-page endpoint (`og/[...slug].ts`) and the homepage fallback
  * (`og.png.ts`) spread this object into `astro-og-canvas`.
  *
- * Leading underscore tells Astro to skip routing for this file — it sits
+ * Leading underscore tells Astro to skip routing for this file - it sits
  * inside `src/pages/` to be next to its consumers, but it's not a route.
  */
 

@@ -4,27 +4,27 @@
 #
 # ⚠ THIS SCRIPT EXISTS BECAUSE ARGO CANNOT DO THIS PART. Everything under this
 # directory is applied by Argo, but Stalwart's real configuration lives inside
-# its own database and is reached over its management API — not through
+# its own database and is reached over its management API - not through
 # Kubernetes objects. `plan.ndjson` is carried into the pod by a ConfigMap and
 # then does nothing at all until something applies it. This is that something.
 #
 # It is idempotent. Run it after any change to plan.ndjson, and run it on a
-# fresh install. The one non-idempotent object it touches — the Tracer, which
-# has no natural key to match on — is created only when absent.
+# fresh install. The one non-idempotent object it touches - the Tracer, which
+# has no natural key to match on - is created only when absent.
 #
 #   ./bootstrap.sh              apply, reload, restart, verify
 #   ./bootstrap.sh --verify     verify only, change nothing
 #   ./bootstrap.sh --no-restart apply and reload, skip the restart
 #   ./bootstrap.sh --dry-run    show what the plan would create or change, and
-#                               stop — reads only. `stalwart-cli apply --dry-run`
+#                               stop - reads only. `stalwart-cli apply --dry-run`
 #                               cannot do this: it never contacts the server, so
 #                               it passes plans the server will refuse.
 #   PLAN_FILE=path ./bootstrap.sh --dry-run
-#                               preview a plan that is not deployed yet — a
+#                               preview a plan that is not deployed yet - a
 #                               branch's, before merge. Dry-run only: a real
 #                               apply always reads what Argo deployed.
 #
-# Runs anywhere `kubectl` reaches the cluster and `python3` exists — on psl-vps
+# Runs anywhere `kubectl` reaches the cluster and `python3` exists - on psl-vps
 # as `mo` needs no sudo.
 #
 # ⚠ ON A GENUINELY FRESH INSTALL, READ config/README.md FIRST. The first
@@ -65,21 +65,21 @@ die() {
   exit 1
 }
 
-command -v python3 >/dev/null || die "python3 is required — it speaks to Stalwart's API"
+command -v python3 >/dev/null || die "python3 is required - it speaks to Stalwart's API"
 
 # ⚠ ASK THE CLUSTER BEFORE ASKING FOR THE POD. `kubectl get pod` fails the same
 # way when kubectl points at no cluster at all, and reporting that as "pod not
 # found" sent a laptop without a context looking for a StatefulSet problem that
 # did not exist.
 kubectl get namespace "$NS" >/dev/null 2>&1 ||
-  die "kubectl cannot reach namespace $NS (context: $(kubectl config current-context 2>/dev/null || echo none)) — run this on psl-vps, or point kubectl at the cluster"
+  die "kubectl cannot reach namespace $NS (context: $(kubectl config current-context 2>/dev/null || echo none)) - run this on psl-vps, or point kubectl at the cluster"
 kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
-  die "pod $POD not found in $NS — is the StatefulSet synced?"
+  die "pod $POD not found in $NS - is the StatefulSet synced?"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The API client
 #
-# ⚠ STALWART'S MANAGEMENT API, DIRECTLY, THROUGH A PORT-FORWARD — NOT
+# ⚠ STALWART'S MANAGEMENT API, DIRECTLY, THROUGH A PORT-FORWARD - NOT
 # stalwart-cli PODS. This used to start one throwaway pod per command: an image
 # pull, a scheduling round and a NetworkPolicy race (kube-router builds its
 # ipsets from a watch, so a new pod reaches nothing for a second or two) each
@@ -93,13 +93,13 @@ kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
 # multi-variant objects); a match is updated with the body minus `@type` and
 # every field the schema marks `immutable` or `serverSet`; no match is created
 # minus `serverSet`; two matches is an error. `#name` references are never
-# rewritten client-side — every request carries a `createdIds` map (RFC 8620
+# rewritten client-side - every request carries a `createdIds` map (RFC 8620
 # §3.3) and the server resolves them, exactly as the CLI does. Only the three
 # operations plan.ndjson uses are supported; anything else fails loudly.
 #
 # ⚠ THE CREDENTIAL NEVER REACHES argv OR A POD SPEC. It lives in a shell
 # variable and is handed to the helper through its environment for the length
-# of one process — not visible in `ps`, and there is no pod whose `-o yaml`
+# of one process - not visible in `ps`, and there is no pod whose `-o yaml`
 # could show it.
 # ─────────────────────────────────────────────────────────────────────────────
 HELPER=$(mktemp "${TMPDIR:-/tmp}/stalwart-api.XXXXXX")
@@ -203,7 +203,7 @@ def refs_in(value, out):
 
 def jmap(calls, creating=()):
     body = {"using": USING, "methodCalls": calls}
-    # Only the references this request uses, and never one it is creating —
+    # Only the references this request uses, and never one it is creating -
     # the same rule as stalwart-cli's request_created_ids.
     known = {r: created_ids[r] for r in refs_in(calls, set()) - set(creating) if r in created_ids}
     if known:
@@ -320,9 +320,9 @@ def update_object(c, sid, patch):
 
 
 def covers(current, wanted):
-    # ⚠ A TYPED SUB-OBJECT COMES BACK WITH THE SERVER'S DEFAULTS FILLED IN —
+    # ⚠ A TYPED SUB-OBJECT COMES BACK WITH THE SERVER'S DEFAULTS FILLED IN -
     # `dkimManagement: {"@type": "Automatic"}` is stored with its algorithms,
-    # selector template and rotation periods — so exact equality reports a
+    # selector template and rotation periods - so exact equality reports a
     # change on every run. Inside anything carrying `@type`, compare only what
     # the plan sets. Plain maps (`bind`, `subjectAlternativeNames`) are sets and
     # are written whole, so they stay exact: a removed entry must show.
@@ -354,7 +354,7 @@ def upsert(c, op, cache, dry=False):
     if isinstance(match_on, str):
         match_on = [match_on]
     if not match_on:
-        fail(f"{label}: upsert without `matchOn` — name the properties that identify the object")
+        fail(f"{label}: upsert without `matchOn` - name the properties that identify the object")
     if c not in cache:
         cache[c] = fetch_all(c)
     known = cache[c]
@@ -451,7 +451,7 @@ def apply(text, dry=False):
             created, updated = create_objects(c, op["value"], cache.setdefault(c, [])), 0
             ok(f"created {c[2:]} ({created})")
         else:
-            fail(f"operation #{i}: `{kind}` is not supported by bootstrap.sh — "
+            fail(f"operation #{i}: `{kind}` is not supported by bootstrap.sh - "
                  "only upsert, update and create; use stalwart-cli for the rest")
         total_created += created
         total_updated += updated
@@ -515,7 +515,7 @@ PY
 connect
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Verification — used at the end, and on its own with --verify.
+# Verification - used at the end, and on its own with --verify.
 # ─────────────────────────────────────────────────────────────────────────────
 verify() {
   local failures=0
@@ -523,7 +523,7 @@ verify() {
   say "Verifying"
 
   # ⚠ THE CONTAINER HAS NO openssl AND ITS /bin/sh IS BUSYBOX. No `/dev/tcp`
-  # either — that is a bash feature. Both checks below are written against what
+  # either - that is a bash feature. Both checks below are written against what
   # the image actually ships: nc and curl. Getting this wrong once produced two
   # confident failures against a server that was working perfectly.
   local greeting
@@ -533,7 +533,7 @@ verify() {
     *mail.i10.tech*) ok "SMTP greeting: ${greeting%%$'\r'*}" ;;
     "") warn "could not read the SMTP greeting" ;;
     *)
-      warn "SMTP greeting is ${greeting%%$'\r'*} — SystemSettings.defaultHostname did not take"
+      warn "SMTP greeting is ${greeting%%$'\r'*} - SystemSettings.defaultHostname did not take"
       failures=$((failures + 1))
       ;;
   esac
@@ -542,7 +542,7 @@ verify() {
   # SNI and gets the right certificate regardless; a sending MTA on port 25
   # generally does not, and that is the connection `defaultCertificateId` exists
   # for. Checking with SNI would pass while inbound mail was being offered a
-  # self-signed certificate — invisible from the direction you are looking.
+  # self-signed certificate - invisible from the direction you are looking.
   #
   # curl against an IP LITERAL sends no SNI, which is exactly the case we want.
   # It then fails to speak HTTP to an SMTP port, which does not matter: the TLS
@@ -554,7 +554,7 @@ verify() {
   case "$subject" in
     *i10.tech*) ok "certificate without SNI: $subject" ;;
     *)
-      warn "certificate without SNI is '${subject:-unreadable}' — expected CN=i10.tech."
+      warn "certificate without SNI is '${subject:-unreadable}' - expected CN=i10.tech."
       warn "  A reload does NOT switch certificates; the pod must be restarted."
       failures=$((failures + 1))
       ;;
@@ -583,22 +583,22 @@ verify() {
   # ⚠ THE LISTENER THE SEND WORKER DIALS, CHECKED BY NAME RATHER THAN ASSUMED.
   # The direct route's whole dependency on this server is one line: without
   # `relay` on 2525, every direct-routed message answers `deferred` and waits in
-  # the queue — the designed failure, but a silent one until the backlog is
+  # the queue - the designed failure, but a silent one until the backlog is
   # large enough to notice. See config/README.md, "The internal relay".
   if api listener relay; then
     ok "the relay listener (2525, in-cluster only) is configured"
   else
-    warn "no relay listener — the direct route cannot send"
+    warn "no relay listener - the direct route cannot send"
     failures=$((failures + 1))
   fi
 
   # ⚠ THE TRAP THAT COST A DAY. The default Tracer writes to /var/log/stalwart,
-  # which does not exist on a read-only root filesystem — so the server logs
+  # which does not exist on a read-only root filesystem - so the server logs
   # NOTHING and every problem has to be diagnosed from outside.
   if [ "$(kubectl logs -n "$NS" "$POD" -c stalwart --tail=5 2>/dev/null | wc -l)" -gt 0 ]; then
     ok "stalwart is logging to stdout"
   else
-    warn "stalwart has logged nothing — the Stdout tracer is missing or needs a restart"
+    warn "stalwart has logged nothing - the Stdout tracer is missing or needs a restart"
     failures=$((failures + 1))
   fi
 
@@ -613,12 +613,12 @@ fi
 
 # ⚠ TWO FUNCTIONS, BECAUSE ONLY THE PLAN MAY GO DOWN THE PIPE. The lookup
 # prints progress and can `die`; run inside a pipeline it would do both in a
-# subshell — its progress line parsed as a plan operation, its exit ignored.
+# subshell - its progress line parsed as a plan operation, its exit ignored.
 find_plan() {
   CM=$(kubectl get configmap -n "$NS" -o name |
     grep -o "${CONFIGMAP_PREFIX}-[a-z0-9]*" | head -1) ||
-    die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS — has Argo synced?"
-  [ -n "$CM" ] || die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS — has Argo synced?"
+    die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS - has Argo synced?"
+  [ -n "$CM" ] || die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS - has Argo synced?"
   ok "using ConfigMap $CM"
 }
 plan_text() {
@@ -626,7 +626,7 @@ plan_text() {
 }
 
 if [ "$DRY_RUN" = true ]; then
-  say "Previewing plan.ndjson — nothing is written"
+  say "Previewing plan.ndjson - nothing is written"
   if [ -n "${PLAN_FILE:-}" ]; then
     [ -r "$PLAN_FILE" ] || die "cannot read PLAN_FILE=$PLAN_FILE"
     ok "using $PLAN_FILE (not deployed)"
@@ -645,7 +645,7 @@ say "Applying plan.ndjson"
 #
 # The plan is already inside the pod, mounted from the hashed ConfigMap Argo
 # generated. Reading it from there rather than from the working copy is what
-# makes this reflect what is DEPLOYED — running it against an uncommitted local
+# makes this reflect what is DEPLOYED - running it against an uncommitted local
 # edit would configure the server from something no one else can see.
 find_plan
 plan_text | api apply || die "the plan did not apply cleanly"
@@ -655,7 +655,7 @@ say "Ensuring a Stdout tracer"
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # ⚠ NOT IN plan.ndjson, AND IT CANNOT BE. `Tracer` has no filters, so `matchOn`
-# has nothing to key on and neither upsert nor reconcile can converge — a second
+# has nothing to key on and neither upsert nor reconcile can converge - a second
 # apply would create a second tracer. It is a create-once object, like the first
 # administrator, so this checks before creating.
 #
@@ -702,7 +702,7 @@ if [ "$RESTART" = true ]; then
   sleep 3
   connect
 else
-  warn "skipping the restart — the certificate, tracer and cached permissions may be stale"
+  warn "skipping the restart - the certificate, tracer and cached permissions may be stale"
 fi
 
 verify || warn "verification found problems; see above"
@@ -714,13 +714,13 @@ say "DNS records this server expects"
 # ⚠ ON A REBUILD THE DKIM KEYS ARE NEW. Stalwart generates its signing keys at
 # first boot and holds the private halves in its own database. A rebuilt server
 # has different keys under different selectors, so the DKIM records in
-# infra/tofu/stacks/dns are WRONG until they are replaced from this output — and
+# infra/tofu/stacks/dns are WRONG until they are replaced from this output - and
 # the failure is silent: mail sends, DKIM fails, DMARC alignment fails, and it
 # lands in spam.
 #
 # TLSA records are filtered out on purpose. Stalwart offers 22 of them; DANE
 # pins the certificate, cert-manager renews every 60 days, and nothing updates
-# the pins — so publishing them breaks inbound delivery at the first renewal.
+# the pins - so publishing them breaks inbound delivery at the first renewal.
 # They also do nothing without DNSSEC, which this zone does not have.
 warn "This is what Stalwart SUGGESTS, not what i10 publishes."
 warn "  infra/tofu/stacks/dns is the authority. It deliberately differs:"
@@ -731,7 +731,7 @@ zone=$(api zone || true)
 if [ -n "$zone" ]; then
   printf '%s\n' "$zone" | grep -v " TLSA " | sed 's/^/   /'
 else
-  warn "no Domain object — plan.ndjson did not create one"
+  warn "no Domain object - plan.ndjson did not create one"
 fi
 
 say "Done."

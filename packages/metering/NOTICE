@@ -4,8 +4,8 @@ Portions of the behaviour in this package are derived from Autumn
 (https://github.com/useautumn/autumn), which is licensed under the Apache
 License, Version 2.0.
 
-No source files were copied. What was taken is the semantics — read from their
-implementation and reimplemented here — specifically:
+No source files were copied. What was taken is the semantics - read from their
+implementation and reimplemented here - specifically:
 
   - the shape of a metered entitlement: an allowance that refills on an
     interval, drawn down per request;

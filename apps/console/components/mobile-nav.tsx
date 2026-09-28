@@ -25,7 +25,7 @@ import { useResetWhen } from "@/lib/react"
  * The top bar below the large breakpoint, and the drawer behind it.
  *
  * ⚠ IT CLOSES ON NAVIGATION, AND THAT HAS TO BE WIRED BY HAND. A client-side
- * route change does not unmount the sheet — Next swaps the page beneath it and
+ * route change does not unmount the sheet - Next swaps the page beneath it and
  * the drawer stays open over the thing you just asked for, which reads as the
  * tap not having registered. Watching `usePathname` is the only signal
  * available, because the links are plain `<Link>`s and closing in each one's
@@ -33,7 +33,7 @@ import { useResetWhen } from "@/lib/react"
  * some other way.
  *
  * ⚠ AND IT IS `lg:hidden` RATHER THAN A SEPARATE MOBILE TREE. One navigation
- * definition, rendered twice — see lib/nav.ts. A second hand-written list is
+ * definition, rendered twice - see lib/nav.ts. A second hand-written list is
  * how a page ends up reachable on a laptop and invisible on a phone.
  */
 export function MobileNav({
@@ -50,7 +50,7 @@ export function MobileNav({
 
   // See the block comment: a client-side route change does not unmount the
   // sheet, so it has to be closed by hand. Adjusted during render rather than
-  // in an effect — an effect would paint the open drawer over the new page for
+  // in an effect - an effect would paint the open drawer over the new page for
   // one frame before closing it.
   useResetWhen(pathname, () => setOpen(false))
 

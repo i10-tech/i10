@@ -1,4 +1,4 @@
-// Root /llms.txt — sectioned index for AI agents.
+// Root /llms.txt - sectioned index for AI agents.
 import { getIndexedTopLevel } from "@cloudflare/nimbus-docs"
 import { config } from "virtual:nimbus/config"
 
@@ -23,7 +23,7 @@ export async function GET() {
   const rows: Row[] = []
 
   for (const leaf of leaves) {
-    const description = leaf.description ? ` — ${leaf.description}` : ""
+    const description = leaf.description ? ` - ${leaf.description}` : ""
     rows.push({
       key: leaf.url,
       line: `- [${leaf.title}](${new URL(leaf.markdownUrl, config.site).href})${description}`,

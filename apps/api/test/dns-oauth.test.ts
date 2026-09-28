@@ -8,14 +8,14 @@ import { dnsOAuth, OAuthError } from "../src/dns/oauth.js"
  * ⚠ TWO THINGS DEFEND THIS FLOW AND NEITHER WAS TESTED. `state` is the entire
  * CSRF defence: the callback arrives as a plain browser navigation with no
  * session of ours, so an unauthenticated state lets anybody craft a callback
- * that attaches THEIR DNS credential to SOMEBODY ELSE'S workspace — the
+ * that attaches THEIR DNS credential to SOMEBODY ELSE'S workspace - the
  * standard OAuth account-linking attack, whose payoff here is a stranger
  * holding a connection that writes records into a zone they do not own.
  *
  * ⚠ AND PKCE IS THE OTHER HALF, because the authorization code travels through
  * a browser we do not control. Anything that can read the redirect holds a code
  * exchangeable for that same credential. The verifier binds the code to this
- * server — and only if it never travels beside it, which is the property the
+ * server - and only if it never travels beside it, which is the property the
  * tests below are really guarding.
  */
 
@@ -46,7 +46,7 @@ describe("starting an authorisation", () => {
       start(o)
     } catch (error) {
       expect((error as OAuthError).kind).toBe("unconfigured")
-      // ⚠ NOT "try again later" — an unregistered app never clears on its own.
+      // ⚠ NOT "try again later" - an unregistered app never clears on its own.
       expect((error as OAuthError).message).toContain(
         "not configured on this deployment",
       )
@@ -105,7 +105,7 @@ describe("starting an authorisation", () => {
 
   /**
    * ⚠ WHOLESALE, NOT MERGED. A merge would mean a deployment could only ever
-   * ADD to whatever the registry says — so a registry entry that is simply
+   * ADD to whatever the registry says - so a registry entry that is simply
    * wrong could never be corrected, which is the whole case for the override.
    */
   it("does not merge the configured scopes with the registry's", () => {
@@ -120,7 +120,7 @@ describe("starting an authorisation", () => {
 
   /**
    * ⚠ THE REGISTRY'S DEFAULTS ARE THE REAL CLOUDFLARE SCOPES, read off a live
-   * client's edit page rather than inferred from the docs — they were
+   * client's edit page rather than inferred from the docs - they were
    * `dns_records:edit` and `zone:read`, which is API TOKEN syntax and is what
    * every integration guide repeats. `offline_access` is what makes the
    * connection outlive its first access token.
@@ -144,7 +144,7 @@ describe("starting an authorisation", () => {
 describe("the PKCE verifier", () => {
   /**
    * ⚠ THE ASSERTION THIS WHOLE MECHANISM EXISTS FOR. `state` is signed but NOT
-   * secret — its payload is base64url and readable by anyone holding the URL —
+   * secret - its payload is base64url and readable by anyone holding the URL -
    * so a verifier carried inside it would sit beside the very code it is meant
    * to protect, and protect nothing.
    */
@@ -208,7 +208,7 @@ describe("verifying the state on the way back", () => {
   /**
    * ⚠ A SIGNATURE OF THE WRONG LENGTH MUST REFUSE, NOT CRASH. `timingSafeEqual`
    * THROWS on a length mismatch rather than returning false, so comparing
-   * without the length check turns a forged state into a 500 — and a 500 where
+   * without the length check turns a forged state into a 500 - and a 500 where
    * a 422 belongs is itself an oracle.
    */
   it("refuses a short signature instead of throwing", () => {
@@ -260,7 +260,7 @@ describe("exchanging the code", () => {
    * ⚠ WHAT A BOT FILTER ANSWERS WITH, AND THE CASE THE OLD `detail` COULD NOT
    * DESCRIBE. `dash.cloudflare.com` is a dashboard host behind Cloudflare's own
    * bot management, so a refused token exchange comes back as an HTML
-   * challenge page rather than an OAuth error — and the body was being parsed
+   * challenge page rather than an OAuth error - and the body was being parsed
    * as JSON, discarded on failure, and reported as the bare status. "HTTP 403"
    * reads identically whether the client secret is wrong or the cluster's
    * egress is being challenged, and those have nothing in common.
@@ -298,7 +298,7 @@ describe("exchanging the code", () => {
 
   /**
    * ⚠ OMITTED ENTIRELY FOR A PUBLIC CLIENT, NOT SENT EMPTY. An empty
-   * `client_secret` is a supplied-and-wrong secret, answered `invalid_client` —
+   * `client_secret` is a supplied-and-wrong secret, answered `invalid_client` -
    * indistinguishable in a log from a real secret that has been rotated.
    */
   it("omits the client secret for a public client", async () => {
@@ -331,7 +331,7 @@ describe("exchanging the code", () => {
 
   /*
    * ⚠ THE STATUS LEADS, AND IT IS NOT DECORATION. `invalid_grant` alone does
-   * not say whether the provider answered at all — a 400 they sent on purpose
+   * not say whether the provider answered at all - a 400 they sent on purpose
    * and a 502 from something standing in front of them are different problems
    * with the same word attached.
    */
@@ -374,7 +374,7 @@ describe("exchanging the code", () => {
    * CHECKS FOR THE SAME THING. `wrangler` matches `<!DOCTYPE html>` and then
    * `challenge-platform` on this exact endpoint and tells you to quote the ray
    * id to support. It is not a credential problem, it is not the customer's
-   * problem, and pressing the button again will not clear it — three things
+   * problem, and pressing the button again will not clear it - three things
    * "Cloudflare did not complete the authorisation" says none of.
    */
   it("names a bot challenge as a bot challenge", async () => {
@@ -404,8 +404,8 @@ describe("exchanging the code", () => {
    * ARGUE THE WRONG CASE. `error code: 1020` is a WAF rule that matched; a
    * challenge is bot management scoring the caller. They are cleared by
    * different people in different places, and the old classifier reported both
-   * with the same sentence because `Attention Required` — the title of the
-   * BLOCK page — was one of its challenge markers.
+   * with the same sentence because `Attention Required` - the title of the
+   * BLOCK page - was one of its challenge markers.
    */
   it("calls a firewall block a firewall block, not a challenge", async () => {
     captureText(
@@ -431,7 +431,7 @@ describe("exchanging the code", () => {
    * ⚠ THE CLASSIFIER WAS EATING THE ONLY EVIDENCE THERE IS. `detail` quotes
    * the body only when it does NOT recognise it, so in the one case worth
    * diagnosing the page was read, matched against three substrings, reduced to
-   * a sentence and dropped — and two rounds were then spent reasoning about a
+   * a sentence and dropped - and two rounds were then spent reasoning about a
    * response nobody had seen. `evidence` is the page, for the log only.
    */
   it("keeps the page Cloudflare actually served, with the headers that classify it", async () => {
@@ -490,7 +490,7 @@ describe("exchanging the code", () => {
 
   /**
    * ⚠ THE RAY ID IS THE ONLY THING CLOUDFLARE SUPPORT WILL ASK FOR. It names
-   * the exact request in their logs, including the rule that stopped it —
+   * the exact request in their logs, including the rule that stopped it -
    * which is the one fact nobody on this side of the connection can discover.
    */
   it("keeps the Cloudflare ray id when there is one", async () => {
@@ -506,7 +506,7 @@ describe("exchanging the code", () => {
 
   /**
    * ⚠ A GENERIC RUNTIME USER AGENT FROM A DATACENTRE IP IS WHAT BOT MANAGEMENT
-   * IS LOOKING FOR. Bun sends `Bun/1.4.2` when none is given — measured
+   * IS LOOKING FOR. Bun sends `Bun/1.4.2` when none is given - measured
    * against `cloudflare.com/cdn-cgi/trace`. See dns/user-agent.ts.
    *
    * ⚠ AND IT MUST NOT LOOK LIKE A CRAWLER EITHER, which is the assertion on
@@ -586,8 +586,8 @@ describe("exchanging the code", () => {
  *
  * ⚠ THE THING UNDER TEST IS *WHERE* THE REQUEST GOES, WHICH NOTHING ELSE HERE
  * LOOKS AT. `dash.cloudflare.com` answers psl-vps with a managed challenge to
- * every client we can construct — measured over IPv4 and IPv6, HTTP/1.1 and h2,
- * curl and Bun — so the fix could only ever be a different caller. That makes
+ * every client we can construct - measured over IPv4 and IPv6, HTTP/1.1 and h2,
+ * curl and Bun - so the fix could only ever be a different caller. That makes
  * the destination a correctness property rather than plumbing: brokering the
  * wrong host sends a client secret somewhere it did not need to go, and
  * brokering none of them leaves the feature broken in production while passing
@@ -702,8 +702,8 @@ describe("the OAuth broker", () => {
  * Where the browser is sent once the provider is done with it.
  *
  * ⚠ THE VALUE IS SIGNED BY US, WHICH IS EXACTLY WHY IT HAS TO BE CHECKED. It
- * cannot ride on `redirect_uri` — providers compare that character for
- * character — so it rides in `state`, and a `state` we signed is one the
+ * cannot ride on `redirect_uri` - providers compare that character for
+ * character - so it rides in `state`, and a `state` we signed is one the
  * callback trusts. An absolute URL accepted here would be an open redirect with
  * our signature on it: start an authorisation naming your own origin, send
  * somebody the link, and the callback hands them to you.
@@ -731,7 +731,7 @@ describe("the return path", () => {
   /*
    * ⚠ `//evil.test` IS THE ONE A LEADING-SLASH CHECK LETS THROUGH. It starts
    * with a slash and every browser resolves it as protocol-relative to another
-   * origin — the classic open redirect, and the reason the guard is not simply
+   * origin - the classic open redirect, and the reason the guard is not simply
    * `startsWith("/")`.
    */
   it("drops a protocol-relative path", () => {

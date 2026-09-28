@@ -5,7 +5,7 @@ import type { SmtpConfig } from "@upyo/smtp"
  *
  * ⚠ THIS IS A SEPARATE FUNCTION BECAUSE worker.ts CANNOT BE IMPORTED BY A TEST.
  * That file has top-level `await`, connects to Postgres and Redis on import and
- * starts draining queues — so every setting inside it was, until now, unverified
+ * starts draining queues - so every setting inside it was, until now, unverified
  * by construction. The settings here are the ones whose failure is silent, which
  * is exactly the set that should not live somewhere untestable.
  *
@@ -15,7 +15,7 @@ import type { SmtpConfig } from "@upyo/smtp"
  * not in `allow-public-mail`, so only the cluster reaches it, and Stalwart
  * relays there only for the worker's `bounce+` envelope. There is no account to
  * create, no password to rotate and nothing in Doppler. It replaced an SMTP
- * submission account that could never have worked — Stalwart refuses to hold a
+ * submission account that could never have worked - Stalwart refuses to hold a
  * password for any account while authd is the directory. See
  * infra/k8s/i10/stalwart/config/README.md, "The internal relay".
  */
@@ -37,7 +37,7 @@ export function relayConfig(opts: RelayOptions): SmtpConfig {
     // server advertises STARTTLS, then verifies the certificate against the name
     // it dialled. Stalwart's certificate is `*.i10.tech` and the worker dials a
     // `.svc.cluster.local` name, and upyo has no `servername` to verify against
-    // instead — so TLS here could only ever be unverified, which is theatre.
+    // instead - so TLS here could only ever be unverified, which is theatre.
     //
     // What crosses this hop is the message and nothing else: there is no
     // credential on it to steal. On a single node it never leaves the host's
@@ -45,7 +45,7 @@ export function relayConfig(opts: RelayOptions): SmtpConfig {
     // WireGuard backend) rather than this one connection.
     secure: false,
     // ⚠ THE LOWERCASE `s` IS LOAD-BEARING. nodemailer spelled it `requireTLS`,
-    // and `SmtpConfig` takes unknown properties without complaint — the wrong
+    // and `SmtpConfig` takes unknown properties without complaint - the wrong
     // casing is not a type error, it is a flag that silently does nothing. There
     // is a test asserting this exact key.
     requireTls: false,

@@ -8,8 +8,8 @@ import { ARRIVAL_PARAM, setArrival, type Arrival } from "@/lib/arrival"
  *
  * ⚠ FOR THE ONE CASE WE CANNOT STOP AT THE SOURCE: a redirect back from a
  * third party. Polar appends `?checkout_id=` to its success URL, so a page
- * reached that way is born with it. This keeps the fact — so a reload still
- * shows the payment banner — and removes the parameter, without a navigation.
+ * reached that way is born with it. This keeps the fact - so a reload still
+ * shows the payment banner - and removes the parameter, without a navigation.
  */
 export function ArrivalQuery({ names }: { names: Arrival[] }) {
   React.useEffect(() => {

@@ -1,5 +1,5 @@
 /*
- * Scaffold placeholder — the marketing site is NOT being built yet.
+ * Scaffold placeholder - the marketing site is NOT being built yet.
  *
  * When it is, it has a job beyond marketing: the Polar startup-program
  * application asks for a website and a hundred-word pitch, so this is a

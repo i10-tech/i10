@@ -8,7 +8,7 @@ variable "mail_host_ipv4" {
     The machine Stalwart listens on, published grey-cloud as mail.i10.tech.
 
     Today this is psl-vps, because i10 shares it. It becomes a remote-state
-    read from stacks/platform the moment i10 has a node of its own — which is
+    read from stacks/platform the moment i10 has a node of its own - which is
     why it is a variable rather than a literal in main.tf.
   EOT
   type        = string
@@ -28,7 +28,7 @@ variable "record_ids" {
   description = <<-EOT
     Cloudflare record ids for the EXISTING records this stack adopts, keyed by
     resource name. Every record in main.tf has an `import` block reading this
-    map, so the first apply adopts the zone rather than recreating it — which
+    map, so the first apply adopts the zone rather than recreating it - which
     matters because a recreate has a window where mail does not resolve.
 
     ⚠ ONE MAP RATHER THAN ONE VARIABLE PER RECORD. There are twenty-two of
@@ -58,6 +58,6 @@ variable "record_ids" {
       "srv_imaps", "srv_submissions", "srv_imap_none", "srv_submission_none",
       "mta_sts",
     ], keys(var.record_ids))) == 0
-    error_message = "record_ids is missing a key. Records this stack ADOPTS have an import block, so a missing id is a record that would be CREATED alongside the live one. One resource is deliberately absent from this list: spf_include, which never existed and is genuinely created here. Note that an EMPTY string satisfies this check and then fails the plan on a malformed import id — which is still the loud failure rather than a duplicate record, but it is not this validation catching it."
+    error_message = "record_ids is missing a key. Records this stack ADOPTS have an import block, so a missing id is a record that would be CREATED alongside the live one. One resource is deliberately absent from this list: spf_include, which never existed and is genuinely created here. Note that an EMPTY string satisfies this check and then fails the plan on a malformed import id - which is still the loud failure rather than a duplicate record, but it is not this validation catching it."
   }
 }

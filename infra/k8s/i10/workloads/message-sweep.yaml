@@ -6,7 +6,7 @@
 # ⚠ WHY THIS EXISTS. Four files in apps/api described a stale-message sweep as
 # the reason a lost enqueue, an abandoned batch or a deferred send is "late, but
 # never lost". `core.sweep_stuck_messages` has been in the schema since
-# 0002_tenancy.sql and nothing ever called it — so none of that was true. The
+# 0002_tenancy.sql and nothing ever called it - so none of that was true. The
 # ordinary path into it is not exotic: SES throttles a message, the worker puts
 # the row back to `queued` and clears its claim, the job that carried it
 # completes, and from that moment nothing anywhere points at the row.
@@ -29,7 +29,7 @@ metadata:
   namespace: i10-prod
 spec:
   # Every five minutes. With SWEEP_QUEUED_GRACE at five minutes, that puts the
-  # worst case for a throttled message at about ten — which is the number this
+  # worst case for a throttled message at about ten - which is the number this
   # schedule actually sets, and the reason it is not hourly.
   #
   # ⚠ THIS STRING IS ALSO IN apps/api/src/sweep.ts, AND THEY MUST AGREE. Sentry
@@ -38,7 +38,7 @@ spec:
   # and the alerting wrong.
   schedule: "*/5 * * * *"
   # ⚠ NEVER TWO AT ONCE, AND THE JOB ID DEPENDS ON IT. Every batch a pass
-  # enqueues is named with that pass's start time — see `sweepJobId` — so one
+  # enqueues is named with that pass's start time - see `sweepJobId` - so one
   # pass collapses duplicates within itself and a later pass is a genuine retry.
   # Two overlapping passes would each be internally consistent and would enqueue
   # the same rows twice; harmless, because the claim decides, and pointless.
@@ -59,7 +59,7 @@ spec:
       backoffLimit: 0
       # ⚠ COMFORTABLY UNDER THE FIVE-MINUTE INTERVAL. A pass that hangs must be
       # killed before the next one is due, or `Forbid` turns one stuck pod into a
-      # sweep that never runs again — and a killed run sends no check-in, so
+      # sweep that never runs again - and a killed run sends no check-in, so
       # Sentry reports it as missed rather than as nothing at all.
       activeDeadlineSeconds: 240
       template:
@@ -74,7 +74,7 @@ spec:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }
               env:
-                # ⚠ `i10_api`, NOT THE OWNER — the same rule as everywhere else.
+                # ⚠ `i10_api`, NOT THE OWNER - the same rule as everywhere else.
                 # This pass reaches across every tenant, and it does it through
                 # one narrow SECURITY DEFINER function
                 # (`core.sweep_stuck_messages`) that returns four columns and no

@@ -85,7 +85,7 @@ describe("checking quota", () => {
 
   /**
    * ⚠ THE MOST IMPORTANT MAPPING IN THE SWAP. A tenant with no plan is OUR
-   * misconfiguration — a signup that never assigned free, a feature id renamed
+   * misconfiguration - a signup that never assigned free, a feature id renamed
    * under a running catalogue. Reporting it as `exceeded` tells a customer who
    * has sent nothing to go and upgrade, and the mistake then hides behind them
    * doing exactly that.
@@ -111,7 +111,7 @@ describe("checking quota", () => {
 })
 
 describe("recording what was sent", () => {
-  // ⚠ The stored `sent_at`, not the recording process's clock — the reconciler
+  // ⚠ The stored `sent_at`, not the recording process's clock - the reconciler
   // buckets both sides on it, and a millisecond across midnight is a deficit in
   // one day and a surplus in the next, topped up forever.
   it("stamps each event with the row's own sent_at", async () => {
@@ -239,7 +239,7 @@ describe("the ledger the reconciler reads", () => {
  * ⚠ AN OPTED-IN OVERAGE IS A SEND, AND THE SEAM HAS NO WORD FOR IT ON PURPOSE.
  * `QuotaOutcome` answers whether the request may proceed; which units were
  * included and which are billable is decided when the send is RECORDED, because
- * only then do the message ids exist — and it is those ids that reach Polar's
+ * only then do the message ids exist - and it is those ids that reach Polar's
  * meter. Attributing at the gate would bill for mail that may never go.
  */
 describe("sending past the plan", () => {
@@ -257,7 +257,7 @@ describe("sending past the plan", () => {
     expect((await metering.checkQuota(TENANT, 300)).status).toBe("exceeded")
   })
 
-  // ⚠ The customer's switch cannot override a plan that says never — which is
+  // ⚠ The customer's switch cannot override a plan that says never - which is
   // what keeps a hard-capped feature like `domains` hard-capped.
   it("refuses when the plan says never, however the switch is set", async () => {
     const { db } = fakeDb(onPro(50_000, { overageEnabled: true }))

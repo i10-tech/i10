@@ -9,8 +9,8 @@ import { errorResponse, notWired as notWiredFor } from "./shared.js"
  * ⚠ EVERY ROUTE HERE IS ABOUT THE CALLER AND ONLY THE CALLER. There is no path
  * parameter naming a user and no `user_id` in any body, so there is no
  * authorisation check to get wrong: the subject is whoever the session says it
- * is. Provisioning on somebody else's behalf — an admin filling the seats they
- * bought — is a genuinely different operation, with a different question to
+ * is. Provisioning on somebody else's behalf - an admin filling the seats they
+ * bought - is a genuinely different operation, with a different question to
  * answer (does this admin own the domain, and is there a seat left) and a
  * different delivery mechanism (an invite the person completes by choosing
  * their own password). It gets its own routes rather than an optional field
@@ -81,7 +81,7 @@ mailboxes.openapi(
       // ⚠ 409, NOT 403, AND THE DISTINCTION IS WHAT THE CLIENT DOES NEXT. 403
       // says "you may not"; this is "not yet, and here is the thing to change".
       // The console's job on seeing it is to send the person to set a password
-      // and then retry the identical request — which is a conflict with current
+      // and then retry the identical request - which is a conflict with current
       // state, not a permission the account lacks.
       case "password_required":
         return c.json(
@@ -103,7 +103,7 @@ mailboxes.openapi(
           409,
         )
 
-      // ⚠ 403, NOT 429 — the same rule the domains route follows. A plan limit
+      // ⚠ 403, NOT 429 - the same rule the domains route follows. A plan limit
       // is not rate limiting: the SDKs back off on 429, and no amount of
       // waiting produces another seat. The fix is an upgrade or a deletion.
       case "limit":

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto"
  *
  * Apple Mail is the one client that cannot be configured by DNS alone. It reads
  * RFC 6186 SRV records and Thunderbird-style autoconfig, which between them fix
- * the hostnames and ports — but everything past that is a form the user fills
+ * the hostnames and ports - but everything past that is a form the user fills
  * in, and every field is a chance to type `i0.tech` instead of `i10.tech`. A
  * configuration profile removes the form: the account arrives complete and the
  * only thing anyone types is the password.
@@ -13,7 +13,7 @@ import { createHash } from "node:crypto"
  * It is also the ONLY route by which Apple Mail would ever speak OAuth to us. A
  * hand-added generic IMAP account in Apple Mail offers password authentication
  * and nothing else; `EmailAccountType` and the OAuth keys are only reachable
- * through a profile. That is not built here — it is the reason this file exists
+ * through a profile. That is not built here - it is the reason this file exists
  * as a seam rather than a string constant.
  *
  * Format: an XML property list. Apple's reference is "Configuration Profile
@@ -88,7 +88,7 @@ export function buildMobileConfig(account: MailAccount): string {
     // ports: the handshake happens before the protocol says a word. With
     // UseSSL false, Apple Mail connects in the clear and waits for a STARTTLS
     // banner that never comes, and the user is told the server "does not
-    // support SSL" — which is the exact wrong diagnosis.
+    // support SSL" - which is the exact wrong diagnosis.
     IncomingMailServerHostName: imapHost,
     IncomingMailServerPortNumber: imapPort,
     IncomingMailServerUseSSL: true,
@@ -101,7 +101,7 @@ export function buildMobileConfig(account: MailAccount): string {
     OutgoingMailServerAuthentication: "EmailAuthPassword",
     OutgoingMailServerUsername: email,
 
-    // One email, one password — the rule the whole identity bridge exists to
+    // One email, one password - the rule the whole identity bridge exists to
     // hold. Telling Apple the two credentials are the same is what stops it
     // prompting twice and inviting the user to invent a second one.
     OutgoingPasswordSameAsIncoming: true,
@@ -153,7 +153,7 @@ function slug(email: string): string {
 /**
  * A UUID derived from a string, formatted as a v4 so Apple's parser accepts it.
  *
- * Not RFC 4122 v5 — that would need a namespace UUID and buy nothing, because
+ * Not RFC 4122 v5 - that would need a namespace UUID and buy nothing, because
  * nothing outside this file ever compares these against another producer's.
  * What matters is only that the same address yields the same UUID forever.
  */

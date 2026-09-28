@@ -44,12 +44,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
    *
    * ⚠ OPTIONAL, AND ITS ABSENCE IS THE OLD BEHAVIOUR RATHER THAN AN ERROR.
    * Without it renaming a workspace renames only ours, which is exactly what
-   * this endpoint did before — the two names simply drift, which is the
+   * this endpoint did before - the two names simply drift, which is the
    * complaint rather than a crash.
    */
   organizations?: { rename(clerkOrgId: string, name: string): Promise<void> }
   /**
-   * The Clerk organizations a person belongs to — where an accepted domain may
+   * The Clerk organizations a person belongs to - where an accepted domain may
    * land.
    *
    * ⚠ OPTIONAL, AND ITS ABSENCE TURNS TRANSFERS OFF RATHER THAN OPENING THEM.
@@ -59,7 +59,7 @@ export interface ConsoleDeps extends TenantAuthDeps {
   memberships?: { list(userId: string): Promise<{ id: string; name: string }[]> }
   /**
    * Who the signed-in person is: a name to sign an offer with, and the
-   * addresses Clerk has VERIFIED for them — the only thing an offer is ever
+   * addresses Clerk has VERIFIED for them - the only thing an offer is ever
    * matched against.
    */
   people?: {
@@ -85,11 +85,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
       expiresAt: Date
     }): Promise<void>
   }
-  /** Optional for the same reason `AppDeps.domains` is — see createApp. */
+  /** Optional for the same reason `AppDeps.domains` is - see createApp. */
   domains?: DomainStore
   /**
    * ⚠ THE CACHE IS NOT OPTIONAL IN PRACTICE, EVEN THOUGH THE TYPE ALLOWS IT.
-   * Revoking a key is two acts — the row and the Redis entry — and without the
+   * Revoking a key is two acts - the row and the Redis entry - and without the
    * second the key keeps working for up to the TTL after the customer was told
    * it was dead. See the delete route.
    */
@@ -102,7 +102,7 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * ⚠ OPTIONAL, AND ITS ABSENCE HIDES THE PANEL RATHER THAN FAILING THE PAGE.
    * The domain still renders its records and its status; what is lost is the
    * sentence explaining which of four indistinguishable reasons is the live
-   * one. Degrading to the old behaviour is correct — that behaviour was
+   * one. Degrading to the old behaviour is correct - that behaviour was
    * uninformative, not broken.
    */
   delegation?: DelegationChecker
@@ -112,7 +112,7 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * ⚠ ALL THREE ARE OPTIONAL TOGETHER, BECAUSE THEY DEPEND ON THE SEALING KEY.
    * Without `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a credential that
    * can rewrite a customer's MX records, so the routes answer 501 rather than
-   * storing one in the clear — the same rule `core.domains` and the webhook
+   * storing one in the clear - the same rule `core.domains` and the webhook
    * secrets already follow.
    */
   dnsConnections?: DnsConnectionStore
@@ -138,7 +138,7 @@ export interface ConsoleDeps extends TenantAuthDeps {
     /**
      * ⚠ NARROWED TO THE ONE WRITE THIS ROUTE OWES THE REST OF THE SYSTEM.
      * Recording which workspace a checkout was started for is what attributes
-     * the payment later — see billing/attribution.ts. It is deliberately not
+     * the payment later - see billing/attribution.ts. It is deliberately not
      * the whole `SubscriptionOps`: nothing in the console may record a
      * subscription or grant a plan.
      */

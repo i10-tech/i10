@@ -8,7 +8,7 @@ import Header from "../components/Header.astro"
  * The API reference, at docs.i10.tech/api.
  *
  * It lives on the docs host rather than the API host because it is
- * documentation — api.i10.tech serves machines. The docs IngressRoute matches
+ * documentation - api.i10.tech serves machines. The docs IngressRoute matches
  * on Host() with no path predicate, so this page needs no infrastructure
  * change, and Astro prefers this specific route over the [...slug] catch-all.
  *
@@ -16,7 +16,7 @@ import Header from "../components/Header.astro"
  * CORS header on the API, no runtime request from a reader's browser, and a
  * reference that still renders when the API is down. The spec is a committed
  * artifact generated from the same Zod schemas the server validates with, and
- * CI fails if the two disagree — so inlining cannot go stale.
+ * CI fails if the two disagree - so inlining cannot go stale.
  *
  * The bundle is vendored into /scalar by scripts/vendor-scalar.mjs, so no part
  * of this page reaches a third-party CDN.

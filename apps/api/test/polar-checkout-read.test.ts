@@ -6,7 +6,7 @@ import { polarClient } from "../src/billing/polar.js"
  *
  * ⚠ THE DISTINCTION UNDER TEST IS "NO SUCH CHECKOUT" VERSUS "POLAR IS DOWN",
  * AND GETTING IT WRONG WAS VISIBLE IN THE PRODUCT. The id reaches this call from
- * a browser, so a value Polar refuses is the ordinary case — and the route above
+ * a browser, so a value Polar refuses is the ordinary case - and the route above
  * turns a THROWN error into a 503 reading "Could not reach the payment
  * provider", which tells somebody mid-purchase that a payment system is down
  * when it in fact answered immediately and correctly.
@@ -45,7 +45,7 @@ describe("reading a Polar checkout by id", () => {
       customerId: null,
       // ⚠ NULL RATHER THAN ABSENT, and both are read off the checkout rather
       // than assumed. They are what identifies the subscription this checkout
-      // produced when the customer's `external_id` names somebody else — see
+      // produced when the customer's `external_id` names somebody else - see
       // `pickForCheckout`.
       productId: null,
       createdAt: null,
@@ -61,7 +61,7 @@ describe("reading a Polar checkout by id", () => {
   /*
    * ⚠ THIS IS THE REGRESSION. Polar validates the id before it looks anything
    * up, so a well-formed UUID that is not one of theirs comes back 422 rather
-   * than 404 — measured against their sandbox with an all-zeros UUID, which the
+   * than 404 - measured against their sandbox with an all-zeros UUID, which the
    * console's own proxy happily forwards because it only checks the shape. That
    * fell through to the throw and surfaced as a 503.
    */
@@ -128,7 +128,7 @@ describe("reading a Polar customer by id", () => {
   /*
    * ⚠ A 403 STILL THROWS, AND NOW IT NAMES THE THING THAT IS ACTUALLY WRONG.
    * `customers:read` is not in the scope set a Polar organisation access token
-   * is created with by default, so this is not a transient failure — it is a
+   * is created with by default, so this is not a transient failure - it is a
    * deployment where attribution repair can never run. Measured in production
    * 2026-09-20: every call answered `403 insufficient_scope`, the caller read it
    * as "Polar is briefly unreachable, assume attribution is fine", and a

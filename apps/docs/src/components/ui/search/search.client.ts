@@ -220,7 +220,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
 }
 
 // ---------------------------------------------------------------------------
-// Bootstrap — imported for its side effects by SearchDialog.astro
+// Bootstrap - imported for its side effects by SearchDialog.astro
 // (`import "./search.client"`). Wires each dialog through mount() and binds the
 // global open shortcut once.
 // ---------------------------------------------------------------------------
@@ -236,7 +236,7 @@ function primaryDialog(): SearchDialogElement | null {
 }
 
 // The open shortcut and trigger delegation live on `document`, which survives
-// view transitions, so they are bound once for the page's lifetime — never
+// view transitions, so they are bound once for the page's lifetime - never
 // through mount()'s per-element setup/teardown. A module-scoped boolean (not an
 // <html> attribute) is the guard: ClientRouter resets <html> on every swap but
 // keeps document listeners, so an attribute guard would stack a duplicate

@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { buildMobileConfig, profileFilename } from "../autoconfig/apple-profile.js"
 
 export interface AutoconfigDeps {
-  /** The domains i10 hosts mail for — `env.MAIL_DOMAINS`. */
+  /** The domains i10 hosts mail for - `env.MAIL_DOMAINS`. */
   hostedDomains: readonly string[]
   /** The public name of the mail server, e.g. `mail.i10.tech`. */
   mailHost: string
@@ -15,15 +15,15 @@ export interface AutoconfigDeps {
  * Client provisioning.
  *
  * Thunderbird and Outlook are served by Stalwart itself, which generates
- * autoconfig XML and autodiscover responses from its own listener list — see
+ * autoconfig XML and autodiscover responses from its own listener list - see
  * `infra/k8s/i10/stalwart/`. Only Apple needs something written by hand, so
  * only Apple is here.
  *
  * ⚠ DELIBERATELY OUTSIDE THE OPENAPI DOCUMENT, for the same reason
  * `/webhooks` is. `api.i10.tech` publishes the transactional sending contract,
  * and every path in that document becomes a method on five generated SDKs.
- * This endpoint provisions a MAILBOX — a different product surface with a
- * different audience — and an `i10.autoconfig.appleMobileconfig()` in the Node
+ * This endpoint provisions a MAILBOX - a different product surface with a
+ * different audience - and an `i10.autoconfig.appleMobileconfig()` in the Node
  * SDK would be noise at best.
  *
  * ⚠ AND DELIBERATELY UNAUTHENTICATED. The profile contains no password (see
@@ -34,8 +34,8 @@ export interface AutoconfigDeps {
  *
  * What it does NOT do is confirm the mailbox exists. It answers identically for
  * a real address and an invented one, so it cannot be used to enumerate who
- * holds an account here. The domain check below is a correctness gate — we
- * cannot describe an IMAP server for a domain we do not run — not a privacy
+ * holds an account here. The domain check below is a correctness gate - we
+ * cannot describe an IMAP server for a domain we do not run - not a privacy
  * one.
  */
 export function createAutoconfig(deps?: AutoconfigDeps) {
@@ -55,7 +55,7 @@ export function createAutoconfig(deps?: AutoconfigDeps) {
 
     const email = (c.req.query("email") ?? "").trim().toLowerCase()
 
-    // Deliberately loose. This is not the place to litigate RFC 5321 — the
+    // Deliberately loose. This is not the place to litigate RFC 5321 - the
     // address only has to be safe to embed and to have a domain we can check.
     // A rejection here should mean "that is not an email address", never "your
     // address is unusual".

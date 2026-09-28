@@ -48,7 +48,7 @@ describe("the return path records", () => {
 
   /**
    * ⚠ AN `include:`, NEVER AN `ip4:`. A literal address pins our infrastructure
-   * into records we cannot edit — changing a relay would mean asking every
+   * into records we cannot edit - changing a relay would mean asking every
    * customer to re-publish, and the ones who did not would start failing SPF
    * with nothing to tell them why.
    */
@@ -93,7 +93,7 @@ describe("the return path records", () => {
 describe("DKIM", () => {
   /**
    * ⚠ ONE TXT WITH OUR OWN PUBLIC KEY. Easy DKIM's three CNAMEs would put the
-   * private half at Amazon, and only Amazon could then sign — which forecloses
+   * private half at Amazon, and only Amazon could then sign - which forecloses
    * routing a message through our own MTA. One key, both routes, one record the
    * customer publishes once.
    */
@@ -111,7 +111,7 @@ describe("DKIM", () => {
   /**
    * ⚠ A DNS CHARACTER-STRING CAPS AT 255 BYTES AND A 2048-BIT KEY IS LONGER.
    * Emitting one long unquoted string is the commonest way a DKIM record is
-   * published broken — some providers split it, some truncate it, and the
+   * published broken - some providers split it, some truncate it, and the
    * failure is a signature that never verifies with no error anywhere.
    */
   it("splits a long key into quoted chunks", () => {
@@ -157,7 +157,7 @@ describe("status", () => {
 })
 
 /**
- * ⚠ FOUR RECORDS, BECAUSE THERE IS ONE RETURN PATH. There used to be six — a
+ * ⚠ FOUR RECORDS, BECAUSE THERE IS ONE RETURN PATH. There used to be six - a
  * second return path, `bounce.<domain>`, with its MX pointed at us so late
  * bounces for mail we delivered ourselves could come back. SES pins the return
  * path's MX to Amazon, so the two could not share a name; they now do, and the

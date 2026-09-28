@@ -121,7 +121,7 @@ export function toTemplateRow(row: typeof templates.$inferSelect): TemplateRow {
  * to be paginated; broadcasts and templates are written by hand, and a
  * workspace reaching two hundred of either has a filing problem before it has
  * a pagination problem. What matters is that the query CANNOT return an
- * unbounded result set — an account that somehow has ten thousand templates
+ * unbounded result set - an account that somehow has ten thousand templates
  * must not be able to take the console down by opening a page. When somebody
  * genuinely hits this, the fix is a cursor like the log's, not a bigger number.
  */

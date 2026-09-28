@@ -11,8 +11,8 @@ import type { ClerkUser } from "../src/projection/clerk-user.js"
 /**
  * Who may have a mailbox, and in what order the question is asked.
  *
- * The ordering is load-bearing rather than cosmetic — see the password test
- * below — so these assert the sequence as well as the answer.
+ * The ordering is load-bearing rather than cosmetic - see the password test
+ * below - so these assert the sequence as well as the answer.
  */
 
 const TENANT = "3f1a0e00-0000-4000-8000-000000000001"
@@ -95,7 +95,7 @@ describe("the password precondition", () => {
 
   /**
    * ⚠ THE POINT OF THE ORDERING. A user who cannot hold a mailbox at all must
-   * not learn which addresses are free on the way to being told so — checking
+   * not learn which addresses are free on the way to being told so - checking
    * availability first would make this endpoint an address oracle for anyone
    * who can sign up.
    */
@@ -238,7 +238,7 @@ describe("creating the mailbox", () => {
   /**
    * ⚠ `active` IS WHAT MAKES THE MAILBOX EXIST AS FAR AS authd IS CONCERNED.
    * Every one of its queries filters on it, so a mailbox created without this
-   * accepts no mail and refuses its owner's login — the exact state the one
+   * accepts no mail and refuses its owner's login - the exact state the one
    * hand-made mailbox had to be repaired out of.
    */
   it("returns an active mailbox", async () => {

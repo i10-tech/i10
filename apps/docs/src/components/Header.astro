@@ -14,14 +14,14 @@ interface Props {
   entryId?: string;
   /**
    * Whether the page has a sidebar to open. When `false`, the mobile
-   * menu button is hidden — pages that opted out via `sidebar: false`
+   * menu button is hidden - pages that opted out via `sidebar: false`
    * shouldn't show a button that opens an empty dialog. Default `true`.
    */
   showSidebar?: boolean;
 }
 
 // `entryId` is part of Props as a forward-compat hook (the version-switcher
-// recipe reads it) but the base Header doesn't use it — leave it off the
+// recipe reads it) but the base Header doesn't use it - leave it off the
 // destructure to avoid an unused-var warning.
 const { collection, showSidebar = true } = Astro.props;
 

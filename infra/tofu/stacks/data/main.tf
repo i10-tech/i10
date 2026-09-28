@@ -1,21 +1,21 @@
-# S1 — durable.
+# S1 - durable.
 #
 # Everything whose loss is unrecoverable, or whose identity must survive a full
 # rebuild. Nothing here may be destroyed by an apply: every resource carries
 # `prevent_destroy`, and the CI policy gate refuses a plan that deletes one.
 #
 # ⚠ IMPORT-ONLY, LIKE PSL'S. Both buckets were created by hand before this
-# stack existed, so it adopts them rather than creating them — and that is the
+# stack existed, so it adopts them rather than creating them - and that is the
 # shape to keep, not a temporary accommodation.
 #
 # What it buys is the recovery property: this stack creates nothing, so the
 # committed tfvars listing what to import IS a complete recipe for rebuilding
 # the state. Lose the state file, re-run init, and the import blocks put it
-# back. A stratum that CREATES loses that — forgetting it owns a bucket means
+# back. A stratum that CREATES loses that - forgetting it owns a bucket means
 # importing every one by hand.
 #
 # An import block is evaluated during `plan`, which is read-only. A wrong id
-# therefore fails before anything is touched — which is how the three-segment
+# therefore fails before anything is touched - which is how the three-segment
 # format `<account>/<bucket>/<jurisdiction>` was found. `default` unless a
 # bucket was deliberately created under `eu` or `fedramp`; the API does not
 # report it, so it has to be known rather than read back.
@@ -34,7 +34,7 @@ module "labels" {
 #
 # ⚠ SEPARATION IS A BUCKET, NEVER A PREFIX. R2 API tokens scope per bucket and
 # have no prefix granularity at all, so "own prefix, own credentials" inside a
-# shared bucket is unenforceable — a token scoped to a bucket reads all of it.
+# shared bucket is unenforceable - a token scoped to a bucket reads all of it.
 # Buckets are free; R2 bills storage and operations.
 
 import {

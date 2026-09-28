@@ -8,7 +8,7 @@ import { unmetered, type Metering } from "../src/send/metering.js"
  *
  * ⚠ NOTHING CHECKED THIS, AND THE FAILURE IT LEFT WAS THE WORST SHAPE THERE IS.
  * `acceptSend` read the API key's scopes and nothing else about the `from`
- * domain — so a send from a domain still waiting on Amazon was accepted,
+ * domain - so a send from a domain still waiting on Amazon was accepted,
  * written, queued, and then refused by SES at delivery as "an identity that is
  * not verified". The caller got 200 and an id, the mail went nowhere, and the
  * only trace was a `failed` row in a log they had no reason to open. Somebody
@@ -102,7 +102,7 @@ describe("sending from a domain that is not verified", () => {
   })
 
   /**
-   * ⚠ EVERY PAYLOAD, NOT THE FIRST — the same rule the key-scope check follows.
+   * ⚠ EVERY PAYLOAD, NOT THE FIRST - the same rule the key-scope check follows.
    * A batch is one request with many `from` addresses, and forty-nine
    * legitimate messages carrying one unverified domain is exactly the case a
    * first-element check misses.
@@ -126,7 +126,7 @@ describe("sending from a domain that is not verified", () => {
 
   /**
    * ⚠ AN UNPARSEABLE `from` IS REFUSED RATHER THAN WAVED THROUGH. It cannot be
-   * verified by definition, and accepting it only moves the refusal to SES —
+   * verified by definition, and accepting it only moves the refusal to SES -
    * which is the behaviour this whole gate exists to stop.
    */
   it("refuses a from address with no domain at all", async () => {
@@ -141,7 +141,7 @@ describe("sending from a domain that is not verified", () => {
   /**
    * ⚠ EXACT MATCH, NOT SUFFIX, WHICH IS THE RULE `maySendFrom` ALREADY SETS FOR
    * KEY SCOPES. `mail.acme.com` is a separate row in `core.domains` with its
-   * own verification and its own DKIM key — the add form even recommends it as
+   * own verification and its own DKIM key - the add form even recommends it as
    * a way to keep sending reputation apart. Treating the apex as licensing its
    * subdomains would let a domain somebody deliberately kept separate send on
    * the strength of one they did not.
@@ -167,7 +167,7 @@ describe("sending from a domain that is not verified", () => {
 describe("the port's shape", () => {
   /**
    * ⚠ IT ANSWERS WITH WHAT IS ALLOWED, SO AN ADAPTER THAT RETURNS NOTHING FAILS
-   * CLOSED. Shaped the other way round — a set of what is refused — a query
+   * CLOSED. Shaped the other way round - a set of what is refused - a query
    * that errored and returned empty would read as "everything is permitted",
    * which is the wrong direction for this question to break in. This is the
    * test that would catch somebody inverting it.

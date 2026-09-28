@@ -3,7 +3,7 @@
  *
  * ⚠ IT EXISTS BECAUSE THE PROBES USED TO HIT `/`, AND `/` NOW NEEDS A SESSION.
  * That mattered in a way a redirect hides: a signed-out probe gets a 307 to the
- * Account Portal, and kubelet counts 3xx as healthy — so the probe passes for a
+ * Account Portal, and kubelet counts 3xx as healthy - so the probe passes for a
  * reason that has nothing to do with the pod working. The failure it stops
  * being able to see is the one that matters: if Clerk is unreachable and
  * `auth.protect()` raises instead of redirecting, `/` answers 5xx, liveness

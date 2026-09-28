@@ -9,12 +9,12 @@ import { readDelegation, type ReferralResult } from "../domains/referral.js"
  * `DomainStore.verify` asks SES, and SES answers `pending` for every reason at
  * once: records not published, records published wrong, delegation pointed
  * somewhere else, or our own nameservers not answering. The console then
- * rendered the one message it had — "this is normal, it can take up to 72
- * hours" — which is true for the first of those and actively misleading for the
+ * rendered the one message it had - "this is normal, it can take up to 72
+ * hours" - which is true for the first of those and actively misleading for the
  * other three. Somebody waits three days for a condition that will never clear.
  *
  * ⚠ IT DIAGNOSES; IT DOES NOT VERIFY, AND THE DISTINCTION IS THE SAME ONE
- * `dns.ts` MAKES AT LENGTH. Nothing here can make a domain sendable — SES
+ * `dns.ts` MAKES AT LENGTH. Nothing here can make a domain sendable - SES
  * decides that. This answers "what is wrong", which is a question nobody was
  * able to ask.
  *
@@ -42,7 +42,7 @@ export type ZoneFinding =
    *
    * ⚠ IT RESOLVES, WHICH IS WHY NOTHING CAUGHT IT. A parent that publishes
    * our two nameservers alongside a third answers `some(ours)` and serves the
-   * zone perfectly whenever a resolver happens to pick one of ours — so the
+   * zone perfectly whenever a resolver happens to pick one of ours - so the
    * domain verifies, mail flows, and then one day a resolver picks the other
    * and it does not. The usual cause is our own: the domain was deleted here,
    * which cannot reach into the customer's zone, and added again with a new
@@ -51,7 +51,7 @@ export type ZoneFinding =
    *
    * ⚠ AND IT IS REPORTED RATHER THAN REPAIRED, BECAUSE NOBODY HOLDS A
    * CREDENTIAL ON THIS PATH. The publisher clears our leftovers where a
-   * provider is connected — see dns/superseded.ts — and this is the same
+   * provider is connected - see dns/superseded.ts - and this is the same
    * problem for everyone who publishes by hand, where the only thing we can
    * do is name the records and say they must go.
    */
@@ -100,8 +100,8 @@ export interface DelegationChecker {
  * ⚠ A SEAM RATHER THAN `node:dns` DIRECTLY, BECAUSE THE INTERESTING PART OF
  * THIS MODULE IS THE CLASSIFICATION AND NOT THE RESOLVING. "NS records exist
  * but point elsewhere" and "NS records point at us and the zone does not
- * resolve" are two lines apart and mean opposite things — one is the customer's
- * to fix and one is ours — and a test that has to stand up a DNS server to tell
+ * resolve" are two lines apart and mean opposite things - one is the customer's
+ * to fix and one is ours - and a test that has to stand up a DNS server to tell
  * them apart is a test nobody writes.
  */
 export interface DelegationLookups {
@@ -110,7 +110,7 @@ export interface DelegationLookups {
    *
    * ⚠ THE PARENT'S REFERRAL, NOT `resolveNs`, AND THE DIFFERENCE IS THE WHOLE
    * ANSWER THIS SCREEN GIVES. A recursive resolver FOLLOWS a delegation and
-   * returns the NS records from the zone at the far end — ours — so it reports
+   * returns the NS records from the zone at the far end - ours - so it reports
    * what we published about ourselves rather than what the customer published
    * about us. Worse, in the state this screen is opened in most often, our zone
    * does not exist yet: the resolver chases the referral to a server that
@@ -160,7 +160,7 @@ export function delegationChecker(
      * against `MAIL_NAMESERVERS` was the same question. Per-claim nameservers
      * changed what customers are told to publish to `<claim>.ns1.i10.tech` and
      * this module was not changed with them, so a customer who had followed the
-     * instructions exactly was told their records "point at somebody else" —
+     * instructions exactly was told their records "point at somebody else" -
      * naming, as the somebody else, our own nameserver.
      *
      * ⚠ AND IT COMES FROM THE RECORD LIST THE CUSTOMER IS LOOKING AT rather
@@ -174,8 +174,8 @@ export function delegationChecker(
 
       /*
        * ⚠ THE NAMESERVER CHECK RUNS ALONGSIDE THE ZONE CHECKS, NOT AFTER THEM.
-       * It is the finding that reframes all the others — a silent nameserver
-       * makes "not published" the least of somebody's problems — so waiting for
+       * It is the finding that reframes all the others - a silent nameserver
+       * makes "not published" the least of somebody's problems - so waiting for
        * three zone lookups before starting it would double the time to the
        * answer that matters most.
        */
@@ -229,7 +229,7 @@ export function delegationChecker(
      * records above live in the PARENT zone and are published by the customer,
      * so they prove only that they followed the instructions. Asking for the
      * zone's own SOA follows the delegation to us and fails if we do not
-     * answer — which is exactly the state a deployment with no running
+     * answer - which is exactly the state a deployment with no running
      * authoritative server is in, and the state nothing else in this product
      * can see.
      */
@@ -266,7 +266,7 @@ export function delegationChecker(
 /**
  * ⚠ ASKED OF EACH NAMESERVER DIRECTLY, WHICH IS THE ONLY WAY TO SEE THIS. A
  * resolver walking the tree hides the difference between "the zone is not
- * delegated" and "the delegation is fine and the target is dead" — both come
+ * delegated" and "the delegation is fine and the target is dead" - both come
  * back as a failure to resolve. Pointing a resolver AT the server and asking it
  * anything at all distinguishes them: a nameserver that is running answers,
  * even if the answer is a refusal.
@@ -293,7 +293,7 @@ async function answering(
   )
 
   // ⚠ ANY ONE OF THEM IS ENOUGH. Resolvers try every nameserver in a delegation
-  // before giving up, so one live server serves the zone — badly, with no
+  // before giving up, so one live server serves the zone - badly, with no
   // redundancy, but it serves it. Reporting this as broken would send somebody
   // chasing a resilience problem while their domain verifies perfectly well.
   return results.some(Boolean)
@@ -302,7 +302,7 @@ async function answering(
 /** The production adapter: node's resolver, with a bounded timeout. */
 function resolverLookups(timeoutMs: number): DelegationLookups {
   /*
-   * ⚠ A DEDICATED `Resolver` PER CALL, NOT THE MODULE-LEVEL `dns.resolveNs` —
+   * ⚠ A DEDICATED `Resolver` PER CALL, NOT THE MODULE-LEVEL `dns.resolveNs` -
    * the same reasoning as `dns.ts`. The module functions share one global
    * resolver whose timeout is process-wide, so setting one here would change
    * behaviour for everything else in the process that resolves a name,
@@ -337,7 +337,7 @@ function resolverLookups(timeoutMs: number): DelegationLookups {
       /*
        * ⚠ THE QUESTION DOES NOT MATTER; BEING ANSWERED AT ALL DOES. A REFUSED
        * or an NXDOMAIN both mean a DNS server is listening, which is the fact
-       * in question — only a timeout or a refused connection means nothing is
+       * in question - only a timeout or a refused connection means nothing is
        * there at all.
        */
       try {

@@ -10,7 +10,7 @@ import (
 //
 // authd implements the subset RFC 4511 §4.5.1 defines that Stalwart's default
 // filters actually use: and, or, not, equalityMatch, present, substrings.
-// Anything else — approxMatch, greaterOrEqual, lessOrEqual, extensibleMatch —
+// Anything else - approxMatch, greaterOrEqual, lessOrEqual, extensibleMatch -
 // evaluates FALSE rather than erroring.
 //
 // False, not an error, is the deliberate choice. A search is a set membership
@@ -114,7 +114,7 @@ func matchSubstrings(parts []message.Substring, value string) bool {
 // handful of candidate rows and then evaluate the real filter against them.
 //
 // It intentionally looks inside NOT as well. A value under a negation is still
-// a value worth fetching — the candidate set only has to be a superset, since
+// a value worth fetching - the candidate set only has to be a superset, since
 // Match does the authoritative work afterwards.
 func EqualityValues(f message.Filter, attrs ...string) []string {
 	want := make(map[string]bool, len(attrs))

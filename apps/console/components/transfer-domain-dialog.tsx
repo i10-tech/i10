@@ -21,7 +21,7 @@ export interface KeyImpact {
  * Offering a domain to somebody by email.
  *
  * ⚠ AN OFFER, NOT A MOVE. The domain keeps sending from here until the
- * recipient accepts, and it can be withdrawn until then — but once accepted it
+ * recipient accepts, and it can be withdrawn until then - but once accepted it
  * is gone from this workspace as surely as if it were deleted. So it carries
  * the delete's friction, in the delete's order: the name typed out, then
  * Clerk's verification prompt, then the request.
@@ -63,7 +63,7 @@ export function TransferDomainDialog({
   /*
    * ⚠ THE SHARED EMAIL CHECK, THEN ONE MORE RULE. A transfer is to another
    * person; offering a domain to yourself would be accepting your own offer.
-   * The API refuses it as well — this is the early, friendly half.
+   * The API refuses it as well - this is the early, friendly half.
    */
   const own = new Set(ownEmails.map((e) => e.toLowerCase()))
   const recipientProblem = (value: string) =>
@@ -81,7 +81,7 @@ export function TransferDomainDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={`Transfer ${name}?`}
-      description="We will email them an offer. The domain moves with its records and verification, so nothing changes in your DNS — and it stops sending from this workspace once they accept."
+      description="We will email them an offer. The domain moves with its records and verification, so nothing changes in your DNS - and it stops sending from this workspace once they accept."
       confirmLabel="Send offer"
       confirmWord={name}
       ready={recipientOk}
@@ -99,7 +99,7 @@ export function TransferDomainDialog({
         toast.success(`Offer sent to ${result.data.recipient_email}`, {
           description: result.data.emailed
             ? "It stays here until they accept. You can withdraw it until then."
-            : "We could not email them, so they will only see it if they already have an i10 account — on their Domains page.",
+            : "We could not email them, so they will only see it if they already have an i10 account - on their Domains page.",
           duration: result.data.emailed ? 6000 : 12_000,
         })
         onOffered()
@@ -117,7 +117,7 @@ export function TransferDomainDialog({
         spellCheck={false}
         check={recipientProblem}
         required="Enter the address to offer it to."
-        hint="They sign in with it — or sign up — to accept."
+        hint="They sign in with it - or sign up - to accept."
       />
 
       {keys.length > 0 && (
@@ -127,7 +127,7 @@ export function TransferDomainDialog({
             {revoked.map((key) => (
               <li key={key.id}>
                 <span className="font-medium text-foreground">{key.name}</span> is
-                revoked — it only sends from {name}.
+                revoked - it only sends from {name}.
               </li>
             ))}
             {narrowed.map((key) => (

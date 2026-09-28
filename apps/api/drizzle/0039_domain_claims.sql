@@ -3,7 +3,7 @@
 --
 -- ⚠ THE OLD CONSTRAINT LET A STRANGER LOCK A DOMAIN THEY DO NOT OWN. `name` was
 -- globally unique across every tenant, so the first account to type
--- `spotify.com` held it for ever — including an account that never published a
+-- `spotify.com` held it for ever - including an account that never published a
 -- single DNS record. The real owner then signed up, added their own domain and
 -- was told "That domain is already registered", with no way forward: they
 -- cannot see the other row, cannot delete it, and support cannot tell the two
@@ -11,7 +11,7 @@
 -- world, and it cost nothing to mount.
 --
 -- ⚠ VERIFICATION IS THE RIGHT GATE BECAUSE IT IS THE ONLY PROOF WE HAVE. An
--- unverified row asserts nothing — anyone can type any name — so it must not
+-- unverified row asserts nothing - anyone can type any name - so it must not
 -- exclude anybody. A verified row required publishing DKIM and a return path in
 -- that domain's DNS, which only whoever controls the domain can do. So the
 -- exclusion follows the proof.
@@ -27,7 +27,7 @@ CREATE UNIQUE INDEX "domains_verified_name_unique"
 --> statement-breakpoint
 
 -- ⚠ THE PER-TENANT CONSTRAINT HAS TO EXIST BEFORE THE GLOBAL ONE GOES, or
--- dropping it lets one workspace add the same domain twice — two rows, two DKIM
+-- dropping it lets one workspace add the same domain twice - two rows, two DKIM
 -- keys, two sets of records for one name, and a customer with no way to tell
 -- which of the identical rows is the one that verified.
 ALTER TABLE "core"."domains"

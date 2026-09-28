@@ -2,21 +2,21 @@
  * Turning a Clerk sign-up into a tenant that can send.
  *
  * ⚠ AN ORGANIZATION IS A TENANT; A USER IS A USER. That is the whole model, and
- * `core.tenants` already assumes it — `clerk_org_id` identifies the tenant and
+ * `core.tenants` already assumes it - `clerk_org_id` identifies the tenant and
  * `owner_clerk_user_id` records who created it. Members of an organization
  * share its tenant, its domains, its keys and its bill.
  *
  * ⚠ WHICH LEAVES A PERSON WHO SIGNS UP AND NEVER MAKES AN ORGANIZATION WITH NO
  * TENANT AND NO WAY TO SEND. So one is made for them: `user.created` creates a
  * personal organization in Clerk, Clerk fires `organization.created`, and that
- * is what writes the row. Two hops rather than one, deliberately — it means a
+ * is what writes the row. Two hops rather than one, deliberately - it means a
  * team organization made by hand in the dashboard provisions through exactly
  * the same path as a personal one, instead of having a second code path that is
  * only exercised by real customers.
  *
  * ⚠ AND BOTH HALVES ARE IDEMPOTENT BY THEMSELVES, NOT BY THE WEBHOOK DEDUPE.
  * `applyClerkEvent` claims each Svix message id and answers `duplicate` on a
- * redelivery — which is right for the mailbox projection and wrong here: if
+ * redelivery - which is right for the mailbox projection and wrong here: if
  * provisioning failed the first time, the retry is the only chance to fix it,
  * and a dedupe that swallows the retry would leave an account that can never
  * send. So these run on every delivery and are safe to.
@@ -93,7 +93,7 @@ export function tenantProvisioning(deps: ProvisioningDeps): TenantProvisioning {
 
       // ⚠ ASK BEFORE CREATING, BECAUSE THE RETRY IS THE COMMON CASE. Svix
       // redelivers, and a user invited into a team already has an organization
-      // — creating another would give them a second tenant, a second bill and a
+      // - creating another would give them a second tenant, a second bill and a
       // dashboard that shows the wrong one.
       const existing = await deps.organizations.membershipCount(userId)
       if (existing > 0) return "already_provisioned"
@@ -144,7 +144,7 @@ export function tenantProvisioning(deps: ProvisioningDeps): TenantProvisioning {
         } catch (error) {
           deps.log.error(
             { err: error, tenantId: tenant.id },
-            "tenant created without an entitlement — first send will be refused",
+            "tenant created without an entitlement - first send will be refused",
           )
         }
       }

@@ -3,12 +3,12 @@
 -- ⚠ THE NUMBERS BELOW ARE PLACEHOLDERS AND SOMEBODY HAS TO CHOOSE THEM. They
 -- are shaped correctly and they are not a pricing decision anyone has made:
 -- one sending domain on free, ten on pro, and mailbox domains as a paid-only
--- feature. Change them here, or from the config push once it exists — this file
+-- feature. Change them here, or from the config push once it exists - this file
 -- is a starting value, not a position.
 --
 -- ⚠ `domains.mailbox` ON FREE IS AN ALLOWANCE OF ZERO, NOT AN ABSENT
 -- ENTITLEMENT, AND THE DIFFERENCE REACHES THE CUSTOMER. Granting it at zero
--- means the answer is `exceeded` — "your plan does not include this, upgrade" —
+-- means the answer is `exceeded` - "your plan does not include this, upgrade" -
 -- which is true and actionable. Leaving it out entirely means `unentitled`,
 -- which this codebase reserves for OUR misconfiguration and deliberately fails
 -- open. A free tenant would then create mailbox domains unmetered.

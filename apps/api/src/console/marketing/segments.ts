@@ -41,7 +41,7 @@ export function segmentsStore(
     async listSegments(tenantId) {
       return withTenant(db, tenantId, async (tx) => {
         // ⚠ A CORRELATED SUBQUERY, NOT A JOIN WITH GROUP BY. An empty segment
-        // must still appear — it is the state every segment starts in, and the
+        // must still appear - it is the state every segment starts in, and the
         // empty one is what somebody just made and is looking for.
         const rows = await tx
           .select({
@@ -121,7 +121,7 @@ export function segmentsStore(
          * ⚠ BOTH SIDES ARE RE-READ UNDER RLS BEFORE ANYTHING IS WRITTEN, AND
          * THE FOREIGN KEYS DO NOT MAKE THAT REDUNDANT. A Postgres FK check runs
          * as the REFERENCED TABLE'S OWNER and is explicitly exempt from row
-         * security — that is what makes FKs work at all under RLS — so
+         * security - that is what makes FKs work at all under RLS - so
          * `segment_contacts(segment_id) REFERENCES segments(id)` is satisfied by
          * ANY segment in the cluster, including another tenant's. The row that
          * results carries OUR `tenant_id`, so our own policy hides nothing from
@@ -141,8 +141,8 @@ export function segmentsStore(
         if (!segment) return null
 
         // ⚠ THE EMPTY CASE IS ANSWERED AFTER THE SEGMENT IS CHECKED, NOT BEFORE.
-        // Returning early meant an empty list reported `0` — "the segment is
-        // real and nobody was added" — for a segment that does not exist. The
+        // Returning early meant an empty list reported `0` - "the segment is
+        // real and nobody was added" - for a segment that does not exist. The
         // route rejects an empty list with a 422 before reaching here, so this
         // is unreachable today; it is ordered correctly so that it stays right
         // if that guard ever moves.
@@ -188,7 +188,7 @@ export function segmentsStore(
         /*
          * ⚠ THE SUBSCRIBER COUNT HAS TO ACCOUNT FOR THE DEFAULT, WHICH IS WHY
          * IT IS NOT `count(*) WHERE subscribed`. On an opt-in topic, a contact
-         * with no row IS subscribed — so the count is "everybody, minus those
+         * with no row IS subscribed - so the count is "everybody, minus those
          * who explicitly said no". On an opt-out topic it is the opposite.
          * Counting only the explicit rows would report a brand-new opt-in topic
          * as having zero subscribers while a broadcast to it reaches everyone.
@@ -270,7 +270,7 @@ export function segmentsStore(
         /*
          * ⚠ `default_subscription` IS NOT PATCHABLE AND IS NOT AN OVERSIGHT.
          * Flipping a topic from opt-out to opt-in retroactively subscribes every
-         * contact who simply never answered — which is sending marketing mail to
+         * contact who simply never answered - which is sending marketing mail to
          * people who did not ask for it, at scale, because of a dropdown. The
          * column is set once, at creation, and the UI disables the control on an
          * existing topic and says why.
@@ -297,7 +297,7 @@ export function segmentsStore(
 
     async setTopicSubscription(tenantId, contactId, topicId, subscribed) {
       return withTenant(db, tenantId, async (tx) => {
-        // ⚠ BOTH IDS VERIFIED UNDER RLS FIRST — an FK check bypasses row
+        // ⚠ BOTH IDS VERIFIED UNDER RLS FIRST - an FK check bypasses row
         // security by design, so it would accept another tenant's topic. See
         // `addToSegment`, which states the whole reasoning.
         const [contact] = await tx

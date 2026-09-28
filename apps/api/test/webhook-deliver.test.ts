@@ -63,7 +63,7 @@ describe("a successful delivery", () => {
     const [url, init] = requestOf(doFetch)
     expect(url).toBe("https://hooks.example.com/i10")
     const headers = init.headers as Record<string, string>
-    // ⚠ VERIFIED THE WAY A RECEIVER VERIFIES IT — the three Standard Webhooks
+    // ⚠ VERIFIED THE WAY A RECEIVER VERIFIES IT - the three Standard Webhooks
     // headers, with the id and timestamp read back off the request rather than
     // assumed. This is the assertion that would catch the sender and any
     // conforming verifier disagreeing on the wire format.
@@ -79,8 +79,8 @@ describe("a successful delivery", () => {
   })
 
   // ⚠ STABLE ACROSS RETRIES, WHICH IS THE ONLY THING THAT LETS A CUSTOMER BE
-  // IDEMPOTENT. We deliver at least once — a timeout after their handler
-  // committed is indistinguishable from a failure — so they need a key to store.
+  // IDEMPOTENT. We deliver at least once - a timeout after their handler
+  // committed is indistinguishable from a failure - so they need a key to store.
   it("sends the delivery id as the idempotency key", async () => {
     const { deps: d, doFetch } = deps()
     await deliverWebhook(job, d)
@@ -101,7 +101,7 @@ describe("a successful delivery", () => {
 
   it.each([200, 201, 202, 204])("treats %d as success", async (status) => {
     const { deps: d, markDelivered } = deps({
-      // 204 must carry a null body — the Response constructor refuses "".
+      // 204 must carry a null body - the Response constructor refuses "".
       fetch: mock(async () => new Response(status === 204 ? null : "", { status })),
     })
     await deliverWebhook(job, d)
@@ -120,7 +120,7 @@ describe("a failing delivery", () => {
     expect(markFailed).toHaveBeenCalledTimes(1)
   })
 
-  // ⚠ THE FAILURE THAT TAKES DOWN A QUEUE IS NOT AN ERROR — it is a socket that
+  // ⚠ THE FAILURE THAT TAKES DOWN A QUEUE IS NOT AN ERROR - it is a socket that
   // accepts the connection and says nothing.
   it("bounds the request with a timeout", async () => {
     const { deps: d, doFetch } = deps()
@@ -142,7 +142,7 @@ describe("a failing delivery", () => {
   })
 
   // ⚠ THROWN WHILE THERE IS BUDGET SO groupmq SCHEDULES THE RETRY, AND NOT ON
-  // THE LAST ATTEMPT — a customer's dead endpoint must not fill the failed-job
+  // THE LAST ATTEMPT - a customer's dead endpoint must not fill the failed-job
   // list that a real bug needs to be visible in.
   it("stops throwing once the budget is gone", async () => {
     const { deps: d, markFailed } = deps({

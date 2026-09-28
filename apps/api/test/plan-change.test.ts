@@ -42,7 +42,7 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps =>
      * ⚠ PRESENT BY DEFAULT, BECAUSE A CANCELLATION NOW WRITES BEFORE IT
      * RETURNS. `to()` calls this inside the try that reports a refusal, so a
      * fake without it turns every cancellation into "Polar could not apply the
-     * change" — which is, exactly, the message the MISSING write produced in
+     * change" - which is, exactly, the message the MISSING write produced in
      * production before this existed.
      */
     noteCancelling: async () => {},
@@ -58,7 +58,7 @@ const ops = (over: Partial<SubscriptionOps> = {}): SubscriptionOps =>
     ...over,
   }) as SubscriptionOps
 
-/** A tenant on a paid plan — the only state a cancellation is reachable from. */
+/** A tenant on a paid plan - the only state a cancellation is reachable from. */
 const onPro = async () => ({
   plan: "pro",
   status: "active",
@@ -110,7 +110,7 @@ describe("what Polar is asked to do", () => {
   /**
    * ⚠ THE ENTIRE DECISION. Polar's `update.py` has no upgrade/downgrade branch,
    * so this mapping is the only thing that makes proration behave the way
-   * anyone expects — and the organisation default the customer portal uses
+   * anyone expects - and the organisation default the customer portal uses
    * cannot be right for both directions at once.
    */
   it("charges an upgrade now and defers a downgrade", () => {
@@ -156,7 +156,7 @@ describe("changing a plan", () => {
   /**
    * ⚠ THE PRODUCT COMES FROM OUR MAP, NEVER FROM THE REQUEST. A caller who
    * could name a Polar product id could name a one-cent one and move themselves
-   * to Pro — and the webhook would grant it perfectly correctly, because from
+   * to Pro - and the webhook would grant it perfectly correctly, because from
    * Polar's side the payment really did succeed.
    */
   it("refuses a plan that is not in the product map", async () => {
@@ -194,8 +194,8 @@ describe("changing a plan", () => {
 
   /**
    * ⚠ LEAVING A PAID PLAN IS THE ONE MOVE THAT IS NOT A PRODUCT SWAP, and
-   * before this it was simply impossible. The free plan has no Polar product —
-   * nothing is charged for it — so `products["free"]` is undefined and the
+   * before this it was simply impossible. The free plan has no Polar product -
+   * nothing is charged for it - so `products["free"]` is undefined and the
    * change was refused with `No such plan: free`. The console rendered a
    * "Downgrade" button next to the free plan that answered that every time, so
    * a paying customer had no way off a plan they no longer wanted.
@@ -205,7 +205,7 @@ describe("changing a plan", () => {
    * synchronously and confirms by webhook a moment later; without this write
    * the console refreshed onto a row that still read "active, not cancelling",
    * kept showing the paid plan with no end date, and left the free card
-   * enabled — so the next press sent a second cancel and reported a payment
+   * enabled - so the next press sent a second cancel and reported a payment
    * problem about a card that was fine.
    */
   it("records the cancellation as soon as Polar accepts it", async () => {
@@ -266,7 +266,7 @@ describe("changing a plan", () => {
   /**
    * ⚠ THE FREE PLAN IS NAMED, NOT INFERRED FROM A MISSING PRODUCT. Treating any
    * plan absent from `POLAR_PRODUCTS` as a cancellation would end somebody's
-   * subscription because of a typo in an environment variable — a silent,
+   * subscription because of a typo in an environment variable - a silent,
    * revenue-losing failure with no error anywhere.
    */
   it("still refuses an unknown plan rather than cancelling", async () => {
@@ -303,7 +303,7 @@ describe("changing a plan", () => {
   /**
    * ⚠ A SUBSCRIPTION THAT HAS ENDED IS NOT ONE THAT CAN BE AMENDED, AND THE
    * ROW STILL HOLDS ITS ID. `core.subscriptions` keeps the row through a
-   * cancellation — it is the history — so reading `polar_subscription_id`
+   * cancellation - it is the history - so reading `polar_subscription_id`
    * alone said "there is something to change" about a subscription Polar
    * closed months ago. The `PATCH` was refused and the refusal reached the
    * customer as "check the payment method", about a subscription with nothing
@@ -369,7 +369,7 @@ describe("changing a plan", () => {
 
   /**
    * ⚠ A DECLINED CARD IS NOT AN OUTAGE. For `invoice`, Polar applies the change
-   * only if the payment succeeds — so the subscription is untouched and the
+   * only if the payment succeeds - so the subscription is untouched and the
    * customer's next step is their bank, not our support queue.
    */
   it("reports a refusal from Polar as a payment problem", async () => {
@@ -406,7 +406,7 @@ describe("changing a plan", () => {
    * ⚠ A 403 THAT IS NOT ABOUT OUR SCOPES IS ABOUT THEIR SUBSCRIPTION, and
    * saying "our billing is misconfigured" for it sends somebody to support
    * about something that is working. Polar answers this way for an operation
-   * it will not perform on that subscription — cancelling one that is
+   * it will not perform on that subscription - cancelling one that is
    * already cancelling, for instance.
    */
   it("blames neither the card nor our config for a refused operation", async () => {
@@ -419,7 +419,7 @@ describe("changing a plan", () => {
   })
 
   /*
-   * ⚠ AN ERROR THAT IS NOT A REFUSAL AT ALL IS A REACHABILITY PROBLEM — a
+   * ⚠ AN ERROR THAT IS NOT A REFUSAL AT ALL IS A REACHABILITY PROBLEM - a
    * timeout, a DNS failure, the process being unable to make the call. "Try
    * again" is the only honest instruction for it, and it is the wrong one for
    * every status above.

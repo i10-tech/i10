@@ -17,8 +17,8 @@ import type { DomainStatus } from "@repo/contracts"
  * The sending identity behind a domain.
  *
  * ⚠ A PORT, FOR THE SAME REASON `Metering` IS ONE: the store and the route are
- * the parts with the interesting decisions in them — the capacity check, the
- * verified gate, the idempotent create — and none of them should need AWS to be
+ * the parts with the interesting decisions in them - the capacity check, the
+ * verified gate, the idempotent create - and none of them should need AWS to be
  * tested. The SES adapter below is the only thing in this feature that cannot
  * be exercised without credentials.
  */
@@ -28,7 +28,7 @@ export interface DomainIdentity {
    *
    * ⚠ IT TAKES A KEYPAIR RATHER THAN RETURNING ONE, WHICH IS THE WHOLE POINT OF
    * BYODKIM. The provider is told which key to sign with; it does not choose.
-   * That is what lets a second sender — our own MTA — sign identically.
+   * That is what lets a second sender - our own MTA - sign identically.
    */
   create(input: {
     domain: string
@@ -46,14 +46,14 @@ export interface DomainIdentity {
    *
    * ⚠ IT EXISTS BECAUSE NOTHING COULD ANSWER "WHAT IS IN SES THAT SHOULD NOT
    * BE". Every other call here is keyed on a domain we already have a row for,
-   * so an identity whose row is gone is unreachable through all of them — and
+   * so an identity whose row is gone is unreachable through all of them - and
    * identities whose row is gone are exactly what a delete that silently failed
    * leaves behind. For most of this product's life `DeleteEmailIdentity` was
    * missing from the IAM policy, so EVERY delete failed that way.
    *
    * ⚠ DOMAINS ONLY, NEVER EMAIL ADDRESSES. The account also holds verified
-   * sender addresses — people's own mailboxes, created by hand in the AWS
-   * console — which no row in this database has ever described and which
+   * sender addresses - people's own mailboxes, created by hand in the AWS
+   * console - which no row in this database has ever described and which
    * nothing here may reason about, let alone remove.
    */
   list(): Promise<string[]>
@@ -62,15 +62,15 @@ export interface DomainIdentity {
    * How an identity is signed, so we can tell OURS from somebody's hand-made one.
    *
    * ⚠ "NO ROW POINTS AT IT" IS NOT ENOUGH TO DELETE SOMETHING, and this is the
-   * second half of the proof. The AWS account is not ours alone in practice —
+   * second half of the proof. The AWS account is not ours alone in practice -
    * identities get created by hand in the console, for a test, for a one-off
-   * send — and an orphan sweep that reasoned only from our own database would
+   * send - and an orphan sweep that reasoned only from our own database would
    * delete every one of them the first time it ran. That is unrecoverable and
    * would be entirely our fault.
    *
    * ⚠ BYODKIM IS THE SIGNATURE. Our `create` always supplies
    * `DkimSigningAttributes`, which sets the origin to `EXTERNAL` and makes the
-   * token our own generated selector — `i10` followed by twelve hex characters,
+   * token our own generated selector - `i10` followed by twelve hex characters,
    * see `generateSelector`. An Easy DKIM identity, which is what the console
    * makes by default, has origin `AWS_SES` and three CNAME tokens that look
    * nothing like that. So the pair is a positive statement that this code
@@ -89,7 +89,7 @@ export interface DomainIdentity {
    *
    * ⚠ "AND IN NO OTHER" IS WHAT MAKES A TRANSFER SAFE. A domain that moved
    * between workspaces is still associated with the tenant that held it before,
-   * and SES lets a resource belong to several tenants — so without the detach,
+   * and SES lets a resource belong to several tenants - so without the detach,
    * the old workspace's tenant could keep sending as it.
    *
    * ⚠ IT ALSO ATTACHES THE CONFIGURATION SET. SES refuses a tenant send whose
@@ -101,7 +101,7 @@ export interface DomainIdentity {
   /**
    * ⚠ DETACHES FROM EVERY TENANT FIRST, BECAUSE SES REFUSES TO DELETE AN
    * IDENTITY A TENANT STILL HOLDS. Without that, every delete of a domain that
-   * had been attached would fail — and `tidy` swallows the failure by design,
+   * had been attached would fail - and `tidy` swallows the failure by design,
    * so it would leak a live, billable identity exactly the way the missing IAM
    * permission once did.
    */
@@ -114,8 +114,8 @@ export interface DomainIdentity {
  * ⚠ DERIVED, NOT STORED AS THE SOURCE OF TRUTH. The name is a pure function of
  * the workspace id, so the worker, the store and the sweep can never disagree
  * about it. `core.domains.ses_tenant_name` records which tenant an identity was
- * last successfully attached to — the fact the worker needs before naming a
- * tenant on a send — not which one it should be.
+ * last successfully attached to - the fact the worker needs before naming a
+ * tenant on a send - not which one it should be.
  *
  * SES allows up to 64 letters, digits, hyphens and underscores; a UUID with
  * this prefix is 40.
@@ -130,7 +130,7 @@ const OUR_TENANT = /^i10-[0-9a-f-]{36}$/
  *
  * ⚠ `TEMPORARY_FAILURE` IS NOT `FAILED`, AND FLATTENING THEM IS A SUPPORT
  * TICKET. SES uses the first for a DNS lookup that failed in a way worth
- * retrying — a nameserver that timed out, propagation still in flight — and
+ * retrying - a nameserver that timed out, propagation still in flight - and
  * telling that customer their records are wrong sends them to re-check DNS that
  * is already correct. `NOT_STARTED` is the third distinct one: the identity
  * exists but SES has not looked yet.
@@ -162,7 +162,7 @@ export interface SesIdentityOptions {
    * region it had asked. An identity lives in ONE region: if the API talks to
    * `eu-central-1` while somebody reads the console in `us-east-1`, then the
    * verified domain they can see is not the one we registered. Verify reports
-   * `pending` — correctly, about a real and genuinely pending identity — and
+   * `pending` - correctly, about a real and genuinely pending identity - and
    * deleting the domain removes an identity that is not the one still sitting
    * in the console they are looking at. Both read as "the product is broken"
    * and neither is a bug in it.
@@ -252,25 +252,25 @@ export function sesIdentity(
    * ⚠ "NO SUCH IDENTITY" IS AN ANSWER, NOT A FAILURE, AND LETTING IT THROW WAS
    * A 500 ON THE ONE BUTTON THIS FEATURE HAS. `GetEmailIdentity` raises
    * `NotFoundException` for a name SES has never been told about, which is the
-   * ordinary state of every domain until `create` succeeds — and there are two
+   * ordinary state of every domain until `create` succeeds - and there are two
    * ways to reach this call without that having happened. `registerIdentity`
    * returns early for a row with no selector or no sealed key, and `refresh`
    * asks about any domain past `not_started` without registering anything. Both
    * then hit an uncaught exception, the API answered "Something went wrong.",
-   * and the console said "Could not check the records" for ever — about a
+   * and the console said "Could not check the records" for ever - about a
    * domain whose DNS was perfect and whose records it had already published.
    *
    * ⚠ IT MAPS TO `not_started`, WHICH IS EXACTLY WHAT IT MEANS. SES's own
    * vocabulary has a word for "the identity exists and I have not looked yet";
    * this is one step before that, and the customer-facing consequence is
-   * identical — nothing has been confirmed, and the next verify is what starts
+   * identical - nothing has been confirmed, and the next verify is what starts
    * it. Reporting `failed` would send somebody to fix DNS that is correct.
    */
   /**
    * The identity as SES holds it, or `null` when there is none.
    *
    * ⚠ ONE PLACE THAT SWALLOWS `NotFoundException`, because two callers need it
-   * and they want opposite things from it — `read` turns it into a status,
+   * and they want opposite things from it - `read` turns it into a status,
    * `create` treats it as "nothing to compare against". Duplicating the catch
    * is how one of them ends up throwing on the ordinary case.
    */
@@ -330,13 +330,13 @@ export function sesIdentity(
        * DOMAIN. `PutEmailIdentityDkimSigningAttributes` does not mean "confirm
        * this key"; it means "here is a new signing configuration", and SES
        * answers by throwing away the result of its DKIM check and starting
-       * again — `SUCCESS` drops to `PENDING` and `VerifiedForSendingStatus`
+       * again - `SUCCESS` drops to `PENDING` and `VerifiedForSendingStatus`
        * goes false. `PutEmailIdentityMailFromAttributes` does the same to MAIL
        * FROM.
        *
        * ⚠ AND THE SEND GATE READS THAT. So pressing Verify on a domain that was
        * already working took it OUT of service for as long as Amazon took to
-       * re-check — observed in production: verified, pressed, pending, back to
+       * re-check - observed in production: verified, pressed, pending, back to
        * verified minutes later. A button that causes a sending outage.
        *
        * ⚠ WHAT IS NOT SAFE IS SKIPPING UNCONDITIONALLY. Re-asserting is
@@ -345,7 +345,7 @@ export function sesIdentity(
        * leaving it means SES signs with a key the customer's DNS no longer
        * publishes and every signature fails while the records look right. So
        * the test is not "does an identity exist" but "does it already carry
-       * THIS ROW'S selector" — which is exactly the case where the write would
+       * THIS ROW'S selector" - which is exactly the case where the write would
        * change nothing and cost a verification.
        */
       const current = await describe(domain)
@@ -358,7 +358,7 @@ export function sesIdentity(
       if (keyIsAlreadyOurs && mailFromIsAlreadySet) {
         log?.info(
           { domain, region: region ?? null, selector },
-          "ses identity already carries this key and return path — left alone",
+          "ses identity already carries this key and return path - left alone",
         )
         return { status: toStatus(current?.DkimAttributes?.Status) }
       }
@@ -385,7 +385,7 @@ export function sesIdentity(
             EmailIdentity: domain,
             // ⚠ SUPPLYING THESE IS WHAT SELECTS BYODKIM. Omitting them opts
             // into Easy DKIM, where Amazon generates the pair and keeps the
-            // private half — after which only Amazon can sign for this domain
+            // private half - after which only Amazon can sign for this domain
             // and routing a message through our own MTA becomes impossible.
             DkimSigningAttributes: signing,
           }),
@@ -395,8 +395,8 @@ export function sesIdentity(
 
         // ⚠ ALREADY EXISTS MEANS RE-ASSERT THE KEY, NOT SHRUG. With Easy DKIM
         // there was nothing to do here; with BYODKIM the existing identity may
-        // be signing with an older key — a re-created domain, a rotation that
-        // half-applied — and leaving it would mean SES signs with a key the
+        // be signing with an older key - a re-created domain, a rotation that
+        // half-applied - and leaving it would mean SES signs with a key the
         // customer's DNS no longer publishes. Every signature then fails and
         // the records look correct.
         await client.send(
@@ -411,7 +411,7 @@ export function sesIdentity(
       // ⚠ SET AFTER THE IDENTITY EXISTS, AND SEPARATELY, because SES has no way
       // to do both at once. `USE_DEFAULT_VALUE` means that if the MAIL FROM MX
       // is missing or broken, SES falls back to amazonses.com rather than
-      // refusing the send — a deliverability cost rather than an outage.
+      // refusing the send - a deliverability cost rather than an outage.
       await client.send(
         new PutEmailIdentityMailFromAttributesCommand({
           EmailIdentity: domain,
@@ -432,7 +432,7 @@ export function sesIdentity(
       /*
        * ⚠ PAGED, BECAUSE THE DEFAULT PAGE IS NOT THE WHOLE ACCOUNT. Reading one
        * page and treating it as the full set would be harmless for the report
-       * and actively wrong for the sweep that consumes it — a second page is
+       * and actively wrong for the sweep that consumes it - a second page is
        * simply invisible, so those identities are never found and never
        * cleaned up, for ever, with nothing to indicate they were missed.
        */
@@ -494,7 +494,7 @@ export function sesIdentity(
 
       /*
        * ⚠ ONLY OUR OWN TENANTS ARE DETACHED. A tenant somebody made by hand in
-       * the console is not ours to reason about — the same line the orphan
+       * the console is not ours to reason about - the same line the orphan
        * sweep draws around identities.
        */
       for (const other of await tenantsOf(identityArn)) {
@@ -526,7 +526,7 @@ export function sesIdentity(
  * A domain identity for a deployment that is not talking to SES.
  *
  * ⚠ IT EXISTS BECAUSE `SES_ENABLED=false` DID NOT MEAN WHAT IT SAYS. The flag
- * gated SENDING, and the SES client was wired unconditionally — so adding a
+ * gated SENDING, and the SES client was wired unconditionally - so adding a
  * domain on a laptop pointed at the production AWS credentials called
  * `CreateEmailIdentity` against the real account. The database is isolated
  * locally and the mail server is absent, but this one call reached straight
@@ -537,7 +537,7 @@ export function sesIdentity(
  * VALUE. A stub that claimed verification would let local work pass through
  * every gate that exists to stop unverified mail, and the first place that
  * assumption would be tested is production. Pending is honest: the domain was
- * created, the zone was published, and nothing has confirmed anything — which
+ * created, the zone was published, and nothing has confirmed anything - which
  * is exactly the state a real domain is in before its records resolve.
  *
  * ⚠ AND IT IS NOT A TEST DOUBLE. Tests construct their own; this is a
@@ -553,7 +553,7 @@ export function offlineIdentity(): DomainIdentity {
       return { status: "pending" }
     },
     // ⚠ EMPTY, NOT A THROW. A deployment without SES has no identities, which
-    // is an answer — and the orphan sweep asking it should find nothing to do
+    // is an answer - and the orphan sweep asking it should find nothing to do
     // rather than fail its whole pass.
     async list() {
       return []

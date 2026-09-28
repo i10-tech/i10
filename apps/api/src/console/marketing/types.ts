@@ -4,8 +4,8 @@ import type { Page } from "../queries.js"
  * Contacts, segments, topics, broadcasts and templates.
  *
  * ⚠ A CONTACT IS GLOBAL TO A TENANT AND UNIQUE BY ADDRESS. Every operation here
- * assumes that, and the schema enforces it. The naive alternative — a contact
- * row per list — makes unsubscribing a per-list act, which means a CSV
+ * assumes that, and the schema enforces it. The naive alternative - a contact
+ * row per list - makes unsubscribing a per-list act, which means a CSV
  * re-import quietly resurrects somebody who opted out. See the block comment in
  * db/core.ts.
  *
@@ -74,7 +74,7 @@ export interface BroadcastRow {
  * A broadcast as it appears in a LIST, which is the same row without its body.
  *
  * ⚠ THE BODY IS THE REASON THIS TYPE EXISTS. A broadcast's `html` is a whole
- * marketing email — tens to hundreds of kilobytes — and the list page renders
+ * marketing email - tens to hundreds of kilobytes - and the list page renders
  * a name, a status and a date. Shipping the bodies made a hundred-broadcast
  * workspace a multi-megabyte JSON response to draw a table that displays none
  * of it, on a page somebody opens to find the one they want to edit.

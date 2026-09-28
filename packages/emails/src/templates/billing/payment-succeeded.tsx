@@ -6,7 +6,7 @@ import { ActionButton, Detail, Layout, styles } from "../../layout.js"
  *
  * ⚠ THESE THREE ARE NOT WIRED TO ANYTHING, AND NOT TO CLERK AT ALL. Clerk has
  * its own billing product and emits `paymentAttempt.*` webhooks for it; i10
- * does not use it — Polar takes the money and `packages/metering` counts the
+ * does not use it - Polar takes the money and `packages/metering` counts the
  * usage. So these are driven from OUR events when that lands, and the props are
  * shaped after what Polar and the meter actually know rather than after Clerk's
  * template variables. Wiring them to Clerk's billing events would be wiring
@@ -21,7 +21,7 @@ export default function PaymentSucceeded({
   paidAt,
   invoiceUrl,
 }: {
-  /** Already formatted with its currency — see the note in the registry. */
+  /** Already formatted with its currency - see the note in the registry. */
   amount: string
   planName?: string
   paidAt?: string
@@ -31,7 +31,7 @@ export default function PaymentSucceeded({
     <Layout preview="Your i10 payment went through">
       <Text style={styles.heading}>Payment received</Text>
       <Text style={styles.text}>
-        Thanks — your payment for {planName ?? "i10"} has gone through.
+        Thanks - your payment for {planName ?? "i10"} has gone through.
       </Text>
       <Section style={{ margin: "16px 0" }}>
         <Detail label="Amount" value={amount} />
@@ -46,7 +46,7 @@ export default function PaymentSucceeded({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

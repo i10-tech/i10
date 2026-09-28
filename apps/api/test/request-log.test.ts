@@ -9,7 +9,7 @@ import type { TenantResolver } from "../src/middleware/tenant.js"
  * What the console's Logs page is fed by.
  *
  * ⚠ THE VALUE OF THIS LOG IS THAT IT IS COMPLETE, which is why it is a wildcard
- * middleware rather than a call in each route — a log that covers the endpoints
+ * middleware rather than a call in each route - a log that covers the endpoints
  * whoever added it remembered answers "did my server actually call you?"
  * wrongly in exactly the case somebody opens it for. These pin the two halves
  * that could go wrong quietly: that an API-key request IS recorded with the
@@ -84,7 +84,7 @@ describe("the API request log", () => {
       tenantId: TENANT,
       apiKeyId: "key-1",
       method: "GET",
-      // ⚠ THE ROUTE PATTERN, NOT THE URL — the invariant `core.api_requests`
+      // ⚠ THE ROUTE PATTERN, NOT THE URL - the invariant `core.api_requests`
       // states. The concrete path would make every message id its own row and
       // bury the signal under its own volume.
       path: "/emails/:id",
@@ -97,7 +97,7 @@ describe("the API request log", () => {
    * ⚠ A CONSOLE PAGE LOAD IS NOT AN API REQUEST, AND THE GUARD THAT SEPARATES
    * THEM IS `requireTenant` SETTING AN EMPTY KEY ID. If that ever changed to a
    * placeholder, every click in the dashboard would land in the customer's own
-   * request log — which is the fastest possible way to make the page useless.
+   * request log - which is the fastest possible way to make the page useless.
    */
   it("does not record a console request made with a session", async () => {
     const recorded: RequestRecord[] = []

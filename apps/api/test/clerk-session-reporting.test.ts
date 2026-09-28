@@ -7,8 +7,8 @@ import type { ClerkClient } from "@clerk/backend"
  *
  * ⚠ THIS FILE EXISTS BECAUSE THE SILENT VERSION COST A PRODUCTION OUTAGE.
  * `authenticateRequest` throws for reasons that are OURS at least as often as
- * theirs — a missing publishable key, a secret from the wrong instance, a
- * malformed token — and the verifier catches all of them and reports
+ * theirs - a missing publishable key, a secret from the wrong instance, a
+ * malformed token - and the verifier catches all of them and reports
  * `unavailable`. That flattening is correct for the OUTCOME: we do not know
  * whether the session is good, so we must not answer 401. It was catastrophic
  * for DIAGNOSIS: `CLERK_PUBLISHABLE_KEY` was unset on the API, every console
@@ -53,7 +53,7 @@ describe("clerkSessions", () => {
 
     // ⚠ THE OUTCOME IS UNCHANGED. `requireTenant` turns this into a 503 with a
     // Retry-After, which is the only safe answer when verification did not
-    // complete — a 401 here signs somebody out during somebody else's outage.
+    // complete - a 401 here signs somebody out during somebody else's outage.
     expect(outcome).toEqual({ status: "unavailable" })
 
     // ⚠ AND THE REASON SURVIVES. "Publishable key is missing" in a log line is

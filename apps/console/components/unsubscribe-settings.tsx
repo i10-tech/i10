@@ -7,13 +7,13 @@ import { Label } from "@repo/ui/components/label"
 import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
 
 /**
- * ⚠ FIXTURE — THE FORM IS REAL AND THE PERSISTENCE IS NOT.
+ * ⚠ FIXTURE - THE FORM IS REAL AND THE PERSISTENCE IS NOT.
  *
  * The unsubscribe page itself does not exist yet: it needs a public route on a
  * domain we control, a signed token per recipient so somebody cannot unsubscribe
  * a stranger by guessing an id, and a `core.unsubscribe_settings` row to render
  * from. None of those are built, and building the settings form against a
- * pretend API would be worse than building it against none — it would look
+ * pretend API would be worse than building it against none - it would look
  * saved.
  *
  * So this deliberately does NOT call an action, and the banner says so in the
@@ -31,7 +31,7 @@ export function UnsubscribePageSettings() {
     <div className="max-w-2xl space-y-6">
       <p className="rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
         The hosted preference page is not live yet, so nothing here is saved. The fields
-        are the ones it will have — the page itself needs a public route and a signed
+        are the ones it will have - the page itself needs a public route and a signed
         per-recipient token before it can ship.
       </p>
 
@@ -77,7 +77,7 @@ export function UnsubscribePageSettings() {
         {/*
          * ⚠ A LIVE PREVIEW RATHER THAN A SCREENSHOT, because the whole point of
          * the form is the appearance. It is rendered with our own components at
-         * a smaller scale — not an iframe — since there is no page to frame yet.
+         * a smaller scale - not an iframe - since there is no page to frame yet.
          */}
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">Preview</p>

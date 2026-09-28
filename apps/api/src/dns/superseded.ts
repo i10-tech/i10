@@ -8,7 +8,7 @@ import type { DesiredRecord } from "./port.js"
  * THERE. Removing a domain from the console tears down the SES identity and
  * the zone we serve; what it cannot touch is what we once wrote into the
  * customer's own DNS. So the customer who deletes `acme.com` and adds it again
- * — with Cloudflare still connected — gets a second full set published beside
+ * - with Cloudflare still connected - gets a second full set published beside
  * the first: six NS records at three delegated names, or two `v=DKIM1` TXT
  * records at `i10._domainkey`. Twelve records where six belong.
  *
@@ -22,8 +22,8 @@ import type { DesiredRecord } from "./port.js"
  * who has done nothing wrong.
  *
  * ⚠ SO THESE ARE REMOVED WITHOUT ASKING, AND THAT IS A DELIBERATE EXCEPTION TO
- * `replaceConflicts`. That flag guards the CUSTOMER'S records — a DMARC policy
- * they wrote, a TXT their vendor needs — and asking before deleting one is
+ * `replaceConflicts`. That flag guards the CUSTOMER'S records - a DMARC policy
+ * they wrote, a TXT their vendor needs - and asking before deleting one is
  * right. These are not theirs. They are ours, at names we are publishing to,
  * in a shape only we produce, superseded by the value we are writing in the
  * same call. Leaving them behind to be "safe" leaves the domain broken.
@@ -55,7 +55,7 @@ const txt = (value: string) =>
   value.trim().replace(/^"|"$/g, "").replace(/"\s+"/g, "").toLowerCase()
 
 /**
- * The part of a hostname below its first label — `ns3.i10.tech` → `i10.tech`.
+ * The part of a hostname below its first label - `ns3.i10.tech` → `i10.tech`.
  *
  * ⚠ IT IS THE HOST WE SERVE FROM, AND COMPARING IT IS WHAT LETS A RENAMED
  * NAMESERVER STILL READ AS OURS. `ns1.i10.tech` and `ns3.i10.tech` are the
@@ -65,7 +65,7 @@ const txt = (value: string) =>
 function parentOf(host: string): string | null {
   const parts = bare(host).split(".")
   // ⚠ FOUR LABELS MINIMUM BEFORE THIS MEANS ANYTHING. `mail.acme.com` has a
-  // parent of `acme.com`, which is the customer's own apex — matching on it
+  // parent of `acme.com`, which is the customer's own apex - matching on it
   // would call every record in the zone ours.
   if (parts.length < 3) return null
   return parts.slice(1).join(".")
@@ -94,7 +94,7 @@ const includes = (value: string) =>
  *
  * ⚠ A DMARC RECORD IS THE ONE PLACE WHERE OUR SHAPE AND THE CUSTOMER'S ARE
  * INDISTINGUISHABLE. `v=DMARC1; p=none` is what everybody's looks like, so the
- * prefix proves nothing at all — the only part of ours that names us is where
+ * prefix proves nothing at all - the only part of ours that names us is where
  * the aggregate reports are sent. Without a shared reporting domain this
  * refuses to call the record ours, which sends it down the conflict path and
  * puts a human in front of the decision. That is the correct answer for a
@@ -112,7 +112,7 @@ const reportDomains = (value: string) =>
 /**
  * Whether `stored` is a stale copy of something we are writing at this name.
  *
- * `wanted` is every value we are publishing at the same name and type — the
+ * `wanted` is every value we are publishing at the same name and type - the
  * caller has already established that none of them equals `stored`.
  */
 function ours(type: string, stored: string, wanted: readonly string[]): boolean {
@@ -163,7 +163,7 @@ function ours(type: string, stored: string, wanted: readonly string[]): boolean 
       }
 
       // ⚠ EVERY OTHER TXT IS SOMEBODY ELSE'S. Domain verification tokens for
-      // Google, Atlassian, Stripe — all of them live at names we may be
+      // Google, Atlassian, Stripe - all of them live at names we may be
       // publishing to, and none of them is ours to remove.
       return false
     }
@@ -175,7 +175,7 @@ function ours(type: string, stored: string, wanted: readonly string[]): boolean 
 /**
  * @param read the adapter's own record, flattened to the three fields this
  *   needs. Cloudflare calls the value `content`, Hetzner and DigitalOcean
- *   disagree about whether a name is absolute — a projection keeps all of
+ *   disagree about whether a name is absolute - a projection keeps all of
  *   that where it is already handled instead of adding a fourth spelling.
  * @param sameValue the adapter's own value comparison, so "already correct" is
  *   decided by exactly the rule that decides `unchanged` a few lines later. A

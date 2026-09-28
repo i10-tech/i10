@@ -10,7 +10,7 @@ import { Button } from "@repo/ui/components/button"
  *
  * ⚠ THIS IS NOT AN ERROR STATE AND MUST NEVER LOOK LIKE ONE. The API answered
  * 409 `tenant_not_ready`, which means the person is signed in and entitled to
- * an account — the row simply does not exist yet, because provisioning runs off
+ * an account - the row simply does not exist yet, because provisioning runs off
  * a Clerk webhook that Svix may still be retrying. Rendering "access denied" on
  * somebody's first visit makes them sign up a second time, which creates a
  * second organization and a second tenant, and now they genuinely do have two
@@ -35,7 +35,7 @@ export function TenantNotReady() {
       // ⚠ `router.refresh()`, NOT `location.reload()`. A full reload throws away
       // the React tree and re-runs Clerk's client bootstrap, which is a visible
       // white flash every second or two. `refresh` re-runs the server
-      // components in place — the layout calls `/console/me` again and renders
+      // components in place - the layout calls `/console/me` again and renders
       // the real console the moment the row exists.
       router.refresh()
     }, DELAYS[attempt])

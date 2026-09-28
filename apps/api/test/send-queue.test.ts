@@ -31,7 +31,7 @@ function fakeQueue() {
 }
 
 describe("scheduling", () => {
-  // ⚠ THE DELAY IS THE OPTIMISATION, THE CLAIM IS THE GUARANTEE — but without
+  // ⚠ THE DELAY IS THE OPTIMISATION, THE CLAIM IS THE GUARANTEE - but without
   // this the worker would take a scheduled batch the moment it is enqueued.
   it("hands groupmq the due time", async () => {
     const queue = fakeQueue()
@@ -179,14 +179,14 @@ describe("quota", () => {
     await expect(
       resilient(broken, log).recordSent("ten-1", [{ id: "msg-a", sentAt: new Date() }]),
     ).resolves.toBeUndefined()
-    // ⚠ And it is NOT retried — Autumn's own docs say a retried batchTrack
+    // ⚠ And it is NOT retried - Autumn's own docs say a retried batchTrack
     // double-deducts, and that "gaps are preferable to duplicates". The
     // reconciler closes the gap.
     expect(log.error).toHaveBeenCalled()
   })
 
   // ⚠ Ids, not a count. Autumn's single `track` 409s a replayed
-  // Idempotency-Key, so an id can be resubmitted safely and a count cannot —
+  // Idempotency-Key, so an id can be resubmitted safely and a count cannot -
   // which is the only reason the reconciler can top up without double-billing.
   //
   // ⚠ And each id carries the database's own `sent_at`, because the reconciler
@@ -216,7 +216,7 @@ describe("quota", () => {
 })
 
 describe("naming a job", () => {
-  // ⚠ THE DEFAULT NAME IS STABLE, WHICH IS THE SECOND IDEMPOTENCY LAYER — and
+  // ⚠ THE DEFAULT NAME IS STABLE, WHICH IS THE SECOND IDEMPOTENCY LAYER - and
   // is also why the sweep cannot use it. groupmq treats a name it has seen
   // before as a duplicate and enqueues nothing.
   it("uses the batch's own name by default", async () => {
@@ -243,7 +243,7 @@ describe("naming a job", () => {
 /**
  * ⚠ THE ROUND TRIP IS THE TEST. Every other test in this file builds a
  * `SendJob` in memory, where `createdAt` is a real `Date` and everything works
- * — which is exactly why the whole suite passed while no mail could be sent at
+ * - which is exactly why the whole suite passed while no mail could be sent at
  * all. groupmq stores the payload as JSON, so the worker never sees the object
  * that was enqueued; it sees what survived `JSON.stringify`.
  */
@@ -267,7 +267,7 @@ describe("a job that has been through redis", () => {
   /**
    * ⚠ AND THE CLAIM IS WHAT ACTUALLY BROKE. `claimStatement` calls
    * `.toISOString()` on every ref, so a string payload threw before Postgres
-   * was touched — the row stayed `queued`, was never marked failed, and the job
+   * was touched - the row stayed `queued`, was never marked failed, and the job
    * retried forever.
    */
   it("can be claimed, which the raw payload could not", () => {

@@ -35,7 +35,7 @@ export function SidebarNav({
   /**
    * What makes this rail's highlight its own.
    *
-   * ⚠ TWO RAILS EXIST AT ONCE — THE DESKTOP ONE AND THE MOBILE DRAWER — AND A
+   * ⚠ TWO RAILS EXIST AT ONCE - THE DESKTOP ONE AND THE MOBILE DRAWER - AND A
    * SHARED `layoutId` WOULD MAKE THEM FIGHT. Motion matches the id globally, so
    * two mounted highlights claiming the same one means it tries to morph a
    * 240px rail's pill into a drawer's and back on every render. The scope is a
@@ -53,8 +53,8 @@ export function SidebarNav({
   /*
    * ⚠ THE RAIL SWAPS RATHER THAN THE PAGE GROWING A SECOND COLUMN. Settings
    * used to render its own narrow nav inside the content area, so on a settings
-   * page the screen carried two vertical lists of links a few pixels apart —
-   * one for the console, one for settings — and the eye had to work out which
+   * page the screen carried two vertical lists of links a few pixels apart -
+   * one for the console, one for settings - and the eye had to work out which
    * of them it was reading. Replacing the rail keeps exactly one navigation on
    * screen at a time, and the back link is what the main rail's continued
    * presence used to provide.
@@ -120,8 +120,8 @@ export function SidebarNav({
                    * ⚠ THE GESTURE STATE LIVES ON THE ROW, NOT ON THE ICON, AND
                    * THAT IS WHAT MAKES THE WHOLE ROW THE TARGET. Motion
                    * propagates a variant name down to any child that declares
-                   * the same variant, so hovering anywhere on the link — the
-                   * label, the padding, the far right edge — runs the icon's
+                   * the same variant, so hovering anywhere on the link - the
+                   * label, the padding, the far right edge - runs the icon's
                    * animation. Putting `whileHover` on the icon itself would
                    * mean it only fired on a 16px square.
                    */
@@ -187,14 +187,14 @@ const ICON_SPRING: Transition = { type: "spring", stiffness: 500, damping: 30 }
  * The icon nudges by a pixel; the highlight crosses up to four hundred of them
  * between "Overview" and "Settings", and a 500-stiffness spring over that
  * distance is a streak rather than a movement. `damping: 34` against
- * `stiffness: 380` lands it in about 300ms with no visible bounce at the end —
+ * `stiffness: 380` lands it in about 300ms with no visible bounce at the end -
  * long enough to follow with the eye, short enough that it has finished before
  * the new page's content arrives.
  */
 const ACTIVE_SPRING: Transition = { type: "spring", stiffness: 380, damping: 34 }
 
 /**
- * ⚠ SCALE AND A SINGLE PIXEL OF LIFT — NO ROTATION, AND THAT IS DELIBERATE.
+ * ⚠ SCALE AND A SINGLE PIXEL OF LIFT - NO ROTATION, AND THAT IS DELIBERATE.
  * A rotate reads beautifully on a gear and absurdly on an envelope, and this
  * list has eighteen different glyphs. The only transform that is flattering to
  * all of them is the one that does not imply a direction.

@@ -7,7 +7,7 @@ import type { SubscriptionState } from "./events.js"
  *
  * ⚠ WRITES GO THROUGH `withTenant`, READS FOR THE RECONCILER DO NOT. Every
  * write here carries a tenant id that came out of a signature-verified Polar
- * payload — the value we ourselves put on the checkout — so the ordinary row
+ * payload - the value we ourselves put on the checkout - so the ordinary row
  * level security path applies. The reconciler is the exception: it asks a
  * question about every tenant at once, which no tenant-scoped connection can
  * answer, so it goes through one narrow SECURITY DEFINER function instead. Same
@@ -35,8 +35,8 @@ export interface CurrentPlan {
    * A plan change Polar has accepted and will apply at the period boundary.
    *
    * ⚠ IT IS WHAT MAKES A DOWNGRADE VISIBLE BEFORE IT HAPPENS. `plan` above is
-   * still the plan they hold and are still paying for — deliberately, because
-   * they keep it until the period ends — so without this the console has
+   * still the plan they hold and are still paying for - deliberately, because
+   * they keep it until the period ends - so without this the console has
    * nothing to distinguish "downgrade accepted" from "nothing happened".
    */
   scheduledPlan: string | null
@@ -46,7 +46,7 @@ export interface CurrentPlan {
    *
    * ⚠ IT IS HERE SO A PLAN CHANGE HAS SOMETHING TO PATCH, and it is the one
    * field on this object that is not for rendering. A tenant with `null` here
-   * has never bought anything — they go through checkout, not through an
+   * has never bought anything - they go through checkout, not through an
    * update, and `PATCH` on a subscription that does not exist is a 404 nobody
    * can act on.
    */
@@ -57,7 +57,7 @@ export interface SubscriptionOps {
   /**
    * Upserts the row, refusing to move it backwards in time.
    *
-   * `stale` means a newer event has already been applied — the delivery that
+   * `stale` means a newer event has already been applied - the delivery that
    * produced this one overtook it in flight. It is a normal outcome, not a
    * failure, and the caller must not treat it as one.
    */
@@ -68,18 +68,18 @@ export interface SubscriptionOps {
        * Take this subscription id from whatever tenant currently holds it.
        *
        * ⚠ SET ONLY BY THE POST-CHECKOUT PATH, AND WITHOUT IT THE RECLAIM
-       * DEADLOCKS. `polar_subscription_id` is UNIQUE, deliberately — two
+       * DEADLOCKS. `polar_subscription_id` is UNIQUE, deliberately - two
        * tenants pointing at one subscription is one payment entitling two
        * accounts. But when somebody re-signs up, Polar reuses their customer
        * and keeps its stale `external_id`, so the WEBHOOK binds the brand-new
        * subscription to the OLD, dead tenant moments before the checkout page
-       * tries to bind it to the live one — and that insert then dies on the
+       * tries to bind it to the live one - and that insert then dies on the
        * constraint, is caught, and the plan never lands.
        *
        * ⚠ IT IS SAFE PRECISELY BECAUSE A SUBSCRIPTION ID HAS EXACTLY ONE
        * BUYER. Polar creates it from one checkout, and that checkout names one
        * tenant in metadata WE wrote. So this does not decide between two
-       * claimants — it corrects a binding made from a field Polar does not
+       * claimants - it corrects a binding made from a field Polar does not
        * maintain, using the one it echoes back unchanged.
        *
        * ⚠ AND THE WEBHOOK MUST NEVER PASS IT. That path attributes by
@@ -94,14 +94,14 @@ export interface SubscriptionOps {
    *
    * ⚠ IT IS THE ANSWER TO "WHO ACTUALLY BOUGHT THIS", AND IT OUTRANKS
    * `customer.external_id`. Our row is written by the post-checkout path from
-   * the checkout's own metadata — a field OUR api sets, from an authenticated
+   * the checkout's own metadata - a field OUR api sets, from an authenticated
    * session, which Polar echoes back unchanged. `external_id` is stamped once,
    * when Polar CREATES a customer, and never maintained: a returning customer
    * carries the tenant they had last time for the rest of the account's life.
    *
    * ⚠ AND IT CANNOT BE ANSWERED BY AN ORDINARY READ, WHICH IS THE WHOLE POINT.
    * The caller is scoped to the tenant Polar names, and the row belongs to the
-   * tenant that bought — so under row level security it is invisible, and the
+   * tenant that bought - so under row level security it is invisible, and the
    * only way the caller learns of the disagreement is by crashing into the
    * unique index on `polar_subscription_id`. See migration 0054.
    *
@@ -116,7 +116,7 @@ export interface SubscriptionOps {
    * what makes it the attribution of record. One checkout buys one subscription
    * for one workspace; `subscription.checkout_id` is on every subscription
    * Polar returns, so this row answers "whose is this" for every event that
-   * subscription will ever produce — without asking Polar to remember anything
+   * subscription will ever produce - without asking Polar to remember anything
    * for us. See migration 0055.
    */
   recordCheckout(polarCheckoutId: string, tenantId: string): Promise<void>
@@ -129,7 +129,7 @@ export interface SubscriptionOps {
    * Records that the entitlement now holds this plan.
    *
    * ⚠ SCOPED TO THE EXACT EVENT THAT WAS GRANTED FOR. If a newer event landed
-   * between the write and the grant, this marks nothing — the row still
+   * between the write and the grant, this marks nothing - the row still
    * reads as needing a grant, and the reconciler picks it up. Marking it
    * regardless would record a plan we never actually attached.
    */
@@ -141,7 +141,7 @@ export interface SubscriptionOps {
    *
    * ⚠ IT EXISTS BECAUSE THE RECONCILER FOUND OUT BY CRASHING. Polar keeps
    * `customer.external_id` for ever, including after the workspace it names is
-   * deleted — so a subscription can name a tenant that no longer exists. With
+   * deleted - so a subscription can name a tenant that no longer exists. With
    * no way to ask, the reconciler read that as "a webhook we never received",
    * tried to repair it, and the INSERT died on
    * `subscriptions_tenant_id_tenants_id_fk` every thirty minutes for ever.
@@ -159,7 +159,7 @@ export interface SubscriptionOps {
    *
    * ⚠ IT EXISTS BECAUSE THE WEBHOOK IS TOO LATE TO BE THE ONLY WRITER. Polar
    * takes the cancellation synchronously and confirms it an event later, and
-   * `plan-change` wrote nothing in between — so the console refreshed onto a
+   * `plan-change` wrote nothing in between - so the console refreshed onto a
    * row that still said "active, not cancelling". The page went on showing Pro
    * with no end date, the free card stayed enabled because it is disabled by
    * exactly this flag, and pressing it again sent a second cancel that Polar
@@ -212,7 +212,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
            * as `orphaned` and a human then has to dismiss.
            *
            * ⚠ `withTenant` SCOPES THIS TO THE NEW TENANT, WHOSE POLICY CANNOT
-           * SEE THE OLD ROW — so it runs through the same SECURITY DEFINER
+           * SEE THE OLD ROW - so it runs through the same SECURITY DEFINER
            * discipline as everything else that crosses a tenant boundary. See
            * migration 0047.
            */
@@ -231,12 +231,12 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         // ⚠ AND THE GUARD IS ON THE UPDATE, NOT IN THE APPLICATION. Reading the
         // row, comparing timestamps and then writing is two statements with a
         // gap, and two webhook deliveries land in that gap regularly enough to
-        // matter — Polar retries in parallel with its own next event.
+        // matter - Polar retries in parallel with its own next event.
         //
         // ⚠ THE SECOND DISJUNCT IS WHAT MAKES A DELIVERY RETRY ABLE TO REPAIR A
         // FAILED GRANT, AND IT IS NOT DEFENSIVE. A redelivery carries the SAME
         // `event_at`, so under `<` alone it answered "stale" and returned
-        // before `ensureCustomer` — meaning that when the grant threw,
+        // before `ensureCustomer` - meaning that when the grant threw,
         // every one of Polar's retries was discarded and the only repair left
         // was the reconciler, up to half an hour later. Observed twice on real
         // events: once on the first payment, once on the first cancellation.
@@ -245,7 +245,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         // the first attempt at this and it was wrong: it only catches a row
         // that has NEVER been granted. A cancellation arrives on a row already
         // granted to `pro`, so `granted_at` is set-but-stale and every retry of
-        // the DOWNGRADE was still discarded — the failure mode that leaves a
+        // the DOWNGRADE was still discarded - the failure mode that leaves a
         // revoked customer entitled.
         //
         // Comparing `granted_plan_id` to what this event entitles is exact: it
@@ -393,9 +393,9 @@ export function subscriptionOps(db: Database): SubscriptionOps {
 
     async ownerOf(polarSubscriptionId) {
       // ⚠ UNSCOPED, LIKE `snapshot` AND FOR THE SAME REASON. The question
-      // crosses a tenant boundary by construction — it is asked precisely when
+      // crosses a tenant boundary by construction - it is asked precisely when
       // we suspect the row belongs to somebody other than the tenant we are
-      // scoped to — so it goes through the SECURITY DEFINER function rather
+      // scoped to - so it goes through the SECURITY DEFINER function rather
       // than through a policy that is guaranteed to hide the answer.
       const rows = (await db.execute(sql`
         select core.subscription_owner(${polarSubscriptionId}) as tenant_id
@@ -409,7 +409,7 @@ export function subscriptionOps(db: Database): SubscriptionOps {
         // ⚠ IDEMPOTENT, BECAUSE A RETRIED CHECKOUT CREATION IS NOT AN ERROR.
         // The id is Polar's and unique per checkout, so a second write is
         // either the same fact again or a caller that would be wrong to
-        // overwrite it — and the first one is the one that matched the redirect.
+        // overwrite it - and the first one is the one that matched the redirect.
         await tx.execute(sql`
           insert into core.polar_checkouts (polar_checkout_id, tenant_id)
           values (${polarCheckoutId}, ${tenantId}::uuid)
@@ -479,24 +479,24 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * ⚠ ONE PARAMETER CARRYING AN ARRAY LITERAL, NEVER A JS ARRAY INTERPOLATED
  * DIRECTLY. ``sql`…tenants_known(${ids}::uuid[])` `` expands to
  * `($1, $2, $3)::uuid[]`, and a parenthesised list of parameters is a ROW
- * CONSTRUCTOR in Postgres rather than an array — so the query dies on
+ * CONSTRUCTOR in Postgres rather than an array - so the query dies on
  * `cannot cast type record to uuid[]`.
  *
  * ⚠ AND IT IS INVISIBLE UNTIL THERE ARE TWO, WHICH IS WHY IT SHIPPED GREEN.
  * With a single id the expansion is `($1)`, a plain parenthesised expression
  * that casts perfectly well. So it worked for exactly as long as one tenant had
- * a subscription and began failing the moment a second one did — taking the
+ * a subscription and began failing the moment a second one did - taking the
  * WHOLE subscription leg with it, every half hour, silently, for 23 hours. That
  * is the leg that downgrades people who have cancelled, which is how a revoked
  * customer kept Pro. Measured against production 2026-09-21: the row form
  * errors, this form answers.
  *
  * ⚠ IT IS A STATEMENT RATHER THAN AN INLINE QUERY SO THE SHAPE CAN BE ASSERTED.
- * No fake could have caught this — the bug is in what Postgres receives, and
+ * No fake could have caught this - the bug is in what Postgres receives, and
  * every unit test in the suite passed throughout. See `billing-sql.test.ts`.
  *
  * ⚠ AND THE IDS ARE FILTERED TO WELL-FORMED UUIDS, because they reach here from
- * `customer.external_id` — text that whoever set up the Polar customer chose. A
+ * `customer.external_id` - text that whoever set up the Polar customer chose. A
  * stray `,` or `}` would corrupt the literal and throw, which is the exact
  * failure being fixed. Dropping them is the RIGHT answer rather than a
  * defensive one: an id this database cannot hold is not a known tenant, so it

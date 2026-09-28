@@ -6,7 +6,7 @@ import type { DnsProvider } from "./types.js"
  * ⚠ THE NAMESERVER PATTERNS WERE RESOLVED LIVE, NOT REMEMBERED. Where a pattern
  * is stated in a provider's documentation but was not confirmed against a real
  * zone, the row says so in `unverified`. The distinction matters because a
- * wrong pattern does not fail loudly — it silently reports the wrong company's
+ * wrong pattern does not fail loudly - it silently reports the wrong company's
  * name and shows a customer a "Connect" dialog for a service they do not use.
  *
  * ⚠ ORDER IS IRRELEVANT TO CORRECTNESS AND IS ALPHABETICAL FOR REVIEW. Matching
@@ -22,7 +22,7 @@ import type { DnsProvider } from "./types.js"
  * ⚠ AND DELEGATION IS THE DEFAULT PATH, NOT THE FALLBACK. Twenty-two of the
  * providers below have no usable per-customer API at all, and the two largest
  * registrars gate theirs behind spend thresholds. NS delegation works wherever
- * an NS record can be created, which is almost everywhere — and it removes the
+ * an NS record can be created, which is almost everywhere - and it removes the
  * entire class of bug documented on `ProviderApi.replacesZone`.
  */
 export const PROVIDERS: DnsProvider[] = [
@@ -42,7 +42,7 @@ export const PROVIDERS: DnsProvider[] = [
     api: {
       docs: "https://techdocs.akamai.com/edge-dns/reference/edge-dns-api",
       auth: "key-secret",
-      scope: "EdgeGrid client token with DNS—Zone Record Management",
+      scope: "EdgeGrid client token with DNS-Zone Record Management",
       zoneScoped: false,
     },
     manualPath:
@@ -112,8 +112,8 @@ export const PROVIDERS: DnsProvider[] = [
     name: "Cloudflare",
     kind: "authoritative",
     /*
-     * ⚠ A ZONE'S TWO NAMESERVERS ARE PERSONALISED PET NAMES — `kim.ns.cloudflare.com`,
-     * `walt.ns.cloudflare.com` — so the pattern is the shared suffix rather than
+     * ⚠ A ZONE'S TWO NAMESERVERS ARE PERSONALISED PET NAMES - `kim.ns.cloudflare.com`,
+     * `walt.ns.cloudflare.com` - so the pattern is the shared suffix rather than
      * any literal hostname.
      *
      * ⚠ `ns3`–`ns7.cloudflare.com` IS CLOUDFLARE'S OWN CORPORATE ZONE AND NOT A
@@ -139,7 +139,7 @@ export const PROVIDERS: DnsProvider[] = [
        * THE MOST VALUABLE FACT IN THIS FILE. Cloudflare hosts more of our
        * customers' zones than everything else here combined, and until this
        * shipped the only option was asking somebody to go and mint an API token
-       * — which is where most setup flows lose people. Authorization code only;
+       * - which is where most setup flows lose people. Authorization code only;
        * public clients must use PKCE S256.
        *
        * ⚠ THE ENDPOINTS BELOW ARE A FALLBACK. Cloudflare explicitly recommends
@@ -152,7 +152,7 @@ export const PROVIDERS: DnsProvider[] = [
         tokenUrl: "https://dash.cloudflare.com/oauth2/token",
         /*
          * ⚠ READ OFF A REAL CLIENT'S EDIT PAGE, NOT INFERRED FROM THE DOCS.
-         * These were `dns_records:edit` and `zone:read` — API TOKEN permission
+         * These were `dns_records:edit` and `zone:read` - API TOKEN permission
          * syntax, which is what the documentation shows and what every other
          * integration guide repeats. Cloudflare's OAuth uses a different form,
          * and the wrong string does not fail gracefully: the authorize endpoint
@@ -163,7 +163,7 @@ export const PROVIDERS: DnsProvider[] = [
          * ⚠ `offline_access` IS WHAT MAKES THE CONNECTION OUTLIVE ITS FIRST
          * ACCESS TOKEN. Without it Cloudflare issues no refresh token, so the
          * connection is dead as soon as the access token expires and the
-         * customer has to reconnect — with no warning, and no way for us to
+         * customer has to reconnect - with no warning, and no way for us to
          * repair it on their behalf.
          *
          * The authoritative list is `GET /client/v4/oauth/scopes`, which needs
@@ -177,7 +177,7 @@ export const PROVIDERS: DnsProvider[] = [
     helpUrl:
       "https://developers.cloudflare.com/dns/manage-dns-records/how-to/subdomains-outside-cloudflare/",
     unverified:
-      "A zone on CNAME (partial) setup cannot delegate a subdomain at all — the " +
+      "A zone on CNAME (partial) setup cannot delegate a subdomain at all - the " +
       "adapter must check the zone `type` before offering the API path. The " +
       "1200-per-5-minutes limit is per ACCOUNT, shared with the customer's own " +
       "dashboard use.",
@@ -228,8 +228,8 @@ export const PROVIDERS: DnsProvider[] = [
     manualPath: "desec.io → Domains → your domain → Add RRset",
     helpUrl: "https://desec.readthedocs.io/",
     unverified:
-      "Bulk atomic RRset writes are exactly the shape we want — SPF, DKIM, " +
-      "DMARC and MX in one transaction — but have not been exercised here.",
+      "Bulk atomic RRset writes are exactly the shape we want - SPF, DKIM, " +
+      "DMARC and MX in one transaction - but have not been exercised here.",
   },
   {
     slug: "digitalocean",
@@ -255,7 +255,7 @@ export const PROVIDERS: DnsProvider[] = [
     helpUrl:
       "https://docs.digitalocean.com/products/networking/dns/how-to/manage-records/",
     unverified:
-      "The domain must already exist as a Domain resource in the account — a " +
+      "The domain must already exist as a Domain resource in the account - a " +
       "customer who pointed NS at DO but never added the domain in the panel " +
       "gets a 404 on records, and the adapter has to create the domain first.",
   },
@@ -279,7 +279,7 @@ export const PROVIDERS: DnsProvider[] = [
       /*
        * ⚠ THE CLEANEST OAUTH IN THE REGISTRY, AND THEREFORE THE ONE TO BUILD
        * FIRST. The token response carries `account_id`, which every other path
-       * in their API needs — so the whole flow is two requests with nothing to
+       * in their API needs - so the whole flow is two requests with nothing to
        * look up afterwards. Getting the adapter shape right here makes
        * Cloudflare, DigitalOcean, Vercel, Netlify and Linode mostly config.
        */
@@ -341,7 +341,7 @@ export const PROVIDERS: DnsProvider[] = [
     manualPath: "Domains → your domain → DNS → Add record",
     unverified:
       "Credentials are issued for the sandbox first and promotion to live " +
-      "requires emailing easyDNS support — a one-time lead-time item for US, " +
+      "requires emailing easyDNS support - a one-time lead-time item for US, " +
       "not per customer.",
   },
   {
@@ -369,7 +369,7 @@ export const PROVIDERS: DnsProvider[] = [
     api: {
       docs: "https://api.gandi.net/docs/livedns/",
       auth: "token",
-      scope: "Personal Access Token — manage domain technical configurations",
+      scope: "Personal Access Token - manage domain technical configurations",
       zoneScoped: false,
       // ⚠ `PUT /domains/{fqdn}/records` REPLACES THE WHOLE ZONE. The scoped
       // `PUT /domains/{fqdn}/records/{name}/{type}` upserts one rrset and is
@@ -386,7 +386,7 @@ export const PROVIDERS: DnsProvider[] = [
      * ⚠ A `.tech` TLD DOES NOT IMPLY get.tech IS THE DNS HOST, AND DETECTING ON
      * THE TLD WOULD BE WRONG FOR MOST `.tech` DOMAINS. `.tech` is a Radix gTLD
      * sold through every ordinary registrar; get.tech is only Radix's own
-     * storefront. Detection is on nameservers, never on the suffix — and
+     * storefront. Detection is on nameservers, never on the suffix - and
      * get.tech's own default nameservers could not be established, so this row
      * matches essentially nothing and that is the honest outcome. An unmatched
      * `.tech` domain falls through to the manual delegation instructions, which
@@ -465,7 +465,7 @@ export const PROVIDERS: DnsProvider[] = [
      * people's zones by walking the DNS tree; it holds no records and there is
      * nothing to connect to. People name it because it is what their laptop
      * resolves through, and the console's job is to say so and then ask who
-     * their registrar is — not to offer a button that could not work.
+     * their registrar is - not to offer a button that could not work.
      *
      * ⚠ NO NAMESERVER PATTERNS, ON PURPOSE. It can never appear in an NS record
      * set, so detection can never produce it. It is in the registry only so the
@@ -620,7 +620,7 @@ export const PROVIDERS: DnsProvider[] = [
       eligibility: "20+ domains, or a $50 balance, or $50 spent in the last two years.",
       /*
        * ⚠ AN INFRASTRUCTURE CONSTRAINT WE HAVE NOT MET. Namecheap pins API
-       * access to IPv4 addresses registered in the account — so this works only
+       * access to IPv4 addresses registered in the account - so this works only
        * if our egress is static AND each customer allowlists our addresses.
        * Until that is decided, the connect flow for Namecheap should offer
        * delegation and say plainly why.
@@ -636,7 +636,7 @@ export const PROVIDERS: DnsProvider[] = [
     name: "NameSilo",
     kind: "registrar",
     // ⚠ `dnsowl.com`, NOT `namesilo.com`. NameSilo's nameservers are branded
-    // differently from the company — exactly the kind of thing that makes
+    // differently from the company - exactly the kind of thing that makes
     // detection look broken if you assume the obvious pattern.
     nameserverPatterns: ["dnsowl.com", "namesilo.com"],
     nsDelegation: true,
@@ -648,7 +648,7 @@ export const PROVIDERS: DnsProvider[] = [
     manualPath: "Manage My Domains → your domain → Update DNS records",
     unverified:
       "Whether the record-type dropdown offers NS for a subdomain was not " +
-      "confirmed — test before treating NameSilo as a delegation target. " +
+      "confirmed - test before treating NameSilo as a delegation target. " +
       "Also: the API key travels in the URL QUERY STRING, so it lands in access " +
       "logs and proxies; scrub it from our own logging.",
   },
@@ -676,7 +676,7 @@ export const PROVIDERS: DnsProvider[] = [
     },
     manualPath: "Domains → your domain → DNS records → Add new record",
     unverified:
-      "There is no update endpoint — a change is delete-then-recreate, which " +
+      "There is no update endpoint - a change is delete-then-recreate, which " +
       "means a window where the record does not exist. Personal access tokens " +
       "and team-owned zones interact badly (401 on an apparently valid token).",
   },
@@ -706,7 +706,7 @@ export const PROVIDERS: DnsProvider[] = [
     unverified:
       "Method names are from community clients; the official reference is " +
       "behind a login. Njalla's users are privacy-maximalist by definition and " +
-      "are the least likely cohort here to paste a token into a SaaS — lead " +
+      "are the least likely cohort here to paste a token into a SaaS - lead " +
       "with delegation.",
   },
   {
@@ -762,7 +762,7 @@ export const PROVIDERS: DnsProvider[] = [
       replacesZone: true,
       eligibility: "Reseller account required; end customers hold no credentials.",
     },
-    manualPath: "Varies by reseller — OpenSRS is white-labelled.",
+    manualPath: "Varies by reseller - OpenSRS is white-labelled.",
   },
   {
     slug: "ovh",
@@ -787,8 +787,8 @@ export const PROVIDERS: DnsProvider[] = [
     slug: "porkbun",
     name: "Porkbun",
     kind: "registrar",
-    // Nameservers are named after Brazilian cities — curitiba, fortaleza,
-    // maceio, salvador — under one suffix.
+    // Nameservers are named after Brazilian cities - curitiba, fortaleza,
+    // maceio, salvador - under one suffix.
     nameserverPatterns: ["ns.porkbun.com", "porkbun.com"],
     nsDelegation: true,
     api: {
@@ -852,14 +852,14 @@ export const PROVIDERS: DnsProvider[] = [
     kind: "authoritative",
     /*
      * ⚠ FOUR TLDs, BECAUSE ROUTE 53 DELIBERATELY SPREADS A ZONE'S FOUR
-     * NAMESERVERS ACROSS FOUR TOP-LEVEL DOMAINS — one `.com`, one `.net`, one
+     * NAMESERVERS ACROSS FOUR TOP-LEVEL DOMAINS - one `.com`, one `.net`, one
      * `.org`, one `.co.uk`. Matching only `awsdns` under `.com` identifies a
      * quarter of the answer and reports `partial` for every Route 53 zone in
      * existence.
      */
     /*
      * ⚠ A REGEX, NOT A SUFFIX, AND THE TEST SUITE IS WHY. The hostnames are
-     * `ns-264.awsdns-33.com` — the identifying part is the `awsdns-NN` LABEL,
+     * `ns-264.awsdns-33.com` - the identifying part is the `awsdns-NN` LABEL,
      * not a suffix, so `awsdns.com` matches nothing at all and a bare `.com`
      * would match every nameserver on the internet. See `nameserverRegex`.
      */
@@ -891,7 +891,7 @@ export const PROVIDERS: DnsProvider[] = [
     kind: "registrar",
     /*
      * ⚠ SHOPIFY PUBLISHES NO CUSTOMER NAMESERVER SET, SO NS DETECTION CANNOT
-     * FIND IT — and that is a property of Shopify rather than a gap here. Their
+     * FIND IT - and that is a property of Shopify rather than a gap here. Their
      * own guidance for a third-party domain is to KEEP the registrar's
      * nameservers and add an A record, so a Shopify store's NS set belongs to
      * GoDaddy or Route 53 or whoever the merchant actually uses. Spot checks of
@@ -906,7 +906,7 @@ export const PROVIDERS: DnsProvider[] = [
       cname: ["shops.myshopify.com"],
     },
     /*
-     * ⚠ SHOPIFY'S DNS PANEL OFFERS A, AAAA, CNAME, MX, TXT AND SRV — AND NO NS.
+     * ⚠ SHOPIFY'S DNS PANEL OFFERS A, AAAA, CNAME, MX, TXT AND SRV - AND NO NS.
      * Delegation is therefore impossible on a Shopify-managed domain, and
      * telling somebody to look for an NS row would send them hunting for a
      * control that is not there. The console routes these to the manual path,
@@ -933,14 +933,14 @@ export const PROVIDERS: DnsProvider[] = [
      * the registrar to Squarespace in September 2023 and the migration of all
      * ~10M domains is complete; domains.google.com is gone. Some migrated zones
      * still answer with `ns-cloud-*.googledomains.com` because their owner
-     * chose Cloud DNS — those correctly detect as google-cloud-dns, which is
+     * chose Cloud DNS - those correctly detect as google-cloud-dns, which is
      * where their records actually live.
      */
     nameserverPatterns: ["squarespacedns.com"],
     nsDelegation: true,
     /*
      * ⚠ SQUARESPACE'S DEVELOPER PLATFORM IS COMMERCE-ONLY. Its OAuth scopes are
-     * orders, inventory, products and transactions — there is no DNS scope and
+     * orders, inventory, products and transactions - there is no DNS scope and
      * no DNS API. Delegation or manual, and nothing else.
      */
     api: null,
@@ -996,8 +996,8 @@ export const PROVIDERS: DnsProvider[] = [
     nameserverPatterns: ["wixdns.net"],
     /*
      * ⚠ ONLY FOR DOMAINS CONNECTED TO WIX *BY NAMESERVERS*. A domain connected
-     * "by pointing" is not managed by Wix DNS at all — its records live at the
-     * registrar — so the Wix panel is the wrong place to look and the customer
+     * "by pointing" is not managed by Wix DNS at all - its records live at the
+     * registrar - so the Wix panel is the wrong place to look and the customer
      * will not find a record editor there.
      */
     nsDelegation: true,
@@ -1010,7 +1010,7 @@ export const PROVIDERS: DnsProvider[] = [
     manualPath: "Domains → your domain → Advanced → Edit DNS → Add record",
     unverified:
       "Wix's Domain DNS API manages zones that live in Google Cloud DNS " +
-      "underneath, and is API-key gated rather than OAuth — so there is no " +
+      "underneath, and is API-key gated rather than OAuth - so there is no " +
       "one-click connect. Limit of 50 values per record type.",
   },
 ]

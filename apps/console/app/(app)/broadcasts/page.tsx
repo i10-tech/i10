@@ -24,7 +24,7 @@ export const metadata: Metadata = { title: "Broadcasts" }
  *
  * ⚠ A BROADCAST IS NOT A SECOND SENDING PATH. Sending one fans it out into
  * ordinary rows in `core.messages` on the bulk queue, each carrying the
- * broadcast's id — so metering, suppression, DKIM, the event ingest, webhooks
+ * broadcast's id - so metering, suppression, DKIM, the event ingest, webhooks
  * and the delivery log are the code that is already in production. A separate
  * marketing sender would be a second answer to "did this deliver", and the two
  * would disagree the first time an event arrived late.
@@ -41,7 +41,7 @@ export default async function BroadcastsPage() {
           {/*
            * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
            * CARRIES THIS ACTION. Two buttons for one action, eight inches
-           * apart, reads as two different things — and the one in the header is
+           * apart, reads as two different things - and the one in the header is
            * the smaller and less explained of the two, so it wins attention it
            * has not earned. The empty state's version says what will happen;
            * this one just says a noun.

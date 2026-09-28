@@ -23,7 +23,7 @@ import {
  * CLASSIC sign-in API; this app is built on the signals API, where a redirect
  * is finished by calling `finalize()` on whichever attempt the handshake
  * produced. The component mounts, finds no classic flow in progress, and does
- * nothing at all — no error, no session, just a page that sits there.
+ * nothing at all - no error, no session, just a page that sits there.
  *
  * ⚠ AND IT HAS TO CHOOSE BETWEEN FOUR OUTCOMES, because one round trip resolves
  * into whichever it turns out to be:
@@ -51,7 +51,7 @@ export function SsoCallback({
    *
    * ⚠ IT IS AN EXPLICIT FLAG RATHER THAN AN INFERENCE. On that return there is
    * a live session and no attempt in progress, which is indistinguishable from
-   * a dozen other dead ends — without the flag the page would decide the
+   * a dozen other dead ends - without the flag the page would decide the
    * hand-off failed and toast at somebody who has just finished signing up.
    */
   reconnected?: boolean
@@ -62,13 +62,13 @@ export function SsoCallback({
   const { signUp } = useSignUp()
 
   // ⚠ ONCE, EVER. This effect re-runs as Clerk's state settles, and `finalize`
-  // is not idempotent — a second call races the navigation the first one
+  // is not idempotent - a second call races the navigation the first one
   // started.
   const done = useRef(false)
 
   /**
    * ⚠ `offer` IS A STOPPING POINT, NOT A STEP THAT RUNS ITSELF. Reaching it
-   * means no account exists and NONE HAS BEEN CREATED — the decision is the
+   * means no account exists and NONE HAS BEEN CREATED - the decision is the
    * person's, and `signUp.create({ transfer: true })` is what makes it real, so
    * it must not be called until they press the button. An earlier version
    * transferred immediately and told them afterwards, which created accounts
@@ -98,8 +98,8 @@ export function SsoCallback({
    *
    * ⚠ IT KEYS OFF `createdSessionId` RATHER THAN `status === "complete"`, AND
    * THAT IS A BUG FIX RATHER THAN A PREFERENCE. A transfer that had already
-   * created the session was reported as "we need a little more" — the account
-   * existed, the person was signed in, and the page said otherwise — because
+   * created the session was reported as "we need a little more" - the account
+   * existed, the person was signed in, and the page said otherwise - because
    * the status read back as something other than complete. The session id is
    * the fact; the status is a description of it.
    *
@@ -132,11 +132,11 @@ export function SsoCallback({
     const navigate = ({ decorateUrl }: { decorateUrl: (u: string) => string }) => {
       // ⚠ `decorateUrl` IS NOT COSMETIC. On Safari it carries the handshake
       // that lets the session cookie survive ITP, and the decorated result may
-      // be an absolute URL on another origin — which Next's router cannot route
+      // be an absolute URL on another origin - which Next's router cannot route
       // to, hence the branch.
       const url = decorateUrl(afterAuthUrl)
       if (url.startsWith("http")) {
-        // ⚠ `replace`, NOT `href` — see _lib/finish.ts. This page is a machine
+        // ⚠ `replace`, NOT `href` - see _lib/finish.ts. This page is a machine
         // step nobody should be able to go back to: restoring it re-runs a
         // hand-off whose one-time code has already been spent.
         leaveFor(url)
@@ -173,7 +173,7 @@ export function SsoCallback({
         }
 
         /*
-         * ⚠ NO ACCOUNT FOR THIS PROVIDER IDENTITY — STOP AND ASK. Clerk answers
+         * ⚠ NO ACCOUNT FOR THIS PROVIDER IDENTITY - STOP AND ASK. Clerk answers
          * `transferable` here, and the transfer that would create the account
          * is deliberately NOT performed. Signing in and signing up are the same
          * button by design, which is convenient right up until it silently
@@ -202,7 +202,7 @@ export function SsoCallback({
           }
 
           // ⚠ RE-READ FROM `clerk.client`: `create` replaces the resource, so
-          // the object the hook handed us is stale — the same trap that made
+          // the object the hook handed us is stale - the same trap that made
           // the SSO buttons silently do nothing.
           const transferred = clerk.client.signIn
           if (
@@ -257,8 +257,8 @@ export function SsoCallback({
     /*
      * ⚠ `failureCode` AND `leaveWithSession` ARE `useCallback`s SO THEY CAN BE
      * HONEST DEPENDENCIES. Written as plain functions they change identity on
-     * every render, which would either re-run this effect — a hand-off that
-     * must happen exactly once — or force a suppression comment to hide the
+     * every render, which would either re-run this effect - a hand-off that
+     * must happen exactly once - or force a suppression comment to hide the
      * fact. The `done` ref is still the real guard; this just keeps the
      * dependency list true.
      */
@@ -284,7 +284,7 @@ export function SsoCallback({
    * looked in the wrong place.
    *
    * ⚠ AND `createdSessionId` IS THE GATE RATHER THAN `status`, because it is
-   * also exactly what `finalize()` requires — it throws "Cannot finalize
+   * also exactly what `finalize()` requires - it throws "Cannot finalize
    * sign-up without a created session" without one. Gating on the same field
    * the call needs means the check and the call cannot disagree.
    */
@@ -312,7 +312,7 @@ export function SsoCallback({
         /*
          * ⚠ ONE MORE TRIP TO GOOGLE, BUT ONLY IF THE FIRST ONE CAME BACK WITHOUT
          * A REFRESH TOKEN. They arrived here from the SIGN-IN button, which
-         * deliberately does not ask for consent — so for anyone who had already
+         * deliberately does not ask for consent - so for anyone who had already
          * authorised i10, Google skipped the consent screen and issued no
          * refresh token, and Clerk flags the account as disconnected. Now that
          * they have said yes to an account, asking once is proportionate.
@@ -329,7 +329,7 @@ export function SsoCallback({
         )
 
         if (stale) {
-          // ⚠ BUILT FROM THE CURRENT URL so `redirect_url` survives verbatim —
+          // ⚠ BUILT FROM THE CURRENT URL so `redirect_url` survives verbatim -
           // rebuilding it by hand is how a destination gets quietly dropped.
           const back = new URL(window.location.href)
           back.searchParams.set("reconnected", "1")
@@ -367,7 +367,7 @@ export function SsoCallback({
        * ⚠ THE ONE PAGE, WHICH ASKS FOR AN ADDRESS FIRST. That is one more field
        * than the old sign-up page needed here, and it is the honest one: the
        * provider did not give us what the instance requires, so there is
-       * nothing to resume from — the address they type is looked up, found to
+       * nothing to resume from - the address they type is looked up, found to
        * have no account, and starts the sign-up with it already filled in.
        */
       router.replace("/sign-in")
@@ -383,7 +383,7 @@ export function SsoCallback({
    * ⚠ `reset()` MATTERS MORE THAN THE NAVIGATION. It clears the transferable
    * attempt off the Clerk client; leaving it there means the next thing they
    * try starts against a half-finished sign-in that has already been declined.
-   * It touches no API — it is local state only — so declining really does leave
+   * It touches no API - it is local state only - so declining really does leave
    * nothing behind.
    */
   async function decline() {
@@ -409,7 +409,7 @@ export function SsoCallback({
                 Create an i10 account?
               </h1>
               <p className="text-muted-foreground text-sm text-balance">
-                There is no i10 account for {named} yet. We have not created anything —
+                There is no i10 account for {named} yet. We have not created anything -
                 say the word and we will set one up and sign you in.
               </p>
             </div>

@@ -33,7 +33,7 @@ export default function PaymentFailed({
         {retryAt ? <Detail label="Next attempt" value={retryAt} /> : null}
       </Section>
       <Text style={styles.text}>
-        Update your payment details to avoid interruption — sending is paused once a
+        Update your payment details to avoid interruption - sending is paused once a
         plan lapses, and mailboxes stop accepting mail.
       </Text>
       {billingUrl ? (
@@ -46,7 +46,7 @@ export default function PaymentFailed({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

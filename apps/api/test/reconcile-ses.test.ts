@@ -48,7 +48,7 @@ const functionBody = (name: string) => {
 /**
  * ⚠ EVERY ONE OF THESE IS `SECURITY DEFINER`, WHICH IS THE POINT OF 0028 AND
  * ALSO ITS ONE DANGER. A definer routine runs as the owner with RLS bypassed,
- * so the checks below are not style — they are the boundary.
+ * so the checks below are not style - they are the boundary.
  */
 describe("the reconciler can ask at all", () => {
   for (const name of [
@@ -181,7 +181,7 @@ describe("we billed it, SES never confirmed", () => {
     expect(body).toContain("e.type = 'sent'")
   })
 
-  // Same grace, opposite direction — a message sent a minute ago has not had
+  // Same grace, opposite direction - a message sent a minute ago has not had
   // time to be confirmed.
   it("applies the event grace here too", () => {
     expect(body).toContain("m.sent_at <  now() - p_grace")
@@ -207,7 +207,7 @@ describe("events for messages we have never heard of", () => {
     expect(body).toContain("FROM core.messages m WHERE m.id = e.message_id")
   })
 
-  // ⚠ A row cannot be invented from an event — it carries no sender, no
+  // ⚠ A row cannot be invented from an event - it carries no sender, no
   // recipients and no api key, so anything written would be a fabricated
   // billing record.
   it("only reads", () => {
@@ -227,7 +227,7 @@ describe("events for messages we have never heard of", () => {
 
 describe("deciding whether to wake somebody", () => {
   // ⚠ Routine by design. The at-least-once window guarantees a trickle, and the
-  // repair is the system working — paging on it teaches everyone to ignore it.
+  // repair is the system working - paging on it teaches everyone to ignore it.
   it("stays quiet for repairs alone, however many", () => {
     expect(
       needsAttention(

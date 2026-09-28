@@ -6,7 +6,7 @@ import type { SubscriptionOps } from "./db.js"
  *
  * ⚠ AND THAT IS A STRUCTURAL PROPERTY, NOT A CONVENTION. Plans are attached
  * with `no_billing_changes: true`, which means it takes no money and cannot
- * know whether any was taken — it does what it is told. So the question "has
+ * know whether any was taken - it does what it is told. So the question "has
  * this customer actually paid" is answered here and nowhere else, and the
  * answer comes from exactly one source: a signature-verified Polar event, or
  * the reconciler re-reading Polar's own list.
@@ -15,8 +15,8 @@ import type { SubscriptionOps } from "./db.js"
  * knows only what the browser asked for.
  *
  * ⚠ AND THE POST-CHECKOUT STATUS ROUTE CALLS IT, WHICH IS NOT THE EXCEPTION IT
- * LOOKS LIKE. Polar's success redirect is a browser navigation — anybody can
- * type that URL — so ARRIVING there still proves nothing and grants nothing.
+ * LOOKS LIKE. Polar's success redirect is a browser navigation - anybody can
+ * type that URL - so ARRIVING there still proves nothing and grants nothing.
  * What that route may do is ask Polar, over our own access token, what
  * subscriptions the checkout's customer holds, and hand the resulting
  * `SubscriptionState` here. That is the same evidence from the same source as a
@@ -37,7 +37,7 @@ import type { SubscriptionOps } from "./db.js"
 
 /**
  * The two operations granting needs. `postgresEntitlements` satisfies it
- * structurally, as `AutumnClient` did before it — which is the point of stating
+ * structurally, as `AutumnClient` did before it - which is the point of stating
  * the slice rather than naming an implementation.
  */
 export interface Entitlements {
@@ -87,7 +87,7 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
        * ⚠ THE TENANT THAT ALREADY HOLDS THE SUBSCRIPTION ID WINS OVER THE ONE
        * POLAR NAMES, AND WITHOUT THIS EVERY EVENT FOR A RETURNING CUSTOMER IS A
        * 500 FOR EVER. `customer.external_id` is stamped once, when Polar
-       * CREATES a customer, and Polar deduplicates customers by EMAIL — so
+       * CREATES a customer, and Polar deduplicates customers by EMAIL - so
        * somebody who deletes their workspace and signs up again keeps a
        * customer naming the tenant they had LAST time. The post-checkout path
        * corrects that for the purchase itself, with `reassign`; nothing
@@ -100,11 +100,11 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
        * customer stayed on Pro after revoking. Observed in production
        * 2026-09-21.
        *
-       * ⚠ AND IT IS NOT A GUESS ABOUT WHO PAID — IT IS A REFUSAL TO MOVE
+       * ⚠ AND IT IS NOT A GUESS ABOUT WHO PAID - IT IS A REFUSAL TO MOVE
        * ANYTHING. The row stays exactly where the checkout put it; all this
        * decides is whose entitlement this event updates, and the only tenant
        * that can hold the id is the one that bought under it. The stronger
-       * claim — taking the id OFF a tenant — still requires `reassign`, still
+       * claim - taking the id OFF a tenant - still requires `reassign`, still
        * comes only from a succeeded checkout, and is untouched below.
        *
        * ⚠ SO IT IS DELIBERATELY SKIPPED WHEN `reassign` IS SET. That path is
@@ -122,7 +122,7 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
               heldBy: owner,
             },
             "Polar's customer names a different tenant than the one holding " +
-              "this subscription — applying to the holder, because external_id " +
+              "this subscription - applying to the holder, because external_id " +
               "is stamped once and never maintained",
           )
           state = { ...state, tenantId: owner }
@@ -155,7 +155,7 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
         // ⚠ ONLY WHEN THE PLAN IS THE ONE THAT SUBSCRIPTION BOUGHT, AND THE
         // DOWNGRADE IS WHY. `subscription_id` says "this attachment IS
         // that Polar subscription", so sending it alongside `free` claims the
-        // free plan is a subscription that has just ended — which is both untrue
+        // free plan is a subscription that has just ended - which is both untrue
         // and rejected: a replay answers 409 `duplicate_subscription_id`, because
         // the id is already bound to the paid attachment.
         //

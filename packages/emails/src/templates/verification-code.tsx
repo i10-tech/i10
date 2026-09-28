@@ -1,7 +1,7 @@
 import { Text } from "@react-email/components"
 import { Code, Layout, Provenance, styles } from "../layout.js"
 
-/** Clerk's "Verification code" — sign-up, and any re-verification of an address. */
+/** Clerk's "Verification code" - sign-up, and any re-verification of an address. */
 export default function VerificationCode({
   code,
   requestedFrom,
@@ -27,7 +27,7 @@ export default function VerificationCode({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

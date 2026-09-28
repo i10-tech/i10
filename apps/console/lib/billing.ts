@@ -5,12 +5,12 @@ import type { BillingState } from "@/lib/types"
  * every control on a plan card is really asking.
  *
  * ⚠ "HAS A SUBSCRIPTION ROW" IS NOT THE SAME QUESTION, AND READING IT AS ONE
- * BROKE UPGRADING. `core.subscriptions` keeps the row through a cancellation —
- * it is the history — so `billing.subscription !== null` stays true for
+ * BROKE UPGRADING. `core.subscriptions` keeps the row through a cancellation -
+ * it is the history - so `billing.subscription !== null` stays true for
  * somebody whose subscription ended. Every card then took the amend path:
  * "Upgrade" called `changePlan`, the API refused because there is nothing at
  * Polar left to change, and the console reported "Start a checkout to
- * subscribe before changing plan" — instructions, offered as an error, for
+ * subscribe before changing plan" - instructions, offered as an error, for
  * the thing the button was supposed to have done.
  *
  * ⚠ IT MIRRORS `LIVE` IN THE API'S plan-change.ts, DELIBERATELY AND NOT BY
@@ -33,9 +33,9 @@ export function hasLiveSubscription(billing: BillingState): boolean {
 /**
  * Whether the workspace is on a PAID plan right now.
  *
- * ⚠ RANK, NOT THE PLAN ID. `free` is rank 0 by construction — see migration
+ * ⚠ RANK, NOT THE PLAN ID. `free` is rank 0 by construction - see migration
  * 0025, which added the column so an upgrade could be told from a downgrade
- * without parsing ids — and hard-coding the string here would be a second
+ * without parsing ids - and hard-coding the string here would be a second
  * definition of "free" that a renamed plan would silently break.
  *
  * ⚠ AND IT NEEDS THE SUBSCRIPTION TO BE LIVE, not merely present. A workspace

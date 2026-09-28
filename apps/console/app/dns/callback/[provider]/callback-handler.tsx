@@ -16,13 +16,13 @@ import { ARRIVAL, setArrival } from "@/lib/arrival"
  * ⚠ CONNECTING USED TO BE ONE OF THREE THINGS SOMEBODY HAD TO DO, AND THE OTHER
  * TWO LOOKED OPTIONAL. You authorised the provider, came back to "Connected",
  * and then had to find the domain, press "Publish these for me", and press
- * "Verify" — three deliberate actions for one intention, with nothing on screen
+ * "Verify" - three deliberate actions for one intention, with nothing on screen
  * saying the first had not finished anything. Authorising IS the instruction:
  * publish the records and check them, then say what happened.
  *
  * ⚠ THE GUARD IS NOT DEFENSIVE PROGRAMMING; AN AUTHORISATION CODE IS SINGLE
  * USE. React runs effects twice in development's strict mode and a router
- * refresh can re-render this, and the second exchange fails — with the provider
+ * refresh can re-render this, and the second exchange fails - with the provider
  * reporting an invalid code, which reads as "the connection is broken" on a
  * connection that was in fact created a moment earlier by the first call. The
  * ref is checked and set synchronously so two renders cannot both pass it.
@@ -52,8 +52,8 @@ export function CallbackHandler({
   const [published, setPublished] = React.useState(0)
   /**
    * ⚠ RECORDS SOMEBODY ELSE'S RECORDS ARE IN THE WAY, AND STOPS. Publishing a
-   * delegation shadows anything already at those names — a DMARC record is the
-   * usual one — and removing it is never ours to decide unprompted. The API
+   * delegation shadows anything already at those names - a DMARC record is the
+   * usual one - and removing it is never ours to decide unprompted. The API
    * answers 409 without writing, and this reports it rather than retrying with
    * `replace_conflicts`, which would be deciding by hand what the dialog on the
    * domain page exists to ask.
@@ -64,8 +64,8 @@ export function CallbackHandler({
    *
    * ⚠ IT IS A SEPARATE LIST BECAUSE IT USED TO BE SILENTLY FOLDED INTO
    * SUCCESS. A verify that answered 500 still counted as published, so this
-   * screen said "we proved the domains are yours" — two claims, one measured
-   * and one invented — and the person had no reason to look any further. The
+   * screen said "we proved the domains are yours" - two claims, one measured
+   * and one invented - and the person had no reason to look any further. The
    * failing call stayed invisible until they pressed Verify by hand.
    */
   const [unchecked, setUnchecked] = React.useState<string[]>([])
@@ -83,7 +83,7 @@ export function CallbackHandler({
          * ⚠ THE PROVIDER'S OWN WORDS, WHERE THE API SENT THEM. Every token
          * exchange that fails reads "X did not complete the authorisation",
          * which is true of an expired code, a rejected secret, a PKCE mismatch
-         * and a bot-protection page alike — four failures with four different
+         * and a bot-protection page alike - four failures with four different
          * next steps and one sentence between them. `detail` is the provider's
          * `error_description`, and the person reading it is the administrator
          * who authorised the account a moment ago.
@@ -98,8 +98,8 @@ export function CallbackHandler({
 
       /*
        * ⚠ EVERY UNVERIFIED DOMAIN, NOT THE ONE THEY CAME FROM. The flow does
-       * not carry a domain — somebody can reach this from onboarding, from the
-       * add form or from a domain page — and a credential for a provider is a
+       * not carry a domain - somebody can reach this from onboarding, from the
+       * add form or from a domain page - and a credential for a provider is a
        * credential for every zone in that account. Publishing for all of them
        * is what the customer asked for by connecting; a domain hosted
        * elsewhere answers `zone_not_found` and is skipped without comment.
@@ -135,7 +135,7 @@ export function CallbackHandler({
 
         wrote += 1
         wroteIds.push(domain.id)
-        // ⚠ PUBLISHED AND CHECKED ARE COUNTED SEPARATELY — see `unchecked`.
+        // ⚠ PUBLISHED AND CHECKED ARE COUNTED SEPARATELY - see `unchecked`.
         if (outcome.kind === "published" && !outcome.checked) {
           notChecked.push(domain.name)
         }
@@ -160,12 +160,12 @@ export function CallbackHandler({
        * ⚠ THE SUCCESS SCREEN IS SKIPPED ENTIRELY WHEN THERE IS SOMEWHERE TO GO
        * BACK TO, AND SHOWING IT FIRST WAS THE BLIP. This used to set `done`,
        * paint "Connected and published" with its green tick, and THEN navigate
-       * — so the reward for connecting was a confirmation that appeared for a
+       * - so the reward for connecting was a confirmation that appeared for a
        * few hundred milliseconds and was snatched away, which reads as the
        * screen glitching rather than as the step completing.
        *
        * ⚠ THE CONFIRMATION IS NOT LOST, IT IS MOVED. `published` rides back in
-       * a cookie and the step it lands on says it there — one screen, arrived at
+       * a cookie and the step it lands on says it there - one screen, arrived at
        * once, already carrying the news. See `StepVerify`.
        */
       const returnTo = connected.data.return_to
@@ -177,7 +177,7 @@ export function CallbackHandler({
          * ⚠ THE DOMAIN IDS, NOT A COUNT, BECAUSE A COOKIE BELONGS TO THE
          * BROWSER AND NOT TO WHOEVER IS SIGNED IN. A bare "2" was announced as
          * "Your records were added" to any account that reached onboarding in
-         * this browser within ten minutes — the checkout-id bug again, where a
+         * this browser within ten minutes - the checkout-id bug again, where a
          * second account was told about the first one's purchase. The page now
          * counts only the ids that appear in its own workspace's domain list,
          * which the API has already scoped, so somebody else's publish counts
@@ -225,14 +225,14 @@ export function CallbackHandler({
               ) : unchecked.length > 0 ? (
                 <>
                   We added the records at {provider}, but the check that follows them
-                  did not answer for {unchecked.join(", ")}. The records are in place —
+                  did not answer for {unchecked.join(", ")}. The records are in place -
                   open the domain and press Verify, and tell us if that keeps failing.
                 </>
               ) : published > 0 ? (
                 <>
                   We added the records at {provider} and proved the domains are yours.
                   Amazon&rsquo;s own check is the last step and usually lands within a
-                  few minutes — the domain pages update themselves.
+                  few minutes - the domain pages update themselves.
                 </>
               ) : (
                 <>

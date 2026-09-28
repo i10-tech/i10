@@ -7,13 +7,13 @@
   /* Break a long unbroken token (URL, hash, no-space string) so it wraps within
      the content column instead of leaking past the page width. Inherited, so it
      covers headings, paragraphs, list items, and inline code; `pre` code blocks
-     are unaffected (their `white-space: pre` doesn't wrap — they scroll instead,
+     are unaffected (their `white-space: pre` doesn't wrap - they scroll instead,
      via `pre.astro-code { overflow-x: auto }`), and wide tables keep their own
      `.nb-table-scroll` handling. */
   overflow-wrap: break-word;
 }
 
-/* Vertical rhythm — every direct child gets spacing by default.
+/* Vertical rhythm - every direct child gets spacing by default.
    Components can override with their own margin utilities (my-4, mt-6, etc.)
    because :where() keeps specificity at (0,1,0) and utilities come later. */
 .docs-content > :where(:not(:first-child)) {
@@ -55,7 +55,7 @@
   margin: 1.5rem 0;
 }
 
-/* Component boundary — elements with a class attribute are component-owned.
+/* Component boundary - elements with a class attribute are component-owned.
    Markdown never adds classes to h1–h6 or p; components always do. */
 .docs-content :where(h1, h2, h3, h4, h5, h6, p):where([class]) {
   margin: 0;
@@ -92,7 +92,7 @@
   scroll-margin-top: 5rem;
 }
 
-/* Typographic wrapping — balance multi-line headings (no orphan words),
+/* Typographic wrapping - balance multi-line headings (no orphan words),
    pretty-wrap body copy (no single-word last lines). Progressive
    enhancement; unsupported browsers ignore both. */
 .docs-content :where(h1:not([class]), h2:not([class]), h3:not([class]), h4:not([class])) {
@@ -145,7 +145,7 @@
   font-family: var(--nb-font-mono);
 }
 
-/* Shiki-rendered code blocks — wider vertical margin than base rhythm
+/* Shiki-rendered code blocks - wider vertical margin than base rhythm
    (1.25rem) because code blocks are visually dense. Inline code-token
    styling (background, border, padding) is reset because Shiki spans
    already carry their own colors via inline styles. */
@@ -207,7 +207,7 @@
   border-bottom: none;
 }
 
-/* Round the outer corner cells to match the table's border-radius —
+/* Round the outer corner cells to match the table's border-radius -
    `border-collapse: separate` leaves square cell backgrounds (the muted
    thead fill in particular) that would otherwise poke past the rounded
    table border. */
@@ -243,7 +243,7 @@
    render with raw browser defaults. Same component boundary as the rest
    of the file: `:not([class])` leaves component-owned markup alone. */
 
-/* Keycaps. The thicker bottom border stands in for a pressed edge —
+/* Keycaps. The thicker bottom border stands in for a pressed edge -
    border darkening, not a drop shadow. */
 .docs-content :where(kbd:not([class])) {
   display: inline-block;
@@ -260,7 +260,7 @@
   vertical-align: 0.0625rem;
 }
 
-/* Inline highlight — harmonized with ::selection instead of the
+/* Inline highlight - harmonized with ::selection instead of the
    browser's fluorescent yellow. `box-decoration-break` keeps the tint
    coherent when the highlight wraps across lines. */
 .docs-content :where(mark:not([class])) {
@@ -273,7 +273,7 @@
 }
 
 /* Native disclosure. Scope guard: FileTree builds classless <details>
-   internally (`.file-tree :global(details)`), so exclude its subtree —
+   internally (`.file-tree :global(details)`), so exclude its subtree -
    without this the rows below would grow double carets and borders. */
 .docs-content :where(details:not([class]):not(.file-tree *)) {
   border: 1px solid var(--nb-border);
@@ -296,7 +296,7 @@
   display: none;
 }
 
-/* Trailing chevron — label left, indicator right, matching Collapsible. */
+/* Trailing chevron - label left, indicator right, matching Collapsible. */
 .docs-content :where(details:not([class]):not(.file-tree *) > summary)::after {
   content: "";
   flex-shrink: 0;
@@ -316,7 +316,7 @@
   margin-bottom: 0.5rem;
 }
 
-/* Definition lists — term/description pairs. */
+/* Definition lists - term/description pairs. */
 .docs-content :where(dt:not([class])) {
   font-weight: 600;
 }

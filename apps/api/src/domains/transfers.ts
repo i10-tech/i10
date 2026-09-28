@@ -10,13 +10,13 @@ import { SENDING_DOMAINS, type Capacity, type Logger } from "./store.js"
  * ⚠ AN OFFER MOVES NOTHING. The domain keeps sending from the workspace that
  * made it until the recipient accepts, and the sender can withdraw it until
  * then. Accepting is the only thing that moves a domain between workspaces
- * without anybody proving it in DNS — so it is the one step that requires the
+ * without anybody proving it in DNS - so it is the one step that requires the
  * recipient to be signed in with the address the offer names, verified.
  *
  * ⚠ ROW LEVEL SECURITY ON EVERY STATEMENT, AND NO DEFINER FUNCTION. The sender
  * reads and writes offers as its own tenant. The recipient reads them through
  * the second policy on `core.domain_transfers`, which admits only rows
- * addressed to one of `app.recipient_emails` — set here, per transaction, from
+ * addressed to one of `app.recipient_emails` - set here, per transaction, from
  * Clerk's verified addresses and never from the request. The move itself is
  * done as the sender to delete and as the receiver to insert, so neither half
  * can touch a row outside its own tenant.
@@ -25,7 +25,7 @@ import { SENDING_DOMAINS, type Capacity, type Logger } from "./store.js"
 /** How long an offer stays open. Long enough to sign up; short enough to forget. */
 const OFFER_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
-/** A plausible address — no comma, which would split the policy's list. */
+/** A plausible address - no comma, which would split the policy's list. */
 const EMAIL = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/
 
 export const normaliseEmail = (raw: string): string | null => {
@@ -55,7 +55,7 @@ export type OfferOutcome =
  * ⚠ KEYS NEVER MOVE WITH A DOMAIN. They are the sender's, saved in the
  * sender's systems; handing one to the recipient would give a stranger a
  * credential somebody else holds. So a key limited to only this domain is
- * revoked — it could send from nothing — and a key limited to this domain and
+ * revoked - it could send from nothing - and a key limited to this domain and
  * others simply loses this one. Unrestricted keys are untouched.
  */
 export interface KeyChanges {
@@ -84,7 +84,7 @@ export interface DomainTransfers {
   /** Open offers addressed to any of `emails`. `tenantId` is the caller's own. */
   incoming(tenantId: string, emails: string[]): Promise<TransferOffer[]>
   /**
-   * One open offer, with the sending workspace's tenant id — the caller needs
+   * One open offer, with the sending workspace's tenant id - the caller needs
    * it to leave that workspace out of the choice of destination, and it never
    * reaches a response.
    */
@@ -94,7 +94,7 @@ export interface DomainTransfers {
     id: string,
   ): Promise<(TransferOffer & { fromTenantId: string }) | null>
   accept(input: {
-    /** The caller's session tenant — only to satisfy the sender policy's setting. */
+    /** The caller's session tenant - only to satisfy the sender policy's setting. */
     tenantId: string
     emails: string[]
     id: string
@@ -229,7 +229,7 @@ async function moveDomain(
  *
  * ⚠ AS THE SENDER, IN THE ACCEPTING TRANSACTION. The keys are the sender's
  * rows, so row level security needs their tenant; and if anything after this
- * fails, the domain and the keys roll back together — a key must never be left
+ * fails, the domain and the keys roll back together - a key must never be left
  * scoped to a domain that did not actually leave, nor live for one that did.
  *
  * ⚠ THE MATCH IS ONE BOUND STRING AGAINST THE ARRAY, NOT AN ARRAY PARAMETER.
@@ -308,7 +308,7 @@ export function domainTransferStore({
           }
         }
 
-        // ⚠ A NEW OFFER REPLACES THE OLD ONE — including an expired one, which
+        // ⚠ A NEW OFFER REPLACES THE OLD ONE - including an expired one, which
         // still holds the open-offer index because expiry is not in it.
         await tx
           .update(domainTransfers)
@@ -390,7 +390,7 @@ export function domainTransferStore({
         await asRecipient(tx, mine)
         /*
          * ⚠ THE ADDRESS IS FILTERED HERE TOO, NOT LEFT TO THE POLICY ALONE.
-         * The sender policy also matches — a workspace offering a domain to its
+         * The sender policy also matches - a workspace offering a domain to its
          * own member would otherwise see that offer listed as incoming.
          */
         const rows = await tx
@@ -485,7 +485,7 @@ export function domainTransferStore({
 
           const keys = await releaseKeys(tx, offer.tenantId, offer.domainName, now())
 
-          // ⚠ ANSWERED UNDER THE RECIPIENT POLICY — `app.recipient_emails` is
+          // ⚠ ANSWERED UNDER THE RECIPIENT POLICY - `app.recipient_emails` is
           // still set in this transaction.
           await tx
             .update(domainTransfers)

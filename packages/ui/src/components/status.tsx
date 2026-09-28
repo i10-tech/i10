@@ -6,8 +6,8 @@ import { cn } from "cn"
  * A state, drawn.
  *
  * ⚠ THIS COMPONENT KNOWS NOTHING ABOUT WHAT THE STATES ARE, AND THAT IS THE
- * LAYER. `bounced`, `temporary_failure` and `past_due` are i10's vocabulary —
- * three of them are on the API's public contract and one is Polar's — and a
+ * LAYER. `bounced`, `temporary_failure` and `past_due` are i10's vocabulary -
+ * three of them are on the API's public contract and one is Polar's - and a
  * design-system package that held the table mapping them to colours would be a
  * package every product change has to be pushed through. What lives here is the
  * drawing: five tones, a dot, a pill, and the rule that the word is always in
@@ -15,8 +15,8 @@ import { cn } from "cn"
  * `apps/console/lib/status.ts`.
  *
  * ⚠ AND THE WORD IS THE ACCESSIBLE HALF, NOT THE DOT. Roughly one man in twelve
- * cannot separate the green from the red — which is exactly the distinction this
- * component exists to draw — and a screen reader gets nothing at all from a
+ * cannot separate the green from the red - which is exactly the distinction this
+ * component exists to draw - and a screen reader gets nothing at all from a
  * coloured circle. So `label` is REQUIRED. Shape and position are constant;
  * colour is a third signal on top, never the only one.
  *
@@ -31,7 +31,7 @@ export type Tone = "neutral" | "info" | "success" | "warning" | "danger"
 
 const dotVariants = cva(
   // A state change (pending → verified) fades rather than snapping; colour
-  // only, so linear — see the motion table in styles/tokens.css.
+  // only, so linear - see the motion table in styles/tokens.css.
   "inline-block size-1.5 shrink-0 rounded-full transition-colors duration-(--duration-dismiss) ease-(--ease-linear)",
   {
     variants: {
@@ -134,7 +134,7 @@ export function Status({
 }: Omit<React.ComponentProps<"span">, "children" | "label"> &
   VariantProps<typeof statusVariants> & {
     /**
-     * The word. Required, and never empty — see the note at the top of this
+     * The word. Required, and never empty - see the note at the top of this
      * file. A caller with no room for it passes a visually hidden node.
      */
     label: React.ReactNode

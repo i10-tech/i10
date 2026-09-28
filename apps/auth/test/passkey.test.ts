@@ -5,8 +5,8 @@ import { passkeyFailure, passkeyReference } from "../app/_lib/passkey"
  * What a passkey prompt is allowed to say when it does not end in a passkey.
  *
  * ⚠ THE FIXTURES ARE REAL ERRORS, NOT INVENTED ONES. Every `message` below was
- * either produced by `ClerkError.formatMessage` — which is why the codes appear
- * inside the text — or reported from a live sign-in. The double-coded one in
+ * either produced by `ClerkError.formatMessage` - which is why the codes appear
+ * inside the text - or reported from a live sign-in. The double-coded one in
  * particular is copied verbatim out of a bug report, and it is the case that a
  * hand-written `error.code` check gets wrong.
  *
@@ -31,7 +31,7 @@ describe("somebody who said no", () => {
   /*
    * ⚠ THE ONE THE OLD CODE GOT WRONG. clerk-js re-wraps the cancellation in a
    * generic `passkey_retrieval_failed`, so `code` says "failed" and only the
-   * copied message still says "cancelled" — reading the code alone reports a
+   * copied message still says "cancelled" - reading the code alone reports a
    * failure to somebody who pressed Cancel.
    */
   it("says nothing when the cancellation arrives inside a generic wrapper", () => {
@@ -52,7 +52,7 @@ describe("somebody who said no", () => {
     expect(passkeyFailure(error, "add")).toBeNull()
   })
 
-  // ⚠ THE UNWRAPPED PATH STILL EXISTS — a navigation mid-prompt aborts before
+  // ⚠ THE UNWRAPPED PATH STILL EXISTS - a navigation mid-prompt aborts before
   // Clerk sees it, and what arrives is the browser's own exception.
   it("says nothing about a raw NotAllowedError", () => {
     const error = Object.assign(new Error("The operation was not allowed"), {
@@ -177,7 +177,7 @@ describe("the reference somebody can quote back", () => {
  * challenge request without a nonce, and it is a BARE `Error`: no `code`, no
  * `errors[]`, no `(code="…")` fragment. That is what let it fall through every
  * reader in the file and come out as the generic sentence with a blank
- * reference — the exact pair of symptoms in the report, no system sheet and no
+ * reference - the exact pair of symptoms in the report, no system sheet and no
  * code to quote.
  */
 const missingPublicKey = () =>
@@ -188,7 +188,7 @@ const missingPublicKey = () =>
 
 describe("a challenge our side never produced", () => {
   // ⚠ THE DEVICE IS NOT MENTIONED, AND THAT IS THE WHOLE FIX. No sheet was ever
-  // opened, so there is nothing about the device to report — the old sentence
+  // opened, so there is nothing about the device to report - the old sentence
   // sent somebody to go and check hardware that was never asked to do anything.
   it("owns the failure instead of blaming the device", () => {
     const reason = passkeyFailure(missingPublicKey(), "add")
@@ -202,7 +202,7 @@ describe("a challenge our side never produced", () => {
   })
 
   // ⚠ THE SIGN-IN HALF ARRIVES CODED, and has to reach the same sentence by the
-  // other road — `REASONS` rather than the message match.
+  // other road - `REASONS` rather than the message match.
   it("reaches it by the code when clerk-js supplies one", () => {
     const error = clerkError(
       "missing_public_key_options",
@@ -247,8 +247,8 @@ describe("an error carrying no code at all", () => {
  *
  * ⚠ THE FIXTURE IS A REAL PRODUCTION ERROR, read out of a live console. Adding
  * a passkey is a protected operation on an instance with reverification on, so
- * FAPI answers with a 403 whose `code` is the ENVELOPE — `ClerkAPIResponseError`
- * stamps `api_response_error` on everything it wraps — and whose meaning sits
+ * FAPI answers with a 403 whose `code` is the ENVELOPE - `ClerkAPIResponseError`
+ * stamps `api_response_error` on everything it wraps - and whose meaning sits
  * one level down in `errors[]`. `PasskeyStep` wraps the call in Clerk's
  * `useReverification` so this is normally swallowed and replayed; these are the
  * assertions for the occasion it is not.
@@ -293,7 +293,7 @@ describe("a step-up policy that reached the toast", () => {
  *
  * ⚠ `OperationError` IS THE ONE FROM THE REPORT. clerk-js maps four DOM
  * exceptions and lets the rest through untouched, so this arrives as the raw
- * browser exception with no code anywhere — and it was only identified because
+ * browser exception with no code anywhere - and it was only identified because
  * the reference line now falls back to the exception name. Its signature is
  * that NO system prompt appears: a passkey provider that claims the request
  * answers it before the operating system draws anything.

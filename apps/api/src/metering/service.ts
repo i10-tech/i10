@@ -23,7 +23,7 @@ import type { UsageBucket } from "../send/reconcile.js"
  *
  * ⚠ AND THE ANSWER NO LONGER CROSSES A NETWORK. Autumn's `check` was an HTTP
  * call inside the accept path with a two-second budget, and its outage was our
- * outage — softened only by failing open. This is a single indexed read on a
+ * outage - softened only by failing open. This is a single indexed read on a
  * connection the request already holds. `resilient()` still wraps it, because
  * the database can be unreachable too and the policy has not changed.
  */
@@ -46,7 +46,7 @@ export interface MeteringOptions {
  * The meter itself, for callers that ask about a feature other than sending.
  *
  * ⚠ ONE INSTANCE PER PROCESS, NOT ONE PER QUESTION. `Metering` below is the
- * send path's narrow view of it — quota and usage for one feature id — and the
+ * send path's narrow view of it - quota and usage for one feature id - and the
  * domains API needs the general form to ask about `domains.sending`. Building a
  * second meter would give the two halves separate adapters and, eventually,
  * separate opinions about the same tenant's plan.
@@ -56,7 +56,7 @@ export function postgresMeter(db: Database): Meter {
     assignments: planAssignmentStore(db),
     usage: meterEventStore(db),
     // ⚠ IT ONLY KNOWS THE FEATURES IT CAN ACTUALLY COUNT, and throws by name
-    // for the rest. `storage.gb` is deliberately absent — see levels.ts and
+    // for the rest. `storage.gb` is deliberately absent - see levels.ts and
     // docs/decisions/metering.md for why it is not readable yet.
     levels: postgresLevels(db),
   })
@@ -84,7 +84,7 @@ export function postgresMetering({
       // ⚠ `overage` IS A SEND, NOT A REFUSAL, AND THE SPLIT IS NOT COMPUTED HERE.
       // The customer opted in to being billed past their plan, so the answer at
       // the gate is simply yes. Which units were included and which are billable
-      // is decided when the send is RECORDED — at that point the message ids
+      // is decided when the send is RECORDED - at that point the message ids
       // exist, and it is those ids that reach Polar's meter. Deciding it here
       // would attribute units for mail that may never go.
       if (outcome.status === "overage") return { status: "allowed" }
@@ -99,7 +99,7 @@ export function postgresMetering({
 
       // ⚠ `unentitled` BECOMES `unavailable`, NOT `exceeded`, AND THIS IS THE
       // SINGLE MOST IMPORTANT LINE IN THE FILE. A tenant with no plan, or a
-      // plan that grants nothing for this feature, is OUR misconfiguration —
+      // plan that grants nothing for this feature, is OUR misconfiguration -
       // a signup that never assigned free, a feature id renamed under a running
       // catalogue. Reporting it as "you have used your allowance" tells a
       // customer who has sent nothing to go and upgrade, and the mistake is
@@ -109,7 +109,7 @@ export function postgresMetering({
       // is what the tenant/customer leg of the reconciler exists to confirm.
       log?.error(
         { tenantId, featureId, reason: outcome.reason },
-        "tenant has no entitlement — sending unmetered",
+        "tenant has no entitlement - sending unmetered",
       )
       return { status: "unavailable", message: "Could not check the sending quota." }
     },
@@ -125,7 +125,7 @@ export function postgresMetering({
         events: sent.map((m) => ({ id: m.id, at: m.sentAt, value: 1 })),
       })
 
-      // Not an error — the send path is at-least-once by design and the
+      // Not an error - the send path is at-least-once by design and the
       // reconciler replays ids on purpose. A rate that is not near zero means
       // something upstream is retrying much harder than it should be, and this
       // is the only place that would show it.
@@ -142,7 +142,7 @@ export function postgresMetering({
 /**
  * Putting a tenant on a plan.
  *
- * ⚠ SHAPED TO SATISFY BOTH `Entitlements` INTERFACES WITHOUT KNOWING EITHER —
+ * ⚠ SHAPED TO SATISFY BOTH `Entitlements` INTERFACES WITHOUT KNOWING EITHER -
  * `billing/grants.ts` wants `ensureCustomer` and `grantPlan`, `tenants/provision.ts`
  * wants `ensureCustomer` alone. Both are structural, both are deliberately
  * narrow, and that narrowness is the mechanism rather than the style: a caller
@@ -181,14 +181,14 @@ export function postgresEntitlements({
     /**
      * ⚠ THE `anchor` IS ONLY USED IF NO ROW EXISTS. For every tenant that has
      * ever been provisioned it is already set, and the upsert underneath
-     * deliberately leaves it alone — a plan change swaps the allowance without
+     * deliberately leaves it alone - a plan change swaps the allowance without
      * moving a single boundary.
      *
      * ⚠ `subscriptionId` IS ACCEPTED AND IGNORED, ON PURPOSE. It was Autumn's
      * idempotency and correlation key; ours is `tenant_id`, which is the
      * primary key of the row being written, so a redelivered event targets the
      * same row by construction. Keeping it in the signature is what lets
-     * `subscriptionGrants` stay untouched — including the downgrade case that
+     * `subscriptionGrants` stay untouched - including the downgrade case that
      * had to omit it, which no longer has anything to omit.
      */
     async grantPlan({
@@ -211,7 +211,7 @@ export function postgresEntitlements({
  * TWO INDEPENDENT NUMBERS. `core.messages` is what we sent; `core.meter_events`
  * is what we counted. Deriving the second from the first would make the
  * reconciler compare a number against itself and quietly turn the backstop into
- * a tautology — which is the whole reason the ledger is its own table.
+ * a tautology - which is the whole reason the ledger is its own table.
  */
 export function postgresLedger({ db, featureId }: { db: Database; featureId: string }) {
   const usage = meterEventStore(db)
@@ -237,8 +237,8 @@ export function postgresLedger({ db, featureId }: { db: Database; featureId: str
      * The top-up, one message at a time.
      *
      * ⚠ IDEMPOTENT ON THE MESSAGE ID, WHICH IS WHY THE DEFICIT IS CLOSED BY ID
-     * AND NEVER BY COUNT. Submitting the same message again — two passes
-     * racing, one retried after a timeout — inserts nothing the second time.
+     * AND NEVER BY COUNT. Submitting the same message again - two passes
+     * racing, one retried after a timeout - inserts nothing the second time.
      * Submitting "seventeen more" is not safe in the same way: two runs add
      * thirty-four.
      */

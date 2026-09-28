@@ -4,15 +4,15 @@
  * Taking ownership of the one WebAuthn request the browser lets us have.
  *
  * ⚠ A DOCUMENT MAY HAVE EXACTLY ONE WEBAUTHN REQUEST IN FLIGHT, AND THE SIGN-IN
- * PAGE ARMS ONE BEFORE ANYBODY TOUCHES ANYTHING. Conditional mediation — the
- * passkey offered inside the email field's own autofill menu — is a
+ * PAGE ARMS ONE BEFORE ANYBODY TOUCHES ANYTHING. Conditional mediation - the
+ * passkey offered inside the email field's own autofill menu - is a
  * `navigator.credentials.get()` that stays PENDING for as long as the page
  * lives, because it is waiting for a choice that may never come. That is not a
  * bug; it is what conditional mediation is.
  *
  * ⚠ AND SINCE SIGN-IN BECAME THE ONLY DOOR, THE SIGN-UP HAPPENS ON THAT SAME
- * DOCUMENT. An unknown address swaps `SignInForm` for `SignUpForm` in place —
- * no navigation, by design, so the card can animate — which means the autofill
+ * DOCUMENT. An unknown address swaps `SignInForm` for `SignUpForm` in place -
+ * no navigation, by design, so the card can animate - which means the autofill
  * request armed at mount is STILL PENDING four steps later when the passkey
  * step calls `navigator.credentials.create()`. Chromium answers that with
  *
@@ -25,7 +25,7 @@
  *
  * ⚠ THE ABORT HANDLE IS CLERK'S AND IT DOES NOT SHARE IT. clerk-js passes its
  * own `AbortController` into every `navigator.credentials` call and keeps it in
- * a module-private singleton — not on the `Clerk` object, not on `window`, and
+ * a module-private singleton - not on the `Clerk` object, not on `window`, and
  * never fully aborted from anywhere we can reach. A second copy of the same
  * class imported from `@clerk/shared` is a DIFFERENT instance and aborts
  * nothing, because clerk-js is a separate script with its own bundle.
@@ -33,7 +33,7 @@
  * ⚠ SO WE SUPPLY THE GETTER INSTEAD OF BORROWING THE CONTROLLER. `signIn`
  * resolves `clerk.__internal_getPublicCredentials` AT CALL TIME and falls back
  * to its own implementation, so assigning ours routes every conditional request
- * through a controller this module holds — and can abort. It is an `__internal_`
+ * through a controller this module holds - and can abort. It is an `__internal_`
  * name and therefore a Clerk upgrade may move it, the same bet already taken in
  * app/layout.tsx; `installed` below fails soft, so a rename costs the fix rather
  * than the page.
@@ -45,7 +45,7 @@ let pending: AbortController | null = null
 /**
  * ⚠ THERE IS NO `installed` FLAG, AND THE FIRST VERSION OF THIS FILE HAD ONE.
  * It latched on the first CALL rather than on the first SUCCESS, and the first
- * call happens before clerk-js has attached `window.Clerk` — so it installed on
+ * call happens before clerk-js has attached `window.Clerk` - so it installed on
  * nothing, marked itself done, and the override never appeared. Identity
  * against the singleton's own property is the honest question: it answers "is
  * OUR getter the one that will run", which a boolean set elsewhere cannot.
@@ -54,7 +54,7 @@ let pending: AbortController | null = null
 /**
  * ⚠ THE NAMES CLERK MAPS, MAPPED IDENTICALLY, BECAUSE THE CODE IS THE MESSAGE.
  * The caller rewraps whatever we return as a generic `passkey_retrieval_failed`
- * and keeps only `.message` — so a cancellation that does not carry its own
+ * and keeps only `.message` - so a cancellation that does not carry its own
  * code in its TEXT becomes a failure, and somebody who pressed Cancel is told
  * their passkey did not work. `_lib/passkey.ts` reads `(code="…")` out of the
  * message for exactly this reason; this is the other end of that contract.
@@ -138,7 +138,7 @@ async function getPublicCredentials({
  * ⚠ `window.Clerk`, NOT THE OBJECT `useClerk()` HANDS BACK. `@clerk/nextjs`
  * returns an *isomorphic* wrapper that queues calls until clerk-js has loaded;
  * a property assigned to it lands on the WRAPPER, while `SignIn.passkey()`
- * reads `BaseResource.clerk.__internal_getPublicCredentials` — the real
+ * reads `BaseResource.clerk.__internal_getPublicCredentials` - the real
  * singleton. Writing to the wrapper is silently ignored, and that is not a
  * hypothetical: the first version of this did it and the override never
  * appeared in the page.
@@ -160,13 +160,13 @@ export function installAbortableWebAuthn(): boolean {
  * Let go of the pending passkey read, so something else may use the browser.
  *
  * ⚠ SAFE TO CALL WHEN NOTHING IS PENDING, and it is deliberately called that
- * way — the passkey step cannot know whether the person reached it through the
+ * way - the passkey step cannot know whether the person reached it through the
  * sign-in form or landed on it directly from a provider round trip, and asking
  * would be a second source of truth about a thing this module already knows.
  *
  * ⚠ ABORTING IS NOT A FAILURE ANYBODY SEES. The conditional request resolves
  * into `_lib/passkey.ts` as `passkey_operation_aborted`, which is in `CANCELLED`
- * — and the sign-in form's own handler discards errors silently regardless,
+ * - and the sign-in form's own handler discards errors silently regardless,
  * because nobody asked for autofill in the first place.
  */
 export function abortPendingWebAuthn(): void {

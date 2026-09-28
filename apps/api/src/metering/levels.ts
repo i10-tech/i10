@@ -32,8 +32,8 @@ export const MAILBOXES = "mailboxes"
  * Disk occupied by a tenant's mailboxes, in BYTES.
  *
  * ⚠ BYTES, AND THE ALLOWANCE IS IN BYTES TOO. Rounding to gigabytes forces a
- * choice between a ceiling — where one byte past ten gigabytes reads as eleven
- * and refuses — and a floor, which hands out up to a gigabyte free. Neither is
+ * choice between a ceiling - where one byte past ten gigabytes reads as eleven
+ * and refuses - and a floor, which hands out up to a gigabyte free. Neither is
  * defensible on a cap, and with both sides exact there is nothing to round.
  */
 export const STORAGE = "storage.bytes"
@@ -41,7 +41,7 @@ export const STORAGE = "storage.bytes"
 /**
  * ⚠ TWO STATEMENTS RATHER THAN ONE WITH THE COLUMN SUBSTITUTED IN. The column
  * comes from a closed set and never from a request, so interpolating it would
- * be safe today — and it would put an identifier into SQL text built at
+ * be safe today - and it would put an identifier into SQL text built at
  * runtime, which is a pattern that stops being safe the first time somebody
  * adds a feature id that comes from a plan row. Two statements cost four lines
  * and remove the question.
@@ -70,18 +70,18 @@ export const mailboxDomainsStatement = (tenantId: string): SQL => sql`
  *
  * ⚠ `authd.accounts.tenant_id` IS SET FROM THE DOMAIN, AND NOTHING WROTE IT
  * UNTIL 0016. A mailbox on acme.com belongs to whoever proved they control
- * acme.com — not to the holder's Clerk organisation, which they may have
+ * acme.com - not to the holder's Clerk organisation, which they may have
  * several of or none. Before that migration this count returned zero for every
  * tenant, which is why the feature was left out of this store rather than
  * shipped as a limit that never fires.
  *
  * ⚠ AND IT COUNTS EVERY ROW, INCLUDING INACTIVE ONES. `active` is the
- * subscription gate — a suspended mailbox still exists, still holds its
+ * subscription gate - a suspended mailbox still exists, still holds its
  * storage, and its address is still reserved. Counting only active ones would
  * let a tenant hold any number of seats by having them switched off, and would
  * make a suspended account free.
  *
- * ⚠ THE `authd` SCHEMA HAS NO ROW LEVEL SECURITY — no migration ever enabled
+ * ⚠ THE `authd` SCHEMA HAS NO ROW LEVEL SECURITY - no migration ever enabled
  * it, unlike every table in `core`. The WHERE clause below is therefore the
  * whole of the isolation rather than defence in depth, and it must never be
  * dropped in favour of trusting the transaction's tenant context.
@@ -94,13 +94,13 @@ export const mailboxesStatement = (tenantId: string): SQL => sql`
 
 /**
  * ⚠ THE LAST SAMPLE, NOT A LIVE READ. Storage lives in Stalwart and is sampled
- * on a schedule — see src/mail/storage.ts. Asking the mail server on the
+ * on a schedule - see src/mail/storage.ts. Asking the mail server on the
  * request path would put its availability inside ours for an accuracy nobody
  * can use: the figure moves continuously and a plan limit does not need it to
  * the byte-second.
  *
  * ⚠ AND A TENANT WITH NO SAMPLE READS AS ZERO, WHICH IS CORRECT HERE AND ONLY
- * HERE. No row means no mailbox has ever been sampled for them — they hold no
+ * HERE. No row means no mailbox has ever been sampled for them - they hold no
  * storage. That is the one case where the absent-row answer is the true one,
  * unlike an unknown FEATURE, which throws.
  */
@@ -123,7 +123,7 @@ export function postgresLevels(db: Database): LevelStore {
       // ⚠ THROWS FOR A FEATURE IT DOES NOT KNOW, AND RETURNING 0 WOULD BE THE
       // WORST POSSIBLE DEFAULT. Zero held means the whole allowance is
       // available, so a plan granting `mailboxes` against a store that cannot
-      // count them would hand every tenant an unlimited number — silently, and
+      // count them would hand every tenant an unlimited number - silently, and
       // in the customer's favour, which is the direction nobody reports.
       const statement = SOURCES[key.featureId]
       if (statement === undefined) {
@@ -142,7 +142,7 @@ export function postgresLevels(db: Database): LevelStore {
       }
 
       // `core.domains` is under row level security, so the tenant context is
-      // required there. `authd.accounts` is NOT — see `mailboxesStatement` —
+      // required there. `authd.accounts` is NOT - see `mailboxesStatement` -
       // so for that one the WHERE clause is the whole boundary. The wrapper is
       // uniform because a reader should not have to know which is which to see
       // that both are scoped.

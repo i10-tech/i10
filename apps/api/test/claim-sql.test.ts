@@ -13,7 +13,7 @@ import {
  *
  * Every property below is one whose regression sends a customer's email twice
  * or not at all, and none of them are visible in a test that only checks return
- * values — they live in the statement text.
+ * values - they live in the statement text.
  */
 const dialect = new PgDialect()
 
@@ -41,7 +41,7 @@ describe("the claim", () => {
     // ⚠ THIS USED TO ASSERT THE STATEMENT CONTAINED NO `select` AT ALL, WHICH
     // STOPPED BEING THE RIGHT TEST WHEN THE ROUTING INPUTS ARRIVED. The claim
     // now reads the domain's override and the tenant's plan as correlated
-    // subqueries inside `returning` — still one statement, still one round
+    // subqueries inside `returning` - still one statement, still one round
     // trip, still atomic. What must never appear is a SEPARATE statement: a
     // select-then-update is the race two workers lose together.
     expect(statement).not.toContain(";")
@@ -55,7 +55,7 @@ describe("the claim", () => {
   })
 
   // ⚠ Without this a worker that dies mid-send strands its rows in `sending`
-  // forever — no error, no retry, the mail simply never arrives.
+  // forever - no error, no retry, the mail simply never arrives.
   it("reclaims a stale `sending` row as well as a queued one", () => {
     const { sql: statement } = claim()
     expect(statement).toContain("m.status = 'queued'")

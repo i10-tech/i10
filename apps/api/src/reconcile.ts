@@ -3,7 +3,7 @@
  *
  * ⚠ A CronJob RATHER THAN AN INTERVAL INSIDE THE WORKER, and the reason is that
  * it must run EXACTLY once per pass. The worker Deployment scales on queue
- * depth, so an interval inside it would run once per replica — three replicas
+ * depth, so an interval inside it would run once per replica - three replicas
  * would issue three sets of repairs against the same rows, and every one of
  * them would write the same ledger. Kubernetes already owns "run this once, on a
  * schedule", with `concurrencyPolicy: Forbid` to say what happens when a run
@@ -18,7 +18,7 @@
  * ⚠ AND THE CHECK-IN IS WHAT NOTICES A RUN THAT NEVER HAPPENED. Everything
  * else here reports a run that went wrong. A suspended CronJob, an edited
  * schedule, or a node too full to place the pod produces no pod, no log line
- * and no exit code — Sentry knows the schedule, so an absence is the one
+ * and no exit code - Sentry knows the schedule, so an absence is the one
  * failure it can see that nothing in this file can.
  *
  * ⚠ FOUR LEGS, IN THIS ORDER, AND THE ORDER IS LOAD-BEARING:
@@ -30,19 +30,19 @@
  *
  * The first repairs INTO `core.messages` and the second reads it, so a message
  * SES sent that we recorded late is an ordinary `sent` row by the time the
- * second leg counts — rather than waiting a whole cycle to be billed.
+ * second leg counts - rather than waiting a whole cycle to be billed.
  *
  * The third is deliberately AFTER the second and not folded into it: the usage
  * reconciler cannot see a tenant the meter has never heard of, because both
  * sides read zero for it and agree. That is the whole reason it is a separate
  * question, and it compares the entire tenant list rather than only tenants
- * that sent something — a tenant that has not sent yet is exactly the one worth
+ * that sent something - a tenant that has not sent yet is exactly the one worth
  * finding before it does.
  *
  * ⚠ THE FIRST TWO WERE WRITTEN, TESTED AND NEVER CALLED. `send/reconcile.ts`
  * and `send/reconcile-ses.ts` were imported by their own tests and by nothing
- * else, so every promise made elsewhere about a reconciler closing a gap — the
- * swallowed `recordSent` in handle-batch.ts most of all — was a promise about a
+ * else, so every promise made elsewhere about a reconciler closing a gap - the
+ * swallowed `recordSent` in handle-batch.ts most of all - was a promise about a
  * job that did not run. `send/reconcile-run.ts` binds them; this calls it.
  *
  * ⚠ AND A LEG THAT FAILS DOES NOT STOP THE ONES AFTER IT. They repair three
@@ -85,7 +85,7 @@ await withMonitor(
     slug: "i10-billing-reconcile",
     // ⚠ THIS MUST BE THE SCHEDULE IN infra/k8s/i10/workloads/billing-reconcile.yaml.
     // Sentry decides a run is missing by comparing the clock to this string, so
-    // a manifest edited without editing here does not break the job — it makes
+    // a manifest edited without editing here does not break the job - it makes
     // the alert wrong, in whichever direction is least useful.
     schedule: "*/30 * * * *",
     // A run that has not checked in five minutes after its slot is missing, not
@@ -103,12 +103,12 @@ await withMonitor(
       // ⚠ NOT AN ERROR, AND IT STILL CHECKS IN. A deployment with no billing
       // configured has nothing to reconcile, and failing here would put a red
       // CronJob on a cluster that is behaving exactly as configured. Returning
-      // rather than exiting is what lets the check-in report `ok` — an early
+      // rather than exiting is what lets the check-in report `ok` - an early
       // `process.exit` would look to Sentry exactly like a run that never
       // happened, and alert every half hour on a correct deployment.
       log.warn(
         { polar: Boolean(env.POLAR_ACCESS_TOKEN) },
-        "billing is not fully configured — nothing to reconcile",
+        "billing is not fully configured - nothing to reconcile",
       )
       return
     }
@@ -134,13 +134,13 @@ await withMonitor(
 
     // ⚠ THE LEDGER, NOT A BILLING CLIENT. It exposes the aggregate, the
     // idempotent top-up and the customer list, and nothing that could grant a
-    // plan — see `UsageLedger` and `CustomerDirectory` in send/reconcile.ts.
+    // plan - see `UsageLedger` and `CustomerDirectory` in send/reconcile.ts.
     // The timeout that used to live here is gone with the HTTP call it bounded.
     const entitlements = postgresLedger({ db, featureId: env.METERING_FEATURE_ID })
 
     // ⚠ A WINDOW, NOT "EVERYTHING SINCE THE LAST RUN". Both legs are idempotent
     // and both skip anything inside `EVENT_GRACE`, so overlapping windows cost
-    // a repeated read and nothing else — while a high-water mark would need
+    // a repeated read and nothing else - while a high-water mark would need
     // storing, would be wrong after a restore, and would silently skip whatever
     // it was wrong about.
     const to = new Date()
@@ -161,7 +161,7 @@ await withMonitor(
       // ⚠ `unbilled` ALONE IS ROUTINE AND MUST NOT PAGE. The at-least-once
       // design guarantees a trickle of them and the repair is the system
       // working; alerting on it would train everyone to ignore this job. The
-      // other two are not routine — see `needsAttention`.
+      // other two are not routine - see `needsAttention`.
       if (needsAttention(ses)) {
         process.exitCode = 1
         captureError(
@@ -209,14 +209,14 @@ await withMonitor(
       }
 
       // ⚠ THE SAME WINDOW, A DIFFERENT QUESTION. The leg above asks whether we
-      // billed for everything we sent — one price, both routes, no route
+      // billed for everything we sent - one price, both routes, no route
       // predicate anywhere in it. This asks which MTA carried it, which is what
       // decides how much SES we are buying and how much of our own IP
       // reputation we are spending. `sent_route` has been written on every row
       // since 0033 and read by nothing until now.
       //
       // ⚠ INSIDE THE USAGE LEG'S `try`, SO ITS OWN FAILURE CANNOT REACH THE
-      // OTHER LEGS — and it deliberately does NOT set `process.exitCode`. A
+      // OTHER LEGS - and it deliberately does NOT set `process.exitCode`. A
       // readout that could fail a job which repairs entitlements would be the
       // tail wagging the dog.
       try {
@@ -249,7 +249,7 @@ await withMonitor(
     // ⚠ IT RUNS HERE RATHER THAN ON ITS OWN SCHEDULE BECAUSE IT IS THE SAME KIND
     // OF WORK: a number that lives somewhere else, pulled on a cadence, with
     // nobody waiting on it. Thirty minutes is far finer than a storage limit
-    // needs — the figure moves in megabytes over hours.
+    // needs - the figure moves in megabytes over hours.
     if (env.STALWART_URL && env.STALWART_API_TOKEN) {
       try {
         const report = await sampleStorage({
@@ -273,7 +273,7 @@ await withMonitor(
     } else {
       log.warn(
         { stalwart: Boolean(env.STALWART_URL) },
-        "storage not sampled — STALWART_URL or STALWART_API_TOKEN is unset",
+        "storage not sampled - STALWART_URL or STALWART_API_TOKEN is unset",
       )
     }
 
@@ -334,12 +334,12 @@ await withMonitor(
       )
 
       // ⚠ A PAYING TENANT MISSING FROM POLAR IS ALWAYS WORTH WAKING SOMEBODY
-      // FOR, however few. It is not a number drifting — it is a customer we
+      // FOR, however few. It is not a number drifting - it is a customer we
       // believe is paying whom the payment rail has never heard of, so every
       // usage event for them fails silently and no invoice will ever be raised.
       //
       // ⚠ AND IT COUNTS ONLY PAYING TENANTS NOW. Free tenants legitimately have
-      // no Polar customer — one is created lazily by the checkout — so
+      // no Polar customer - one is created lazily by the checkout - so
       // including them made this fire on healthy state from the first signup
       // onwards. See `payingTenantsStatement`.
       if (tenants.missing.length > 0) {
@@ -408,7 +408,7 @@ await withMonitor(
         process.exitCode = 1
         // ⚠ REPORTED AS AN EXCEPTION AS WELL AS A FAILED CHECK-IN, because the
         // check-in carries a verdict and nothing else. This is the line that
-        // says WHICH tenants and why — the thing that turned two hours of
+        // says WHICH tenants and why - the thing that turned two hours of
         // reading pod logs into a thirty-second diagnosis.
         captureError(
           new Error(
@@ -432,7 +432,7 @@ await withMonitor(
       /*
        * ⚠ ITS OWN ALERT, AND ITS OWN PROBLEM, FOR THE SAME REASON `stranded`
        * HAS ONE. Until this existed these landed in `failed`, where they were
-       * indistinguishable from a transient repair that the next run would fix —
+       * indistinguishable from a transient repair that the next run would fix -
        * except that no run would ever fix them, so the job failed every thirty
        * minutes and carried the whole Argo Application to Degraded with it.
        *
@@ -451,7 +451,7 @@ await withMonitor(
         captureError(
           new Error(
             `${report.unknownTenant.length} Polar subscription(s) name a tenant id ` +
-              "this database does not hold — usually a re-signup whose Polar customer " +
+              "this database does not hold - usually a re-signup whose Polar customer " +
               "kept its old external_id. DO NOT revoke without checking: the customer " +
               "is probably live on a new workspace.",
           ),
@@ -462,14 +462,14 @@ await withMonitor(
       /*
        * ⚠ NO LONGER A FAILURE, BECAUSE IT IS NO LONGER UNRESOLVED. These used
        * to be reported and skipped, on the reasoning that only the checkout
-       * knows who paid — but the holder IS what the checkout decided, and
+       * knows who paid - but the holder IS what the checkout decided, and
        * `external_id` is immutable, so "wait for a human to fix the customer in
        * Polar" was waiting for something Polar does not permit. The run now
        * reconciles against the holder and this is the record of having done so.
        *
        * ⚠ IT STAYS IN THE REPORT, AND IT STAYS LOGGED. A customer whose Polar
        * record permanently names a dead workspace is worth being able to count
-       * — it is the signal that somebody re-signed up, and the population it
+       * - it is the signal that somebody re-signed up, and the population it
        * describes is the one every future billing change has to keep working
        * for.
        */

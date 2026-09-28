@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 /**
- * Human mailboxes — the IMAP/SMTP side of i10, not the sending API.
+ * Human mailboxes - the IMAP/SMTP side of i10, not the sending API.
  *
  * ⚠ THIS ONE IS OURS, NOT RESEND'S. Every other contract in this package is
  * shaped so `resend/node` → `@i10/node` is a one-line change; Resend has no
@@ -21,7 +21,7 @@ import { z } from "zod"
  *
  * ⚠ VALIDATED HERE ONLY AS FAR AS "COULD BE ONE". Whether the domain is one we
  * host, whether it is verified, and whether the address is taken are all
- * questions for the provisioning core — they need the database, and a zod
+ * questions for the provisioning core - they need the database, and a zod
  * schema that pretended to answer them would be a second, weaker copy of the
  * rules that actually matter.
  */

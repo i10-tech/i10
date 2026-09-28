@@ -24,7 +24,7 @@ export const metadata: Metadata = { title: "Usage" }
  * sending is being refused.
  *
  * ⚠ AND `unentitled` IS RENDERED AS ITSELF, NEVER AS "0 of 0". It means the
- * plan grants nothing for that feature — which is almost always OUR
+ * plan grants nothing for that feature - which is almost always OUR
  * misconfiguration. Showing a full meter would tell a customer who has sent
  * nothing to go and upgrade, and they would, which makes our bug invisible to
  * us.
@@ -60,7 +60,7 @@ export default async function UsagePage() {
                 <div key={feature.feature_id} className="space-y-1">
                   <div className="flex items-baseline justify-between">
                     <span className="text-sm font-medium">{feature.label}</span>
-                    <span className="text-sm text-muted-foreground">—</span>
+                    <span className="text-sm text-muted-foreground">-</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     We could not read this right now. Your sending is unaffected.
@@ -80,7 +80,7 @@ export default async function UsagePage() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Your plan grants no allowance for this. If that looks wrong, it
-                    probably is — tell us.
+                    probably is - tell us.
                   </p>
                 </div>
               )

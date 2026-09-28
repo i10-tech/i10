@@ -5,11 +5,11 @@
 -- records that make its delegation work have to succeed or fail together, and
 -- Postgres cannot span two databases in one transaction. A domain row whose
 -- zone never landed is a customer whose delegated DNS silently answers nothing
--- — with a dashboard that says the domain was created.
+-- - with a dashboard that says the domain was created.
 --
 -- ⚠ THE TRADE IS THAT A POWERDNS UPGRADE MAY WANT COLUMNS WE DID NOT WRITE.
 -- Their schema is stable and versioned and they publish the ALTERs, so this is
--- a migration to write rather than a surprise — unlike Stalwart, which
+-- a migration to write rather than a surprise - unlike Stalwart, which
 -- migrates itself on start and is pre-1.0. If that ever stops being true, this
 -- moves to its own database and the API grows a second connection.
 --
@@ -118,21 +118,21 @@ CREATE UNIQUE INDEX "pdns_namealgoindex" ON "pdns"."tsigkeys"(name, algorithm);
 
 -- ⚠ THE `pdns` ROLE IS NOT CREATED HERE, AND IT USED TO BE. `CREATE ROLE`
 -- requires CREATEROLE, which the migration connects as `i10` and does not have
--- — only `postgres` is a superuser on this cluster. So this migration failed on
+-- - only `postgres` is a superuser on this cluster. So this migration failed on
 -- its first real run and took 0024 through 0028 down with it, because the
 -- PreSync hook blocks the whole sync.
 --
 -- ⚠ AND THE FIX IS NOT TO GRANT `i10` CREATEROLE. Roles are CNPG's job on this
 -- cluster and are declared in `platform-db/cluster.yaml` under `managed.roles`,
--- each with its password from Doppler — `stalwart`, `authd`, `autumn` and
+-- each with its password from Doppler - `stalwart`, `authd`, `autumn` and
 -- `i10_api` all arrived that way. A migration inventing a login role beside
 -- them would be a second writer for the same thing, and CNPG reconciles: what
 -- it does not know about, it does not manage.
 --
 -- ⚠ SO THE NAMESERVER'S GRANTS ARRIVE WITH THE NAMESERVER, DEFERRED RATHER
 -- THAN SKIPPED. PowerDNS is not deployed; it has no Doppler config, no password
--- secret and no manifest. The tables below have one consumer today — the API,
--- which writes zones through `i10_api` — and granting to a role nobody
+-- secret and no manifest. The tables below have one consumer today - the API,
+-- which writes zones through `i10_api` - and granting to a role nobody
 -- authenticates as would buy nothing. When PowerDNS ships, it brings its
 -- managed role, its secret and a migration carrying these five grants:
 --
@@ -150,8 +150,8 @@ CREATE UNIQUE INDEX "pdns_namealgoindex" ON "pdns"."tsigkeys"(name, algorithm);
 --
 -- ⚠ THE ISOLATION ARGUMENT IS UNCHANGED AND IS WHY THE SCHEMA IS SEPARATE AT
 -- ALL. `pdns` will have no grant on `core` or `authd`, so a compromised
--- nameserver — the one process here answering unauthenticated queries from the
--- whole internet — cannot read a mailbox, a message or an API key.
+-- nameserver - the one process here answering unauthenticated queries from the
+-- whole internet - cannot read a mailbox, a message or an API key.
 
 GRANT USAGE ON SCHEMA "pdns" TO i10_api;--> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "pdns" TO i10_api;--> statement-breakpoint

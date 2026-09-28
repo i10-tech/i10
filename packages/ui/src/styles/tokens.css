@@ -2,7 +2,7 @@
  * ⚠ THE LAYER ORDER IS DECLARED BEFORE THE IMPORT, AND `clerk` HAS TO SIT
  * BEFORE `utilities`. CSS ranks an UNLAYERED rule above every layered one, so
  * Clerk's runtime-injected stylesheet otherwise outranks every Tailwind utility
- * we hand it through `appearance.elements` — and whether an override took
+ * we hand it through `appearance.elements` - and whether an override took
  * effect came down to selector specificity, which is why some of them worked
  * and some silently did not. Naming the layer (see `CLERK_CSS_LAYER` in
  * ../clerk.ts) and ordering it here makes our overrides win by construction.
@@ -13,7 +13,7 @@
  * of what is wanted and looks identical until an override fails.
  *
  * ⚠ THE BUILD DOES NOT EMIT THIS LINE VERBATIM, AND THAT IS FINE. Tailwind
- * rewrites it — the compiled stylesheet carries `@layer clerk,components;` and
+ * rewrites it - the compiled stylesheet carries `@layer clerk,components;` and
  * then `theme`, `base` and `utilities` as blocks after it. What matters is the
  * resulting order, and that was checked rather than assumed: `.bg-muted` is
  * emitted inside `@layer utilities`, which resolves after `clerk`. So a
@@ -26,8 +26,8 @@
 
 /*
  * ⚠ AFTER TAILWIND, SO THE `@font-face` RULES LAND UNLAYERED AND OUTRANK
- * NOTHING. A font-face declaration is not a style rule — it registers a family
- * name — so layer position is irrelevant to it, but the import ORDER is not:
+ * NOTHING. A font-face declaration is not a style rule - it registers a family
+ * name - so layer position is irrelevant to it, but the import ORDER is not:
  * `@import` must precede any rule that is not another `@import`, and putting it
  * above `@import "tailwindcss"` would put a second stylesheet ahead of
  * Tailwind's own preflight.
@@ -40,7 +40,7 @@
  * Tailwind v4 scans the project that imports it. A workspace package reached
  * through a pnpm symlink is NOT part of that project, so without this line
  * every component in `packages/ui` renders with the right markup, the right
- * class names, and no rules ever generated for them — unstyled, in every app,
+ * class names, and no rules ever generated for them - unstyled, in every app,
  * with nothing in any build log to say so. It did not matter while this package
  * held only tokens and `cn()`; it started mattering the moment the first
  * component landed in src/components.
@@ -52,7 +52,7 @@
 /*
  * i10 design tokens.
  *
- * The system is shadcn/ui following Uber Base's principles — the same standard
+ * The system is shadcn/ui following Uber Base's principles - the same standard
  * PSL holds itself to, and for the same reason: the interface is a first-order
  * product claim here, not polish applied at the end. i10's whole competitive
  * case is that it feels better to use than Resend, Clerk, Attio, Twenty and
@@ -61,7 +61,7 @@
  * ⚠ ONE RULE STILL HOLDS, UNCHANGED:
  *
  *   THERE IS NO BRAND ACCENT. `--brand` is deliberately unset. Do not pick one
- *   — focus and emphasis use the neutral ring until the accent is chosen by a
+ *   - focus and emphasis use the neutral ring until the accent is chosen by a
  *   person. A colour invented here becomes a default that is hard to argue with
  *   later.
  *
@@ -70,19 +70,19 @@
  * from base.uber.com/6d2425e9f/p/116184-motion and its `77fcaf-timing` and
  * `312fab-transitions` children. The curves are the standard quintic and
  * quadratic beziers Base names; the durations are theirs verbatim. Anything
- * added here later needs the same provenance — an approximation from memory is
+ * added here later needs the same provenance - an approximation from memory is
  * the exact failure this standard exists to prevent.
  *
  * ⚠ THE TOKENS ARE DECLARED TWICE, ON PURPOSE, AND COLLAPSING THE TWO LAYERS
- * BREAKS SHADCN COMPONENTS SILENTLY. `:root` carries the BARE shadcn names —
- * `--popover`, `--border`, `--radius` — because generated components reference
+ * BREAKS SHADCN COMPONENTS SILENTLY. `:root` carries the BARE shadcn names -
+ * `--popover`, `--border`, `--radius` - because generated components reference
  * them directly in inline styles, not only through utilities. `@theme inline`
  * then maps each one to the `--color-*` name Tailwind builds utilities from.
  *
  * An earlier version of this file declared ONLY the `--color-*` half and
  * claimed shadcn output dropped in unmodified. It did not: `sonner.tsx` sets
  * `--border-radius: var(--radius)` and three colours the same way, every one of
- * which resolved to nothing — so the toast rendered with no background, no
+ * which resolved to nothing - so the toast rendered with no background, no
  * border and SQUARE CORNERS, with no error anywhere to say why.
  *
  * ⚠ AND IT IS `@theme inline`, NEVER PLAIN `@theme`. `inline` emits
@@ -96,7 +96,7 @@
  * THEM BREAKS EVERY COLOUR UTILITY SILENTLY. Tailwind resolves `@theme inline`
  * by looking up the `var()` it points at; a token declared inside a cascade
  * layer is invisible to that lookup, so `--color-muted-foreground` resolves to
- * nothing and `text-muted-foreground` is simply NEVER GENERATED — no error, no
+ * nothing and `text-muted-foreground` is simply NEVER GENERATED - no error, no
  * warning, just an unstyled class. Verified by building both ways and diffing
  * the emitted CSS.
  */
@@ -125,8 +125,8 @@
   /*
    * ⚠ FOCUS IS THE BORDER GOING FULL-CONTRAST, NOT A HALO DRAWN AROUND IT, AND
    * THIS TOKEN IS WHERE THAT DECISION LIVES. shadcn ships `--ring` as a mid
-   * grey and then paints it as a 3px translucent glow — `focus-visible:ring-[3px]
-   * ring-ring/50` — on every control it generates. Two things are wrong with
+   * grey and then paints it as a 3px translucent glow - `focus-visible:ring-[3px]
+   * ring-ring/50` - on every control it generates. Two things are wrong with
    * that here. It is a soft blurred shape on a surface whose entire depth model
    * is "borders and hairlines, never shadows" (see the dark-canvas note below),
    * so it reads as the one component with a drop shadow. And a 50%-opacity grey
@@ -135,7 +135,7 @@
    *
    * So `--ring` is now simply `--foreground`, and focus is expressed by moving
    * the 1px border from `--input` to `--ring`. Nothing new is painted, nothing
-   * changes size, and the contrast step is large — grey to near-black here,
+   * changes size, and the contrast step is large - grey to near-black here,
    * grey to white in dark mode.
    *
    * ⚠ IT IS DEFINED AS THE SAME VALUE RATHER THAN AS `var(--foreground)`,
@@ -145,15 +145,15 @@
    * ⚠ AND IT IS STILL CALLED `--ring`. Twenty-odd generated components
    * reference `border-ring` and `outline-ring` directly, and `shadcn add` will
    * write more. Renaming it would mean every future component arrives with a
-   * focus colour that resolves to nothing — silently, because an undefined
+   * focus colour that resolves to nothing - silently, because an undefined
    * custom property is not an error.
    */
   --ring: oklch(0.145 0 0);
 
   /*
    * ⚠ shadcn's OWN BASE CORNER, AND THE REST OF THE SCALE IS DERIVED FROM IT.
-   * Read raw by components that do not go through a utility — sonner sets
-   * `--border-radius: var(--radius)` — and by `--radius-sm/md/lg` below.
+   * Read raw by components that do not go through a utility - sonner sets
+   * `--border-radius: var(--radius)` - and by `--radius-sm/md/lg` below.
    * Changing this one number moves every corner in the system together, which
    * is the point of it being a single base rather than four literals.
    *
@@ -162,7 +162,7 @@
    * how this number reads on its own: from 14 the scale is 10 / 12 / 14 / 18,
    * which puts Button at 12 and Card at 18. Base publishes radius100–500 as
    * 2/4/8/12/16; 12 is Base's own button corner, and the card sits one step
-   * above its largest, which is the intent — this console is meant to read
+   * above its largest, which is the intent - this console is meant to read
    * softer than a stock shadcn build, not identical to one.
    */
   --radius: 0.875rem;
@@ -171,7 +171,7 @@
    * The pill, for controls whose height is fixed and known.
    *
    * ⚠ IT IS A SEPARATE TOKEN RATHER THAN A BIGGER `--radius`, BECAUSE A PILL IS
-   * NOT A CORNER — it is `height / 2`, and it only reads as intentional on a
+   * NOT A CORNER - it is `height / 2`, and it only reads as intentional on a
    * shape short enough for the two arcs to meet. Applied to a card it produces
    * a lozenge; applied to a `<textarea>` that grows, the corners swell as the
    * box does. So single-line inputs, buttons, badges and chips take this, and
@@ -189,8 +189,8 @@
    * THE BRIEF IS THE REASON: borders and extremely subtle shadows, never giant
    * ones. Tailwind's own `shadow-md` is `0 4px 6px -1px rgb(0 0 0 / 0.1)`, which
    * on a white page reads as a card lying on top of a photograph. These top out
-   * at 10% on the largest step and are built from TWO layers — a tight contact
-   * shadow and a wide ambient one — because a single blur reads as a sticker and
+   * at 10% on the largest step and are built from TWO layers - a tight contact
+   * shadow and a wide ambient one - because a single blur reads as a sticker and
    * two read as an object resting on a surface.
    *
    * ⚠ AND THEY REPLACE TAILWIND'S `--shadow-*` KEYS RATHER THAN ADDING NEW
@@ -208,7 +208,7 @@
    *
    * ⚠ REWRITTEN FROM WHAT `shadcn add sidebar` GENERATED, AND THE REASON IS THE
    * FIRST RULE AT THE TOP OF THIS FILE. The CLI seeds `--sidebar-ring` and the
-   * dark `--sidebar-primary` as hsl(217/224 …) — Tailwind's blue-500 and
+   * dark `--sidebar-primary` as hsl(217/224 …) - Tailwind's blue-500 and
    * blue-700. That is a brand accent, arriving by default, in the one component
    * that frames every screen in the console. Replaced with the neutral ramp the
    * rest of the sheet uses, so the sidebar is a slightly recessed plane rather
@@ -262,7 +262,7 @@
 
 /*
  * ⚠ THE DARK CANVAS IS TRUE BLACK, NOT NEAR-BLACK, AND THAT IS A DECISION
- * RATHER THAN A DEFAULT. shadcn ships `oklch(0.145 0 0)` — about #1a1a1a — which
+ * RATHER THAN A DEFAULT. shadcn ships `oklch(0.145 0 0)` - about #1a1a1a - which
  * reads as dark grey next to the surfaces this product is compared against.
  * Resend, Vercel and Linear all sit on #000, and the reason it works is the
  * second half of the decision: with a true-black ground, ELEVATION IS A 1px
@@ -270,14 +270,14 @@
  * on black is invisible; a grey canvas needs shadows to separate anything, and
  * then every card has a soft halo and the whole interface goes muddy.
  *
- * ⚠ THE LIFTED SURFACES ARE #0f0f0f (card) AND #121212 (popover) — the pair
+ * ⚠ THE LIFTED SURFACES ARE #0f0f0f (card) AND #121212 (popover) - the pair
  * Cloudflare's dashboard uses on its black. They were #060606 and #090909
  * before, which on most panels could not be told apart from the page, so the
  * hairline was doing all of the work alone.
  *
  * ⚠ AND EVERY FILL THAT LANDS ON THEM SITS ABOVE BOTH: muted #141414,
  * secondary #161616, accent (hover, active nav) #1b1b1b. `bg-muted` is used
- * inside cards and popovers all over the console — table heads, code, chips —
+ * inside cards and popovers all over the console - table heads, code, chips -
  * and at the card's own value it vanishes. Raise the card, raise these with it.
  *
  * ⚠ SO `--border` IS BRIGHTER HERE THAN SHADCN'S DEFAULT (12% rather than 10%)
@@ -303,7 +303,7 @@
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  /* The border going to white on focus — see the light value for why. */
+  /* The border going to white on focus - see the light value for why. */
   --ring: oklch(0.985 0 0);
 
   /*
@@ -312,11 +312,11 @@
    * page to cast onto; what actually reads as "this is raised" against black is
    * a one-pixel lighter line along the TOP edge, which is how a real surface
    * catches light from above. That is the same reasoning as the dark-mode note
-   * below — elevation here is a hairline, not a halo.
+   * below - elevation here is a hairline, not a halo.
    *
    * ⚠ THE AMBIENT SHADOW IS KEPT ANYWAY ON THE UPPER STEPS, AND IT IS NOT
    * WASTED. A popover or a dialog floats over CARDS, not over the page, and
-   * `--card` is `oklch(0.17)` — light enough for a heavy, tightly-negative
+   * `--card` is `oklch(0.17)` - light enough for a heavy, tightly-negative
    * spread to darken. It does nothing over the black canvas and everything over
    * a table, which is exactly where the two are used.
    */
@@ -327,7 +327,7 @@
   /*
    * ⚠ IN DARK MODE THE SIDEBAR IS THE SAME TRUE BLACK AS THE PAGE, AND ONLY THE
    * HAIRLINE SEPARATES THEM. With a #000 canvas there is nowhere darker to go,
-   * so the usual trick — recede the chrome — is unavailable, and lifting the
+   * so the usual trick - recede the chrome - is unavailable, and lifting the
    * sidebar instead would make the navigation read as floating ABOVE the
    * content it is subordinate to. One border, and the active item carries the
    * only fill.
@@ -347,7 +347,7 @@
   /*
    * ⚠ LIGHTER AND LESS SATURATED THAN THE LIGHT VALUES, NOT THE SAME HEX.
    * A colour that passes contrast on white fails on near-black, and the
-   * failure is worst for the two that matter most — a green and a red at
+   * failure is worst for the two that matter most - a green and a red at
    * L=0.55 on an L=0.145 canvas are both illegible. Each is lifted to ~0.72
    * and pulled in slightly, which is the dark-mode convention shadcn's own
    * palette follows.
@@ -367,7 +367,7 @@
 /*
  * ⚠ THIS IS WHAT MAKES `dark:` FOLLOW THE CLASS RATHER THAN THE OS. Tailwind
  * v4's built-in `dark:` variant keys off `prefers-color-scheme`, but the theme
- * here is chosen by next-themes putting `.dark` on <html> — so without this the
+ * here is chosen by next-themes putting `.dark` on <html> - so without this the
  * `dark:bg-input/30` in shadcn's own components would fire on a machine set to
  * dark even while the app is showing light, and never fire when someone picks
  * dark by hand.
@@ -418,8 +418,8 @@
   /*
    * ⚠ THE CHART SERIES ARE GREYS, AND THAT IS NOT AN OVERSIGHT. shadcn's chart
    * component expects `--chart-1..5` and its own default is five hues. Every
-   * chart in this console plots ONE quantity over time — sends per day,
-   * delivery rate, queue depth — where a second colour would imply a second
+   * chart in this console plots ONE quantity over time - sends per day,
+   * delivery rate, queue depth - where a second colour would imply a second
    * meaning. Where a chart genuinely splits by outcome it uses the state
    * tokens above, which already carry that meaning everywhere else.
    */
@@ -442,7 +442,7 @@
    * ⚠ THE ROOT TOKEN IS `--pill`, NOT `--radius-pill`, AND THE TWO NAMES MUST
    * STAY DIFFERENT. `@theme inline` resolves a key by inlining the `var()` it
    * points at, so `--radius-pill: var(--radius-pill)` is a variable defined as
-   * itself — which does not error, it simply resolves to nothing, and every
+   * itself - which does not error, it simply resolves to nothing, and every
    * `rounded-pill` in the product silently becomes a square corner. */
   --radius-pill: var(--pill);
 
@@ -480,7 +480,7 @@
   /*
    * ⚠ THE DISPLAY FACE FALLS BACK TO `--font-sans`'s OWN STACK, NOT TO
    * `sans-serif`. If the CDN file is missing the heading should render in Geist
-   * like everything around it, not in whatever the browser calls a sans — which
+   * like everything around it, not in whatever the browser calls a sans - which
    * on Windows is Arial and turns one line of a page into a different product.
    * See styles/fonts.css for why this face is allowed to be absent at all.
    */
@@ -490,7 +490,7 @@
 
   /*
    * The ramp: a major second (1.125) from a 14px base, with line height
-   * computed as size × 1.45 rounded to the nearest 4 — Base's sizing rule,
+   * computed as size × 1.45 rounded to the nearest 4 - Base's sizing rule,
    * from zeroheight.com/6d2425e9f/p/976582-typography.
    *
    * ⚠ THE BASE IS 14px, NOT 16. This is a dense data surface: tables, logs,
@@ -502,7 +502,7 @@
   --text-2xs--line-height: 1rem; /* 16 */
   --text-xs: 0.75rem; /* 12 */
   --text-xs--line-height: 1rem; /* 16 */
-  --text-sm: 0.875rem; /* 14 — base */
+  --text-sm: 0.875rem; /* 14 - base */
   --text-sm--line-height: 1.25rem; /* 20 */
   --text-base: 1rem; /* 16 */
   --text-base--line-height: 1.5rem; /* 24 */
@@ -518,7 +518,7 @@
   --text-4xl--line-height: 3rem; /* 48 */
 
   /*
-   * Motion — Uber Base's published timing, not an approximation.
+   * Motion - Uber Base's published timing, not an approximation.
    *
    * | curve                 | ms  | for                      |
    * | --------------------- | --- | ------------------------ |
@@ -533,7 +533,7 @@
    * motion nobody thought about.
    *
    * ⚠ AND 500ms IS FOR A SCREEN, NOT FOR A BUTTON. The long durations belong to
-   * view transitions — a drawer entering, a panel pushing. A hover state that
+   * view transitions - a drawer entering, a panel pushing. A hover state that
    * takes half a second is broken. Hover, focus and colour changes use
    * `--duration-instant` with `--ease-linear`, which is the fifth row.
    */
@@ -541,8 +541,8 @@
    * Springs, as `linear()` rather than as a JavaScript solver.
    *
    * ⚠ A CUBIC BEZIER CANNOT OVERSHOOT, WHICH IS THE ENTIRE POINT OF A SPRING.
-   * Its output is clamped to the 0–1 box, so "settles into place" — travel a
-   * little past the target, come back, stop — is not expressible as one. The
+   * Its output is clamped to the 0–1 box, so "settles into place" - travel a
+   * little past the target, come back, stop - is not expressible as one. The
    * `linear()` function takes an arbitrary sample list and CAN exceed 1, so a
    * real spring curve can be sampled into it once and then run on the
    * compositor, with no library, no rAF loop and no React state per frame.
@@ -550,7 +550,7 @@
    * ⚠ THESE ARE DELIBERATELY UNDER-DAMPED BY ONLY A FEW PERCENT. The brief was
    * micro-interactions somebody feels rather than notices; a spring that
    * overshoots by 20% is a toy. `--ease-spring` peaks about 2.5% past its
-   * target, which at a 12px travel is a third of a pixel of bounce — read as
+   * target, which at a 12px travel is a third of a pixel of bounce - read as
    * weight, not as animation.
    *
    * ⚠ AND THEY ARE FOR TRANSFORMS AND SIZES, NEVER FOR COLOUR OR OPACITY. An
@@ -642,7 +642,7 @@
   );
 
   /* ⚠ LONGER THAN THE BASE DURATIONS ON PURPOSE. A spring needs time for the
-   * settle to exist at all — run one in 100ms and only the overshoot lands,
+   * settle to exist at all - run one in 100ms and only the overshoot lands,
    * which reads as a glitch rather than as weight. */
   --duration-spring: 420ms;
 
@@ -653,20 +653,20 @@
   /*
    * ⚠ THE GENTLE EASE-OUT, AND IT EXISTS BECAUSE `--ease-quint-out` IS TOO
    * SHARP FOR ANYTHING THAT SHOULD BE WATCHED. A fifth-power ease-out is 48%
-   * travelled inside one frame and 97% by half the duration — which is exactly
+   * travelled inside one frame and 97% by half the duration - which is exactly
    * right for a control that must feel instant, and useless when the movement
    * itself is meant to be legible. Lengthening the duration does not help: it
    * adds time to a tail nobody can see, so the movement looks identical and
    * merely finishes later.
    *
    * A second-power ease-out has the property both of those lack: it still
-   * leaves at once — non-zero velocity at t=0, so there is no pause between the
-   * click and the response — while spending the whole duration arriving. Half
+   * leaves at once - non-zero velocity at t=0, so there is no pause between the
+   * click and the response - while spending the whole duration arriving. Half
    * the travel is done at half the time, where a fifth-power ease-out is 97%
    * done by then.
    *
    * ⚠ IT IS NOT A SUBSTITUTE FOR THE SPRINGS. Those start from REST, which is
-   * what makes them read as weight — and as elastic on a short travel. This has
+   * what makes them read as weight - and as elastic on a short travel. This has
    * no overshoot and no ramp-up; it is the plainest possible "moves off
    * immediately, slows into place".
    */
@@ -713,13 +713,13 @@
    * NOTHING IN THIS PRODUCT FELT CLICKABLE. Tailwind 3 left the browser default
    * in place; v4 normalises every `button` to the arrow cursor on the reasoning
    * that a pointer should mean "link". The result across a console built almost
-   * entirely from `<button>` is that no control — not Verify, not Upgrade, not a
-   * dropdown, not a tab — changes the cursor on hover, so the only way to learn
+   * entirely from `<button>` is that no control - not Verify, not Upgrade, not a
+   * dropdown, not a tab - changes the cursor on hover, so the only way to learn
    * what is interactive is to click and find out.
    *
    * ⚠ IT IS A BASE RULE RATHER THAN `cursor-pointer` ON EVERY COMPONENT, for two
    * reasons. Fifteen shadcn primitives would each need the class, and every one
-   * of them is a file `shadcn add` will overwrite — so the fix would quietly
+   * of them is a file `shadcn add` will overwrite - so the fix would quietly
    * come undone one component at a time. And the rule belongs to the whole
    * surface: a `role="button"` div or a `<summary>` is as clickable as a
    * `<button>` and had the same problem.
@@ -769,7 +769,7 @@
  * was removed again: the console's rail is hand-built (apps/console/components/
  * sidebar-nav.tsx) because the generated one carries a provider, a cookie, a
  * keyboard shortcut and a `Math.random()` skeleton that this product has no use
- * for — and the last of those is impure in a `useMemo`, which the React
+ * for - and the last of those is impure in a `useMemo`, which the React
  * Compiler rightly refuses.
  *
  * The TOKENS stayed because the rail still needs a name for "the surface the

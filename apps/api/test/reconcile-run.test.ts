@@ -60,8 +60,8 @@ describe("the SES leg", () => {
   })
 
   // ⚠ A REPAIR THAT WROTE NOTHING IS NOT A REPAIR. The row reached `sent`
-  // between the read and the write — a second pass, or the worker finishing
-  // late — and counting it would report work that did not happen.
+  // between the read and the write - a second pass, or the worker finishing
+  // late - and counting it would report work that did not happen.
   it("does not count a repair that hit no row", async () => {
     const { db } = fakeDb([
       [
@@ -122,8 +122,8 @@ describe("the SES leg", () => {
 /**
  * ⚠ IT IS A `UsageLedger`, WHICH IS ALL IT EVER NEEDED TO BE. This used to be
  * typed `AutumnClient` and cast, so the fake carried six methods
- * `reconcileUsage` never calls — `check`, `batchTrack`, `ensureCustomer` and
- * the rest — and the test read as though the reconciler depended on a vendor
+ * `reconcileUsage` never calls - `check`, `batchTrack`, `ensureCustomer` and
+ * the rest - and the test read as though the reconciler depended on a vendor
  * client. It depends on two methods.
  */
 function fakeLedger(over: Partial<UsageLedger> = {}): UsageLedger {
@@ -268,7 +268,7 @@ describe("the tenant/customer leg", () => {
   /**
    * ⚠ THE NARROWING ONLY WORKS IF THE PLAN ID REACHES THE QUERY. The exclusion
    * itself lives in `core.paying_tenants_snapshot`, so a fake database cannot
-   * demonstrate it — what this pins is the wiring: the caller's free plan id is
+   * demonstrate it - what this pins is the wiring: the caller's free plan id is
    * bound as a parameter rather than dropped, which is the half that can
    * regress here. Pass the wrong one and every free tenant is checked again,
    * which is the failure this whole change removes.

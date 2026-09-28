@@ -22,14 +22,14 @@ import { toastFailure } from "@/lib/toast"
  *
  * ⚠ IT EXISTS SO THAT ERROR HANDLING IS WRITTEN ONCE. Eight dialogs each doing
  * their own `try`, their own toast and their own refresh is eight chances for
- * one of them to close on a failure — which tells somebody the thing was
+ * one of them to close on a failure - which tells somebody the thing was
  * created when it was not, and the list they return to proves them wrong. Here
  * the rule is in one place: a failed submit keeps the dialog open and shows the
  * API's own message.
  *
  * ⚠ SUCCESS IS SAID IN THE DIALOG, NOT IN A TOAST. The submit button becomes a
  * tick with the past tense of its own label, the fields turn green, and the
- * dialog holds that for a beat before closing — over a list that has ALREADY
+ * dialog holds that for a beat before closing - over a list that has ALREADY
  * changed, because the action's response carries the re-rendered page (see
  * `run` in lib/actions.ts). It used to toast, close, and then ask the router
  * for the page again, so the new row arrived a moment after the dialog had gone
@@ -54,7 +54,7 @@ export function FormDialog<T>({
   submitLabel?: string
   /**
    * The word on the button once it worked. A dialog whose verb is not "create"
-   * says its own — "Added", "Saved".
+   * says its own - "Added", "Saved".
    */
   doneLabel?: string
   onSubmit: () => Promise<ActionResult<T>>
@@ -76,7 +76,7 @@ export function FormDialog<T>({
   const open = controlledOpen ?? uncontrolledOpen
   const setOpen = setControlledOpen ?? setUncontrolledOpen
 
-  // ⚠ ON OPEN, NOT ON CLOSE — the tick has to stay on the button while the
+  // ⚠ ON OPEN, NOT ON CLOSE - the tick has to stay on the button while the
   // dialog animates out. See `useResetOnOpen`.
   useResetOnOpen(open, outcome.reset)
 
@@ -92,8 +92,8 @@ export function FormDialog<T>({
         if (!result.ok) {
           /*
            * ⚠ A TOAST, AND THE DIALOG STAYS OPEN. This used to render inline,
-           * on the reasoning that the message often names a field — "a
-           * property with that key already exists" — and a toast puts it where
+           * on the reasoning that the message often names a field - "a
+           * property with that key already exists" - and a toast puts it where
            * the person is not looking. That trade was made the other way
            * deliberately: errors in this product are reported in ONE place so
            * that none of them can leak wording nobody reviewed, and a red panel
@@ -120,7 +120,7 @@ export function FormDialog<T>({
 
   return (
     // ⚠ LOCKED WHILE THE CALL IS IN FLIGHT ONLY. Once the tick shows, Escape
-    // is just an early close — the thing has been created either way.
+    // is just an early close - the thing has been created either way.
     <Dialog open={open} onOpenChange={outcome.state === "pending" ? () => {} : setOpen}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="sm:max-w-md">

@@ -1,5 +1,5 @@
 variable "cloudflare_account_id" {
-  description = "Cloudflare account id. An identifier, not a credential — it appears in every R2 S3 URL."
+  description = "Cloudflare account id. An identifier, not a credential - it appears in every R2 S3 URL."
   type        = string
 }
 

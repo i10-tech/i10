@@ -27,7 +27,7 @@ describe("resolving an entitlement", () => {
 
   /**
    * ⚠ `undefined`, NOT AN ALLOWANCE OF ZERO. A feature the plan says nothing
-   * about is a misconfiguration — a renamed id, a half-written custom plan — and
+   * about is a misconfiguration - a renamed id, a half-written custom plan - and
    * collapsing it into "exhausted" tells a customer who has sent nothing that
    * they are over quota. Autumn's own config file carries this warning.
    */

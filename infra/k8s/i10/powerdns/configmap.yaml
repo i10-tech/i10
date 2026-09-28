@@ -8,7 +8,7 @@
 #     gsqlite3-database=/var/lib/powerdns/pdns.sqlite3
 #
 # Overriding `launch` on the command line means the sqlite backend is never
-# loaded — and the two settings below it are then settings for a backend that
+# loaded - and the two settings below it are then settings for a backend that
 # does not exist, which PowerDNS treats as fatal:
 #
 #     Fatal error: Trying to set unknown setting 'gsqlite3-dnssec'
@@ -39,7 +39,7 @@ data:
 
     # ⚠ THE PASSWORD IS NOT HERE, AND MUST NOT BE. A ConfigMap is world-readable
     # to anything with `get` on the namespace. It is supplied on the command
-    # line from the Secret — see the Deployment — and a command-line setting
+    # line from the Secret - see the Deployment - and a command-line setting
     # overrides the file.
 
     # ⚠ THE SCHEMA IS SELECTED BY `search_path`, NOT BY QUALIFYING THE QUERIES.
@@ -50,20 +50,20 @@ data:
 
     # ⚠ OFF BECAUSE OUR WRITER DOES NOT MAINTAIN THE COLUMNS IT NEEDS. With
     # DNSSEC on, PowerDNS expects `ordername` and `auth` on every record, and
-    # apps/api/src/domains/powerdns.ts writes neither — the result is a zone
+    # apps/api/src/domains/powerdns.ts writes neither - the result is a zone
     # that answers NXDOMAIN for names that exist.
     gpgsql-dnssec=no
 
     # ⚠ THE ZONE CACHE IS REFRESHED EVERY MINUTE, NOT EVERY FIVE. PowerDNS
     # caches the LIST of zones it serves and re-reads it only on this interval;
     # the default is 300 seconds, and until then a zone the API has just written
-    # answers REFUSED — as though we were not authoritative for it at all.
+    # answers REFUSED - as though we were not authoritative for it at all.
     # Measured locally: a zone inserted while the server ran was invisible until
     # the interval elapsed.
     #
     # ⚠ THAT MATTERS BECAUSE CREATING A DOMAIN AND PUBLISHING ITS ZONE ARE ONE
     # TRANSACTION. The customer adds a domain, publishes records, presses
-    # Verify — and for five minutes our own nameserver would deny knowing the
+    # Verify - and for five minutes our own nameserver would deny knowing the
     # zone, which the delegation check reports as `nameserver_silent`: our
     # fault, correctly, and clearing on its own. The worst kind of intermittent.
     #

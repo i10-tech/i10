@@ -1,7 +1,7 @@
 {
   "name": "@i10/node",
   "version": "0.0.0",
-  "description": "i10 SDK for Node. Drop-in for resend/node — change one import.",
+  "description": "i10 SDK for Node. Drop-in for resend/node - change one import.",
   "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,

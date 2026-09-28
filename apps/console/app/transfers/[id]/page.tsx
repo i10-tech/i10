@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic"
  * The page an offer's email links to.
  *
  * ⚠ OUTSIDE THE `(app)` GROUP, LIKE ONBOARDING, AND FOR THE SAME REASON. That
- * layout sends a new account to `/onboarding` — and somebody who signed up
+ * layout sends a new account to `/onboarding` - and somebody who signed up
  * BECAUSE of this email would be sent there and never see the offer they came
  * for. Here they answer it first; set-up can wait.
  */

@@ -23,7 +23,7 @@ import type { CreatedApiKey, DomainSummary } from "@/lib/types"
  * page like any other.
  *
  * ⚠ AND THE SNIPPET CONTAINS THE REAL KEY EXACTLY ONCE, WHILE IT IS ON SCREEN.
- * Nothing stores it — the API keeps a SHA-256 of it — so navigating away loses
+ * Nothing stores it - the API keeps a SHA-256 of it - so navigating away loses
  * it. That is stated in the interface rather than left to be discovered, and
  * the snippet falls back to a placeholder once the key is gone.
  */
@@ -46,7 +46,7 @@ export function StepSend({
 
   /*
    * ⚠ THE SNIPPET USES A DOMAIN THEY ACTUALLY ADDED, VERIFIED OR NOT. It used
-   * to fall back to `yourdomain.com` the moment nothing was verified — which is
+   * to fall back to `yourdomain.com` the moment nothing was verified - which is
    * every person still waiting on DNS, i.e. almost everybody who reaches this
    * step. They had just typed their domain two screens ago and were then handed
    * a snippet addressed to a placeholder, so the one thing they had to edit by
@@ -76,11 +76,11 @@ export function StepSend({
     let created: CreatedApiKey | null = null
     /*
      * ⚠ UNRESTRICTED, DELIBERATELY. This is the first key a workspace ever has
-     * and onboarding is not the moment to explain scopes — somebody is trying
+     * and onboarding is not the moment to explain scopes - somebody is trying
      * to send one email. The keys page is where a scope is chosen, and this key
      * can be narrowed there without being replaced.
      */
-    // ⚠ TICK, HOLD, THEN THE ROW BECOMES THE KEY — the same beat as the keys
+    // ⚠ TICK, HOLD, THEN THE ROW BECOMES THE KEY - the same beat as the keys
     // page, so the first key anybody makes feels like every one after it. No
     // refresh: `createApiKey` re-renders this page in its own response.
     await outcome.run(
@@ -102,7 +102,7 @@ export function StepSend({
   }
 
   // ⚠ TO THEMSELVES, so running the snippet lands a real email in an inbox they
-  // can open — the proof that it works, not just a 200.
+  // can open - the proof that it works, not just a 200.
   const to = recipient ?? "you@example.com"
 
   const curl = `curl -X POST https://api.i10.tech/emails \\
@@ -151,7 +151,7 @@ client.emails.send({
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
           <span>
             No domain is verified yet, so a send will be refused. The snippet is still
-            worth copying — come back to it once verification finishes.
+            worth copying - come back to it once verification finishes.
           </span>
         </p>
       )}
@@ -165,7 +165,7 @@ client.emails.send({
               <p className="text-sm font-medium">Your API key</p>
               <CopyField value={key.secret} className="py-2" />
               <p className="text-xs text-warning">
-                This is the only time it is shown. It is already in the snippet below —
+                This is the only time it is shown. It is already in the snippet below -
                 copy that and you have both.
               </p>
             </div>
@@ -217,7 +217,7 @@ client.emails.send({
             />
             {/*
              * ⚠ THE CODE IS A TEXT CHILD OF <pre>, NEVER `innerHTML`. It
-             * contains the customer's own domain, which they typed — so it is
+             * contains the customer's own domain, which they typed - so it is
              * user input on its way back to the screen, and React escaping it
              * is what stops a domain containing a tag from becoming one.
              */}

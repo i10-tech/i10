@@ -9,7 +9,7 @@ import type { DnsInspection } from "@/lib/types"
  *
  * ⚠ IT LIVES IN ITS OWN FILE SO IT CAN OUTLIVE ITS OWN DATA BY ONE ANIMATION.
  * The form reveals and collapses this block, and a collapsing block still has
- * to render for the length of the collapse — so it is handed an inspection as a
+ * to render for the length of the collapse - so it is handed an inspection as a
  * prop rather than reading the form's `current`, which is already null by then.
  * Keeping it inline meant every field inside it needed a non-null assertion
  * against a value that was, at exactly that moment, null.
@@ -32,8 +32,8 @@ export function DetectionPanel({
 
   /*
    * ⚠ A RESOLVER IS NOT A HOST, AND THIS IS THE ONE CASE THE UI MUST EXPLAIN
-   * RATHER THAN SOLVE. It cannot actually be reached by detection — 8.8.8.8
-   * never appears in an NS record set — but the registry carries the two
+   * RATHER THAN SOLVE. It cannot actually be reached by detection - 8.8.8.8
+   * never appears in an NS record set - but the registry carries the two
    * resolvers so that any surface offering a provider list can say so.
    */
   const resolverConfusion = provider?.kind === "resolver"
@@ -44,14 +44,14 @@ export function DetectionPanel({
        * ⚠ `items-center`, SO THE MARK SITS AGAINST THE BLOCK RATHER THAN ITS
        * FIRST LINE. This panel is one line for most providers and three for a
        * split migration, and a top-aligned logo in the tall case reads as
-       * having slipped upwards — it is the only thing in the row with no text
+       * having slipped upwards - it is the only thing in the row with no text
        * baseline to belong to.
        */}
       <div className="flex items-center gap-3 px-4 py-3">
         {/*
          * ⚠ THE MARK GETS A TILE, AND THE TILE IS WHAT MAKES THE ROW STEADY.
-         * These are other companies' assets at other companies' proportions —
-         * Cloudflare's is roughly 1.7:1, GoDaddy's is square — so a bare logo
+         * These are other companies' assets at other companies' proportions -
+         * Cloudflare's is roughly 1.7:1, GoDaddy's is square - so a bare logo
          * changes the row's height and its optical left edge with every
          * provider. A fixed square with the logo centred inside gives all
          * sixteen of them one footprint.
@@ -80,11 +80,11 @@ export function DetectionPanel({
           {provider ? (
             <>
               {/*
-               * ⚠ THE SENTENCE NO LONGER TRAILS "— though not all of your
+               * ⚠ THE SENTENCE NO LONGER TRAILS "- though not all of your
                * nameservers point there". The warning directly beneath it
                * says exactly that, at greater length and in the colour that
                * means it matters, so the panel was making the same point
-               * twice — and the quiet copy of it was the one that ran the
+               * twice - and the quiet copy of it was the one that ran the
                * headline onto a second line.
                */}
               <p className="text-sm">
@@ -117,7 +117,7 @@ export function DetectionPanel({
            * ⚠ ONE CHIP PER NAMESERVER, NOT ONE RUN OF TEXT SEPARATED BY DOTS.
            * These are three or four hostnames somebody compares against what
            * their registrar shows them, and `break-all` was splitting them
-           * mid-label at the panel's edge — so `gina.ns.cloudflare.com` could
+           * mid-label at the panel's edge - so `gina.ns.cloudflare.com` could
            * arrive as `gina.ns.cloudfla` / `re.com`, which is unreadable for
            * the one task the line exists for. A chip wraps between names
            * instead of inside them.
@@ -137,7 +137,7 @@ export function DetectionPanel({
 
           {resolverConfusion && (
             <p className="text-xs text-muted-foreground">
-              {provider?.name} is a public <em>resolver</em> — it answers DNS questions
+              {provider?.name} is a public <em>resolver</em> - it answers DNS questions
               but does not host anyone&rsquo;s records. Your DNS host is whoever your
               domain&rsquo;s nameservers point to, usually your registrar.
             </p>
@@ -155,14 +155,14 @@ export function DetectionPanel({
           {/*
            * ⚠ LIVE NOW, AND IT LEAVES THE PAGE. Connecting is a full
            * navigation to the provider's authorisation screen and back
-           * through the callback — so anything typed above is lost, which
+           * through the callback - so anything typed above is lost, which
            * is exactly why the button sits beside the detection panel
            * rather than inside the form's own flow. Somebody who connects
            * first comes back to an empty form and a working connection.
            */}
           {/*
            * ⚠ A STATUS, NEVER A SECOND BUTTON. Connecting used to be
-           * offered here AND as the form's submit, eight inches apart —
+           * offered here AND as the form's submit, eight inches apart -
            * two controls for one action, and the one up here had less
            * explanation and more prominence than it had earned. The panel
            * reports what we know about the provider; the single control at

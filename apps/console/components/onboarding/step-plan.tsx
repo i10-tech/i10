@@ -36,7 +36,7 @@ export function StepPlan({
    * ⚠ THREADED FROM THE PAGE RATHER THAN READ WITH `useSearchParams`, so this
    * stays a component that renders what it is given. The hook would also pull
    * the whole client tree above it out of prerendering unless it were wrapped
-   * in its own Suspense boundary — a real cost for a value the server already
+   * in its own Suspense boundary - a real cost for a value the server already
    * has in `searchParams`.
    */
   checkoutId: string | null
@@ -44,14 +44,14 @@ export function StepPlan({
   /**
    * ⚠ TOLD UPWARDS SO THE SHELL CAN CHANGE ITS FOOTER. Once somebody has
    * paid, "You can come back to this at any time" is advice about a step
-   * that is finished — and the shell owns that line, not this step.
+   * that is finished - and the shell owns that line, not this step.
    */
   onSubscribed?: () => void
 }) {
   /*
    * ⚠ LOCAL, AND SET FROM THE CHECKOUT RATHER THAN FROM `billing`. Nothing
-   * re-fetches after a payment any more — see the note on `subscribed` in
-   * PlanCards — so this step learns it the same way the cards do: from the
+   * re-fetches after a payment any more - see the note on `subscribed` in
+   * PlanCards - so this step learns it the same way the cards do: from the
    * success it was just handed.
    */
   const [paid, setPaid] = React.useState(false)
@@ -60,7 +60,7 @@ export function StepPlan({
    * ⚠ THE BANNER'S ID LIVES HERE, NOT IN THE URL, ONCE A CHECKOUT HAS RUN IN
    * THIS TAB. It arrives as a prop from `searchParams` for a reload or a
    * redirect return; handed straight over by the cards, it needs no
-   * navigation to reach the banner — and the navigation was the blank frame
+   * navigation to reach the banner - and the navigation was the blank frame
    * that killed the toast.
    */
   const [liveCheckout, setLiveCheckout] = React.useState<string | null>(null)
@@ -71,7 +71,7 @@ export function StepPlan({
    *
    * ⚠ IT HAS TO BE ABLE TO STOP SAYING THINGS, WHICH IS WHY THIS IS A MODE
    * AND NOT A FLAG. "You're on Pro" is true right up until somebody presses
-   * Downgrade, and then it is the loudest wrong thing on the screen — it sat
+   * Downgrade, and then it is the loudest wrong thing on the screen - it sat
    * there, green and confident, over a subscription that had just been set
    * to end.
    *
@@ -96,7 +96,7 @@ export function StepPlan({
        * ⚠ BUYING DURING ONBOARDING NEEDED THE SAME ANSWER AND HAD NOWHERE TO
        * PUT IT. `PlanCards` renders here as well as on the billing page, and
        * both Polar's redirect and our own embedded flow come back with
-       * `?checkout_id=` — but only the billing page read it, so somebody who
+       * `?checkout_id=` - but only the billing page read it, so somebody who
        * upgraded mid-set-up got a toast and nothing else. Same component, same
        * row, same answer.
        */}
@@ -108,7 +108,7 @@ export function StepPlan({
        * ⚠ THE ANSWER TO "Keep subscription", IN THE PLACE THE LAST ANSWER
        * WAS. Pressing it un-marks a subscription that was going to end, and
        * without a word here the only evidence was a card quietly changing
-       * back — easy to miss, and the opposite of the cancellation, which
+       * back - easy to miss, and the opposite of the cancellation, which
        * announces itself.
        */}
       <BillingBanner
@@ -119,23 +119,23 @@ export function StepPlan({
          * ⚠ "You're", NOT "You are", BECAUSE THE BANNER BESIDE IT SAYS
          * "You're on Pro". These two appear in the same place, minutes
          * apart, and one of them spelling the contraction out reads as a
-         * different voice — see `present` in lib/checkout-outcome.ts.
+         * different voice - see `present` in lib/checkout-outcome.ts.
          */
         title={`You're keeping ${billing.plan?.name ?? "your plan"}`}
-        body="Nothing was charged and nothing changes — the cancellation is called off and your plan renews as usual."
+        body="Nothing was charged and nothing changes - the cancellation is called off and your plan renews as usual."
       />
 
       {/*
        * ⚠ THE HEADING ASKS FOR A DECISION NOW, RATHER THAN NARRATING ONE
        * ALREADY MADE. This said "You are on Free" over a meter panel and a
        * "Change plan" heading, which framed the last step of set-up as a
-       * receipt with an afterthought attached — so the cards read as optional
+       * receipt with an afterthought attached - so the cards read as optional
        * detail and the only live control was "Finish set-up" at the bottom.
        */}
       {/*
        * ⚠ `done`, NOT "A CHECKOUT ID EXISTS". Keyed on the id, this said "Your
-       * plan is active" after a checkout that was closed, never loaded, or —
-       * via the browser-scoped cookie — belonged to a different account. It
+       * plan is active" after a checkout that was closed, never loaded, or -
+       * via the browser-scoped cookie - belonged to a different account. It
        * now waits for the same facts that reveal "Continue to dashboard".
        */}
       <div className="text-center">
@@ -144,7 +144,7 @@ export function StepPlan({
         </h1>
         <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
           {done
-            ? "Your plan is active. Carry on, or change it here — you can do either at any time."
+            ? "Your plan is active. Carry on, or change it here - you can do either at any time."
             : "Start free and change it whenever. Allowances move the moment a payment clears."}
         </p>
       </div>
@@ -152,7 +152,7 @@ export function StepPlan({
       {/*
        * ⚠ THE METER PANEL IS GONE, AND WITH IT THE ONLY REASON THIS STEP HAD
        * TO BE TALL. It listed the current plan's allowances as five meters at
-       * zero used — the numbers are on the plan cards a few inches below, in
+       * zero used - the numbers are on the plan cards a few inches below, in
        * the card for that same plan, so the screen said everything twice and
        * gave the duplicate the more prominent half of the page.
        *
@@ -165,7 +165,7 @@ export function StepPlan({
         /*
          * ⚠ WIDER THAN THE FLOW IT SITS IN, DELIBERATELY. Every other step is
          * a form at `max-w-2xl`, which is the right measure for reading and
-         * the wrong one for three cards side by side — at that width they
+         * the wrong one for three cards side by side - at that width they
          * stack into a column of tall boxes and the comparison, which is the
          * entire job of this step, has to be done by scrolling. This breaks
          * out to the middle of the viewport and stops at `max-w-4xl`.
@@ -178,7 +178,7 @@ export function StepPlan({
              * ⚠ THE CURRENT PLAN'S CARD IS HOW THIS STEP ENDS, WHICH IS WHY
              * "Finish set-up" IS NO LONGER UNDER IT. Staying on free was
              * already the commonest way out of set-up and the card for it
-             * said "Current plan" and could not be pressed — so the actual
+             * said "Current plan" and could not be pressed - so the actual
              * exit was an unrelated button below, and the card that described
              * the choice somebody was making was the one dead control on the
              * screen.
@@ -207,15 +207,15 @@ export function StepPlan({
        *
        * ⚠ REVEALED, ON THE SAME SPRING AS EVERYTHING ELSE. It arrives a
        * second after a checkout closes, which is exactly the moment a hard
-       * insert reads as the page glitching — the fault this whole change set
+       * insert reads as the page glitching - the fault this whole change set
        * out to remove.
        */}
       <Reveal show={done} spacing="pt-2">
         <div className="flex justify-center">
           {/*
            * ⚠ `xl`, THE SAME SIZE AS "Continue" ON THE SIGN-IN PAGE. It is
-           * the same kind of control — the one thing to press on a screen
-           * that has finished asking — and for a new customer the two are
+           * the same kind of control - the one thing to press on a screen
+           * that has finished asking - and for a new customer the two are
            * three minutes apart.
            */}
           <Button size="xl" onClick={onDone}>

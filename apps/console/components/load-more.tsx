@@ -11,7 +11,7 @@ import { Spinner } from "@repo/ui/components/spinner"
  * ⚠ IT REPLACES THE PAGE RATHER THAN APPENDING TO IT, AND THAT IS A DELIBERATE
  * TRADE. Infinite scroll needs the rows in client state, which means fetching
  * them in the browser, which means the whole table stops being server-rendered
- * — a spinner where there is currently HTML, and a list that cannot be linked
+ * - a spinner where there is currently HTML, and a list that cannot be linked
  * to. Advancing the cursor in the URL keeps the page shareable and the render
  * on the server; the cost is that "back" is a browser action rather than a
  * button, which browsers are extremely good at.

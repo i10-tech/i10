@@ -2,7 +2,7 @@
  * Proxies the API's public checkout-status endpoint.
  *
  * ⚠ WHY A PROXY AND NOT A DIRECT BROWSER CALL. api.i10.tech sends no CORS
- * headers, and it should not start doing so for one status page — every origin
+ * headers, and it should not start doing so for one status page - every origin
  * it allows is a decision that outlives the reason for it. Going through this
  * route keeps the poll same-origin, so there is nothing to allow.
  *
@@ -14,8 +14,8 @@
  * in a cookie that belongs to the browser, not to whoever is signed in, so
  * without this a second account signed up in the same tab was told "You're on
  * Pro" about the first account's purchase. With the session the API answers
- * only about the caller's own workspace; with none — a session that lapsed on
- * Polar's site — it answers as it always did. See the API route's note.
+ * only about the caller's own workspace; with none - a session that lapsed on
+ * Polar's site - it answers as it always did. See the API route's note.
  */
 
 import { auth } from "@clerk/nextjs/server"
@@ -25,7 +25,7 @@ const API = process.env.I10_BASE_URL ?? "https://api.i10.tech"
 
 /**
  * Polar checkout ids are UUIDs. Checked before interpolation so a crafted
- * parameter cannot walk the path — `..%2F` and friends reach a different
+ * parameter cannot walk the path - `..%2F` and friends reach a different
  * upstream route otherwise.
  */
 const CHECKOUT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -43,7 +43,7 @@ export async function GET(
   /*
    * ⚠ A FIXTURE HERE, EVEN THOUGH PREVIEW REFUSES TO START A CHECKOUT. Reading
    * what became of one is not taking money, and its outcomes are five pieces of
-   * copy — success, still settling, closed, declined, expired — that were
+   * copy - success, still settling, closed, declined, expired - that were
    * otherwise impossible to look at without a Polar account. `PREVIEW` folds to
    * `false` at build time in production, so this branch is deleted rather than
    * merely unreachable. See lib/preview.ts.

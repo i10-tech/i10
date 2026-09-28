@@ -14,11 +14,11 @@ import {
  * rail stayed on screen, which put two vertical lists of links within a few
  * pixels of each other and left the content column squeezed into whatever was
  * left. `SidebarNav` now swaps itself for `SETTINGS_NAV` on these routes and
- * carries a way back — one navigation, in the place navigation already lives.
+ * carries a way back - one navigation, in the place navigation already lives.
  *
  * ⚠ AND THE HEADING STILL LIVES HERE, NOT IN EACH PAGE. Eight pages each
  * rendering their own "Settings" title is eight chances for one of them to be
- * two pixels out — which nobody can name and everybody feels as they move
+ * two pixels out - which nobody can name and everybody feels as they move
  * between tabs.
  */
 export default function SettingsLayout({

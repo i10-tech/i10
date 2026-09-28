@@ -7,7 +7,7 @@ import "strings"
 // This is a deliberately narrow comparison: case-insensitive, whitespace
 // trimmed around commas, and nothing else. A full RFC 4514 normalisation would
 // have to handle escaping, hex-encoded values, and per-attribute matching
-// rules — and every DN authd compares is one it built itself, so the extra
+// rules - and every DN authd compares is one it built itself, so the extra
 // surface would be all risk and no benefit.
 func EqualDN(a, b string) bool {
 	return strings.EqualFold(canonDN(a), canonDN(b))

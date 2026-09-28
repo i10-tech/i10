@@ -15,7 +15,7 @@ import {
  * segments that group them and the topics they subscribe to.
  *
  * ⚠ NOTHING HERE EVER RE-SUBSCRIBES SOMEBODY. Re-adding a contact by hand, or
- * re-importing last quarter's CSV, must not undo an opt-out — their choice
+ * re-importing last quarter's CSV, must not undo an opt-out - their choice
  * outlives our imports. The rule is enforced in the store, in the one
  * `onConflictDoUpdate` that deliberately omits `unsubscribed`; these routes must
  * not find a way around it.
@@ -50,7 +50,7 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
     /*
      * ⚠ AN UPSERT, AND IT RETURNS 200 RATHER THAN 201 WHEN IT MATCHED. Adding
      * somebody who is already a contact is what a person does when they are not
-     * sure — and a 409 there would be an error message for a non-error. The
+     * sure - and a 409 there would be an error message for a non-error. The
      * status has to tell the truth about which happened, though: 201 claims a
      * resource came into existence, and a client that creates one row and gets
      * five 201s has been told it has five contacts. What this does NOT do is
@@ -119,7 +119,7 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
    * CSV import.
    *
    * ⚠ THE BODY IS READ AS TEXT AND CAPPED, BECAUSE THE PARSER IS NOT A STREAM.
-   * `parseContactCsv` builds the whole file in memory — the right trade for a
+   * `parseContactCsv` builds the whole file in memory - the right trade for a
    * contacts export and the wrong one for a gigabyte. The cap is enforced here
    * so the refusal is an HTTP status with a message rather than an
    * out-of-memory kill.
@@ -134,7 +134,7 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
       message: "That file is larger than 20 MB. Split it and import in parts.",
     }
 
-    // ⚠ THE STREAMING CAP ABOVE IS THE REAL CONTROL — see `csvBodyLimit`. These
+    // ⚠ THE STREAMING CAP ABOVE IS THE REAL CONTROL - see `csvBodyLimit`. These
     // two checks stay because they produce the message that names the limit and
     // tells somebody what to do about it, and because a route that states its
     // own bound does not silently lose it if the middleware is ever reordered.
@@ -142,7 +142,7 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
     if (declared > MAX_BYTES) return c.json(tooBig, 413)
 
     const csv = await c.req.text()
-    // ⚠ CHECKED AGAIN AFTER READING. `Content-Length` is a claim, not a fact —
+    // ⚠ CHECKED AGAIN AFTER READING. `Content-Length` is a claim, not a fact -
     // a chunked request carries none at all, so the header check is an early
     // out rather than the control.
     if (csv.length > MAX_BYTES) return c.json(tooBig, 413)
@@ -321,14 +321,14 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
     /*
      * ⚠ `default_subscription` IS REFUSED RATHER THAN IGNORED. Flipping a topic
      * from opt-out to opt-in would retroactively subscribe everybody who never
-     * answered — marketing mail to people who did not ask for it, because of a
+     * answered - marketing mail to people who did not ask for it, because of a
      * dropdown. Silently dropping the field would let a caller believe it
      * worked; a 422 says what the rule is.
      */
     if (body?.default_subscription !== undefined) {
       return c.json(
         validation(
-          "`default_subscription` cannot be changed after a topic is created — " +
+          "`default_subscription` cannot be changed after a topic is created - " +
             "it would retroactively change what every contact has agreed to. " +
             "Create a new topic instead.",
         ),

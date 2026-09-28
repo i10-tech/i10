@@ -4,7 +4,7 @@
  * ⚠ HAND-WRITTEN AND NOT IMPORTED FROM THE API, WHICH IS A DELIBERATE COST.
  * `apps/api` is a bun server with a database driver, AWS clients and Redis in
  * its dependency graph; importing a type from it drags its `tsconfig`, its
- * `@types/bun`, and — the moment somebody imports a value by accident — its
+ * `@types/bun`, and - the moment somebody imports a value by accident - its
  * runtime into a Next build. `@repo/contracts` exists for the shapes that are a
  * PUBLIC contract and is used for those; this file covers the console's private
  * surface, which is deliberately not one.
@@ -46,7 +46,7 @@ export interface BillingState {
     cancel_at_period_end: boolean
     current_period_end: string | null
     /**
-     * A plan change accepted now and applied at the period boundary — what a
+     * A plan change accepted now and applied at the period boundary - what a
      * downgrade looks like for the rest of the month. `plan_id` above is still
      * the plan in force, deliberately: they keep what they paid for.
      */
@@ -77,7 +77,7 @@ export interface Me {
     id: string
     /** Primary address, if verified. Prefills the onboarding test email. */
     email: string | null
-    /** Every verified address — the transfer dialog refuses these. */
+    /** Every verified address - the transfer dialog refuses these. */
     verified_emails: string[]
   }
   tenant: TenantProfile | null
@@ -168,7 +168,7 @@ export interface DomainSummary {
   region: string
   delegated: boolean
   /**
-   * When another workspace proved this name and took it. Console-only — the
+   * When another workspace proved this name and took it. Console-only - the
    * public API's domain says nothing about our other customers.
    */
   displaced_at?: string | null
@@ -190,14 +190,14 @@ export interface Domain extends DomainSummary {
  * ⚠ AND IT IS SEPARATE FROM `status`. `status` is Amazon's opinion of the
  * domain and lags DNS by minutes; this is what our own resolver saw during the
  * request. A domain can be proved here and still `pending` there, which is the
- * ordinary state between publishing records and being able to send — and the
+ * ordinary state between publishing records and being able to send - and the
  * one state the console previously described as "the records have not
  * propagated".
  */
 export interface VerifiedDomain extends Domain {
   /**
    * ⚠ `superseded` IS THE THIRD REASON AND IT NEEDS ITS OWN SENTENCE. It means
-   * the NS records are published and point at us, but name an EARLIER claim —
+   * the NS records are published and point at us, but name an EARLIER claim -
    * which is what every delete-and-re-add produces, because the delegation
    * token is issued per domain row. Folding it into `absent` tells somebody
    * their records are missing while they are looking straight at them.
@@ -208,7 +208,7 @@ export interface VerifiedDomain extends Domain {
   /**
    * Only when this verify took the name from another workspace AND that
    * workspace's records still resolve. The latest proof wins, so while these
-   * are published the old holder can take it back — removing them keeps it.
+   * are published the old holder can take it back - removing them keeps it.
    */
   leftover_records?: { type: "TXT" | "NS"; name: string; value?: string }[]
 }
@@ -274,7 +274,7 @@ export interface ApiKeyRow {
    *
    * ⚠ DERIVED BY THE API FROM `scopes`, AND THE CONSOLE DELIBERATELY DOES NOT
    * PARSE THAT ARRAY. The storage format is `domain:acme.com` and it is the
-   * API's business — see apps/api/src/auth/scope.ts. A console that knew the
+   * API's business - see apps/api/src/auth/scope.ts. A console that knew the
    * prefix would be a second place to spell it, and the one that is wrong is
    * always the one nobody tested.
    */
@@ -451,7 +451,7 @@ export interface TemplateRow {
  * Why a delegated domain has not verified. See apps/api/src/console/delegation.ts.
  *
  * ⚠ THE FINDINGS ARE A UNION RATHER THAN A STRING, because the console's whole
- * job with them is to say a different sentence for each — and one of those
+ * job with them is to say a different sentence for each - and one of those
  * sentences blames us rather than the customer.
  */
 export type ZoneFinding =
@@ -459,7 +459,7 @@ export type ZoneFinding =
   | { zone: string; code: "not_published" }
   | { zone: string; code: "delegated_elsewhere"; observed: string[] }
   /**
-   * Delegated to us AND to something else at once — usually a previous
+   * Delegated to us AND to something else at once - usually a previous
    * set-up's nameservers left published beside the current ones.
    *
    * ⚠ IT RESOLVES TODAY, WHICH IS WHAT MAKES IT WORTH A WARNING. Whichever
@@ -488,7 +488,7 @@ export interface DelegationReport {
  *
  * ⚠ THE API DECIDES THIS, NOT THE CONSOLE. Whether a provider is connectable
  * depends on an adapter existing and, for the one-click path, on an OAuth app
- * being registered — one is a deploy and the other is configuration. Deciding it
+ * being registered - one is a deploy and the other is configuration. Deciding it
  * from `@repo/dns-providers` here would render a live Connect button for the
  * twenty-nine providers we cannot write to.
  */
@@ -528,7 +528,7 @@ export interface PublishOutcome {
   unchanged: { name: string; type: string; value: string }[]
   removed: ConflictingRecord[]
   /**
-   * Records of OUR OWN that this publish replaced — a previous set left in the
+   * Records of OUR OWN that this publish replaced - a previous set left in the
    * customer's zone after the domain was deleted here and added again.
    *
    * ⚠ NOT THE SAME THING AS `removed`, AND THE CONSOLE MUST NOT REPORT THEM

@@ -9,7 +9,7 @@ import { LIST_CAP, broadcastStats, toBroadcastRow, toTemplateRow } from "./share
  * Broadcasts and the templates they are written from.
  *
  * ⚠ READING A LIST NEVER READS A BODY. A broadcast's `html` is a whole
- * marketing email, and the list pages render a name and a status — see
+ * marketing email, and the list pages render a name and a status - see
  * `BroadcastSummary`. The bodies come back only from the single-row reads.
  */
 export function campaignsStore(
@@ -33,15 +33,15 @@ export function campaignsStore(
    *
    * ⚠ A FOREIGN KEY DOES NOT DO THIS, AND THAT IS THE WHOLE REASON THIS
    * EXISTS. A Postgres FK check runs as the REFERENCED table's owner and is
-   * explicitly exempt from row security — that exemption is what makes FKs work
-   * under RLS at all — so `broadcasts.segment_id REFERENCES segments(id)` is
+   * explicitly exempt from row security - that exemption is what makes FKs work
+   * under RLS at all - so `broadcasts.segment_id REFERENCES segments(id)` is
    * satisfied by ANY segment in the cluster, including another tenant's. The
    * resulting row carries OUR `tenant_id` and points into somebody else's data:
    * at minimum an existence oracle for their ids, and at worst a broadcast
    * whose recipient list is not ours to send to.
    *
    * ⚠ IT IS THE SAME RULE `addToSegment` AND `setTopicSubscription` FOLLOW, and
-   * it was missing here — which is the argument for it being a named helper
+   * it was missing here - which is the argument for it being a named helper
    * rather than three inline selects. Every write of one of these two columns
    * goes through it.
    *
@@ -80,7 +80,7 @@ export function campaignsStore(
       return withTenant(db, tenantId, async (tx) => {
         /*
          * ⚠ COLUMNS NAMED EXPLICITLY, WITH `html` AND `text` LEFT OUT. A
-         * `select()` here reads the bodies out of the heap for every row — the
+         * `select()` here reads the bodies out of the heap for every row - the
          * bytes leave the database, cross the wire and are then discarded by a
          * list page that renders a name and a status.
          */
@@ -140,7 +140,7 @@ export function campaignsStore(
         /*
          * ⚠ THE STATS QUERY IS SKIPPED ENTIRELY FOR A DRAFT. A draft has no
          * messages by definition, so the aggregate would scan every partition of
-         * `core.messages` looking for a broadcast id that appears nowhere — the
+         * `core.messages` looking for a broadcast id that appears nowhere - the
          * most expensive possible way to compute five zeroes, on the page
          * somebody has open while they write.
          */
@@ -155,7 +155,7 @@ export function campaignsStore(
 
     async createBroadcast(tenantId, input) {
       return withTenant(db, tenantId, async (tx) => {
-        // ⚠ BOTH FKs VERIFIED UNDER RLS BEFORE THE INSERT — see `assertOwned`.
+        // ⚠ BOTH FKs VERIFIED UNDER RLS BEFORE THE INSERT - see `assertOwned`.
         const owned = await assertOwned(tx, input)
         if (!owned.ok) return { unknown: owned.field }
 
@@ -183,7 +183,7 @@ export function campaignsStore(
 
     async updateBroadcast(tenantId, id, patch) {
       return withTenant(db, tenantId, async (tx) => {
-        // ⚠ THE SAME CHECK ON THE WAY IN — a PATCH can retarget a broadcast at
+        // ⚠ THE SAME CHECK ON THE WAY IN - a PATCH can retarget a broadcast at
         // another tenant's segment exactly as a POST can.
         const owned = await assertOwned(tx, patch)
         if (!owned.ok) return { unknown: owned.field }
@@ -245,7 +245,7 @@ export function campaignsStore(
 
     async listTemplates(tenantId) {
       return withTenant(db, tenantId, async (tx) => {
-        // ⚠ NO `html`, NO `text`, AND A CEILING — see `listBroadcasts` above.
+        // ⚠ NO `html`, NO `text`, AND A CEILING - see `listBroadcasts` above.
         const rows = await tx
           .select({
             id: templates.id,

@@ -3,7 +3,7 @@ import { Layout, styles } from "../layout.js"
 
 /**
  * ⚠ A NOTIFICATION, AND IT MUST NEVER CARRY A LINK TO ACT ON. "Your password
- * changed — click here if it wasn't you" is the exact shape of a phishing mail,
+ * changed - click here if it wasn't you" is the exact shape of a phishing mail,
  * and teaching customers to click it is teaching them to fall for the forgery.
  * It says where to go; it does not take them there.
  */
@@ -32,7 +32,7 @@ export default function PasswordChanged({
 /*
  * ⚠ `PreviewProps` IS WHAT LETS THE TEMPLATE AND ITS PREVIEW BE ONE FILE.
  * `email dev` renders a directory of DEFAULT exports and has no way to invent
- * props, so this used to need a second `emails/` tree holding sample values —
+ * props, so this used to need a second `emails/` tree holding sample values -
  * two files per template, and a preview that could silently drift from what is
  * actually sent. react-email reads this static instead, so the thing you look
  * at IS the thing that goes out.

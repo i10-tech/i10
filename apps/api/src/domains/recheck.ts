@@ -8,14 +8,14 @@ import type { TenancyOutcome } from "./ses-tenant.js"
  * own them.
  *
  * ⚠ VERIFICATION WAS ONE-SHOT AND DOMAINS OUTLIVE IT. A workspace that proved
- * `example.com` once kept the verified badge for ever — through the
+ * `example.com` once kept the verified badge for ever - through the
  * registration lapsing, through somebody else buying it, through the records
  * being deleted. Nothing ever asked again, so a verified sending identity for a
  * domain somebody else now owns was a permanent state with no path out of it
  * except support.
  *
  * ⚠ AND IT IS DELIBERATELY MUCH MORE CAUTIOUS THAN THE CONTEST PATH. There, a
- * challenger has PROVED the name — positive evidence the domain has moved, and
+ * challenger has PROVED the name - positive evidence the domain has moved, and
  * enough to act on at once. Here there is no challenger and no evidence of
  * anything except an absence, and an absence has a dozen innocent causes: a
  * zone being migrated between providers, a record mid-edit, a registrar's
@@ -23,7 +23,7 @@ import type { TenancyOutcome } from "./ses-tenant.js"
  * lives in `proof_missing_since` rather than in this process.
  *
  * ⚠ A FAILURE TO ASK IS NEVER AN ANSWER. `unreachable` does not start the
- * clock, does not stamp the check, and does not count towards anything — the
+ * clock, does not stamp the check, and does not count towards anything - the
  * row is simply left for the next run. Treating a resolver timeout as "they no
  * longer own it" would, during one bad afternoon at a large DNS provider,
  * quietly un-verify a large fraction of our customers at once.
@@ -53,7 +53,7 @@ export interface RecheckDeps {
    * domain, but an attach that failed, and every domain that predates tenants,
    * would otherwise stay untenanted for ever. It rides on this pass because
    * this pass already visits every verified domain, oldest check first, with
-   * its workspace id — so no second cross-tenant query is needed to find them.
+   * its workspace id - so no second cross-tenant query is needed to find them.
    *
    * Optional: a deployment without SES has no tenant to join.
    */

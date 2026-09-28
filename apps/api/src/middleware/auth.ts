@@ -7,7 +7,7 @@ export interface AuthContext {
    * i10's own tenant id, taken from Clerk's claims on the key.
    *
    * NOT Clerk's `subject`, which is a `user_…` or `org_…`. A tenant may
-   * reference either, or neither — see core.tenants.
+   * reference either, or neither - see core.tenants.
    */
   tenantId: string
   scopes: readonly string[]
@@ -40,7 +40,7 @@ declare module "hono" {
     domains?: import("../domains/store.js").DomainStore
     /**
      * The signed-in person, set by `requireUser`. Present only on the routes
-     * that take a session — see middleware/session.ts on why those are a
+     * that take a session - see middleware/session.ts on why those are a
      * different set from the ones that take an API key.
      */
     user: import("./session.js").SessionContext
@@ -48,7 +48,7 @@ declare module "hono" {
     sessionAuth?: import("./session.js").SessionVerifier
     /**
      * Whether the session was proved RECENTLY, for the routes that delete
-     * things. Injected by the console router — see middleware/session.ts.
+     * things. Injected by the console router - see middleware/session.ts.
      *
      * ⚠ OPTIONAL IN THE TYPE AND FAIL-CLOSED IN THE MIDDLEWARE. Every other
      * optional dependency here degrades by hiding a feature; this one would
@@ -65,9 +65,9 @@ declare module "hono" {
  * Bearer-token authentication.
  *
  * ⚠ THE HEADER IS NOT OURS TO CHANGE. `Authorization: Bearer` is what makes
- * `resend/node` → `@i10/node` a one-line migration. The key FORMAT is ours —
+ * `resend/node` → `@i10/node` a one-line migration. The key FORMAT is ours -
  * `i10_live_…` is recognisable in a customer's logs and greppable in a leak
- * scan — but a custom header would break the pitch outright.
+ * scan - but a custom header would break the pitch outright.
  *
  * ⚠ AUTHENTICATION IS NOT QUOTA. This answers "is this key valid and what may
  * it do". Whether the customer has sending budget left is a different question
@@ -85,7 +85,7 @@ declare module "hono" {
  *
  * And it is annotated as `MiddlewareHandler` rather than built with
  * `createMiddleware`, because that helper infers the return type from the
- * handler — so returning a 401 in one branch and a 503 in another produces two
+ * handler - so returning a 401 in one branch and a 503 in another produces two
  * incompatible `JSONRespondReturn` types and the whole thing stops assigning.
  */
 export const requireApiKey: MiddlewareHandler = async (c, next) => {
@@ -135,7 +135,7 @@ export const requireApiKey: MiddlewareHandler = async (c, next) => {
 
     default:
       // ⚠ 503, NEVER 401. Clerk did not answer, so we do not know whether the
-      // key is good — and a 401 tells the customer their key is wrong. They
+      // key is good - and a 401 tells the customer their key is wrong. They
       // respond by rotating a key that was fine, during an outage that was
       // never theirs. Same rule as services/authd answering LDAP `unavailable`
       // rather than `invalidCredentials`. `Retry-After` is what makes an SDK

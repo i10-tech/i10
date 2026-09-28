@@ -6,7 +6,7 @@
  * `package.json` files before `bun install --frozen-lockfile`, so that a change
  * to source code does not invalidate the dependency layer. The list is
  * hand-maintained. Add a package, have an app depend on it, forget the COPY
- * line, and `lint`, `check-types`, `test` and `bun run build` all still pass —
+ * line, and `lint`, `check-types`, `test` and `bun run build` all still pass -
  * they run against the real repository, where the package is on disk. The image
  * build fails, and only on a push to `main`, which is after the merge.
  *
@@ -17,14 +17,14 @@
  *
  * ⚠ IT IS STATIC, NOT AN INSTALL. Reproducing the layer properly means staging
  * the copied files and running `bun install --frozen-lockfile` in a temporary
- * directory — accurate, and seconds per Dockerfile. The failure is entirely a
+ * directory - accurate, and seconds per Dockerfile. The failure is entirely a
  * question of which manifests are present versus which workspace dependencies
  * they name, and that is answerable by reading the files. This runs in
  * milliseconds, which is what makes it acceptable in a pre-push hook.
  *
  * ⚠ AND IT CHECKS THE CLOSURE, NOT JUST THE DIRECT DEPENDENCIES. A copied
  * manifest's workspace dependency must itself be copied, and so must ITS
- * workspace dependencies — `bun install` resolves the whole graph. Checking one
+ * workspace dependencies - `bun install` resolves the whole graph. Checking one
  * level deep would pass a Dockerfile that is still broken two levels down.
  */
 
@@ -88,7 +88,7 @@ function requiredWorkspaces(manifest, seen = new Set()) {
   const deps = {
     ...(pkg.dependencies ?? {}),
     // ⚠ DEV DEPENDENCIES COUNT. The build stage runs `bun run build`, which
-    // needs `@repo/typescript-config` and `@repo/eslint-config` — and
+    // needs `@repo/typescript-config` and `@repo/eslint-config` - and
     // `--frozen-lockfile` refuses to install at all if any of them is absent,
     // whichever section named it.
     ...(pkg.devDependencies ?? {}),

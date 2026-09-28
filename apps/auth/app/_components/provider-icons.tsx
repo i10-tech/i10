@@ -3,7 +3,7 @@
  *
  * ⚠ THREE OF THESE ARE SOMEBODY ELSE'S TRADEMARK AND ONE IS NOT, WHICH IS THE
  * ONLY REASON THEY SHARE A FILE. `PasskeyIcon` is a method rather than a brand,
- * so nothing governs its path data and it is drawn to match Lucide's geometry —
+ * so nothing governs its path data and it is drawn to match Lucide's geometry -
  * see its own note. The three below are governed, and the paragraph after this
  * one is about them.
  *
@@ -77,7 +77,7 @@ export function AppleIcon(props: React.ComponentProps<"svg">) {
  * conventional passkey mark precisely because it says WHOSE credential it is.
  *
  * ⚠ DRAWN TO LUCIDE'S GRID SO IT SITS WITH THE REST. 24×24, unfilled, 2px
- * strokes with round caps and joins, and no `size-*` of its own — `Button`
+ * strokes with round caps and joins, and no `size-*` of its own - `Button`
  * sizes any bare `<svg>` inside it, and a hard-coded size here would be the one
  * icon in the row that ignored it.
  */
@@ -95,7 +95,7 @@ export function PasskeyIcon(props: React.ComponentProps<"svg">) {
     >
       {/*
        * ⚠ THE PERSON IS LUCIDE'S `UserRound` AT 0.7 SCALE, NOT A SHAPE INVENTED
-       * HERE. Head at r=3.5 over a semicircular shoulder arc of r=5.5 — the same
+       * HERE. Head at r=3.5 over a semicircular shoulder arc of r=5.5 - the same
        * proportion between the two that every other person-glyph in the set
        * uses. A first attempt drew the shoulders as a quarter-arc with a tick on
        * the end, which at size renders as a crescent floating under an

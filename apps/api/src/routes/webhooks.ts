@@ -28,7 +28,7 @@ export interface ClerkWebhookDeps {
    *
    * ⚠ ABSENT MEANS A DELETED WORKSPACE KEEPS PAYING, WHICH IS WHY IT IS WIRED
    * WHEREVER PROVISIONING IS. Without it `organization.deleted` falls through
-   * to `ignored` — the state this endpoint was in until it was found: an
+   * to `ignored` - the state this endpoint was in until it was found: an
    * account deleted in Clerk left `core.tenants` saying `active`, the plan
    * assignment on Pro, and Polar charging a card every month for a workspace
    * nobody could sign in to.
@@ -38,7 +38,7 @@ export interface ClerkWebhookDeps {
    * Sends Clerk's authentication mail through our own send path.
    *
    * ⚠ ABSENT MEANS CLERK KEEPS SENDING IT, WHICH IS THE SAFE DEFAULT. An
-   * unconfigured deployment must not silently swallow verification codes — with
+   * unconfigured deployment must not silently swallow verification codes - with
    * this undefined the event is acknowledged and Clerk's own delivery, which is
    * still switched on per template, remains the only sender.
    */
@@ -53,7 +53,7 @@ export interface ClerkWebhookDeps {
  * decides which addresses exist as local recipients. Nothing reaches the
  * database before the Svix signature verifies.
  *
- * On status codes — Svix retries anything that is not 2xx, with backoff, then
+ * On status codes - Svix retries anything that is not 2xx, with backoff, then
  * gives up:
  *
  *   401  bad or missing signature. Retrying will not help, but answering 200 to
@@ -127,7 +127,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // ⚠ RUN EVEN WHEN `applyClerkEvent` SAID `duplicate`, AND THAT IS THE
       // WHOLE REASON IT IS OUT HERE RATHER THAN INSIDE THE SWITCH. That dedupe
       // claims the Svix message id and discards a redelivery, which is right
-      // for the mailbox projection — the second copy has nothing new to say.
+      // for the mailbox projection - the second copy has nothing new to say.
       // Provisioning is the opposite: if it failed the first time, the retry is
       // the only chance to fix it, and swallowing that leaves somebody with an
       // account that can never send. Both halves are idempotent on their own.
@@ -135,7 +135,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
 
       // ⚠ OUTSIDE THE DEDUPE FOR THE SAME REASON PROVISIONING IS, and safe for
       // a different one. `applyClerkEvent` claims the Svix id and answers
-      // `duplicate` on a redelivery — skipping the send on that basis would
+      // `duplicate` on a redelivery - skipping the send on that basis would
       // mean a send that failed once is never retried, and somebody's code
       // never arrives. Instead the send path is keyed on Clerk's own email id,
       // so a redelivery is refused there rather than here.
@@ -182,7 +182,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
 /**
  * ⚠ THROWS RATHER THAN SWALLOWS, so the caller answers 500 and Svix retries.
  * A sign-up that produced no tenant is an account that cannot send, and the
- * customer's only signal would be a 401 on their first API call — a retry is
+ * customer's only signal would be a 401 on their first API call - a retry is
  * both free and the correct repair.
  */
 async function provision(
@@ -199,7 +199,7 @@ async function provision(
     /*
      * ⚠ DELETION RUNS THROUGH THE SAME FUNCTION AS CREATION, AND THEREFORE
      * OUTSIDE THE SVIX DEDUPE, FOR THE IDENTICAL REASON. `applyClerkEvent`
-     * claims the message id and answers `duplicate` on a redelivery — right for
+     * claims the message id and answers `duplicate` on a redelivery - right for
      * the mailbox projection, wrong here: if the Polar revoke failed the first
      * time, the retry is the only thing that stops the billing, and a dedupe
      * that swallowed it would leave a deleted account paying for ever. Both

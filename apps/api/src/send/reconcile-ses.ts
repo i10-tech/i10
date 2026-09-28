@@ -12,7 +12,7 @@ import { sql, type SQL } from "drizzle-orm"
  * messages table, and the usage reconciler then bills them on its next run
  * because they are simply `sent` rows it has not seen yet. Nothing here talks
  * to the meter, and a message SES sent that we never recorded needs no special
- * billing path — it becomes an ordinary row and the existing machinery bills it.
+ * billing path - it becomes an ordinary row and the existing machinery bills it.
  *
  * Repairing SES → the meter directly would give the same number two writers, and
  * the two would disagree the first time one of them was retried.
@@ -25,22 +25,22 @@ import { sql, type SQL } from "drizzle-orm"
  * ⚠ THE LEFT-HAND SIDE IS OUR EVENT LOG, WHICH IS A PUSH FEED AND THEREFORE
  * NOT INDEPENDENT EVIDENCE. `core.message_events` exists only because SES
  * publishes to a configuration set destination and our webhook received it. So
- * these three queries can find a message SES sent that we mis-recorded — but
+ * these three queries can find a message SES sent that we mis-recorded - but
  * they cannot find one SES sent that we never heard about at all, because the
  * absence of an event is exactly what a broken webhook also looks like.
  *
  * ⚠ SES CAN BE ASKED DIRECTLY, AND THAT IS THE MISSING FOURTH CHECK. There is
  * no synchronous "list messages" call, which is what made this look impossible
- * at first — but `CreateExportJob` with a `MessageInsightsDataSource` takes a
+ * at first - but `CreateExportJob` with a `MessageInsightsDataSource` takes a
  * `StartDate` and `EndDate` and writes the individual messages to S3, and
  * `GetMessageInsights` looks one up by SES MessageId and returns its
- * `EmailTags` — which carry `i10_message_id`, so SES hands our own id back.
+ * `EmailTags` - which carry `i10_message_id`, so SES hands our own id back.
  *
  * That is a genuine second source of truth, independent of whether our webhook
  * ever ran, and it is what would close the orphan case properly. Not built yet,
  * and it has a prerequisite worth confirming in the console FIRST: Message
  * Insights is a Virtual Deliverability Manager feature, so with VDM disabled an
- * export job plausibly returns nothing — and it would return nothing the same
+ * export job plausibly returns nothing - and it would return nothing the same
  * way a clean account does, which is the worst possible failure for a
  * reconciler. Neither the VDM dependency nor the retention window is stated in
  * the API reference; both need checking against the live account rather than
@@ -72,7 +72,7 @@ import { sql, type SQL } from "drizzle-orm"
  *
  * ⚠ IT RAISED RATHER THAN RETURNING NOTHING, WHICH IS THE ONLY REASON IT WAS
  * SURVIVABLE. Had RLS filtered the rows instead, this reconciler would have
- * reported a clean account on every run forever — and a reconciler that cannot
+ * reported a clean account on every run forever - and a reconciler that cannot
  * fail is worse than no reconciler, because it is evidence.
  */
 export const EVENT_GRACE = "30 minutes"
@@ -82,7 +82,7 @@ export const EVENT_GRACE = "30 minutes"
  *
  * ⚠ THIS IS THE ONE THAT COSTS MONEY, AND IT IS THE EXPECTED OUTCOME OF THE
  * AT-LEAST-ONCE DESIGN RATHER THAN A BUG. The worker calls SES, SES accepts,
- * and the process dies before writing the result — the row stays `sending` and
+ * and the process dies before writing the result - the row stays `sending` and
  * is never billed, while the customer's mail was delivered. The claim in
  * db/claim.ts names that window and says it cannot be closed; this is what
  * finds what fell into it.
@@ -108,7 +108,7 @@ export function sesSentButUnbilledStatement(limit: number): SQL {
  *
  * ⚠ IT MUST NOT OVERWRITE A ROW THAT IS ALREADY `sent`. Two reconcilers, or one
  * retried, would otherwise rewrite `sent_at` and move the message into a
- * different billing bucket — turning a repair into a double-count in the usage
+ * different billing bucket - turning a repair into a double-count in the usage
  * reconciler that reads this table next.
  *
  * ⚠ AND `sent_at` COMES FROM SES'S EVENT, NOT FROM `now()`. The usage
@@ -117,7 +117,7 @@ export function sesSentButUnbilledStatement(limit: number): SQL {
  * boundary would then disagree with SES's own record of the same message.
  *
  * ⚠ BOTH GUARDS NOW LIVE IN THE FUNCTION, NOT HERE, AND THAT IS LOAD-BEARING.
- * `core.repair_from_ses` is SECURITY DEFINER, so it runs with RLS bypassed —
+ * `core.repair_from_ses` is SECURITY DEFINER, so it runs with RLS bypassed -
  * anything a caller could omit would be a row they could rewrite. Keeping the
  * `status <> 'sent'` and `created_at` checks inside is what stops it being "set
  * any message to sent at any timestamp", which in a billing table is the whole
@@ -144,7 +144,7 @@ export function repairFromSesStatement(
  * Rows we call `sent` that SES has never confirmed.
  *
  * The opposite direction, and it is a correctness question rather than a
- * billing one — we are billing for these, so being wrong means over-charging.
+ * billing one - we are billing for these, so being wrong means over-charging.
  *
  * ⚠ IT IS REPORTED, NEVER REPAIRED. There are three explanations and they need
  * different answers: the event destination is misconfigured and no events are
@@ -173,8 +173,8 @@ export function billedButUnconfirmedStatement(from: Date, limit: number): SQL {
  * ⚠ THE ALARMING ONE, AND IT IS NEVER AUTO-CREATED. A row cannot be invented
  * from an event: the event carries no sender, no recipients, no body and no api
  * key, so anything written would be a fabricated billing record. It means
- * either something sent mail outside this pipeline — which is a security
- * finding, not an accounting one — or a message row was lost, which is a
+ * either something sent mail outside this pipeline - which is a security
+ * finding, not an accounting one - or a message row was lost, which is a
  * database problem. Both want a human.
  *
  * `message_events` has no foreign key to `messages` by design, so this is
@@ -212,13 +212,13 @@ export interface SesReconcileReport {
  * Whether a run is worth waking somebody for.
  *
  * ⚠ `unbilled` ALONE IS ROUTINE. The at-least-once design guarantees a trickle
- * of them, and the repair is the system working as intended — paging on it
+ * of them, and the repair is the system working as intended - paging on it
  * would train everyone to ignore this job.
  *
  * The other two are not routine. `orphaned` means mail left the account without
  * a record. A large `unconfirmed` count means the event destination has
  * probably stopped delivering, which quietly disables the `unbilled` detection
- * as well — so the failure hides the failure, and that is worth an alert on its
+ * as well - so the failure hides the failure, and that is worth an alert on its
  * own.
  */
 export function needsAttention(

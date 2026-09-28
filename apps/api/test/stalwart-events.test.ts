@@ -15,7 +15,7 @@ import {
  * The direct route's delivery events.
  *
  * ⚠ THE SHAPES HERE ARE READ OUT OF STALWART'S SOURCE, NOT GUESSED. `data`
- * carries the event's own keys merged with its SPAN's keys — the collector
+ * carries the event's own keys merged with its SPAN's keys - the collector
  * attaches the open `delivery.attempt-start` span to every event sharing its
  * span id, and the webhook serializer is built `.with_spans()`. That is why
  * `from` (the VERP envelope, and our only join key) appears on an event that
@@ -69,7 +69,7 @@ describe("verifying a Stalwart notification", () => {
    * verifier in this repository uses, and `signing.ts` warns at length that
    * keying with the printable form is the mistake that looks correct from
    * inside this codebase. Here it is the other way round, so someone tidying
-   * this file into line with its neighbours would break it — and the symptom is
+   * this file into line with its neighbours would break it - and the symptom is
    * a 403 on a signature that is demonstrably right, which sends you looking at
    * Stalwart rather than at the key.
    */
@@ -181,8 +181,8 @@ describe("interpreting a Stalwart event", () => {
 
   /**
    * ⚠ `to` IS A LIST ON THE EVENTS THAT INHERIT IT FROM THE SPAN.
-   * `delivery.message-rejected` sets no recipient of its own — the receiver
-   * refused the message, not an address — so the span's list is what arrives.
+   * `delivery.message-rejected` sets no recipient of its own - the receiver
+   * refused the message, not an address - so the span's list is what arrives.
    */
   it("reads a recipient list as well as a single recipient", () => {
     const many = interpretStalwartEvent(
@@ -215,7 +215,7 @@ describe("interpreting a Stalwart event", () => {
 /**
  * ⚠ THE BUG THIS PREVENTS IS A SECOND BOUNCE FOR ONE FAILURE. Stalwart's event
  * `id` is `{timestamp}{counter}{typeId}`, and the counter is a PROCESS-GLOBAL
- * ATOMIC INCREMENTED WHEN THE BATCH IS SERIALISED — not a property of the event.
+ * ATOMIC INCREMENTED WHEN THE BATCH IS SERIALISED - not a property of the event.
  * A failed POST puts the same events back on the pending list, and the next
  * batch serialises them again with fresh counter values. Keying the dedupe on
  * that id would turn every retry into a second `email.bounced`, a second
@@ -256,7 +256,7 @@ describe("the dedupe key", () => {
 
   /**
    * ⚠ THE COLUMN IS SHARED WITH SNS. `source_event_id` holds Amazon's message
-   * ids too, and an unprefixed hash could in principle collide with one — which
+   * ids too, and an unprefixed hash could in principle collide with one - which
    * would silently discard a real event as a duplicate.
    */
   it("is namespaced so it cannot collide with an SNS message id", () => {
@@ -268,7 +268,7 @@ describe("the dedupe key", () => {
 
 /**
  * ⚠ A SUPPRESSION IS PERMANENT AND SILENT FROM THE CUSTOMER'S SIDE, so the bar
- * for writing one is evidence about the ADDRESS — not about the message, and
+ * for writing one is evidence about the ADDRESS - not about the message, and
  * not about the receiver having a bad week.
  */
 describe("what suppresses an address", () => {
@@ -345,7 +345,7 @@ describe("what the customer receives", () => {
 
   /**
    * ⚠ `from` IS NULL RATHER THAN THE ENVELOPE. Stalwart reports the return
-   * path, which is our VERP bounce address — not the customer's `From:` header.
+   * path, which is our VERP bounce address - not the customer's `From:` header.
    * Echoing it into a field a customer reads as the sender would be worse than
    * omitting it.
    */

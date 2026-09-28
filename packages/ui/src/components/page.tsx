@@ -6,12 +6,12 @@ import { cn } from "cn"
  *
  * ⚠ IT EXISTS SO THAT NO PAGE DECIDES ITS OWN MARGINS. Twenty screens each
  * picking `px-6` or `px-8` for themselves is how a dashboard ends up with a
- * title that moves two pixels when you change tab — which nobody can name but
+ * title that moves two pixels when you change tab - which nobody can name but
  * everybody feels. The horizontal padding, the max width and the gap between a
  * title and its content are properties of the CONSOLE, set once, here.
  *
  * ⚠ AND THERE IS NO `maxWidth` PROP. A log table wants the full viewport and a
- * settings form wants a readable measure, which is a real difference — but it
+ * settings form wants a readable measure, which is a real difference - but it
  * is a difference between KINDS of page, so it belongs in `PageBody`'s
  * `width` variant where there are three named answers, rather than in a number
  * each page passes and gets slightly wrong.
@@ -65,7 +65,7 @@ export function PageTitle({ className, ...props }: React.ComponentProps<"h1">) {
        * ⚠ `font-display` IS THE DISPLAY FACE, AND IT IS SAFE TO APPLY BEFORE THE
        * FILE EXISTS. `--font-display` falls back to Geist's own stack (see
        * styles/tokens.css), so until something is published to cdn.i10.tech this
-       * renders exactly as it did — and the day it is published, every page
+       * renders exactly as it did - and the day it is published, every page
        * title in the console changes with it and nothing else does.
        */
       className={cn("font-display text-xl font-semibold tracking-tight", className)}
@@ -97,9 +97,9 @@ export function PageActions({ className, ...props }: React.ComponentProps<"div">
 /**
  * The scrolling region.
  *
- * `full` — tables and logs, which want every pixel of width.
- * `wide` — dashboards and record lists: roomy, still bounded.
- * `prose` — settings and forms, bounded to a readable measure.
+ * `full` - tables and logs, which want every pixel of width.
+ * `wide` - dashboards and record lists: roomy, still bounded.
+ * `prose` - settings and forms, bounded to a readable measure.
  */
 export function PageBody({
   className,
@@ -126,7 +126,7 @@ export function PageBody({
  * ⚠ NOT A `Card`. Settings are a list of things you can change, and wrapping
  * each one in a raised surface turns a list into a stack of boxes with more
  * border than content. A heading, a description and a rule is the same
- * structure with none of the weight — which is what Resend, Attio and Vercel's
+ * structure with none of the weight - which is what Resend, Attio and Vercel's
  * own settings all do.
  */
 export function Section({ className, ...props }: React.ComponentProps<"section">) {

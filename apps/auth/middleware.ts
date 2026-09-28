@@ -6,8 +6,8 @@ import { clerkMiddleware } from "@clerk/nextjs/server"
  * ⚠ EVERY ROUTE HERE IS PUBLIC, AND THAT IS THE POINT RATHER THAN AN OVERSIGHT.
  * This app exists to be reachable by someone who is not signed in; protecting
  * any of it would be a door that locks from the outside. `clerkMiddleware` is
- * still needed — it is what puts a Clerk context on the request so the sign-in
- * and sign-up flows can run at all — but nothing calls `auth.protect()`.
+ * still needed - it is what puts a Clerk context on the request so the sign-in
+ * and sign-up flows can run at all - but nothing calls `auth.protect()`.
  *
  * ⚠ THE KEYS ARE UNPREFIXED AND READ AT RUNTIME. Next inlines `NEXT_PUBLIC_*`
  * at BUILD time, server code included, so a prefixed key absent from the CI
@@ -20,7 +20,7 @@ export default clerkMiddleware({
    * ⚠ `secretKey` IS DELIBERATELY NOT PASSED, AND PASSING IT CRASHES THE APP.
    * Handing `clerkMiddleware` an explicit secret puts it in "dynamic keys"
    * mode, where the key is encrypted and propagated from the middleware to the
-   * server runtime — which requires `CLERK_ENCRYPTION_KEY`. Without one it
+   * server runtime - which requires `CLERK_ENCRYPTION_KEY`. Without one it
    * throws `encryption_key_missing` on EVERY request, so the pod starts,
    * answers 500 to everything including its own probe, and never goes ready.
    * The guard is literally `if (requestData.secretKey && !ENCRYPTION_KEY)`.

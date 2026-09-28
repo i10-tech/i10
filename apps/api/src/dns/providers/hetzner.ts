@@ -16,7 +16,7 @@ import { DNS_USER_AGENT } from "../user-agent.js"
  *
  * ⚠ THE THIRD SHAPE: A PASTED TOKEN, NOT AN OAUTH GRANT. It is here so the
  * connect flow is exercised on a provider with no OAuth application to register
- * — which is most of the registry, and all of the providers a small customer
+ * - which is most of the registry, and all of the providers a small customer
  * actually uses. If every adapter had been an OAuth one, the token path would
  * have gone untested until the first person pasted a key.
  *
@@ -46,7 +46,7 @@ async function call<T>(
    * ⚠ READ BEFORE THE `try`, AND THAT IS NOT A STYLE CHOICE. `tokenOf` throws
    * `unauthorized` for a credential that has lost its token, and inside the
    * block below that throw is caught by the network handler and re-wrapped as
-   * `unavailable` — so a connection that can only be fixed by reconnecting
+   * `unavailable` - so a connection that can only be fixed by reconnecting
    * reports itself as a Hetzner outage, the console says "try again", and
    * trying again produces the identical failure for ever. The port's own note
    * on `DnsWriteFailure` is about exactly this collapse, in the other
@@ -213,7 +213,7 @@ export function hetznerWriter(): ZoneWriter {
 /**
  * ⚠ HETZNER HAS NO `priority` FIELD; AN MX PRIORITY GOES IN THE VALUE. Sending
  * it as a separate key is silently dropped and produces an MX record with
- * priority 0 — which is valid, deliverable, and not what was asked for.
+ * priority 0 - which is valid, deliverable, and not what was asked for.
  *
  * ⚠ AND A HOSTNAME TARGET GETS A TRAILING DOT, for the same reason it does at
  * DigitalOcean: an unqualified target is relative to the zone.

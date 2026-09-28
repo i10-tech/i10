@@ -6,13 +6,13 @@ import { apiKeys, domains, onboarding } from "../db/core.js"
  * Where a tenant is in onboarding, and whether to send them there.
  *
  * ⚠ THE ROW DECIDES WHERE WE *SEND* SOMEBODY, NEVER WHERE THEY MAY GO.
- * `/onboarding` is a route anyone can open at any time — that is a requirement,
+ * `/onboarding` is a route anyone can open at any time - that is a requirement,
  * not an accident, because the flow re-runs after an upgrade. Anything that
  * treated `completed_at` as a permission would make that impossible and the
  * bug would present as "the upgrade did nothing".
  *
  * ⚠ AND `shouldOnboard` READS THE WORLD, NOT ONLY THE ROW. A tenant with a
- * verified domain and a live API key is onboarded whatever this table says —
+ * verified domain and a live API key is onboarded whatever this table says -
  * somebody who set everything up through the API and then opened the console
  * for the first time must not be walked through creating what they already
  * have. The row is a hint that makes the common case one query; the facts
@@ -30,7 +30,7 @@ export interface OnboardingState {
   use_case: string | null
   /** Whether the console should redirect on arrival. See `shouldOnboard`. */
   should_onboard: boolean
-  /** What the redirect decision was based on — rendered in the console. */
+  /** What the redirect decision was based on - rendered in the console. */
   facts: {
     has_domain: boolean
     has_verified_domain: boolean
@@ -87,14 +87,14 @@ export function onboardingStore(db: Database, freePlanId = "free"): OnboardingSt
            * ⚠ A RE-OPENED FLOW RESTARTS AT `domain`, NOT WHERE IT LEFT OFF.
            * `complete` stamps `step: "plan"`, so a tenant coming back after an
            * upgrade would be dropped on the last screen of a wizard they have
-           * already finished — which looks exactly like the upgrade having done
+           * already finished - which looks exactly like the upgrade having done
            * nothing. `workspace` would be wrong in the other direction: their
            * workspace exists, and walking them through naming it is theatre.
            *
            * ⚠ AND IT IS DERIVED HERE RATHER THAN WRITTEN BY THE BILLING
            * WEBHOOK, WHICH IS WHY THERE IS NO `reopenOnUpgrade`. A write-path
            * version of this rule is a SECOND implementation of it that only
-           * runs if the webhook landed — so a missed delivery left somebody
+           * runs if the webhook landed - so a missed delivery left somebody
            * upgraded, correctly told to onboard, and pointed at the wrong step.
            * One rule, evaluated on read, cannot disagree with itself.
            */
@@ -180,7 +180,7 @@ export function shouldOnboard(input: {
    * one asks "did they just buy something", and those are different questions
    * with different answers for the same tenant. Somebody with a verified domain
    * and a live key who upgrades from free is, by every other test here, already
-   * onboarded — and is also exactly the person with a new allowance they have
+   * onboarded - and is also exactly the person with a new allowance they have
    * not seen, which is the screen the flow ends on. Putting the facts shortcut
    * first meant the most engaged customers were the ones the upgrade flow never
    * ran for.
@@ -192,7 +192,7 @@ export function shouldOnboard(input: {
    * domain they configured six months ago, is an insult dressed as a wizard.
    *
    * ⚠ AND IT REQUIRES `completedAt`, so this cannot fire for somebody who has
-   * never finished the flow — they are caught by the branch below and start at
+   * never finished the flow - they are caught by the branch below and start at
    * the beginning rather than at the end.
    */
   if (
@@ -206,7 +206,7 @@ export function shouldOnboard(input: {
 
   /*
    * ⚠ THE FACTS WIN OVER THE ROW. Somebody who set everything up through the
-   * API and has never opened the console has no onboarding row at all — the
+   * API and has never opened the console has no onboarding row at all - the
    * naive check ("no row means not onboarded") would greet an established
    * customer with a wizard asking them to add their first domain. A verified
    * domain and a live key IS being onboarded, whoever did it and however.

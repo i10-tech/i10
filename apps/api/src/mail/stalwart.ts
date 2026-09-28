@@ -14,8 +14,8 @@ import type { MailboxStorage } from "./storage.js"
  *
  * ⚠ THE `x:` PREFIX IS THE REGISTRY'S NAMESPACE AND IT IS NOT OPTIONAL.
  * `Account/get` answers `unknownMethod`; `x:Account/get` returns the object.
- * The schema at `/api/schema` names every registry type this way — `x:Account`,
- * `x:Account/User`, `x:Account/Group` — while the RFC types (`Mailbox`,
+ * The schema at `/api/schema` names every registry type this way - `x:Account`,
+ * `x:Account/User`, `x:Account/Group` - while the RFC types (`Mailbox`,
  * `Principal`) carry no prefix. A vendor extension can be renamed between
  * releases, so a bump of the Stalwart image is a reason to re-run the probe.
  *
@@ -27,7 +27,7 @@ import type { MailboxStorage } from "./storage.js"
 
 /**
  * ⚠ AND THE SESSION'S OWN `apiUrl` IS DELIBERATELY IGNORED. It advertises
- * `https://mail.i10.tech/jmap/`, which is the public hostname — and Traefik
+ * `https://mail.i10.tech/jmap/`, which is the public hostname - and Traefik
  * routes only autoconfig, autodiscover and MTA-STS to this pod, so every one of
  * those requests 404s. A conforming JMAP client follows `apiUrl`; ours must
  * not. `baseUrl` is the in-cluster service and stays authoritative.
@@ -39,7 +39,7 @@ export interface StalwartOptions {
    * An admin credential, sent as `Bearer`.
    *
    * ⚠ NOT A USER'S PASSWORD, AND THERE IS NO PATH THAT WOULD LET IT BE ONE.
-   * The RFC 9425 route — `Quota/get` — is scoped to the authenticated account,
+   * The RFC 9425 route - `Quota/get` - is scoped to the authenticated account,
    * and we never hold a user's password, because the whole authd
    * bind-delegation design exists so that we do not. The registry is the only
    * source that answers for accounts other than the caller's own.
@@ -101,8 +101,8 @@ export function stalwartStorage(opts: StalwartOptions): MailboxStorage {
       if (!first) throw new Error("stalwart returned no method response")
 
       // ⚠ A JMAP ERROR IS A 200 WITH `error` IN THE SLOT WHERE THE METHOD NAME
-      // GOES. Checking response.ok alone would read `unknownMethod` — the exact
-      // failure this file was shipped with once — as a successful empty result.
+      // GOES. Checking response.ok alone would read `unknownMethod` - the exact
+      // failure this file was shipped with once - as a successful empty result.
       if (first[0] === "error") {
         const detail = first[1]
         throw new Error(
@@ -164,7 +164,7 @@ export function stalwartStorage(opts: StalwartOptions): MailboxStorage {
 
           // ⚠ A GROUP HAS NO `usedDiskQuota` AND THAT IS STRUCTURAL, NOT A
           // FAILURE. `x:Account` is a union: the `User` variant carries the
-          // field, the `Group` variant does not have it at all — a group is a
+          // field, the `Group` variant does not have it at all - a group is a
           // delivery target with no store of its own. Treating the absence as
           // an error, which this file used to, would abort a whole tenant's
           // sample over a mailing list.
@@ -176,8 +176,8 @@ export function stalwartStorage(opts: StalwartOptions): MailboxStorage {
           const bytes = account[USED_DISK_QUOTA]
 
           // ⚠ A MISSING PROPERTY ON A USER IS A FAILURE, NOT A ZERO. It means
-          // the shape is not what we expect — a renamed property, a changed
-          // variant tag — and every one of those reads as "uses no space" if it
+          // the shape is not what we expect - a renamed property, a changed
+          // variant tag - and every one of those reads as "uses no space" if it
           // is allowed to fall through, which grants the whole allowance to
           // everybody, silently, in the direction nobody reports.
           if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {

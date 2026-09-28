@@ -30,14 +30,14 @@ import type { WebhookEndpoint } from "@/lib/types"
  *
  * ⚠ THE SIGNING SECRET IS SHOWN ONCE, LIKE AN API KEY, AND FOR THE SAME REASON:
  * the API stores it encrypted and never returns it again. Without it a customer
- * cannot verify that a POST came from us — which means either they trust
+ * cannot verify that a POST came from us - which means either they trust
  * anything that hits the URL, or their handler stops working. The dialog says
  * so rather than assuming they know.
  *
  * ⚠ AND EVERY EVENT IS SELECTED BY DEFAULT. The common case is "tell me
  * everything"; making somebody tick six boxes to get the obvious outcome is
  * friction for its own sake, and an endpoint created with none selected
- * silently receives nothing — which looks exactly like a broken webhook.
+ * silently receives nothing - which looks exactly like a broken webhook.
  */
 export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }) {
   const [open, setOpen] = React.useState(autoOpen)
@@ -52,7 +52,7 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
   /*
    * ⚠ CLEARED ON OPEN, NOT ON CLOSE. It used to run on close, so the URL and
    * the ticked events emptied in front of the person while the dialog was
-   * still fading out — and the secret panel collapsed back to the form in the
+   * still fading out - and the secret panel collapsed back to the form in the
    * same frame. See `useResetOnOpen`.
    */
   useResetOnOpen(open, () => {
@@ -76,8 +76,8 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
 
     let endpoint: WebhookEndpoint | null = null
     /*
-     * ⚠ THE TICK FIRST, THEN THE SECRET. The form confirms in place — button,
-     * green fields — and after the hold the dialog slides on to the one thing
+     * ⚠ THE TICK FIRST, THEN THE SECRET. The form confirms in place - button,
+     * green fields - and after the hold the dialog slides on to the one thing
      * that has to be copied. Jumping straight to the secret skipped the "that
      * worked" beat and hard-cut one panel for another of a different height.
      */
@@ -127,7 +127,7 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
                   <DialogTitle>Copy your signing secret</DialogTitle>
                   <DialogDescription>
                     Use it to verify that a request came from us. It is stored encrypted
-                    and cannot be shown again — rotate it if you lose it.
+                    and cannot be shown again - rotate it if you lose it.
                   </DialogDescription>
                 </DialogHeader>
 
@@ -168,7 +168,7 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
                     check={httpsUrlProblem}
                     required="Enter the URL to post to."
                     autoFocus
-                    hint="Must be HTTPS and publicly reachable. Localhost will not work — use a tunnel while developing."
+                    hint="Must be HTTPS and publicly reachable. Localhost will not work - use a tunnel while developing."
                   />
 
                   <FloatingInput

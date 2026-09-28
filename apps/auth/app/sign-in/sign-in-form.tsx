@@ -31,7 +31,7 @@ import type { SsoProvider } from "../_lib/providers"
  * behaviour rather than taste: the two placeholder `<a href="#">` links now go
  * somewhere, the single hard-coded GitHub button became the providers we
  * actually enabled, and the form submits instead of reloading the page. Nothing
- * was restyled — a block edited for taste on arrival is a block that can no
+ * was restyled - a block edited for taste on arrival is a block that can no
  * longer be diffed against upstream.
  *
  * ⚠ THERE IS ONE `busy` FOR THE WHOLE PAGE, NOT ONE PER BUTTON, AND THAT IS THE
@@ -78,7 +78,7 @@ export function SignInForm({
    * NOT ANSWER IT. `signIn` arrives from a signals wrapper that exists before
    * clerk-js does and carries no readiness of its own, so a truthy `signIn`
    * does NOT mean `window.Clerk` is there to install onto. `useAuth` is the
-   * hook that re-renders when it is — see the autofill effect below, which must
+   * hook that re-renders when it is - see the autofill effect below, which must
    * not arm until that install has actually landed.
    */
   const { isLoaded } = useAuth()
@@ -87,7 +87,7 @@ export function SignInForm({
   /**
    * Email first, password second.
    *
-   * ⚠ THE SPLIT IS NOT COSMETIC — IT IS WHAT LETS THE SECOND SCREEN BE
+   * ⚠ THE SPLIT IS NOT COSMETIC - IT IS WHAT LETS THE SECOND SCREEN BE
    * CORRECT. `signIn.create({ identifier })` answers with the factors this
    * particular account actually supports, so somebody who has only ever used a
    * passkey is not shown a password box they have never filled in, and an SSO
@@ -97,7 +97,7 @@ export function SignInForm({
    * ⚠ AND IT DOES DISCLOSE WHETHER AN ADDRESS HAS AN ACCOUNT, which is the
    * honest cost of this pattern and worth writing down rather than discovering.
    * Clerk answers `form_identifier_not_found` for an unknown identifier, so the
-   * first step is an enumeration oracle — the same one Google, Apple and Clerk's
+   * first step is an enumeration oracle - the same one Google, Apple and Clerk's
    * own hosted pages accept. It is a deliberate trade for a flow that can route
    * to the right factor, not an oversight.
    */
@@ -115,7 +115,7 @@ export function SignInForm({
 
   /*
    * ⚠ READ IN AN EFFECT, NOT DURING RENDER. It comes from `localStorage`, which
-   * the server does not have — reading it inline renders one thing on the
+   * the server does not have - reading it inline renders one thing on the
    * server and another in the browser, which React reports as a hydration
    * mismatch and resolves by discarding the markup.
    */
@@ -124,12 +124,12 @@ export function SignInForm({
   /**
    * Offer a saved passkey without anybody asking.
    *
-   * ⚠ `autofill`, NOT `discoverable` — the opposite of `provePasskey` below. This
+   * ⚠ `autofill`, NOT `discoverable` - the opposite of `provePasskey` below. This
    * is WebAuthn conditional mediation: the browser quietly checks whether it
    * holds a passkey for this site and, if it does, offers it inside the email
    * field's own autofill menu. It must be armed BEFORE the person touches
    * anything, which is why it runs in an effect rather than behind a button,
-   * and it pairs with `autoComplete="username webauthn"` on that input — drop
+   * and it pairs with `autoComplete="username webauthn"` on that input - drop
    * either half and the prompt never appears.
    *
    * ⚠ AND EVERY FAILURE HERE IS SILENT ON PURPOSE. Nobody asked for this: a
@@ -152,7 +152,7 @@ export function SignInForm({
      * ⚠ INSTALLED BEFORE THE REQUEST IT HAS TO BE ABLE TO CANCEL, AND THE ORDER
      * IS THE WHOLE FIX. The call below stays pending for the life of the
      * document, and an unknown address turns this page into a sign-up WITHOUT
-     * navigating — so four steps later `createPasskey()` meets Chromium's
+     * navigating - so four steps later `createPasskey()` meets Chromium's
      * "A request is already pending." Whoever owns the controller when the
      * request is armed owns it for good, so arming first would leave it
      * un-abortable. See _lib/webauthn.
@@ -197,7 +197,7 @@ export function SignInForm({
     /*
      * ⚠ NOTHING CHECKS THE SHAPE HERE ANY MORE, AND THAT IS NOT A REGRESSION.
      * `ValidatedInput` refuses its own form's submit before React's handler is
-     * reached, so this runs only for an address that is worth a round trip —
+     * reached, so this runs only for an address that is worth a round trip -
      * see @repo/ui/components/validated-field. It used to be four lines here,
      * four more in the sign-up form, and none at all anywhere else.
      *
@@ -207,7 +207,7 @@ export function SignInForm({
      * border under somebody's username would be the form refusing a credential
      * that works. Checked against the instance: `email_address` is the sole
      * attribute with `used_for_first_factor`. If a username is ever switched
-     * on, the `check` on the field has to go or learn about it — see
+     * on, the `check` on the field has to go or learn about it - see
      * _lib/environment.ts.
      */
     const value = identifier.trim()
@@ -219,7 +219,7 @@ export function SignInForm({
         /*
          * ⚠ "NO SUCH ACCOUNT" IS THE OTHER ANSWER, NOT AN ERROR. On a page with
          * one box serving both doors, an unknown address is how somebody says
-         * they are new — and a red toast telling them so, on a form that then
+         * they are new - and a red toast telling them so, on a form that then
          * sits there unchanged, is the interface refusing to do the obvious
          * next thing.
          */
@@ -247,12 +247,12 @@ export function SignInForm({
    *
    * ⚠ `/passkey` WAS A WHOLE SCREEN WHOSE ONLY CONTENT WAS A BUTTON THAT CALLED
    * THIS. A navigation, a render and a second decision in front of something
-   * that is one tap — and the heading it showed ("Your device will ask for your
+   * that is one tap - and the heading it showed ("Your device will ask for your
    * fingerprint") was describing a dialog the person could not see yet, because
    * it does not open until they press the thing on the next screen down. The
    * button belongs where the choice is made.
    *
-   * ⚠ `discoverable`, NOT `autofill`. Autofill is the other flow — the browser
+   * ⚠ `discoverable`, NOT `autofill`. Autofill is the other flow - the browser
    * quietly offering a passkey inside the email box the moment the page loads,
    * which is armed in the effect above and needs an input to attach to. This one
    * opens on demand because somebody pressed a button, and the two must not be
@@ -269,7 +269,7 @@ export function SignInForm({
         /*
          * ⚠ NOT `messageFor`, WHICH SHOWED CLERK'S DEVELOPER STRING VERBATIM.
          * A passkey failure is a `ClerkWebAuthnError`, so there is no `errors`
-         * array to read and `message` is what came back — including the
+         * array to read and `message` is what came back - including the
          * `(code="…")` brackets `ClerkError` appends. Somebody who pressed
          * Cancel on their own Touch ID sheet was shown a link to the WebAuthn
          * spec and two error codes.
@@ -309,7 +309,7 @@ export function SignInForm({
        * ⚠ THE CATCH IS LOAD-BEARING HERE, UNLIKE ON THE PASSWORD FORM. A passkey
        * prompt is WebAuthn: dismissing the sheet, or a browser with no
        * authenticator at all, rejects at the platform level rather than coming
-       * back as a Clerk error — and an unhandled rejection would leave this
+       * back as a Clerk error - and an unhandled rejection would leave this
        * stuck on "Waiting for your device…" for the rest of the session.
        *
        * ⚠ AND IT IS CLASSIFIED RATHER THAN CALLED A NETWORK PROBLEM. It used to
@@ -331,7 +331,7 @@ export function SignInForm({
     const form = new FormData(event.currentTarget)
     setBusy("password")
 
-    // ⚠ AN ATTEMPT, NOT A RESULT — promoted only once a session exists. A wrong
+    // ⚠ AN ATTEMPT, NOT A RESULT - promoted only once a session exists. A wrong
     // password must not teach the badge that a password is what works here.
     markSignInAttempt("password")
 
@@ -339,7 +339,7 @@ export function SignInForm({
       const { error } = await signIn.password({
         // ⚠ PASSED AGAIN RATHER THAN RELYING ON THE SIGN-IN CREATED ABOVE.
         // Clerk will use the in-progress attempt's identifier when this is
-        // omitted, which works — until the attempt is garbage-collected by a
+        // omitted, which works - until the attempt is garbage-collected by a
         // reload or a second tab, and then the password lands on nothing with
         // an error that reads like a wrong password.
         identifier: identifier.trim(),
@@ -355,7 +355,7 @@ export function SignInForm({
       if (signIn.status === "complete") {
         /*
          * ⚠ `finalize` IS WHAT CREATES THE SESSION, and the helper is what gets
-         * the browser out of here — see _lib/finish.ts for why the destination
+         * the browser out of here - see _lib/finish.ts for why the destination
          * is `replace`d and why the navigation is not left entirely to Clerk's
          * callback. The lock is deliberately NOT released on this path: the
          * page is leaving, and re-enabling a "Login" button for the second or
@@ -375,7 +375,7 @@ export function SignInForm({
       // ⚠ `needs_client_trust` IS NOT AN ERROR AND IS NOT RARE. It is Clerk's
       // device-trust step: the password was right, and the instance wants this
       // BROWSER proved with an emailed code before it hands over a session.
-      // Treating it as unsupported — which this did — makes correct
+      // Treating it as unsupported - which this did - makes correct
       // credentials answer "contact support" on a fresh device, which is every
       // first sign-in.
       if (
@@ -386,14 +386,14 @@ export function SignInForm({
         // resumes THIS `signIn` out of Clerk's client state; a full page load
         // would start a fresh client with no attempt in progress and bounce the
         // person back to the beginning, having already given their password.
-        // The lock stays on for the same reason as above — this page is going
+        // The lock stays on for the same reason as above - this page is going
         // away.
         router.push(mfaHref)
         return
       }
 
       // ⚠ ANYTHING ELSE IS A DEAD END *TODAY*, AND IT SAYS SO RATHER THAN
-      // FAILING QUIETLY. `needs_new_password` — an admin forcing a change — is
+      // FAILING QUIETLY. `needs_new_password` - an admin forcing a change - is
       // the notable one still unhandled. Leaving the button spinning would be
       // the worst option; naming the state at least tells support what
       // happened.
@@ -420,11 +420,11 @@ export function SignInForm({
        * a fixed heading above the swap would leave one line of the card
        * stationary while everything under it moved, which reads as the page
        * partially failing to update. The whole panel is one object changing
-       * state — see @repo/ui/components/step-stage.
+       * state - see @repo/ui/components/step-stage.
        */}
       {/*
        * ⚠ OUTSIDE THE STAGE, so the step swap cannot unmount it mid-prompt. It
-       * covers the page while the operating system's own dialog is open — see
+       * covers the page while the operating system's own dialog is open - see
        * _components/passkey-cue.tsx, which came off the deleted `/passkey` page.
        */}
       {busy === "passkey" ? <PasskeyCue /> : null}
@@ -437,7 +437,7 @@ export function SignInForm({
                * ⚠ THE COPY FOLLOWS WHETHER THIS PAGE IS BOTH DOORS. With a
                * handler for an unknown address the box serves people who have
                * no account yet, and "Login to your account" tells half of them
-               * they are in the wrong place — which, on a page that was about
+               * they are in the wrong place - which, on a page that was about
                * to sign them up, is the one sentence that sends them away.
                *
                * ⚠ AND THE BOTH-DOORS HEADING CARRIES NO SUBTITLE, BECAUSE THE
@@ -464,13 +464,13 @@ export function SignInForm({
                * rather than `FloatingInput` growing a `badge` prop. This is the
                * only field in the product that carries one, and a prop on the
                * shared component would be an API every other call site has to
-               * ignore — see @repo/ui/components/floating-field, which is
+               * ignore - see @repo/ui/components/floating-field, which is
                * already carrying more geometry than it wants to.
                *
                * ⚠ AND IT IS ON THE EMAIL BOX, NOT ONLY ON THE BUTTON TWO STEPS
                * LATER. Somebody who signed in with a password last time is
                * looking at this field, deciding between it and the provider
-               * buttons above — which is the moment the hint is worth anything.
+               * buttons above - which is the moment the hint is worth anything.
                * By the password step they have already chosen.
                */}
               <div className="relative">
@@ -544,7 +544,7 @@ export function SignInForm({
                   type="button"
                   variant="outline"
                   size="xl"
-                  // The positioning context for the chip below — see
+                  // The positioning context for the chip below - see
                   // oauth-buttons, which carries the same class for the same
                   // reason.
                   className="relative"
@@ -563,7 +563,7 @@ export function SignInForm({
                       {/*
                        * ⚠ THE PASSKEY PATH RECORDS ITSELF NOW, so it can carry
                        * the badge like every other method. `provePasskey` calls
-                       * `markSignInAttempt("passkey")` on success — without
+                       * `markSignInAttempt("passkey")` on success - without
                        * that this button was the one way in that never became
                        * "last used", which is the worst one to forget: somebody
                        * who signs in with a passkey has no password to fall
@@ -577,7 +577,7 @@ export function SignInForm({
               {/*
                * ⚠ "DON'T HAVE AN ACCOUNT? SIGN UP" IS GONE, AND ITS ABSENCE IS
                * THE POINT OF THE PAGE. It asked somebody to answer a question
-               * the box below is about to answer for them — and answering it
+               * the box below is about to answer for them - and answering it
                * wrong was the whole failure mode: a returning customer who
                * clicked it got "that address is taken", a new one who did not
                * got "no such account". Typing the address is the answer.
@@ -592,7 +592,7 @@ export function SignInForm({
                 {/*
                  * ⚠ THE ADDRESS IS A BUTTON, NOT A LINE OF TEXT. Somebody who
                  * mistyped their email on the previous step has no other way
-                 * back — the browser's back button leaves Clerk's sign-in
+                 * back - the browser's back button leaves Clerk's sign-in
                  * attempt behind and produces a confusing half-state. Making the
                  * thing they want to change the thing they can click is the
                  * shortest route, and it is where they are already looking.
@@ -619,7 +619,7 @@ export function SignInForm({
                 /*
                  * ⚠ NO `check`, DELIBERATELY. Signing IN, the only thing wrong
                  * with a password is that it is not the right one, and only
-                 * Clerk knows that — a policy check here would redden a
+                 * Clerk knows that - a policy check here would redden a
                  * correct password chosen before the rules were tightened.
                  */
                 required="Enter your password."
@@ -646,15 +646,15 @@ export function SignInForm({
 
               {/*
                * ⚠ NO "Last used" CHIP HERE, AND ITS ABSENCE IS THE POINT. The
-               * email box two steps back already carries it — see the note
-               * there — and by this screen the choice is made: the address is
+               * email box two steps back already carries it - see the note
+               * there - and by this screen the choice is made: the address is
                * typed, the provider buttons are gone, and this is the only
                * control on the page. A hint about which method to pick, shown
                * after the method has been picked, annotates nothing.
                *
                * ⚠ AND SHOWING IT IN BOTH PLACES WAS WORSE THAN SHOWING IT IN
                * THE WRONG ONE. One fact, announced twice on the way through a
-               * single flow, reads as two different facts — the second one
+               * single flow, reads as two different facts - the second one
                * arriving next to a password field invites "last used… what,
                * this password?", which is not what it records.
                */}
@@ -683,7 +683,7 @@ export function SignInForm({
        * ⚠ OUTSIDE THE STAGE, SO IT IS NEVER UNMOUNTED. Clerk's bot protection
        * mounts itself into this exact id and its absence is a silent failure:
        * with Smart CAPTCHA on and no `#clerk-captcha` in the DOM, Clerk rejects
-       * the attempt rather than challenging it — which is what
+       * the attempt rather than challenging it - which is what
        * `authorization_invalid` from FAPI turned out to be. Inside the step
        * swap it would be torn out from under Clerk halfway through the flow.
        *

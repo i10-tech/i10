@@ -10,7 +10,7 @@ import type { DomainIdentity } from "../src/domains/identity.js"
  *
  * ⚠ THE FIRST HALF OF THIS FILE PINS A DELIBERATE REVERSAL. `core.domains.name`
  * used to be unique across every tenant, which meant the first account to TYPE a
- * name held it for ever — publishing nothing, proving nothing. Anybody could
+ * name held it for ever - publishing nothing, proving nothing. Anybody could
  * register for free and take `spotify.com` away from Spotify, and the real owner
  * hit "That domain is already registered" with no route past it and no way to
  * see what was in the way. Migration 0039 moved the exclusivity onto
@@ -57,7 +57,7 @@ const violation = (constraint: string) =>
 /**
  * ⚠ `claim` IS A SEPARATE HANDLER BECAUSE `remove` NOW ASKS TWO QUESTIONS. It
  * reads the domain row, and then reads `core.delegations` to find out whether
- * this row is the one actually being served — answering both from one handler
+ * this row is the one actually being served - answering both from one handler
  * fed the claim lookup a domain row, whose `domainId` is undefined, so every
  * delegated delete looked like a tenant that held nothing.
  *
@@ -76,19 +76,19 @@ function fakeDb(handlers: {
    * it still type-checks, and so an unexpected query gets a harmless row.
    */
   taken?: boolean
-  /** `core.verified_holder` — the workspace a challenger has to displace. */
+  /** `core.verified_holder` - the workspace a challenger has to displace. */
   holder?: () => unknown[]
   /**
    * ⚠ `list` READS THROUGH `orderBy` AND `get` THROUGH `limit`, WHICH IS THE
-   * ONLY THING THAT TELLS THEM APART HERE. `releaseDomains` calls both — the
-   * list to find the domains, then one `get` per domain inside `remove` — and
+   * ONLY THING THAT TELLS THEM APART HERE. `releaseDomains` calls both - the
+   * list to find the domains, then one `get` per domain inside `remove` - and
    * a fake that answered them from one handler could not express "this tenant
    * holds two domains", which is the whole case worth testing.
    */
   many?: () => unknown[]
   /** Every `update(...).set(values)`, so a displacement can be observed. */
   onSet?: (values: Record<string, unknown>) => void
-  /** Every raw statement, with its parameters — `set_config` included. */
+  /** Every raw statement, with its parameters - `set_config` included. */
   onExecute?: (text: string, params: unknown[]) => void
   /** Every `insert(...).values(values)`. */
   onInsert?: (values: Record<string, unknown>) => void
@@ -101,7 +101,7 @@ function fakeDb(handlers: {
        * ⚠ `core.zone_owner` IS DERIVED FROM THE SAME `claim` HANDLER THESE
        * TESTS ALREADY SET, so each one keeps the intent it was written with.
        * `remove` used to read the claim through drizzle and now asks a definer
-       * function instead — because the honest question spans tenants and a
+       * function instead - because the honest question spans tenants and a
        * row-level-security read cannot see the other workspaces holding a name.
        * Modelling it as a separate fixture would have meant every existing test
        * silently exercising the "nobody owns this" branch.
@@ -178,7 +178,7 @@ const base = {
   /**
    * ⚠ WITHOUT THIS THESE TESTS RESOLVE `example.com` ON THE REAL INTERNET.
    * `verify` proves ownership before it registers an SES identity, and the
-   * store's default lookup is a live resolver — so the result would depend on
+   * store's default lookup is a live resolver - so the result would depend on
    * the test runner's network. It answers with the fixture's own DKIM key,
    * which is exactly what a manual domain proves ownership with.
    */
@@ -237,7 +237,7 @@ describe("losing the race to verify", () => {
    * ⚠ TWO TENANTS MAY BOTH HOLD A NAME AS PENDING; ONLY ONE MAY VERIFY IT. The
    * loser's UPDATE hits the partial unique index. Before this was handled the
    * exception escaped as a 500, so the console's Verify button answered "500"
-   * for ever with nothing anywhere saying why — which is indistinguishable from
+   * for ever with nothing anywhere saying why - which is indistinguishable from
    * the button being broken.
    */
   it("reports a conflict instead of throwing, and does not mark it verified", async () => {
@@ -251,7 +251,7 @@ describe("losing the race to verify", () => {
         update: () => {
           attempt += 1
           // ⚠ EVERY ATTEMPT COLLIDES: somebody else keeps verifying in the gap.
-          // One retry, then the conflict — never a loop.
+          // One retry, then the conflict - never a loop.
           throw violation("domains_verified_name_unique")
         },
       }),
@@ -267,7 +267,7 @@ describe("losing the race to verify", () => {
     // verification FAILED sends somebody to break DNS that is correct.
     expect(outcome.status === "claimed" && outcome.domain.status).toBe("pending")
     expect(attempt).toBe(2)
-    // ⚠ AND THE FINAL STAMP DOES NOT CLEAR `displaced_at` — this row does not
+    // ⚠ AND THE FINAL STAMP DOES NOT CLEAR `displaced_at` - this row does not
     // hold the name.
     expect(sets.at(-1)).not.toHaveProperty("displacedAt")
   })
@@ -286,14 +286,14 @@ describe("deleting a domain whose cleanup fails", () => {
   /**
    * ⚠ THE ROW IS GONE BEFORE EITHER TIDY RUNS, SO NEITHER MAY FAIL THE DELETE.
    * SES answers NotFoundException for an identity that was never successfully
-   * created, which is every domain added while that call was failing — so this
+   * created, which is every domain added while that call was failing - so this
    * is not a hypothetical path.
    */
   /**
    * ⚠ AT `error`, NOT `warn`, AND THAT IS THE HALF THAT WAS MISSING. This line
    * fired in production twice, saying precisely what had happened, while the
    * leak was being reported as "deleting the domain does not remove it from
-   * SES" — because `warn` reaches the pod log and nothing else. An identity
+   * SES" - because `warn` reaches the pod log and nothing else. An identity
    * left behind is live, billable and still able to send for a domain nobody
    * owns, which is not the same class of leak as a zone that stops answering
    * when the delegation lapses.
@@ -343,7 +343,7 @@ describe("deleting a domain whose cleanup fails", () => {
 
     // ⚠ AND IT IS WRITTEN DOWN. Nothing is broken for the customer, but an
     // identity we failed to remove is a real leak that somebody has to
-    // reconcile — and it is invisible unless it is logged.
+    // reconcile - and it is invisible unless it is logged.
     expect(warn).toHaveBeenCalledTimes(1)
   })
 
@@ -352,7 +352,7 @@ describe("deleting a domain whose cleanup fails", () => {
     const store = domainStore({
       ...base,
       // ⚠ AND THIS TENANT HOLDS THE CLAIM, which is now what decides whether
-      // the zones are theirs to remove at all — see `delegations_name_unique`.
+      // the zones are theirs to remove at all - see `delegations_name_unique`.
       db: fakeDb({
         select: () => [row({ delegated: true })],
         claim: () => [{ domainId: ID }],
@@ -375,7 +375,7 @@ describe("deleting a domain whose cleanup fails", () => {
   /**
    * ⚠ THE SES IDENTITY IS KEYED BY NAME ACROSS THE WHOLE AWS ACCOUNT, AND THIS
    * IS THE HOLE THAT MADE A DELETE CROSS-TENANT. Several workspaces may hold
-   * one name as pending — migration 0039 exists to allow it — so a workspace
+   * one name as pending - migration 0039 exists to allow it - so a workspace
    * that never verified anything could delete its own pending row and take out
    * the identity another workspace is SENDING from. Their mail stops, their
    * console says nothing, and the cause is a delete in an account they have
@@ -428,7 +428,7 @@ describe("deleting a domain whose cleanup fails", () => {
 
   /**
    * ⚠ AND THE GUARD MUST NOT BECOME A LEAK. Failing closed on every delete
-   * would leave an identity in AWS for every domain anybody ever removed —
+   * would leave an identity in AWS for every domain anybody ever removed -
    * inert, billable, and enough to block the name being re-added cleanly. The
    * holder being THIS row is the ordinary case and has to still go.
    */
@@ -472,7 +472,7 @@ describe("deleting a domain whose cleanup fails", () => {
  *
  * ⚠ NOTHING DID THIS, AND WHAT SURVIVED WAS LIVE. Termination marks the tenant
  * `deleted` rather than deleting the row, so the `on delete cascade` on
- * `domains.tenant_id` never fires — leaving a verified SES identity per domain
+ * `domains.tenant_id` never fires - leaving a verified SES identity per domain
  * and our own nameservers still answering for every delegated one, serving
  * DKIM keys and return paths for an account that no longer exists.
  */
@@ -515,7 +515,7 @@ describe("releasing a terminated workspace's domains", () => {
     /*
      * ⚠ THREE ZONES, NOT SIX, AND THAT IS THE GUARD WORKING RATHER THAN A
      * MISCOUNT. Only the domain that actually holds the delegation claim gives
-     * up its zones — the fake grants the claim to `ID` alone — so the bulk path
+     * up its zones - the fake grants the claim to `ID` alone - so the bulk path
      * keeps the per-domain check that stops one workspace's delete taking
      * another's DNS. A bulk teardown with its own copy of this logic is exactly
      * what `releaseDomains` refuses to be.
@@ -568,7 +568,7 @@ describe("refusing a duplicate without touching SES", () => {
    * ⚠ THE REFUSAL USED TO COST THE OTHER TENANT THEIR DKIM KEY, which is a far
    * worse bug than the orphaned identity it looked like. SES keys identities on
    * the domain name inside one AWS account, so `CreateEmailIdentity` for a name
-   * somebody else holds raises `AlreadyExistsException` — and the adapter's
+   * somebody else holds raises `AlreadyExistsException` - and the adapter's
    * recovery is `PutEmailIdentityDkimSigningAttributes`, which REPLACES their
    * signing key with ours. The verified tenant then signs with a key their DNS
    * does not publish and their working domain breaks, because a stranger typed

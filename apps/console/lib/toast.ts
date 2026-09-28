@@ -9,7 +9,7 @@ import { toast } from "sonner"
  * Twenty call sites each writing their own `toast.error(String(e))` is twenty
  * chances to put a stack trace, an internal hostname or a database constraint
  * name on somebody's screen. The message this renders has already been through
- * `safeFailure` on the server (see lib/failure.ts) — this end decides only how
+ * `safeFailure` on the server (see lib/failure.ts) - this end decides only how
  * it is presented.
  *
  * ⚠ THE TITLE IS DERIVED FROM THE STATUS AND THE MESSAGE IS THE DESCRIPTION,
@@ -27,8 +27,8 @@ export interface Failure {
 
 /**
  * ⚠ KEYED ON `name` FIRST AND `status` SECOND, BECAUSE THE API'S NAMES ARE THE
- * PRECISE SIGNAL AND THE STATUS IS THE FALLBACK. Two different 409s —
- * `domain_already_exists` and `domain_already_claimed` — need different titles,
+ * PRECISE SIGNAL AND THE STATUS IS THE FALLBACK. Two different 409s -
+ * `domain_already_exists` and `domain_already_claimed` - need different titles,
  * and the status cannot tell them apart. See packages/contracts/src/errors.ts.
  */
 const TITLES: Record<string, string> = {
@@ -79,8 +79,8 @@ export function toastDone(message: string, description?: string): void {
 
 /**
  * ⚠ WARNING, NOT ERROR, AND THE DISTINCTION IS THE YELLOW/RED ONE. Something
- * that has not finished — a verification still propagating, a checkout waiting
- * on a webhook — is not a failure, and colouring it red teaches people to read
+ * that has not finished - a verification still propagating, a checkout waiting
+ * on a webhook - is not a failure, and colouring it red teaches people to read
  * red as "probably fine". Yellow means "not yet"; red means "no".
  */
 export function toastPending(message: string, description?: string): void {

@@ -14,8 +14,8 @@ import { cn } from "cn"
  * every keystroke, they have to work on uncontrolled inputs, and routing them
  * through React would mean a re-render per character for an effect the
  * compositor can do alone. None of that is true here. An EXIT animation is the
- * thing React genuinely cannot express — a component that has been removed is
- * already gone from the DOM, so there is nothing left to animate — and a
+ * thing React genuinely cannot express - a component that has been removed is
+ * already gone from the DOM, so there is nothing left to animate - and a
  * container that morphs to its new content's height needs a measurement taken
  * before the swap and applied after it. Hand-rolling those is a `ResizeObserver`
  * and a FLIP implementation; `AnimatePresence` and `layout` are what that
@@ -23,7 +23,7 @@ import { cn } from "cn"
  *
  * ⚠ `mode="popLayout"` IS THE WHOLE TRICK, AND THE DEFAULT IS WRONG HERE. With
  * the default `sync`, the outgoing pane keeps its space in the layout while it
- * fades, so the wrapper first grows to fit BOTH panes and then shrinks — a
+ * fades, so the wrapper first grows to fit BOTH panes and then shrinks - a
  * visible lurch in the middle of an animation whose entire purpose is to remove
  * one. `popLayout` takes the exiting pane out of flow immediately, so the
  * wrapper only ever has one pane's height to animate to.
@@ -39,14 +39,14 @@ import { cn } from "cn"
  * A tweened swap always takes its full time; a spring carries velocity, so
  * somebody clicking Next twice quickly gets one continuous movement rather than
  * an animation that restarts. `damping: 38` against `stiffness: 420` is just
- * under critical — enough overshoot to read as weight, not enough to read as
+ * under critical - enough overshoot to read as weight, not enough to read as
  * bounce.
  */
 const SPRING: Transition = { type: "spring", stiffness: 420, damping: 38, mass: 1 }
 
 /**
  * ⚠ 12px OF TRAVEL, NOT A FULL WIDTH. A pane that slides the width of the card
- * is a page transition, and it makes a four-step form feel like four screens —
+ * is a page transition, and it makes a four-step form feel like four screens -
  * which is the feeling this exists to remove. Twelve pixels plus a fade reads as
  * the same card changing its mind.
  */
@@ -77,7 +77,7 @@ export function StepStage({
    * Which way the panes slide.
    *
    * ⚠ IT IS A PROP RATHER THAN DERIVED FROM A STEP INDEX, because "back" is not
-   * always a smaller number — a flow that branches (add a passkey, skip to the
+   * always a smaller number - a flow that branches (add a passkey, skip to the
    * end) has steps that are neither forward nor backward of each other, and
    * inferring direction from an ordering that does not exist gets it wrong
    * exactly when somebody has done something unusual.
@@ -87,7 +87,7 @@ export function StepStage({
    * Whether this box morphs its own size.
    *
    * ⚠ OFF INSIDE `AutoHeight`, WHICH ALREADY OWNS THE HEIGHT. Two animations
-   * on one box — Motion's layout transform here and a real height there —
+   * on one box - Motion's layout transform here and a real height there -
    * scale the same content twice, and the transform half distorts borders
    * while it runs.
    */

@@ -20,7 +20,7 @@ import type { IncomingTransfer } from "@/lib/types"
  * Answering an offer: which workspace it lands in, then yes or no.
  *
  * ⚠ THE DESTINATION IS CHOSEN HERE, NOT BY THE SENDER. The offer is to a
- * person, and a person can be in several workspaces — including the sender's,
+ * person, and a person can be in several workspaces - including the sender's,
  * which the API has already left out of the list because the domain is there.
  *
  * ⚠ AND AFTER ACCEPTING, THE CONSOLE SWITCHES TO THAT WORKSPACE. Otherwise the

@@ -50,8 +50,8 @@ spec:
           #
           # Left alone, the server resolves that pod name and binds to whatever
           # comes back. Under Node that was the pod's IPv4; under bun it is the
-          # IPv6 address, so the container listened on tcp6 ONLY — `/proc/net/tcp`
-          # was empty — while kubelet dialled the pod's IPv4 and got
+          # IPv6 address, so the container listened on tcp6 ONLY - `/proc/net/tcp`
+          # was empty - while kubelet dialled the pod's IPv4 and got
           # `connection refused`. The pod logs "Ready in 0ms" and looks perfectly
           # healthy, the readiness probe never passes, liveness then restarts it,
           # and the Deployment sits Degraded forever with the previous ReplicaSet
@@ -76,7 +76,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            # Numeric, matching the Dockerfile's USER — see api.yaml.
+            # Numeric, matching the Dockerfile's USER - see api.yaml.
             runAsUser: 1001
             runAsGroup: 1001
             capabilities: { drop: ["ALL"] }

@@ -1,7 +1,7 @@
 -- Taking a domain back from a holder who can no longer prove they own it.
 --
 -- ⚠ PROOF WAS ONE-SHOT, AND DOMAINS CHANGE HANDS. A workspace that proved
--- `example.com` in March keeps the claim and the verified badge for ever — the
+-- `example.com` in March keeps the claim and the verified badge for ever - the
 -- registration can lapse, somebody else can buy it, and nothing in this system
 -- ever asks again. The new owner adds the domain, publishes everything
 -- correctly, and is told the name belongs to another workspace; the previous
@@ -11,7 +11,7 @@
 -- ⚠ SO A CLAIM IS CONTESTABLE, AND THE CONTEST IS DECIDED BY DNS RATHER THAN BY
 -- SUPPORT. A challenger who proves ownership causes the incumbent to be
 -- RE-CHECKED against the same public DNS. If the incumbent still proves it,
--- nothing moves — two workspaces of one company both holding the records is a
+-- nothing moves - two workspaces of one company both holding the records is a
 -- tie, and a tie never grants anything. If the incumbent cannot, the domain
 -- moves to whoever can, which is the only answer that stays true as ownership
 -- changes.
@@ -19,7 +19,7 @@
 -- ⚠ ALL THREE FUNCTIONS ARE SECURITY DEFINER FOR THE SAME REASON THE REST ARE:
 -- `core.domains` is under row level security, so a challenger's own query for
 -- the incumbent returns nothing by construction. They return the minimum needed
--- to RE-RUN A DNS CHECK and never reach a customer — the console sees an
+-- to RE-RUN A DNS CHECK and never reach a customer - the console sees an
 -- outcome, never a row.
 
 -- The workspace currently being SERVED for a delegated name.
@@ -82,8 +82,8 @@ GRANT EXECUTE ON FUNCTION "core"."verified_holder"(text) TO i10_api;
 -- Stand a holder down, because public DNS no longer says the domain is theirs.
 --
 -- ⚠ `failed`, NOT A DELETE, AND NOT `pending`. Their row, their DKIM key and
--- their history stay exactly where they are — we are not entitled to delete a
--- customer's domain because somebody else proved it — but it stops being
+-- their history stay exactly where they are - we are not entitled to delete a
+-- customer's domain because somebody else proved it - but it stops being
 -- verified, which is what gates sending. `failed` is also honest in the words
 -- the console already uses: their records genuinely no longer resolve.
 --
@@ -116,7 +116,7 @@ GRANT EXECUTE ON FUNCTION "core"."displace_domain"(uuid) TO i10_api;
 -- ⚠ A SINGLE ABSENT READING MUST NEVER DEMOTE ANYBODY, which is why this column
 -- exists rather than the sweep acting on what it sees. A customer migrating
 -- between DNS providers, editing a zone, or briefly mis-pasting a record would
--- otherwise lose a verified domain — and with it the ability to send — because
+-- otherwise lose a verified domain - and with it the ability to send - because
 -- of a lookup that happened during the ninety seconds their zone was wrong.
 --
 -- ⚠ AND IT IS DELIBERATELY NOT SYMMETRIC WITH THE CONTEST PATH, which demotes
@@ -129,8 +129,8 @@ ALTER TABLE "core"."domains" ADD COLUMN "proof_missing_since" timestamptz;
 -- The verified domains whose proof has not been checked recently.
 --
 -- ⚠ SECURITY DEFINER AND CROSS-TENANT ON PURPOSE, like `sweep_stuck_messages`.
--- A periodic re-check has no tenant context by definition — it is asking a
--- question about every customer at once — and RLS would answer "no domains".
+-- A periodic re-check has no tenant context by definition - it is asking a
+-- question about every customer at once - and RLS would answer "no domains".
 -- It returns only what is needed to RE-RUN A DNS CHECK.
 CREATE FUNCTION "core"."domains_due_recheck"(p_before timestamptz, p_limit int)
 RETURNS TABLE (

@@ -1,8 +1,8 @@
 -- The domains waiting on SES, so that something asks again.
 --
 -- ⚠ NOTHING EVER ASKED A SECOND TIME, AND A DOMAIN SES HAD VERIFIED SAT
--- `pending` IN OUR TABLE FOR EVER. `core.domains_due_recheck` — the only
--- background reader of this table — selects `WHERE status = 'verified'`,
+-- `pending` IN OUR TABLE FOR EVER. `core.domains_due_recheck` - the only
+-- background reader of this table - selects `WHERE status = 'verified'`,
 -- because its job is re-proving ownership of domains that already passed. A
 -- domain that has NOT passed is not in it, so the only things that ever move a
 -- row from `pending` to `verified` are a human pressing Verify at the moment
@@ -11,7 +11,7 @@
 --
 -- ⚠ AND THE CONSEQUENCE WAS NOT COSMETIC. SES verifies on its own schedule and
 -- tells nobody; once it has, it will happily send. So a customer's mail went
--- out and was delivered while our dashboard said the domain was pending — we
+-- out and was delivered while our dashboard said the domain was pending - we
 -- were simply wrong about our own state, for as long as the row lived. It also
 -- makes the send gate dangerous: refusing on `verified_at` is only correct if
 -- something keeps `verified_at` current.
@@ -44,7 +44,7 @@ AS $$
    WHERE d.verified_at IS NULL
      -- ⚠ AN IDENTITY MUST EXIST TO ASK ABOUT. `not_started` is the state of a
      -- row whose ownership has never been proved, so `CreateEmailIdentity` has
-     -- never been called for it — asking SES would raise `NotFoundException`
+     -- never been called for it - asking SES would raise `NotFoundException`
      -- for every domain anybody ever abandoned half-way through.
      AND d.status <> 'not_started'
      AND d.created_at > p_created_after

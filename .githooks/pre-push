@@ -20,7 +20,7 @@
 #
 # ⚠ `test` AND `build` ARE DELIBERATELY NOT HERE. They are the slow ones, they
 # are the ones people already run while working, and a pre-push that takes a
-# minute is a pre-push that gets bypassed — at which point it protects nothing.
+# minute is a pre-push that gets bypassed - at which point it protects nothing.
 # CI still runs all four.
 #
 # Skip it with `git push --no-verify` when you genuinely need to.
@@ -30,7 +30,7 @@ set -euo pipefail
 # ⚠ NEVER IN CI. GitHub Actions checks out a real repository and runs
 # `bun install`, so `prepare` sets `core.hooksPath` there too. Nothing in CI
 # pushes today, but a release workflow that did would run this hook inside the
-# job that already has its own lanes for these checks — paying for them twice
+# job that already has its own lanes for these checks - paying for them twice
 # and, worse, failing a release on a check that has its own red X elsewhere.
 if [ -n "${CI:-}" ]; then
   exit 0
@@ -46,7 +46,7 @@ fi
 
 # ⚠ OUTPUT IS CAPTURED AND SHOWN ONLY ON FAILURE. Turbo prints a few hundred
 # lines for a successful `lint` or `check-types`, and a hook that dumps that on
-# every push trains people to stop reading it — at which point the one time it
+# every push trains people to stop reading it - at which point the one time it
 # says something useful scrolls past unread. Silence on success, the full log on
 # failure.
 log="$(mktemp -t pre-push)"
@@ -79,7 +79,7 @@ MESSAGE
 # ⚠ FIRST, BECAUSE IT IS THE ONE NOTHING ELSE CATCHES. Each Dockerfile copies a
 # hand-maintained list of workspace manifests before `bun install
 # --frozen-lockfile`. Add a package, depend on it, forget the COPY line, and
-# lint, types, tests and `bun run build` all still pass — they run against the
+# lint, types, tests and `bun run build` all still pass - they run against the
 # real repository, where the package is on disk. The image build fails, and only
 # on a push to `main`, which is after the merge. See the script's own note.
 step "image manifests" check-images \

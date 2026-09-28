@@ -3,7 +3,7 @@
 -- ⚠ THE TRANSACTIONAL LEVER IS A TYPESCRIPT DECISION AND THIS ONE CANNOT BE.
 -- `stalwartTransport` picks a route before submitting, because our worker owns
 -- that message. Mailbox mail is submitted by a person's mail client straight
--- into Stalwart's queue — no code of ours is in that path — so the only place
+-- into Stalwart's queue - no code of ours is in that path - so the only place
 -- left to decide is Stalwart itself, and the only way to ask us is a query.
 -- `MtaOutboundStrategy.route` is an expression evaluated PER RECIPIENT and it is
 -- awaited, so `sql_query` works there. Verified against stalwart v0.16:
@@ -22,7 +22,7 @@
 -- domain's override and the tenant's plan are rows; `SES_ENABLED` and
 -- `METERING_FREE_PLAN_ID` are environment variables read by the API and the
 -- worker. A function Stalwart calls cannot read our pods' environment, so
--- without this table the mailbox lever would have to hardcode the other two —
+-- without this table the mailbox lever would have to hardcode the other two -
 -- and the kill switch would move transactional mail while leaving human mail
 -- pointed at the thing that is down. "One rule, three readers" would stop being
 -- true exactly when it mattered most.
@@ -30,7 +30,7 @@
 -- ⚠ THE ENVIRONMENT STAYS THE AUTHORED SOURCE; THIS IS A PROJECTION OF IT. The
 -- API upserts this row at boot from its own env (see src/index.ts), so there is
 -- still one place a human edits. The drift window is the gap between a Doppler
--- change and the API rolling — which is the same window the API itself has, so
+-- change and the API rolling - which is the same window the API itself has, so
 -- this introduces no staleness that did not already exist.
 CREATE TABLE "core"."routing_settings" (
   -- ⚠ A ONE-ROW TABLE, ENFORCED BY THE PRIMARY KEY RATHER THAN BY CONVENTION. A
@@ -64,8 +64,8 @@ INSERT INTO "core"."routing_settings" ("id") VALUES (true) ON CONFLICT DO NOTHIN
 
 -- ⚠ RLS ON WITH A `true` POLICY, WHICH IS A DELIBERATE EXCEPTION AND NOT AN
 -- OVERSIGHT. Every other policy in `core` reads `current_setting('app.tenant_id')`
--- because every other table holds tenant data. This holds none — it is global
--- configuration — so there is nothing to scope it by. Enabling RLS anyway keeps
+-- because every other table holds tenant data. This holds none - it is global
+-- configuration - so there is nothing to scope it by. Enabling RLS anyway keeps
 -- the invariant "every table in `core` has RLS" true, so an audit that checks for
 -- it does not have to carry an exception list.
 ALTER TABLE "core"."routing_settings" ENABLE ROW LEVEL SECURITY;
@@ -86,7 +86,7 @@ GRANT SELECT, INSERT, UPDATE ON "core"."routing_settings" TO i10_api;
 -- AND THAT IS THE RISK THIS WHOLE BLOCK EXISTS TO MANAGE. The rule has to run
 -- inside Postgres because Stalwart asks Postgres; it has to run in TypeScript
 -- because the dashboard renders it and the API answers with it. Two
--- implementations of one rule drift, and the drift is silent — the dashboard
+-- implementations of one rule drift, and the drift is silent - the dashboard
 -- says `ses` while the mail goes direct, and nobody finds out until somebody
 -- compares them by hand.
 --
@@ -155,7 +155,7 @@ END $$;
 -- Returns the NAME OF A ROUTE, because that is what the expression's result is
 -- used for: `eval_if::<String>` then `get_route_or_default(name)`.
 --
---   `mx`         a built-in — deliver to the recipient's MX ourselves.
+--   `mx`         a built-in - deliver to the recipient's MX ourselves.
 --   `ses-relay`  an `MtaRoute` object defining SES's SMTP endpoint as a smart
 --                host. See infra/k8s/i10/stalwart/config/README.md; it is NOT in
 --                plan.ndjson yet because it needs SES SMTP credentials.
@@ -164,7 +164,7 @@ END $$;
 -- SAFE TO SHIP BEFORE THE RELAY EXISTS. `get_route_or_default` in
 -- crates/common/src/network/mta.rs answers `MX_GATEWAY` for a name it cannot
 -- resolve and logs `Smtp(IdNotFound)`. So the worst case is mail leaving the way
--- it leaves today, with a line in the log — not mail stuck in a queue.
+-- it leaves today, with a line in the log - not mail stuck in a queue.
 --
 -- ⚠ AND `ses_relay_enabled` DEFAULTS FALSE, so this returns `mx` for everybody
 -- until somebody turns it on. Shipping the lever does not move any mail.
@@ -173,14 +173,14 @@ END $$;
 -- THAT IS THE TRAP IN THIS WHOLE FEATURE. `QueueEnvelope::resolve_variable` maps
 -- `SenderDomain` to `return_path.domain_part()`. For human mail that is the
 -- sender's own domain, which is what we want. For OUR OWN transactional mail on
--- the direct route it is `bounce.<domain>` — the VERP envelope — which is not a
+-- the direct route it is `bounce.<domain>` - the VERP envelope - which is not a
 -- row in `core.domains` at all.
 --
 -- ⚠ WHICH MATTERS BECAUSE THIS EXPRESSION SEES EVERY MESSAGE IN THE QUEUE,
 -- INCLUDING OURS. A transactional message our worker already decided to send
 -- direct must not be re-routed onto SES here: it would leave with a VERP return
 -- path SES does not own, break the SPF alignment the direct route was built for,
--- and be signed twice. The `hosts_mailboxes` join is what prevents it — a
+-- and be signed twice. The `hosts_mailboxes` join is what prevents it - a
 -- `bounce.` subdomain matches no row, and a domain that only sends is not a
 -- mailbox domain either, so both answer `mx` and the worker's decision stands.
 CREATE FUNCTION "core"."mailbox_route"(p_sender_domain text)
@@ -193,7 +193,7 @@ AS $$
   SELECT CASE
     -- No relay configured, or SES switched off entirely: carry it ourselves.
     WHEN s.ses_enabled IS NOT TRUE OR s.ses_relay_enabled IS NOT TRUE THEN 'mx'
-    -- Not a domain we host mailboxes for — including every `bounce.` VERP
+    -- Not a domain we host mailboxes for - including every `bounce.` VERP
     -- subdomain our own transactional mail leaves under. See above.
     WHEN d.name IS NULL THEN 'mx'
     WHEN core.resolve_route(d.mailbox_route::text, pa.plan_id, s.free_plan_id, s.ses_enabled)
@@ -211,7 +211,7 @@ $$;
 --> statement-breakpoint
 
 -- ⚠ TO `stalwart`, THE ROLE THAT ALREADY EXISTS AND ALREADY HAS CONNECT ON THIS
--- DATABASE. Creating a role here is not possible — `CREATE ROLE` needs CREATEROLE
+-- DATABASE. Creating a role here is not possible - `CREATE ROLE` needs CREATEROLE
 -- and migrations connect as `i10`, which does not have it; that is exactly how
 -- 0023 failed on its first real run and blocked four migrations behind it.
 --

@@ -36,7 +36,7 @@ import { handleBatch } from "./worker/handle-batch.js"
  * The send worker.
  *
  * ⚠ THE SAME IMAGE AS THE API, RUN WITH A DIFFERENT COMMAND. There is no
- * separate Dockerfile and no extra entry in the build matrix — the deployment
+ * separate Dockerfile and no extra entry in the build matrix - the deployment
  * runs `node dist/worker.js`, exactly as the migration Job runs
  * `node dist/migrate.js`. It shares the database client, the environment schema
  * and the contracts for free, and the two scale independently because they are
@@ -62,7 +62,7 @@ initObservability({
 /**
  * ⚠ IDENTIFIES THE CLAIM, AND IT MUST BE UNIQUE PER PROCESS. It is written to
  * `claimed_by`, and `markSent` refuses to record a result for a row it does not
- * still hold — two replicas sharing an id would each accept the other's
+ * still hold - two replicas sharing an id would each accept the other's
  * completions, which is the one way the compare-and-swap can be defeated from
  * inside. The pod name is the natural value; the uuid is the fallback that
  * cannot collide.
@@ -75,7 +75,7 @@ const { sql, db } = createDb(env.DATABASE_URL)
 
 // ⚠ BEFORE ANY WORK, FOR THE SAME REASON THE API DOES IT. Connecting as a role
 // that bypasses row level security removes the tenant boundary and everything
-// keeps working — no error, no wrong answer, just a worker that can read every
+// keeps working - no error, no wrong answer, just a worker that can read every
 // tenant's mail.
 try {
   await assertRlsSubject(sql, log)
@@ -90,7 +90,7 @@ try {
 
 // ⚠ THE QUEUE CLIENT, NOT THE CACHE ONE, AND THE DIFFERENCE IS THE WHOLE POINT
 // OF THERE BEING TWO. `createCacheClient` sets `enableOfflineQueue: false` so a
-// command issued while disconnected fails instead of waiting — correct for a
+// command issued while disconnected fails instead of waiting - correct for a
 // cache, where a miss costs nothing. This process exists to drain a queue, so
 // the same policy means a Redis blip drops queue commands on the floor.
 //
@@ -99,7 +99,7 @@ try {
 // connection, and every worker restart threw "Stream isn't writeable and
 // enableOfflineQueue options is false" out of `startWorker`. The startup race
 // was the visible half; the silent half was every transient blip after it.
-// index.ts always had this right — see the note on `queueRedis` there.
+// index.ts always had this right - see the note on `queueRedis` there.
 const queueRedis = createQueueClient(env.REDIS_URL)
 queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
 
@@ -123,8 +123,8 @@ let relayPool: SmtpTransport | null = null
  *
  * ⚠ IT REFUSES RATHER THAN FALLS BACK TO SES, AND THAT IS THE WHOLE POINT OF
  * BUILDING IT THIS WAY. A stub that quietly sent through SES would mean a
- * domain pinned to `direct` — including every free tenant once the plan rule
- * applies — leaving by the route somebody deliberately moved it off, with
+ * domain pinned to `direct` - including every free tenant once the plan rule
+ * applies - leaving by the route somebody deliberately moved it off, with
  * nothing in the logs saying so and `sent_route` recording `direct` either way.
  * `deferred` keeps the message in the queue with its attempt counted, so
  * nothing is lost and the backlog is what raises the alarm.
@@ -142,7 +142,7 @@ function directTransport(): Transport {
       !env.WEBHOOK_SECRET_KEY && "WEBHOOK_SECRET_KEY",
     ].filter(Boolean)
 
-    log.warn({ missing }, "DIRECT ROUTE UNAVAILABLE — messages routed direct will wait")
+    log.warn({ missing }, "DIRECT ROUTE UNAVAILABLE - messages routed direct will wait")
     return {
       async send() {
         return {
@@ -166,7 +166,7 @@ function directTransport(): Transport {
     mailer: relayPool,
     // ⚠ SMTP CAN TAKE A MESSAGE AND STILL REFUSE SOME OF ITS RECIPIENTS, and
     // before upyo we could not see it happen. `warn` rather than `error`: the
-    // message was delivered to everyone else, so this is not a failed send — it
+    // message was delivered to everyone else, so this is not a failed send - it
     // is the only record that somebody on the envelope did not get it.
     onRejectedRecipients: ({ messageId, tenantId, recipients }) =>
       log.warn(
@@ -203,7 +203,7 @@ const routeFor = (message: ClaimedMessage): DeliveryRoute =>
   })
 
 // ⚠ THE WORKER METERS TOO, AND ITS HALF IS THE ONE THAT BILLS. The API checks
-// quota; this records what actually went — and it writes to the same
+// quota; this records what actually went - and it writes to the same
 // `core.meter_events` the API reads, on the same connection pool, so there is
 // no longer a second system that can be configured differently in the two
 // processes.
@@ -247,7 +247,7 @@ function startWorker(cls: SendClass) {
         reportError: captureError,
         concurrency: env.WORKER_CONCURRENCY,
       }),
-    // ⚠ BATCHES AT ONCE, NOT MESSAGES AT ONCE — TWO DIFFERENT NUMBERS THAT BOTH
+    // ⚠ BATCHES AT ONCE, NOT MESSAGES AT ONCE - TWO DIFFERENT NUMBERS THAT BOTH
     // WANT TO BE CALLED CONCURRENCY. `WORKER_CONCURRENCY` above is the fan-out
     // INSIDE one batch; this is how many batches this worker will hold at the
     // same time, and groupmq defaults it to 1.
@@ -255,7 +255,7 @@ function startWorker(cls: SendClass) {
     // ⚠ AND LEAVING IT AT 1 REINTRODUCES THE BLOCKING THE QUEUE SPLIT EXISTS TO
     // PREVENT. groupmq already serialises per group, so one batch at a time
     // across ALL groups means tenant B's password reset waits behind the whole
-    // of tenant A's batch — head-of-line blocking between tenants, which no
+    // of tenant A's batch - head-of-line blocking between tenants, which no
     // amount of per-group ordering was ever meant to allow. The webhook worker
     // below always set this; the send workers never did.
     //
@@ -267,16 +267,16 @@ function startWorker(cls: SendClass) {
     // ⚠ THE HANDLER OWNS RETRIES, NOT groupmq. A message that failed is already
     // back in `queued` with its attempt counted, and the row is the record. If
     // groupmq also retried the JOB, the same batch would be re-claimed and the
-    // two retry schedules would compound — so the job's own attempts exist only
+    // two retry schedules would compound - so the job's own attempts exist only
     // for the case where the handler itself throws.
     //
     // ⚠ THE SAME VALUE AS THE QUEUE ABOVE, AND IT HAS TO COME FROM ONE PLACE.
     // groupmq checks the Worker's budget first (`handleJobFailure`) and
     // `retry.lua` enforces the job's stamped one as a ceiling, so two different
-    // numbers give an effective budget equal to the smaller — which was 3
+    // numbers give an effective budget equal to the smaller - which was 3
     // against the API's 5, stated nowhere.
     maxAttempts: env.WORKER_MAX_ATTEMPTS,
-    // ⚠ REPORTED, UNLIKE THE WEBHOOK WORKER'S — see the note there. The handler
+    // ⚠ REPORTED, UNLIKE THE WEBHOOK WORKER'S - see the note there. The handler
     // already puts a failed message back in `queued` with its attempt counted,
     // so reaching here means the handler ITSELF threw, which is our bug rather
     // than a provider being slow.
@@ -296,17 +296,17 @@ function startWorker(cls: SendClass) {
  *
  * ⚠ THE SAME PROCESS AS THE SEND WORKER, AND A DIFFERENT QUEUE. Both are
  * I/O-bound waits on somebody else's server, so a second Deployment would cost
- * a pod to save nothing — and one process means one place where a slow
+ * a pod to save nothing - and one process means one place where a slow
  * shutdown, a Redis reconnect or a database pool problem has to be got right.
  *
  * ⚠ AND IT IS ABSENT RATHER THAN BROKEN WHEN THERE IS NO KEY. Without
  * `WEBHOOK_SECRET_KEY` the stored secrets cannot be decrypted, so there is
- * nothing to sign with — starting a worker that would fail every delivery
+ * nothing to sign with - starting a worker that would fail every delivery
  * would fill the failure counters and disable every customer's endpoint.
  */
 function startWebhookWorker() {
   if (!env.WEBHOOK_SECRET_KEY) {
-    log.warn({}, "WEBHOOK DELIVERY DISABLED — no WEBHOOK_SECRET_KEY")
+    log.warn({}, "WEBHOOK DELIVERY DISABLED - no WEBHOOK_SECRET_KEY")
     return null
   }
 
@@ -329,11 +329,11 @@ function startWebhookWorker() {
     maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
     // ⚠ HOW MANY ENDPOINTS ARE IN FLIGHT AT ONCE, NOT HOW MANY EVENTS PER
     // ENDPOINT. groupmq runs one job per group, so this is a count of distinct
-    // customer endpoints being POSTed to concurrently — every one of them a
+    // customer endpoints being POSTed to concurrently - every one of them a
     // ten-second wait on somebody else's server, which is why it is worth
     // being higher than the send worker's.
     concurrency: env.WEBHOOK_CONCURRENCY,
-    // ⚠ ON THE WORKER, NOT THE QUEUE — groupmq ignores it on the latter. See
+    // ⚠ ON THE WORKER, NOT THE QUEUE - groupmq ignores it on the latter. See
     // queue/webhook-queue.ts.
     backoff: webhookBackoff,
     // Deliberately quiet: a customer's endpoint being down is their operational
@@ -362,7 +362,7 @@ const workers = [
  * ⚠ STOP TAKING WORK, THEN LET WHAT IS IN FLIGHT FINISH. Kubernetes sends
  * SIGTERM and waits `terminationGracePeriodSeconds` before SIGKILL. A worker
  * killed mid-send leaves rows in `sending` that nothing releases until the
- * stale-claim timeout — mail that is late by minutes rather than seconds, and
+ * stale-claim timeout - mail that is late by minutes rather than seconds, and
  * a duplicate if the provider had in fact accepted it. Closing cleanly is what
  * keeps an ordinary deploy from generating both.
  */
@@ -370,7 +370,7 @@ const workers = [
  * ⚠ AND groupmq's OWN DEFAULT IS 30 SECONDS, WHICH SILENTLY DEFEATED ALL OF THE
  * ABOVE. `close()` with no argument waits `gracefulTimeoutMs = 30_000`, then
  * logs a warning, emits `graceful-timeout` and abandons whatever is still in
- * flight — so a batch running at the thirty-second mark produced exactly the
+ * flight - so a batch running at the thirty-second mark produced exactly the
  * stranded `sending` rows the ninety-second grace period in worker.yaml was
  * chosen to prevent. The manifest was right and unused.
  *
@@ -398,8 +398,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
       )
       // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
       // queues and the transport sends on a timer, so an error raised in the
-      // last seconds before a rolling deploy — which is a common moment for one
-      // — died in the buffer with the process. The boot path always got this
+      // last seconds before a rolling deploy - which is a common moment for one
+      // - died in the buffer with the process. The boot path always got this
       // right; the shutdown path never did.
       .then(() => flushObservability())
       .finally(() => process.exit(0))

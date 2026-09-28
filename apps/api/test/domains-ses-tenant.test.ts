@@ -7,7 +7,7 @@ import { ensureSesTenant } from "../src/domains/ses-tenant.js"
  *
  * ⚠ THE ORDER IS THE WHOLE POINT. The worker names a tenant on a send only when
  * `ses_tenant_name` is set, and SES refuses a tenant send it cannot match to
- * associated resources — so writing the column before, or despite, a failed
+ * associated resources - so writing the column before, or despite, a failed
  * attach would turn an SES hiccup into refused mail.
  */
 

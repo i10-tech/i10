@@ -1,11 +1,11 @@
 /**
- * Metering and quota — the seam the meter plugs into.
+ * Metering and quota - the seam the meter plugs into.
  *
  * ⚠ QUOTA IS NOT AUTHENTICATION, AND THE TWO MUST NOT COLLAPSE. `requireApiKey`
  * answers "is this key valid and what may it do". This answers "does this
  * tenant have sending budget left". They fail differently and they are owned by
  * different systems, and merging them would make it impossible to sell a plan
- * that differs only by volume — and would make `rate_limit_exceeded`, which is
+ * that differs only by volume - and would make `rate_limit_exceeded`, which is
  * retryable, indistinguishable from `daily_quota_exceeded`, which is not.
  *
  * ⚠ CHECKED AT ADMISSION, RECORDED AT SEND, AND THOSE ARE DIFFERENT MOMENTS ON
@@ -14,7 +14,7 @@
  * Checking at admission is what lets `POST /emails` reject over-quota traffic in
  * milliseconds without touching the send path. It reads a cached balance, so it
  * is approximate: a burst can slip past a stale answer. That is the right
- * trade — the alternative is a synchronous call to a third party on the hot
+ * trade - the alternative is a synchronous call to a third party on the hot
  * path of every send, which would make a billing service's availability
  * i10's availability. It was Autumn's; the port outlived it.
  *
@@ -23,7 +23,7 @@
  * malformed or the tenant was suppressed, and a customer reading their invoice
  * would be right to complain.
  *
- * The gap between the two — accepted but not yet sent — is bounded by the queue
+ * The gap between the two - accepted but not yet sent - is bounded by the queue
  * depth, and it is the reason `checkQuota` returns a decision rather than a
  * number: over-quota is a policy answer, not arithmetic the caller redoes.
  */
@@ -32,7 +32,7 @@ export type QuotaOutcome =
   /** Within budget. Proceed. */
   | { status: "allowed" }
   /**
-   * Out of budget. A 429 with `daily_quota_exceeded`, and NOT retryable — the
+   * Out of budget. A 429 with `daily_quota_exceeded`, and NOT retryable - the
    * SDKs back off on 429, and backing off will not create budget.
    */
   | { status: "exceeded"; message: string; resetsAt?: Date }
@@ -42,7 +42,7 @@ export type QuotaOutcome =
    * outage must never be reported as "you are over quota", because the customer
    * responds by upgrading a plan that was fine.
    *
-   * What the caller does with it is a policy decision — see `failOpen`.
+   * What the caller does with it is a policy decision - see `failOpen`.
    */
   | { status: "unavailable"; message: string }
 
@@ -52,7 +52,7 @@ export type QuotaOutcome =
  * ⚠ `sentAt` IS THE STORED VALUE, NOT THE WORKER'S CLOCK, AND IT IS NOT
  * COSMETIC. The reconciler buckets i10's side by `core.messages.sent_at` and
  * the meter's side by the event timestamp we hand it. If those differ by even a
- * millisecond across midnight, one day shows a deficit and the next a surplus —
+ * millisecond across midnight, one day shows a deficit and the next a surplus -
  * and the deficit gets topped up, every run, forever. Threading the value the
  * UPDATE returned is what keeps the two sides on one clock.
  */
@@ -129,7 +129,7 @@ export const unmetered: Metering = {
  *
  * ⚠ A SWALLOWED `recordSent` IS REVENUE NEVER COUNTED, AND THAT IS ACCEPTABLE
  * ONLY BECAUSE SOMETHING ELSE FINDS IT. `core.messages` is the billing source
- * of truth — every `sent` row is one billable unit with `sent_at` as its clock —
+ * of truth - every `sent` row is one billable unit with `sent_at` as its clock -
  * and send/reconcile.ts compares it against what the meter actually recorded. The
  * log line is a signal, not the record.
  */
@@ -151,12 +151,12 @@ export function resilient(inner: Metering, log?: Logger): Metering {
         // idempotency, so retrying re-submits the items that already succeeded
         // and double-counts them; a gap is preferable to a duplicate, because
         // the reconciler can find a gap and cannot find a duplicate. The hot
-        // path takes the gap and the reconciler closes it — see
+        // path takes the gap and the reconciler closes it - see
         // send/reconcile.ts. Autumn's own documentation said the same thing,
         // and the reasoning is a property of bulk writes rather than of Autumn.
         log?.error(
           { err, tenantId, count: sent.length },
-          "usage not recorded — the reconciler will close the gap",
+          "usage not recorded - the reconciler will close the gap",
         )
       }
     },
