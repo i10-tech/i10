@@ -762,6 +762,17 @@ const ROUTES: [
   ],
 
   [
+    // ⚠ PAUSED IN PREVIEW, so the banner can be reviewed; production reads SES.
+    /^\/console\/sending-status$/,
+    () => ({
+      status: "disabled",
+      cause:
+        "The bounce rate exceeded 15.0% based on a representative volume of 664 emails.",
+      changed_at: ago(1),
+    }),
+  ],
+
+  [
     /^\/console\/suppressions$/,
     () => ({
       data: Array.from({ length: 12 }, (_, i) => ({

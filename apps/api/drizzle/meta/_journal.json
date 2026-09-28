@@ -456,6 +456,13 @@
       "when": 1790572383091,
       "tag": "0064_rls_partitions_and_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1790572913721,
+      "tag": "0065_ses_tenant_status",
+      "breakpoints": true
     }
   ]
 }

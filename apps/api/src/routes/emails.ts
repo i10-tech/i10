@@ -85,6 +85,21 @@ function acceptError(outcome: AcceptOutcome) {
       status: 403 as const,
     }
   }
+  /*
+   * ⚠ 403 AND ITS OWN NAME. Waiting does not lift a pause - a review does - so
+   * a 429 would send SDKs into retries that cannot succeed, and it is not the
+   * key or the domain that is wrong either.
+   */
+  if (outcome.status === "paused") {
+    return {
+      body: {
+        statusCode: 403,
+        name: "sending_paused" as const,
+        message: outcome.message,
+      },
+      status: 403 as const,
+    }
+  }
   if (outcome.status === "quota_exceeded") {
     return {
       body: {

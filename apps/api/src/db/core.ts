@@ -173,6 +173,19 @@ export const domainStatus = core.enum("domain_status", [
   "temporary_failure",
 ])
 
+/**
+ * An SES tenant's sending status (#157), lowercased from SES's own values.
+ *
+ * ⚠ `reinstated` IS NOT `enabled`. SES re-enables a paused tenant into a grace
+ * state where its open reputation findings are ignored until they resolve - it
+ * can send, and it is on probation. The risk score reads the difference.
+ */
+export const sesSendingStatus = core.enum("ses_sending_status", [
+  "enabled",
+  "disabled",
+  "reinstated",
+])
+
 export const suppressionReason = core.enum("suppression_reason", [
   "hard_bounce",
   "complaint",
@@ -1186,6 +1199,87 @@ export const suppressions = core.table(
      * whole list.
      */
     index("suppressions_tenant_created_idx").on(t.tenantId, t.createdAt),
+  ],
+)
+
+/**
+ * The current SES sending status of each workspace's tenant (#157).
+ *
+ * ⚠ ONE ROW PER WORKSPACE, READ ON EVERY SEND. `accept()` refuses a send for a
+ * workspace SES has paused before handing it over, so the question has to be a
+ * primary-key lookup - the history below is the record, this is the answer.
+ *
+ * ⚠ NO ROW MEANS ENABLED. Workspaces that were never paused, or have no
+ * tenant yet, never get a row; only a status SES has actually reported writes
+ * one.
+ */
+export const sesTenantStatus = core.table(
+  "ses_tenant_status",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    status: sesSendingStatus("status").notNull(),
+    /** SES's own words, e.g. "Status manually updated." Shown to the customer. */
+    cause: text("cause"),
+    /** `aws_managed` (SES or Trust & Safety) or `customer_managed` (us). */
+    origin: text("origin"),
+    /** When SES changed it - not when we heard. */
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull(),
+    /** When the owner was emailed about the latest pause, so it is sent once. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy("ses_tenant_status_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Every SES sending status change we have seen, per workspace (#157).
+ *
+ * ⚠ APPEND-ONLY, AND IT IS A RISK SIGNAL BEFORE IT IS A LOG. The risk score
+ * (#170) reads how often and how recently SES paused a workspace, and an SES
+ * pause is the strongest negative signal there is - so the history is kept even
+ * after the workspace is reinstated and the current row says all is well.
+ *
+ * ⚠ THE SAME CHANGE CAN ARRIVE TWICE - the EventBridge event and the daily poll
+ * both report it. `(tenant_id, status, changed_at)` is unique so the second is a
+ * no-op rather than a second pause in the score.
+ */
+export const sesTenantStatusEvents = core.table(
+  "ses_tenant_status_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    status: sesSendingStatus("status").notNull(),
+    cause: text("cause"),
+    origin: text("origin"),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull(),
+    /** `event` (EventBridge) or `poll` (the daily re-check found it). */
+    source: text("source").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ses_tenant_status_events_change_unique").on(
+      t.tenantId,
+      t.status,
+      t.changedAt,
+    ),
+    index("ses_tenant_status_events_tenant_idx").on(t.tenantId, t.changedAt),
+    pgPolicy("ses_tenant_status_events_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
   ],
 )
 

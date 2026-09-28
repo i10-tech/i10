@@ -4,6 +4,7 @@ import { Suspense } from "react"
 import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
+import { SendingStatusBanner } from "@/components/sending-status-banner"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { CommandMenu } from "@/components/command-menu"
 import { MobileNav } from "@/components/mobile-nav"
@@ -184,6 +185,14 @@ export default async function AppLayout({
          * page load with extra steps - the whole value of an app shell is that
          * most of the screen does not go anywhere.
          */}
+        {/*
+         * ⚠ ITS OWN BOUNDARY WITH NO FALLBACK. The banner is absent for almost
+         * everybody, so a skeleton would flash a box that then vanishes; the
+         * page renders at once and the banner, if any, arrives above it.
+         */}
+        <Suspense fallback={null}>
+          <SendingStatusBanner />
+        </Suspense>
         <PageFrame>{children}</PageFrame>
       </div>
 

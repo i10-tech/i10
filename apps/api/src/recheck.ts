@@ -35,6 +35,16 @@ import { nodeTxtLookup } from "./domains/ownership.js"
 import { readDelegation } from "./domains/referral.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
+import { createClerkClient } from "@clerk/backend"
+import { systemSenderFor } from "./auth-email/system.js"
+import { createQueueClient } from "./cache/redis.js"
+import { postgresMetering } from "./metering/service.js"
+import { createSendQueue } from "./queue/send-queue.js"
+import { resilient } from "./send/metering.js"
+import { ownerNotice } from "./ses-status/notice.js"
+import { pollTenantStatuses, sesTenantStatusReader } from "./ses-status/poll.js"
+import { sesStatusService } from "./ses-status/service.js"
+import { sesStatusStore } from "./ses-status/store.js"
 
 const log = pino({ name: "i10-domain-recheck" })
 const env = loadEnv()
@@ -114,6 +124,8 @@ await withMonitor(
         )
       }
 
+      if (env.SES_ENABLED) await pollSesStatuses(db, sql)
+
       /*
        * ⚠ EVERY LOOKUP FAILING IS OUR PROBLEM, NOT THE CUSTOMERS'. A pass that
        * could not ask anything writes nothing and stands nobody down, which is
@@ -136,3 +148,75 @@ await withMonitor(
     }
   },
 )
+
+/**
+ * The daily re-read of every SES tenant's sending status (#157).
+ *
+ * ⚠ HERE BECAUSE THIS JOB ALREADY RUNS ONCE A DAY ACROSS EVERY WORKSPACE, and
+ * the poll is the net under the EventBridge events - see ses-status/poll.ts. A
+ * change it finds is recorded, enforced and emailed exactly as an event would
+ * be, which is why it builds the same sender the API does.
+ *
+ * ⚠ ITS FAILURE DOES NOT FAIL THE DOMAIN RE-CHECK. The domains above were
+ * checked and written already; a Redis or SES hiccup here is reported and
+ * retried tomorrow.
+ */
+async function pollSesStatuses(
+  db: ReturnType<typeof createDb>["db"],
+  sql: ReturnType<typeof createDb>["sql"],
+) {
+  const redis = createQueueClient(env.REDIS_URL)
+  redis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+  try {
+    const queue = (cls: "transactional" | "bulk") =>
+      createSendQueue({
+        redis,
+        class: cls,
+        jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+        maxAttempts: env.WORKER_MAX_ATTEMPTS,
+      })
+    const sender = await systemSenderFor({
+      sql,
+      db,
+      queues: { transactional: queue("transactional"), bulk: queue("bulk") },
+      metering: resilient(
+        postgresMetering({ db, featureId: env.METERING_FEATURE_ID, log }),
+        log,
+      ),
+      from: env.AUTH_EMAIL_FROM,
+      tenantSlug: env.AUTH_EMAIL_TENANT_SLUG,
+      log,
+    })
+    const consoleUrl = env.CONSOLE_ORIGINS[0]
+    const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+    const store = sesStatusStore(db)
+
+    const summary = await pollTenantStatuses({
+      reader: sesTenantStatusReader(new SESv2Client({ region: env.AWS_REGION })),
+      store,
+      service: sesStatusService({
+        store,
+        ...(sender && consoleUrl
+          ? { notice: ownerNotice({ db, clerk, sender, consoleUrl }) }
+          : {}),
+        log,
+        alert: captureError,
+      }),
+      log,
+    })
+    log.info(summary, "SES tenant status poll complete")
+    if (summary.failed > 0) {
+      captureError(
+        new Error(`${summary.failed} SES tenant status(es) could not be read`),
+        {
+          phase: "recheck-ses-status",
+        },
+      )
+    }
+  } catch (error) {
+    log.error({ err: error }, "SES tenant status poll failed")
+    captureError(error, { phase: "recheck-ses-status" })
+  } finally {
+    await redis.quit().catch(() => {})
+  }
+}
