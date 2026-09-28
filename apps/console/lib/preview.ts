@@ -9,8 +9,8 @@
  *
  * ⚠ IT IS IMPOSSIBLE TO ENABLE IN PRODUCTION, AND THAT IS ENFORCED BY THE
  * COMPILER RATHER THAN BY DISCIPLINE. `process.env.NODE_ENV` is replaced with
- * the literal `"production"` at build time by Next — in server code as well as
- * client — so in a production build the first half of the condition below is
+ * the literal `"production"` at build time by Next - in server code as well as
+ * client - so in a production build the first half of the condition below is
  * `"production" !== "production"` and the whole expression folds to `false`.
  * Every `if (PREVIEW)` block is then a branch on a constant, and the bundler
  * deletes it: the compiled `api()` in the production output goes straight from
@@ -19,7 +19,7 @@
  *
  * ⚠ WHAT IS REMOVED IS THE READ, NOT NECESSARILY THE DATA. Turbopack folds the
  * branch but still emits these fixture constants into the server chunk, where
- * they sit unreferenced — verified by building and grepping the output. That is
+ * they sit unreferenced - verified by building and grepping the output. That is
  * a few kilobytes of dead weight, and it is worth knowing precisely, because
  * the claim that matters is the checkable one: nothing in a production build
  * READS a fixture. "The module is gone" is a claim this build does not support,
@@ -28,7 +28,7 @@
  *
  * ⚠ AND IT IS OFF BY DEFAULT IN DEVELOPMENT TOO. `bun run dev` talks to a real
  * API on localhost; `bun run dev:preview` sets the variable. A developer
- * debugging a live query must never silently be looking at fixtures — that is
+ * debugging a live query must never silently be looking at fixtures - that is
  * the failure mode that makes this kind of mode dangerous, and the only
  * protection is that turning it on is deliberate.
  */
@@ -39,7 +39,7 @@ export const PREVIEW =
 /**
  * ⚠ THE FIXTURES ARE DELIBERATELY NOT ALL HEALTHY. A preview where every domain
  * is verified, nothing has bounced and every meter is at 12% shows none of the
- * states the interface actually has to handle — and those are exactly the ones
+ * states the interface actually has to handle - and those are exactly the ones
  * worth reviewing. There is a failed domain, a bounce, a complaint, a delayed
  * message, a revoked key, an unsubscribed contact and a meter past its
  * allowance.
@@ -114,7 +114,7 @@ const PLANS = [
  * ⚠ A PAID SUBSCRIPTION WITH A DOWNGRADE ALREADY SCHEDULED, BECAUSE THAT IS THE
  * STATE WITH NOTHING ELSE TO SHOW IT. It used to be `subscription: null`, which
  * renders the one billing state that has no dates, no status pill, no card on
- * file and no deletion consequence — so every line of copy that had to be got
+ * file and no deletion consequence - so every line of copy that had to be got
  * right was invisible in preview. The fixtures are deliberately not all healthy;
  * see the note above.
  *
@@ -295,7 +295,7 @@ const EMAILS = Array.from({ length: 50 }, (_, i) => {
 
 const SERIES = Array.from({ length: 30 }, (_, i) => {
   const days = 29 - i
-  // A weekday shape, with a quiet weekend — a flat line looks synthetic.
+  // A weekday shape, with a quiet weekend - a flat line looks synthetic.
   const weekday = new Date(now - days * DAY).getUTCDay()
   const base = weekday === 0 || weekday === 6 ? 140 : 620
   const wobble = ((i * 37) % 23) * 11
@@ -364,14 +364,14 @@ const CONTACTS = Array.from({ length: 24 }, (_, i) => ({
 /**
  * ⚠ THE ROUTE TABLE IS MATCHED IN ORDER AND LONGEST-FIRST, so `/console/emails/x`
  * cannot be swallowed by `/console/emails`. It mirrors the API's own paths
- * exactly — if a path here drifts from the real one, preview mode would keep
+ * exactly - if a path here drifts from the real one, preview mode would keep
  * working while the real console broke, which is the one thing a fixture layer
  * must never do.
  */
 type Query = Record<string, string | number | undefined | null> | undefined
 
 /**
- * "This id does not exist here" — the one answer a fixture layer has to be able
+ * "This id does not exist here" - the one answer a fixture layer has to be able
  * to give.
  *
  * ⚠ WITHOUT IT, EVERY DETAIL ROUTE INVENTED A ROW FOR AN ID IT HAD NEVER SEEN.
@@ -382,7 +382,7 @@ type Query = Record<string, string | number | undefined | null> | undefined
  * looks at until it matters could never be reviewed.
  *
  * ⚠ A SYMBOL RATHER THAN `undefined`, BECAUSE `undefined` ALREADY MEANS
- * SOMETHING ELSE HERE — "no fixture is defined for this path at all", which
+ * SOMETHING ELSE HERE - "no fixture is defined for this path at all", which
  * `api()` reports as a 501 telling whoever is building the screen to add one.
  * Confusing a missing ROW with a missing FIXTURE would turn a reviewable 404
  * into a "go and edit preview.ts" message.
@@ -393,7 +393,7 @@ export const PREVIEW_NOT_FOUND = Symbol("preview:not-found")
  * "This needs a real payment provider, which preview mode does not have."
  *
  * ⚠ SEPARATE FROM `PREVIEW_NOT_FOUND` BECAUSE IT IS A 503, NOT A 404. Nothing is
- * missing — the operation genuinely cannot be performed here, and the message
+ * missing - the operation genuinely cannot be performed here, and the message
  * has to say so rather than implying the plan or the customer does not exist.
  */
 export const PREVIEW_UNAVAILABLE = Symbol("preview:unavailable")
@@ -410,7 +410,7 @@ const ROUTES: [
    * fixture that answered with a plausible-looking checkout url would send
    * whoever is reviewing to a real Polar page or to a 404, and a fixture that
    * answered nothing at all is what crashed the upgrade button. Refusing
-   * explicitly, with a message that says why, is the honest option — and it
+   * explicitly, with a message that says why, is the honest option - and it
    * exercises the button's real error path, which is worth being able to see.
    */
   [/^\/console\/billing\/checkout$/, () => PREVIEW_UNAVAILABLE],
@@ -455,7 +455,7 @@ const ROUTES: [
     /^\/console\/emails\/([^/]+)$/,
     (m) => {
       const email = EMAILS.find((e) => e.id === m[1])
-      // ⚠ NOT A FALLBACK TO THE FIRST ROW — see `PREVIEW_NOT_FOUND`.
+      // ⚠ NOT A FALLBACK TO THE FIRST ROW - see `PREVIEW_NOT_FOUND`.
       if (!email) return PREVIEW_NOT_FOUND
       return {
         ...email,
@@ -547,9 +547,9 @@ const ROUTES: [
       const held = DOMAINS.find((d) => d.name === name)
       const refusal =
         name === "i10.tech" || name.endsWith(".i10.tech")
-          ? `${name} is ours — we are flattered, genuinely, but we are already using it. Add the domain your own mail comes from.`
+          ? `${name} is ours - we are flattered, genuinely, but we are already using it. Add the domain your own mail comes from.`
           : held
-            ? `You have already added ${name}, and it ${held.status === "verified" ? "is verified" : held.status === "failed" ? "failed verification — open it to fix the records" : "is waiting for verification"}.`
+            ? `You have already added ${name}, and it ${held.status === "verified" ? "is verified" : held.status === "failed" ? "failed verification - open it to fix the records" : "is waiting for verification"}.`
             : null
       return { name, refusal }
     },
@@ -559,7 +559,7 @@ const ROUTES: [
     /^\/console\/domains\/([^/]+)$/,
     (m, _q, method) => {
       const domain = DOMAINS.find((d) => d.id === m[1])
-      // ⚠ NOT A FALLBACK TO THE FIRST ROW — see `PREVIEW_NOT_FOUND`.
+      // ⚠ NOT A FALLBACK TO THE FIRST ROW - see `PREVIEW_NOT_FOUND`.
       if (!domain) return PREVIEW_NOT_FOUND
       // A tracking PATCH answers with the domain as it was: the switch keeps its
       // own optimistic state, and preview has no store to write to.
@@ -569,7 +569,7 @@ const ROUTES: [
        * VERIFIED, AND THAT IS A LIMIT OF THE MODE RATHER THAN A BUG IN IT. A
        * server action and a server render are separate module instances under
        * `next dev`, so the counter the refresh route keeps is not the one this
-       * render would read — sharing it would need a store, which is the thing
+       * render would read - sharing it would need a store, which is the thing
        * preview mode exists to avoid. In production the refresh writes the row
        * and the re-render reads it back, so the badge does turn over.
        */
@@ -581,7 +581,7 @@ const ROUTES: [
    * ⚠ VERIFY AND REFRESH HAD NO FIXTURE AT ALL, AND AN ABSENT FIXTURE IS NOT
    * AN INERT ONE. `previewFor` returns `undefined` for a path it does not
    * know, `api()` hands that back as the payload, and the caller reads
-   * `.status` off it — so pressing Verify in preview threw
+   * `.status` off it - so pressing Verify in preview threw
    * "Cannot read properties of undefined" into the console rather than doing
    * nothing. It went unnoticed while Verify was a button somebody had to press
    * on purpose; the moment the page started checking by itself it threw seven
@@ -605,7 +605,7 @@ const ROUTES: [
   /*
    * ⚠ IT VERIFIES ON THE THIRD ASK, WHICH IS THE ONLY WAY THE WATCH IS
    * REVIEWABLE AT ALL. A fixture that answers `pending` for ever shows the
-   * spinner and never the thing worth looking at — the moment the page
+   * spinner and never the thing worth looking at - the moment the page
    * notices, stops watching and re-renders itself green. A counter in a
    * dev-only module is the cheapest honest way to have a second state.
    */
@@ -630,8 +630,8 @@ const ROUTES: [
 
   /*
    * ⚠ ONE PATH, TWO ANSWERS, WHICH IS WHY THE METHOD REACHES THIS FILE AT ALL.
-   * A mutation in preview is still a no-op that reports success — nothing
-   * persists — but "success" for a POST here is a DOMAIN, and returning the
+   * A mutation in preview is still a no-op that reports success - nothing
+   * persists - but "success" for a POST here is a DOMAIN, and returning the
    * LIST envelope made the caller read `records` off an object that has none.
    * The onboarding flow crashed at the step after the one being reviewed, which
    * is the failure this mode exists to prevent rather than cause.
@@ -653,7 +653,7 @@ const ROUTES: [
   /*
    * ⚠ THE LOOKUP FIXTURE VARIES BY DOMAIN, WHICH IS THE ONLY WAY THE FEATURE IS
    * REVIEWABLE. A fixture that always answered "Cloudflare" would show one of
-   * the five states this screen has — and the interesting ones are the provider
+   * the five states this screen has - and the interesting ones are the provider
    * we can connect, the provider we cannot, the one whose editor has no NS row,
    * the split nameserver set, and the domain nobody recognises. Typing any of
    * the names below in preview mode reaches each of them.
@@ -669,7 +669,7 @@ const ROUTES: [
 
   /*
    * ⚠ ALWAYS FRESH IN PREVIEW, BECAUSE THERE IS NO CLERK TO ASK. The step-up
-   * prompt is Clerk's own dialog and preview mode has no session at all — so
+   * prompt is Clerk's own dialog and preview mode has no session at all - so
    * the honest fixture is "already proved", which lets the delete dialogs it
    * guards stay reviewable. The refusal it exists for is enforced on the API
    * and cannot be reviewed here either way.
@@ -841,7 +841,7 @@ const ROUTES: [
           status: "ok" as const,
         },
         // ⚠ ONE FEATURE IS DELIBERATELY UNREADABLE. `storage.bytes` genuinely
-        // throws today — see metering/levels.ts — and the usage page has a branch
+        // throws today - see metering/levels.ts - and the usage page has a branch
         // for it that would otherwise never be exercised in review.
         {
           feature_id: "storage.bytes",
@@ -877,7 +877,7 @@ const ROUTES: [
     /^\/console\/contacts\/([^/]+)$/,
     (m) => {
       const contact = CONTACTS.find((c) => c.id === m[1])
-      // ⚠ NOT A FALLBACK TO THE FIRST ROW — see `PREVIEW_NOT_FOUND`.
+      // ⚠ NOT A FALLBACK TO THE FIRST ROW - see `PREVIEW_NOT_FOUND`.
       if (!contact) return PREVIEW_NOT_FOUND
       return {
         ...contact,
@@ -952,7 +952,7 @@ const ROUTES: [
   [
     /^\/console\/broadcasts\/([^/]+)$/,
     (m) => {
-      // ⚠ THE ID IS CHECKED RATHER THAN IGNORED — see `PREVIEW_NOT_FOUND`.
+      // ⚠ THE ID IS CHECKED RATHER THAN IGNORED - see `PREVIEW_NOT_FOUND`.
       if (m[1] !== "af7a1c00-0000-4000-8000-000000000001") return PREVIEW_NOT_FOUND
       return {
         id: "af7a1c00-0000-4000-8000-000000000001",
@@ -1023,7 +1023,7 @@ const ROUTES: [
   [
     /^\/console\/templates\/([^/]+)$/,
     (m) => {
-      // ⚠ THE ID IS CHECKED RATHER THAN IGNORED — see `PREVIEW_NOT_FOUND`.
+      // ⚠ THE ID IS CHECKED RATHER THAN IGNORED - see `PREVIEW_NOT_FOUND`.
       if (m[1] !== "bf7a1c00-0000-4000-8000-000000000001") return PREVIEW_NOT_FOUND
       return {
         id: "bf7a1c00-0000-4000-8000-000000000001",
@@ -1109,7 +1109,7 @@ export function previewFor(path: string, query?: Query, method = "GET"): unknown
 
 /**
  * ⚠ THE PROVIDER IS CHOSEN BY A SUBSTRING OF THE NAME, NOT BY A REAL LOOKUP.
- * Preview mode does no DNS at all — the point is to reach each branch of the
+ * Preview mode does no DNS at all - the point is to reach each branch of the
  * screen from the keyboard. `acme.dev` is the provider we cannot connect,
  * `acme.shop` is the one with no NS row, `acme.net` is mid-migration, and
  * anything else unrecognised falls through to "we could not match your
@@ -1202,14 +1202,14 @@ function dnsFixtureFor(domain: string) {
  * `POST /console/billing/checkout` DELIBERATELY REFUSES. That refusal is right:
  * a fixture answering with a plausible checkout url would send whoever is
  * reviewing to a real Polar page. This endpoint only reports what became of a
- * checkout, and its five outcomes — granted, paid, closed, declined, expired —
+ * checkout, and its five outcomes - granted, paid, closed, declined, expired -
  * are five pieces of copy that somebody has to be able to look at. They were
  * previously unreachable in preview, which is how "the redirect shows nothing"
  * survived as long as it did.
  *
  * ⚠ THE OUTCOME IS CHOSEN BY THE ID'S FIRST BLOCK SO ALL OF THEM ARE REACHABLE.
  * Append `?checkout_id=<uuid>` to the billing page or to `/onboarding`, using
- * one of the prefixes below with any well-formed remainder — for example
+ * one of the prefixes below with any well-formed remainder - for example
  * `00000004-0000-4000-8000-000000000000` for a declined card. Any other id is
  * the ordinary success.
  */

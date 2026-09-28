@@ -25,13 +25,13 @@ import type {
  * ⚠ SERVER ACTIONS RATHER THAN ROUTE HANDLERS, FOR ONE REASON THAT MATTERS: the
  * session token never reaches the browser. A `fetch` from a client component to
  * our own `/api/...` would work too, but it needs a second layer of handlers
- * that do nothing but forward — and each one is another place to forget the
+ * that do nothing but forward - and each one is another place to forget the
  * auth header or the tenant check. The action runs on the server, calls
  * `api()`, and the client gets a plain object back.
  *
  * ⚠ THEY RETURN A RESULT, THEY DO NOT THROW. A thrown error in a server action
  * reaches the client as an opaque "An error occurred in the Server Components
- * render" with the message stripped in production — which is exactly the
+ * render" with the message stripped in production - which is exactly the
  * message the person needs ("that domain is already registered", "your plan
  * does not include another domain"). Returning a discriminated union keeps the
  * API's own wording, including its machine-readable `name`, which the forms
@@ -39,7 +39,7 @@ import type {
  *
  * ⚠ AND EVERY ONE OF THEM REVALIDATES. A server action that mutates without
  * `revalidatePath` leaves the page showing the list it rendered before the
- * write — the row is created, the screen says it is not, and the person clicks
+ * write - the row is created, the screen says it is not, and the person clicks
  * the button again.
  */
 
@@ -53,7 +53,7 @@ export type ActionResult<T = undefined> =
       /**
        * ⚠ THE WHOLE ERROR BODY, BECAUSE SOME REFUSALS CARRY DATA. A 409 from
        * `/domains/:id/publish` lists the records standing in the way, and that
-       * list IS the remedy — flattening every failure to a message would leave
+       * list IS the remedy - flattening every failure to a message would leave
        * the caller with a dialog it cannot fill in. Everything else ignores it.
        *
        * ⚠ IT IS THE API'S OWN JSON AND IS TREATED AS DATA, NOT AS TRUSTED SHAPE.
@@ -72,7 +72,7 @@ async function run<T>(
     for (const path of revalidate) {
       // ⚠ `"page"` RATHER THAN THE DEFAULT `"layout"`. Revalidating as a layout
       // invalidates every nested route under the path, which for `/` is the
-      // entire console — so creating one API key would discard the cached
+      // entire console - so creating one API key would discard the cached
       // render of every page the person has visited.
       revalidatePath(path, "page")
     }
@@ -82,7 +82,7 @@ async function run<T>(
      * pattern everywhere: the action's response already carried the updated
      * page (a Server Function that revalidates the path being viewed does that
      * by itself), the component then fired a toast, and THEN asked for the page
-     * again — a second `GET ?_rsc` and a second render of the whole tree,
+     * again - a second `GET ?_rsc` and a second render of the whole tree,
      * landing a few hundred milliseconds into the toast. Measured on revoking a
      * key: one POST, then one GET, for one click. That second render is the
      * "refresh that cuts the toast" and the layout that twitches after a save.
@@ -90,7 +90,7 @@ async function run<T>(
      * ⚠ `refresh()` RATHER THAN RELYING ON THE PATHS ABOVE, because the paths
      * name where the data is SHOWN and not where the action was CALLED FROM.
      * Onboarding creates an API key; `/api-keys` is revalidated and
-     * `/onboarding` — the page on screen — is not. `refresh()` is Next's
+     * `/onboarding` - the page on screen - is not. `refresh()` is Next's
      * Server-Function-only way to say "and the current page", whatever it is,
      * so the rule is one line here instead of a judgement at thirty call sites.
      *
@@ -100,8 +100,8 @@ async function run<T>(
      * blink those were written to avoid.
      *
      * ⚠ AND NEVER FOR A DELETION (`refreshCaller: false`). The page a delete is
-     * called from is very often the page OF the thing being deleted — a domain,
-     * a template — and re-rendering it after the row is gone renders its 404
+     * called from is very often the page OF the thing being deleted - a domain,
+     * a template - and re-rendering it after the row is gone renders its 404
      * behind the dialog that is still saying "Deleted". Deletions revalidate
      * the LIST paths, which covers the list they were called from; a detail
      * page navigates away on its own. Revoking a domain's keys inside the
@@ -124,9 +124,9 @@ async function run<T>(
 
     /*
      * ⚠ NOT `error.message`. Anything reaching here was thrown by the runtime
-     * rather than written by the API — `getaddrinfo ENOTFOUND
+     * rather than written by the API - `getaddrinfo ENOTFOUND
      * i10-api.i10-prod.svc.cluster.local`, or a TypeError naming one of our
-     * own properties — and this string is rendered to the customer. See
+     * own properties - and this string is rendered to the customer. See
      * lib/failure.ts; the real error is logged there.
      */
     const safe = safeFailure(error, "server action")
@@ -143,7 +143,7 @@ async function run<T>(
 
 /**
  * ⚠ IT REVALIDATES NOTHING, AND THAT IS THE POINT. `revalidatePath("/settings")`
- * is a re-render of the page this is called FROM — the whole settings tree
+ * is a re-render of the page this is called FROM - the whole settings tree
  * re-fetched and reconciled for one string, which reads as the page blinking
  * a beat after Save. Nothing else on that page shows the name: the field
  * already holds what was typed, and the only other place it appears is the
@@ -181,7 +181,7 @@ export async function verifyDomain(id: string) {
     () =>
       // ⚠ `VerifiedDomain`, NOT `Domain`. The extra field is what the button
       // needs to tell "we could not reach your nameservers" apart from "your
-      // records are not there yet" — see the note on the type.
+      // records are not there yet" - see the note on the type.
       api<VerifiedDomain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
         method: "POST",
       }),
@@ -193,7 +193,7 @@ export async function verifyDomain(id: string) {
  * The cheap re-check, for watching rather than acting.
  *
  * ⚠ NOT `verifyDomain` IN A LOOP. Every verify re-asserts the DKIM key at SES
- * — two writes against an account-wide, low-rate API — which is right once and
+ * - two writes against an account-wide, low-rate API - which is right once and
  * abusive on a timer. This asks what SES currently thinks and stores it, and
  * nothing else. See `DomainStore.refresh` in the API.
  *
@@ -280,7 +280,7 @@ export async function acceptTransfer(id: string, workspace?: string) {
     () =>
       api<{ domain_id: string; domain_name: string; workspace: Workspace | null }>(
         `/console/transfers/${encodeURIComponent(id)}/accept`,
-        // ⚠ NO WORKSPACE MEANS THE CURRENT ONE — onboarding's case.
+        // ⚠ NO WORKSPACE MEANS THE CURRENT ONE - onboarding's case.
         { method: "POST", body: workspace ? { workspace } : {} },
       ),
     ["/domains", "/", "/onboarding"],
@@ -299,7 +299,7 @@ export async function declineTransfer(id: string) {
 
 export async function lookupDns(domain: string) {
   // ⚠ NO REVALIDATION: THIS IS A READ. It is an action rather than a loader
-  // because it runs in response to typing, not to navigation — the onboarding
+  // because it runs in response to typing, not to navigation - the onboarding
   // form asks it as the person finishes entering an apex.
   return run(() =>
     api<import("@/lib/types").DnsInspection>("/console/dns/lookup", {
@@ -309,8 +309,8 @@ export async function lookupDns(domain: string) {
 }
 
 /**
- * Why the API would refuse to add this name — ours, or already in this
- * workspace — asked while it is still being typed.
+ * Why the API would refuse to add this name - ours, or already in this
+ * workspace - asked while it is still being typed.
  *
  * ⚠ READ-ONLY, AND ITS FAILURE MEANS "NO OBJECTION". The create still decides;
  * this only lets the box go red before the button is pressed.
@@ -347,7 +347,7 @@ export async function dnsConnections() {
 }
 
 /**
- * @param returnTo Where to land once the connection is made — a path on this
+ * @param returnTo Where to land once the connection is made - a path on this
  * console, never a URL. It rides in the signed OAuth `state` because a
  * provider compares `redirect_uri` exactly and will not accept an extra query
  * parameter; the API re-checks it on the way back. See dns/oauth.ts.
@@ -417,7 +417,7 @@ export async function disconnectDns(provider: string) {
  * ⚠ THE FIRST CALL IS A DRY RUN WHEREVER ANYTHING WOULD BE DELETED. The API
  * answers 409 with the conflicting records and writes nothing; the caller shows
  * them and calls again with `replaceConflicts`. That protocol is the reason this
- * returns the raw error rather than a boolean — the conflicts are in the body.
+ * returns the raw error rather than a boolean - the conflicts are in the body.
  */
 export async function publishDnsRecords(input: {
   domainId: string
@@ -447,7 +447,7 @@ export async function publishDnsRecords(input: {
  * something.
  *
  * ⚠ IT DOES NOTHING, AND THAT IS ITS ENTIRE VALUE. The step-up prompt works by
- * REPLAYING the call that was refused — so a flow that is more than one
+ * REPLAYING the call that was refused - so a flow that is more than one
  * request, like deleting a domain and revoking its keys, cannot be the thing
  * that triggers it: the replay would re-run the half that already succeeded.
  * Asking a route with no side effects is always safe to retry.
@@ -470,7 +470,7 @@ export async function createApiKey(input: {
 }) {
   /*
    * ⚠ THE SECRET IS IN THIS RETURN VALUE AND NOWHERE ELSE, EVER. Nothing stores
-   * it — see apps/api/src/auth/store.ts — so the component that receives it is
+   * it - see apps/api/src/auth/store.ts - so the component that receives it is
    * the last thing in the system that can show it. It must not be logged, must
    * not be put in a URL, and the dialog that renders it must not be
    * re-openable.
@@ -486,7 +486,7 @@ export async function createApiKey(input: {
  *
  * ⚠ IT EXISTS SO THE SCOPE IS NOT A DECISION MADE ONCE, IN A DIALOG, FOREVER.
  * The only other way to restrict a key minted unrestricted is to revoke it and
- * redeploy the secret everywhere it lives — enough friction that nobody does
+ * redeploy the secret everywhere it lives - enough friction that nobody does
  * it, which leaves every key unrestricted and the feature decorative.
  */
 /** Empty `domains` is every domain. */
@@ -837,7 +837,7 @@ export async function createBroadcast(input: { name: string }) {
  * A BUG THAT SHIPPED ONCE. An untyped patch is the last place the wire names
  * and the API's field names could have been checked against each other, and
  * with it untyped nothing noticed that `segment_id` was being dropped on every
- * save — the request succeeded, the toast said "Saved", and the broadcast came
+ * save - the request succeeded, the toast said "Saved", and the broadcast came
  * back targeted at nothing.
  */
 export interface BroadcastPatch {
@@ -923,7 +923,7 @@ export async function deleteTemplate(id: string) {
 
 /**
  * ⚠ THIS STARTS A CHECKOUT AND GRANTS NOTHING. The plan moves when Polar's
- * signature-verified webhook says the money arrived — see
+ * signature-verified webhook says the money arrived - see
  * apps/api/src/routes/billing.ts. The URL returned here is a redirect target,
  * not evidence of anything, and the page Polar returns to polls for the grant.
  *
@@ -934,7 +934,7 @@ export async function deleteTemplate(id: string) {
  * to disagree with the first.
  */
 /**
- * @param returnTo Where Polar should send the browser afterwards — a path on
+ * @param returnTo Where Polar should send the browser afterwards - a path on
  * this console, so somebody who bought a plan mid-onboarding comes back to
  * onboarding rather than to a confirmation page with no way onward. The API
  * keeps its own origin and accepts only the path; see routes/console/account.ts.
@@ -951,7 +951,7 @@ export async function startCheckout(plan: string, returnTo?: string) {
      * NOT DEFENSIVE PROGRAMMING FOR ITS OWN SAKE. The caller's next act is
      * `window.location.assign(...)`; an absent url there is an uncaught
      * TypeError in a click handler, which React surfaces as an error overlay
-     * over the billing page — the single worst place in the product to show
+     * over the billing page - the single worst place in the product to show
      * somebody a stack trace, because they were about to pay us.
      *
      * ⚠ AND IT IS A REAL CASE, NOT A HYPOTHETICAL. A 501 from an unconfigured

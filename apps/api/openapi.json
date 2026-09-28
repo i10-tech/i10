@@ -1896,7 +1896,7 @@
     "/domains/{id}/verify": {
       "post": {
         "summary": "Verify a domain",
-        "description": "Asks the provider to re-check the DNS records. Verification is not instant: a `pending` answer means the records have not propagated yet, and `temporary_failure` means the lookup itself failed and is worth retrying — neither means the records are wrong.",
+        "description": "Asks the provider to re-check the DNS records. Verification is not instant: a `pending` answer means the records have not propagated yet, and `temporary_failure` means the lookup itself failed and is worth retrying - neither means the records are wrong.",
         "tags": [
           "Domains"
         ],

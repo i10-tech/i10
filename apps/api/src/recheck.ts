@@ -2,25 +2,25 @@
  * Re-checks whether verified domains are still their holders', then exits.
  *
  * ⚠ VERIFICATION WAS ONE-SHOT AND DOMAINS OUTLIVE IT. A workspace that proved
- * `example.com` once kept the verified badge for ever — through the
+ * `example.com` once kept the verified badge for ever - through the
  * registration lapsing, through somebody else buying it, through every record
  * being deleted. Nothing asked again, so "verified" meant "was true once",
  * which is not what anything downstream reads it as.
  *
  * ⚠ A CronJob RATHER THAN AN INTERVAL IN THE WORKER, for the reason given in
  * reconcile.ts and message-sweep.yaml: the worker Deployment scales on queue
- * depth, so an interval inside it would run once per replica — every replica
+ * depth, so an interval inside it would run once per replica - every replica
  * making the same DNS queries about the same customers.
  *
  * ⚠ AND IT IS THE CAUTIOUS HALF OF A PAIR. `domainStore.verify` demotes a
  * holder the moment somebody else PROVES the name, because that is positive
  * evidence the domain has moved. This has no challenger and no evidence except
- * an absence, so it only starts a clock — `core.domains.proof_missing_since` —
+ * an absence, so it only starts a clock - `core.domains.proof_missing_since` -
  * and a domain has to fail every check for a week before it is stood down.
  *
  * ⚠ IT EXITS NON-ZERO WHEN NOTHING COULD BE REACHED, which is the one failure
  * the summary cannot otherwise show. A pass where every lookup timed out writes
- * nothing, touches nobody and looks exactly like a quiet night — so a broken
+ * nothing, touches nobody and looks exactly like a quiet night - so a broken
  * resolver, a missing egress rule or a DNS outage would be invisible for as
  * long as it lasted.
  */
@@ -72,7 +72,7 @@ await withMonitor(
       captureError(error, { phase: "boot" })
       await sql.end({ timeout: 5 })
       // An exit code rather than `process.exit`, so the check-in and its flush
-      // still run — the same reason reconcile.ts does it this way.
+      // still run - the same reason reconcile.ts does it this way.
       process.exitCode = 1
       return
     }
@@ -104,7 +104,7 @@ await withMonitor(
       // ⚠ SAID OUT LOUD, NOT ONLY RETRIED. A domain that cannot be attached
       // keeps sending without tenant isolation, and a sweep that quietly tried
       // again every night would hide a broken IAM policy for as long as it
-      // lasted — which is how the identity-delete gap survived for weeks.
+      // lasted - which is how the identity-delete gap survived for weeks.
       if (summary.tenantsFailed > 0) {
         captureError(
           new Error(

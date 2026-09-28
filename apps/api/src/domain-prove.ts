@@ -2,8 +2,8 @@
  * Tries again to prove the domains nobody has proved yet, then exits.
  *
  * ⚠ IT EXISTS BECAUSE REGISTRATION HAD EXACTLY ONE ATTEMPT. `verify` is the
- * only thing in the system that may create an SES identity — correctly, since
- * SES keys identities on the domain name inside one AWS account — and it is
+ * only thing in the system that may create an SES identity - correctly, since
+ * SES keys identities on the domain name inside one AWS account - and it is
  * reachable only from two HTTP routes. The console fires it once, about a
  * second after writing the records. DNS is usually not serving yet at that
  * instant, and on the manual path the customer publishes hours later, so that
@@ -19,8 +19,8 @@
  * ⚠ A SEPARATE CronJob RATHER THAN A BRANCH INSIDE `domain-catchup.ts`, on the
  * reasoning that already split catch-up from recheck: they do different work at
  * different cost. Catch-up makes one cheap `GetEmailIdentity` per row; this
- * runs a full ownership proof — several bounded DNS lookups against somebody
- * else's nameservers, plus a zone write for a delegated domain — so it wants
+ * runs a full ownership proof - several bounded DNS lookups against somebody
+ * else's nameservers, plus a zone write for a delegated domain - so it wants
  * its own batch size, its own staleness window and its own failure signal.
  *
  * ⚠ AND ITS OWN Sentry MONITOR, because the failure is invisible in the data. A
@@ -95,7 +95,7 @@ await withMonitor(
      */
     const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
     if (!secrets) {
-      log.warn({}, "no WEBHOOK_SECRET_KEY — nothing to prove")
+      log.warn({}, "no WEBHOOK_SECRET_KEY - nothing to prove")
       await sql.end({ timeout: 5 })
       return
     }
@@ -106,7 +106,7 @@ await withMonitor(
         domains: domainStore({
           db,
           // ⚠ THE SAME GATE THE API USES. With SES off, `offlineIdentity`
-          // answers `pending` and registers nothing — so this job still proves
+          // answers `pending` and registers nothing - so this job still proves
           // ownership and publishes zones, and simply has no provider to tell.
           identity: env.SES_ENABLED
             ? sesIdentity(new SESv2Client({ region: env.AWS_REGION }), {

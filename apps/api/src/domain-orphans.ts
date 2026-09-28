@@ -3,7 +3,7 @@
  *
  * ⚠ IT EXISTS BECAUSE THE TIDY IS ALLOWED TO FAIL AND NOTHING COUNTED THE
  * FAILURES. `remove` deletes the row first and then cleans up the SES identity
- * and the three zones, swallowing errors in both — the right trade, because the
+ * and the three zones, swallowing errors in both - the right trade, because the
  * domain really is deleted and a 500 the customer cannot act on is worse. It is
  * not the right trade against a failure that happens EVERY time, and that is
  * what was happening: `ses:DeleteEmailIdentity` was missing from the IAM policy,
@@ -12,7 +12,7 @@
  *
  * ⚠ AND THE ZONE HALF HAD ITS OWN VERSION OF THE SAME BUG. `holdsZones` read a
  * missing `core.delegations` row as "not mine", which is true of every delegated
- * domain created before claims existed — in this deployment, all of them.
+ * domain created before claims existed - in this deployment, all of them.
  *
  * ⚠ DAILY, NOT PER-MINUTE. Catch-up and prove answer "is somebody's domain
  * ready yet" for a person watching a badge. This answers "what did we leak",
@@ -98,13 +98,13 @@ await withMonitor(
         { ...summary, removing: env.DOMAIN_ORPHANS_REMOVE },
         env.DOMAIN_ORPHANS_REMOVE
           ? "orphan sweep complete"
-          : "orphan sweep complete — reporting only, set DOMAIN_ORPHANS_REMOVE to act",
+          : "orphan sweep complete - reporting only, set DOMAIN_ORPHANS_REMOVE to act",
       )
 
       /*
        * ⚠ A FOREIGN IDENTITY IS WORTH SAYING OUT LOUD EVEN THOUGH IT IS LEFT
        * ALONE. It means an identity exists in the account that this product did
-       * not create and does not know about — somebody working around the
+       * not create and does not know about - somebody working around the
        * product, or a leftover from before it. Neither is actionable by the
        * sweep and both are worth a human knowing.
        */

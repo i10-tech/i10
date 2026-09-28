@@ -37,14 +37,14 @@ import type { SecretBox } from "../webhooks/signing.js"
  *
  * ⚠ THIS IS THE FIRST PLACE A PLAN LIMIT IS ACTUALLY ENFORCED. The metering
  * package, the level adapter and the entitlement all existed before there was
- * anywhere to call them from — `core.domains` had no writer at all. The check
+ * anywhere to call them from - `core.domains` had no writer at all. The check
  * below is that call site.
  */
 
 /**
  * ⚠ THE SLICE OF THE METER THIS NEEDS, AND NOTHING MORE. `Meter` from
  * `@repo/metering` satisfies it structurally. Taking the whole object would
- * hand the domains API `record()`, which writes billable usage — a thing this
+ * hand the domains API `record()`, which writes billable usage - a thing this
  * module has no business being able to do.
  */
 export interface Capacity {
@@ -65,7 +65,7 @@ const standing = (status: DomainStatus): string => {
     case "verified":
       return "is verified"
     case "failed":
-      return "failed verification — open it to fix the records"
+      return "failed verification - open it to fix the records"
     default:
       return "is waiting for verification"
   }
@@ -82,19 +82,19 @@ export interface DomainStore {
   /**
    * Why `create` would refuse this name, asked without creating anything.
    *
-   * ⚠ ONLY THE REFUSALS ABOUT THE NAME ITSELF — ours, or already in this
+   * ⚠ ONLY THE REFUSALS ABOUT THE NAME ITSELF - ours, or already in this
    * workspace. The plan limit is left out on purpose: it is not answered by
    * editing the box, and it keeps its own button.
    *
    * ⚠ "VERIFIED BY ANOTHER WORKSPACE" IS NO LONGER ONE OF THEM. A name somebody
-   * else holds may be added and verified here, and proving it moves it — see
+   * else holds may be added and verified here, and proving it moves it - see
    * `verify`. Refusing it at the door left an owner who lost the account their
    * domain was in with no way to prove it from a new one.
    */
   refusal(tenantId: string, name: string): Promise<string | null>
   get(tenantId: string, id: string): Promise<Domain | null>
   /**
-   * Changes what can change on a live domain without touching its DNS — today,
+   * Changes what can change on a live domain without touching its DNS - today,
    * open and click tracking (#154). `null` when the domain is not this
    * workspace's.
    *
@@ -111,15 +111,15 @@ export interface DomainStore {
    * The same question as `verify`, asked cheaply, for polling.
    *
    * ⚠ IT EXISTS BECAUSE `verify` IS A WRITE AGAINST SES AND POLLING IT IS
-   * ABUSE. Every `verify` re-asserts the DKIM signing key —
+   * ABUSE. Every `verify` re-asserts the DKIM signing key -
    * `CreateEmailIdentity`, then `PutEmailIdentityDkimSigningAttributes` on the
-   * AlreadyExists — which is exactly right once, when the key may have changed,
+   * AlreadyExists - which is exactly right once, when the key may have changed,
    * and is two writes against a low-TPS account-wide API every time after that.
    * A console that checks back every few seconds until the badge turns green
    * would have made twenty of those per domain.
    *
    * ⚠ AND IT PROVES NOTHING AND CLAIMS NOTHING. No DNS lookup, no ownership
-   * proof, no delegation claim, no zone published — it reads SES's opinion of
+   * proof, no delegation claim, no zone published - it reads SES's opinion of
    * an identity that `verify` has already established and stores it. A domain
    * that has never been verified has no identity to ask about, so this answers
    * `missing` rather than quietly starting the flow by the back door.
@@ -132,13 +132,13 @@ export interface DomainStore {
    * IT, so the `on delete cascade` on `domains.tenant_id` never fires and
    * nothing anywhere was tearing these down. What survived a deleted workspace
    * was a live SES identity per domain and a PowerDNS zone still answering for
-   * every delegated one — our nameservers serving DKIM keys and return paths
+   * every delegated one - our nameservers serving DKIM keys and return paths
    * for an account that no longer exists, indefinitely, with no way to find
    * them except by reading the database.
    *
    * ⚠ IT IS `remove` IN A LOOP, NOT A SECOND TEARDOWN. Deleting a domain
    * safely means reading who actually holds the delegation and who actually
-   * holds the SES identity before touching either — two cross-tenant checks
+   * holds the SES identity before touching either - two cross-tenant checks
    * that took two separate bugs to get right. A bulk path with its own copy
    * would be the third.
    */
@@ -176,14 +176,14 @@ export interface ReleaseSummary {
    * ⚠ COUNTED RATHER THAN THROWN, because the caller is a webhook finishing a
    * deletion. One domain whose row will not delete must not stop the other
    * four, and must not fail a termination that has already stopped the
-   * billing — see the note where this is called.
+   * billing - see the note where this is called.
    */
   failed: number
 }
 
 /**
  * ⚠ DELIBERATELY NARROWER THAN `VerifyOutcome`. There is no `claimed` and no
- * `unproven` here because this asks nobody for anything it could lose — it
+ * `unproven` here because this asks nobody for anything it could lose - it
  * cannot take a name from another workspace and it cannot fail a proof it
  * never ran.
  */
@@ -199,7 +199,7 @@ export type RefreshOutcome =
  * ⚠ THE THREE ARE KEPT APART BECAUSE THEY SEND SOMEBODY TO THREE DIFFERENT
  * PLACES. `absent` means publish the records; `unreachable` means we could not
  * ask and nothing is wrong yet; `superseded` means the records are published,
- * correct-looking, and name an older claim — which happens every time a domain
+ * correct-looking, and name an older claim - which happens every time a domain
  * is deleted and added again, because the token is per row. Flattening the
  * third into the first is what sends a customer to re-check DNS that is
  * present and correct.
@@ -209,7 +209,7 @@ export type UnprovenReason = "absent" | "unreachable" | "superseded"
 /**
  * ⚠ `claimed` EXISTS BECAUSE TWO TENANTS MAY HOLD THE SAME NAME AS PENDING.
  * Only one may hold it verified (migration 0039), so the loser of that race
- * needs an answer that is neither "verified" nor "your DNS is wrong" — both
+ * needs an answer that is neither "verified" nor "your DNS is wrong" - both
  * would be lies, and the second sends somebody to go and break records that are
  * correct. It is a distinct outcome rather than a `failed` status for exactly
  * that reason.
@@ -226,7 +226,7 @@ export type VerifyOutcome =
   /**
    * ⚠ THE CHALLENGE RECORD IS NOT THERE YET, WHICH IS NOT A FAILURE. It is the
    * ordinary state of a delegated domain between being added and being set up,
-   * and it is the ONLY thing standing between this tenant and a zone — so it
+   * and it is the ONLY thing standing between this tenant and a zone - so it
    * has to be said in its own words rather than folded into `failed`, which
    * would send somebody to re-check DNS that is not the problem.
    *
@@ -246,12 +246,12 @@ export interface VerifyOptions {
    * incumbent can no longer prove, the domain has changed hands and should
    * move. Run from a cron on every unproved row in the table, the same code
    * would migrate domains between customers on its own schedule with nobody
-   * asking — which is exactly what `catch-up.ts` refuses to do, for the same
+   * asking - which is exactly what `catch-up.ts` refuses to do, for the same
    * reason, in its own words: "a poll must never move a domain between
    * customers".
    *
    * ⚠ FALSE DOES NOT MEAN "PRETEND IT VERIFIED". The contest is skipped and the
-   * outcome is reported as `claimed`, unchanged — the next verify a person
+   * outcome is reported as `claimed`, unchanged - the next verify a person
    * presses resolves it properly. And it is decided BEFORE SES is touched: a
    * sweep that registered the identity first would re-key the holder's signing
    * without moving anything, which is a takeover by a cron.
@@ -273,7 +273,7 @@ export interface DomainStoreDeps {
    * ⚠ REFUSED RATHER THAN ALLOWED-AND-BROKEN, because every path after this
    * assumes the customer controls the name. Adding `i10.tech` would create a
    * DKIM keypair for a domain whose DNS we already serve, register a second SES
-   * identity against our own sending domain, and — on the delegated path — hand
+   * identity against our own sending domain, and - on the delegated path - hand
    * a customer's claim the zone that carries OUR SPF and return paths. The
    * first thing to break would be our own mail.
    */
@@ -295,7 +295,7 @@ export interface DomainStoreDeps {
   /**
    * ⚠ READS THE PARENT'S REFERRAL, WHICH NO ORDINARY RESOLVER WILL DO. A
    * delegated domain proves itself through the nameserver names it delegates
-   * to, and those can only be read from the zone ABOVE the delegation — see
+   * to, and those can only be read from the zone ABOVE the delegation - see
    * domains/referral.ts. Defaults to the real thing; tests supply their own.
    */
   delegation?: DelegationProbe
@@ -332,7 +332,7 @@ export interface Logger {
 
 /**
  * ⚠ A HOSTNAME, NOT A URL AND NOT AN ADDRESS. Both are things people paste into
- * this field, and both would create a domain that can never verify — silently,
+ * this field, and both would create a domain that can never verify - silently,
  * because the record names would be built from the wrong string. Rejecting them
  * here costs one regex and saves a support conversation that starts "I added
  * the records and nothing happened".
@@ -390,7 +390,7 @@ const COLUMNS = {
 }
 
 /**
- * The MAIL FROM name SES must be told about — the one return path both routes
+ * The MAIL FROM name SES must be told about - the one return path both routes
  * write, from the one function that derives it. See `returnPathDomain`.
  */
 const mailFromFor = (row: { name: string; mailFromSubdomain: string }): string =>
@@ -461,7 +461,7 @@ export function domainStore({
   const probes: DnsProbes = { txt, delegation }
 
   /**
-   * Every OTHER row that holds this name — verified, or serving its delegation.
+   * Every OTHER row that holds this name - verified, or serving its delegation.
    *
    * ⚠ THROUGH THE TWO SECURITY DEFINER FUNCTIONS, because row level security
    * makes another workspace's rows invisible to this one by construction. They
@@ -490,7 +490,7 @@ export function domainStore({
    * ⚠ THE LATEST PROOF WINS, AND THAT IS A DELIBERATE REVERSAL. It used to be a
    * contest: the holder was re-checked, and if they still proved the name it
    * was a tie and nothing moved. That left an owner who lost the account their
-   * domain was in with no way back — the old account's records are still in
+   * domain was in with no way back - the old account's records are still in
    * their DNS, so the old account "still proves it" for ever. Now proving the
    * name is enough to take it; the old row is kept, set `failed` so it cannot
    * send, and stamped `displaced_at` so its console can say what happened.
@@ -500,7 +500,7 @@ export function domainStore({
    * hand this row the holder's signing while the holder still reads verified.
    *
    * ⚠ `contest: false` NEVER TAKES ANYTHING. A sweep proving a name somebody
-   * else holds reports `taken` and leaves it for a person to press Verify —
+   * else holds reports `taken` and leaves it for a person to press Verify -
    * two workspaces that both still publish their records would otherwise
    * trade the domain back and forth on every run.
    *
@@ -571,13 +571,13 @@ export function domainStore({
    *
    * ⚠ CALLED FROM `verify` AND NEVER FROM `create`, which is the whole point.
    * SES keys identities on the domain name inside one AWS account, so this call
-   * is not inert for a name another workspace holds — `AlreadyExistsException`
+   * is not inert for a name another workspace holds - `AlreadyExistsException`
    * sends the adapter into `PutEmailIdentityDkimSigningAttributes`, replacing
    * their signing key with ours. Only a proved owner may reach it.
    *
    * ⚠ AND RE-ASSERTING IS CORRECT RATHER THAN MERELY HARMLESS. After a domain
    * changes hands the new owner's verify runs this, which moves the shared SES
-   * identity onto their key — exactly what a transfer has to do.
+   * identity onto their key - exactly what a transfer has to do.
    *
    * ⚠ THE PRIVATE KEY IS READ IN ITS OWN QUERY, NOT ADDED TO `COLUMNS`. The
    * only secret in this feature has no business travelling inside the row shape
@@ -587,7 +587,7 @@ export function domainStore({
    * ⚠ IT REPORTS WHETHER IT ACTUALLY REGISTERED, AND THE CALLER NEEDS THAT TO
    * READ SES HONESTLY. Both early returns below leave no identity behind, so a
    * `not_started` from the status read that follows means two different things
-   * depending on which path got here — "nothing exists" or "it exists and
+   * depending on which path got here - "nothing exists" or "it exists and
    * Amazon has not looked yet". `verify` collapses that with this boolean; see
    * the floor it applies.
    */
@@ -617,7 +617,7 @@ export function domainStore({
 
     // ⚠ FORCED, because this is where ownership changes hands: a transferred
     // domain's identity may still sit in the previous workspace's SES tenant,
-    // and only the attach can take it out. Never fails the verify — see
+    // and only the attach can take it out. Never fails the verify - see
     // ses-tenant.ts.
     await ensureSesTenant({ db, identity, log }, tenantId, id, { force: true })
 
@@ -631,7 +631,7 @@ export function domainStore({
    * ⚠ EXTRACTED RATHER THAN INLINED INTO `verify`, because it is a different
    * question with a different answer. `verify` asks the PROVIDER what it
    * believes; this asks whether we should be answering DNS for this name at
-   * all, and the two only meet at the end — SES cannot see a DKIM record in a
+   * all, and the two only meet at the end - SES cannot see a DKIM record in a
    * zone we have not published.
    *
    * ⚠ AND THE ORDER IS PROVE, THEN CLEAR THE WAY, THEN CLAIM, THEN PUBLISH.
@@ -659,7 +659,7 @@ export function domainStore({
      * ⚠ BEFORE THE CLAIM, NOT AFTER. A claim taken on arrival and checked later
      * is a claim that was granted on nothing. A row that already holds the
      * claim proved it to get it, and is re-proved only if somebody else now
-     * holds the name verified — taking it from them needs today's evidence.
+     * holds the name verified - taking it from them needs today's evidence.
      */
     if (!alreadyOurs || (await rivalsFor(row)).length > 0) {
       const proof = await proveDomain(probes, row, dns.nameservers)
@@ -676,7 +676,7 @@ export function domainStore({
         )
       } catch (error) {
         // ⚠ A THIRD PARTY CLAIMED IT BETWEEN `clearTheWay` AND HERE. Reported
-        // rather than retried — looping would race every other claimant at
+        // rather than retried - looping would race every other claimant at
         // once, and the next Verify settles it.
         if (!isUniqueViolation(error)) throw error
         return { status: "taken" }
@@ -686,7 +686,7 @@ export function domainStore({
     /*
      * ⚠ REPUBLISHED ON EVERY VERIFY, NOT ONLY ON THE FIRST. `put` replaces the
      * zone wholesale and is idempotent, so this is also the repair path for a
-     * zone that was lost — a failed write, a restore, an operator deleting it —
+     * zone that was lost - a failed write, a restore, an operator deleting it -
      * and the customer's fix is a button they were already going to press.
      */
     for (const zone of delegatedZones({
@@ -715,11 +715,11 @@ export function domainStore({
     /*
      * ⚠ FUNNY, THEN USEFUL, IN THAT ORDER AND BOTH IN ONE SENTENCE. A
      * joke that does not also say what to do next is a dead end with a
-     * smile on it — and this is somebody's first minute in the product,
+     * smile on it - and this is somebody's first minute in the product,
      * where the thing they need is the next step rather than a laugh.
      */
     return (
-      `${name} is ours — we are flattered, genuinely, but we are already ` +
+      `${name} is ours - we are flattered, genuinely, but we are already ` +
       `using it. Add the domain your own mail comes from.`
     )
   }
@@ -733,7 +733,7 @@ export function domainStore({
    * them changed the field would promise a name the create then refused.
    *
    * ⚠ ANOTHER WORKSPACE HOLDING IT IS NOT A REFUSAL ANY MORE. Adding a name
-   * asserts nothing and touches nothing shared — no SES identity, no zone — so
+   * asserts nothing and touches nothing shared - no SES identity, no zone - so
    * it cannot hurt whoever holds it. Proving it is what moves it, in `verify`.
    */
   async function heldRefusal(tenantId: string, name: string): Promise<string | null> {
@@ -769,7 +769,7 @@ export function domainStore({
 
       // ⚠ CHECKED BEFORE THE IDENTITY IS CREATED, NOT AFTER. Creating the SES
       // identity first and then refusing would leave a verified identity in AWS
-      // that no row points at — invisible, billable, and still able to send.
+      // that no row points at - invisible, billable, and still able to send.
       //
       // ⚠ AND IT COUNTS UNVERIFIED DOMAINS, which is the level adapter's rule
       // rather than a choice made here: a pending domain is a row the customer
@@ -790,7 +790,7 @@ export function domainStore({
 
       // ⚠ `unentitled` IS NOT A REFUSAL HERE, FOR THE SAME REASON IT IS NOT ONE
       // ON THE SEND PATH. It means the tenant holds no plan or the plan grants
-      // no domains — our misconfiguration, not their fault — and the policy
+      // no domains - our misconfiguration, not their fault - and the policy
       // this codebase has already chosen for that is to allow and log.
 
       const ours = oursRefusal(name)
@@ -827,13 +827,13 @@ export function domainStore({
        * within ONE AWS ACCOUNT, so `CreateEmailIdentity` for a name another
        * workspace already holds raises `AlreadyExistsException` and our adapter
        * recovers by REPLACING their DKIM signing key with ours. Two workspaces
-       * may hold the same name as pending — migration 0039 exists to allow
-       * exactly that — so the second one to add it used to silently break the
+       * may hold the same name as pending - migration 0039 exists to allow
+       * exactly that - so the second one to add it used to silently break the
        * first one's signing, on the MANUAL path, with no delegation involved
        * and nothing on either screen to explain it.
        *
        * ⚠ SO THE IDENTITY IS `verify`'s TO CREATE, ONCE OWNERSHIP IS PROVED.
-       * Only one workspace can prove a name, so only one ever writes it — the
+       * Only one workspace can prove a name, so only one ever writes it - the
        * same rule the zone already follows, applied to the other shared
        * resource. `mailFrom` is derived there from the row rather than carried,
        * because by then it is a fact about the domain rather than an argument.
@@ -872,14 +872,14 @@ export function domainStore({
          * domain is somebody typing a name; it asserts nothing. Publishing the
          * zone at that moment meant the second workspace to type an
          * already-delegated name silently replaced the first one's DKIM
-         * selector — underneath NS records the real owner had published — and
+         * selector - underneath NS records the real owner had published - and
          * then verified against it.
          *
          * ⚠ SO THE ZONE IS `verify`'s TO PUBLISH, ONCE THE CHALLENGE RESOLVES.
          * That also means adding a domain can no longer fail because somebody
          * else typed it first, which is migration 0039's rule restored: any
-         * number of workspaces may hold a name as pending, and proof — not
-         * arrival — decides which of them we serve.
+         * number of workspaces may hold a name as pending, and proof - not
+         * arrival - decides which of them we serve.
          */
         return {
           status: "created",
@@ -889,7 +889,7 @@ export function domainStore({
         /*
          * ⚠ ONLY THIS WORKSPACE'S OWN DUPLICATE CAN REACH HERE. The row is
          * inserted `not_started`, so `domains_verified_name_unique` cannot fire
-         * on it, and another workspace holding the name is not a conflict —
+         * on it, and another workspace holding the name is not a conflict -
          * which is why any unique violation is read as `domains_tenant_name_unique`
          * rather than insisting on a constraint name some drivers drop.
          */
@@ -966,8 +966,8 @@ export function domainStore({
         } catch (error) {
           /*
            * ⚠ ONE FAILURE MUST NOT TAKE THE REST WITH IT. `remove` already
-           * swallows a failing SES call and a failing zone delete — those are
-           * tidies and are logged where they happen — so reaching here means
+           * swallows a failing SES call and a failing zone delete - those are
+           * tidies and are logged where they happen - so reaching here means
            * the row itself would not delete. That is worth a line and worth
            * counting, and it is not worth abandoning the other domains of a
            * workspace that has already been shut off.
@@ -990,7 +990,7 @@ export function domainStore({
       /*
        * ⚠ READ BEFORE THE ROW GOES, BECAUSE THE CLAIM CASCADES WITH IT. After
        * the delete below there is nothing left to ask, and the question has to
-       * be answered from somewhere — the old code answered it from
+       * be answered from somewhere - the old code answered it from
        * `existing.delegated`, which says only that THIS tenant asked for
        * delegation, not that this tenant is the one being served.
        *
@@ -1003,8 +1003,8 @@ export function domainStore({
       /*
        * ⚠ AND THE CLAIM ALONE WAS NOT ENOUGH TO ANSWER IT, WHICH LEAKED EVERY
        * ZONE PUBLISHED BEFORE CLAIMS EXISTED. Zones used to be written by
-       * `create` — see the note there that begins "NO ZONE IS PUBLISHED HERE
-       * ANY MORE" — so a delegated domain from before that change has three
+       * `create` - see the note there that begins "NO ZONE IS PUBLISHED HERE
+       * ANY MORE" - so a delegated domain from before that change has three
        * live zones and NO row in `core.delegations`. Reading the claim through
        * `withTenant` then returned undefined, `holdsZones` was false, and the
        * delete left our nameservers serving a DKIM key and a return path for a
@@ -1028,7 +1028,7 @@ export function domainStore({
           /*
            * ⚠ A FAILED LOOKUP MUST NOT FAIL THE DELETE, AND IT DID. This runs
            * BEFORE the row is removed, so anything it throws comes out of the
-           * route as "Could not delete the domain — Something went wrong." and
+           * route as "Could not delete the domain - Something went wrong." and
            * the customer cannot delete their domain at all. Observed the first
            * time a deployment ran this code against a database that had not
            * had migration 0051 applied: `core.zone_owner` did not exist, and a
@@ -1037,7 +1037,7 @@ export function domainStore({
            * ⚠ SO IT FAILS IN THE CHEAP DIRECTION, the same rule the rest of
            * this teardown follows: not knowing whose zones these are means
            * leaving them, which costs an inert record that the next verify of
-           * the name republishes wholesale — and that the orphan sweep now
+           * the name republishes wholesale - and that the orphan sweep now
            * finds. Blocking the delete costs the customer the one action they
            * asked for.
            */
@@ -1049,7 +1049,7 @@ export function domainStore({
           } catch (error) {
             log?.error?.(
               { err: String(error), tenantId, domain: existing.name },
-              "could not read who owns this domain's zones — deleting the row " +
+              "could not read who owns this domain's zones - deleting the row " +
                 "anyway and leaving the zones behind",
             )
             return false
@@ -1059,7 +1059,7 @@ export function domainStore({
 
           /*
            * ⚠ NO ANSWER IS NOT AN ANSWER. A migration not yet applied, a
-           * permission lost, a function renamed — any of them returns no row,
+           * permission lost, a function renamed - any of them returns no row,
            * and a count defaulted to zero would then satisfy "nobody else holds
            * it" and authorise the delete. The absent case has to be the
            * refusing case.
@@ -1071,7 +1071,7 @@ export function domainStore({
 
           /*
            * ⚠ EXACTLY ONE, NOT "AT MOST ONE". This row is still in the table
-           * when the count is taken — it is deleted below — so one means this
+           * when the count is taken - it is deleted below - so one means this
            * row alone, and zero means the count did not see what we are holding
            * and cannot be trusted either.
            */
@@ -1084,7 +1084,7 @@ export function domainStore({
        * ⚠ IT IS THE SAME CROSS-TENANT HOLE `holdsZones` ABOVE CLOSES, LEFT OPEN
        * ON THE OTHER HALF OF THE SAME TEARDOWN. SES keys an identity by domain
        * name within ONE AWS ACCOUNT, and several workspaces may hold the same
-       * name as pending — migration 0039 exists to allow exactly that, and the
+       * name as pending - migration 0039 exists to allow exactly that, and the
        * note above records `pslhq.app` held by three tenants in production. So
        * a workspace that never verified anything could delete its own pending
        * row and, with it, the SES identity another workspace is SENDING from.
@@ -1127,16 +1127,16 @@ export function domainStore({
        * the moment the statement above returns; throwing from here made the
        * route answer 500 while the domain had in fact been deleted, so the
        * console said "Could not delete the domain" and a reload showed it
-       * deleted anyway. That is the worst shape an error can take — it teaches
+       * deleted anyway. That is the worst shape an error can take - it teaches
        * people that our errors are noise, and the next real one is ignored too.
        *
        * ⚠ AND BOTH TIDIES ARE GENUINELY ALLOWED TO FAIL. SES answers
-       * NotFoundException for an identity that was never created — which is
-       * every domain added while the identity call was failing — and the zone
+       * NotFoundException for an identity that was never created - which is
+       * every domain added while the identity call was failing - and the zone
        * delete touches a second system that can be down. Neither can resurrect
        * the domain, so neither is worth a 500 the customer cannot act on.
        */
-      // ⚠ ONLY THE IDENTITY THIS ROW ACTUALLY OWNS — see `ownsIdentity`. A row
+      // ⚠ ONLY THE IDENTITY THIS ROW ACTUALLY OWNS - see `ownsIdentity`. A row
       // that never registered one, or a name another workspace holds verified,
       // leaves it strictly alone.
       if (ownsIdentity) {
@@ -1145,14 +1145,14 @@ export function domainStore({
 
       // ⚠ THE ZONES GO TOO, OR THE DELEGATION OUTLIVES THE DOMAIN. The customer's
       // NS records still point here after a delete, so a zone left behind keeps
-      // answering — with a DKIM key and a return path for a domain nobody owns.
+      // answering - with a DKIM key and a return path for a domain nobody owns.
       //
       // ⚠ BUT ONLY THE ZONES THIS ROW ACTUALLY HELD. A tenant whose pending row
       // never won the claim has no zones to take away, and taking them anyway
       // is deleting somebody else's DNS.
       if (holdsZones && zones) {
-        // The zones are the names this domain's NS records delegate — the
-        // record list the customer was shown — so a per-domain return-path
+        // The zones are the names this domain's NS records delegate - the
+        // record list the customer was shown - so a per-domain return-path
         // label needs no second derivation here.
         const delegated = existing.records.filter((r) => r.type === "NS")
         for (const zone of new Set(delegated.map((r) => r.name))) {
@@ -1172,7 +1172,7 @@ export function domainStore({
         } catch (error) {
           /*
            * ⚠ NEVER SILENCE, AND NOT ALWAYS THE SAME VOLUME. Nothing is broken
-           * for the customer either way — their domain is deleted — but the two
+           * for the customer either way - their domain is deleted - but the two
            * leaks are not equally serious. A zone left behind stops answering
            * as soon as the delegation lapses; an SES identity left behind is
            * live, billable and still able to send for a domain nobody owns.
@@ -1180,11 +1180,11 @@ export function domainStore({
            * ⚠ AND THE LOUD ONE IS LOUD BECAUSE THE QUIET ONE WAS NOT READ. This
            * exact line fired in production twice, saying exactly what had
            * happened, while the leak was reported as "deleting the domain does
-           * not remove it from SES" — because `warn` reaches the pod log and
+           * not remove it from SES" - because `warn` reaches the pod log and
            * nothing else. At `error` it reaches the reporter too.
            */
           const where = { err: String(error), tenantId, domain: existing!.name, what }
-          const message = `domain deleted, but its ${what} could not be removed — left behind`
+          const message = `domain deleted, but its ${what} could not be removed - left behind`
 
           if (severity === "error" && log?.error) log.error(where, message)
           else log?.warn(where, message)
@@ -1211,7 +1211,7 @@ export function domainStore({
 
       /*
        * ⚠ `not_started` MEANS NO IDENTITY EXISTS YET, so asking SES about one
-       * would be asking about a name we have never registered — which for a
+       * would be asking about a name we have never registered - which for a
        * name ANOTHER workspace holds is not merely useless but a reading of
        * their identity. `verify` is the only thing that may create one, and it
        * only does so after proving ownership.
@@ -1223,7 +1223,7 @@ export function domainStore({
       /*
        * ⚠ A DISPLACED ROW IS NEVER UPDATED FROM SES. The identity is keyed on
        * the name and now belongs to the workspace that took it, so its status
-       * is THEIR status — copying `verified` here would hand the name back to
+       * is THEIR status - copying `verified` here would hand the name back to
        * the row that lost it, without a proof, on a poll. Only this row's own
        * verify, which proves the name again, may move it.
        */
@@ -1294,7 +1294,7 @@ export function domainStore({
        * ⚠ EVERY UNPROVEN EXIT BELOW USED TO RETURN WITHOUT TOUCHING THE ROW, AND
        * THAT MADE THE ROW UNSWEEPABLE. `dns_checked_at` is the staleness clock
        * every background selector orders and filters on, so a domain that never
-       * proves never advances it — and a sweep that picks rows oldest-first
+       * proves never advances it - and a sweep that picks rows oldest-first
        * would take the same head of the table on every run, for ever, while the
        * rows behind it were never reached. Stamping it is simply true: we did
        * ask, and the answer was "not yet".
@@ -1334,7 +1334,7 @@ export function domainStore({
          * IT. Its DKIM selector is generated per domain ROW, so
          * `<selector>._domainkey.<domain>` carrying our public key is already
          * an account-specific fact that only somebody holding the domain's DNS
-         * can publish — the same proof the challenge record gives a delegated
+         * can publish - the same proof the challenge record gives a delegated
          * domain, which a delegated domain cannot use because that name lives
          * in a zone we serve.
          *
@@ -1353,7 +1353,7 @@ export function domainStore({
           }
         }
 
-        // ⚠ PROVED, SO WHOEVER HOLDS THE NAME STANDS DOWN — before SES below
+        // ⚠ PROVED, SO WHOEVER HOLDS THE NAME STANDS DOWN - before SES below
         // is asked to sign with this row's key. See `clearTheWay`.
         const cleared = await clearTheWay(existing, contest)
         if (cleared.status === "taken") {
@@ -1373,7 +1373,7 @@ export function domainStore({
        * ⚠ `not_started` CANNOT BE TRUE OF AN IDENTITY WE JUST CREATED, AND
        * WRITING IT ANYWAY MADE THE ROW INVISIBLE TO EVERYTHING. Two things
        * produce it here: SES's own `NOT_STARTED`, and a `NotFoundException`
-       * from reading back an identity a moment after creating it — the adapter
+       * from reading back an identity a moment after creating it - the adapter
        * maps both to the same word. Stored, that word means something entirely
        * different to the rest of the system: `domains_awaiting_provider`
        * excludes it, so the catch-up sweep never asks about the row again, and
@@ -1382,7 +1382,7 @@ export function domainStore({
        *
        * ⚠ SO IT IS FLOORED AT `pending`, WHICH IS WHAT IT ACTUALLY IS: an
        * identity exists and nothing has confirmed it. Only when we did NOT
-       * register — no selector, no sealed key — is `not_started` still the
+       * register - no selector, no sealed key - is `not_started` still the
        * honest answer, and that is exactly what `registered` distinguishes.
        */
       const seen =
@@ -1392,7 +1392,7 @@ export function domainStore({
 
       // ⚠ `verified_at` IS SET ONCE AND NEVER MOVED BACKWARDS BY A LATER CHECK.
       // It is the moment the domain first became usable, and things downstream
-      // — the mailbox projection, the send path — read it as "has this ever
+      // - the mailbox projection, the send path - read it as "has this ever
       // been proven". A transient `temporary_failure` must not un-verify a
       // working domain; `status` carries that, which is what it is for.
       const verifiedAt =
@@ -1459,7 +1459,7 @@ export function domainStore({
          * ⚠ THE ROW IS LEFT UNVERIFIED AND THE CHECK IS STILL STAMPED. Marking
          * it `failed` would tell somebody to go and fix DNS that is correct;
          * marking it verified is what the index just refused. And
-         * `displaced_at` stays as it was — this row does not hold the name.
+         * `displaced_at` stays as it was - this row does not hold the name.
          */
         await noteChecked()
         return { status: "claimed", domain: present(existing, region, dns) }

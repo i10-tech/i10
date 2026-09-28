@@ -65,7 +65,7 @@ describe("GET /emails/{id}", () => {
   })
 
   // ⚠ 404, NOT 403, FOR ANOTHER TENANT'S ID. Row level security returns
-  // nothing, and a 403 would confirm the id exists — turning a status endpoint
+  // nothing, and a 403 would confirm the id exists - turning a status endpoint
   // into an oracle for enumerating other customers' message ids.
   it("answers 404 for a message that is not this tenant's", async () => {
     const app = createApp({ apiKeyAuth, emailLookup: { get: async () => null } })
@@ -100,7 +100,7 @@ describe("last_event", () => {
   })
 
   // ⚠ SEVERITY, NOT TIME. SES publishes Delivery for one recipient and Bounce
-  // for another on the same message, in whatever order the receivers answer —
+  // for another on the same message, in whatever order the receivers answer -
   // so ordering by timestamp makes the same message read differently on two
   // requests.
   it("is deterministic when delivery and bounce both arrive", () => {
@@ -243,7 +243,7 @@ describe("/webhook-endpoints", () => {
 
 describe("POST /webhooks/ses", () => {
   // ⚠ `JSON.parse` SUCCEEDS ON `null`, AND THE VERIFIER READS `.Type` OFF IT.
-  // Without the shape guard this is a TypeError before any signature check —
+  // Without the shape guard this is a TypeError before any signature check -
   // a 500 and an error log that any unauthenticated caller can produce at will,
   // in exactly the log an operator watches for real ingest failures.
   it.each([["null"], ["123"], ['"a string"'], ["[]"]])(

@@ -36,7 +36,7 @@ export interface SesTransportOptions {
   client: SESv2Client
   /**
    * The SES configuration set. ⚠ WITHOUT IT THERE ARE NO EVENTS, AND WITHOUT
-   * EVENTS THE SES RECONCILER IS BLIND — it reads `core.message_events`, which
+   * EVENTS THE SES RECONCILER IS BLIND - it reads `core.message_events`, which
    * only exists because SES publishes to a configuration set's destination.
    * Leaving this unset does not fail a send; it silently removes half the
    * safety net.
@@ -80,11 +80,11 @@ function toSesInput(
     },
     ReplyToAddresses: m.replyTo.length ? [...m.replyTo] : undefined,
     // ⚠ THE BASE NAME IS NOT NECESSARILY THE SET. The domain's tracking picks
-    // one of four — see send/configuration-sets.ts.
+    // one of four - see send/configuration-sets.ts.
     ConfigurationSetName: configurationSetName
       ? configurationSetFor(configurationSetName, m.tracking ?? NO_TRACKING)
       : undefined,
-    // ⚠ Per-workspace reputation, pause and suppression — see `sesTenant`.
+    // ⚠ Per-workspace reputation, pause and suppression - see `sesTenant`.
     TenantName: m.sesTenant ?? undefined,
 
     // ⚠ THIS TAG IS THE JOIN KEY FOR EVERYTHING DOWNSTREAM. SES echoes it on
@@ -106,14 +106,14 @@ function toSesInput(
  * ⚠ ALWAYS RAW, THOUGH NOT FOR THE REASON IT WAS CHANGED. This chose
  * `Content.Simple` unless a message carried a file, and SES refused the first
  * mail this system ever sent with `BadRequestException: Header <Message-ID> is
- * not supported` — Simple cannot carry that header at any price. Raw can, so
+ * not supported` - Simple cannot carry that header at any price. Raw can, so
  * raw it became, to keep the retry mitigation db/claim.ts leans on.
  *
  * ⚠ AND THEN SES OVERWROTE THE HEADER ANYWAY. Measured on the wire, and stated
  * plainly in the SendRawEmail API reference: SES applies its own `Message-ID`
  * and `Date` and discards the caller's. Verified independently of this code
  * with a hand-built message sent through the AWS CLI. So the change did not buy
- * what it was made to buy, and no SES path can — see send/transport.ts.
+ * what it was made to buy, and no SES path can - see send/transport.ts.
  *
  * ⚠ IT STAYS RAW REGARDLESS, AND THE REASONS ARE NOW THE PLAIN ONES.
  * Attachments require it, so Simple was never the only path; one path is
@@ -121,7 +121,7 @@ function toSesInput(
  * Reverting would be churn that buys back only SES's validation of Simple.
  *
  * ⚠ `Destination` STILL GOVERNS WHO RECEIVES IT. Raw supplies the bytes; the
- * recipient list is passed alongside, which is what keeps `Bcc` blind — see
+ * recipient list is passed alongside, which is what keeps `Bcc` blind - see
  * buildRawMessage, which deliberately writes no `Bcc` header.
  */
 function content(m: OutboundMessage): SendEmailCommandInput["Content"] {
@@ -136,7 +136,7 @@ function content(m: OutboundMessage): SendEmailCommandInput["Content"] {
  * ⚠ OURS CANNOT BE OVERWRITTEN. `i10_message_id` is what matches an SES event
  * back to a row in `core.messages`; a customer tag of the same name would
  * detach every delivery, bounce and complaint for that send from the message
- * they describe — and suppression, which is built from those events, would stop
+ * they describe - and suppression, which is built from those events, would stop
  * working for exactly the sends that need it. The contract already refuses an
  * `i10_` prefix; this is the second lock on the same door.
  */
@@ -161,7 +161,7 @@ function buildTags(m: OutboundMessage): { Name: string; Value: string }[] {
  * answer and delaying everything behind it.
  *
  * Names are matched rather than instances, because the SDK's error classes are
- * not reliably `instanceof`-able across bundling and version boundaries — a
+ * not reliably `instanceof`-able across bundling and version boundaries - a
  * check that silently stops matching would quietly reclassify every failure.
  */
 function classify(err: unknown): SendOutcome {
@@ -186,7 +186,7 @@ function classify(err: unknown): SendOutcome {
     case "AccountSuspendedException":
       return { status: "rejected", reason: `${name}: ${message}` }
 
-    // Paused, throttled, or over a limit — all of which pass.
+    // Paused, throttled, or over a limit - all of which pass.
     case "SendingPausedException":
     case "TooManyRequestsException":
     case "LimitExceededException":

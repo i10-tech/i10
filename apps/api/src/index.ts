@@ -65,7 +65,7 @@ initObservability({
   dsn: env.SENTRY_DSN,
   environment: env.SENTRY_ENVIRONMENT,
   service: "api",
-  // Read straight from the environment, the same way /version does — it is
+  // Read straight from the environment, the same way /version does - it is
   // baked into the image at build time rather than validated as configuration.
   release: process.env.GIT_SHA,
   log,
@@ -75,7 +75,7 @@ const { sql, db } = createDb(env.DATABASE_URL)
 
 // ⚠ BEFORE THE LISTENER, NOT AFTER, AND NOT IN A HEALTH CHECK. Connecting as a
 // role that bypasses row level security is the one misconfiguration in this
-// service that produces no error and no wrong answer — it removes the tenant
+// service that produces no error and no wrong answer - it removes the tenant
 // boundary and everything keeps working. Checked here, it fails the rollout
 // while the previous pod is still serving.
 try {
@@ -93,8 +93,8 @@ try {
 
 // ⚠ AFTER THE RLS ASSERTION, BEFORE ANYTHING SERVES. This publishes
 // `SES_ENABLED` and `METERING_FREE_PLAN_ID` into `core.routing_settings`, which
-// is the only way the mailbox lever — a function Stalwart calls inside Postgres
-// — can see them. See domains/routing-settings.ts.
+// is the only way the mailbox lever - a function Stalwart calls inside Postgres
+// - can see them. See domains/routing-settings.ts.
 //
 // ⚠ AND IT IS NOT FATAL. A failure leaves Stalwart reading the previous deploy's
 // values, which are stale rather than nonsense; refusing to boot over a routing
@@ -108,7 +108,7 @@ try {
 } catch (error) {
   log.error(
     { err: error },
-    "could not publish routing settings — Stalwart keeps the old ones",
+    "could not publish routing settings - Stalwart keeps the old ones",
   )
   captureError(error, { phase: "boot" })
 }
@@ -117,7 +117,7 @@ try {
  * ⚠ THE PUBLISHABLE KEY IS PASSED, AND `authenticateRequest` DOES NOT WORK
  * WITHOUT IT. It is not an optional nicety for a server SDK: Clerk uses it to
  * resolve which instance a session token belongs to, and throws "Publishable
- * key is missing" when it is absent — which the verifier reports as
+ * key is missing" when it is absent - which the verifier reports as
  * `unavailable`, which every session route renders as "retry shortly". See
  * env.ts.
  */
@@ -128,14 +128,14 @@ const clerk = createClerkClient({
 
 /*
  * ⚠ SAID AT STARTUP RATHER THAN DISCOVERED PER REQUEST. Both of these are
- * misconfigurations that present as something else entirely — one as a Clerk
- * outage, one as nothing at all — so the only place they are cheap to notice is
+ * misconfigurations that present as something else entirely - one as a Clerk
+ * outage, one as nothing at all - so the only place they are cheap to notice is
  * the first ten lines of the log after a deploy.
  */
 if (!env.CLERK_PUBLISHABLE_KEY) {
   log.error(
     {},
-    "CLERK_PUBLISHABLE_KEY is not set — every session-authenticated route " +
+    "CLERK_PUBLISHABLE_KEY is not set - every session-authenticated route " +
       "(/console/*, /mailboxes) will answer 503. Sending is unaffected.",
   )
 }
@@ -143,15 +143,15 @@ if (!env.CLERK_PUBLISHABLE_KEY) {
 if (env.POLAR_ACCESS_TOKEN && !env.POLAR_SUCCESS_URL) {
   /*
    * ⚠ IT BREAKS TWO THINGS AT ONCE AND LOOKS LIKE NEITHER. `POLAR_SUCCESS_URL`
-   * is where the browser lands after paying, AND — because `embed_origin` is
-   * derived from its origin — it is the only thing that lets Polar's embedded
+   * is where the browser lands after paying, AND - because `embed_origin` is
+   * derived from its origin - it is the only thing that lets Polar's embedded
    * checkout speak to the page it is embedded in. Without it the modal takes
    * the money and then sits there for ever, having sent no `success` event and
    * offering no working way out. See `withCheckoutId` in billing/polar.ts.
    */
   log.error(
     {},
-    "POLAR_SUCCESS_URL is not set — the embedded checkout cannot message the " +
+    "POLAR_SUCCESS_URL is not set - the embedded checkout cannot message the " +
       "console, so a completed payment leaves the customer looking at a modal " +
       "that never closes.",
   )
@@ -164,19 +164,19 @@ if (env.CONSOLE_ORIGINS.length === 0) {
   // nothing about the running system looks different.
   log.error(
     {},
-    "CONSOLE_ORIGINS is empty — the Clerk `azp` allowlist is disabled, so a " +
+    "CONSOLE_ORIGINS is empty - the Clerk `azp` allowlist is disabled, so a " +
       "token minted for any application on this Clerk instance is accepted.",
   )
 }
 
-// ⚠ A SEPARATE CLIENT FROM THE QUEUES'. The queue connection is a dependency —
+// ⚠ A SEPARATE CLIENT FROM THE QUEUES'. The queue connection is a dependency -
 // a job that cannot be enqueued has not been accepted. This one is a cache, and
 // its errors are swallowed. Sharing a client would mean one set of retry and
 // offline-queue settings serving two opposite failure policies.
 const cache = createCacheClient(env.REDIS_URL)
 cache.on("error", (err: Error) => log.warn({ err }, "api key cache unavailable"))
 
-// ⚠ THE QUEUE'S CONNECTION, NOT THE CACHE'S — see cache/redis.ts. An enqueue
+// ⚠ THE QUEUE'S CONNECTION, NOT THE CACHE'S - see cache/redis.ts. An enqueue
 // that fails does not fail the request, but it does cost the message a trip
 // through the sweep, so this client retries where the cache one gives up.
 const queueRedis = createQueueClient(env.REDIS_URL)
@@ -185,7 +185,7 @@ queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailabl
 /**
  * ⚠ THERE IS NO LONGER AN UNMETERED MODE TO FALL INTO, AND THAT IS THE POINT OF
  * THE SWAP. This used to hinge on a vendor secret key: no key meant every send
- * allowed and nothing counted — right for a local checkout, catastrophic to
+ * allowed and nothing counted - right for a local checkout, catastrophic to
  * discover in production a month later, and so a line you could grep for rather
  * than a silent default. Usage now lives in the database the API cannot start
  * without, so the state that needed announcing no longer exists.
@@ -203,7 +203,7 @@ log.info({ feature: env.METERING_FEATURE_ID }, "metering via postgres")
 
 /*
  * ⚠ SKIPPED IS NOT SILENT. A client id with no secret beside it, or a secret
- * with no id, is somebody half-way through configuring a provider — and the
+ * with no id, is somebody half-way through configuring a provider - and the
  * only symptom is one Connect button that quietly does nothing, which nobody
  * discovers until a customer presses it. It is not worth refusing to boot over,
  * which is exactly why it has to be said out loud here instead.
@@ -220,7 +220,7 @@ if (env.DNS_OAUTH_IGNORED.length > 0) {
  * variables set is a working Cloudflare connection; neither is a direct call,
  * which is correct wherever the egress is not challenged. ONE of them is a
  * Cloudflare exchange that goes on failing with a bot challenge while the
- * deployment believes it has been fixed — and the challenge is invisible until
+ * deployment believes it has been fixed - and the challenge is invisible until
  * a customer presses Connect. Same reasoning as the ignored apps above.
  */
 if (Boolean(env.DNS_OAUTH_BROKER_URL) !== Boolean(env.DNS_OAUTH_BROKER_SECRET)) {
@@ -235,7 +235,7 @@ if (Boolean(env.DNS_OAUTH_BROKER_URL) !== Boolean(env.DNS_OAUTH_BROKER_SECRET)) 
 /**
  * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
  * `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a customer's signing
- * secret, so the endpoint routes answer 501 and no SES event is ingested —
+ * secret, so the endpoint routes answer 501 and no SES event is ingested -
  * visible, rather than a silent downgrade to unsigned or plaintext.
  */
 const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
@@ -243,7 +243,7 @@ const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : nul
 // TWO HALVES. The value stamped on the job at `add()` is enforced as a ceiling
 // in `retry.lua`; the Worker's own value is what actually dead-letters. The
 // effective budget is the smaller of the two, so both come from
-// WEBHOOK_MAX_ATTEMPTS — left to the default here, raising that variable would
+// WEBHOOK_MAX_ATTEMPTS - left to the default here, raising that variable would
 // make groupmq give up before `deliverWebhook` considers the attempt final, and
 // the row would sit `pending` forever with the endpoint never disabled.
 const webhookQueue = secrets
@@ -252,7 +252,7 @@ const webhookQueue = secrets
 
 log.info(
   { webhooks: Boolean(secrets) },
-  secrets ? "webhooks enabled" : "WEBHOOKS DISABLED — no WEBHOOK_SECRET_KEY",
+  secrets ? "webhooks enabled" : "WEBHOOKS DISABLED - no WEBHOOK_SECRET_KEY",
 )
 
 /**
@@ -270,7 +270,7 @@ const subscriptions = subscriptionOps(db)
  * ⚠ THE ONLY OBJECT IN THIS PROCESS THAT CAN MOVE A CUSTOMER BETWEEN PLANS, and
  * it reaches exactly two places: `subscriptionGrants`, which acts on verified
  * Polar events, and tenant provisioning, which puts a brand-new tenant on the
- * free plan. Nothing else is handed it — everything else gets `metering`, which
+ * free plan. Nothing else is handed it - everything else gets `metering`, which
  * exposes quota and usage and nothing that could grant anything.
  *
  * ⚠ AND IT IS NO LONGER OPTIONAL, WHICH REMOVES A WHOLE FAILURE MODE. When the
@@ -326,7 +326,7 @@ const tenantDeaths = tenantLifecycleStore(db)
  *
  * ⚠ IT IS CONSTRUCTED AFTER `polar` BECAUSE IT NEEDS IT, AND IT IS BUILT EVEN
  * WHEN POLAR IS ABSENT. Without a Polar client it can still mark the tenant
- * dead and drop it to the free allowance — the half that is entirely ours — and
+ * dead and drop it to the free allowance - the half that is entirely ours - and
  * it logs the subscription it could not cancel at `error`, which is the only
  * remaining trace of a card that is still being charged.
  */
@@ -336,7 +336,7 @@ const tenantDeaths = tenantLifecycleStore(db)
  * ⚠ IT WAS CONSTRUCTED TWICE, AND THE SECOND COPY'S OWN COMMENT SAID SO
  * ("Two stores, one rule"). Two stores means two sets of DNS probes and two
  * places for the SES gate, the nameserver list and the zone sink to be
- * configured — and the failure mode of them drifting is a domain that verifies
+ * configured - and the failure mode of them drifting is a domain that verifies
  * through one surface and not the other. This file already shares `sessionAuth`
  * rather than building a second verifier, for exactly the same reason.
  *
@@ -350,7 +350,7 @@ const domains = secrets
       /*
        * ⚠ `SES_ENABLED` GATES THE IDENTITY, NOT JUST THE SENDING. It used to
        * gate only the latter, so a deployment with SES off still called
-       * `CreateEmailIdentity` on every domain creation — which on a laptop
+       * `CreateEmailIdentity` on every domain creation - which on a laptop
        * holding production AWS credentials wrote into the real account. The
        * flag now means what it says. See `offlineIdentity`.
        */
@@ -379,7 +379,7 @@ const domains = secrets
       log,
       // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is nowhere
       // safe to keep a DKIM private key, so the routes answer 501 rather than
-      // storing one in the clear — the same rule webhooks already follow.
+      // storing one in the clear - the same rule webhooks already follow.
       secrets,
     })
   : null
@@ -397,14 +397,14 @@ const lifecycle = tenantLifecycle({
   organizations: {
     /*
      * ⚠ IT COUNTS MEMBERS RATHER THAN ASKING WHETHER THE ORGANIZATION EXISTS,
-     * and that is not a refinement — existence is the wrong question. Clerk
+     * and that is not a refinement - existence is the wrong question. Clerk
      * leaves an organization standing when its last member is deleted:
      * measured in production 2026-09-20, two organizations whose only members
      * had deleted their accounts both answered 200 with `total_count: 0`, and
      * no `organization.deleted` was ever fired for either. Gating on existence
      * would therefore never terminate anything.
      *
-     * ⚠ 404 IS AN ANSWER — "gone", which is zero members by a shorter route.
+     * ⚠ 404 IS AN ANSWER - "gone", which is zero members by a shorter route.
      * Anything ELSE failing must not read as abandoned, because that answer
      * switches off a workspace; the throw is caught by the caller, which skips
      * that tenant and says so.
@@ -454,20 +454,20 @@ log.info(
   },
   polar && grants && env.POLAR_WEBHOOK_SECRET
     ? "billing wired to polar"
-    : "BILLING INCOMPLETE — no paid plan can be sold or granted",
+    : "BILLING INCOMPLETE - no paid plan can be sold or granted",
 )
 
 /**
  * ⚠ THE SAME QUEUE OBJECTS THE ACCEPT PATH PUSHES TO, NOT NEW ONES. groupmq's
  * Queue is a handle rather than a connection, but two handles on one namespace
- * would be two places to keep the options in step — and an autoscaler reading a
+ * would be two places to keep the options in step - and an autoscaler reading a
  * queue configured differently from the one being written to is a scaler that
  * measures the wrong thing.
  */
 /**
  * ⚠ `maxAttempts` HERE AS WELL AS ON THE WORKER, AND FROM THE SAME VARIABLE.
  * groupmq stamps this side's value on the job and `retry.lua` enforces it as a
- * ceiling, while the Worker's own setting is what actually dead-letters — so
+ * ceiling, while the Worker's own setting is what actually dead-letters - so
  * two different numbers give an effective budget equal to the smaller of them.
  * This side used to take the queue's fallback of 5 while the worker asked for
  * 3, which meant the real budget was 3 and nothing anywhere said so.
@@ -496,7 +496,7 @@ const depthSources = {
  * i10's own tenant, for the mail i10 sends about itself.
  *
  * ⚠ RESOLVED ONCE AT BOOT AND ALLOWED TO BE ABSENT. A fresh database has no
- * `i10` tenant — migration 0029 inserts one only where it already exists — so
+ * `i10` tenant - migration 0029 inserts one only where it already exists - so
  * this is `null` on a new deployment and authentication mail simply stays with
  * Clerk. Failing to boot over it would make the API refuse to start on exactly
  * the deployments that have no customers to email.
@@ -516,17 +516,17 @@ const authEmailDomain = env.AUTH_EMAIL_FROM
 /*
  * ⚠ SET BUT UNPARSEABLE IS A MISCONFIGURATION THAT MUST NOT PASS QUIETLY.
  * `AUTH_EMAIL_FROM` is only `z.string().min(1)`, so it accepts a value with no
- * address in it at all — and without a domain there is no exemption, the send
+ * address in it at all - and without a domain there is no exemption, the send
  * gate refuses our own mail, and the env's own note names that exact outcome:
  * "it must never be the case that we stop Clerk sending and then fail to send
  * ourselves, because that is a sign-up nobody can complete." So this says so
  * loudly and the block below declines to take over, which leaves Clerk
- * delivering — the safe default rather than the degraded one.
+ * delivering - the safe default rather than the degraded one.
  */
 if (env.AUTH_EMAIL_FROM && !authEmailDomain) {
   log.error(
     { from: env.AUTH_EMAIL_FROM },
-    "AUTH_EMAIL_FROM has no parseable domain — clerk keeps delivering its own",
+    "AUTH_EMAIL_FROM has no parseable domain - clerk keeps delivering its own",
   )
 }
 
@@ -536,7 +536,7 @@ const authEmailTenantId = await (async () => {
   try {
     // ⚠ THROUGH THE DEFINER, NOT `select … from core.tenants`. That table is
     // under RLS and its policy reads `current_setting('app.tenant_id')`
-    // strictly, which nothing has set this early — so the direct read did not
+    // strictly, which nothing has set this early - so the direct read did not
     // return zero rows, it RAISED. It cannot be repaired with `withTenant()`
     // either: that needs the tenant id, and the id is what this is looking
     // for. See migration 0032.
@@ -550,7 +550,7 @@ const authEmailTenantId = await (async () => {
     if (!id) {
       log.warn(
         { slug: env.AUTH_EMAIL_TENANT_SLUG },
-        "no tenant for auth email — clerk keeps delivering its own",
+        "no tenant for auth email - clerk keeps delivering its own",
       )
     }
     return id
@@ -559,11 +559,11 @@ const authEmailTenantId = await (async () => {
     // One question about who signs the verification mail crashlooped the send
     // path, the webhooks and the mailbox projection along with it. However
     // this fails, the right outcome is the one this value already has a name
-    // for — no tenant, and Clerk keeps delivering. Loud in the log, not in the
+    // for - no tenant, and Clerk keeps delivering. Loud in the log, not in the
     // exit code.
     log.error(
       { slug: env.AUTH_EMAIL_TENANT_SLUG, err: String(err) },
-      "could not resolve the auth email tenant — clerk keeps delivering its own",
+      "could not resolve the auth email tenant - clerk keeps delivering its own",
     )
     return null
   }
@@ -578,7 +578,7 @@ const authEmailTenantId = await (async () => {
  * Clerk instance from being replayed against this API, and every separate
  * construction is another chance for one of them to be built without it. Three
  * copies of this call used to be spread through the deps object below with a
- * comment claiming they were shared — which is the version of this mistake that
+ * comment claiming they were shared - which is the version of this mistake that
  * survives review, because the sharing was asserted rather than done.
  */
 const sessions = clerkSessions(clerk, {
@@ -601,7 +601,7 @@ const freshAuth = clerkFreshAuth(clerk, {
 })
 
 /**
- * The one sender for mail i10 sends as itself — Clerk's auth emails and our
+ * The one sender for mail i10 sends as itself - Clerk's auth emails and our
  * own notices alike, through our own send path as the system tenant.
  */
 const systemSender =
@@ -615,7 +615,7 @@ const systemSender =
          * own sending domains, so `AUTH_EMAIL_FROM` can never be a
          * verified domain and the gate would refuse every password reset
          * in the product. Scoping the exemption to the object the
-         * auth-email path builds — rather than to a flag on a request —
+         * auth-email path builds - rather than to a flag on a request -
          * is what keeps it unreachable from a customer's send.
          */
         ops: acceptDatabaseOps({
@@ -654,7 +654,7 @@ const transferNotice =
           })
           const hasAccount = existing.totalCount > 0
           // ⚠ `?new=1` SENDS A SIGNED-OUT VISITOR TO SIGN-UP RATHER THAN
-          // SIGN-IN — see the console's middleware. Either way they land back
+          // SIGN-IN - see the console's middleware. Either way they land back
           // on the offer once they are in.
           const url = `${consoleUrl}/transfers/${input.offerId}${hasAccount ? "" : "?new=1"}`
           const rendered = await renderDomainTransfer({
@@ -682,7 +682,7 @@ const transferNotice =
 const app = createApp({
   apiKeyAuth: {
     // ⚠ OUR OWN TABLE, NOT CLERK. See auth/api-key.ts for why, and note the
-    // client above is still built — Clerk remains the identity provider for
+    // client above is still built - Clerk remains the identity provider for
     // sessions, organizations and the authd bind delegation. It is only the
     // per-request credential check that stopped crossing the network.
     lookup: keyLookup(db),
@@ -702,7 +702,7 @@ const app = createApp({
     lifecycle,
     // ⚠ ONLY WHEN BOTH HALVES EXIST. Without a from-address or i10's tenant we
     // would have nowhere to send from and nothing to attribute it to, and the
-    // webhook then acknowledges the event while Clerk keeps sending — which is
+    // webhook then acknowledges the event while Clerk keeps sending - which is
     // the state the product is in today, and a safe place to fail to.
     ...(systemSender
       ? {
@@ -719,7 +719,7 @@ const app = createApp({
     mailHost: env.MAIL_HOSTNAME,
     // ⚠ NOT CONFIGURABLE, BECAUSE THEY ARE NOT OURS TO CHOOSE. These are the
     // two ports claimed with `hostPort` in the Stalwart StatefulSet and named
-    // in the SRV records — 993 implicit-TLS IMAP, 465 implicit-TLS submission.
+    // in the SRV records - 993 implicit-TLS IMAP, 465 implicit-TLS submission.
     // An environment variable here would let a profile advertise a port
     // nothing is listening on, and the client's report of that is "cannot
     // connect using SSL", which sends you looking at certificates.
@@ -812,7 +812,7 @@ const app = createApp({
          * poll, and that is still all it does for them.
          *
          * ⚠ WHAT CHANGED IS THE ONE CASE ONLY IT CAN FIX. A checkout carries
-         * `metadata.tenant_id`; a subscription does not — so when Polar reuses a
+         * `metadata.tenant_id`; a subscription does not - so when Polar reuses a
          * customer it did not create, and leaves `external_id` null, THIS is the
          * only place in the system that knows both halves. It writes the id
          * back, and then has to be able to grant what that customer already
@@ -822,7 +822,7 @@ const app = createApp({
          *
          * ⚠ IT STILL GRANTS NOTHING OF ITS OWN. `grants.apply` takes a state
          * derived by `toState` from what Polar says, exactly as the webhook and
-         * the reconciler do — the money still decides, and this only removes the
+         * the reconciler do - the money still decides, and this only removes the
          * wait.
          */
         checkoutStatus: {
@@ -835,13 +835,13 @@ const app = createApp({
            * and has to assume the expensive one. Polar deduplicates customers
            * by email, so somebody who subscribed, deleted their account and
            * signed up again gets the SAME Polar customer back, still carrying
-           * their first tenant's id — and refusing to overwrite it meant their
+           * their first tenant's id - and refusing to overwrite it meant their
            * payment could never be attributed to anybody. This is the only
            * thing that knows the first tenant is gone.
            */
           tenants: tenantDeaths,
           // The console's own session check, so a signed-in caller is held to
-          // its own workspace — see routes/checkout-status.ts.
+          // its own workspace - see routes/checkout-status.ts.
           tenantAuth: { sessions, tenants: tenantResolver(db), activeOrg },
           options: {
             planForProduct: (productId: string) =>
@@ -855,7 +855,7 @@ const app = createApp({
     : {}),
   /**
    * ⚠ THE ONLY WRITER OF `core.domains` IN THE APPLICATION, which is what makes
-   * the plan's domain limit enforceable at all — before this there was nowhere
+   * the plan's domain limit enforceable at all - before this there was nowhere
    * to check it. It is handed the meter rather than the `Metering` seam,
    * because the seam answers about one feature and this asks about another.
    *
@@ -867,7 +867,7 @@ const app = createApp({
    * The human half of i10, and the only routes that take a session.
    *
    * ⚠ WIRED UNCONDITIONALLY, unlike `domains` above, because none of its parts
-   * are optional — there is no secret it can be missing. A deployment that
+   * are optional - there is no secret it can be missing. A deployment that
    * cannot reach Clerk fails at the session, which answers 503, rather than at
    * a 501 that would claim mailboxes are not a feature.
    */
@@ -876,14 +876,14 @@ const app = createApp({
   /**
    * The dashboard, at `/console`.
    *
-   * ⚠ IT SHARES `sessionAuth`'s VERIFIER RATHER THAN BUILDING A SECOND ONE —
-   * the same `sessions` object, not a second call with the same arguments — so
+   * ⚠ IT SHARES `sessionAuth`'s VERIFIER RATHER THAN BUILDING A SECOND ONE -
+   * the same `sessions` object, not a second call with the same arguments - so
    * there is exactly one place the `authorizedParties` allowlist is configured.
    * See the two constants above.
    *
    * ⚠ AND EVERY STORE IT IS GIVEN IS ONE THAT ALREADY EXISTS. The console reads
    * through its own query module and writes through `domainStore`, `keyStore`
-   * and `webhookEndpointStore` — the objects that own the plan limits and the
+   * and `webhookEndpointStore` - the objects that own the plan limits and the
    * cache eviction. Handing it a second path to those tables would put the
    * domain limit in two places, and the console is where somebody would notice
    * it was missing last.
@@ -900,8 +900,8 @@ const app = createApp({
     profile: tenantProfileStore(db),
     /*
      * ⚠ RENAMING THE WORKSPACE NOW RENAMES THE ORGANIZATION, and this call used
-     * to be deliberately absent. The reason was sound — a write to Clerk inside
-     * a rename transaction would let a Clerk outage stop renames — and the
+     * to be deliberately absent. The reason was sound - a write to Clerk inside
+     * a rename transaction would let a Clerk outage stop renames - and the
      * route keeps that property by committing ours first and treating this as
      * best effort afterwards. What the absence produced was an organization
      * still called "Mohamed" in the switcher long after the workspace became
@@ -924,7 +924,7 @@ const app = createApp({
       /*
        * ⚠ VERIFIED ADDRESSES ONLY. An offer is accepted by whoever holds the
        * address it names, and an unverified address on a Clerk account is a
-       * string somebody typed — accepting on it would let anybody claim any
+       * string somebody typed - accepting on it would let anybody claim any
        * offer by adding the recipient's address to their own profile.
        */
       get: async (userId: string) => {
@@ -961,7 +961,7 @@ const app = createApp({
     /*
      * ⚠ IT IS GIVEN NO NAMESERVERS AT ALL, AND THAT IS THE POINT. It used to be
      * handed `MAIL_NAMESERVERS` so that "the check and the instructions cannot
-     * disagree" — which was true only while every customer was told to publish
+     * disagree" - which was true only while every customer was told to publish
      * the same two names. Per-claim delegation made the instructions per
      * domain and left this list behind, so the check and the instructions
      * disagreed for every delegated domain in the product: a customer who had
@@ -975,13 +975,13 @@ const app = createApp({
      * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
      * why all of it arrives together or not at all. A credential that can
      * rewrite a customer's MX records must not be stored in the clear, so
-     * without a box to seal it in the routes answer 501 — the same rule
+     * without a box to seal it in the routes answer 501 - the same rule
      * `domains` below follows for a DKIM private key.
      *
      * ⚠ AND THE THREE ARE BUILT ONCE, IN ONE SCOPE, BECAUSE THEY REFER TO EACH
      * OTHER. The publisher renews an expiring OAuth credential through the same
      * `dnsOAuth` the callback used and writes it back through the same store
-     * the routes read — so a second `dnsConnectionStore(db, secrets)` here, as
+     * the routes read - so a second `dnsConnectionStore(db, secrets)` here, as
      * there used to be, is a second object claiming to be the same thing.
      */
     ...(secrets
@@ -994,7 +994,7 @@ const app = createApp({
              * ⚠ DERIVED FROM THE SEALING KEY RATHER THAN BEING ITS OWN
              * VARIABLE, and domain-separated so it is not the same value. It
              * signs the OAuth `state`, which is what stops somebody attaching
-             * their DNS credential to another workspace — a real key, but not
+             * their DNS credential to another workspace - a real key, but not
              * one an operator should have to remember to set separately from
              * the key this feature already cannot run without.
              */
@@ -1005,7 +1005,7 @@ const app = createApp({
              * ⚠ BOTH OR NEITHER, DECIDED HERE SO THE MODULE NEVER SEES A HALF
              * ONE. A URL without a secret would call an authenticated Worker
              * with no credential and turn every Cloudflare exchange into a 401
-             * — a worse failure than the challenge it was meant to fix, and one
+             * - a worse failure than the challenge it was meant to fix, and one
              * that reads like a rejected client secret. See `DNS_OAUTH_BROKER_URL`.
              */
             ...(env.DNS_OAUTH_BROKER_URL && env.DNS_OAUTH_BROKER_SECRET
@@ -1027,7 +1027,7 @@ const app = createApp({
               /*
                * ⚠ THE ONE QUESTION THAT DECIDES WHETHER WE MAY DELETE A RECORD
                * THAT LOOKS LIKE OURS. A name can be held by more than one
-               * workspace — see migration 0039 — so "this record is in our
+               * workspace - see migration 0039 - so "this record is in our
                * shape at a name we publish to" does not establish that it is
                * this domain's to remove. `core.verified_holder` is
                * `SECURITY DEFINER` precisely so the answer can cross tenants,
@@ -1038,7 +1038,7 @@ const app = createApp({
                * ⚠ WITHOUT THIS A CONNECTION IS GOOD FOR ONE ACCESS TOKEN AND
                * THEN DEAD. The grant was stored when somebody authorised us and
                * never read again, so the first publish after it expired failed
-               * `unauthorized` — and the console told the customer to reconnect,
+               * `unauthorized` - and the console told the customer to reconnect,
                * asking them to redo an authorisation that had not lapsed, while
                * the refresh token sat unused in the row.
                */
@@ -1050,7 +1050,7 @@ const app = createApp({
     ...(domains
       ? {
           // ⚠ THE SAME STORE, NOT A SECOND ONE. It used to be built again here
-          // with the note "Two stores, one rule" — which was the rule stated
+          // with the note "Two stores, one rule" - which was the rule stated
           // and the drift left possible. See where it is constructed.
           domains,
         }
@@ -1086,7 +1086,7 @@ const app = createApp({
     capacity: postgresMeter(db),
     // ⚠ THE PROJECTION, NOT A SECOND WRITER. Provisioning changes Clerk and
     // then asks the projection to derive the row, exactly as the webhook does;
-    // `MAIL_DOMAINS` is passed for the same reason it is there — i10's own
+    // `MAIL_DOMAINS` is passed for the same reason it is there - i10's own
     // domains are hosted regardless of who owns a `core.domains` row.
     project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
     featureId: MAILBOXES,
@@ -1104,7 +1104,7 @@ const app = createApp({
         //
         // ⚠ AND IT IS GATED ON THE SECRET SEPARATELY FROM THE REST. Without
         // `STALWART_WEBHOOK_SECRET` the route answers 503 rather than accepting
-        // unsigned notifications — a public endpoint that writes suppressions
+        // unsigned notifications - a public endpoint that writes suppressions
         // must never be reachable without a signature, not even in a
         // half-configured environment.
         ...(env.STALWART_WEBHOOK_SECRET
@@ -1144,7 +1144,7 @@ let shuttingDown = false
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     // ⚠ GUARDED, BECAUSE Bun.serve DOES NOT REMOVE THE HANDLER FOR US. A second
-    // SIGTERM — which kubelet does send if the first one looks ignored — would
+    // SIGTERM - which kubelet does send if the first one looks ignored - would
     // otherwise start a second teardown while the first is still draining, and
     // the two races would close the pool out from under in-flight queries.
     if (shuttingDown) return
@@ -1152,7 +1152,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     log.info({ signal }, "shutting down")
 
     // ⚠ `stop()` WITH NO ARGUMENT. It stops accepting new connections and
-    // resolves once the ones already in flight have finished — the same
+    // resolves once the ones already in flight have finished - the same
     // contract `server.close(cb)` had. Passing `true` would close active
     // connections immediately, which is precisely the dropped-request
     // behaviour this block exists to prevent.
@@ -1165,7 +1165,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
       )
       // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
       // queues and the transport sends on a timer, so a 500 raised in the
-      // last seconds before a rolling deploy took the report with it — and
+      // last seconds before a rolling deploy took the report with it - and
       // the seconds around a deploy are when the interesting ones happen.
       .then(() => flushObservability())
       .finally(() => process.exit(0))

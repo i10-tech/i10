@@ -2,8 +2,8 @@
  * Asks SES about the domains still waiting on it, then exits.
  *
  * ⚠ IT EXISTS BECAUSE NOTHING ASKED TWICE. `recheck.ts` re-proves domains that
- * are ALREADY verified — `core.domains_due_recheck` selects on
- * `status = 'verified'` — so a domain that has not got there yet was read
+ * are ALREADY verified - `core.domains_due_recheck` selects on
+ * `status = 'verified'` - so a domain that has not got there yet was read
  * exactly once, by whoever pressed Verify, and then never again. SES announces
  * a verification to nobody, so a domain it had verified sat `pending` in our
  * table indefinitely: a customer sent real mail, SES delivered it, and our
@@ -22,14 +22,14 @@
  *
  * ⚠ EVERY MINUTE, AND THE COST OF THAT IS POD CHURN RATHER THAN SES CALLS. What
  * limits how often any ONE domain is asked about is `staleMs` inside the sweep,
- * not the schedule — so tightening this from five minutes to one cut the worst
+ * not the schedule - so tightening this from five minutes to one cut the worst
  * case somebody waits by five and left the per-domain call rate unchanged. What
  * it does buy is 1,440 pods a day instead of 288, each of which usually does one
  * indexed read and exits.
  *
  * ⚠ AND ITS OWN Sentry MONITOR, because the failure is invisible in the data.
  * A pass that asks nothing and a pass that cannot reach SES both write nothing
- * and stand nobody up — the check-in is the only place that difference exists.
+ * and stand nobody up - the check-in is the only place that difference exists.
  */
 import pino from "pino"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
@@ -65,8 +65,8 @@ await withMonitor(
     schedule: "*/1 * * * *",
     /*
      * ⚠ FIFTEEN MISSED RUNS, NOT ONE, BECAUSE THE JOB FIRES EVERY MINUTE. A
-     * single skipped slot on a minute cadence says nothing — a node was busy,
-     * a pull was slow — and alerting on it would train everybody to ignore the
+     * single skipped slot on a minute cadence says nothing - a node was busy,
+     * a pull was slow - and alerting on it would train everybody to ignore the
      * monitor. Fifteen minutes with no successful pass is a real outage.
      */
     checkinMarginMinutes: 15,
@@ -88,7 +88,7 @@ await withMonitor(
       captureError(error, { phase: "boot" })
       await sql.end({ timeout: 5 })
       // An exit code rather than `process.exit`, so the check-in and its flush
-      // still run — the same reason reconcile.ts does it this way.
+      // still run - the same reason reconcile.ts does it this way.
       process.exitCode = 1
       return
     }
@@ -101,7 +101,7 @@ await withMonitor(
      */
     const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
     if (!secrets) {
-      log.warn({}, "no WEBHOOK_SECRET_KEY — nothing to catch up on")
+      log.warn({}, "no WEBHOOK_SECRET_KEY - nothing to catch up on")
       await sql.end({ timeout: 5 })
       return
     }

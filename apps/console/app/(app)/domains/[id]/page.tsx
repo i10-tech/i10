@@ -49,8 +49,8 @@ export async function generateMetadata({
 /**
  * One domain, and whether it can send.
  *
- * ⚠ THE RECORDS TABLE IS THE PAGE. Everything else — region, created date,
- * delete — is secondary to "what do I paste where, and have you seen it yet".
+ * ⚠ THE RECORDS TABLE IS THE PAGE. Everything else - region, created date,
+ * delete - is secondary to "what do I paste where, and have you seen it yet".
  * Per-record status is what makes the difference between "it does not work" and
  * "the DKIM record is missing"; without it, verification is a single red word
  * and somebody re-checks all six records looking for the wrong one.
@@ -73,7 +73,7 @@ export default async function DomainDetailPage({
   /*
    * ⚠ FETCHED ONLY FOR AN UNVERIFIED DELEGATED DOMAIN, AND THAT IS THREE DNS
    * LOOKUPS THIS PAGE DOES NOT OTHERWISE DO. A verified domain has nothing to
-   * diagnose, and a manual one has no delegation — running it for either would
+   * diagnose, and a manual one has no delegation - running it for either would
    * put a resolver on the critical path of a page that currently renders from
    * one call.
    */
@@ -102,7 +102,7 @@ export default async function DomainDetailPage({
      * ⚠ READ HERE SO THE DELETE DIALOG CAN ASK ABOUT THEM WITHOUT A ROUND TRIP
      * OF ITS OWN. A key restricted to this domain becomes a credential that can
      * send from nothing the moment the domain goes, and the person deleting it
-     * is the only one who will ever connect the two — see DomainActions.
+     * is the only one who will ever connect the two - see DomainActions.
      *
      * ⚠ AND A FAILURE HERE HIDES THE QUESTION RATHER THAN THE PAGE, like the
      * three above. The domain still deletes; what is lost is the offer to tidy
@@ -128,12 +128,12 @@ export default async function DomainDetailPage({
   const liveForThis = (keys.ok ? keys.data.data : []).filter(
     (key) => key.revoked_at === null && key.domains.includes(domain.name),
   )
-  // Keys that can send from nothing once this domain goes — the delete asks
+  // Keys that can send from nothing once this domain goes - the delete asks
   // about these.
   const scopedKeys = liveForThis
     .filter((key) => key.domains.length === 1)
     .map((key) => ({ id: key.id, name: key.name }))
-  // Every key the domain leaving would change, and what each keeps — the
+  // Every key the domain leaving would change, and what each keeps - the
   // transfer spells these out before the offer is sent.
   const keyImpact = liveForThis.map((key) => ({
     id: key.id,
@@ -189,13 +189,13 @@ export default async function DomainDetailPage({
         {/*
          * ⚠ THE EXPLANATION OF WHAT EACH STATUS MEANS IS INLINE, NOT IN A
          * TOOLTIP. `temporary_failure` in particular is not a synonym for
-         * `failed` — SES uses it for a DNS lookup that failed in a way worth
-         * retrying — and a customer who reads it as "failed" goes and changes
+         * `failed` - SES uses it for a DNS lookup that failed in a way worth
+         * retrying - and a customer who reads it as "failed" goes and changes
          * records that were correct.
          */}
         {/*
          * ⚠ IN PLACE OF THE STATUS NOTE, NOT BESIDE IT. A displaced domain is
-         * `failed`, and "we could not find the records" is the wrong story —
+         * `failed`, and "we could not find the records" is the wrong story -
          * the records were found, in another workspace's setup. Shown together,
          * the failure note sends somebody to check DNS that has nothing wrong.
          */}
@@ -209,7 +209,7 @@ export default async function DomainDetailPage({
           // ⚠ SUPPRESSED WHEN THERE IS A REAL DIAGNOSIS TO SHOW. The generic
           // "propagation can take 72 hours" note and a specific "your records
           // point somewhere else" note contradict each other, and the generic
-          // one is the reassuring half — so shown together, it is the one people
+          // one is the reassuring half - so shown together, it is the one people
           // believe.
           quiet={delegation?.ok === true || Boolean(domain.displaced_at)}
         />
@@ -240,13 +240,13 @@ export default async function DomainDetailPage({
               <>
                 {/*
                  * ⚠ THE COUNT IS COUNTED, NOT WRITTEN DOWN. This said "three NS
-                 * records" while the table below listed six — three delegated
-                 * names times two nameservers — so the first thing the page did
+                 * records" while the table below listed six - three delegated
+                 * names times two nameservers - so the first thing the page did
                  * was contradict itself, and the second was make somebody
                  * wonder which three of the six they needed. `MAIL_NAMESERVERS`
                  * is configuration and can change; a number typed here cannot.
                  */}
-                Publish {domain.records.length} NS records at your DNS provider — the{" "}
+                Publish {domain.records.length} NS records at your DNS provider - the{" "}
                 {new Set(domain.records.map((record) => record.name)).size} names below,
                 each pointing at every one of our nameservers. Once they resolve, i10
                 serves those subdomains, so SPF, DKIM, DMARC and MX stay correct without
@@ -296,7 +296,7 @@ export default async function DomainDetailPage({
 
         {/*
          * ⚠ LAST, AND THAT IS THE POINT. Deleting a domain stops its mail, and
-         * it used to sit behind a ✕✕✕ in the header an inch from "Verify" —
+         * it used to sit behind a ✕✕✕ in the header an inch from "Verify" -
          * an unlabelled menu whose only contents were destructive. Reaching it
          * now means scrolling past everything the page is actually for.
          */}
@@ -334,7 +334,7 @@ function DisplacedNote({ name, at }: { name: string; at: string }) {
         <span className="font-mono text-foreground">{name}</span>, so the domain is now
         in their account and you can no longer send from it here. If it belongs here,
         make sure the records below are published at your DNS provider and press Verify
-        — proving it again moves it back to this workspace.
+        - proving it again moves it back to this workspace.
       </p>
     </div>
   )
@@ -362,17 +362,17 @@ function StatusNote({
     },
     pending: {
       title: "Waiting for DNS",
-      body: "The records have been issued and we are watching for them. DNS propagation is usually minutes and can be up to 72 hours — nothing is wrong yet.",
+      body: "The records have been issued and we are watching for them. DNS propagation is usually minutes and can be up to 72 hours - nothing is wrong yet.",
       tone: "border-warning/25 bg-warning/5",
     },
     temporary_failure: {
       title: "Temporary lookup failure",
-      body: "A DNS lookup failed in a way worth retrying — this is not the same as your records being wrong. We keep checking; press Verify to check now.",
+      body: "A DNS lookup failed in a way worth retrying - this is not the same as your records being wrong. We keep checking; press Verify to check now.",
       tone: "border-warning/25 bg-warning/5",
     },
     failed: {
       title: "Verification failed",
-      body: "We could not find the records within 72 hours. Check each row below against what your DNS provider actually shows — a trailing dot, a quoted value or a wrong host is the usual cause.",
+      body: "We could not find the records within 72 hours. Check each row below against what your DNS provider actually shows - a trailing dot, a quoted value or a wrong host is the usual cause.",
       tone: "border-danger/25 bg-danger/5",
     },
   }

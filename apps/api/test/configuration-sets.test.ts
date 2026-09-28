@@ -6,7 +6,7 @@ import {
 
 /**
  * Tracking is decided by the SES configuration set, not the message (#154), so
- * the domain's two switches must land on exactly one of four sets — and every
+ * the domain's two switches must land on exactly one of four sets - and every
  * one of those four must be one an SES tenant is given.
  */
 describe("choosing the configuration set", () => {

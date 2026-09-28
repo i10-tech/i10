@@ -27,7 +27,7 @@ describe("interpreting an SES notification", () => {
   it("maps the types we carry", () => {
     // ⚠ THE SECOND COLUMN IS THE EVENT UNION, NOT `string`. bun types a matcher
     // against the value it received, so `toBe(ours)` compares the narrow
-    // `email.*` union on the left with whatever this table says on the right —
+    // `email.*` union on the left with whatever this table says on the right -
     // and `string` is not assignable to it. Naming the real type also makes a
     // typo in an expectation a compile error rather than a failing assertion.
     const cases: [string, NonNullable<ReturnType<typeof interpretSesEvent>>["type"]][] =
@@ -146,7 +146,7 @@ describe("interpreting an SES notification", () => {
   })
 
   // ⚠ SES SPELLS IT WITH A SPACE IN THE PAYLOAD; `RENDERING_FAILURE` is the
-  // configuration-set API's spelling. Missing it is silent — a template that
+  // configuration-set API's spelling. Missing it is silent - a template that
   // failed to render would read as `sent` forever.
   it.each(["Rendering Failure", "RENDERING_FAILURE"])(
     "maps %s to email.failed",
@@ -158,7 +158,7 @@ describe("interpreting an SES notification", () => {
   )
 
   // ⚠ THE DEDUPE KEY HAS TO SURVIVE A REDELIVERY. `new Date()` here would let a
-  // notification with no usable timestamp be recorded twice — two delivery rows
+  // notification with no usable timestamp be recorded twice - two delivery rows
   // and two customer webhooks for one real event.
   it("falls back to a caller-supplied clock, not to now", () => {
     const snsAt = new Date("2026-09-03T09:00:00.000Z")
@@ -328,7 +328,7 @@ describe("ingestion", () => {
   })
 
   // The rows are committed and queryable; reporting a failure would make SNS
-  // redeliver, and the unique index would then discard the event — losing the
+  // redeliver, and the unique index would then discard the event - losing the
   // webhook in order to fix the queue.
   it("still succeeds when the enqueue fails after commit", async () => {
     const { deps, log } = ops({

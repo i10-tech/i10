@@ -9,7 +9,7 @@ import { DnsWriteError, type PublishOutcome, type ZoneWriter } from "../src/dns/
  * Publishing a domain's records into the customer's own DNS.
  *
  * ⚠ THE PUBLISHER ITSELF WRITES NOTHING AND DECIDES EVERYTHING: which zone, on
- * whose credential, and — the part that matters — whether a blocked publish is
+ * whose credential, and - the part that matters - whether a blocked publish is
  * reported as a refusal or quietly treated as a success. The adapters signal a
  * refusal by a SHAPE (`removed` populated, nothing created or unchanged) rather
  * than by throwing, so a reader of this file that gets the condition slightly
@@ -76,7 +76,7 @@ function connections(over: Partial<DnsConnectionStore> = {}) {
 const log = { warn: mock(() => {}) }
 
 /**
- * ⚠ THE WRITER IS INJECTED, so nothing here touches a real provider adapter —
+ * ⚠ THE WRITER IS INJECTED, so nothing here touches a real provider adapter -
  * each of those has its own file. `cloudflare` is only a slug the tests pass
  * through; `unsupported` is proved by asking for a slug the registry has no
  * writer for.
@@ -91,7 +91,7 @@ const publisherWith = (w: ZoneWriter, conn = connections()) => ({
  *
  * ⚠ THE CLEAN-UP IS THE ONLY DESTRUCTIVE THING THIS MODULE DOES WITHOUT
  * ASKING, AND THIS IS THE GATE ON IT. A name can be held by more than one
- * workspace — migration 0039 exists to allow exactly that — so a record in
+ * workspace - migration 0039 exists to allow exactly that - so a record in
  * our shape at a name we publish to may be another workspace's LIVE
  * delegation rather than litter from a domain that was deleted. Only
  * `core.verified_holder` can tell the two apart, and every answer other than
@@ -266,7 +266,7 @@ describe("a publish the adapter refused", () => {
     })
 
     expect(result).toEqual({ status: "needs_confirmation", conflicts })
-    // ⚠ NOT COUNTED AS A SUCCESSFUL USE EITHER — nothing was written.
+    // ⚠ NOT COUNTED AS A SUCCESSFUL USE EITHER - nothing was written.
     expect(conn.noteUse).not.toHaveBeenCalled()
   })
 
@@ -313,7 +313,7 @@ describe("translating the records the customer is looking at", () => {
    * is watching for the record to appear, and an hour-long negative cache is
    * the difference between "it worked" and "it did nothing".
    *
-   * ⚠ AND NOTHING WE ISSUE SAYS "Auto" ANY MORE — the records carry the number
+   * ⚠ AND NOTHING WE ISSUE SAYS "Auto" ANY MORE - the records carry the number
    * itself. The fallback stays because a domain row created before that change
    * still has the old string in whatever the caller is holding, and mapping it
    * is one line against a publish that would otherwise write a TTL of zero.

@@ -10,7 +10,7 @@ import { z } from "zod"
  *
  * ⚠ AND THE STATUS STRINGS ARE A PUBLIC CONTRACT THE MOMENT THIS SHIPS. They
  * arrive in customer code as literals in `if (domain.status === "verified")`.
- * Add to them, never rename — the same rule as `webhookEventName`.
+ * Add to them, never rename - the same rule as `webhookEventName`.
  */
 
 export const domainStatus = z.enum([
@@ -25,7 +25,7 @@ export const domainStatus = z.enum([
  * What the customer has to publish, and whether we have seen it yet.
  *
  * ⚠ `ttl` IS A STRING BECAUSE RESEND'S IS, AND OURS NOW ALWAYS CARRIES A
- * NUMBER. It used to say "Auto", copying Resend literally — which told a
+ * NUMBER. It used to say "Auto", copying Resend literally - which told a
  * customer nothing, did not match what we actually publish, and left the
  * zone-file export inventing 3600 for it. It is `RECORD_TTL` seconds, the
  * same value the publisher writes and the same one our own zones serve, so
@@ -51,7 +51,7 @@ export const dnsRecordSchema = z.object({
 export const createDomainSchema = z.object({
   /**
    * ⚠ THE APEX, NOT A URL AND NOT AN ADDRESS. `example.com`, never
-   * `https://example.com` or `me@example.com` — both are things people paste,
+   * `https://example.com` or `me@example.com` - both are things people paste,
    * and both would create a domain that can never verify.
    */
   name: z.string().min(1).max(253),
@@ -93,8 +93,8 @@ export const domainSchema = z.object({
   created_at: z.string(),
   region: z.string(),
   /**
-   * What the customer has to publish. Six ordinary records, or — for a
-   * delegated domain — the NS records for the three subdomains i10 serves.
+   * What the customer has to publish. Six ordinary records, or - for a
+   * delegated domain - the NS records for the three subdomains i10 serves.
    */
   records: z.array(dnsRecordSchema),
   /** Whether i10 serves this domain's mail records. See `records`. */
@@ -111,7 +111,7 @@ export const domainSchema = z.object({
 
 /**
  * `PATCH /domains/{id}`. Only what can change on a live domain without
- * touching its DNS — which is why `delegated` is not here.
+ * touching its DNS - which is why `delegated` is not here.
  */
 export const updateDomainSchema = z
   .object({

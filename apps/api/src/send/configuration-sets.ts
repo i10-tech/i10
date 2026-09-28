@@ -33,7 +33,7 @@ export function configurationSetFor(base: string, tracking: Tracking): string {
 }
 
 /**
- * Every set a send may name, which is every set an SES tenant must hold — SES
+ * Every set a send may name, which is every set an SES tenant must hold - SES
  * refuses a tenant send through a set that is not associated with the tenant.
  */
 export const configurationSetsFor = (base: string): string[] => [

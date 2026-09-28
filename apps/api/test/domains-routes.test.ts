@@ -96,7 +96,7 @@ describe("Resend compatibility", () => {
 describe("refusals", () => {
   /**
    * ⚠ 403 AND NOT 429, AND THIS IS THE ONE THAT MATTERS. The SDKs back off on a
-   * 429, and waiting does not produce another domain — a retry loop would run
+   * 429, and waiting does not produce another domain - a retry loop would run
    * forever. A plan limit on a held resource is not rate limiting.
    */
   it("answers 403 with plan_limit_exceeded when the plan is full", async () => {
