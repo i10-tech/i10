@@ -142,6 +142,7 @@ const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
   status: async () => ({ dkimTokens: ["aaa"], status: "pending" }),
   list: async () => [],
   signature: async () => ({ origin: null, tokens: [] }),
+  attach: async () => {},
   remove: async () => {},
   ...over,
 })

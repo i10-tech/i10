@@ -61,6 +61,14 @@ const schema = z.object({
   // means every customer edits DNS. Chosen once, deliberately: eu-central-1.
   AWS_REGION: z.literal("eu-central-1").default("eu-central-1"),
 
+  // The AWS account SES lives in, for the ARNs SES tenant associations name
+  // (#156). Not a secret — it appears in every ARN — and a constant for the
+  // same reason the region is one.
+  AWS_ACCOUNT_ID: z
+    .string()
+    .regex(/^\d{12}$/)
+    .default("699073937874"),
+
   // Signs Clerk's webhooks, via Svix. This is an authentication boundary, not
   // a checksum: everything downstream writes to the mailbox projection, so a
   // forged event could create a mailbox on a domain we host or silence one.

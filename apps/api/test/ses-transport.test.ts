@@ -79,6 +79,21 @@ describe("what reaches SES", () => {
     expect(inputOf(c as never).ConfigurationSetName).toBe("i10-prod")
   })
 
+  // ⚠ #156. A tenant is named only when the message carries one — the worker
+  // sets it only once the identity is recorded as attached, because SES refuses
+  // a tenant send whose identity or configuration set it does not associate.
+  it("names the SES tenant when the message carries one", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send({ ...message, sesTenant: "i10-ten" })
+    expect(inputOf(c as never).TenantName).toBe("i10-ten")
+  })
+
+  it("names no tenant when the message carries none", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send({ ...message, sesTenant: null })
+    expect(inputOf(c as never).TenantName).toBeUndefined()
+  })
+
   // ⚠ The duplicate mitigation. A retry must reuse this exact header or the
   // accepted-duplicate rate becomes a delivered-duplicate rate.
   //

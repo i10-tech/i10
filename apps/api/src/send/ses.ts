@@ -79,6 +79,8 @@ function toSesInput(
     },
     ReplyToAddresses: m.replyTo.length ? [...m.replyTo] : undefined,
     ConfigurationSetName: configurationSetName,
+    // ⚠ Per-workspace reputation, pause and suppression — see `sesTenant`.
+    TenantName: m.sesTenant ?? undefined,
 
     // ⚠ THIS TAG IS THE JOIN KEY FOR EVERYTHING DOWNSTREAM. SES echoes it on
     // every event it publishes, and `core.message_events` is matched back to

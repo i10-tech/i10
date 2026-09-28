@@ -23,6 +23,7 @@ import {
 } from "./ownership.js"
 import { readDelegation } from "./referral.js"
 import type { DomainIdentity } from "./identity.js"
+import { ensureSesTenant } from "./ses-tenant.js"
 import type { SecretBox } from "../webhooks/signing.js"
 
 /**
@@ -591,6 +592,12 @@ export function domainStore({
       selector: row.dkimSelector,
       privateKey: secrets.open(sealed),
     })
+
+    // ⚠ FORCED, because this is where ownership changes hands: a transferred
+    // domain's identity may still sit in the previous workspace's SES tenant,
+    // and only the attach can take it out. Never fails the verify — see
+    // ses-tenant.ts.
+    await ensureSesTenant({ db, identity, log }, tenantId, id, { force: true })
 
     return true
   }

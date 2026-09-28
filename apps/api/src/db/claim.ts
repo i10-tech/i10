@@ -144,7 +144,13 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
               -- "no override".
               (select d.transactional_route
                  from core.domains d
-                where d.id = m.domain_id) as transactional_route
+                where d.id = m.domain_id) as transactional_route,
+              -- The SES tenant the domain's identity is RECORDED as attached
+              -- to. Null until an attach has succeeded, and a null names no
+              -- tenant -- see domains/ses-tenant.ts.
+              (select d.ses_tenant_name
+                 from core.domains d
+                where d.id = m.domain_id) as ses_tenant_name
   `
 }
 

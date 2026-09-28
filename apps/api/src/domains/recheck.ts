@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { proveDomain, type DnsProbes } from "./ownership.js"
+import type { TenancyOutcome } from "./ses-tenant.js"
 
 /**
  * Asking, periodically, whether the workspaces holding verified domains still
@@ -44,6 +45,19 @@ export interface RecheckDeps {
   intervalMs?: number
   /** ⚠ BOUNDED, so one run cannot make thousands of DNS queries. */
   batch?: number
+  /**
+   * Puts a still-proven domain back in its workspace's SES tenant if it is not
+   * recorded there (#156). `ensureSesTenant`, bound to an SES identity.
+   *
+   * ⚠ THIS SWEEP IS WHERE "ALWAYS" COMES FROM. Registration attaches every new
+   * domain, but an attach that failed, and every domain that predates tenants,
+   * would otherwise stay untenanted for ever. It rides on this pass because
+   * this pass already visits every verified domain, oldest check first, with
+   * its workspace id — so no second cross-tenant query is needed to find them.
+   *
+   * Optional: a deployment without SES has no tenant to join.
+   */
+  tenancy?: (tenantId: string, domainId: string) => Promise<TenancyOutcome>
 }
 
 export interface RecheckSummary {
@@ -55,6 +69,10 @@ export interface RecheckSummary {
   unreachable: number
   /** Stood down: failing for longer than the grace period. */
   displaced: number
+  /** Proven domains newly attached to their SES tenant. */
+  tenantsAttached: number
+  /** Proven domains whose tenant attach failed. Retried next run. */
+  tenantsFailed: number
 }
 
 const DAY = 24 * 60 * 60 * 1000
@@ -79,6 +97,7 @@ export async function recheckDomains({
   graceMs = 7 * DAY,
   intervalMs = DAY,
   batch = 200,
+  tenancy,
 }: RecheckDeps): Promise<RecheckSummary> {
   const summary: RecheckSummary = {
     checked: 0,
@@ -86,6 +105,8 @@ export async function recheckDomains({
     missing: 0,
     unreachable: 0,
     displaced: 0,
+    tenantsAttached: 0,
+    tenantsFailed: 0,
   }
 
   const before = new Date(now().getTime() - intervalMs)
@@ -124,6 +145,11 @@ export async function recheckDomains({
 
     if (proof.proven) {
       summary.proven += 1
+      // ⚠ ONLY A PROVEN DOMAIN. One failing its proof may be on its way to
+      // being stood down, and is no business of a tenant's.
+      const outcome = await tenancy?.(row.tenant_id, row.domain_id)
+      if (outcome === "attached") summary.tenantsAttached += 1
+      if (outcome === "failed") summary.tenantsFailed += 1
       continue
     }
 

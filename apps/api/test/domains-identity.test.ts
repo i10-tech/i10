@@ -213,3 +213,125 @@ describe("re-registering an identity that is already ours", () => {
     expect(sent).toContain("PutEmailIdentityMailFromAttributesCommand")
   })
 })
+
+/**
+ * SES tenants (#156): one per workspace, the identity in exactly one of ours.
+ *
+ * ⚠ AND A DELETE MUST DETACH FIRST. SES refuses to delete an identity a tenant
+ * still holds, and the store's `tidy` swallows that refusal by design — so a
+ * delete that did not detach would leak a live identity silently, the same way
+ * the missing IAM permission once did.
+ */
+describe("SES tenants", () => {
+  /** A client that records each command with its input. */
+  const tenantClient = (answers: Record<string, unknown> = {}) => {
+    const sent: { name: string; input: Record<string, unknown> }[] = []
+    const c = {
+      send: async (command: { input: Record<string, unknown> }) => {
+        const name = command.constructor.name
+        sent.push({ name, input: command.input })
+        const answer = answers[name]
+        if (answer instanceof Error) throw answer
+        return answer ?? {}
+      },
+    } as unknown as SESv2Client
+    return { client: c, sent }
+  }
+
+  const options = {
+    region: "eu-central-1",
+    accountId: "123456789012",
+    configurationSet: "i10-prod",
+  }
+  const exists = (name: string) =>
+    Object.assign(new Error(`${name} already exists`), {
+      name: "AlreadyExistsException",
+    })
+
+  it("creates the tenant and associates both the identity and the configuration set", async () => {
+    const { client: c, sent } = tenantClient()
+    await sesIdentity(c, options).attach("example.com", "i10-ten")
+
+    expect(sent.map((s) => s.name)).toEqual([
+      "CreateTenantCommand",
+      "CreateTenantResourceAssociationCommand",
+      "CreateTenantResourceAssociationCommand",
+      "ListResourceTenantsCommand",
+    ])
+    expect(sent[1]!.input).toEqual({
+      TenantName: "i10-ten",
+      ResourceArn: "arn:aws:ses:eu-central-1:123456789012:identity/example.com",
+    })
+    expect(sent[2]!.input).toEqual({
+      TenantName: "i10-ten",
+      ResourceArn: "arn:aws:ses:eu-central-1:123456789012:configuration-set/i10-prod",
+    })
+  })
+
+  it("treats an existing tenant and existing associations as done", async () => {
+    const { client: c } = tenantClient({
+      CreateTenantCommand: exists("tenant"),
+      CreateTenantResourceAssociationCommand: exists("association"),
+    })
+    await sesIdentity(c, options).attach("example.com", "i10-ten")
+  })
+
+  it("takes the identity out of any other workspace's tenant, and leaves foreign tenants alone", async () => {
+    const previous = "i10-0190a3e4-0000-7000-8000-000000000001"
+    const { client: c, sent } = tenantClient({
+      ListResourceTenantsCommand: {
+        ResourceTenants: [
+          { TenantName: "i10-ten" },
+          { TenantName: previous },
+          { TenantName: "made-by-hand" },
+        ],
+      },
+    })
+    await sesIdentity(c, options).attach("example.com", "i10-ten")
+
+    const detached = sent.filter(
+      (s) => s.name === "DeleteTenantResourceAssociationCommand",
+    )
+    expect(detached.map((s) => s.input.TenantName)).toEqual([previous])
+  })
+
+  it("refuses to attach without the account and configuration set it needs", async () => {
+    const { client: c } = tenantClient()
+    await expect(sesIdentity(c, {}).attach("example.com", "i10-ten")).rejects.toThrow(
+      /configurationSet/,
+    )
+  })
+
+  it("detaches every tenant before deleting the identity", async () => {
+    const { client: c, sent } = tenantClient({
+      ListResourceTenantsCommand: {
+        ResourceTenants: [{ TenantName: "i10-ten" }, { TenantName: "made-by-hand" }],
+      },
+    })
+    await sesIdentity(c, options).remove("example.com")
+
+    expect(sent.map((s) => s.name)).toEqual([
+      "ListResourceTenantsCommand",
+      "DeleteTenantResourceAssociationCommand",
+      "DeleteTenantResourceAssociationCommand",
+      "DeleteEmailIdentityCommand",
+    ])
+  })
+
+  it("still deletes an identity no tenant holds", async () => {
+    const { client: c, sent } = tenantClient({ ListResourceTenantsCommand: notFound() })
+    await sesIdentity(c, options).remove("example.com")
+    expect(sent.at(-1)!.name).toBe("DeleteEmailIdentityCommand")
+  })
+
+  it("names the tenant after the workspace, within SES's limits", async () => {
+    const { sesTenantName } = await import("../src/domains/identity.js")
+    const name = sesTenantName("0190a3e4-5b6c-7d8e-9f00-112233445566")
+    expect(name).toBe("i10-0190a3e4-5b6c-7d8e-9f00-112233445566")
+    expect(name).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+  })
+
+  it("does nothing offline", async () => {
+    await offlineIdentity().attach("example.com", "i10-ten")
+  })
+})

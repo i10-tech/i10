@@ -45,6 +45,16 @@ export interface OutboundMessage {
   attachments?: readonly Attachment[] | null
   /** The caller's own labels, echoed back on every provider event. */
   tags?: readonly Tag[] | null
+  /**
+   * The SES tenant to send through, or none (#156).
+   *
+   * ⚠ ONLY EVER A TENANT THE IDENTITY IS RECORDED AS ATTACHED TO. SES refuses
+   * a tenant send whose identity or configuration set it does not associate
+   * with that tenant, so naming one on hope turns a missed attach into refused
+   * mail. Absent, the message goes at the account level. The direct route
+   * ignores it.
+   */
+  sesTenant?: string | null
 }
 
 export type SendOutcome =
