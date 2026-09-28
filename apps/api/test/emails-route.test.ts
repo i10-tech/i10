@@ -345,3 +345,29 @@ describe("when the send path is not configured", () => {
     expect(res.status).toBe(501)
   })
 })
+
+describe("a workspace held by the risk engine (#170)", () => {
+  it("answers 403 sending_held, distinct from sending_paused, and writes nothing", async () => {
+    const { app: a, sendPath } = app({
+      sendingHeld: async () => ({ why: "too many recent messages bounced" }),
+    })
+    const res = await post(a, "/emails", body)
+    expect(res.status).toBe(403)
+    const json = (await res.json()) as { name: string; message: string }
+    expect(json.name).toBe("sending_held")
+    expect(json.message).toContain("too many recent messages bounced")
+    expect(json.message).not.toMatch(/\d+%/)
+    expect(
+      (sendPath as unknown as { persist: ReturnType<typeof mock> }).persist,
+    ).not.toHaveBeenCalled()
+  })
+
+  it("refuses a batch the same way", async () => {
+    const { app: a } = app({
+      sendingHeld: async () => ({ why: "unusual sending activity" }),
+    })
+    const res = await post(a, "/emails/batch", [body, body])
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { name: string }).name).toBe("sending_held")
+  })
+})

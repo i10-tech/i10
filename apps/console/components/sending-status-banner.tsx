@@ -26,12 +26,49 @@ import type { SendingStatus } from "@/lib/types"
  * ⚠ `reinstated` GETS ITS OWN, QUIETER NOTE. Sending works again, but the
  * workspace is on probation - new bounces weigh more until the old findings
  * clear - and that is worth one line, not an alarm.
+ *
+ * ⚠ A HOLD (#170) COMES FIRST AND READS DIFFERENTLY FROM A PAUSE. A pause is
+ * our email provider's and lifts with better rates; a hold is our own review
+ * and lifts when a person looks. The banner names the category, never the
+ * threshold, and says how to reach that person.
  */
 export async function SendingStatusBanner() {
   const result = await tryApi<SendingStatus>("/console/sending-status")
   if (!result.ok) return null
-  const { status, cause, health, findings } = result.data
+  const { status, cause, health, findings, hold } = result.data
   if (status === "enabled" && health === "healthy") return null
+
+  if (health === "held" && hold) {
+    return (
+      <div className="border-b px-4 py-3 sm:px-6">
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>Sending is on hold while we review this workspace</AlertTitle>
+          <AlertDescription>
+            <p>
+              Our automated review held sending because {hold.why}. Until it is lifted,
+              the API refuses new emails with a{" "}
+              <code className="font-mono text-xs">sending_held</code> error. Mailboxes,
+              domains and the rest of the console keep working.
+            </p>
+            {hold.canceled_messages > 0 ? (
+              <p>
+                {hold.canceled_messages === 1
+                  ? "One queued or scheduled email was"
+                  : `${hold.canceled_messages} queued or scheduled emails were`}{" "}
+                canceled so they would not go out during the review.
+              </p>
+            ) : null}
+            <p>
+              A person on our team reviews every hold within a day. Reply to the email
+              we sent the workspace owner to tell us what you send and to whom, or if
+              you think this is a mistake.
+            </p>
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
 
   if (status === "enabled" && health === "at_risk") {
     const worst = findings[0]

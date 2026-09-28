@@ -560,8 +560,10 @@ export interface SendingStatus {
   status: "enabled" | "disabled" | "reinstated"
   cause: string | null
   changed_at: string | null
-  health: "healthy" | "at_risk" | "paused"
+  health: "healthy" | "at_risk" | "paused" | "held"
   findings: SendingFinding[]
+  /** Our own review's hold (#170). The category sentence, never a threshold. */
+  hold?: { why: string; held_at: string; canceled_messages: number } | null
 }
 
 /** `GET /console/sending-health`: the status plus seven days of our own counts. */
@@ -583,6 +585,6 @@ export interface Attention {
     unverified: number
     proof_missing: number
     transfers: number
-    reputation: "healthy" | "at_risk" | "paused"
+    reputation: "healthy" | "at_risk" | "paused" | "held"
   }
 }

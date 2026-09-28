@@ -120,6 +120,7 @@ export async function systemSenderFor({
       // ⚠ OUR MAIL SENDS THROUGH ITS OWN SES TENANT (#206), so a pause on our
       // workspace's tenant must not refuse a sign-in code (#157).
       honourSesPause: false,
+      honourHolds: false,
     }),
     metering,
     log,

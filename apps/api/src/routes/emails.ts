@@ -100,6 +100,21 @@ function acceptError(outcome: AcceptOutcome) {
       status: 403 as const,
     }
   }
+  /*
+   * ⚠ 403 AND ITS OWN NAME, BESIDE `sending_paused` AND NOT MERGED WITH IT. A
+   * pause is SES's and lifts with better rates; a hold is ours and lifts with a
+   * person's review. Neither is fixed by retrying.
+   */
+  if (outcome.status === "held") {
+    return {
+      body: {
+        statusCode: 403,
+        name: "sending_held" as const,
+        message: outcome.message,
+      },
+      status: 403 as const,
+    }
+  }
   if (outcome.status === "quota_exceeded") {
     return {
       body: {

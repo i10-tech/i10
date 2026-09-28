@@ -105,6 +105,19 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
    * from what one process can manage.
    */
   concurrency: number
+
+  /**
+   * Whether the risk engine holds this workspace (#170). Checked after the
+   * claim, so mail queued before a hold landed - or claimed by a worker that
+   * raced the hold's own cancellation - is canceled here rather than sent.
+   *
+   * ⚠ OPTIONAL, AND A FAILURE TO ASK IS "NOT HELD". Refusing every send because
+   * one lookup failed would turn a Postgres blip into an outage for everybody;
+   * accept already refused new mail, and this is the second net, not the first.
+   */
+  held?: (tenantId: string) => Promise<boolean>
+  /** Records a claimed message as canceled, never attempted. */
+  markCanceled?: (message: M, reason: string) => Promise<void>
 }
 
 export interface BatchResult {
@@ -123,6 +136,8 @@ export interface BatchResult {
    * our own books.
    */
   stranded: number
+  /** Claimed messages canceled because the workspace is held (#170). */
+  canceled?: number
 }
 
 export async function handleBatch<M extends OutboundMessage>(
@@ -141,6 +156,27 @@ export async function handleBatch<M extends OutboundMessage>(
       "batch already claimed elsewhere",
     )
     return { claimed: 0, sent: 0, rejected: 0, deferred: 0, stranded: 0 }
+  }
+
+  if (
+    deps.held &&
+    deps.markCanceled &&
+    (await deps.held(job.tenantId).catch(() => false))
+  ) {
+    for (const message of messages)
+      await deps.markCanceled(message, "held: sending is on hold for review")
+    deps.log.warn(
+      { tenantId: job.tenantId, canceled: messages.length },
+      "workspace is held; claimed messages canceled",
+    )
+    return {
+      claimed: messages.length,
+      sent: 0,
+      rejected: 0,
+      deferred: 0,
+      stranded: 0,
+      canceled: messages.length,
+    }
   }
 
   const sent: SentMessage[] = []

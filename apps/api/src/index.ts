@@ -55,6 +55,13 @@ import { sendingTierStore, tierMeter } from "./metering/tiers.js"
 import { reputationService } from "./ses-status/reputation.js"
 import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
+import { workspaceOfSesTenant } from "./domains/identity.js"
+import { recordContent } from "./risk/content.js"
+import { markDirty } from "./risk/runner.js"
+import { sessionObserver } from "./risk/session.js"
+import { riskTrigger } from "./risk/trigger.js"
+import { riskSystem, systemTenantIds } from "./risk/wire.js"
+import type { SendEmail } from "@repo/contracts"
 import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
 import { domainTransferStore } from "./domains/transfers.js"
@@ -638,6 +645,93 @@ const sesFindings = reputationService({
 })
 
 /**
+ * The risk engine (#170): event-driven re-scores, holds at accept, sightings of
+ * people in the console, and content fingerprints of accepted mail. The hourly
+ * job (risk-score.ts) and the staff script build the same thing through the
+ * same `riskSystem`. See docs/decisions/risk.md.
+ *
+ * ⚠ REDIS HERE IS THE CACHE CLIENT, WITH ITS SWALLOW-AND-CARRY-ON POLICY. Every
+ * Redis use in the engine - the per-workspace lease, the tripwire sets, the
+ * sighting de-duplication - degrades to "do the work anyway" when Redis is
+ * down, which is the right failure for all of them and the wrong one for the
+ * queue client.
+ */
+const riskExempt = await systemTenantIds(db, env.AUTH_EMAIL_TENANT_SLUG)
+const risk = riskSystem({
+  db,
+  env,
+  clerk,
+  redis: cache,
+  sender: systemSender,
+  ...(consoleUrl ? { consoleUrl } : {}),
+  exempt: riskExempt,
+  alert: (message, level, context) => captureMessage(message, level, context),
+  log,
+})
+const rescore = riskTrigger(risk.deps)
+log.info(
+  {
+    enabled: env.RISK_ENABLED,
+    tiers: env.RISK_ACT_TIERS,
+    holds: env.RISK_ACT_HOLDS,
+    sesPolicy: env.RISK_ACT_SES_POLICY,
+    takeover: env.RISK_ACT_TAKEOVER,
+    clientContext: Boolean(env.CLIENT_CONTEXT_SECRET),
+  },
+  env.RISK_ENABLED ? "risk engine on" : "RISK ENGINE OFF - nothing is scored",
+)
+
+/*
+ * ⚠ AN SES PAUSE OR A NEW FINDING RE-SCORES THE WORKSPACE NOW, not at the next
+ * hour. The services stay exactly as they were; this only watches what they
+ * return, so a failure to re-score can never fail the webhook SNS is waiting on.
+ */
+const sesStatusWatched = {
+  apply: async (...args: Parameters<typeof sesStatusChanges.apply>) => {
+    const outcome = await sesStatusChanges.apply(...args)
+    const tenantId = workspaceOfSesTenant(args[0].sesTenant)
+    if (outcome === "changed" && tenantId) rescore.rescore([tenantId], "ses-status")
+    return outcome
+  },
+}
+const sesFindingsWatched = {
+  ...sesFindings,
+  apply: async (...args: Parameters<typeof sesFindings.apply>) => {
+    const outcome = await sesFindings.apply(...args)
+    const tenantId = workspaceOfSesTenant(args[0].sesTenant)
+    if ((outcome === "opened" || outcome === "resolved") && tenantId) {
+      rescore.rescore([tenantId], "ses-finding")
+    }
+    return outcome
+  },
+}
+
+const observeContent = (tenantId: string, payloads: readonly SendEmail[]) => {
+  if (!env.RISK_ENABLED) return
+  void recordContent(tenantId, payloads, {
+    db,
+    redis: cache,
+    threshold: env.RISK_FARM_TRIPWIRE,
+    rescore: (ids, trigger) => rescore.rescore(ids, trigger),
+  })
+    .then(() => markDirty(cache, [tenantId]))
+    .catch((error: unknown) =>
+      log.warn({ err: error, tenantId }, "could not fingerprint accepted mail"),
+    )
+}
+
+const observeSession = env.RISK_ENABLED
+  ? sessionObserver({
+      store: risk.identity,
+      redis: cache,
+      ...(risk.takeover ? { takeover: risk.takeover } : {}),
+      rescore: (tenantId, trigger) => rescore.rescore([tenantId], trigger),
+      ...(env.CLIENT_CONTEXT_SECRET ? { secret: env.CLIENT_CONTEXT_SECRET } : {}),
+      log,
+    })
+  : undefined
+
+/**
  * The suppression list, shared by the console and `/suppressions` (#159).
  *
  * ⚠ GATED ON `SES_ENABLED` LIKE THE IDENTITY. A laptop holding production AWS
@@ -709,6 +803,7 @@ const app = createApp({
       // somebody waiting for a password reset.
       queues: sendQueues,
     }),
+    observe: observeContent,
     metering,
     log,
   },
@@ -870,6 +965,8 @@ const app = createApp({
     queries: consoleQueries(db),
     sesStatus,
     sesReputation,
+    holds: risk.holds,
+    ...(observeSession ? { observeSession } : {}),
     suppressions,
     usage: usageStore({
       db,
@@ -1085,8 +1182,8 @@ const app = createApp({
         sesWebhooks: {
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,
-          tenantStatus: sesStatusChanges,
-          reputation: sesFindings,
+          tenantStatus: sesStatusWatched,
+          reputation: sesFindingsWatched,
         },
         // ⚠ THE SAME OPS, A DIFFERENT INTERPRETER. Both routes write through
         // `ingestEvent`, so the dedupe, the suppression write and the customer

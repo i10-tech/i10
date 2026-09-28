@@ -1,3 +1,4 @@
+import { CATEGORY_TEXT, type Category } from "../../risk/types.js"
 import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
 import { removalRefusal, suppressionsCsv } from "../../suppressions/store.js"
@@ -201,9 +202,10 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
  * whether mail is flowing and what to fix.
  */
 export async function sendingStatus(d: ConsoleDeps, tenantId: string) {
-  const [current, findings] = await Promise.all([
+  const [current, findings, hold] = await Promise.all([
     d.sesStatus?.current(tenantId),
     d.sesReputation?.openFindings(tenantId),
+    d.holds?.current(tenantId).catch(() => null),
   ])
   const status = current?.status ?? "enabled"
   const open = findings ?? []
@@ -211,7 +213,25 @@ export async function sendingStatus(d: ConsoleDeps, tenantId: string) {
     status,
     cause: current?.cause ?? null,
     changed_at: current?.changedAt.toISOString() ?? null,
-    health: status === "disabled" ? "paused" : open.length > 0 ? "at_risk" : "healthy",
+    /*
+     * ⚠ A HOLD OUTRANKS EVERYTHING: it is the one state in which the API
+     * refuses mail for a reason the customer cannot fix alone. The category is
+     * the customer's sentence; the staff reason never leaves the server.
+     */
+    health: hold
+      ? "held"
+      : status === "disabled"
+        ? "paused"
+        : open.length > 0
+          ? "at_risk"
+          : "healthy",
+    hold: hold
+      ? {
+          why: CATEGORY_TEXT[hold.category as Category] ?? "unusual sending activity",
+          held_at: hold.heldAt.toISOString(),
+          canceled_messages: hold.canceledMessages,
+        }
+      : null,
     findings: open.map((f) => ({
       type: f.type,
       impact: f.impact,

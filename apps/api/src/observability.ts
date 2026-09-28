@@ -45,6 +45,7 @@ export type Service =
   | "domain-catchup"
   | "domain-prove"
   | "domain-orphans"
+  | "risk-score"
 
 export interface ObservabilityOptions {
   /**

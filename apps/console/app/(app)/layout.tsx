@@ -5,6 +5,7 @@ import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
 import { SendingStatusBanner } from "@/components/sending-status-banner"
+import { ClientContext } from "@/components/client-context"
 import { SendingHealthRail } from "@/components/sending-health"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { CommandMenu } from "@/components/command-menu"
@@ -204,6 +205,7 @@ export default async function AppLayout({
         <Suspense fallback={null}>
           <SendingStatusBanner />
         </Suspense>
+        <ClientContext />
         <PageFrame>{children}</PageFrame>
       </div>
 

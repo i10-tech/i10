@@ -271,6 +271,9 @@ export interface RequestRecord {
   durationMs: number
   errorName?: string | null
   userAgent?: string | null
+  /** From Cloudflare's headers (#170): which places this key is used from. */
+  clientIp?: string | null
+  country?: string | null
 }
 
 export function consoleQueries(db: Database): ConsoleQueries {
@@ -779,6 +782,8 @@ export function consoleQueries(db: Database): ConsoleQueries {
           // ⚠ TRUNCATED. A user agent is unbounded and attacker-controlled;
           // 200 characters names an SDK and a version, which is the question.
           userAgent: input.userAgent ? input.userAgent.slice(0, 200) : null,
+          clientIp: input.clientIp ?? null,
+          country: input.country ? input.country.slice(0, 2).toUpperCase() : null,
         })
       })
     },

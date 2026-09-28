@@ -116,6 +116,13 @@ export const errorNames = [
    * that backs off on it retries until it gives up.
    */
   "sending_paused",
+  /**
+   * Our own review holds the workspace's sending (#170), pending a person.
+   *
+   * ⚠ A 403, AND NOT `sending_paused`: a pause is the email provider's and
+   * lifts with better rates; a hold is ours and lifts with a review.
+   */
+  "sending_held",
   "internal_server_error",
 ] as const
 

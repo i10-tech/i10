@@ -16,6 +16,8 @@ import OrganizationMemberJoined from "./templates/organization-member-joined.js"
 import WaitlistConfirmation from "./templates/waitlist-confirmation.js"
 import DomainTransfer from "./templates/domain-transfer.js"
 import SendingStatus, { sendingStatusSubject } from "./templates/sending-status.js"
+import SendingHeld, { sendingHeldSubject } from "./templates/sending-held.js"
+import SecurityAlert, { securityAlertSubject } from "./templates/security-alert.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -312,6 +314,36 @@ export async function renderSendingStatus(
   const element = SendingStatus(props)
   return {
     subject: sendingStatusSubject(props.state, props.workspace),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * The email telling a workspace owner that our own review held or released
+ * its sending (#170). Sent by the API's risk engine; see apps/api/src/risk.
+ */
+export async function renderSendingHeld(
+  props: React.ComponentProps<typeof SendingHeld>,
+): Promise<RenderedEmail> {
+  const element = SendingHeld(props)
+  return {
+    subject: sendingHeldSubject(props.state, props.workspace),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * The email telling somebody we saw something wrong with how their account or
+ * key is used, and what we did (#170).
+ */
+export async function renderSecurityAlert(
+  props: React.ComponentProps<typeof SecurityAlert>,
+): Promise<RenderedEmail> {
+  const element = SecurityAlert(props)
+  return {
+    subject: securityAlertSubject(props.kind),
     html: await render(element),
     text: await render(element, { plainText: true }),
   }

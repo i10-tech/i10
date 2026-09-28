@@ -477,6 +477,20 @@
       "when": 1790576332285,
       "tag": "0067_sending_tiers",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790623888900,
+      "tag": "0068_risk_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790623889339,
+      "tag": "0069_risk_definers",
+      "breakpoints": true
     }
   ]
 }

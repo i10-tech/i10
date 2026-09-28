@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build src/index.ts src/worker.ts src/migrate.ts src/sweep.ts src/reconcile.ts src/recheck.ts src/domain-catchup.ts src/domain-prove.ts src/domain-orphans.ts --target=bun --outdir=dist --root=src --splitting --sourcemap=linked",
+    "build": "bun build src/index.ts src/worker.ts src/migrate.ts src/sweep.ts src/reconcile.ts src/recheck.ts src/domain-catchup.ts src/domain-prove.ts src/domain-orphans.ts src/risk-score.ts src/risk-admin.ts --target=bun --outdir=dist --root=src --splitting --sourcemap=linked",
     "dev": "bun --watch src/index.ts",
     "start": "bun dist/index.js",
     "lint": "eslint . --max-warnings 0",
@@ -13,7 +13,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "openapi": "bun scripts/generate-openapi.ts",
-    "adopt-dkim": "bun scripts/adopt-dkim.ts"
+    "adopt-dkim": "bun scripts/adopt-dkim.ts",
+    "risk-admin": "bun src/risk-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1123.0",
@@ -34,6 +35,7 @@
     "ioredis": "^6.0.0",
     "pino": "^10.3.1",
     "postgres": "^3.4.9",
+    "tldts": "^7",
     "zod": "^4.5.4"
   },
   "devDependencies": {
