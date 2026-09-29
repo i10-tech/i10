@@ -2466,6 +2466,25 @@ export const broadcasts = core.table(
 export const templateKind = core.enum("template_kind", ["html", "tsx"])
 
 /**
+ * Where a template is maintained, which is a different question from what its
+ * versions are made of (#234):
+ *
+ *   managed  written in the dash's editor, versioned by publishing
+ *   upload   uploaded `.tsx` files, versioned by each upload
+ *   github   a connected repository, versioned by each push to its target
+ *            branch (#235)
+ *
+ * ⚠ IT DECIDES WHO MAY MAKE A VERSION. A folder upload never overwrites a
+ * managed or GitHub template that happens to share a name; the repository is
+ * the only thing that versions a GitHub one.
+ */
+export const templateSource = core.enum("template_source", [
+  "managed",
+  "upload",
+  "github",
+])
+
+/**
  * A reusable email, referenced by id or by name from a send (#160, #161).
  *
  * ⚠ THIS ROW IS THE TEMPLATE'S IDENTITY AND ITS DRAFT; WHAT A SEND USES IS A
@@ -2488,6 +2507,7 @@ export const templates = core.table(
     /** A path like `transactional/auth`. Flat storage, rendered as a tree. */
     folder: text("folder"),
     kind: templateKind("kind").notNull().default("html"),
+    source: templateSource("source").notNull().default("managed"),
 
     /** The draft subject, with `{{ name }}` placeholders. Copied into each version. */
     subject: text("subject"),
@@ -2556,11 +2576,24 @@ export const templateVersions = core.table(
       .$type<{ path: string; preview: string }[]>(),
 
     /**
-     * The uploaded `.tsx`, kept per version (#161). The skeleton is what sends
+     * The entry `.tsx`, kept per version (#161). The skeleton is what sends
      * use; the source is what somebody reads to understand it, and a connected
      * repository can be deleted or force-pushed out from under us.
      */
     source: text("source"),
+    /**
+     * The rest of the template's files: everything the entry imports by
+     * relative path, path to text (#234). Null for a template of one file.
+     */
+    files: jsonb("files").$type<Record<string, string>>(),
+    /** The entry's path in the upload or the repository. */
+    path: text("path"),
+    /** The commit a GitHub template's version was made from (#235). */
+    commitSha: text("commit_sha"),
+    /**
+     * A hash of the entry and all of its files, which is how an upload or a
+     * push of an unchanged template is recognised and makes no new version.
+     */
     sourceSha256: text("source_sha256"),
     /** Which React and React Email rendered it, e.g. `react@19.2.8+…+react-email@6.9.3`. */
     runtime: text("runtime"),

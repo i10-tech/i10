@@ -24,7 +24,11 @@ export interface Sandbox {
 }
 
 export type Compiled =
-  { ok: true; skeleton: Skeleton } | { ok: false; problems: string[] }
+  | { ok: true; skeleton: Skeleton; subject: string | null }
+  | { ok: false; problems: string[] }
+
+/** A header line's limit in RFC 5322; a subject longer than this is a mistake. */
+const MAX_SUBJECT_CHARS = 998
 
 /** A rendered email larger than this is not a template anybody should send. */
 const MAX_RENDER_CHARS = 2 * 1024 * 1024
@@ -39,6 +43,21 @@ export async function compileTemplate(
   const preview = isObject(first.value) ? first.value.preview : undefined
   const flat = flattenPreview(preview)
   if (!flat.ok) return { ok: false, problems: [flat.error] }
+
+  const exported = isObject(first.value) ? first.value.subject : null
+  if (
+    exported !== null &&
+    exported !== undefined &&
+    (typeof exported !== "string" || exported.length > MAX_SUBJECT_CHARS)
+  ) {
+    return {
+      ok: false,
+      problems: [
+        `The exported \`subject\` must be a string of at most ${MAX_SUBJECT_CHARS} characters.`,
+      ],
+    }
+  }
+  const subject = typeof exported === "string" && exported.trim() ? exported : null
 
   const nonceA = nonceFrom(random(12))
   let nonceB = nonceFrom(random(12))
@@ -70,7 +89,7 @@ export async function compileTemplate(
     ? answer.accessed.filter((k): k is string => typeof k === "string").slice(0, 500)
     : []
 
-  return verifyRenders({
+  const verified = verifyRenders({
     variables: flat.variables,
     nonceA,
     nonceB,
@@ -79,6 +98,7 @@ export async function compileTemplate(
     empty,
     accessed,
   })
+  return verified.ok ? { ...verified, subject } : verified
 }
 
 function asRender(value: unknown): Render | null {

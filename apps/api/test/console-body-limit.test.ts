@@ -117,4 +117,15 @@ describe("console body limits", () => {
     const response = await post("/nonsense/contacts/import", 512 * 1024)
     expect(response.status).toBe(413)
   })
+
+  /**
+   * ⚠ A TEMPLATE UPLOAD IS A FOLDER OF CODE (#234), so its two routes get a
+   * larger limit of their own. Templates are not wired in this app, so getting
+   * through the limit reads as 501 rather than 413.
+   */
+  it("lets a template upload send more than 256 KB, on its two routes only", async () => {
+    expect((await post("/templates/upload", 1024 * 1024)).status).toBe(501)
+    expect((await post("/templates/abc/versions", 1024 * 1024)).status).toBe(501)
+    expect((await post("/templates/abc/publish", 512 * 1024)).status).toBe(413)
+  })
 })
