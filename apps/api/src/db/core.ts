@@ -1003,22 +1003,33 @@ export const messageBodies = core.table(
     headers: jsonb("headers"),
 
     /**
-     * Files to send with the message: `{ filename, content_type?, content }`
-     * with the content base64-encoded, exactly as the caller supplied it.
+     * Files to send with the message, in one of two shapes (#136, #168):
      *
-     * ⚠ IN THE DATABASE RATHER THAN IN OBJECT STORAGE, AND THAT IS A BOUNDED
-     * DECISION. The contract caps a message's attachments, so a row cannot grow
-     * without limit - and the alternative, a bucket, would put a second store
-     * with its own lifecycle, its own access control and its own retention in
-     * front of every send. Here retention is the partition drop that already
-     * exists, and row level security already covers it.
+     *   inline  `{ filename, content_type?, content }`, base64, exactly as the
+     *           caller sent it. Every message starts like this.
+     *   stored  `{ filename, content_type?, size, sha256 }`. The bytes are in
+     *           R2 at `<tenant_id>/sha256/<hash>`, once per workspace however
+     *           many messages carry them.
+     *
+     * ⚠ RAW AT ACCEPT, MOVED AFTER THE SEND (#188). Accept writes inline in the
+     * same transaction as today, so nothing touches object storage before the
+     * 202. The content-store job moves finished messages' files to R2 minutes
+     * later and sets `attachments_stored_at`. Readers restore through
+     * content/attachments.ts, so both shapes read the same.
+     *
+     * ⚠ THE BODY ROW IS THE ONLY REFERENCE TO AN OBJECT. There is no counter
+     * to drift: an object is deleted once no `message_bodies` row names its
+     * hash, so whatever removes bodies (retention, tenant deletion) frees their
+     * objects without knowing they exist. The GIN index is what makes asking
+     * that cheap.
      *
      * ⚠ AND IT IS WHY THIS TABLE IS SPLIT FROM `messages`. The claim, the
      * sweeper and every dashboard list read the status row; none of them read
-     * this. A 10 MB column on the hot table would be a 10 MB column on the
-     * queue drain.
+     * this.
      */
     attachments: jsonb("attachments"),
+    /** When the content-store job moved this row's files to R2. */
+    attachmentsStoredAt: timestamp("attachments_stored_at", { withTimezone: true }),
 
     /**
      * The caller's own labels, forwarded to SES as `EmailTags` and echoed back
@@ -1056,7 +1067,25 @@ export const messageBodies = core.table(
      */
     trustedTemplateId: uuid("trusted_template_id"),
   },
-  (t) => [primaryKey({ columns: [t.messageId, t.createdAt] })],
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.createdAt] }),
+    // Retention deletes by tenant and age; the content-store job finds work
+    // the same way.
+    index("message_bodies_tenant_created_idx").on(t.tenantId, t.createdAt),
+    // What the content-store job still has to move.
+    index("message_bodies_attachments_pending_idx")
+      .on(t.createdAt)
+      .where(sql`${t.attachments} is not null and ${t.attachmentsStoredAt} is null`),
+    // "Does any body still name this object?" - the object sweep's question.
+    index("message_bodies_attachments_gin_idx").using(
+      "gin",
+      t.attachments.op("jsonb_path_ops"),
+    ),
+    // "Does any body still use this template?" - the template sweep's question.
+    index("message_bodies_template_idx")
+      .on(t.templateId)
+      .where(sql`${t.templateId} is not null`),
+  ],
 )
 
 /**
@@ -1717,6 +1746,21 @@ export const plans = core.table(
      * which is neither charged nor deferred - see `directionOf`.
      */
     rank: integer("rank").notNull().default(0),
+
+    /**
+     * How long a message lives, in days: its row, its body, its events and its
+     * attachments, all together (docs/decisions/storage.md). Free 3, Pro 30;
+     * a custom plan sets its own.
+     *
+     * ⚠ EVERYTHING GOES, NOT JUST THE BODY, LIKE RESEND. A log that lists mail
+     * whose content is gone is a log nobody can use, and keeping recipients
+     * and subjects longer than bodies is keeping personal data for no reason.
+     *
+     * ⚠ NEVER BELOW `RECONCILE_LOOKBACK_DAYS` + 1. The billing reconcile counts
+     * `core.messages` against the meter over that window; deleting inside it
+     * turns every expired message into a false surplus. The job clamps it.
+     */
+    retentionDays: integer("retention_days").notNull().default(30),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2894,6 +2938,69 @@ export const contentTemplates = core.table(
     uniqueIndex("content_templates_skeleton_unique").on(t.tenantId, t.skeletonHash),
     index("content_templates_bands_idx").using("gin", t.bands),
     tenantPolicy("content_templates_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * The attachment objects a workspace holds in R2 (#136, #168): one row per
+ * distinct file, at `<tenant_id>/sha256/<sha256>` in the content bucket.
+ *
+ * ⚠ A ROW MEANS THE OBJECT IS THERE. It is written only after the upload
+ * succeeds, so the content-store job trusts it and skips the PUT - which is
+ * the dedup: fifty thousand messages with one logo cost one write.
+ *
+ * ⚠ NOT A REFERENCE COUNT. References are the `message_bodies` rows that name
+ * the hash; this only records what exists and when it was last wanted. The
+ * sweep deletes an object once no body names it AND `last_seen_at` is older
+ * than its grace, under a row lock the content-store job's touch waits on -
+ * see content/attachments.ts for why that closes the race.
+ *
+ * ⚠ NO FOREIGN KEY TO `tenants`, ON PURPOSE. A cascade would delete these rows
+ * with the tenant and leave the objects in R2 with nothing left that knows
+ * they exist. Without it, the sweep still finds them.
+ *
+ * ⚠ PER WORKSPACE, NEVER GLOBAL. A shared object would let one workspace learn
+ * whether another had sent the same file (the upload is skipped or it is not).
+ */
+export const contentObjects = core.table(
+  "content_objects",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    /** Hex SHA-256 of the exact bytes: the object's identity. */
+    sha256: text("sha256").notNull(),
+    size: bigint("size", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.sha256] }),
+    index("content_objects_last_seen_idx").on(t.lastSeenAt),
+    tenantPolicy("content_objects_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * Messages retention deleted, kept 90 days so a late bounce or complaint can
+ * still suppress its address (docs/decisions/storage.md).
+ *
+ * ⚠ WITHOUT IT, RETENTION SILENTLY STOPS SUPPRESSION. SES and receivers
+ * report complaints days after the send. On a three-day plan the message is
+ * gone by then, `ownerOf` finds nothing, and the event is dropped - so the
+ * workspace keeps mailing someone who pressed "this is spam". A tombstone is
+ * an id and a tenant; no address, no content.
+ */
+export const expiredMessages = core.table(
+  "expired_messages",
+  {
+    messageId: uuid("message_id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    expiredAt: timestamp("expired_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("expired_messages_expired_idx").on(t.expiredAt),
+    tenantPolicy("expired_messages_tenant", t.tenantId),
   ],
 )
 

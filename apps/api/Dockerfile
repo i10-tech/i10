@@ -73,7 +73,8 @@ RUN bunx turbo run build --filter=@i10/api
 # Keep in step with the `command:` lines in infra/k8s/i10/workloads/*.yaml.
 RUN set -eu; \
     for entry in index worker migrate sweep reconcile recheck \
-                 domain-catchup domain-prove domain-orphans risk-score risk-admin; do \
+                 domain-catchup domain-prove domain-orphans risk-score risk-admin \
+                 content-store retention; do \
       if [ ! -f "apps/api/dist/${entry}.js" ]; then \
         echo "dist/${entry}.js is missing - bun build moved the output layout."; \
         echo "Found instead:"; ls apps/api/dist; \

@@ -1,3 +1,4 @@
+import { summariseAttachments } from "../content/attachments.js"
 import { restoreBodies } from "../content/restore.js"
 import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
@@ -624,10 +625,10 @@ export function consoleQueries(db: Database): ConsoleQueries {
           text: body?.text ?? null,
           headers: (body?.headers as Record<string, string> | null) ?? null,
           /*
-           * ⚠ METADATA ONLY - THE BYTES ARE NEVER RETURNED. An attachment is
-           * stored as base64 in a jsonb column; a ten-megabyte PDF would be a
-           * thirteen-megabyte JSON response for a page that only ever renders
-           * the filename. There is a separate download route for the content.
+           * ⚠ METADATA ONLY - THE BYTES ARE NEVER RETURNED. A ten-megabyte PDF
+           * would be a thirteen-megabyte JSON response for a page that only
+           * ever renders the filename. Both shapes - inline, or moved to R2
+           * (#136) - summarise the same.
            */
           attachments: summariseAttachments(body?.attachments),
           tags: (body?.tags as Record<string, string> | null) ?? null,
@@ -811,26 +812,6 @@ function num(value: string | number): number {
 function toDateString(value: Date | string): string {
   const d = value instanceof Date ? value : new Date(value)
   return d.toISOString().slice(0, 10)
-}
-
-function summariseAttachments(
-  value: unknown,
-): { filename?: string; content_type?: string; size?: number }[] | null {
-  if (!Array.isArray(value)) return null
-  return value.map((a) => {
-    const item = (a ?? {}) as Record<string, unknown>
-    const content = typeof item.content === "string" ? item.content : undefined
-    return {
-      ...(typeof item.filename === "string" ? { filename: item.filename } : {}),
-      ...(typeof item.content_type === "string"
-        ? { content_type: item.content_type }
-        : {}),
-      // ⚠ THE DECODED SIZE, NOT THE BASE64 LENGTH. Reporting the encoded length
-      // overstates every attachment by a third, and the number a person
-      // compares it against - their provider's limit - is in decoded bytes.
-      ...(content ? { size: Math.floor((content.length * 3) / 4) } : {}),
-    }
-  })
 }
 
 export { encodeCursor, decodeCursor, escapeLike, clampLimit, rawTimestamp }

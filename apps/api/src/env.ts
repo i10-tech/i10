@@ -844,6 +844,51 @@ const schema = z.object({
   /** IPinfo Lite, for the network behind an IP. Unset: no hosting signal. */
   IPINFO_TOKEN: z.string().min(1).optional(),
 
+  // ── content storage and retention (#136, #168, #188) ─────────────────────
+
+  /**
+   * The private R2 bucket message content moves to after the send:
+   * `i10-content` in production, `i10-content-dev` for development. Endpoint
+   * is `https://<account>.r2.cloudflarestorage.com`.
+   *
+   * ⚠ ALL FOUR OR NONE, checked below. Unset, attachments stay inline in
+   * Postgres and the content-store job does nothing - the product works as it
+   * did. Half set is refused, because it looks configured and stores nothing.
+   *
+   * ⚠ A TOKEN SCOPED TO THIS ONE BUCKET, NEVER THE BACKUPS KEY. R2 tokens have
+   * no prefix scoping, so a shared token reads every bucket it names.
+   */
+  CONTENT_STORE_ENDPOINT: z.url().optional(),
+  CONTENT_STORE_BUCKET: z.string().min(1).optional(),
+  CONTENT_STORE_ACCESS_KEY_ID: z.string().min(1).optional(),
+  CONTENT_STORE_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+
+  /** Bodies with files the content-store job moves per workspace per run. */
+  CONTENT_STORE_BATCH: z.coerce.number().int().min(1).max(5000).default(200),
+
+  /**
+   * How long an object nothing references survives before the sweep deletes
+   * it. ⚠ IT IS WHAT CLOSES THE RACE with a concurrent store that has touched
+   * the object and not yet written its reference (seconds), so hours is
+   * already generous.
+   */
+  CONTENT_OBJECT_GRACE_HOURS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(24 * 90)
+    .default(24),
+
+  /**
+   * How long a template no message uses must go unseen before it is deleted.
+   * Mail matching it again after that simply derives it again - see
+   * content/sweep.ts.
+   */
+  CONTENT_TEMPLATE_STALE_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+
+  /** Messages retention deletes per statement. */
+  RETENTION_BATCH: z.coerce.number().int().min(1).max(10_000).default(1000),
+
   /** Google Web Risk, for link reputation. Unset: no unsafe-link signal. */
   WEBRISK_API_KEY: z.string().min(1).optional(),
 
@@ -961,6 +1006,23 @@ const validated = schema.superRefine((env, ctx) => {
    * correct source is an explicit statement per deployment, so production is
    * required to make it and this is what makes the omission loud.
    */
+  const store = [
+    "CONTENT_STORE_ENDPOINT",
+    "CONTENT_STORE_BUCKET",
+    "CONTENT_STORE_ACCESS_KEY_ID",
+    "CONTENT_STORE_SECRET_ACCESS_KEY",
+  ] as const
+  const set = store.filter((k) => env[k] !== undefined)
+  if (set.length > 0 && set.length < store.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: [store.find((k) => env[k] === undefined)!],
+      message:
+        `the content store needs all of ${store.join(", ")} or none of them; ` +
+        `with some set it looks configured and stores nothing.`,
+    })
+  }
+
   if (env.NODE_ENV === "production" && env.SENTRY_ENVIRONMENT === "development") {
     ctx.addIssue({
       code: "custom",

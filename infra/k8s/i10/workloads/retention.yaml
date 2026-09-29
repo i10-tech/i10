@@ -1,0 +1,62 @@
+# Enforces message retention and frees what it leaves, hourly
+# (docs/decisions/storage.md).
+#
+# ⚠ THE SAME IMAGE AND ANOTHER COMMAND. `bun dist/retention.js` keeps a year of
+# partitions ahead, deletes every workspace's mail older than its plan keeps it
+# (Free 3 days, Pro 30), sweeps unused templates and R2 objects, prunes
+# 90-day-old tombstones and drops empty expired partitions - then exits.
+#
+# ⚠ IT NEVER TOUCHES BILLING. Usage is `core.meter_events`, which this does not
+# delete from.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-retention
+  namespace: i10-prod
+spec:
+  # Hourly, off the hour so it does not land beside the risk run at :07.
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/retention.ts, AND THEY MUST AGREE.
+  schedule: "23 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Half the interval: a first run over a large backlog is capped per
+      # workspace (RETENTION_BATCH x 50) and simply continues next hour.
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: retention
+              image: ghcr.io/i10-tech/i10-api:prod-5084da3dd090946d5e1606b05e8a82145e22762a@sha256:442f4d55621c5f7e7075b32d26dc001b8c5f96660c9ee006f4edbb3adf132e4a
+              imagePullPolicy: Always
+              command: ["bun", "dist/retention.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER. The pass finds its workspaces
+                # through SECURITY DEFINER functions that return ids only (0076)
+                # and does the work per tenant, under RLS.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

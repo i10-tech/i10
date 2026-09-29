@@ -1,3 +1,5 @@
+import { restoreAttachments, type AnyAttachment } from "../content/attachments.js"
+import type { ObjectStore } from "../content/object-store.js"
 import { restoreBodies } from "../content/restore.js"
 import type { Attachment, Tag } from "@repo/contracts"
 import { eq, inArray } from "drizzle-orm"
@@ -66,6 +68,12 @@ export interface AdapterOptions {
    * Must exceed groupmq's `jobTimeoutMs` - see db/claim.ts.
    */
   staleAfter: string
+  /**
+   * Where attachments moved to R2 are read back from (#136). Only a retry of a
+   * finished message ever meets one; absent, such a message fails loudly
+   * rather than going out without its files.
+   */
+  store?: ObjectStore | null
 }
 
 export function databaseOps(
@@ -76,7 +84,7 @@ export function databaseOps(
 > {
   return {
     async claim(job: SendJob): Promise<ClaimedMessage[]> {
-      return withTenant(opts.db, job.tenantId, async (tx) => {
+      const claimed = await withTenant(opts.db, job.tenantId, async (tx) => {
         const claimed = (await tx.execute(
           claimStatement(job.messages, {
             workerId: opts.workerId,
@@ -138,6 +146,20 @@ export function databaseOps(
           }
         })
       })
+
+      // ⚠ AFTER THE TRANSACTION, NOT INSIDE IT. Reading R2 holds nothing in
+      // Postgres open, and it only ever happens for a retry of a message whose
+      // files the content-store job already moved.
+      return Promise.all(
+        claimed.map(async (m) => ({
+          ...m,
+          attachments: (await restoreAttachments(
+            opts.store ?? null,
+            m.tenantId,
+            m.attachments as AnyAttachment[] | null,
+          )) as Attachment[] | null,
+        })),
+      )
     },
 
     // ⚠ RETURNS THE STORED `sent_at`, WHICH THE METER IS THEN BILLED ON. Null
