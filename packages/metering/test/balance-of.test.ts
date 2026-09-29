@@ -90,6 +90,9 @@ describe("balanceOf", () => {
         start: new Date("2026-01-15T00:00:00.000Z"),
         end: new Date("2026-01-16T00:00:00.000Z"),
       },
+      // Which cycle the window is, so a usage page can say "daily".
+      interval: "day",
+      intervalCount: 1,
     })
   })
 

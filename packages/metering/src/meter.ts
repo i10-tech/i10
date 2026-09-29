@@ -3,7 +3,7 @@ import { windowFor } from "./interval.js"
 import { meterKeyOf } from "./key.js"
 import { entitlementFor } from "./plan.js"
 import type { Allowance } from "./balance.js"
-import type { ResetWindow } from "./interval.js"
+import type { ResetInterval, ResetWindow } from "./interval.js"
 import type { Entitlement } from "./plan.js"
 import type {
   AssignmentStore,
@@ -112,6 +112,14 @@ export type BalanceOutcome =
       overage: boolean
       /** `null` for a continuous feature: no reset, so no window. */
       window: ResetWindow | null
+      /**
+       * The reset cycle the window was cut from, for a consumable feature -
+       * what lets a usage page say "daily" or "monthly" without inferring it
+       * from the window's length (a month is 28 to 31 days). Absent for a
+       * continuous feature, which never resets.
+       */
+      interval?: ResetInterval
+      intervalCount?: number
     }
   | { status: "unentitled"; reason: string }
 
@@ -302,6 +310,12 @@ export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
         remaining: remainingOf({ allowance: entitlement.allowance, used }),
         overage,
         window,
+        ...(entitlement.kind === "consumable"
+          ? {
+              interval: entitlement.interval,
+              intervalCount: entitlement.intervalCount ?? 1,
+            }
+          : {}),
       }
     },
   }
