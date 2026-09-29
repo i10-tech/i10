@@ -398,6 +398,311 @@ export const PREVIEW_NOT_FOUND = Symbol("preview:not-found")
  */
 export const PREVIEW_UNAVAILABLE = Symbol("preview:unavailable")
 
+// ── Templates (#236) ────────────────────────────────────────────────────────
+
+/*
+ * ⚠ ONE OF EACH SOURCE, AND NOT ALL OF THEM TIDY. An editor template with a
+ * newer version than live (somebody rolled back), an upload made of several
+ * files with a subject from its file, a GitHub template versioned by commits,
+ * and an editor template that has never been published.
+ */
+type FixtureVersion = {
+  number: number
+  subject: string
+  html: string | null
+  text: string | null
+  variables: { path: string; preview: string }[]
+  path?: string
+  commit_sha?: string
+  source?: string
+  files?: Record<string, string>
+  days: number
+}
+
+const LAYOUT_TSX = `import { Body, Container, Html, Text } from "react-email"
+import type { ReactNode } from "react"
+
+export function Layout({ children }: { children: ReactNode }) {
+  return (
+    <Html>
+      <Body style={{ fontFamily: "Helvetica, Arial, sans-serif" }}>
+        <Container>
+          {children}
+          <Text style={{ color: "#888", fontSize: 12 }}>Acme Inc.</Text>
+        </Container>
+      </Body>
+    </Html>
+  )
+}
+`
+
+const welcomeTsx = (
+  heading: string,
+) => `import { Button, Heading, Text } from "react-email"
+import { Layout } from "../components/layout"
+
+export const subject = "Welcome to Acme, {{ name }}"
+
+export default function Welcome({ name, url }: { name: string; url: string }) {
+  return (
+    <Layout>
+      <Heading>${heading}</Heading>
+      <Text>Hi {name}, your workspace is ready.</Text>
+      <Button href={url}>Open Acme</Button>
+    </Layout>
+  )
+}
+
+Welcome.PreviewProps = { name: "Ada", url: "https://acme.test/start" }
+`
+
+const page = (inner: string) =>
+  `<!DOCTYPE html><html><body style="font-family:Helvetica,Arial,sans-serif;background:#f6f6f6;padding:24px"><div style="max-width:520px;margin:0 auto;background:#fff;border-radius:8px;padding:24px">${inner}<p style="color:#888;font-size:12px">Acme Inc.</p></div></body></html>`
+
+const TEMPLATES: {
+  id: string
+  name: string
+  folder: string | null
+  kind: "html" | "tsx"
+  source: "managed" | "upload" | "github"
+  subject: string | null
+  html: string | null
+  text: string | null
+  live: number
+  created_days: number
+  updated_days: number
+  versions: FixtureVersion[]
+}[] = [
+  {
+    id: "bf7a1c00-0000-4000-8000-000000000001",
+    name: "password-reset",
+    folder: "transactional/auth",
+    kind: "html",
+    source: "managed",
+    subject: "Reset your password",
+    html: '<p>Hello {{first_name}},</p>\n<p><a href="{{reset_url}}">Reset your password</a></p>\n<p>This link expires in an hour.</p>',
+    text: "Hello {{first_name}},\n\nReset your password: {{reset_url}}\n\nThis link expires in an hour.",
+    live: 3,
+    created_days: 170,
+    updated_days: 3,
+    versions: [1, 2, 3, 4].map((n) => ({
+      number: n,
+      subject: n < 3 ? "Password reset" : "Reset your password",
+      html: page(
+        `<p>Hello {{ first_name }},</p><p><a href="{{ reset_url }}" style="background:#111;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">Reset your password</a></p>${n >= 2 ? "<p>This link expires in an hour.</p>" : ""}${n === 4 ? '<img src="https://acme.test/pixel.png" width="1" height="1">' : ""}`,
+      ),
+      text: `Hello {{ first_name }},\n\nReset your password: {{ reset_url }}${n >= 2 ? "\n\nThis link expires in an hour." : ""}`,
+      variables: [
+        { path: "first_name", preview: "" },
+        { path: "reset_url", preview: "" },
+      ],
+      days: 170 - n * 40,
+    })),
+  },
+  {
+    id: "bf7a1c00-0000-4000-8000-000000000002",
+    name: "welcome",
+    folder: "auth",
+    kind: "tsx",
+    source: "upload",
+    subject: "Welcome to Acme, {{ name }}",
+    html: null,
+    text: null,
+    live: 3,
+    created_days: 60,
+    updated_days: 2,
+    versions: [1, 2, 3].map((n) => ({
+      number: n,
+      subject: "Welcome to Acme, {{ name }}",
+      html: page(
+        `<h1>${n === 1 ? "Welcome" : "Welcome aboard"}</h1><p>Hi {{ name }}, your workspace is ready.</p><p><a href="{{ url }}" style="background:#111;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">Open Acme</a></p>`,
+      ),
+      text: `${n === 1 ? "WELCOME" : "WELCOME ABOARD"}\n\nHi {{ name }}, your workspace is ready.\n\nOpen Acme [{{ url }}]`,
+      variables: [
+        { path: "name", preview: "Ada" },
+        { path: "url", preview: "https://acme.test/start" },
+      ],
+      path: "auth/welcome.tsx",
+      source: welcomeTsx(n === 1 ? "Welcome" : "Welcome aboard"),
+      files: {
+        "components/layout.tsx":
+          n < 3
+            ? LAYOUT_TSX
+            : LAYOUT_TSX.replace("Acme Inc.", "Acme Inc. · Unsubscribe any time"),
+      },
+      days: 60 - n * 20,
+    })),
+  },
+  {
+    id: "bf7a1c00-0000-4000-8000-000000000003",
+    name: "receipt",
+    folder: "billing",
+    kind: "tsx",
+    source: "github",
+    subject: "Your receipt from Acme",
+    html: null,
+    text: null,
+    live: 2,
+    created_days: 40,
+    updated_days: 1,
+    versions: [1, 2].map((n) => ({
+      number: n,
+      subject: "Your receipt from Acme",
+      html: page(
+        `<h2>Thanks for your order</h2><p>Order {{ order.id }}: {{ order.total }}</p>${n === 2 ? "<p>Questions? Reply to this email.</p>" : ""}`,
+      ),
+      text: `Thanks for your order\n\nOrder {{ order.id }}: {{ order.total }}${n === 2 ? "\n\nQuestions? Reply to this email." : ""}`,
+      variables: [
+        { path: "order.id", preview: "A-1042" },
+        { path: "order.total", preview: "$42.00" },
+      ],
+      path: "emails/billing/receipt.tsx",
+      commit_sha:
+        n === 1
+          ? "4f1c2a9e0b7d3c55a6e1f00d9b2c8e7a61d3b4c2"
+          : "a91e03b7c4d2f68e15a0b9c3d7e2f41806c5b9d1",
+      source: `import { Heading, Text } from "react-email"
+
+export default function Receipt({ order }: { order: { id: string; total: string } }) {
+  return (
+    <>
+      <Heading as="h2">Thanks for your order</Heading>
+      <Text>Order {order.id}: {order.total}</Text>${n === 2 ? "\n      <Text>Questions? Reply to this email.</Text>" : ""}
+    </>
+  )
+}
+
+Receipt.PreviewProps = { order: { id: "A-1042", total: "$42.00" } }
+`,
+      days: 40 - n * 15,
+    })),
+  },
+  {
+    id: "bf7a1c00-0000-4000-8000-000000000004",
+    name: "weekly-digest",
+    folder: null,
+    kind: "html",
+    source: "managed",
+    subject: "Your week at Acme",
+    html: "<p>Draft</p>",
+    text: null,
+    live: 0,
+    created_days: 5,
+    updated_days: 5,
+    versions: [],
+  },
+]
+
+function summary(full: (typeof TEMPLATES)[number]) {
+  const live = full.versions.find((v) => v.number === full.live)
+  return {
+    id: full.id,
+    name: full.name,
+    folder: full.folder,
+    kind: full.kind,
+    source: full.source,
+    subject: full.subject,
+    html: null,
+    text: null,
+    published_at: live ? ago(live.days) : null,
+    version: full.live,
+    versions: full.versions.length,
+    created_at: ago(full.created_days),
+    updated_at: ago(full.updated_days),
+  }
+}
+
+function versionSummary(t: (typeof TEMPLATES)[number], v: FixtureVersion) {
+  return {
+    id: `${t.id.slice(0, -2)}${String(v.number).padStart(2, "0")}`,
+    number: v.number,
+    kind: t.kind,
+    subject: v.subject,
+    variables: v.variables,
+    runtime:
+      t.kind === "tsx" ? "react@19.2.8+react-dom@19.2.8+react-email@6.9.3" : null,
+    path: v.path ?? null,
+    commit_sha: v.commit_sha ?? null,
+    live: v.number === t.live,
+    created_at: ago(v.days),
+  }
+}
+
+function templateDetailFixture(id: string) {
+  const t = TEMPLATES.find((x) => x.id === id)
+  if (!t) return null
+  return {
+    ...summary(t),
+    html: t.html,
+    text: t.text,
+    history: [...t.versions].reverse().map((v) => versionSummary(t, v)),
+  }
+}
+
+/** A version's detail - or, for the preview route, the same filled. */
+function templateVersionFixture(id: string, number: number) {
+  const t = TEMPLATES.find((x) => x.id === id)
+  const v = t?.versions.find((x) => x.number === number)
+  if (!t || !v) return null
+  return {
+    ...versionSummary(t, v),
+    source: v.source ?? null,
+    files: v.files ?? null,
+    display: { html: v.html, text: v.text },
+    // Filled with samples (or the name itself), for the preview route.
+    html: fillFixture(v.html, v.variables),
+    text: fillFixture(v.text, v.variables),
+  }
+}
+
+function fillFixture(
+  text: string | null,
+  variables: { path: string; preview: string }[],
+): string | null {
+  if (text === null) return null
+  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
+    const v = variables.find((x) => x.path === path)
+    return (v?.preview || path).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+  })
+}
+
+const TEMPLATE_UPLOAD = [
+  {
+    path: "auth/welcome.tsx",
+    name: "welcome",
+    folder: "auth",
+    template_id: "bf7a1c00-0000-4000-8000-000000000002",
+    outcome: "versioned",
+    version: 4,
+  },
+  {
+    path: "auth/magic-link.tsx",
+    name: "magic-link",
+    folder: "auth",
+    template_id: "bf7a1c00-0000-4000-8000-000000000009",
+    outcome: "created",
+    version: 1,
+  },
+  {
+    path: "billing/invoice.tsx",
+    name: "invoice",
+    folder: "billing",
+    template_id: "bf7a1c00-0000-4000-8000-000000000008",
+    outcome: "unchanged",
+    version: 2,
+  },
+  {
+    path: "marketing/promo.tsx",
+    name: "promo",
+    folder: "marketing",
+    template_id: null,
+    outcome: "refused",
+    problems: [
+      'A variable is used as a condition or measured - `{name && …}`, `{name || "there"}`, `.length` or similar. A template is rendered once, so every variable must always be inserted the same way. Near: `<p>Hi there, here is`',
+    ],
+  },
+]
+
 const ROUTES: [
   RegExp,
   (match: RegExpMatchArray, query: Query, method: string) => unknown,
@@ -1084,77 +1389,47 @@ const ROUTES: [
     }),
   ],
 
+  [/^\/console\/templates\/upload$/, () => ({ data: TEMPLATE_UPLOAD, problems: [] })],
+
   [
-    /^\/console\/templates\/([^/]+)$/,
+    /^\/console\/templates\/([^/]+)\/versions\/(\d+)\/preview$/,
     (m) => {
-      // ⚠ THE ID IS CHECKED RATHER THAN IGNORED - see `PREVIEW_NOT_FOUND`.
-      if (m[1] !== "bf7a1c00-0000-4000-8000-000000000001") return PREVIEW_NOT_FOUND
+      const version = templateVersionFixture(m[1]!, Number(m[2]))
+      if (!version) return PREVIEW_NOT_FOUND
       return {
-        id: "bf7a1c00-0000-4000-8000-000000000001",
-        name: "password-reset",
-        folder: "transactional/auth",
-        kind: "html",
-        subject: "Reset your password",
-        html: '<p>Hello {{first_name}},</p>\n<p><a href="{{reset_url}}">Reset your password</a></p>',
-        text: "Hello {{first_name}},\n\nReset your password: {{reset_url}}",
-        published_at: ago(30),
-        version: 4,
-        versions: 4,
-        created_at: ago(170),
-        updated_at: ago(3),
+        subject: fillFixture(version.subject, version.variables),
+        html: version.html,
+        text: version.text,
       }
     },
   ],
 
   [
-    /^\/console\/templates$/,
-    () => ({
-      data: [
-        {
-          id: "bf7a1c00-0000-4000-8000-000000000001",
-          name: "password-reset",
-          folder: "transactional/auth",
-          kind: "html",
-          subject: "Reset your password",
-          html: null,
-          text: null,
-          published_at: ago(30),
-          version: 4,
-          versions: 4,
-          created_at: ago(170),
-          updated_at: ago(3),
-        },
-        {
-          id: "bf7a1c00-0000-4000-8000-000000000002",
-          name: "welcome",
-          folder: "transactional/auth",
-          kind: "html",
-          subject: "Welcome to Acme",
-          html: null,
-          text: null,
-          published_at: ago(80),
-          version: 2,
-          versions: 2,
-          created_at: ago(160),
-          updated_at: ago(80),
-        },
-        {
-          id: "bf7a1c00-0000-4000-8000-000000000003",
-          name: "receipt",
-          folder: null,
-          kind: "html",
-          subject: "Your receipt",
-          html: null,
-          text: null,
-          published_at: null,
-          version: 0,
-          versions: 0,
-          created_at: ago(5),
-          updated_at: ago(5),
-        },
-      ],
-    }),
+    /^\/console\/templates\/([^/]+)\/versions\/(\d+)\/promote$/,
+    (m) => templateDetailFixture(m[1]!) ?? PREVIEW_NOT_FOUND,
   ],
+
+  [
+    /^\/console\/templates\/([^/]+)\/versions\/(\d+)$/,
+    (m) => templateVersionFixture(m[1]!, Number(m[2])) ?? PREVIEW_NOT_FOUND,
+  ],
+
+  [
+    /^\/console\/templates\/([^/]+)\/versions$/,
+    (m) => {
+      const detail = templateDetailFixture(m[1]!)
+      if (!detail) return PREVIEW_NOT_FOUND
+      return { ...templateVersionFixture(m[1]!, detail.version)!, unchanged: false }
+    },
+  ],
+
+  [
+    /^\/console\/templates\/([^/]+)$/,
+    // ⚠ THE ID IS CHECKED RATHER THAN IGNORED - see `PREVIEW_NOT_FOUND`.
+    (m) => templateDetailFixture(m[1]!) ?? PREVIEW_NOT_FOUND,
+  ],
+
+  [/^\/console\/templates$/, () => ({ data: TEMPLATES.map((t) => summary(t)) })],
 ]
 
 /**
