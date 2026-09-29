@@ -18,7 +18,7 @@ import { features, predict } from "./model.js"
 import { registrable } from "./rules.js"
 import { bandRank, type Assessment, type Band } from "./types.js"
 import type { Embedder } from "../content/embed.js"
-import { processContent } from "../content/job.js"
+import { analyseContent } from "../content/job.js"
 import { restoreBodies } from "../content/restore.js"
 import { purgeVectors, storeBehaviour } from "../content/vectors.js"
 import {
@@ -404,11 +404,9 @@ export interface RunSummary {
   webRiskSpent: number | null
   unsafe: number
   retrained: string | null
+  /** Crediting and embedding; compaction runs in the content-store job (#171). */
   content: {
     scanned: number
-    derived: number
-    compacted: number
-    bytesSaved: number
     embedded: number
     /** Messages newly credited to an approved template (#222). */
     trusted: number
@@ -479,9 +477,6 @@ export async function runAll(
     retrained: null,
     content: {
       scanned: 0,
-      derived: 0,
-      compacted: 0,
-      bytesSaved: 0,
       embedded: 0,
       trusted: 0,
     },
@@ -519,23 +514,25 @@ export async function runAll(
           }
           await purgeContent(deps, id, now)
           // ⚠ CONTENT BEFORE THE SCORE, so this hour's vectors are the ones it
-          // compares. Its failure costs this workspace's content pass, not its score.
+          // compares. Its failure costs this workspace's content pass, not its
+          // score. Compaction is not here: it runs every five minutes in the
+          // content-store job, for every workspace, risk on or off (#171).
           try {
             const store = deps.trustedTemplates
-            const c = await processContent(id, {
+            const c = await analyseContent(id, {
               db: deps.db,
               ...(deps.embedder ? { embedder: deps.embedder } : {}),
               ...(deps.trust ? { trust: deps.trust } : {}),
               ...(store
-                ? { creditTemplates: (counts) => store.credit(id, counts) }
+                ? {
+                    creditTemplates: (counts: ReadonlyMap<string, number>) =>
+                      store.credit(id, counts),
+                  }
                 : {}),
               now,
               ...(deps.log ? { log: deps.log } : {}),
             })
             summary.content.scanned += c.scanned
-            summary.content.derived += c.derived
-            summary.content.compacted += c.compacted
-            summary.content.bytesSaved += c.bytesSaved
             summary.content.embedded += c.embedded
             summary.content.trusted += c.trusted
             await purgeVectors(deps.db, id, now)

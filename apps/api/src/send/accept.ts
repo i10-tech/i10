@@ -288,15 +288,6 @@ export interface AcceptOps {
   sendingHeld?: (tenantId: string) => Promise<{ why: string } | null>
 
   /**
-   * Sees what was accepted, after the commit: the risk engine's content
-   * fingerprints, link hosts and farm tripwire (#170).
-   *
-   * ⚠ FIRE-AND-FORGET, AND IT MUST NEVER THROW INTO A SEND. It is called with
-   * the payloads and not awaited; a failure costs a fingerprint, not a message.
-   */
-  observe?: (tenantId: string, payloads: readonly SendEmail[]) => void
-
-  /**
    * Pushes the batch. Called only after the transaction commits.
    *
    * `runAt` delays the job - see the scheduling note in `acceptSend`.
@@ -472,14 +463,10 @@ export async function acceptSend(
     return { status: "replayed", ids: written.ids }
   }
 
-  try {
-    deps.observe?.(input.tenantId, input.payloads)
-  } catch (err) {
-    deps.log.error(
-      { err, tenantId: input.tenantId },
-      "risk observer threw; the send is unaffected",
-    )
-  }
+  // ⚠ NOTHING ABOUT THE CONTENT IS COMPUTED HERE (#171). Fingerprints, link
+  // hosts and the farm tripwire used to be computed in this process after the
+  // commit; the content-store job now reads them from the stored bodies every
+  // five minutes, so a send costs its write and its enqueue and nothing else.
 
   // ⚠ ONLY MESSAGES WITH A SURVIVING RECIPIENT ARE QUEUED. The rest are
   // recorded so the dashboard can explain them, and never sent.

@@ -1,7 +1,9 @@
 # Message storage and retention
 
 **Decided:** 2026-09-29. **Status:** attachments to R2 (#136, #168) and
-retention built on one branch. Bodies to R2 (#188) not started.
+retention built on one branch; the content job reworked for #171 (progress
+markers, compaction out of the risk run, fingerprints off the send path).
+Bodies to R2 (#188) not started.
 
 ---
 
@@ -77,6 +79,56 @@ only its values. It is deleted when no body (compacted or merely linked)
 references it AND it has gone 7 days unseen. If the workspace starts sending
 that mail again, the content job derives it anew from the near-duplicates, and
 new mail keeps its full body until then, so nothing is lost in between.
+
+## The content job (#171)
+
+`i10-content-store` runs every 5 minutes and does everything to stored mail
+after the send, per workspace, each step independent of the others:
+
+| Step         | Runs when               | Progress marker (`message_bodies`) | Finds workspaces through       |
+| ------------ | ----------------------- | ---------------------------------- | ------------------------------ |
+| Fingerprints | `RISK_ENABLED`          | `fingerprinted_at`                 | `core.content_fingerprint_due` |
+| Attachments  | `CONTENT_STORE_*` set   | `attachments_stored_at`            | `core.content_store_due`       |
+| Compaction   | always, every workspace | `examined_at`                      | `core.content_compaction_due`  |
+
+The hourly risk run keeps the risk half: trusted-template credit (#222) and
+embeddings, on its own marker, `analysed_at`.
+
+**Every pass makes progress.** Compaction used to read the oldest uncompacted
+bodies of the last week. Unique mail is never compacted and nothing recorded
+that it had been read, so once a workspace had a batch's worth of unique
+finished bodies, every run re-read exactly those and never reached newer mail
+(reproduced: five unique bodies starved six near-identical receipts for good).
+Now every body read is stamped, and the risk half the same way.
+
+**Stamping does not cost the pairing.** A template needs two near-duplicates,
+and a stamped body is never read again, so an unmatched body keeps its MinHash
+bands in `content_bands` (GIN, partial on unlinked rows). Its twin, arriving in
+a later pass, reads only the few bodies that share a band.
+
+**Link, then promote by template.** A match is linked once (template and
+values recorded, original kept). When a template reaches 3 matches, every body
+linked to it is compacted, found through the linked-body index rather than a
+rescan, after rendering the values back and comparing byte for byte. A body
+that no longer reconstructs is unlinked, so it cannot block the queue.
+
+**Not a risk feature.** It rode the risk run until #171, so `RISK_ENABLED=false`
+stopped compaction, the system tenant (exempt from scoring, sender of the most
+templated mail we have) never compacted, and only active workspaces were
+visited. The definers return tenant ids for every workspace, whatever its
+status.
+
+**Nothing beyond a hash on the send path.** Fingerprints, link hosts and the
+farm tripwire moved out of the API into this job, read from stored bodies
+(restored first). The tripwire now fires within 5 minutes instead of at accept,
+and re-scores through the same risk construction the hourly run uses
+(`risk/runtime.ts`). Recording and stamping share one transaction, so a crash
+never counts a body twice; migration 0082 marked every existing body as
+fingerprinted, since accept had already counted it.
+
+**Approvals credit forward.** An approved template is credited on mail
+analysed after the approval; mail analysed while it was pending is not
+re-read. The old retroactive week was an accident of the starvation.
 
 ## Credentials
 

@@ -410,39 +410,4 @@ describe("the risk engine at accept (#170)", () => {
     })
     expect((await accept(deps)).status).toBe("paused")
   })
-
-  it("shows accepted mail to the observer, after the write", async () => {
-    const observe = mock(() => {})
-    const { deps, persist } = ops({ observe })
-    await accept(deps, { payloads: [email(), email({ subject: "Two" })] })
-    expect(observe).toHaveBeenCalledTimes(1)
-    const [tenant, payloads] = observe.mock.calls[0] as unknown as [string, SendEmail[]]
-    expect(tenant).toBe("ten-1")
-    expect(payloads).toHaveLength(2)
-    expect(persist).toHaveBeenCalled()
-  })
-
-  it("does not show the observer a replay, a conflict or a refusal", async () => {
-    const observe = mock(() => {})
-    const replay = ops({
-      observe,
-      persist: mock(async () => ({ status: "replayed" as const, ids: ["x"] })) as never,
-    })
-    await accept(replay.deps)
-    const refused = ops({ observe, sendingHeld: async () => ({ why: "x" }) })
-    await accept(refused.deps)
-    expect(observe).not.toHaveBeenCalled()
-  })
-
-  it("never lets an observer that throws cost the send", async () => {
-    const { deps, enqueue, log } = ops({
-      observe: () => {
-        throw new Error("redis down")
-      },
-    })
-    const outcome = await accept(deps)
-    expect(outcome.status).toBe("accepted")
-    expect(enqueue).toHaveBeenCalled()
-    expect(log.error).toHaveBeenCalled()
-  })
 })

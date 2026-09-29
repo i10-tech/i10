@@ -1,12 +1,16 @@
-# Moves finished messages' attachments to R2, on a schedule (#136, #168, #188).
+# Everything done to stored mail after the send, on a schedule (#136, #168,
+# #171, #188): fingerprints and the farm tripwire (risk on), attachments to R2
+# (content store configured), and template compaction (always).
 #
 # ⚠ THE SAME IMAGE AND ANOTHER COMMAND, like the sweep and the reconciler.
 # `bun dist/content-store.js` runs one pass and exits.
 #
-# ⚠ ACCEPT STILL WRITES FILES INLINE, and this is the "process later" half:
-# nothing touches object storage before the 202, and files wait in Postgres
-# minutes, not hours. Without the CONTENT_STORE_* keys (Doppler, prod_api) it
-# logs and exits 0, and attachments stay where they are.
+# ⚠ ACCEPT WRITES THE RAW MESSAGE AND RETURNS; this is the "process later" half:
+# nothing touches object storage, fingerprints or templates before the 202.
+# Without the CONTENT_STORE_* keys (Doppler, prod_api) attachments stay inline;
+# without RISK_ENABLED nothing is fingerprinted; compaction runs either way.
+# It reads REDIS_URL and CLERK_SECRET_KEY from i10-shared/i10-api for the
+# tripwire's re-score. See docs/decisions/storage.md.
 ---
 apiVersion: batch/v1
 kind: CronJob

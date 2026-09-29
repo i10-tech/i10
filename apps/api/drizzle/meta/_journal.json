@@ -568,6 +568,20 @@
       "when": 1790654267935,
       "tag": "0080_plan_since_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790657618167,
+      "tag": "0081_content_progress",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790657656903,
+      "tag": "0082_content_progress_definers",
+      "breakpoints": true
     }
   ]
 }
