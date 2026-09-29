@@ -902,6 +902,7 @@ const ROUTES: [
           remaining: 38,
           resets_at: new Date(Date.now() + 5 * 3_600_000 + 12 * 60_000).toISOString(),
           overage: false,
+          starts_on_send: false,
           status: "ok" as const,
         },
         {
@@ -914,6 +915,7 @@ const ROUTES: [
           remaining: 1160,
           resets_at: ago(-12),
           overage: false,
+          starts_on_send: false,
           status: "ok" as const,
         },
       ],

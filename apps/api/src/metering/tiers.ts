@@ -9,7 +9,7 @@ import { eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { sendingTierEvents, sendingTiers } from "../db/core.js"
 import { postgresLevels } from "./levels.js"
-import { meterEventStore } from "./postgres.js"
+import { meterEventStore, meterWindowStore } from "./postgres.js"
 
 /**
  * Sending tiers for FREE workspaces (#165).
@@ -46,6 +46,9 @@ export const tierPlan = (tier: SendingTier, featureId: string): Plan => ({
       kind: "consumable",
       interval: "month",
       allowance: TIER_MONTHLY_LIMITS[tier],
+      // ⚠ FROM THE FIRST SEND, LIKE THE PLAN'S DAILY LINE (0078): an anchored
+      // month would allow 3,000 either side of its boundary.
+      start: "first_use",
       // ⚠ A HARD CAP. Overage is a paid-plan idea, and this is only ever a
       // free workspace.
       overage: "never",
@@ -68,7 +71,7 @@ export function tierAssignments(
     async find(tenantId) {
       const rows = (await withTenant(db, tenantId, (tx) =>
         tx.execute(sql`
-          select a.plan_id, a.anchor, t.tier
+          select a.plan_id, a.anchor, a.plan_since, t.tier
             from core.plan_assignments a
             left join core.sending_tiers t on t.tenant_id = a.tenant_id
            where a.tenant_id = ${tenantId}::uuid
@@ -77,6 +80,7 @@ export function tierAssignments(
       )) as unknown as {
         plan_id: string
         anchor: string | Date
+        plan_since: string | Date
         tier: SendingTier | null
       }[]
       const row = rows[0]
@@ -87,6 +91,9 @@ export function tierAssignments(
       return {
         tenantId,
         anchor: new Date(row.anchor),
+        // ⚠ THE FREE PLAN'S SINCE, so the tier month never reaches back into a
+        // paid period either. A tier change (strict to normal) does not move it.
+        planSince: new Date(row.plan_since),
         overageEnabled: false,
         plan: tierPlan(row.tier ?? DEFAULT_TIER, featureId),
       } satisfies Assignment
@@ -103,6 +110,7 @@ export function tierMeter(
     assignments: tierAssignments(db, opts),
     usage: meterEventStore(db),
     levels: postgresLevels(db),
+    windows: meterWindowStore(db),
   })
 }
 

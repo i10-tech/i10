@@ -66,6 +66,28 @@ export interface ConsumableEntitlement extends EntitlementBase {
   interval: ResetInterval
   /** e.g. `interval: "month", intervalCount: 3` is quarterly. Defaults to 1. */
   intervalCount?: number
+  /**
+   * Where a window starts.
+   *
+   * - `anchor` (the default) - windows tile time from the tenant's anchor, one
+   *   after another, whether or not anything is sent. Paid plans: their
+   *   allowance is the billing period Polar charges for, and using two periods'
+   *   volume back to back at the seam is legitimate, because both were paid.
+   * - `first_use` - a window opens at the tenant's FIRST SEND after the last one
+   *   ended, and lasts one interval from there; with nothing sent, no window is
+   *   open and nothing is counting. Free limits: waiting for a fixed boundary
+   *   and sending 100 either side of it (200 in a minute) is exactly the burst
+   *   a free tier must not allow, and a window that only starts when you send
+   *   gives no boundary to wait for.
+   *
+   * ⚠ `first_use` NARROWS THE BURST; IT DOES NOT MAKE IT IMPOSSIBLE. One send
+   * early in a window, 99 at its very end and 100 at the start of the next is
+   * still about 200 in a few minutes (Claude's 5-hour sessions share this
+   * property). If that is ever seen in practice, the fix is a SLIDING cap
+   * beside it - "at most N in any rolling 24 hours", counted from the ledger -
+   * which has no boundary at all. Decided 2026-09-29 to start with first use.
+   */
+  start?: "anchor" | "first_use"
 }
 
 /**
@@ -148,6 +170,20 @@ export interface Assignment {
    * hard cap whatever this says.
    */
   overageEnabled: boolean
+  /**
+   * When the tenant moved onto THIS plan (not when it was first given one -
+   * that is `anchor`).
+   *
+   * ⚠ ONLY `first_use` WINDOWS READ IT, AND THEY NEVER REACH BEFORE IT. A Pro
+   * workspace that sent 20,000 this month and drops to Free must not find its
+   * free month already spent on mail it paid for; its free windows start at
+   * its first send AFTER the change. Anchored (paid) windows ignore it on
+   * purpose: there usage carries across a change, which is the anchor rule
+   * above and matches how Polar credits an upgrade.
+   *
+   * Optional: absent, nothing is bounded, as before this existed.
+   */
+  planSince?: Date
 }
 
 /**

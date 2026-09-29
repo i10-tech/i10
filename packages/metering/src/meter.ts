@@ -4,13 +4,15 @@ import { meterKeyOf } from "./key.js"
 import { entitlementFor } from "./plan.js"
 import type { Allowance } from "./balance.js"
 import type { ResetInterval, ResetWindow } from "./interval.js"
-import type { Entitlement } from "./plan.js"
+import type { ConsumableEntitlement, Entitlement } from "./plan.js"
+import type { MeterKey } from "./key.js"
 import type {
   AssignmentStore,
   LevelStore,
   RecordResult,
   UsageEvent,
   UsageStore,
+  WindowStore,
 } from "./ports.js"
 
 /**
@@ -170,11 +172,18 @@ export interface MeterDeps {
    * grants an unlimited number of mailboxes to everybody.
    */
   levels?: LevelStore
+  /**
+   * Where `first_use` windows start. Optional for the same reason as `levels`,
+   * and its absence throws for the same reason: resolving a first-use window
+   * without it is a wiring mistake, and falling back to the anchor would
+   * silently reopen the boundary burst the setting exists to close.
+   */
+  windows?: WindowStore
 }
 
-export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
+export function createMeter({ assignments, usage, levels, windows }: MeterDeps): Meter {
   /** Resolves plan → entitlement → window, or explains why it could not. */
-  async function resolve(tenantId: string, featureId: string, at: Date) {
+  async function resolve(tenantId: string, featureId: string, at: Date, shard = 0) {
     const assignment = await assignments.find(tenantId)
     if (assignment === null) {
       return { ok: false as const, reason: `tenant ${tenantId} holds no plan` }
@@ -194,8 +203,91 @@ export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
       // ⚠ BOTH HALVES, AND THE PLAN'S IS THE ONE THAT CAN SAY NO. A tenant who
       // switched overage on does not thereby get a fourth domain.
       overage: entitlement.overage === "billable" && assignment.overageEnabled,
-      window: windowOfEntitlement(entitlement, assignment.anchor, at),
+      window:
+        entitlement.kind === "consumable" && entitlement.start === "first_use"
+          ? await firstUseWindow(
+              entitlement,
+              meterKeyOf(tenantId, featureId, shard),
+              at,
+              assignment.planSince ?? null,
+            )
+          : windowOfEntitlement(entitlement, assignment.anchor, at),
     }
+  }
+
+  /**
+   * The open `first_use` window at `at`, or null when none is open - nothing
+   * sent since the last one ended, so nothing is counting.
+   *
+   * ⚠ DERIVED FROM THE LEDGER, NOT OPENED BY A CHECK. A window starts at the
+   * first usage event after the previous window ended: the first email that
+   * actually went out. Opening it when a send is merely CHECKED would start the
+   * clock on a request that was then refused (by the tier, a hold, a bad
+   * address) and hand the tenant a window they never used.
+   *
+   * ⚠ A FIRST READ LOOKS BACK ONE INTERVAL. With nothing stored - a new tenant,
+   * or the first read after this shipped - the window starts at the first send
+   * within the last interval, so a tenant already mid-day is not handed a fresh
+   * 100 by the deploy.
+   */
+  async function firstUseWindow(
+    entitlement: ConsumableEntitlement,
+    key: MeterKey,
+    at: Date,
+    planSince: Date | null,
+  ): Promise<ResetWindow | null> {
+    if (windows === undefined || usage.firstEventAt === undefined) {
+      throw new Error(
+        `no window store configured, but ${key.featureId} starts on first use`,
+      )
+    }
+    const id = `${entitlement.interval}:${entitlement.intervalCount ?? 1}`
+    const span = (start: Date) =>
+      windowFor({
+        anchor: start,
+        interval: entitlement.interval,
+        intervalCount: entitlement.intervalCount,
+        at: start,
+      })
+
+    // ⚠ A WINDOW THAT BEGAN ON ANOTHER PLAN IS NOT THIS PLAN'S. After a change
+    // (Pro to Free, or Free to Pro and back) the stored start is ignored and the
+    // search never looks before the change, so mail sent on the old plan never
+    // counts against this one.
+    const raw = await windows.startOf(key, id)
+    const stored = raw && (!planSince || raw >= planSince) ? raw : null
+    let current = stored ? span(stored) : null
+    // Nothing stored: search from one interval back (see above), but never
+    // from before the plan began.
+    let from =
+      current?.end ?? backOne(at, entitlement.interval, entitlement.intervalCount ?? 1)
+    if (planSince && from < planSince) from = planSince
+
+    // ⚠ A LOOP, BECAUSE SEVERAL WINDOWS CAN HAVE COME AND GONE since the stored
+    // one. Each pass jumps to the first send after the last window ended; it
+    // stops at the one containing `at`, or when nothing was sent since.
+    for (let i = 0; i < 1000; i++) {
+      if (current && (current.end === null || at < current.end)) break
+      const next = await usage.firstEventAt(key, from, at)
+      if (next === null) {
+        current = null
+        break
+      }
+      current = span(next)
+      from = current.end ?? at
+    }
+
+    if (current && (!stored || current.start.getTime() > stored.getTime())) {
+      await windows.advance(key, id, current.start)
+    }
+    return current && (current.end === null || at < current.end) ? current : null
+  }
+
+  function backOne(at: Date, interval: ResetInterval, count: number): Date {
+    if (interval === "lifetime") return new Date(0)
+    const probe = windowFor({ anchor: at, interval, intervalCount: count, at })
+    // One interval before `at`, the same length as the window it would open.
+    return new Date(at.getTime() - (probe.end!.getTime() - probe.start.getTime()))
   }
 
   /**
@@ -229,7 +321,11 @@ export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
     // event whose `sent_at` lands before `window.start` - a late flush from the
     // far side of a boundary - belongs to the window it happened in and is
     // correctly excluded from this one.
-    return usage.usedIn(key, window!)
+    // ⚠ NO WINDOW OPEN (a `first_use` window before the first send) MEANS
+    // NOTHING IS COUNTING - by definition nothing has been sent since the last
+    // window ended.
+    if (window === null) return 0
+    return usage.usedIn(key, window)
   }
 
   /** `null` for a continuous feature: it has no reset, so it has no window. */
@@ -249,7 +345,7 @@ export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
 
   return {
     async check({ tenantId, featureId, requested, at, shard = 0 }) {
-      const resolved = await resolve(tenantId, featureId, at)
+      const resolved = await resolve(tenantId, featureId, at, shard)
       if (!resolved.ok) return { status: "unentitled", reason: resolved.reason }
 
       const { entitlement, window, overage } = resolved
@@ -292,7 +388,7 @@ export function createMeter({ assignments, usage, levels }: MeterDeps): Meter {
     },
 
     async balanceOf({ tenantId, featureId, at, shard = 0 }) {
-      const resolved = await resolve(tenantId, featureId, at)
+      const resolved = await resolve(tenantId, featureId, at, shard)
       if (!resolved.ok) return { status: "unentitled", reason: resolved.reason }
 
       const { entitlement, window, overage } = resolved

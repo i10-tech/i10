@@ -540,6 +540,34 @@
       "when": 1790649813575,
       "tag": "0076_content_storage_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790654115977,
+      "tag": "0077_meter_windows",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790654116592,
+      "tag": "0078_free_limits_first_use",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1790654267319,
+      "tag": "0079_plan_since",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1790654267935,
+      "tag": "0080_plan_since_trigger",
+      "breakpoints": true
     }
   ]
 }

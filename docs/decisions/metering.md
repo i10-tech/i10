@@ -1180,6 +1180,38 @@ tiers move.
 
 ---
 
+## Free limits start on the first send (2026-09-29)
+
+Anchored windows let a free workspace wait for the reset, send 100 a minute
+before it and 100 a minute after: 200 in two minutes. So a consumable
+entitlement can say `start: "first_use"`: its window opens at the first send
+after the previous one ended and runs one interval from there. With nothing
+sent, no window is open and nothing counts.
+
+- **Which limits:** the free plan's daily 100 (migration 0078) and the tier's
+  monthly line (`metering/tiers.ts`). Paid plans stay anchored, because their
+  allowance is the billing period Polar charges for, and using two periods'
+  volume back to back at the seam is legitimate.
+- **Derived from the ledger:** a window starts at the first `meter_events` row
+  after the last window ended, not when a send is checked, so a refused
+  request never starts a clock. `core.meter_windows` caches the current start
+  and only moves forward.
+- **Plan changes:** a first-use window never reaches before
+  `plan_assignments.plan_since`, which a trigger moves only when `plan_id`
+  actually changes (0080). Pro to Free: Pro's mail never counts against the
+  free day or month; the free windows open at the first send after the change.
+  Free to Pro: anchored as before, and usage in the current period carries
+  over, which is the anchor rule and matches Polar's upgrade arithmetic. A tier
+  change (strict to normal) keeps the window and swaps the allowance. A
+  redelivered webhook re-granting the same plan moves nothing.
+- **Not a hard guarantee:** one send early in a window, 99 at its end and 100
+  just after is still about 200 in minutes (Claude's 5-hour sessions share
+  this). If that is seen in practice, add a **sliding cap** beside it, "at most
+  N in any rolling 24 hours" counted straight from the ledger, which has no
+  boundary at all.
+
+---
+
 ## Open questions
 
 - [ ] Autumn's real reason for the SQS migration, from their commit history.

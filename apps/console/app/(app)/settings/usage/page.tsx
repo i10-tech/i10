@@ -60,8 +60,10 @@ export default async function UsagePage() {
           {billing.plan
             ? `You are on ${billing.plan.name}.`
             : "No plan is assigned to this workspace yet."}{" "}
-          A send is refused when any one of these is reached. Each resets on a rolling
-          window from when your plan started, not on the first of the month.
+          A send is refused when any one of these is reached.{" "}
+          {limits.some((limit) => limit.source === "tier")
+            ? "Each limit starts with your first send and runs a full day or month from there."
+            : "Your allowance renews with your billing period."}
         </SectionDescription>
         <SectionContent className="max-w-2xl divide-y divide-border">
           {limits.map((limit) => (
@@ -168,7 +170,11 @@ function LimitRow({ limit }: { limit: SendingLimit }) {
       ? "Could not be read right now. Your sending is unaffected."
       : [
           limit.tier ? (TIER_NAME[limit.tier] ?? limit.tier) : null,
-          limit.resets_at ? `Resets in ${formatUntil(limit.resets_at)}` : null,
+          limit.starts_on_send
+            ? "Starts with your next send"
+            : limit.resets_at
+              ? `Resets in ${formatUntil(limit.resets_at)}`
+              : null,
         ]
           .filter(Boolean)
           .join(" · ")

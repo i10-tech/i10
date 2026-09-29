@@ -72,6 +72,12 @@ export interface UsageStore {
    * is a unique index and `ON CONFLICT DO NOTHING`.
    */
   record(key: MeterKey, events: readonly UsageEvent[]): Promise<RecordResult>
+
+  /**
+   * The earliest usage event in `[from, to]`, or null. Needed only by
+   * `first_use` windows, which start at a send; absent otherwise.
+   */
+  firstEventAt?(key: MeterKey, from: Date, to: Date): Promise<Date | null>
 }
 
 /**
@@ -91,6 +97,22 @@ export interface UsageStore {
  * storage. Counting only the working ones lets a tenant park fifty pending
  * domains against a limit of three.
  */
+/**
+ * Where a `first_use` window currently starts, per meter key and window shape.
+ *
+ * ⚠ A CACHE OF A FACT THE LEDGER ALREADY HOLDS, NOT A SECOND SOURCE OF TRUTH.
+ * A window starts at the first usage event after the previous one ended; the
+ * stored start only saves walking the ledger from the beginning each time. It
+ * only ever moves FORWARD, so two readers racing to advance it cannot move it
+ * back.
+ */
+export interface WindowStore {
+  /** The stored start of the latest window, or null if none has opened. */
+  startOf(key: MeterKey, windowId: string): Promise<Date | null>
+  /** Records a later start. A start at or before the stored one is ignored. */
+  advance(key: MeterKey, windowId: string, start: Date): Promise<void>
+}
+
 export interface LevelStore {
   /**
    * How much of this feature the tenant currently holds.

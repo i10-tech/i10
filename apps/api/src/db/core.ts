@@ -1819,6 +1819,17 @@ export const planAssignments = core.table("plan_assignments", {
 
   assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * When the tenant moved onto its CURRENT plan. The free plan's first-send
+   * windows never reach before it, so mail sent on Pro never counts against a
+   * free day or month after a downgrade (packages/metering `planSince`).
+   *
+   * ⚠ MOVED BY A TRIGGER, ONLY WHEN `plan_id` ACTUALLY CHANGES (0080). Not
+   * `updated_at`: that bumps on every re-grant, including a Polar webhook
+   * redelivered for the plan the tenant already holds, and a free workspace
+   * handed a fresh window by a replay is the reset this whole design refuses.
+   */
+  planSince: timestamp("plan_since", { withTimezone: true }).notNull().defaultNow(),
 })
 
 /**
@@ -1942,6 +1953,41 @@ export const meterEvents = core.table(
     primaryKey({ columns: [t.tenantId, t.featureId, t.eventId] }),
     // The gate's only read: one tenant, one feature, one shard, one window.
     index("meter_events_window_idx").on(t.tenantId, t.featureId, t.shard, t.occurredAt),
+  ],
+)
+
+/**
+ * Where each `first_use` meter window currently starts (packages/metering,
+ * `start: "first_use"`): the free plan's daily 100 and the tier's month.
+ *
+ * ⚠ A CACHE OF THE LEDGER, NOT A SECOND LEDGER. A window starts at the first
+ * `meter_events` row after the previous window ended; this only saves walking
+ * the ledger from the beginning on every check. Losing it costs nothing but a
+ * look back one interval, which is exactly what a first read does.
+ *
+ * ⚠ IT ONLY MOVES FORWARD. Two checks racing to open the same window compute
+ * the same start from the same ledger, and the upsert refuses to move it back.
+ */
+export const meterWindows = core.table(
+  "meter_windows",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    featureId: text("feature_id").notNull(),
+    shard: integer("shard").notNull().default(0),
+    /** `<interval>:<intervalCount>`, e.g. `day:1`. */
+    windowId: text("window_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.featureId, t.shard, t.windowId] }),
+    // Inline rather than `tenantPolicy`, which is declared further down.
+    pgPolicy("meter_windows_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
   ],
 )
 

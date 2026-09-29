@@ -1,0 +1,1 @@
+ALTER TABLE "core"."plan_assignments" ADD COLUMN "plan_since" timestamp with time zone DEFAULT now() NOT NULL;
