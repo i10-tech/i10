@@ -27,12 +27,60 @@ Why, in the order it was decided:
    it safe, since it may behave differently on other input. Here it does not
    need to be: after that one render, the code never runs again.
 
+## Where templates come from
+
+`templates.source` says where a template is maintained (#234). That also
+decides what may make a version of it:
+
+| Source    | Maintained in                                           | A version is made by           |
+| --------- | ------------------------------------------------------- | ------------------------------ |
+| `managed` | the dash's editor (HTML now, the visual editor in #162) | publishing                     |
+| `upload`  | `.tsx` files or a folder, uploaded in the dash          | each upload                    |
+| `github`  | a connected repository (#235)                           | each push to the target branch |
+
+A folder upload only creates or versions `upload` templates. A file whose name
+matches a managed or GitHub template is refused, not versioned over it.
+Templates we ship ready-made for customers are a separate, later idea.
+
 ## How a version is made
 
-| Kind   | Source                              | Skeleton made by                                 |
-| ------ | ----------------------------------- | ------------------------------------------------ |
-| `html` | HTML written in the console         | finding `{{ name }}` placeholders (no execution) |
-| `tsx`  | an uploaded React Email `.tsx` file | the sandbox Worker, `services/template-renderer` |
+| Kind   | Source                                | Skeleton made by                                 |
+| ------ | ------------------------------------- | ------------------------------------------------ |
+| `html` | HTML written in the console           | finding `{{ name }}` placeholders (no execution) |
+| `tsx`  | React Email files, uploaded or pushed | the sandbox Worker, `services/template-renderer` |
+
+### Templates are file sets
+
+Real template folders share a layout, a footer, a button. So a `tsx` template
+is an **entry file plus everything it imports by relative path**, and an
+upload (or a repository directory) is a set of files that may hold many
+templates. The file-set code lives in `packages/templates` (`files.ts`), so the
+API and the Worker cannot disagree about what `./layout` means:
+
+- **Discovery.** A template is a `.tsx`/`.jsx` file with a default export that
+  sets `PreviewProps`, outside `node_modules` and folders starting with `_` or
+  `.`. That is React Email's own convention, so a folder that works with
+  `email dev` works here. An `i10.json` at the root with
+  `{ "templates": [...] }` lists them explicitly instead.
+- **Names.** The file's stem is the template's name, which is what a send
+  uses; its directory is the folder. Two templates with the same stem are both
+  refused, since one name for two emails would be a guess.
+- **The closure.** The entry's relative imports are followed transitively.
+  One that is not in the set is refused, naming the file and the specifier.
+  Everything else in the set is ignored, so each template renders in a
+  sandbox holding only its own files. The limits are 64 files and 512 KiB per
+  template, and 500 files and 4 MiB per upload.
+- **In the sandbox.** Each file is transpiled on its own. `template.js` holds
+  them as CommonJS factories; a relative `require` resolves only through the
+  link table the parent computed, and anything else goes to the allowlist. A
+  relative specifier the table does not name is refused by name, never passed
+  to the allowlist.
+- **The import scan is lexical, and fails closed.** A specifier it misses is
+  absent from the link table, so the sandbox refuses it.
+
+A template may also `export const subject = "Welcome, {{ name }}"`. When it
+does, that becomes the version's subject and the draft's, so a GitHub
+template's subject lives in the repository with the rest of it.
 
 Markers look like `⟦i10<nonce>_<n>⟧`. The nonce is random per version and
 chosen after the source is fixed, so a template cannot contain one by accident.
@@ -107,8 +155,16 @@ are immutable. `templates.live_version_id` is the one pointer that moves.
 - **Publish** makes the draft a new live version. For `tsx`, publishing re-uses
   the latest rendering under the draft subject, so a subject edit needs neither
   a re-upload nor the sandbox.
-- **Upload** (`POST /console/templates/:id/versions`) is the only route that
-  runs anything.
+- **Upload** is the only thing that runs anything:
+  `POST /console/templates/:id/versions` for one template (`{ source }` or
+  `{ entry, files }`), and `POST /console/templates/upload { files }` for a
+  folder, which answers with one outcome per template: `created`, `versioned`,
+  `unchanged`, `refused` with its problems, or `unavailable`.
+- **The same files make no new version.** `source_sha256` hashes the entry and
+  all of its files, and an upload or push whose hash matches the live version
+  answers `unchanged` without calling the sandbox. A version keeps its entry
+  in `source`, the rest in `files`, and its entry's `path` (and, for GitHub,
+  `commit_sha`), because a repository can be deleted or force-pushed.
 - **Promote** makes an older version live, which is how you roll back.
 - A send records `message_bodies.template_version_id`. The body is still stored
   in full, and content compaction (#171) deduplicates it like any other.

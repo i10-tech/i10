@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import type { Context } from "hono"
 import { bodyLimit } from "hono/body-limit"
+import { MAX_SET_BYTES } from "@repo/templates"
 import { requireTenant } from "../middleware/tenant.js"
 import { requireFreshAuth } from "../middleware/session.js"
 import type { ConsoleDeps } from "./console/deps.js"
@@ -174,11 +175,23 @@ export function createConsole(deps?: ConsoleDeps) {
 
   const jsonBodyLimit = bodyLimit({ maxSize: 256 * 1024, onError: tooLarge })
   const csvBodyLimit = bodyLimit({ maxSize: 20 * 1024 * 1024, onError: tooLarge })
+  // ⚠ A TEMPLATE UPLOAD IS A FOLDER OF CODE (#234): up to MAX_SET_BYTES of it,
+  // and JSON-escaping source text can nearly double it.
+  const templateBodyLimit = bodyLimit({
+    maxSize: 2 * MAX_SET_BYTES + 64 * 1024,
+    onError: tooLarge,
+  })
 
   app.use("/contacts/import", async (c, next) => {
     c.set("bodyLimited", true)
     return csvBodyLimit(c, next)
   })
+  for (const path of ["/templates/upload", "/templates/:id/versions"]) {
+    app.use(path, async (c, next) => {
+      c.set("bodyLimited", true)
+      return templateBodyLimit(c, next)
+    })
+  }
   app.use("*", async (c, next) =>
     c.get("bodyLimited") ? next() : jsonBodyLimit(c, next),
   )

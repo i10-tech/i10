@@ -4,7 +4,13 @@ import postgres from "postgres"
 import { marker, resolveTemplateSend } from "@repo/templates"
 import type { Database } from "../src/db/client.js"
 import * as schema from "../src/db/schema.js"
-import { templateStore, type TemplateStore } from "../src/templates/store.js"
+import type { Renderer } from "../src/templates/renderer.js"
+import {
+  fileSetHash,
+  templateStore,
+  type TemplateStore,
+} from "../src/templates/store.js"
+import { uploadTemplates } from "../src/templates/upload.js"
 
 /**
  * Templates and versions (#160, #161) against the real schema as `i10_api`.
@@ -162,4 +168,146 @@ suite("templates", () => {
     const result = await store.publish(t, created.id)
     expect(result && "problems" in result).toBe(true)
   })
+
+  it("records where a template is maintained", async () => {
+    const t = await workspace()
+    const html = await store.create(t, { name: "edited" })
+    const tsx = await store.create(t, { name: "uploaded", kind: "tsx" })
+    expect("source" in html && html.source).toBe("managed")
+    expect("source" in tsx && tsx.source).toBe("upload")
+    expect((await store.identity(t, "uploaded"))?.source).toBe("upload")
+  })
+
+  it("stores a template's files, and makes no version from the same files again", async () => {
+    const t = await workspace()
+    const created = await store.create(t, { name: "welcome", kind: "tsx" })
+    if ("conflict" in created) throw new Error("conflict")
+    const files = {
+      "auth/welcome.tsx": "entry",
+      "components/layout.tsx": "layout",
+    }
+    const input = {
+      entry: "auth/welcome.tsx",
+      source: "entry",
+      files,
+      runtime: "test",
+      subject: "Welcome, {{ name }}",
+      skeleton: skeleton(),
+    }
+
+    const first = await store.createRenderedVersion(t, created.id, input)
+    expect(first).toMatchObject({
+      number: 1,
+      unchanged: false,
+      path: "auth/welcome.tsx",
+      files: { "components/layout.tsx": "layout" },
+      subject: "Welcome, {{ name }}",
+      display: { html: "<p>{{ name }}</p>" },
+    })
+    // The exported subject became the draft's.
+    expect((await store.get(t, created.id))?.subject).toBe("Welcome, {{ name }}")
+
+    const again = await store.createRenderedVersion(t, created.id, input)
+    expect(again).toMatchObject({ number: 1, unchanged: true })
+    expect((await store.identity(t, created.id))?.live_sha256).toBe(
+      fileSetHash("auth/welcome.tsx", files),
+    )
+
+    const changed = await store.createRenderedVersion(t, created.id, {
+      ...input,
+      files: { ...files, "components/layout.tsx": "layout v2" },
+    })
+    expect(changed).toMatchObject({ number: 2, unchanged: false })
+
+    // A subject-only publish keeps the files, so it is still "the same files".
+    await store.update(t, created.id, { subject: "Hello" })
+    await store.publish(t, created.id)
+    const v3 = await store.version(t, created.id, 3)
+    expect(v3).toMatchObject({
+      subject: "Hello",
+      path: "auth/welcome.tsx",
+      files: { "components/layout.tsx": "layout v2" },
+    })
+  })
+
+  it("uploads a folder: creates, skips what is unchanged, and refuses what is not its own", async () => {
+    const t = await workspace()
+    const managed = await store.create(t, { name: "receipt" })
+    if ("conflict" in managed) throw new Error("conflict")
+
+    const compiled: string[] = []
+    const renderer: Renderer = {
+      async compile(input) {
+        if ("files" in input) compiled.push(input.entry)
+        return { ok: true, skeleton: skeleton(), runtime: "test", subject: null }
+      },
+    }
+    const tpl = (extra = "") =>
+      `import { Layout } from "../components/layout"\n${extra}\nexport default function T() { return null }\nT.PreviewProps = { name: "Ada" }`
+    const folder = {
+      "auth/welcome.tsx": tpl(),
+      "auth/reset.tsx": tpl(),
+      "billing/receipt.tsx": tpl(),
+      "broken/orphan.tsx": `import x from "./missing"\nexport default x\nx.PreviewProps = {}`,
+      "components/layout.tsx": "export const Layout = 1",
+      "README.md": "ignored",
+    }
+
+    const first = await uploadTemplates({ templates: store, renderer }, t, folder)
+    if (!first.ok) throw new Error(first.problems.join("\n"))
+    const by = Object.fromEntries(first.data.map((o) => [o.name, o]))
+    expect(by.welcome).toMatchObject({ outcome: "created", version: 1, folder: "auth" })
+    expect(by.reset).toMatchObject({ outcome: "created", version: 1 })
+    expect(by.receipt).toMatchObject({ outcome: "refused", template_id: managed.id })
+    expect(by.orphan).toMatchObject({
+      outcome: "refused",
+      problems: ["`./missing`, imported by `broken/orphan.tsx`, is not in the files."],
+    })
+    expect(compiled.sort()).toEqual(["auth/reset.tsx", "auth/welcome.tsx"])
+
+    // The same folder again renders nothing; a changed layout versions both.
+    compiled.length = 0
+    const second = await uploadTemplates({ templates: store, renderer }, t, folder)
+    expect(
+      second.ok && second.data.filter((o) => o.outcome === "unchanged").length,
+    ).toBe(2)
+    expect(compiled).toEqual([])
+
+    const third = await uploadTemplates({ templates: store, renderer }, t, {
+      ...folder,
+      "components/layout.tsx": "export const Layout = 2",
+    })
+    expect(
+      third.ok &&
+        third.data.filter((o) => o.outcome === "versioned").map((o) => o.name),
+    ).toEqual(["reset", "welcome"])
+
+    // Another workspace sees none of it.
+    const other = await workspace()
+    expect(await store.identity(other, "welcome")).toBeNull()
+  })
+
+  it("says so when a folder has no templates in it", async () => {
+    const t = await workspace()
+    const result = await uploadTemplates(
+      {
+        templates: store,
+        renderer: { compile: () => Promise.reject(new Error("not called")) },
+      },
+      t,
+      { "components/layout.tsx": "export const Layout = 1" },
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.problems[0]).toStartWith("No templates were found")
+  })
 })
+
+function skeleton() {
+  const nonce = "abcdefghijkl"
+  return {
+    html: `<p>${marker(nonce, 0)}</p>`,
+    text: marker(nonce, 0),
+    nonce,
+    variables: [{ path: "name", preview: "Ada" }],
+  }
+}

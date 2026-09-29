@@ -2,11 +2,14 @@ import { createHash } from "node:crypto"
 import { and, count, desc, eq, sql } from "drizzle-orm"
 import {
   buildProps,
+  canonicalFileSet,
+  displaySkeleton,
   fill,
   markerPattern,
   nonceFrom,
   placeholders,
   skeletonFromHtml,
+  type FileSet,
   type Skeleton,
   type StoredVersion,
   type TemplateLookup,
@@ -29,12 +32,15 @@ import { LIST_CAP } from "../console/marketing/shared.js"
  */
 
 export type TemplateKind = "html" | "tsx"
+/** Where a template is maintained. See `templateSource` in db/core.ts. */
+export type TemplateSource = "managed" | "upload" | "github"
 
 export interface TemplateSummary {
   id: string
   name: string
   folder: string | null
   kind: TemplateKind
+  source: TemplateSource
   subject: string | null
   /** The live version's number, or 0 before the first publish. */
   version: number
@@ -57,13 +63,53 @@ export interface VersionSummary {
   subject: string | null
   variables: Variable[]
   runtime: string | null
+  /** The entry's path in the upload or repository, when there was one. */
+  path: string | null
+  /** The commit a GitHub template's version came from. */
+  commit_sha: string | null
   live: boolean
   created_at: string
 }
 
 export interface VersionDetail extends VersionSummary {
-  /** The uploaded `.tsx`, for `tsx` versions. */
+  /** The entry `.tsx`, for `tsx` versions. */
   source: string | null
+  /** The other files the entry imports, path to text. */
+  files: Record<string, string> | null
+  /**
+   * The skeleton with its markers written as `{{ path }}`: what a person
+   * reads, and what two versions are diffed by. Never what is sent.
+   */
+  display: { html: string | null; text: string | null }
+}
+
+/** What an upload or a push needs to know about a template before it acts. */
+export interface TemplateIdentity {
+  id: string
+  name: string
+  source: TemplateSource
+  kind: TemplateKind
+  /** The live version's number, or 0 before the first. */
+  live_number: number
+  /** The live version's hash of its files, if it is a rendered version. */
+  live_sha256: string | null
+}
+
+/** A rendered template, as the sandbox returned it, to store as a version. */
+export interface RenderedInput {
+  /** The entry's path; absent for the single-file form. */
+  entry?: string
+  /** The entry's text. */
+  source: string
+  /** The entry and everything it imports, when the template has several files. */
+  files?: FileSet
+  skeleton: Skeleton
+  runtime: string
+  /** The template's exported subject; when present it replaces the draft's. */
+  subject?: string | null
+  commitSha?: string
+  /** What the template becomes: an upload unless a repository made it. */
+  origin?: "upload" | "github"
 }
 
 export interface Preview {
@@ -85,8 +131,15 @@ export interface TemplateStore {
   ): Promise<(TemplateRow & { history: VersionSummary[] }) | null>
   create(
     tenantId: string,
-    input: { name: string; folder?: string | null; kind?: TemplateKind },
+    input: {
+      name: string
+      folder?: string | null
+      kind?: TemplateKind
+      source?: TemplateSource
+    },
   ): Promise<TemplateRow | { conflict: true }>
+  /** By id or by name, as a send names it. */
+  identity(tenantId: string, ref: string): Promise<TemplateIdentity | null>
   update(
     tenantId: string,
     id: string,
@@ -104,12 +157,16 @@ export interface TemplateStore {
    * needs no re-upload and no sandbox.
    */
   publish(tenantId: string, id: string): Promise<TemplateRow | Problems | null>
-  /** Stores a version the sandbox rendered, and makes it live. */
+  /**
+   * Stores a version the sandbox rendered, and makes it live - unless its
+   * files are exactly the live version's, in which case nothing is written
+   * and the live version comes back marked `unchanged`.
+   */
   createRenderedVersion(
     tenantId: string,
     id: string,
-    input: { source: string; skeleton: Skeleton; runtime: string },
-  ): Promise<VersionDetail | null>
+    input: RenderedInput,
+  ): Promise<(VersionDetail & { unchanged: boolean }) | null>
   version(tenantId: string, id: string, number: number): Promise<VersionDetail | null>
   promote(tenantId: string, id: string, number: number): Promise<TemplateRow | null>
   /** A version filled with its sample values, overlaid with the caller's. */
@@ -151,6 +208,7 @@ export function templateStore(db: Database): TemplateStore {
       name: row.name,
       folder: row.folder,
       kind: row.kind,
+      source: row.source,
       subject: row.subject,
       html: row.html,
       text: row.text,
@@ -181,6 +239,10 @@ export function templateStore(db: Database): TemplateStore {
       text: string | null
       source?: string
       runtime?: string
+      files?: Record<string, string> | null
+      path?: string | null
+      commitSha?: string | null
+      sourceSha256?: string | null
     },
   ) => {
     await tx.execute(
@@ -204,9 +266,10 @@ export function templateStore(db: Database): TemplateStore {
         nonce: version.skeleton.nonce,
         variables: withSubjectVariables(version.skeleton.variables, version.subject),
         source: version.source ?? null,
-        sourceSha256: version.source
-          ? createHash("sha256").update(version.source).digest("hex")
-          : null,
+        files: version.files ?? null,
+        path: version.path ?? null,
+        commitSha: version.commitSha ?? null,
+        sourceSha256: version.sourceSha256 ?? null,
         runtime: version.runtime ?? null,
       })
       .returning()
@@ -228,6 +291,7 @@ export function templateStore(db: Database): TemplateStore {
             name: templates.name,
             folder: templates.folder,
             kind: templates.kind,
+            source: templates.source,
             subject: templates.subject,
             liveNumber: templateVersions.number,
             liveAt: templateVersions.createdAt,
@@ -245,6 +309,7 @@ export function templateStore(db: Database): TemplateStore {
           name: r.name,
           folder: r.folder,
           kind: r.kind,
+          source: r.source,
           subject: r.subject,
           version: r.liveNumber ?? 0,
           published_at: r.liveAt?.toISOString() ?? null,
@@ -286,10 +351,39 @@ export function templateStore(db: Database): TemplateStore {
             name: input.name.trim(),
             folder: input.folder ?? null,
             kind: input.kind ?? "html",
+            source: input.source ?? (input.kind === "tsx" ? "upload" : "managed"),
           })
           .onConflictDoNothing({ target: [templates.tenantId, templates.name] })
           .returning({ id: templates.id })
         return row ? (await rowOf(tx, row.id))! : { conflict: true as const }
+      })
+    },
+
+    async identity(tenantId, ref) {
+      return withTenant(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({
+            id: templates.id,
+            name: templates.name,
+            source: templates.source,
+            kind: templates.kind,
+            liveNumber: templateVersions.number,
+            liveSha256: templateVersions.sourceSha256,
+          })
+          .from(templates)
+          .leftJoin(templateVersions, eq(templateVersions.id, templates.liveVersionId))
+          .where(UUID.test(ref) ? eq(templates.id, ref) : eq(templates.name, ref))
+          .limit(1)
+        return row
+          ? {
+              id: row.id,
+              name: row.name,
+              source: row.source,
+              kind: row.kind,
+              live_number: row.liveNumber ?? 0,
+              live_sha256: row.liveSha256,
+            }
+          : null
       })
     },
 
@@ -366,6 +460,10 @@ export function templateStore(db: Database): TemplateStore {
           text: latest.text,
           source: latest.source ?? undefined,
           runtime: latest.runtime ?? undefined,
+          files: latest.files,
+          path: latest.path,
+          commitSha: latest.commitSha,
+          sourceSha256: latest.sourceSha256,
         })
         return rowOf(tx, id)
       })
@@ -373,27 +471,69 @@ export function templateStore(db: Database): TemplateStore {
 
     async createRenderedVersion(tenantId, id, input) {
       if (!UUID.test(id)) return null
+      const entry = input.entry ?? "template.tsx"
+      const files = input.files ?? { [entry]: input.source }
+      const sha256 = fileSetHash(entry, files)
       return withTenant(db, tenantId, async (tx) => {
         const [draft] = await tx
-          .select({ subject: templates.subject, kind: templates.kind })
+          .select({
+            subject: templates.subject,
+            kind: templates.kind,
+            source: templates.source,
+            live: templates.liveVersionId,
+          })
           .from(templates)
           .where(eq(templates.id, id))
           .limit(1)
+          .for("update")
         if (!draft) return null
+
+        // ⚠ THE SAME FILES AS WHAT IS LIVE MAKE NO VERSION. A re-upload of an
+        // unchanged folder, or a push that touched other templates, would
+        // otherwise add a version per template per push, each identical to
+        // the last, and bury the history that matters.
+        if (draft.live) {
+          const [live] = await tx
+            .select()
+            .from(templateVersions)
+            .where(eq(templateVersions.id, draft.live))
+          if (live && live.kind === "tsx" && live.sourceSha256 === sha256) {
+            return { ...toDetail(live, live.id), unchanged: true }
+          }
+        }
+
         // ⚠ AN UPLOAD MAKES THE TEMPLATE A TSX TEMPLATE. The html draft stays
         // where it was, unused, so switching back is a decision and not a loss.
-        if (draft.kind !== "tsx") {
-          await tx.update(templates).set({ kind: "tsx" }).where(eq(templates.id, id))
+        // A subject the file exports becomes the draft's too, so a later
+        // subject-only publish starts from what the file said.
+        const origin = input.origin ?? "upload"
+        const subject = input.subject ?? draft.subject
+        if (
+          draft.kind !== "tsx" ||
+          draft.source !== origin ||
+          subject !== draft.subject
+        ) {
+          await tx
+            .update(templates)
+            .set({ kind: "tsx", source: origin, subject })
+            .where(eq(templates.id, id))
         }
+        const others = Object.fromEntries(
+          Object.entries(files).filter(([path]) => path !== entry),
+        )
         const row = await insertVersion(tx, tenantId, id, "tsx", {
-          subject: draft.subject,
+          subject,
           skeleton: input.skeleton,
           html: input.skeleton.html,
           text: input.skeleton.text,
           source: input.source,
           runtime: input.runtime,
+          files: Object.keys(others).length > 0 ? others : null,
+          path: input.entry ?? null,
+          commitSha: input.commitSha ?? null,
+          sourceSha256: sha256,
         })
-        return { ...toSummary(row, row.id), source: row.source }
+        return { ...toDetail(row, row.id), unchanged: false }
       })
     },
 
@@ -411,9 +551,7 @@ export function templateStore(db: Database): TemplateStore {
             ),
           )
           .limit(1)
-        return row
-          ? { ...toSummary(row.version, row.live), source: row.version.source }
-          : null
+        return row ? toDetail(row.version, row.live) : null
       })
     },
 
@@ -528,9 +666,34 @@ function toSummary(
     subject: v.subject,
     variables: v.variables,
     runtime: v.runtime,
+    path: v.path,
+    commit_sha: v.commitSha,
     live: v.id === liveId,
     created_at: v.createdAt.toISOString(),
   }
+}
+
+function toDetail(
+  v: typeof templateVersions.$inferSelect,
+  liveId: string | null,
+): VersionDetail {
+  return {
+    ...toSummary(v, liveId),
+    source: v.source,
+    files: v.files,
+    display: {
+      html: displaySkeleton(v.html, v.nonce, v.variables),
+      text: displaySkeleton(v.text, v.nonce, v.variables),
+    },
+  }
+}
+
+/**
+ * What says whether two versions were made from the same files. The single-
+ * file form hashes as a set of one, named `template.tsx`.
+ */
+export function fileSetHash(entry: string, files: FileSet): string {
+  return createHash("sha256").update(canonicalFileSet(entry, files)).digest("hex")
 }
 
 function toStored(v: typeof templateVersions.$inferSelect): StoredVersion {

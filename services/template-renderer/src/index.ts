@@ -14,8 +14,10 @@
  */
 import runtime from "../dist/runtime.txt"
 import runtimeInfo from "../dist/runtime.json" with { type: "json" }
+import { canonicalFileSet } from "@repo/templates"
 import { compileTemplate } from "./compile.js"
-import { MAX_SOURCE_BYTES, messageOf, sandboxModules, transpile } from "./sandbox.js"
+import { prepare } from "./request.js"
+import { messageOf, sandboxModules } from "./sandbox.js"
 
 interface Env {
   LOADER: WorkerLoader
@@ -66,36 +68,36 @@ export default {
       return json(401, { error: "unauthorized" })
     }
 
-    let source: unknown
+    let body: unknown
     try {
-      source = ((await request.json()) as { source?: unknown }).source
+      body = await request.json()
     } catch {
       return json(400, { error: "invalid_json" })
     }
-    if (typeof source !== "string" || source.length === 0) {
-      return json(400, { error: "`source` is required" })
+    const prepared = prepare(body)
+    if (!prepared.ok) {
+      return prepared.status === 400
+        ? json(400, { error: prepared.error })
+        : json(422, { ok: false, problems: prepared.problems })
     }
-    if (new TextEncoder().encode(source).byteLength > MAX_SOURCE_BYTES) {
-      return json(422, {
-        ok: false,
-        problems: [`A template may be at most ${MAX_SOURCE_BYTES / 1024} KiB.`],
-      })
-    }
-
-    const transpiled = transpile(source)
-    if (!transpiled.ok) return json(422, { ok: false, problems: [transpiled.error] })
 
     /*
-     * ⚠ CACHED BY SOURCE AND RUNTIME, so the two questions below reuse one warm
-     * isolate, and the same file uploaded twice is one Dynamic Worker for the
-     * day rather than two. The runtime id is in the key so a deploy with new
-     * library versions never answers from an isolate built on the old ones.
+     * ⚠ CACHED BY THE TEMPLATE'S FILES AND THE RUNTIME, so the two questions
+     * below reuse one warm isolate, and the same template uploaded twice is one
+     * Dynamic Worker for the day rather than two. The runtime id is in the key
+     * so a deploy with new library versions never answers from an isolate
+     * built on the old ones.
      */
-    const id = `tpl:${await sha256(source)}:${runtimeInfo.id}`
+    const id = `tpl:${await sha256(canonicalFileSet(prepared.entry, prepared.files))}:${runtimeInfo.id}`
     const worker = env.LOADER.get(id, () => ({
       compatibilityDate: COMPATIBILITY_DATE,
       mainModule: "main.js",
-      modules: sandboxModules(transpiled.code, runtime),
+      modules: sandboxModules({
+        entry: prepared.entry,
+        code: prepared.code,
+        links: prepared.links,
+        runtime,
+      }),
       globalOutbound: null,
       env: {},
       limits: LIMITS,
@@ -123,7 +125,12 @@ export default {
       crypto.getRandomValues(new Uint8Array(n)),
     )
     return compiled.ok
-      ? json(200, { ok: true, skeleton: compiled.skeleton, runtime: runtimeInfo.id })
+      ? json(200, {
+          ok: true,
+          skeleton: compiled.skeleton,
+          subject: compiled.subject,
+          runtime: runtimeInfo.id,
+        })
       : json(422, compiled)
   },
 }

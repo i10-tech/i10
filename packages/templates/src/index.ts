@@ -29,6 +29,30 @@ export {
   type Filled,
 } from "./substitute.js"
 export { skeletonFromHtml } from "./html.js"
+export { displaySkeleton } from "./display.js"
+export {
+  CODE_EXTENSIONS,
+  MANIFEST,
+  MAX_SET_BYTES,
+  MAX_SET_FILES,
+  MAX_TEMPLATE_BYTES,
+  MAX_TEMPLATE_FILES,
+  canonicalFileSet,
+  closureOf,
+  discoverTemplates,
+  importsOf,
+  isCodeFile,
+  isRelative,
+  normalizePath,
+  pick,
+  readFileSet,
+  resolveImport,
+  stripComments,
+  type Closure,
+  type Discovered,
+  type Discovery,
+  type FileSet,
+} from "./files.js"
 export {
   resolveTemplateSend,
   type SendResolution,

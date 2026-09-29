@@ -1,4 +1,4 @@
-import type { Skeleton } from "@repo/templates"
+import type { FileSet, Skeleton } from "@repo/templates"
 
 /**
  * The client for services/template-renderer: where an uploaded `.tsx` is run,
@@ -10,11 +10,20 @@ import type { Skeleton } from "@repo/templates"
  */
 
 export interface Renderer {
-  compile(source: string): Promise<Compiled>
+  compile(input: CompileInput): Promise<Compiled>
 }
 
+/** One file, or an entry and the files it imports (#234). */
+export type CompileInput = { source: string } | { entry: string; files: FileSet }
+
 export type Compiled =
-  | { ok: true; skeleton: Skeleton; runtime: string }
+  | {
+      ok: true
+      skeleton: Skeleton
+      runtime: string
+      /** The template's exported `subject`, when it has one. */
+      subject: string | null
+    }
   /** The template itself is the problem; the uploader can fix it. */
   | { ok: false; problems: string[] }
   /** We are the problem; the uploader can only retry. */
@@ -36,7 +45,7 @@ export function templateRenderer(opts: {
   const endpoint = new URL("/compile", opts.url).toString()
 
   return {
-    async compile(source) {
+    async compile(input) {
       let response: Response
       try {
         response = await doFetch(endpoint, {
@@ -45,7 +54,7 @@ export function templateRenderer(opts: {
             Authorization: `Bearer ${opts.secret}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ source }),
+          body: JSON.stringify(input),
           signal: AbortSignal.timeout(TIMEOUT_MS),
         })
       } catch (error) {
@@ -69,6 +78,10 @@ export function templateRenderer(opts: {
         ok: true,
         skeleton: body.skeleton,
         runtime: typeof body.runtime === "string" ? body.runtime : "unknown",
+        subject:
+          typeof body.subject === "string" && body.subject.length <= 998
+            ? body.subject
+            : null,
       }
     },
   }

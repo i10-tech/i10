@@ -1,4 +1,7 @@
 import type { Hono } from "hono"
+import { closureOf, normalizePath, pick, readFileSet } from "@repo/templates"
+import type { CompileInput } from "../../templates/renderer.js"
+import { uploadTemplates } from "../../templates/upload.js"
 import type { ConsoleDeps } from "./deps.js"
 import {
   asNullableString,
@@ -104,12 +107,18 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
   })
 
   /**
-   * Uploads a React Email `.tsx` as a new version, and makes it live.
+   * Uploads a React Email template as a new version, and makes it live.
+   *
+   * Either one file, `{ source }`, or a template and the files it imports,
+   * `{ entry, files }` (#234). Files the entry never imports are ignored.
    *
    * ⚠ THE ONE ROUTE THAT RUNS CUSTOMER CODE, AND IT RUNS IT ELSEWHERE. The
    * source goes to the sandbox Worker, which renders it once and says whether
    * it only inserts its variables; this process never evaluates it. A refusal
    * comes back as 422 with every reason, for the author to fix.
+   *
+   * ⚠ THE SAME FILES AS THE LIVE VERSION MAKE NO NEW ONE, and the answer is
+   * the live version with `unchanged: true` and a 200 rather than a 201.
    */
   app.post("/templates/:id/versions", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
@@ -117,16 +126,42 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
     const { tenantId } = c.get("auth")
     const id = c.req.param("id")
     const body = await readJson(c)
-    const source = typeof body?.source === "string" ? body.source : ""
-    if (!source.trim()) return c.json(validation("`source` is required."), 422)
+
+    let input: CompileInput & { entry?: string }
+    if (body?.files !== undefined) {
+      const read = readFileSet(body.files)
+      if (!read.ok) return c.json(unprocessable(read.problems), 422)
+      const entry = typeof body.entry === "string" ? normalizePath(body.entry) : null
+      if (!entry) return c.json(validation("`entry` names the template's file."), 422)
+      const closure = closureOf(entry, read.files)
+      if (closure.problems.length > 0) {
+        return c.json(unprocessable(closure.problems), 422)
+      }
+      input = { entry, files: pick(read.files, closure.paths) }
+    } else {
+      const source = typeof body?.source === "string" ? body.source : ""
+      if (!source.trim()) {
+        return c.json(validation("`source`, or `entry` and `files`, is required."), 422)
+      }
+      input = { source }
+    }
 
     // Before the sandbox, so an upload to a template that is not there costs
     // nothing.
-    if (!(await d.templates.get(tenantId, id))) {
+    const template = await d.templates.identity(tenantId, id)
+    if (!template || template.id !== id) {
       return c.json(notFound("No template with that id."), 404)
     }
+    if (template.source === "github") {
+      return c.json(
+        unprocessable([
+          "This template is kept in a GitHub repository. Push to its repository to change it.",
+        ]),
+        422,
+      )
+    }
 
-    const compiled = await d.templateRenderer.compile(source)
+    const compiled = await d.templateRenderer.compile(input)
     if (!compiled.ok) {
       return "problems" in compiled
         ? c.json(unprocessable(compiled.problems), 422)
@@ -142,13 +177,39 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
     }
 
     const version = await d.templates.createRenderedVersion(tenantId, id, {
-      source,
+      ...("files" in input
+        ? { entry: input.entry, source: input.files[input.entry]!, files: input.files }
+        : { source: input.source }),
       skeleton: compiled.skeleton,
       runtime: compiled.runtime,
+      subject: compiled.subject,
+      origin: "upload",
     })
-    return version
-      ? c.json(version, 201)
-      : c.json(notFound("No template with that id."), 404)
+    if (!version) return c.json(notFound("No template with that id."), 404)
+    return c.json(version, version.unchanged ? 200 : 201)
+  })
+
+  /**
+   * A folder of templates, or several `.tsx` files at once (#234): every
+   * template in it created or given a new version, each on its own. See
+   * templates/upload.ts.
+   *
+   * ⚠ 200 WITH REFUSALS INSIDE, NOT 422. The request did what it could, and the
+   * answer lists what happened to each template; only an upload with nothing
+   * usable in it at all is a 422.
+   */
+  app.post("/templates/upload", async (c) => {
+    if (!d.templates) return c.json(notWired("Templates"), 501)
+    if (!d.templateRenderer) return c.json(notWired("React Email templates"), 501)
+    const body = await readJson(c)
+    const result = await uploadTemplates(
+      { templates: d.templates, renderer: d.templateRenderer },
+      c.get("auth").tenantId,
+      body?.files,
+    )
+    return result.ok
+      ? c.json({ data: result.data, problems: result.problems })
+      : c.json(unprocessable(result.problems), 422)
   })
 
   app.get("/templates/:id/versions/:number", async (c) => {

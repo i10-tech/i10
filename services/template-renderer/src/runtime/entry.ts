@@ -67,7 +67,8 @@ export type Request =
 /**
  * The two questions the parent asks.
  *
- *   preview  the template's `PreviewProps`, which say what its variables are
+ *   preview  the template's `PreviewProps`, which say what its variables are,
+ *            and its exported `subject`, if it has one
  *   render   one render per prop set, HTML and plain text, and which top-level
  *            props the component read when called with `probe`
  *
@@ -81,7 +82,17 @@ export async function answer(exports: Exports, request: Request): Promise<unknow
   const Component = componentOf(exports)
   if (request.op === "preview") {
     const preview = (Component as { PreviewProps?: unknown }).PreviewProps
-    return { preview: preview === undefined ? null : preview }
+    // `export const subject = "…"`, which lets a template's file carry its
+    // subject line (#234). Anything but a string is reported as it is, and
+    // the parent refuses it.
+    const subject =
+      typeof exports === "object" && "subject" in exports
+        ? (exports as { subject?: unknown }).subject
+        : undefined
+    return {
+      preview: preview === undefined ? null : preview,
+      subject: subject === undefined ? null : subject,
+    }
   }
 
   const renders = []

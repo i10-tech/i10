@@ -71,7 +71,13 @@ post '{"source":"export default function T() { while (true) {} }"}'
 post '{"source":"export default async function T() { await fetch(\"https://example.com\"); return null }"}'
 # imports: must name the allowlist
 post '{"source":"import fs from \"node:fs\"\nexport default () => fs.readFileSync(\"/etc/passwd\")"}'
+# file sets: a relative import outside the files must be refused by name
+post '{"entry":"a.tsx","files":{"a.tsx":"const n = \"./b\"; const b = require(n)\nexport default () => b\nexport const x = 1"}}'
 ```
+
+`/compile` takes `{ source }` (one file) or `{ entry, files }` (a template and
+the files it imports, #234), and answers with the skeleton, the runtime id, and
+the template's exported `subject` or null.
 
 In the cluster, run them from a pod in `i10-prod`, since the Service has no
 route from outside.
