@@ -1111,6 +1111,29 @@ export const messageBodies = core.table(
      * rule is that nothing beyond a hash runs on the send path.
      */
     fingerprintedAt: timestamp("fingerprinted_at", { withTimezone: true }),
+
+    /**
+     * Where this body went when it left Postgres (#188): a pack in R2 at
+     * `<tenant_id>/packs/<pack_id>`, `pack_length` bytes from `pack_offset`.
+     * Null while the body is still inline, and for compacted bodies, which
+     * stay in Postgres as a template plus values.
+     *
+     * ⚠ SET IN THE SAME STATEMENT THAT CLEARS `html` AND `text`, and only after
+     * the pack was uploaded and read back. A row either holds its body or
+     * points at a pack that has it; never neither.
+     */
+    packId: uuid("pack_id"),
+    packOffset: bigint("pack_offset", { mode: "number" }),
+    packLength: integer("pack_length"),
+    /**
+     * The body's own AES-256-GCM key, wrapped by the master key (base64; see
+     * content/seal.ts).
+     *
+     * ⚠ DELETING IT DELETES THE EMAIL. The sealed bytes stay in the pack until
+     * no row names it, and nothing can open them without this.
+     */
+    bodyKey: text("body_key"),
+    packedAt: timestamp("packed_at", { withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.messageId, t.createdAt] }),
@@ -1152,6 +1175,16 @@ export const messageBodies = core.table(
     index("message_bodies_template_idx")
       .on(t.templateId)
       .where(sql`${t.templateId} is not null`),
+    // "Does any body still point into this pack?" - the pack sweep's question.
+    index("message_bodies_pack_idx")
+      .on(t.packId)
+      .where(sql`${t.packId} is not null`),
+    // Bodies still inline that may yet be packed (#188).
+    index("message_bodies_unpacked_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(
+        sql`${t.packId} is null and ${t.compactedAt} is null and (${t.html} is not null or ${t.text} is not null)`,
+      ),
   ],
 )
 
@@ -3091,6 +3124,40 @@ export const contentObjects = core.table(
     primaryKey({ columns: [t.tenantId, t.sha256] }),
     index("content_objects_last_seen_idx").on(t.lastSeenAt),
     tenantPolicy("content_objects_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * Packs of sealed message bodies a workspace holds in R2 (#188), at
+ * `<tenant_id>/packs/<id>`.
+ *
+ * ⚠ WRITTEN BEFORE THE UPLOAD. A pack that uploaded with a commit that then
+ * failed has a row and no body pointing at it, so the sweep finds and deletes
+ * it; written after, it would be an object nothing knows exists.
+ *
+ * ⚠ NOT A REFERENCE COUNT, like `content_objects`. The references are the
+ * `message_bodies` rows naming it; the sweep deletes a pack past its grace once
+ * none do. Packs are never appended to or shared, so no store can race it.
+ *
+ * ⚠ NO FOREIGN KEY TO `tenants`, for the reason `content_objects` gives.
+ */
+export const contentPacks = core.table(
+  "content_packs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id").notNull(),
+    /** Bytes in R2, sealed. */
+    size: bigint("size", { mode: "number" }).notNull(),
+    bodies: integer("bodies").notNull(),
+    /** Bytes the bodies took in Postgres before they were packed. */
+    rawSize: bigint("raw_size", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("content_packs_tenant_created_idx").on(t.tenantId, t.createdAt),
+    tenantPolicy("content_packs_tenant", t.tenantId),
   ],
 )
 

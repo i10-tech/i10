@@ -3,8 +3,8 @@ import { withTenant, type Database } from "../db/client.js"
 import { fingerprint, htmlToText } from "../risk/fingerprint.js"
 import type { TrustSource } from "../risk/trusted.js"
 import type { Embedder } from "./embed.js"
-import { restoreInline } from "./inline.js"
-import type { ObjectStore } from "./object-store.js"
+import type { ContentStore } from "./object-store.js"
+import { restoreContent } from "./packs.js"
 import { restoreBodies } from "./restore.js"
 import { classify, trustMark } from "./trust.js"
 import { embeddedAlready, storeContentVectors } from "./vectors.js"
@@ -42,7 +42,7 @@ import { embeddedAlready, storeContentVectors } from "./vectors.js"
 export interface ContentJobDeps {
   db: Database
   /** Where data-URI images moved to (#168); needed only once any have. */
-  store?: ObjectStore | null
+  store?: ContentStore | null
   embedder?: Embedder
   now?: Date
   limit?: number
@@ -85,7 +85,7 @@ export async function analyseContent(
   const stored = await withTenant(db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
       select b.message_id, b.created_at::text as created_at, m.subject, b.html, b.text,
-             b.template_id, b.template_values, b.trusted_template_id, b.inline_objects
+             b.template_id, b.template_values, b.trusted_template_id, b.inline_objects, b.pack_id, b.pack_offset, b.pack_length, b.body_key
         from core.message_bodies b
         join core.messages m on m.id = b.message_id and m.created_at = b.created_at
        where b.tenant_id = ${tenantId}::uuid
@@ -104,6 +104,10 @@ export async function analyseContent(
       template_values: unknown
       trusted_template_id: string | null
       inline_objects: string[] | null
+      pack_id: string | null
+      pack_offset: string | number | null
+      pack_length: number | null
+      body_key: string | null
     }[]
     return restoreBodies(
       tx,
@@ -115,11 +119,20 @@ export async function analyseContent(
     )
   })
 
-  // ⚠ IMAGES BACK IN TOO (#168): the trust matcher compares exact bytes.
-  const rows = await restoreInline(
+  // ⚠ PACKED BODIES AND IMAGES BACK IN TOO (#168, #188): the trust matcher
+  // compares exact bytes.
+  const rows = await restoreContent(
     deps.store ?? null,
     tenantId,
-    stored.map((r) => ({ ...r, inlineObjects: r.inline_objects })),
+    stored.map((r) => ({
+      ...r,
+      messageId: r.message_id,
+      inlineObjects: r.inline_objects,
+      packId: r.pack_id,
+      packOffset: r.pack_offset,
+      packLength: r.pack_length,
+      bodyKey: r.body_key,
+    })),
   )
   const bodies: Body[] = rows.map((r) => ({
     messageId: r.message_id,

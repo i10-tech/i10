@@ -1,6 +1,6 @@
 import { summariseAttachments } from "../content/attachments.js"
-import { restoreInline } from "../content/inline.js"
-import type { ObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { restoreContent } from "../content/packs.js"
 import { restoreBodies } from "../content/restore.js"
 import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
@@ -283,7 +283,7 @@ export interface RequestRecord {
 export function consoleQueries(
   db: Database,
   /** Where data-URI images moved to (#168). Null: none can have moved. */
-  store: ObjectStore | null = null,
+  store: ContentStore | null = null,
 ): ConsoleQueries {
   return {
     async overview(tenantId, days) {
@@ -561,7 +561,14 @@ export function consoleQueries(
           ]
         : []
 
-      let inlineObjects = null as string[] | null
+      // What of the body lives in R2 (#168, #188); null when nothing does.
+      let stored = null as {
+        inlineObjects: string[] | null
+        packId: string | null
+        packOffset: number | null
+        packLength: number | null
+        bodyKey: string | null
+      } | null
       const email = await withTenant(db, tenantId, async (tx) => {
         const rows = await tx
           .select()
@@ -609,7 +616,7 @@ export function consoleQueries(
         // ⚠ RESTORED, so a body stored as a template plus values (#171) shows
         // exactly what was sent.
         const [body] = await restoreBodies(tx, bodies)
-        inlineObjects = body?.inlineObjects ?? null
+        stored = body && (body.inlineObjects?.length || body.packId) ? body : null
 
         return {
           id: message.id,
@@ -654,11 +661,24 @@ export function consoleQueries(
       })
       // ⚠ AFTER THE TRANSACTION, like the attachments: an image read from R2
       // holds nothing open in Postgres (#168).
-      if (!email || !inlineObjects) return email
-      const [restored] = await restoreInline(store, tenantId, [
-        { html: email.html, inlineObjects },
+      if (!email || !stored) return email
+      const [restored] = await restoreContent(store, tenantId, [
+        {
+          inlineObjects: stored.inlineObjects,
+          packId: stored.packId,
+          packOffset: stored.packOffset,
+          packLength: stored.packLength,
+          bodyKey: stored.bodyKey,
+          messageId: email.id,
+          html: email.html,
+          text: email.text,
+        },
       ])
-      return { ...email, html: restored?.html ?? email.html }
+      return {
+        ...email,
+        html: restored?.html ?? email.html,
+        text: restored?.text ?? email.text,
+      }
     },
 
     async listDeliveries(tenantId, opts) {

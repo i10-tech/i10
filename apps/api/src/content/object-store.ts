@@ -1,5 +1,6 @@
 import { S3Client } from "bun"
 import type { Env } from "../env.js"
+import { parseKeyring, type Body, type Keyring } from "./seal.js"
 
 /**
  * Where message content lives once it leaves Postgres (#136, #168, #188): the
@@ -16,7 +17,22 @@ import type { Env } from "../env.js"
 export interface ObjectStore {
   put(key: string, bytes: Uint8Array, contentType?: string): Promise<void>
   get(key: string): Promise<Uint8Array>
+  /**
+   * `length` bytes from `offset`: one ranged GET, so opening one email reads
+   * that email's bytes and not the whole pack it sits in (#188).
+   */
+  getRange(key: string, offset: number, length: number): Promise<Uint8Array>
   delete(key: string): Promise<void>
+}
+
+/**
+ * An object store that can also open sealed message bodies (#188), and may
+ * cache what it opened.
+ */
+export type ContentStore = ObjectStore & {
+  /** Master keys (CONTENT_KEYS). Absent: bodies stay in Postgres. */
+  keys?: Keyring | null
+  cache?: { get(key: string): Body | null; set(key: string, body: Body): void } | null
 }
 
 /**
@@ -29,6 +45,15 @@ export interface ObjectStore {
 export const objectKey = (tenantId: string, sha256: string) =>
   `${tenantId}/sha256/${sha256}`
 
+/**
+ * `<tenant_id>/packs/<pack_id>`: many sealed bodies in one object (#188).
+ *
+ * ⚠ PER WORKSPACE LIKE EVERYTHING ELSE. One workspace's pack never holds
+ * another's mail, so a workspace's content is a prefix, whole.
+ */
+export const packKey = (tenantId: string, packId: string) =>
+  `${tenantId}/packs/${packId}`
+
 /** The configured store, or `null` when the four settings are unset. */
 export function objectStoreFrom(
   env: Pick<
@@ -37,8 +62,9 @@ export function objectStoreFrom(
     | "CONTENT_STORE_BUCKET"
     | "CONTENT_STORE_ACCESS_KEY_ID"
     | "CONTENT_STORE_SECRET_ACCESS_KEY"
+    | "CONTENT_KEYS"
   >,
-): ObjectStore | null {
+): ContentStore | null {
   if (
     !env.CONTENT_STORE_ENDPOINT ||
     !env.CONTENT_STORE_BUCKET ||
@@ -47,7 +73,7 @@ export function objectStoreFrom(
   ) {
     return null
   }
-  return r2Store(
+  const store: ContentStore = r2Store(
     new S3Client({
       endpoint: env.CONTENT_STORE_ENDPOINT,
       bucket: env.CONTENT_STORE_BUCKET,
@@ -57,6 +83,8 @@ export function objectStoreFrom(
       region: "auto",
     }),
   )
+  store.keys = env.CONTENT_KEYS ? parseKeyring(env.CONTENT_KEYS) : null
+  return store
 }
 
 export function r2Store(client: S3Client): ObjectStore {
@@ -68,6 +96,20 @@ export function r2Store(client: S3Client): ObjectStore {
     },
     async get(key) {
       return new Uint8Array(await client.file(key).arrayBuffer())
+    },
+    async getRange(key, offset, length) {
+      const bytes = new Uint8Array(
+        await client
+          .file(key)
+          .slice(offset, offset + length)
+          .arrayBuffer(),
+      )
+      // ⚠ A SHORT READ IS AN ERROR, not a body: GCM would refuse it anyway,
+      // but this says which object was short.
+      if (bytes.byteLength !== length) {
+        throw new Error(`short read from ${key}: ${bytes.byteLength} of ${length}`)
+      }
+      return bytes
     },
     // ⚠ IDEMPOTENT: deleting a missing key succeeds, which is what lets a sweep
     // that died between the delete and its commit simply run again.
@@ -81,11 +123,13 @@ export function r2Store(client: S3Client): ObjectStore {
 export function memoryStore(): ObjectStore & {
   objects: Map<string, Uint8Array>
   puts: number
+  ranges: number
 } {
   const objects = new Map<string, Uint8Array>()
   const store = {
     objects,
     puts: 0,
+    ranges: 0,
     async put(key: string, bytes: Uint8Array) {
       store.puts++
       objects.set(key, bytes)
@@ -94,6 +138,13 @@ export function memoryStore(): ObjectStore & {
       const found = objects.get(key)
       if (!found) throw new Error(`no such object: ${key}`)
       return found
+    },
+    async getRange(key: string, offset: number, length: number) {
+      store.ranges++
+      const found = objects.get(key)
+      if (!found) throw new Error(`no such object: ${key}`)
+      if (offset + length > found.byteLength) throw new Error(`short read from ${key}`)
+      return found.slice(offset, offset + length)
     },
     async delete(key: string) {
       objects.delete(key)

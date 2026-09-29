@@ -1,6 +1,6 @@
 import { restoreAttachments, type AnyAttachment } from "../content/attachments.js"
-import type { ObjectStore } from "../content/object-store.js"
-import { restoreInline } from "../content/inline.js"
+import type { ContentStore } from "../content/object-store.js"
+import { restoreContent } from "../content/packs.js"
 import { restoreBodies } from "../content/restore.js"
 import type { Attachment, Tag } from "@repo/contracts"
 import { eq, inArray } from "drizzle-orm"
@@ -72,9 +72,10 @@ export interface AdapterOptions {
   /**
    * Where attachments moved to R2 are read back from (#136). Only a retry of a
    * finished message ever meets one; absent, such a message fails loudly
-   * rather than going out without its files.
+   * rather than going out without its files. The same goes for a body packed
+   * into R2 (#188).
    */
-  store?: ObjectStore | null
+  store?: ContentStore | null
 }
 
 export function databaseOps(
@@ -85,8 +86,17 @@ export function databaseOps(
 > {
   return {
     async claim(job: SendJob): Promise<ClaimedMessage[]> {
-      // Which stored images each claimed body references (#168), by id.
-      const inlineById = new Map<string, string[] | null>()
+      // What of each claimed body lives in R2 (#168, #188), by id.
+      const storedById = new Map<
+        string,
+        {
+          inlineObjects: string[] | null
+          packId: string | null
+          packOffset: number | null
+          packLength: number | null
+          bodyKey: string | null
+        }
+      >()
       const claimed = await withTenant(opts.db, job.tenantId, async (tx) => {
         const claimed = (await tx.execute(
           claimStatement(job.messages, {
@@ -113,6 +123,10 @@ export function databaseOps(
             templateId: messageBodies.templateId,
             templateValues: messageBodies.templateValues,
             inlineObjects: messageBodies.inlineObjects,
+            packId: messageBodies.packId,
+            packOffset: messageBodies.packOffset,
+            packLength: messageBodies.packLength,
+            bodyKey: messageBodies.bodyKey,
           })
           .from(messageBodies)
           .where(inArray(messageBodies.messageId, ids))
@@ -122,7 +136,7 @@ export function databaseOps(
           .then((rows) => restoreBodies(tx, rows))
 
         const byId = new Map(bodies.map((b) => [b.messageId, b]))
-        for (const b of bodies) inlineById.set(b.messageId, b.inlineObjects)
+        for (const b of bodies) storedById.set(b.messageId, b)
 
         return claimed.map((row): ClaimedMessage => {
           const body = byId.get(String(row.id))
@@ -157,14 +171,26 @@ export function databaseOps(
       // files the content-store job already moved.
       return Promise.all(
         claimed.map(async (m) => {
-          // ⚠ INLINE IMAGES TOO (#168): a retry of a finished message may have
-          // had its data-URI images moved to R2, and must send them as sent.
-          const [restored] = await restoreInline(opts.store ?? null, m.tenantId, [
-            { html: m.html ?? null, inlineObjects: inlineById.get(m.id) ?? null },
+          // ⚠ PACKED BODIES AND INLINE IMAGES TOO (#168, #188): a retry of a
+          // finished message may have had its body packed or its data-URI
+          // images moved to R2, and must send them as sent.
+          const stored = storedById.get(m.id)
+          const [restored] = await restoreContent(opts.store ?? null, m.tenantId, [
+            {
+              messageId: m.id,
+              html: m.html ?? null,
+              text: m.text ?? null,
+              inlineObjects: stored?.inlineObjects ?? null,
+              packId: stored?.packId ?? null,
+              packOffset: stored?.packOffset ?? null,
+              packLength: stored?.packLength ?? null,
+              bodyKey: stored?.bodyKey ?? null,
+            },
           ])
           return {
             ...m,
             html: restored?.html ?? m.html,
+            text: restored?.text ?? m.text,
             attachments: (await restoreAttachments(
               opts.store ?? null,
               m.tenantId,

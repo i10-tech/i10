@@ -6,8 +6,8 @@
  *   1. Keeps a year of monthly partitions ahead, locked down like 0064's.
  *   2. Deletes every workspace's mail older than its plan keeps it: row, body,
  *      events, webhook deliveries - leaving a tombstone per message.
- *   3. Sweeps templates no body uses that have gone stale, and R2 objects no
- *      body names. Step 2 is what makes them unreferenced.
+ *   3. Sweeps templates no body uses that have gone stale, and R2 objects and
+ *      body packs (#188) no body names. Step 2 is what makes them unreferenced.
  *   4. Prunes tombstones older than 90 days and drops EMPTY expired partitions.
  *
  * ⚠ HOURLY. Retention is measured in days; an hour late is within any
@@ -22,6 +22,7 @@ import { sql } from "drizzle-orm"
 import pino from "pino"
 import { sweepObjects } from "./content/attachments.js"
 import { objectStoreFrom } from "./content/object-store.js"
+import { sweepPacks } from "./content/packs.js"
 import { sweepTemplates } from "./content/sweep.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
@@ -69,6 +70,7 @@ await withMonitor(
       deliveries: 0,
       templates: 0,
       objects: 0,
+      packs: 0,
       tombstonesPruned: 0,
       partitionsDropped: [] as string[],
       partitionsRefused: [] as string[],
@@ -116,6 +118,7 @@ await withMonitor(
           summary.templates += await sweepTemplates(db, tenantId, staleDays)
           if (store) {
             summary.objects += await sweepObjects(tenantId, { db, store, graceHours })
+            summary.packs += await sweepPacks(tenantId, { db, store, graceHours })
           }
         } catch (error) {
           summary.failed++
