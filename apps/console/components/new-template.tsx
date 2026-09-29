@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
+import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createTemplate } from "@/lib/actions"
@@ -20,6 +21,7 @@ export function NewTemplateButton() {
   const router = useRouter()
   const [name, setName] = React.useState("")
   const [folder, setFolder] = React.useState("")
+  const [kind, setKind] = React.useState<"visual" | "html">("visual")
   const [open, setOpen] = React.useState(false)
 
   // ⚠ CLEARED WHEN IT OPENS, NOT WHEN IT CLOSES - emptying the fields on
@@ -29,6 +31,7 @@ export function NewTemplateButton() {
   useResetOnOpen(open, () => {
     setName("")
     setFolder("")
+    setKind("visual")
   })
 
   return (
@@ -46,7 +49,7 @@ export function NewTemplateButton() {
       submitLabel="Create"
       canSubmit={name.trim().length > 0}
       onSubmit={() =>
-        createTemplate({ name: name.trim(), folder: folder.trim() || null })
+        createTemplate({ name: name.trim(), folder: folder.trim() || null, kind })
       }
       onSuccess={(template) => router.push(`/templates/${template.id}`)}
     >
@@ -70,6 +73,39 @@ export function NewTemplateButton() {
         className="font-mono text-xs"
         hint="Optional. Use slashes to nest - it is only a label for the list."
       />
+
+      {/*
+       * ⚠ CHOSEN ONCE, HERE. The visual editor's document and hand-written
+       * HTML are different drafts; converting one into the other would lose
+       * either the layout or the markup, so a template is one or the other.
+       */}
+      <fieldset className="space-y-2">
+        <legend className="mb-1.5 text-sm font-medium">Write it in</legend>
+        <RadioGroup
+          value={kind}
+          onValueChange={(value) => setKind(value as "visual" | "html")}
+          className="gap-2"
+        >
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 hover:bg-muted/30">
+            <RadioGroupItem value="visual" className="mt-0.5" />
+            <span className="space-y-0.5">
+              <span className="block text-sm font-medium">The visual editor</span>
+              <span className="block text-xs text-muted-foreground">
+                Blocks, buttons and columns, built on React Email. Type / for the list.
+              </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 hover:bg-muted/30">
+            <RadioGroupItem value="html" className="mt-0.5" />
+            <span className="space-y-0.5">
+              <span className="block text-sm font-medium">HTML</span>
+              <span className="block text-xs text-muted-foreground">
+                Your own markup, exactly as you write it.
+              </span>
+            </span>
+          </label>
+        </RadioGroup>
+      </fieldset>
     </FormDialog>
   )
 }

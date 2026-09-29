@@ -177,6 +177,7 @@ export function createConsole(deps?: ConsoleDeps) {
   const csvBodyLimit = bodyLimit({ maxSize: 20 * 1024 * 1024, onError: tooLarge })
   // ⚠ A TEMPLATE UPLOAD IS A FOLDER OF CODE (#234): up to MAX_SET_BYTES of it,
   // and JSON-escaping source text can nearly double it.
+  const draftBodyLimit = bodyLimit({ maxSize: 2 * 1024 * 1024, onError: tooLarge })
   const templateBodyLimit = bodyLimit({
     maxSize: 2 * MAX_SET_BYTES + 64 * 1024,
     onError: tooLarge,
@@ -192,6 +193,14 @@ export function createConsole(deps?: ConsoleDeps) {
       return templateBodyLimit(c, next)
     })
   }
+  // ⚠ A VISUAL TEMPLATE'S DRAFT IS ITS DOCUMENT AND THE HTML EXPORTED FROM IT
+  // (#243), which outgrows 256 KB with a few inline images. After the two
+  // above, and standing down for them: `/templates/upload` matches `:id` too.
+  app.use("/templates/:id", async (c, next) => {
+    if (c.get("bodyLimited")) return next()
+    c.set("bodyLimited", true)
+    return draftBodyLimit(c, next)
+  })
   app.use("*", async (c, next) =>
     c.get("bodyLimited") ? next() : jsonBodyLimit(c, next),
   )

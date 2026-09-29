@@ -32,7 +32,7 @@ import { VersionCache } from "./version-cache.js"
  * `createRenderedVersion`. The send path reads skeletons through `lookup`.
  */
 
-export type TemplateKind = "html" | "tsx"
+export type TemplateKind = "html" | "tsx" | "visual"
 /** Where a template is maintained. See `templateSource` in db/core.ts. */
 export type TemplateSource = "managed" | "upload" | "github"
 
@@ -55,6 +55,8 @@ export interface TemplateSummary {
 export interface TemplateRow extends TemplateSummary {
   html: string | null
   text: string | null
+  /** A `visual` template's draft, as the editor's TipTap JSON. */
+  design: Record<string, unknown> | null
 }
 
 export interface VersionSummary {
@@ -77,6 +79,8 @@ export interface VersionDetail extends VersionSummary {
   source: string | null
   /** The other files the entry imports, path to text. */
   files: Record<string, string> | null
+  /** A `visual` version's TipTap JSON: what reopening it in the editor loads. */
+  design: Record<string, unknown> | null
   /**
    * The skeleton with its markers written as `{{ path }}`: what a person
    * reads, and what two versions are diffed by. Never what is sent.
@@ -150,6 +154,7 @@ export interface TemplateStore {
       subject?: string | null
       html?: string | null
       text?: string | null
+      design?: Record<string, unknown> | null
     },
   ): Promise<TemplateRow | { conflict: true } | null>
   /**
@@ -216,6 +221,7 @@ export function templateStore(
       subject: row.subject,
       html: row.html,
       text: row.text,
+      design: row.design,
       version: live?.number ?? 0,
       published_at: live?.createdAt.toISOString() ?? null,
       versions: n,
@@ -247,6 +253,7 @@ export function templateStore(
       path?: string | null
       commitSha?: string | null
       sourceSha256?: string | null
+      design?: Record<string, unknown> | null
     },
   ) => {
     await tx.execute(
@@ -275,6 +282,7 @@ export function templateStore(
         commitSha: version.commitSha ?? null,
         sourceSha256: version.sourceSha256 ?? null,
         runtime: version.runtime ?? null,
+        design: version.design ?? null,
       })
       .returning()
 
@@ -400,6 +408,7 @@ export function templateStore(
         if (patch.subject !== undefined) set.subject = patch.subject
         if (patch.html !== undefined) set.html = patch.html
         if (patch.text !== undefined) set.text = patch.text
+        if (patch.design !== undefined) set.design = patch.design
 
         try {
           const [row] = await tx
@@ -425,7 +434,11 @@ export function templateStore(
           .limit(1)
         if (!draft) return null
 
-        if (draft.kind === "html") {
+        // ⚠ A VISUAL TEMPLATE PUBLISHES EXACTLY LIKE AN HTML ONE (#243). The
+        // editor exported `html` and `text` from its document; the version is
+        // made from those by finding `{{ name }}`, and keeps the document so
+        // it can be reopened.
+        if (draft.kind === "html" || draft.kind === "visual") {
           if (!draft.html && !draft.text) {
             return { problems: ["Write the email before publishing it."] }
           }
@@ -435,11 +448,12 @@ export function templateStore(
             nonce: newNonce(),
           })
           if (!made.ok) return { problems: made.problems }
-          await insertVersion(tx, tenantId, id, "html", {
+          await insertVersion(tx, tenantId, id, draft.kind, {
             subject: draft.subject,
             skeleton: made.skeleton,
             html: draft.html === null ? null : made.skeleton.html,
             text: draft.text === null ? null : made.skeleton.text,
+            design: draft.kind === "visual" ? draft.design : null,
           })
           return rowOf(tx, id)
         }
@@ -704,6 +718,7 @@ function toDetail(
     ...toSummary(v, liveId),
     source: v.source,
     files: v.files,
+    design: v.design,
     display: {
       html: displaySkeleton(v.html, v.nonce, v.variables),
       text: displaySkeleton(v.text, v.nonce, v.variables),

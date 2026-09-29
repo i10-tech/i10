@@ -21,6 +21,7 @@ import { TemplateTabs } from "@/components/template-tabs"
 import { TemplateVersions } from "@/components/template-versions"
 import { Time } from "@/components/time"
 import { UploadVersionButton } from "@/components/upload-templates"
+import { VisualTemplateEditor } from "@/components/visual-template-editor"
 import { tryApi } from "@/lib/api"
 import type { TemplateDetail } from "@/lib/types"
 
@@ -54,10 +55,10 @@ export default async function TemplatePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ tab?: string }>
+  searchParams: Promise<{ tab?: string; restored?: string }>
 }) {
   const { id } = await params
-  const { tab } = await searchParams
+  const { tab, restored } = await searchParams
   const result = await tryApi<TemplateDetail>(
     `/console/templates/${encodeURIComponent(id)}`,
   )
@@ -79,15 +80,26 @@ export default async function TemplatePage({
   const versions = {
     value: "versions",
     label: `Versions${template.versions > 0 ? ` (${template.versions})` : ""}`,
-    content: <TemplateVersions templateId={template.id} history={template.history} />,
+    content: (
+      <TemplateVersions
+        templateId={template.id}
+        history={template.history}
+        editable={template.source === "managed"}
+      />
+    ),
   }
   const tabs =
-    template.kind === "html"
+    template.kind === "html" || template.kind === "visual"
       ? [
           {
             value: "editor",
             label: "Editor",
-            content: <TemplateEditor template={template} />,
+            content:
+              template.kind === "visual" ? (
+                <VisualTemplateEditor template={template} />
+              ) : (
+                <TemplateEditor template={template} />
+              ),
           },
           preview,
           versions,
@@ -153,7 +165,13 @@ export default async function TemplatePage({
 
         {template.kind === "tsx" && <TemplateSubject template={template} />}
 
-        <TemplateTabs initial={tab ?? ""} tabs={tabs} />
+        {/*
+         * ⚠ KEYED BY `restored`, WHICH ONLY "EDIT FROM HERE" SETS. Copying a
+         * version into the draft must remount the editor on the new document;
+         * an ordinary save must not, or every save would throw away the
+         * cursor and the undo history.
+         */}
+        <TemplateTabs key={restored ?? ""} initial={tab ?? ""} tabs={tabs} />
       </PageBody>
     </Page>
   )

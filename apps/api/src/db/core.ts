@@ -2458,12 +2458,13 @@ export const broadcasts = core.table(
  * How a template's versions are written.
  *
  *   html  hand-written HTML with `{{ name }}` placeholders, edited in the console
- *   tsx   an uploaded React Email component, rendered once per version in the
- *         sandbox (services/template-renderer)
- *
- * The visual editor (#162) and our managed templates will add their own.
+ *   tsx     a React Email component, uploaded or pushed, rendered once per
+ *           version in the sandbox (services/template-renderer)
+ *   visual  made in the React Email editor (#162, #243): its draft is the
+ *           editor's TipTap JSON (`design`), and a version is made from the
+ *           HTML the editor exports, exactly as for `html` - no sandbox
  */
-export const templateKind = core.enum("template_kind", ["html", "tsx"])
+export const templateKind = core.enum("template_kind", ["html", "tsx", "visual"])
 
 /**
  * Where a template is maintained, which is a different question from what its
@@ -2514,6 +2515,12 @@ export const templates = core.table(
     /** The draft body of an `html` template. Unused by `tsx`, whose source is a version's. */
     html: text("html"),
     text: text("text"),
+    /**
+     * A `visual` template's draft as the editor's TipTap JSON (#243): what the
+     * editor opens. `html` and `text` beside it are what the editor exported
+     * from it, and what publishing makes a version from.
+     */
+    design: jsonb("design").$type<Record<string, unknown>>(),
 
     /**
      * The version an unpinned send renders. Null until the first publish.
@@ -2590,6 +2597,8 @@ export const templateVersions = core.table(
     path: text("path"),
     /** The commit a GitHub template's version was made from (#235). */
     commitSha: text("commit_sha"),
+    /** A `visual` version's TipTap JSON, so any version can be reopened (#243). */
+    design: jsonb("design").$type<Record<string, unknown>>(),
     /**
      * A hash of the entry and all of its files, which is how an upload or a
      * push of an unchanged template is recognised and makes no new version.

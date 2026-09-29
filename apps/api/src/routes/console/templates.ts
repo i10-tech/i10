@@ -50,7 +50,8 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
     const body = await readJson(c)
     const name = typeof body?.name === "string" ? body.name.trim() : ""
     if (!name) return c.json(validation("`name` is required."), 422)
-    const kind = body?.kind === "tsx" ? "tsx" : "html"
+    const kind =
+      body?.kind === "tsx" ? "tsx" : body?.kind === "visual" ? "visual" : "html"
     const created = await d.templates.create(c.get("auth").tenantId, {
       name,
       folder: asNullableString(body?.folder),
@@ -81,6 +82,9 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
           : {}),
         ...(body?.html !== undefined ? { html: asNullableString(body.html) } : {}),
         ...(body?.text !== undefined ? { text: asNullableString(body.text) } : {}),
+        ...(body?.design !== undefined
+          ? { design: isRecord(body.design) ? body.design : null }
+          : {}),
       },
     )
     if (updated && "conflict" in updated) return c.json(conflict(), 409)

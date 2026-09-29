@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { diffLines, type Change } from "diff"
-import { ArrowRight, Undo2 } from "lucide-react"
+import { ArrowRight, PenLine, Undo2 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -21,6 +21,7 @@ import { Time } from "@/components/time"
 import {
   previewTemplateVersion,
   promoteTemplateVersion,
+  restoreTemplateDraft,
   templateVersion,
 } from "@/lib/actions"
 import type {
@@ -40,12 +41,16 @@ import type {
 export function TemplateVersions({
   templateId,
   history,
+  editable = false,
 }: {
   templateId: string
   history: TemplateVersionSummary[]
+  /** An editor template: any version can be copied back into the draft. */
+  editable?: boolean
 }) {
   const router = useRouter()
   const [promoting, setPromoting] = React.useState<TemplateVersionSummary | null>(null)
+  const [restoring, setRestoring] = React.useState<TemplateVersionSummary | null>(null)
   const live = history.find((v) => v.live)
 
   if (history.length === 0) {
@@ -77,19 +82,53 @@ export function TemplateVersions({
             <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground">
               <Time iso={v.created_at} />
             </span>
-            <div className="w-28 shrink-0 text-right">
-              {!v.live && (
-                <Button variant="ghost" size="sm" onClick={() => setPromoting(v)}>
-                  <Undo2 />
-                  Make live
+            <div className="flex shrink-0 justify-end gap-1">
+              {editable && (
+                <Button variant="ghost" size="sm" onClick={() => setRestoring(v)}>
+                  <PenLine />
+                  Edit from here
                 </Button>
               )}
+              <div className="w-28 text-right">
+                {!v.live && (
+                  <Button variant="ghost" size="sm" onClick={() => setPromoting(v)}>
+                    <Undo2 />
+                    Make live
+                  </Button>
+                )}
+              </div>
             </div>
           </li>
         ))}
       </ul>
 
       {history.length > 1 && <VersionDiff templateId={templateId} history={history} />}
+
+      <ConfirmDialog
+        open={restoring !== null}
+        onOpenChange={(open) => !open && setRestoring(null)}
+        title={`Edit from v${restoring?.number ?? ""}?`}
+        description={
+          `The draft becomes v${restoring?.number ?? ""}'s subject and body, replacing ` +
+          "any unpublished changes. Nothing that is sent changes until you publish the draft, which makes a new version."
+        }
+        confirmLabel="Replace the draft"
+        doneLabel="Replaced"
+        onConfirm={async () => {
+          if (!restoring) return false
+          const result = await restoreTemplateDraft(templateId, restoring.number)
+          if (!result.ok) {
+            toast.error("Could not copy it into the draft", {
+              description: result.error,
+            })
+            return false
+          }
+          router.push(
+            `/templates/${templateId}?tab=editor&restored=${restoring.number}-${Date.now()}`,
+          )
+          return true
+        }}
+      />
 
       <ConfirmDialog
         open={promoting !== null}
