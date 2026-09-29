@@ -3,6 +3,8 @@ import { withTenant, type Database } from "../db/client.js"
 import { fingerprint, htmlToText } from "../risk/fingerprint.js"
 import type { TrustSource } from "../risk/trusted.js"
 import type { Embedder } from "./embed.js"
+import { restoreInline } from "./inline.js"
+import type { ObjectStore } from "./object-store.js"
 import { restoreBodies } from "./restore.js"
 import { classify, trustMark } from "./trust.js"
 import { embeddedAlready, storeContentVectors } from "./vectors.js"
@@ -39,6 +41,8 @@ import { embeddedAlready, storeContentVectors } from "./vectors.js"
  */
 export interface ContentJobDeps {
   db: Database
+  /** Where data-URI images moved to (#168); needed only once any have. */
+  store?: ObjectStore | null
   embedder?: Embedder
   now?: Date
   limit?: number
@@ -78,10 +82,10 @@ export async function analyseContent(
   const now = deps.now ?? new Date()
   const result: ContentJobResult = { scanned: 0, embedded: 0, trusted: 0 }
 
-  const rows = await withTenant(db, tenantId, async (tx) => {
+  const stored = await withTenant(db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
       select b.message_id, b.created_at::text as created_at, m.subject, b.html, b.text,
-             b.template_id, b.template_values, b.trusted_template_id
+             b.template_id, b.template_values, b.trusted_template_id, b.inline_objects
         from core.message_bodies b
         join core.messages m on m.id = b.message_id and m.created_at = b.created_at
        where b.tenant_id = ${tenantId}::uuid
@@ -99,6 +103,7 @@ export async function analyseContent(
       template_id: string | null
       template_values: unknown
       trusted_template_id: string | null
+      inline_objects: string[] | null
     }[]
     return restoreBodies(
       tx,
@@ -110,6 +115,12 @@ export async function analyseContent(
     )
   })
 
+  // ⚠ IMAGES BACK IN TOO (#168): the trust matcher compares exact bytes.
+  const rows = await restoreInline(
+    deps.store ?? null,
+    tenantId,
+    stored.map((r) => ({ ...r, inlineObjects: r.inline_objects })),
+  )
   const bodies: Body[] = rows.map((r) => ({
     messageId: r.message_id,
     // ⚠ POSTGRES'S OWN TEXT, NOT A JS DATE: the partition key has microseconds.

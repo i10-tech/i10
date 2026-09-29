@@ -582,6 +582,13 @@
       "when": 1790657656903,
       "tag": "0082_content_progress_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1790659734770,
+      "tag": "0083_inline_objects",
+      "breakpoints": true
     }
   ]
 }

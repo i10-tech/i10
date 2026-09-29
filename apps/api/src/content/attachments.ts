@@ -26,6 +26,8 @@ import { objectKey, type ObjectStore } from "./object-store.js"
 export interface InlineAttachment {
   filename: string
   content_type?: string | undefined
+  /** An inline image the html names as `cid:` (#168). Survives the move to R2. */
+  content_id?: string | undefined
   content: string
 }
 
@@ -33,6 +35,7 @@ export interface InlineAttachment {
 export interface StoredAttachment {
   filename: string
   content_type?: string | undefined
+  content_id?: string | undefined
   size: number
   sha256: string
 }
@@ -168,45 +171,15 @@ async function storeOne(
     return {
       filename: a.filename,
       ...(a.content_type ? { content_type: a.content_type } : {}),
+      // ⚠ KEPT, OR A RETRY SENDS THE LOGO AS A DOWNLOAD AND THE HTML'S
+      // `cid:` POINTS AT NOTHING.
+      ...(a.content_id ? { content_id: a.content_id } : {}),
       size: bytes.byteLength,
       sha256,
     }
   })
 
-  let uploaded = 0
-  let reused = 0
-  const hashes = [...files.keys()]
-  if (hashes.length > 0) {
-    const present = new Set(
-      (
-        (await withTenant(db, tenantId, (tx) =>
-          tx.execute(sql`
-            update core.content_objects set last_seen_at = now()
-             where tenant_id = ${tenantId}::uuid and sha256 in (${list(hashes)})
-            returning sha256
-          `),
-        )) as unknown as { sha256: string }[]
-      ).map((r) => r.sha256),
-    )
-    for (const [sha256, file] of files) {
-      if (present.has(sha256)) {
-        reused++
-        continue
-      }
-      await store.put(objectKey(tenantId, sha256), file.bytes, file.type)
-      // ⚠ THE ROW ONLY AFTER THE UPLOAD SUCCEEDED. A row is the promise that
-      // the object exists; the next message with this file trusts it and skips
-      // the PUT.
-      await withTenant(db, tenantId, (tx) =>
-        tx.execute(sql`
-          insert into core.content_objects (tenant_id, sha256, size)
-          values (${tenantId}::uuid, ${sha256}, ${file.bytes.byteLength})
-          on conflict (tenant_id, sha256) do update set last_seen_at = now()
-        `),
-      )
-      uploaded++
-    }
-  }
+  const { uploaded, reused } = await putObjects(tenantId, files, { db, store })
 
   // ⚠ GUARDED ON THE ORIGINAL. The rewrite lands only if the row still holds
   // exactly what was hashed; anything that changed it since wins, and the
@@ -228,6 +201,58 @@ async function storeOne(
   let bytes = 0
   for (const f of files.values()) bytes += f.bytes.byteLength
   return { uploaded, reused, bytes }
+}
+
+/**
+ * Makes sure every file is in R2 and has its `content_objects` row, before a
+ * body is rewritten to point at it. Shared by attachments and inline images.
+ *
+ * ⚠ THE ORDER CLOSES THE RACE WITH THE SWEEP. For every hash: touch its row
+ * (`last_seen_at = now()`); if there is none, upload, then insert it. Only then
+ * may the caller rewrite the body. The sweep deletes a row only under
+ * `FOR UPDATE SKIP LOCKED` and only past its grace, so a touched object is
+ * never taken, and one the sweep took first has no row for the touch to find -
+ * and is uploaded again.
+ */
+export async function putObjects(
+  tenantId: string,
+  files: ReadonlyMap<string, { bytes: Uint8Array; type?: string | undefined }>,
+  { db, store }: { db: Database; store: ObjectStore },
+): Promise<{ uploaded: number; reused: number }> {
+  let uploaded = 0
+  let reused = 0
+  const hashes = [...files.keys()]
+  if (hashes.length === 0) return { uploaded, reused }
+  const present = new Set(
+    (
+      (await withTenant(db, tenantId, (tx) =>
+        tx.execute(sql`
+          update core.content_objects set last_seen_at = now()
+           where tenant_id = ${tenantId}::uuid and sha256 in (${list(hashes)})
+          returning sha256
+        `),
+      )) as unknown as { sha256: string }[]
+    ).map((r) => r.sha256),
+  )
+  for (const [sha256, file] of files) {
+    if (present.has(sha256)) {
+      reused++
+      continue
+    }
+    await store.put(objectKey(tenantId, sha256), file.bytes, file.type)
+    // ⚠ THE ROW ONLY AFTER THE UPLOAD SUCCEEDED. A row is the promise that
+    // the object exists; the next message with this file trusts it and skips
+    // the PUT.
+    await withTenant(db, tenantId, (tx) =>
+      tx.execute(sql`
+        insert into core.content_objects (tenant_id, sha256, size)
+        values (${tenantId}::uuid, ${sha256}, ${file.bytes.byteLength})
+        on conflict (tenant_id, sha256) do update set last_seen_at = now()
+      `),
+    )
+    uploaded++
+  }
+  return { uploaded, reused }
 }
 
 /**
@@ -256,6 +281,7 @@ export async function restoreAttachments(
       return {
         filename: a.filename,
         ...(a.content_type ? { content_type: a.content_type } : {}),
+        ...(a.content_id ? { content_id: a.content_id } : {}),
         content: Buffer.from(bytes).toString("base64"),
       }
     }),
@@ -297,7 +323,8 @@ export interface SweepObjectsDeps {
 }
 
 /**
- * Deletes one workspace's objects that no message body names any more.
+ * Deletes one workspace's objects that no message body names any more - as an
+ * attachment, or as an inline image in its html (`inline_objects`, #168).
  *
  * ⚠ THE BODY ROW IS THE REFERENCE, SO THERE IS NOTHING TO KEEP IN STEP.
  * Retention deleting a body, a tenant deletion, a flush by hand - each makes
@@ -323,6 +350,14 @@ export async function sweepObjects(
            select 1 from core.message_bodies b
             where b.tenant_id = ${tenantId}::uuid
               and b.attachments @> jsonb_build_array(jsonb_build_object('sha256', o.sha256))
+         )
+         -- ⚠ AND NO BODY'S HTML REFERENCES IT (#168). Inline images live in
+         -- the same objects; without this the sweep deleted a logo every
+         -- compacted receipt still pointed at.
+         and not exists (
+           select 1 from core.message_bodies b
+            where b.tenant_id = ${tenantId}::uuid
+              and b.inline_objects @> array[o.sha256]
          )
        order by o.last_seen_at
        limit ${deps.limit ?? 200}

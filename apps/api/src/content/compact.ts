@@ -1,6 +1,9 @@
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { fingerprint } from "../risk/fingerprint.js"
+import { putObjects } from "./attachments.js"
+import { extractDataUris } from "./inline.js"
+import type { ObjectStore } from "./object-store.js"
 import {
   compactable,
   derive,
@@ -50,6 +53,11 @@ import {
  */
 export interface CompactDeps {
   db: Database
+  /**
+   * Where data-URI images go (#168). Absent: they stay in the html, and
+   * compaction runs exactly as before.
+   */
+  store?: ObjectStore | null
   now?: Date
   /** Unexamined bodies per workspace per pass. */
   limit?: number
@@ -65,6 +73,10 @@ export interface CompactDeps {
 export interface CompactResult {
   /** Bodies examined, whatever the outcome. */
   scanned: number
+  /** Bodies whose data-URI images moved to R2 this pass (#168). */
+  extracted: number
+  /** Base64 characters that left the html. */
+  inlineBytes: number
   /** Bodies newly linked to a template. */
   matched: number
   derived: number
@@ -114,6 +126,8 @@ export async function compactContent(
   ).toISOString()
   const result: CompactResult = {
     scanned: 0,
+    extracted: 0,
+    inlineBytes: 0,
     matched: 0,
     derived: 0,
     compacted: 0,
@@ -154,6 +168,49 @@ export async function compactContent(
     }[]
     return [bodies, templates] as const
   })
+
+  // ── 0. Data-URI images to R2, BEFORE matching (#168) ──
+  //
+  // ⚠ FIRST, SO A TEMPLATE IS BUILT FROM REFERENCES. A logo inlined in every
+  // receipt then becomes part of the skeleton as a 70-byte reference, stored
+  // once as an object, instead of 40 KB of base64 in the skeleton - and two
+  // receipts whose images differ still share one template, the image hash
+  // being a value like any other.
+  if (deps.store) {
+    for (const r of rows) {
+      if (!r.html) continue
+      const extracted = extractDataUris(r.html)
+      if (!extracted) continue
+      try {
+        await putObjects(tenantId, extracted.objects, { db, store: deps.store })
+        // ⚠ GUARDED ON THE ORIGINAL, like every rewrite here.
+        const done = (await withTenant(db, tenantId, (tx) =>
+          tx.execute(sql`
+            update core.message_bodies
+               set html = ${extracted.html},
+                   inline_objects = ${arrayLiteral([...extracted.objects.keys()])}::text[]
+             where message_id = ${r.message_id}::uuid
+               and created_at = ${r.created_at}::timestamptz
+               and compacted_at is null
+               and html = ${r.html}
+            returning message_id
+          `),
+        )) as unknown as unknown[]
+        if (done.length === 0) continue
+        result.extracted++
+        result.inlineBytes += r.html.length - extracted.html.length
+        r.html = extracted.html
+      } catch (error) {
+        // ⚠ THE BODY STAYS WHOLE, which is a correct state; next pass retries
+        // only if it is still unexamined, so a dead bucket costs the saving,
+        // never the mail.
+        deps.log?.warn?.(
+          { err: error, tenantId, messageId: r.message_id },
+          "could not move a body's inline images",
+        )
+      }
+    }
+  }
 
   const bodies: Body[] = rows.map((r) => ({
     linkedTo: r.template_id,

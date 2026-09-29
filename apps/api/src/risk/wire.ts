@@ -13,6 +13,7 @@ import { labelStore } from "./labels.js"
 import { riskNotices } from "./notice.js"
 import type { RiskDeps } from "./runner.js"
 import { embedderModelName } from "../content/embed.js"
+import { objectStoreFrom } from "../content/object-store.js"
 import { assessmentStore } from "./store.js"
 import { boilerplateStore, trustSource, trustedTemplateStore } from "./trusted.js"
 import { asVerdict, webRiskChecker } from "./webrisk.js"
@@ -60,6 +61,10 @@ export interface RiskSystemInput {
     | "RISK_EMBEDDER"
     | "WEBRISK_API_KEY"
     | "WEBRISK_DAILY_LIMIT"
+    | "CONTENT_STORE_ENDPOINT"
+    | "CONTENT_STORE_BUCKET"
+    | "CONTENT_STORE_ACCESS_KEY_ID"
+    | "CONTENT_STORE_SECRET_ACCESS_KEY"
   >
   clerk: ClerkForRisk
   redis?: Redis
@@ -186,6 +191,7 @@ export function riskSystem(input: RiskSystemInput) {
         }
       : {}),
     contentModel: embedderModelName(env.RISK_EMBEDDER),
+    objects: objectStoreFrom(env),
     switches: {
       enabled: env.RISK_ENABLED,
       tiers: env.RISK_ACT_TIERS,

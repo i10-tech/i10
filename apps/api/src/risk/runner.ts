@@ -19,6 +19,8 @@ import { registrable } from "./rules.js"
 import { bandRank, type Assessment, type Band } from "./types.js"
 import type { Embedder } from "../content/embed.js"
 import { analyseContent } from "../content/job.js"
+import { restoreInline } from "../content/inline.js"
+import type { ObjectStore } from "../content/object-store.js"
 import { restoreBodies } from "../content/restore.js"
 import { purgeVectors, storeBehaviour } from "../content/vectors.js"
 import {
@@ -84,6 +86,11 @@ export interface RiskDeps {
   embedder?: Embedder
   /** The model name to compare vectors under, where no embedder is loaded (the API). */
   contentModel?: string
+  /**
+   * Where data-URI images moved to (#168). The content passes and the sample
+   * the classifier reads restore them; null until any have moved.
+   */
+  objects?: ObjectStore | null
   /** Workspaces the score never touches: our own system tenant. */
   exempt?: ReadonlySet<string>
   /** The active model, loaded once per run by the caller. */
@@ -346,7 +353,7 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
   }
   const rows = await withTenant(deps.db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
-      select m.subject, b.text, b.html, b.template_id, b.template_values
+      select m.subject, b.text, b.html, b.template_id, b.template_values, b.inline_objects
         from core.messages m join core.message_bodies b on b.message_id = m.id
        where m.tenant_id = ${tenantId}::uuid
          and m.created_at > now() - interval '24 hours'
@@ -358,6 +365,7 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
       html: string | null
       template_id: string | null
       template_values: unknown
+      inline_objects: string[] | null
     }[]
     // A compacted body reads like a full one (#171).
     return restoreBodies(
@@ -369,7 +377,12 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
       })),
     )
   })
-  const m = rows[0]
+  // And its images are back in place (#168).
+  const [m] = await restoreInline(
+    deps.objects ?? null,
+    tenantId,
+    rows.slice(0, 1).map((r) => ({ ...r, inlineObjects: r.inline_objects })),
+  )
   if (!m || !deps.laya) return null
   const text = `${m.subject}\n\n${m.text ?? (m.html ? htmlToText(m.html) : "")}`
   const probability = await layaClassify(deps.laya, text, deps.fetch)
@@ -521,6 +534,7 @@ export async function runAll(
             const store = deps.trustedTemplates
             const c = await analyseContent(id, {
               db: deps.db,
+              store: deps.objects ?? null,
               ...(deps.embedder ? { embedder: deps.embedder } : {}),
               ...(deps.trust ? { trust: deps.trust } : {}),
               ...(store

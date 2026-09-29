@@ -35,6 +35,8 @@ export interface MimeAttachment {
   filename: string
   content?: string | undefined
   content_type?: string | undefined
+  /** Set: an inline image the HTML names as `cid:<content_id>` (#168). */
+  content_id?: string | undefined
 }
 
 const CRLF = "\r\n"
@@ -106,7 +108,17 @@ export function buildRawMessage(
     headers.push(foldUnstructured(name, String(value).replace(/[\r\n]+/g, " ")))
   }
 
-  const body = bodyPart(message)
+  /*
+   * ⚠ A FILE WITH A `content_id` IS PART OF THE HTML, NOT A DOWNLOAD (#168).
+   * It travels inside a `multipart/related` beside the html part, which is what
+   * lets `<img src="cid:logo">` resolve; everything else stays in the outer
+   * `multipart/mixed`. With no html there is nothing to relate to, so an inline
+   * file is sent as an ordinary attachment that still carries its Content-ID.
+   */
+  const inline = message.html ? attachments.filter((a) => a.content_id) : []
+  const files = message.html ? attachments.filter((a) => !a.content_id) : attachments
+
+  const body = bodyPart(message, inline)
 
   /**
    * ⚠ NO `multipart/mixed` WHERE THERE IS NOTHING TO MIX. `bodyPart` already
@@ -119,12 +131,12 @@ export function buildRawMessage(
    * plain-text send would arrive structurally indistinguishable from one
    * carrying a file.
    */
-  if (attachments.length === 0) return [...headers, body].join(CRLF)
+  if (files.length === 0) return [...headers, body].join(CRLF)
 
   const boundary = boundaryFor(message.id, "mixed")
   headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`)
 
-  const parts = [body, ...attachments.map(attachmentPart)]
+  const parts = [body, ...files.map((a) => attachmentPart(a))]
 
   return [
     headers.join(CRLF),
@@ -146,9 +158,14 @@ export function buildRawMessage(
  * single body needs no nesting, and adding it anyway would make a plain-text
  * message with one attachment three levels deep for no reason.
  */
-function bodyPart(message: OutboundMessage): string {
+function bodyPart(
+  message: OutboundMessage,
+  inline: readonly MimeAttachment[] = [],
+): string {
   const text = message.text ? textPart("text/plain", message.text) : null
-  const html = message.html ? textPart("text/html", message.html) : null
+  const html = message.html
+    ? relatedPart(message, textPart("text/html", message.html), inline)
+    : null
 
   if (text && html) {
     const boundary = boundaryFor(message.id, "alt")
@@ -166,6 +183,34 @@ function bodyPart(message: OutboundMessage): string {
   }
 
   return text ?? html ?? textPart("text/plain", "")
+}
+
+/**
+ * The html part and the images it names by `cid:`, as RFC 2387's
+ * `multipart/related`, or the html part alone when there are none.
+ *
+ * ⚠ THE HTML IS THE ROOT, SO IT GOES FIRST AND `type=` SAYS SO. A client
+ * renders the first part of a related set and resolves `cid:` references
+ * against the rest; images first would be shown as the message.
+ *
+ * ⚠ INSIDE THE ALTERNATIVE, NOT AROUND IT. The images belong to the html
+ * rendering only; a plain-text reader must not be handed them.
+ */
+function relatedPart(
+  message: OutboundMessage,
+  html: string,
+  inline: readonly MimeAttachment[],
+): string {
+  if (inline.length === 0) return html
+  const boundary = boundaryFor(message.id, "rel")
+  return [
+    `Content-Type: multipart/related; type="text/html"; boundary="${boundary}"`,
+    "",
+    `--${boundary}${CRLF}${html}`,
+    ...inline.map((a) => `--${boundary}${CRLF}${attachmentPart(a, "inline")}`),
+    `--${boundary}--`,
+    "",
+  ].join(CRLF)
 }
 
 function textPart(contentType: string, body: string): string {
@@ -203,7 +248,10 @@ function textPart(contentType: string, body: string): string {
  * ⚠ AND AN ASCII FILENAME TAKES NEITHER, BYTE FOR BYTE AS BEFORE. The common
  * case is unchanged, so this cannot regress a message that works today.
  */
-function attachmentPart(attachment: MimeAttachment): string {
+function attachmentPart(
+  attachment: MimeAttachment,
+  disposition: "attachment" | "inline" = "attachment",
+): string {
   const { filename } = attachment
   const ascii = ASCII.test(filename)
 
@@ -211,9 +259,13 @@ function attachmentPart(attachment: MimeAttachment): string {
     `Content-Type: ${attachment.content_type ?? "application/octet-stream"}; ` +
       `name="${ascii ? filename : encodeWord(filename)}"`,
     "Content-Transfer-Encoding: base64",
+    // ⚠ THE BRACKETS ARE OURS. RFC 2392: the header is `<id>` and the html
+    // says `cid:id`; the contract refuses brackets and whitespace in the id,
+    // so nothing a caller sends can close the header early or add a line.
+    ...(attachment.content_id ? [`Content-ID: <${attachment.content_id}>`] : []),
     ascii
-      ? `Content-Disposition: attachment; filename="${filename}"`
-      : `Content-Disposition: attachment; filename*=UTF-8''${rfc2231(filename)}`,
+      ? `Content-Disposition: ${disposition}; filename="${filename}"`
+      : `Content-Disposition: ${disposition}; filename*=UTF-8''${rfc2231(filename)}`,
     "",
     // ⚠ RE-WRAPPED, NOT RE-ENCODED. The caller already sent base64 and the
     // contract validated it; decoding it to encode it again would double the

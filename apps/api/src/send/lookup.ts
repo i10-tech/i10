@@ -1,3 +1,5 @@
+import { restoreInline } from "../content/inline.js"
+import type { ObjectStore } from "../content/object-store.js"
 import { restoreBodies } from "../content/restore.js"
 import type { EmailEventName, GetEmailResponse } from "@repo/contracts"
 import { and, eq, gte, lte } from "drizzle-orm"
@@ -54,12 +56,17 @@ export interface EmailLookup {
   get: (tenantId: string, id: string) => Promise<GetEmailResponse | null>
 }
 
-export function emailLookup(db: Database): EmailLookup {
+export function emailLookup(
+  db: Database,
+  /** Where data-URI images moved to (#168). Null: none can have moved. */
+  store: ObjectStore | null = null,
+): EmailLookup {
   return {
     async get(tenantId, id) {
       const minted = timestampFromUuidV7(id)
+      let inlineObjects = null as string[] | null
 
-      return withTenant(db, tenantId, async (tx) => {
+      const email = await withTenant(db, tenantId, async (tx) => {
         // ⚠ THE RANGE IS OMITTED FOR AN ID WE CANNOT DATE rather than guessed.
         // A v4 from a fixture, or an id minted by some future scheme, would
         // otherwise prune to a window it never belonged to and return null for
@@ -109,6 +116,7 @@ export function emailLookup(db: Database): EmailLookup {
               html: messageBodies.html,
               templateId: messageBodies.templateId,
               templateValues: messageBodies.templateValues,
+              inlineObjects: messageBodies.inlineObjects,
             })
             .from(messageBodies)
             .where(
@@ -150,6 +158,7 @@ export function emailLookup(db: Database): EmailLookup {
 
         // A body stored as a template plus values (#171) reads like a full one.
         const [body] = await restoreBodies(tx, bodies)
+        inlineObjects = body?.inlineObjects ?? null
 
         return {
           object: "email" as const,
@@ -171,6 +180,13 @@ export function emailLookup(db: Database): EmailLookup {
           ),
         }
       })
+      // ⚠ AFTER THE TRANSACTION: an image read from R2 holds nothing open in
+      // Postgres. Only bodies whose data-URI images moved (#168) read at all.
+      if (!email || !inlineObjects) return email
+      const [restored] = await restoreInline(store, tenantId, [
+        { html: email.html, inlineObjects },
+      ])
+      return { ...email, html: restored?.html ?? email.html }
     },
   }
 }

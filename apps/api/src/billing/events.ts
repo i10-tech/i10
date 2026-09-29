@@ -40,6 +40,30 @@
 /** Polar's subscription statuses, as its API documents them. */
 const ENTITLED_STATUSES = new Set(["active", "trialing", "past_due"])
 
+/**
+ * Whether a subscription, as stored or as Polar sent it, still entitles
+ * anything at `now`: a live status, and not past the end date of a
+ * cancellation Polar has already announced (see the notes above).
+ *
+ * ⚠ ONE RULE FOR THE WEBHOOK AND THE CONSOLE. The billing page used to show the
+ * newest subscription row whatever its state, so a revoked subscription - plan
+ * already back to Free - still read "Renews Oct 26" off its paid-through date.
+ */
+export function stillEntitles(
+  sub: {
+    status: string
+    cancelAtPeriodEnd: boolean
+    currentPeriodEnd: Date | null
+  },
+  now: Date = new Date(),
+): boolean {
+  const lapsed =
+    sub.cancelAtPeriodEnd &&
+    sub.currentPeriodEnd !== null &&
+    sub.currentPeriodEnd.getTime() <= now.getTime()
+  return ENTITLED_STATUSES.has(sub.status) && !lapsed
+}
+
 export interface PolarSubscription {
   id: string
   status: string
@@ -293,15 +317,12 @@ export function toState(
   const currentPeriodEnd = parseDate(sub.current_period_end)
   const cancelAtPeriodEnd = sub.cancel_at_period_end ?? false
 
-  // The period a cancelled subscription was paid up to, once it is behind us.
   // `null` current_period_end means Polar has not stated one, which is not the
   // same as one that has passed.
-  const lapsed =
-    cancelAtPeriodEnd &&
-    currentPeriodEnd !== null &&
-    currentPeriodEnd.getTime() <= (opts.now?.() ?? new Date()).getTime()
-
-  const entitled = ENTITLED_STATUSES.has(sub.status) && !lapsed
+  const entitled = stillEntitles(
+    { status: sub.status, cancelAtPeriodEnd, currentPeriodEnd },
+    opts.now?.() ?? new Date(),
+  )
 
   // ⚠ A PENDING CHANGE TO A PRODUCT WE DO NOT SELL IS RECORDED AS NO CHANGE,
   // NOT AS A FAILURE. It is the same judgement `planForProduct` already makes

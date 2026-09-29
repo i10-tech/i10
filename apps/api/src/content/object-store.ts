@@ -30,7 +30,15 @@ export const objectKey = (tenantId: string, sha256: string) =>
   `${tenantId}/sha256/${sha256}`
 
 /** The configured store, or `null` when the four settings are unset. */
-export function objectStoreFrom(env: Env): ObjectStore | null {
+export function objectStoreFrom(
+  env: Pick<
+    Env,
+    | "CONTENT_STORE_ENDPOINT"
+    | "CONTENT_STORE_BUCKET"
+    | "CONTENT_STORE_ACCESS_KEY_ID"
+    | "CONTENT_STORE_SECRET_ACCESS_KEY"
+  >,
+): ObjectStore | null {
   if (
     !env.CONTENT_STORE_ENDPOINT ||
     !env.CONTENT_STORE_BUCKET ||

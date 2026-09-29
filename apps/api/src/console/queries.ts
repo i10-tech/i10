@@ -1,4 +1,6 @@
 import { summariseAttachments } from "../content/attachments.js"
+import { restoreInline } from "../content/inline.js"
+import type { ObjectStore } from "../content/object-store.js"
 import { restoreBodies } from "../content/restore.js"
 import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
@@ -278,7 +280,11 @@ export interface RequestRecord {
   country?: string | null
 }
 
-export function consoleQueries(db: Database): ConsoleQueries {
+export function consoleQueries(
+  db: Database,
+  /** Where data-URI images moved to (#168). Null: none can have moved. */
+  store: ObjectStore | null = null,
+): ConsoleQueries {
   return {
     async overview(tenantId, days) {
       const to = new Date()
@@ -555,7 +561,8 @@ export function consoleQueries(db: Database): ConsoleQueries {
           ]
         : []
 
-      return withTenant(db, tenantId, async (tx) => {
+      let inlineObjects = null as string[] | null
+      const email = await withTenant(db, tenantId, async (tx) => {
         const rows = await tx
           .select()
           .from(messages)
@@ -602,6 +609,7 @@ export function consoleQueries(db: Database): ConsoleQueries {
         // ⚠ RESTORED, so a body stored as a template plus values (#171) shows
         // exactly what was sent.
         const [body] = await restoreBodies(tx, bodies)
+        inlineObjects = body?.inlineObjects ?? null
 
         return {
           id: message.id,
@@ -644,6 +652,13 @@ export function consoleQueries(db: Database): ConsoleQueries {
           attempts: message.attempts,
         }
       })
+      // ⚠ AFTER THE TRANSACTION, like the attachments: an image read from R2
+      // holds nothing open in Postgres (#168).
+      if (!email || !inlineObjects) return email
+      const [restored] = await restoreInline(store, tenantId, [
+        { html: email.html, inlineObjects },
+      ])
+      return { ...email, html: restored?.html ?? email.html }
     },
 
     async listDeliveries(tenantId, opts) {

@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
+import {
+  restoreAttachments,
+  storeAttachments,
+  sweepObjects,
+} from "../src/content/attachments.js"
 import { compactContent } from "../src/content/compact.js"
+import { restoreInline } from "../src/content/inline.js"
+import { memoryStore } from "../src/content/object-store.js"
 import { hashEmbedder } from "../src/content/embed.js"
 import { analyseContent } from "../src/content/job.js"
 import { restoreBodies } from "../src/content/restore.js"
@@ -103,6 +110,7 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
         "content_fingerprints",
         "link_hosts",
         "content_vectors",
+        "content_objects",
       ]) {
         await owner
           .unsafe(`delete from core.${t} where tenant_id = $1`, [id])
@@ -281,5 +289,84 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
     const [again] =
       await owner`select messages from core.content_fingerprints where tenant_id = ${a}`
     expect(again!.messages).toBe(2)
+  })
+
+  it("moves data-URI images to R2, compacts around the references, restores exactly, and sweeps only what is unused", async () => {
+    const t = await workspace()
+    const store = memoryStore()
+    const logo = Buffer.alloc(3_000, 9).toString("base64")
+    const withLogo = (name: string, order: string) =>
+      receipt(name, order).replace(
+        '<img src="https://cdn.acme.com/logo.png">',
+        `<img src="data:image/png;base64,${logo}">`,
+      )
+    const ids = [
+      await seed(t, withLogo("Ada", "1"), { minutesAgo: 3 }),
+      await seed(t, withLogo("Bob", "2"), { minutesAgo: 2 }),
+      await seed(t, withLogo("Cy", "3"), { minutesAgo: 1 }),
+    ]
+    const r = await compactContent(t, { db, store })
+    expect(r.extracted).toBe(3)
+    expect(r.inlineBytes).toBeGreaterThan(3 * 3_000)
+    expect(r.compacted).toBe(3)
+    // One object for three messages, and the template holds a reference.
+    expect(store.objects.size).toBe(1)
+    const [tmpl] =
+      await owner`select segments from core.content_templates where tenant_id = ${t}`
+    expect(JSON.stringify(tmpl!.segments)).not.toContain(logo.slice(0, 64))
+
+    for (const [i, id] of ids.entries()) {
+      const rows = await withTenant(db, t, async (tx) =>
+        restoreBodies(
+          tx,
+          await tx
+            .select({
+              html: schema.messageBodies.html,
+              text: schema.messageBodies.text,
+              templateId: schema.messageBodies.templateId,
+              templateValues: schema.messageBodies.templateValues,
+              inlineObjects: schema.messageBodies.inlineObjects,
+            })
+            .from(schema.messageBodies)
+            .where(eq(schema.messageBodies.messageId, id)),
+        ),
+      )
+      const [back] = await restoreInline(store, t, rows)
+      expect(back!.html).toBe(withLogo(["Ada", "Bob", "Cy"][i]!, String(i + 1)))
+    }
+
+    // Past its grace, still referenced: kept.
+    await owner`update core.content_objects set last_seen_at = now() - interval '2 days' where tenant_id = ${t}`
+    expect(await sweepObjects(t, { db, store, graceHours: 24 })).toBe(0)
+    expect(store.objects.size).toBe(1)
+    // Every body gone: freed.
+    await owner`delete from core.message_bodies where tenant_id = ${t}`
+    expect(await sweepObjects(t, { db, store, graceHours: 24 })).toBe(1)
+    expect(store.objects.size).toBe(0)
+  })
+
+  it("keeps an attachment's content_id through the move to R2 and back", async () => {
+    const t = await workspace()
+    const store = memoryStore()
+    const [m] = await owner`
+      with m as (
+        insert into core.messages (tenant_id, from_address, to_addresses, subject, status, queue, sent_at)
+        values (${t}, 'shop@acme.com', '{a@example.com}', 's', 'sent', 'transactional', now())
+        returning id, created_at, tenant_id
+      )
+      insert into core.message_bodies (message_id, created_at, tenant_id, html, attachments)
+      select id, created_at, tenant_id, '<img src="cid:logo">',
+             ${owner.json([{ filename: "logo.png", content_type: "image/png", content_id: "logo", content: Buffer.from("png").toString("base64") }] as never)}
+        from m
+      returning message_id as id, attachments`
+    expect((await storeAttachments(t, { db, store })).moved).toBe(1)
+    const [row] =
+      await owner`select attachments from core.message_bodies where message_id = ${m!.id}`
+    expect(row!.attachments[0].content_id).toBe("logo")
+    const back = await restoreAttachments(store, t, row!.attachments)
+    expect(back![0]).toMatchObject({
+      content_id: "logo",
+      content: Buffer.from("png").toString("base64"),
+    })
   })
 })

@@ -411,3 +411,55 @@ describe("non-ASCII attachment filenames", () => {
     expect(raw).not.toContain("filename*=")
   })
 })
+
+describe("inline images by Content-ID (#168)", () => {
+  const logo = file({
+    filename: "logo.png",
+    content_type: "image/png",
+    content: Buffer.from("png bytes").toString("base64"),
+    content_id: "logo",
+  })
+
+  it("puts a content_id file in multipart/related beside the html, inline", () => {
+    const raw = buildRawMessage(
+      message({ text: "hi", html: '<img src="cid:logo">' }),
+      [logo, file()],
+      AT,
+    )
+    // mixed > alternative > (text, related > (html, logo)), and the pdf in mixed.
+    expect(raw).toContain("multipart/mixed")
+    expect(raw).toContain("multipart/alternative")
+    expect(raw).toMatch(
+      /Content-Type: multipart\/related; type="text\/html"; boundary=/,
+    )
+    expect(raw).toContain("Content-ID: <logo>")
+    expect(raw).toContain('Content-Disposition: inline; filename="logo.png"')
+    expect(raw).toContain('Content-Disposition: attachment; filename="receipt.pdf"')
+    // The html is the root: it comes before the image inside the related part.
+    const related = raw.slice(raw.indexOf("multipart/related"))
+    expect(related.indexOf("text/html")).toBeLessThan(related.indexOf("image/png"))
+    // And the plain-text alternative carries no image.
+    const alt = raw.slice(
+      raw.indexOf("multipart/alternative"),
+      raw.indexOf("multipart/related"),
+    )
+    expect(alt).not.toContain("image/png")
+  })
+
+  it("needs no multipart/mixed when the only file is inline", () => {
+    const raw = buildRawMessage(
+      message({ text: undefined, html: '<img src="cid:logo">' }),
+      [logo],
+      AT,
+    )
+    expect(raw).not.toContain("multipart/mixed")
+    expect(raw).toContain("multipart/related")
+  })
+
+  it("sends a content_id file as an attachment when there is no html to relate to", () => {
+    const raw = buildRawMessage(message({ text: "plain only" }), [logo], AT)
+    expect(raw).not.toContain("multipart/related")
+    expect(raw).toContain("Content-ID: <logo>")
+    expect(raw).toContain('Content-Disposition: attachment; filename="logo.png"')
+  })
+})

@@ -12,7 +12,7 @@ Bodies to R2 (#188) not started.
 | What                                          | Where                                         | Until                                  |
 | --------------------------------------------- | --------------------------------------------- | -------------------------------------- |
 | Message row, body, events, webhook deliveries | Postgres, monthly partitions                  | the plan's retention period            |
-| Attachment bytes                              | R2 `i10-content`, `<tenant_id>/sha256/<hash>` | no body names the hash, plus 24h grace |
+| Attachment and inline-image bytes             | R2 `i10-content`, `<tenant_id>/sha256/<hash>` | no body names the hash, plus 24h grace |
 | Template skeletons (#167, #169)               | `core.content_templates`                      | no body uses it AND unseen 7 days      |
 | Tombstone (message id, tenant)                | `core.expired_messages`                       | 90 days after expiry                   |
 | Usage                                         | `core.meter_events`                           | never touched by retention             |
@@ -71,6 +71,33 @@ never taken; one the sweep took first has no row left, so the store uploads it
 again.
 
 **Bytes are exact.** No recompression, no cleaning (#188, #189).
+
+## Inline images (#168)
+
+**By Content-ID.** An attachment with `content_id` (Resend's name) is sent in a
+`multipart/related` beside the html part, with `Content-ID: <id>` and
+`Content-Disposition: inline`, so `<img src="cid:id">` resolves. Without html
+it goes out as an ordinary attachment that keeps its Content-ID. It is stored,
+moved to R2 and restored like any attachment, `content_id` included.
+
+**Data URIs in html.** The content-store job, before template matching, lifts
+each `data:<mime>;base64,` payload of at least 1 KB out of a finished body into
+R2 (the same per-workspace objects as attachments) and leaves
+`data:<mime>;base64,<U+0003><sha256><U+0003>` in its place. Only canonical
+base64 is taken (re-encoding must give the identical string), and a body that
+already contains U+0003 is never touched, so restoring is exact. Nothing about
+what is sent changes.
+
+- Extraction runs before matching, so a logo inlined in every receipt becomes a
+  reference inside the template's skeleton, stored once.
+- `message_bodies.inline_objects` lists the hashes a body references however
+  it is stored (full, or compacted into a template and values). The object
+  sweep counts it beside `attachments`, or it would delete a logo every
+  compacted receipt still points at.
+- Every reader restores after `restoreBodies`: the worker (a retry), `GET
+/emails/:id` and the console detail (both after their transaction, so no R2
+  read holds a Postgres connection), and the risk passes. A body with
+  references and no configured store fails loudly.
 
 ## Templates: store once, forget when unused, come back on use
 

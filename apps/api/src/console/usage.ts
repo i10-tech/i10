@@ -1,5 +1,6 @@
 import { desc, eq, isNull, or } from "drizzle-orm"
 import type { Meter } from "@repo/metering"
+import { stillEntitles } from "../billing/events.js"
 import { withTenant, type Database } from "../db/client.js"
 import { describeErrorChain } from "../errors.js"
 import { planAssignments, plans, subscriptions, tenantStorage } from "../db/core.js"
@@ -317,7 +318,17 @@ export function usageStore({
         ])
 
         const assigned = assignment[0]
-        const sub = subscription[0]
+        /*
+         * ⚠ ONLY A SUBSCRIPTION THAT STILL ENTITLES IS "THE" SUBSCRIPTION. A
+         * revoked one keeps its paid-through date, and the page read it as
+         * "Free - Renews Oct 26": a free plan cannot renew. Once it entitles
+         * nothing, the workspace has no paid subscription, which is exactly
+         * what the page then says. Same rule as the webhook (billing/events.ts).
+         */
+        const sub =
+          subscription[0] && stillEntitles(subscription[0])
+            ? subscription[0]
+            : undefined
 
         return {
           plan: assigned ? toPlanSummary(assigned.plan) : null,

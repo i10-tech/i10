@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
+import { restoreInline } from "../content/inline.js"
+import type { ObjectStore } from "../content/object-store.js"
 import { restoreBodies } from "../content/restore.js"
 import { classify, trustMark } from "../content/trust.js"
 import { ALLOWLISTED, fingerprint, linkHosts, type Fingerprint } from "./fingerprint.js"
@@ -195,6 +197,8 @@ export async function recordContent(
 
 export interface FingerprintDeps extends ContentDeps {
   now?: Date
+  /** Where data-URI images moved to (#168); needed only once any have. */
+  store?: ObjectStore | null
   /** Bodies per workspace per pass. */
   limit?: number
 }
@@ -214,10 +218,10 @@ export async function fingerprintStored(
   deps: FingerprintDeps,
 ): Promise<number> {
   const now = deps.now ?? new Date()
-  const rows = await withTenant(deps.db, tenantId, async (tx) => {
+  const restored = await withTenant(deps.db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
       select b.message_id, b.created_at::text as created_at, m.subject, b.html, b.text,
-             b.template_id, b.template_values
+             b.template_id, b.template_values, b.inline_objects
         from core.message_bodies b
         join core.messages m on m.id = b.message_id and m.created_at = b.created_at
        where b.tenant_id = ${tenantId}::uuid
@@ -233,6 +237,7 @@ export async function fingerprintStored(
       text: string | null
       template_id: string | null
       template_values: unknown
+      inline_objects: string[] | null
     }[]
     return restoreBodies(
       tx,
@@ -243,7 +248,12 @@ export async function fingerprintStored(
       })),
     )
   })
-  if (rows.length === 0) return 0
+  if (restored.length === 0) return 0
+  const rows = await restoreInline(
+    deps.store ?? null,
+    tenantId,
+    restored.map((r) => ({ ...r, inlineObjects: r.inline_objects })),
+  )
   await recordContent(
     tenantId,
     rows.map((r) => ({
