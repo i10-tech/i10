@@ -148,31 +148,6 @@ export const NAV: NavGroup[] = [
       },
     ],
   },
-  {
-    /*
-     * ⚠ SETTINGS NEEDS A LINK IN THE SIDEBAR, AND FOR A WHILE IT HAD NONE AT
-     * ALL. `SETTINGS_NAV` below has always described the settings pages, but
-     * nothing rendered a route INTO them: not this list, not the workspace bar,
-     * not the mobile drawer. The only way to reach `/settings` - and therefore
-     * billing, the team, and the usage detail - was ⌘K, which is a shortcut
-     * people learn after they have found a thing, not before. Billing in
-     * particular was unreachable by clicking, so "there is nowhere to change my
-     * plan" was literally true.
-     *
-     * ⚠ ONE ENTRY, NOT THE WHOLE SETTINGS TREE. The note on `SETTINGS_NAV`
-     * stands: flattening five settings pages into the primary sidebar pushes
-     * the ten daily destinations below the fold. This is a door, and the
-     * settings shell has its own second column behind it.
-     */
-    items: [
-      {
-        href: "/settings",
-        label: "Settings",
-        icon: Settings,
-        keywords: ["billing", "plan", "team", "usage", "workspace", "account"],
-      },
-    ],
-  },
 ]
 
 /**
@@ -188,7 +163,28 @@ export const SETTINGS_NAV: NavGroup[] = [
   {
     label: "Workspace",
     items: [
-      { href: "/settings", label: "General", icon: Settings, exact: true },
+      /*
+       * ⚠ THE DOOR INTO SETTINGS IS THE ACCOUNT MENU AT THE FOOT OF THE RAIL,
+       * NOT A ROW IN `NAV`. It used to be a lone "Settings" group under the
+       * daily destinations; it moved so the rail can fit without scrolling
+       * (components/account-bar.tsx). The keywords that row carried moved
+       * here, so ⌘K still finds billing and the plan under "Settings".
+       */
+      {
+        href: "/settings",
+        label: "General",
+        icon: Settings,
+        exact: true,
+        keywords: [
+          "settings",
+          "billing",
+          "plan",
+          "team",
+          "usage",
+          "workspace",
+          "account",
+        ],
+      },
       { href: "/settings/team", label: "Team", icon: Building2 },
       { href: "/settings/billing", label: "Billing", icon: CreditCard },
       { href: "/settings/usage", label: "Usage", icon: Gauge },

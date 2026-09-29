@@ -79,7 +79,7 @@ export function UsageRing({
         r={r}
         fill="none"
         strokeWidth={stroke}
-        className="stroke-muted"
+        className="stroke-track"
       />
       {ratio > 0 && (
         <circle

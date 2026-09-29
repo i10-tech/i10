@@ -122,7 +122,7 @@ export function StepVerify({
        * same wrongness as the blip, held still.
        */}
       {justPublished > 0 && (
-        <div className="flex items-start gap-3 rounded-xl border border-success/30 bg-success/5 p-4 duration-(--duration-instant) animate-in fade-in-0">
+        <div className="flex items-start gap-3 rounded-xl border border-success/30 bg-success/5 p-4 motion-surface animate-[surface-enter_var(--duration-instant)_var(--ease-linear)]">
           <CheckCircle2
             aria-hidden="true"
             className="mt-0.5 size-5 shrink-0 text-success"

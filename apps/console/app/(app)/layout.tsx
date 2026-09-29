@@ -4,6 +4,7 @@ import { Suspense } from "react"
 import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
+import { Rail } from "@/components/rail"
 import { SendingStatusBanner } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
 import { SidebarNav } from "@/components/sidebar-nav"
@@ -121,7 +122,7 @@ export default async function AppLayout({
        * declared `h-dvh` a second time would be two numbers that have to agree
        * - and they stop agreeing the first time the shell grows a header.
        */}
-      <aside className="hidden h-full w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
+      <Rail className="hidden h-full w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
         <div className="flex h-14 items-center px-4">
           <Link
             href="/"
@@ -134,48 +135,51 @@ export default async function AppLayout({
         <Separator />
 
         <div className="px-2 py-2">
-          <WorkspaceBar
-            tenant={me.data.tenant}
-            plan={me.data.billing.plan}
-            clerkEnabled={clerkEnabled}
-          />
+          <WorkspaceBar tenant={me.data.tenant} clerkEnabled={clerkEnabled} />
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+        {/*
+         * ⚠ THE RAIL FITS; IT DOES NOT SCROLL. With Settings moved into the
+         * account menu and 28px rows, the navigation fits a 700px-tall window,
+         * and a rail that scrolls hides its own last items behind a gesture
+         * nobody expects to need there (decided 2026-09-29).
+         *
+         * ⚠ `overflow-y-auto` STAYS, AS THE LAST RESORT, AND ONLY ENGAGES WHEN
+         * THE NAV TRULY CANNOT FIT. A fixed height breakpoint was tried and
+         * clipped Mailboxes out of reach between the breakpoint and the height
+         * the rail actually needs; "scroll only when it overflows" cannot clip.
+         * The account row stays pinned either way.
+         */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
           <SidebarNav attention={attention} />
         </div>
 
         {/*
-         * ⚠ THE USAGE RING IS PINNED TO THE BOTTOM OF THE RAIL, VISIBLE ON
-         * EVERY SCREEN, AND THAT IS A PRODUCT DECISION RATHER THAN A LAYOUT
-         * ONE. Metering that only appears on a billing page is metering nobody
-         * looks at until they are refused a send. It is also the only
-         * persistent home for the upgrade button.
+         * ⚠ ONE ROW AT THE FOOT OF THE RAIL: WHO YOU ARE, THE PLAN, AND THE
+         * USAGE RING. The ring is visible on every screen, and that is a
+         * product decision rather than a layout one: metering that only
+         * appears on a billing page is metering nobody looks at until they are
+         * refused a send. See components/account-bar.tsx.
          *
-         * ⚠ IN ITS OWN SUSPENSE BOUNDARY so a slow meter read cannot hold up
-         * the navigation. The rail renders, the number arrives.
+         * ⚠ THE RING IN ITS OWN SUSPENSE BOUNDARY, so a slow meter read cannot
+         * hold up the rail. The row renders; the ring arrives.
+         *
+         * ⚠ NO SENDING-HEALTH PILL HERE (#153). Trouble reaches every page
+         * through the banner above the content.
          */}
-        <div className="mt-auto space-y-1 border-t p-2">
-          {/*
-           * ⚠ NO SENDING-HEALTH PILL HERE ANY MORE (#153). A permanent "Healthy"
-           * badge was noise; trouble still reaches every page through the
-           * banner above the content, and the overview keeps the full card.
-           */}
-          <Suspense fallback={<Skeleton className="h-8 w-full rounded-md" />}>
-            <UsageRail />
-          </Suspense>
-
-          {/*
-           * ⚠ THE PERSON, AT THE FOOT OF THE RAIL, BELOW THE WORKSPACE'S USAGE.
-           * It used to share the top row with the organization switcher, which
-           * gave a control somebody touches monthly the same prominence as the
-           * one that changes which workspace's data is on every page. The
-           * reading order now matches the questions: which workspace (top),
-           * where to go (middle), what it is costing and who I am (bottom).
-           */}
-          {clerkEnabled && <AccountBar />}
+        <div className="mt-auto border-t p-2">
+          <AccountBar
+            clerkEnabled={clerkEnabled}
+            plan={me.data.billing.plan}
+            fallbackEmail={me.data.user.email}
+            usage={
+              <Suspense fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}>
+                <UsageRail />
+              </Suspense>
+            }
+          />
         </div>
-      </aside>
+      </Rail>
 
       {/*
        * ⚠ `overflow-hidden` ON THE COLUMN, `overflow-y-auto` ON THE PANE
@@ -188,8 +192,14 @@ export default async function AppLayout({
         <MobileNav
           tenant={me.data.tenant}
           plan={me.data.billing.plan}
+          fallbackEmail={me.data.user.email}
           clerkEnabled={clerkEnabled}
           attention={attention}
+          usage={
+            <Suspense fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}>
+              <UsageRail side="top" />
+            </Suspense>
+          }
         />
         {/*
          * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,

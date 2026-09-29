@@ -1,10 +1,11 @@
+import { cache } from "react"
 import { tryApi } from "@/lib/api"
 import { formatNumber, formatUntil } from "@/lib/format"
 import type { BillingState, FeatureUsage, SendingLimit } from "@/lib/types"
 import { UsageRingButton, type RingRow } from "@/components/usage-ring-button"
 
 /**
- * Sending usage as a ring, pinned to the bottom of the sidebar (#153).
+ * Sending usage as a ring, at the right of the account row (#153).
  *
  * ⚠ IT IS ON EVERY SCREEN ON PURPOSE. Metering that lives only on a billing
  * page is metering nobody looks at until a send is refused. A ring in the
@@ -24,12 +25,21 @@ import { UsageRingButton, type RingRow } from "@/components/usage-ring-button"
  * bad second would be the loudest possible report of the least important
  * failure.
  */
-export async function UsageRail() {
-  const result = await tryApi<{
+/**
+ * ⚠ ONE READ PER REQUEST, HOWEVER MANY RINGS. The shell renders this twice -
+ * the desktop rail and the mobile drawer - and only CSS decides which is seen;
+ * without `cache` that is two identical meter reads on every navigation.
+ */
+const readUsage = cache(() =>
+  tryApi<{
     usage: FeatureUsage[]
     limits: SendingLimit[]
     billing: BillingState
-  }>("/console/usage")
+  }>("/console/usage"),
+)
+
+export async function UsageRail({ side }: { side?: "right" | "top" } = {}) {
+  const result = await readUsage()
   if (!result.ok) return null
 
   const { limits, billing } = result.data
@@ -64,7 +74,14 @@ export async function UsageRail() {
   const plan = billing.plan
   const canUpgrade = plan === null || plan.rank === 0
 
-  return <UsageRingButton rows={rows} binding={binding} canUpgrade={canUpgrade} />
+  return (
+    <UsageRingButton
+      rows={rows}
+      binding={binding}
+      canUpgrade={canUpgrade}
+      {...(side ? { side } : {})}
+    />
+  )
 }
 
 const LABEL: Record<string, string> = {

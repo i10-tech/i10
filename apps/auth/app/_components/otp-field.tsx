@@ -133,7 +133,7 @@ export function OtpField({
            * next frame is indistinguishable from a word that was always there;
            * one that arrives is an answer to something.
            */
-          <span className="inline-flex animate-in items-center gap-1 fade-in-0 zoom-in-95 duration-(--duration-instant)">
+          <span className="motion-surface inline-flex animate-[surface-enter_var(--duration-instant)_var(--ease-linear)] items-center gap-1">
             <Check aria-hidden="true" className="size-3" />
             Verified
           </span>

@@ -115,6 +115,18 @@
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
+  /*
+   * The unfilled part of a meter or a usage ring.
+   *
+   * ⚠ ITS OWN TOKEN BECAUSE `--muted` VANISHES WHERE METERS LIVE IN DARK MODE.
+   * A meter sits in popovers and cards, and there `--muted` (0.19) is within a
+   * hair of `--popover` (0.18) and `--card` (0.17): an empty bar read as no bar.
+   * Translucent foreground lifts it the same amount on every surface - black
+   * rail, card or popover. Light is the same idea inverted: `--muted` (0.97)
+   * on the near-white rail left an empty ring invisible, so it is a black
+   * wash instead, and reads on white, the rail and a card alike.
+   */
+  --track: oklch(0 0 0 / 12%);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -297,6 +309,7 @@
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.19 0 0);
   --muted-foreground: oklch(0.65 0 0);
+  --track: oklch(1 0 0 / 16%);
   --accent: oklch(0.22 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -387,6 +400,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-track: var(--track);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -775,3 +789,64 @@
  * The TOKENS stayed because the rail still needs a name for "the surface the
  * navigation sits on". Do not delete them as unused; grep for `bg-sidebar`.
  */
+
+/*
+ * Base's ENTER/EXIT pattern for every overlay - popover, menu, select,
+ * tooltip, hover card, dialog, sheet - as two keyframes. The components drive
+ * them with the motion tokens above through the strings in
+ * components/surface-motion.tsx; nothing sets a duration or a curve by hand.
+ *
+ * ⚠ THE DIRECTION IS TWO VARIABLES, `--surface-x` AND `--surface-y`, SET BY
+ * WHERE THE SURFACE COMES FROM: 4px from its trigger for a popover, 8px up for
+ * a dialog, its own full width for a sheet. One axis, never both, and no zoom -
+ * Base's "one clear direction". Unset, only the opacity moves.
+ *
+ * ⚠ `transform`, NOT `translate`. Tailwind's `translate-x-[-50%]` is what
+ * centres a dialog, and it writes the `translate` PROPERTY; animating that
+ * property would replace the centring for the duration and throw the dialog
+ * to the corner. `transform` composes with it instead.
+ *
+ * ⚠ RADIX WAITS FOR `animationend` BEFORE IT UNMOUNTS, which is what lets the
+ * exit play at all - and why this is an animation, not a transition: a
+ * transition on an element being removed never starts. It is also why no
+ * JavaScript is involved (decided 2026-09-29: CSS for overlays, Motion for
+ * layout and shared-element motion).
+ *
+ * ⚠ THESE REPLACED CLASSES THAT NEVER WORKED. The shadcn copies used
+ * `animate-in`, `fade-in-0` and `zoom-in-95` from `tw-animate-css`, which this
+ * workspace never installed, so every overlay opened and closed with no motion.
+ */
+@keyframes surface-enter {
+  from {
+    opacity: 0;
+    transform: translate(var(--surface-x, 0), var(--surface-y, 0));
+  }
+}
+
+@keyframes surface-exit {
+  to {
+    opacity: 0;
+    transform: translate(var(--surface-x, 0), var(--surface-y, 0));
+  }
+}
+
+/*
+ * ⚠ REDUCED MOTION IS A 100ms FADE, NOT NOTHING. The blanket rule above cuts
+ * every animation to 0.01ms, which for an overlay is a hard cut - Base asks for
+ * a short crossfade instead. An overlay carries `motion-surface`; this keeps its
+ * opacity, drops its travel, and outranks the blanket rule on specificity.
+ */
+/*
+ * ⚠ IN `@layer base`, BESIDE THE BLANKET RULE, OR IT LOSES. For `!important`
+ * the cascade inverts: a layered important declaration beats an unlayered one
+ * whatever the specificity. In the same layer, `.motion-surface` outranks `*`.
+ */
+@layer base {
+  @media (prefers-reduced-motion: reduce) {
+    .motion-surface {
+      --surface-x: 0 !important;
+      --surface-y: 0 !important;
+      animation-duration: var(--duration-instant) !important;
+    }
+  }
+}
