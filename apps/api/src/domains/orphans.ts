@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm"
+import { sql, type SQL } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import type { DomainIdentity } from "./identity.js"
 import type { DnsZones } from "./zone.js"
@@ -98,6 +98,29 @@ interface OrphanZone {
   domain_name: string
 }
 
+/**
+ * Asking which of these names still have a domain row, across every tenant.
+ *
+ * ⚠ `array[$1, $2]`, NEVER A JS ARRAY INTERPOLATED DIRECTLY. Drizzle expands
+ * ``${names}::text[]`` to `($1, $2)::text[]`, a ROW CONSTRUCTOR that Postgres
+ * refuses to cast. With one name it becomes `($1)::text[]`, which asks
+ * Postgres to parse the bare domain as an array literal and fails with
+ * `malformed array literal: "pslhq.app"`. Either way the whole sweep died
+ * before looking at a single identity, every day, and reported nothing.
+ *
+ * ⚠ ONE SCALAR PER NAME RATHER THAN A `{…}` LITERAL, because SES lists email
+ * identities as well as domains and those may legally carry `,` `"` or `}`.
+ * Bound one at a time they need no escaping. See `markShippedStatement`.
+ *
+ * Exported so the rendered statement can be asserted; a fake db cannot tell
+ * the broken form from this one.
+ */
+export const knownDomainsStatement = (names: readonly string[]): SQL =>
+  sql`select * from core.domains_known(array[${sql.join(
+    names.map((name) => sql`${name}`),
+    sql`, `,
+  )}]::text[])`
+
 export async function sweepOrphans({
   db,
   identity,
@@ -132,9 +155,9 @@ export async function sweepOrphans({
      * "unknown" for every other workspace's domains and mark every one of their
      * live identities an orphan. See the note in migration 0052.
      */
-    const rows = (await db.execute(
-      sql`select * from core.domains_known(${candidates}::text[])`,
-    )) as unknown as { name: string }[]
+    const rows = (await db.execute(knownDomainsStatement(candidates))) as unknown as {
+      name: string
+    }[]
     const known = new Set(rows.map((r) => r.name))
 
     for (const name of candidates) {

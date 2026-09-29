@@ -2,7 +2,7 @@ import { PgDialect } from "drizzle-orm/pg-core"
 import type { SQL } from "drizzle-orm"
 import { describe, expect, it, mock } from "bun:test"
 import type { Database } from "../src/db/client.js"
-import { sweepOrphans } from "../src/domains/orphans.js"
+import { knownDomainsStatement, sweepOrphans } from "../src/domains/orphans.js"
 
 /**
  * What we are still holding for domains that no longer exist.
@@ -234,5 +234,63 @@ describe("sweeping orphans", () => {
     expect(summary.identitiesOrphaned).toBe(2)
     expect(summary.identitiesRemoved).toBe(1)
     expect(summary.failed).toBe(1)
+  })
+})
+
+/**
+ * ⚠ THE STATEMENT ITSELF, BECAUSE NO FAKE ABOVE COULD HAVE CAUGHT THIS. The
+ * cron failed every day with `malformed array literal: "pslhq.app"` while every
+ * test here passed: interpolating the JS array gave `($1)::text[]` for one name
+ * and a row constructor for two, and a fake db answers the same either way.
+ */
+describe("asking which names still have a domain row", () => {
+  const render = (names: string[]) => dialect.sqlToQuery(knownDomainsStatement(names))
+
+  // ⚠ THE CASE THAT FAILED IN PRODUCTION. One name must still arrive as an array.
+  it("binds a single name inside an array constructor", () => {
+    const { sql: statement, params } = render(["pslhq.app"])
+
+    expect(statement).toContain("core.domains_known(array[$1]::text[])")
+    expect(statement).not.toContain("($1)")
+    expect(params).toEqual(["pslhq.app"])
+  })
+
+  it("binds several names as one array, never a row", () => {
+    const { sql: statement, params } = render(["a.com", "b.com", "c.com"])
+
+    expect(statement).toContain("core.domains_known(array[$1, $2, $3]::text[])")
+    expect(statement).not.toContain("($1, $2")
+    expect(params).toEqual(["a.com", "b.com", "c.com"])
+  })
+
+  // SES lists email identities too, and a `{…}` literal would need escaping.
+  it("passes names through untouched, whatever they contain", () => {
+    const odd = 'we"ird,}@x.com'
+    const { params } = render([odd, "a.com"])
+
+    expect(params).toEqual([odd, "a.com"])
+  })
+
+  it("is what the sweep actually sends, for one candidate and for many", async () => {
+    for (const names of [["only.com"], ["one.com", "two.com"]]) {
+      const seen: { sql: string; params: unknown[] }[] = []
+      const db = {
+        execute: async (q: unknown) => {
+          seen.push(dialect.sqlToQuery(q as SQL))
+          return names.map((name) => ({ name }))
+        },
+      } as unknown as Database
+
+      await sweepOrphans({
+        db,
+        identity: identity({ list: async () => names }) as never,
+        ...base,
+      })
+
+      const known = seen.find((q) => q.sql.includes("domains_known"))
+      const placeholders = names.map((_, i) => `$${i + 1}`).join(", ")
+      expect(known?.sql).toContain(`domains_known(array[${placeholders}]::text[])`)
+      expect(known?.params).toEqual(names)
+    }
   })
 })
