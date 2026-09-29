@@ -147,17 +147,27 @@ done
 # ⚠ HEALTH IS STILL READ AND STILL REPORTED, one line below, because a Degraded
 # Application is worth knowing about even when it is not this deploy's fault.
 # It is a warning here and an error nowhere.
+#
+# ⚠ AND NO SYNC OPERATION MAY STILL BE RUNNING. Argo reports the new revision
+# as `Synced` while its operation is still working through hooks and waves:
+# on 2026-09-30 (run 36644755578) the API's PreSync migration was running, §3
+# waited on the OLD Deployment - already rolled, so instantly `ok` - and Argo
+# applied the new one seconds later, after §4 had looked and failed with
+# "stale images" on a rollout that then came up perfectly. A revision that
+# changed nothing in this Application starts no operation at all, so the rule
+# is "none running", not "one succeeded for this revision".
 deadline=$((SECONDS + SYNC_TIMEOUT))
-revision="" sync="" health="" synced=false
+revision="" sync="" health="" phase="" synced=false
 
 while (( SECONDS < deadline )); do
-  read -r revision sync health < <(
+  read -r revision sync health phase < <(
     kubectl get application "$APP" -n "$NAMESPACE" -o \
-      jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}' \
+      jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status} {.status.operationState.phase}' \
       2>/dev/null
   )
 
-  if [[ "$revision" == "$SHA" && "$sync" == "Synced" ]]; then
+  if [[ "$revision" == "$SHA" && "$sync" == "Synced" \
+        && "$phase" != "Running" && "$phase" != "Terminating" ]]; then
     synced=true
     break
   fi
@@ -169,6 +179,7 @@ if [[ "$synced" != true ]]; then
   echo "  revision: ${revision:-<none>}" >&2
   echo "  sync:     ${sync:-<none>}" >&2
   echo "  health:   ${health:-<none>}" >&2
+  echo "  operation: ${phase:-<none>}" >&2
   # ⚠ THE CONDITIONS ARE WHERE THE REASON ACTUALLY IS. "OutOfSync" says nothing;
   # "ComparisonError: unable to resolve revision" says everything.
   kubectl get application "$APP" -n "$NAMESPACE" -o \
