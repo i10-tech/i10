@@ -3262,6 +3262,44 @@ export const contentObjects = core.table(
 )
 
 /**
+ * Images uploaded for a workspace's templates (#244), public in the template
+ * assets bucket at `<folder>/<sha256>.<ext>`.
+ *
+ * ⚠ A ROW MEANS THE OBJECT IS THERE. It is written after the upload succeeds,
+ * so a second upload of the same image finds it and writes nothing.
+ *
+ * ⚠ KEPT FOR AS LONG AS THE WORKSPACE EXISTS. Emails already sent point at
+ * these URLs, and no reference we hold can say which inboxes still show them;
+ * deleting an image because no template uses it any more would break mail
+ * people have already received. When the workspace is deleted, the sweep
+ * deletes every one of its images.
+ *
+ * ⚠ NO FOREIGN KEY TO `tenants`, ON PURPOSE, as for `content_objects`: a
+ * cascade would delete the rows and leave the objects public in R2 with
+ * nothing left that knows they exist.
+ *
+ * ⚠ PER WORKSPACE, NEVER GLOBAL. A shared object would tell one workspace
+ * whether another had uploaded the same image.
+ */
+export const templateAssets = core.table(
+  "template_assets",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    /** Hex SHA-256 of the exact bytes: the image's identity. */
+    sha256: text("sha256").notNull(),
+    /** The object key in the bucket, and the path of the public URL. */
+    key: text("key").notNull(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.sha256] }),
+    tenantPolicy("template_assets_tenant", t.tenantId),
+  ],
+)
+
+/**
  * Packs of sealed message bodies a workspace holds in R2 (#188), at
  * `<tenant_id>/packs/<id>`.
  *

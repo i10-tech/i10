@@ -73,6 +73,32 @@ built on TipTap. A template made in it has kind `visual` and source `managed`.
   objects are not plain, and a server action serializes them as temporary
   references that arrive as nothing.
 
+### Template images (#244)
+
+Images added in the visual editor go to a **separate, public R2 bucket**,
+because every recipient's mail client loads them. Message content stays in the
+private content bucket, and R2 tokens cannot be scoped to a prefix, so the
+separation is a bucket.
+
+- **Content-addressed per workspace:** `<folder>/<sha256>.<ext>`, where the
+  folder is a salted hash of the workspace id. The public URL names no
+  workspace, but a workspace's images remain one prefix. The same image
+  uploaded twice is one object. Two workspaces never share one, since a shared
+  object would tell one whether the other had uploaded it.
+- **The type comes from the bytes:** PNG, JPEG, GIF or WebP, at most 4 MB.
+  SVG is refused, since it is a document that can carry script, served from a
+  host we own.
+- **`core.template_assets`** records what exists, under tenant row security.
+  Like `content_objects`, it has no cascading foreign key.
+- **Kept while the workspace lives, deleted with it.** Sent mail points at
+  these URLs, and nothing we hold says which inboxes still show them. The
+  hourly retention job deletes the images of deleted workspaces
+  (`core.template_assets_orphaned`, tenant ids only), from R2 first and then
+  the rows.
+- Settings: `TEMPLATE_ASSETS_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`,
+  `_SECRET_ACCESS_KEY` and `_PUBLIC_URL`, all or none. Unset, uploads answer
+  501 and the editor takes image addresses only.
+
 ### Templates are file sets
 
 Real template folders share a layout, a footer, a button. So a `tsx` template

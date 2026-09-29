@@ -87,6 +87,40 @@ export function objectStoreFrom(
   return store
 }
 
+/** The template images bucket (#244), or `null` when its settings are unset. */
+export function templateAssetsBucketFrom(
+  env: Pick<
+    Env,
+    | "TEMPLATE_ASSETS_ENDPOINT"
+    | "TEMPLATE_ASSETS_BUCKET"
+    | "TEMPLATE_ASSETS_ACCESS_KEY_ID"
+    | "TEMPLATE_ASSETS_SECRET_ACCESS_KEY"
+    | "TEMPLATE_ASSETS_PUBLIC_URL"
+  >,
+): { store: ObjectStore; publicUrl: string } | null {
+  if (
+    !env.TEMPLATE_ASSETS_ENDPOINT ||
+    !env.TEMPLATE_ASSETS_BUCKET ||
+    !env.TEMPLATE_ASSETS_ACCESS_KEY_ID ||
+    !env.TEMPLATE_ASSETS_SECRET_ACCESS_KEY ||
+    !env.TEMPLATE_ASSETS_PUBLIC_URL
+  ) {
+    return null
+  }
+  return {
+    store: r2Store(
+      new S3Client({
+        endpoint: env.TEMPLATE_ASSETS_ENDPOINT,
+        bucket: env.TEMPLATE_ASSETS_BUCKET,
+        accessKeyId: env.TEMPLATE_ASSETS_ACCESS_KEY_ID,
+        secretAccessKey: env.TEMPLATE_ASSETS_SECRET_ACCESS_KEY,
+        region: "auto",
+      }),
+    ),
+    publicUrl: env.TEMPLATE_ASSETS_PUBLIC_URL,
+  }
+}
+
 export function r2Store(client: S3Client): ObjectStore {
   return {
     async put(key, bytes, contentType) {

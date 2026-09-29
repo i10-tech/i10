@@ -18,10 +18,12 @@ export default function VisualEditorCanvas({
   design,
   onReady,
   onChange,
+  onUploadImage,
 }: {
   design: Record<string, unknown> | null
   onReady: (ref: EmailEditorRef) => void
   onChange: (ref: EmailEditorRef) => void
+  onUploadImage: (file: File) => Promise<{ url: string }>
 }) {
   // The document the editor opened with. Later edits live in the editor.
   const [initial] = React.useState(() => design ?? undefined)
@@ -32,6 +34,7 @@ export default function VisualEditorCanvas({
         placeholder="Type / for blocks, or just start writing"
         onReady={onReady}
         onUpdate={onChange}
+        onUploadImage={onUploadImage}
       />
     </div>
   )

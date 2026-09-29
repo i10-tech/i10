@@ -31,7 +31,7 @@ import { mailboxDirectory } from "./mailboxes/store.js"
 import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
-import { objectStoreFrom } from "./content/object-store.js"
+import { objectStoreFrom, templateAssetsBucketFrom } from "./content/object-store.js"
 import { BodyCache } from "./content/packs.js"
 import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
@@ -42,6 +42,7 @@ import { credentialRenewal } from "./dns/renew.js"
 import { marketingStore } from "./console/marketing.js"
 import { templateStore } from "./templates/store.js"
 import { templateRenderer } from "./templates/renderer.js"
+import { templateAssetStore } from "./templates/assets.js"
 import { onboardingStore } from "./console/onboarding.js"
 import { tenantProfileStore } from "./console/tenant.js"
 import { usageStore } from "./console/usage.js"
@@ -211,6 +212,7 @@ if (Boolean(env.TEMPLATE_RENDERER_URL) !== Boolean(env.TEMPLATE_RENDERER_SECRET)
 }
 // One store for the console and the send path: the same rows, read two ways.
 const templates = templateStore(db)
+const templateAssetsBucket = templateAssetsBucketFrom(env)
 
 /**
  * ⚠ THERE IS NO LONGER AN UNMETERED MODE TO FALL INTO, AND THAT IS THE POINT OF
@@ -1003,6 +1005,9 @@ const app = createApp({
             secret: env.TEMPLATE_RENDERER_SECRET,
           }),
         }
+      : {}),
+    ...(templateAssetsBucket
+      ? { templateAssets: templateAssetStore({ db, ...templateAssetsBucket }) }
       : {}),
     profile: tenantProfileStore(db),
     /*

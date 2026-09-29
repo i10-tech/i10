@@ -10,6 +10,7 @@ import type { SuppressionStore } from "../../suppressions/store.js"
 import type { MarketingStore } from "../../console/marketing.js"
 import type { TemplateStore } from "../../templates/store.js"
 import type { Renderer } from "../../templates/renderer.js"
+import type { TemplateAssets } from "../../templates/assets.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
 import type { UsageStore } from "../../console/usage.js"
 import type { DomainStore } from "../../domains/store.js"
@@ -84,6 +85,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * it HTML templates work and uploads answer 501. See TEMPLATE_RENDERER_URL.
    */
   templateRenderer?: Renderer
+  /**
+   * Images for templates (#244). Optional: without the TEMPLATE_ASSETS_*
+   * settings, uploads answer 501 and the editor takes image addresses only.
+   */
+  templateAssets?: TemplateAssets
   profile: TenantProfileStore
   /**
    * Renaming the Clerk organization behind the workspace.

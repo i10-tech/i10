@@ -127,5 +127,11 @@ describe("console body limits", () => {
     expect((await post("/templates/upload", 1024 * 1024)).status).toBe(501)
     expect((await post("/templates/abc/versions", 1024 * 1024)).status).toBe(501)
     expect((await post("/templates/abc/publish", 512 * 1024)).status).toBe(413)
+    // Images (#244) get the upload limit, not the 2 MB draft one that
+    // `/templates/:id` would otherwise give `/templates/assets`.
+    expect((await post("/templates/assets", 3 * 1024 * 1024)).status).toBe(501)
+    // A draft save may pass 256 KB, up to 2 MB.
+    expect((await post("/templates/abc", 1024 * 1024)).status).not.toBe(413)
+    expect((await post("/templates/abc", 3 * 1024 * 1024)).status).toBe(413)
   })
 })

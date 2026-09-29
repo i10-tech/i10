@@ -163,3 +163,52 @@ describe("uploading a folder", () => {
     })
   })
 })
+
+describe("uploading a template image (#244)", () => {
+  function images(assets?: ConsoleDeps["templateAssets"]) {
+    const app = new Hono()
+    app.use("*", async (c, next) => {
+      c.set("auth", { apiKeyId: "", tenantId: TENANT, scopes: [], mode: "live" })
+      await next()
+    })
+    mountTemplates(app, {
+      templates: {},
+      templateAssets: assets,
+    } as unknown as ConsoleDeps)
+    return (bytes: Uint8Array) =>
+      app.request("/templates/assets", {
+        method: "POST",
+        headers: { "Content-Type": "image/png" },
+        body: bytes,
+      })
+  }
+
+  it("answers 501 when no bucket is configured", async () => {
+    expect((await images()(new Uint8Array([1]))).status).toBe(501)
+  })
+
+  it("passes the raw bytes through, and a refusal as 422", async () => {
+    const upload = mock<NonNullable<ConsoleDeps["templateAssets"]>["upload"]>(
+      async (_t, bytes) =>
+        bytes[0] === 0x89
+          ? {
+              ok: true,
+              asset: {
+                url: "https://a.test/x.png",
+                sha256: "x",
+                content_type: "image/png",
+                size: 3,
+              },
+            }
+          : {
+              ok: false,
+              problem: "Only PNG, JPEG, GIF and WebP images can be used in emails.",
+            },
+    )
+    const post = images({ upload, sweepDeleted: async () => 0 })
+    const ok = await post(new Uint8Array([0x89, 1, 2]))
+    expect(ok.status).toBe(201)
+    expect(upload.mock.calls[0]?.[1]).toEqual(new Uint8Array([0x89, 1, 2]))
+    expect((await post(new Uint8Array([0x3c]))).status).toBe(422)
+  })
+})

@@ -878,6 +878,21 @@ const schema = z.object({
   CONTENT_STORE_ACCESS_KEY_ID: z.string().min(1).optional(),
   CONTENT_STORE_SECRET_ACCESS_KEY: z.string().min(1).optional(),
 
+  /**
+   * The PUBLIC R2 bucket template images live in (#244), and the host that
+   * serves it: `TEMPLATE_ASSETS_PUBLIC_URL` is what goes into emails, e.g.
+   * `https://assets.i10.tech`.
+   *
+   * ⚠ ALL FIVE OR NONE, checked below. Unset, image uploads answer 501 and the
+   * editor offers image addresses only. A bucket of its own with a token
+   * scoped to it, never the content bucket's: that one is private.
+   */
+  TEMPLATE_ASSETS_ENDPOINT: z.url().optional(),
+  TEMPLATE_ASSETS_BUCKET: z.string().min(1).optional(),
+  TEMPLATE_ASSETS_ACCESS_KEY_ID: z.string().min(1).optional(),
+  TEMPLATE_ASSETS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  TEMPLATE_ASSETS_PUBLIC_URL: z.url().optional(),
+
   /** Bodies with files the content-store job moves per workspace per run. */
   CONTENT_STORE_BATCH: z.coerce.number().int().min(1).max(5000).default(200),
 
@@ -1081,6 +1096,22 @@ const validated = schema.superRefine((env, ctx) => {
       message:
         `the content store needs all of ${store.join(", ")} or none of them; ` +
         `with some set it looks configured and stores nothing.`,
+    })
+  }
+
+  const assets = [
+    "TEMPLATE_ASSETS_ENDPOINT",
+    "TEMPLATE_ASSETS_BUCKET",
+    "TEMPLATE_ASSETS_ACCESS_KEY_ID",
+    "TEMPLATE_ASSETS_SECRET_ACCESS_KEY",
+    "TEMPLATE_ASSETS_PUBLIC_URL",
+  ] as const
+  const assetsSet = assets.filter((k) => env[k] !== undefined)
+  if (assetsSet.length > 0 && assetsSet.length < assets.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: [assets.find((k) => env[k] === undefined)!],
+      message: `template images need all of ${assets.join(", ")} or none of them.`,
     })
   }
 

@@ -12,7 +12,12 @@ import { FloatingInput } from "@repo/ui/components/floating-field"
 import { Swap } from "@repo/ui/components/swap"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { Time } from "@/components/time"
-import { deleteTemplate, publishTemplate, updateTemplate } from "@/lib/actions"
+import {
+  deleteTemplate,
+  publishTemplate,
+  updateTemplate,
+  uploadTemplateImage,
+} from "@/lib/actions"
 import { OUTCOME_HOLD_MS, useOutcome } from "@/lib/outcome"
 import type { TemplateRow } from "@/lib/types"
 
@@ -93,6 +98,18 @@ export function VisualTemplateEditor({ template }: { template: TemplateRow }) {
         onChange={(ref) => {
           editor.current = ref
           setBodyDirty(true)
+        }}
+        onUploadImage={async (file) => {
+          const form = new FormData()
+          form.append("file", file)
+          const result = await uploadTemplateImage(form)
+          if (!result.ok) {
+            // ⚠ THROWN AFTER SAYING WHY: the editor removes the placeholder
+            // it inserted for the upload when this rejects.
+            toast.error("Could not add the image", { description: result.error })
+            throw new Error(result.error)
+          }
+          return { url: result.data.url }
         }}
       />
 

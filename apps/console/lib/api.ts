@@ -93,8 +93,8 @@ export class ApiRequestError extends Error {
 interface RequestOptions {
   method?: string
   body?: unknown
-  /** Sent as-is. Used for the CSV import, which is not JSON. */
-  rawBody?: string
+  /** Sent as-is. Used for the CSV import and template images, which are not JSON. */
+  rawBody?: string | Uint8Array
   contentType?: string
   /**
    * ⚠ `no-store` IS THE DEFAULT AND CHANGING IT PER CALL NEEDS A REASON. This
@@ -242,10 +242,13 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const headers: Record<string, string> = { Authorization: header }
   const context = await clientContextHeader()
   if (context) headers["x-i10-client"] = context
-  let body: string | undefined
+  let body: string | Uint8Array<ArrayBuffer> | undefined
 
   if (options.rawBody !== undefined) {
-    body = options.rawBody
+    body =
+      typeof options.rawBody === "string"
+        ? options.rawBody
+        : new Uint8Array(options.rawBody) // a copy with a plain ArrayBuffer, as fetch wants
     headers["Content-Type"] = options.contentType ?? "text/plain"
   } else if (options.body !== undefined) {
     body = JSON.stringify(options.body)

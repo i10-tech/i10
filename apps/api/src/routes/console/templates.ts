@@ -216,6 +216,22 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
       : c.json(unprocessable(result.problems), 422)
   })
 
+  /**
+   * An image for a template (#244): the raw bytes in, a public URL out.
+   *
+   * ⚠ THE BODY IS THE FILE, NOT JSON. Base64 would add a third to the largest
+   * thing this route takes; the type is read from the bytes either way, so
+   * nothing the request says about itself is trusted.
+   */
+  app.post("/templates/assets", async (c) => {
+    if (!d.templateAssets) return c.json(notWired("Template images"), 501)
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    const result = await d.templateAssets.upload(c.get("auth").tenantId, bytes)
+    return result.ok
+      ? c.json(result.asset, 201)
+      : c.json(unprocessable([result.problem]), 422)
+  })
+
   app.get("/templates/:id/versions/:number", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
     const number = versionNumber(c.req.param("number"))
