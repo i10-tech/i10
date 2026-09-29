@@ -300,6 +300,59 @@ suite("templates", () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.problems[0]).toStartWith("No templates were found")
   })
+
+  it("resolves a send in one query once the version is cached, and never across workspaces (#238)", async () => {
+    const statements: string[] = []
+    const counted = postgres(API_URL!, {
+      max: 1,
+      onnotice: () => {},
+      debug: (_conn, query) => {
+        if (/^\s*select/i.test(query) && !query.includes("set_config"))
+          statements.push(query)
+      },
+    })
+    try {
+      const cached = templateStore(drizzle(counted, { schema }) as unknown as Database)
+      const t = await workspace()
+      const created = await cached.create(t, { name: "cached" })
+      if ("conflict" in created) throw new Error("conflict")
+      await cached.update(t, created.id, { subject: "s", html: "<p>{{ name }}</p>" })
+      await cached.publish(t, created.id)
+      await cached.update(t, created.id, { html: "<p>two {{ name }}</p>" })
+      await cached.publish(t, created.id)
+
+      const send = (version?: number) =>
+        resolveTemplateSend(
+          { template: { id: "cached", version }, variables: { name: "A" } },
+          cached.lookup(t),
+        )
+
+      statements.length = 0
+      expect((await send()).ok).toBe(true)
+      expect(statements.length).toBe(2) // the reference, then the content
+      statements.length = 0
+      expect(await send()).toMatchObject({ ok: true, html: "<p>two A</p>" })
+      expect(statements.length).toBe(1) // the reference only
+
+      // Pinned is the same single query, not a template lookup and a version lookup.
+      await send(1)
+      statements.length = 0
+      expect(await send(1)).toMatchObject({ ok: true, html: "<p>A</p>" })
+      expect(statements.length).toBe(1)
+
+      // A promote takes effect on the very next send.
+      await cached.promote(t, created.id, 1)
+      expect(await send()).toMatchObject({ ok: true, html: "<p>A</p>" })
+
+      // Another workspace asking for this version id by id gets nothing, from
+      // the cache or from Postgres.
+      const other = await workspace()
+      const versionId = (await cached.lookup(t).versionIdFor({ id: "cached" }))!
+      expect(await cached.lookup(other).version(versionId)).toBeNull()
+    } finally {
+      await counted.end()
+    }
+  })
 })
 
 function skeleton() {
