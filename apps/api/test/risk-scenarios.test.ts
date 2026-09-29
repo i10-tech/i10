@@ -16,6 +16,7 @@ import {
   daysAgo,
   identity,
   LEGIT,
+  NO_TRUST,
   NOW,
   peer,
 } from "./risk-fixtures.js"
@@ -129,7 +130,10 @@ describe("scores and bands", () => {
       links: {
         unsafe: [{ host: "evil.example", verdict: "MALWARE", day: "2026-09-28" }],
       },
-      farm: { peers: [peer(), peer(), peer(), peer(), peer({ held: true })] },
+      farm: {
+        peers: [peer(), peer(), peer(), peer(), peer({ held: true })],
+        trusted: NO_TRUST,
+      },
     })
     expect(evaluate(worst).score).toBe(100)
   })
@@ -201,14 +205,20 @@ describe("farm detection needs corroboration", () => {
       free: false,
     })
     const a = evaluate(
-      baseFacts({ farm: { peers: [loose, { ...loose }, { ...loose }] } }),
+      baseFacts({
+        farm: { peers: [loose, { ...loose }, { ...loose }], trusted: NO_TRUST },
+      }),
     )
     expect(a.contributions.map((c) => c.rule)).not.toContain("farm.cluster")
     expect(a.band).toBe("low")
   })
 
   it("flags four or more linked peers at high at least", () => {
-    const a = evaluate(baseFacts({ farm: { peers: [peer(), peer(), peer(), peer()] } }))
+    const a = evaluate(
+      baseFacts({
+        farm: { peers: [peer(), peer(), peer(), peer()], trusted: NO_TRUST },
+      }),
+    )
     expect(bandRank(a.band)).toBeGreaterThanOrEqual(bandRank("high"))
   })
 })
@@ -267,6 +277,11 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
     youngFreeSimilar: 0,
     taintedSimilar: 0,
     bestTaintedSimilarity: null,
+    neighbours: 0,
+    medianSimilarity: null,
+    bestSimilarity: null,
+    trusted: NO_TRUST,
+    boilerplateNear: null,
     ...over,
   })
 
@@ -299,7 +314,7 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
     const withFarm = evaluate(
       baseFacts({
         similarity: sim({ taintedSimilar: 2, bestTaintedSimilarity: 0.95 }),
-        farm: { peers: [peer(), peer()] },
+        farm: { peers: [peer(), peer()], trusted: NO_TRUST },
       }),
     )
     expect(bandRank(withFarm.band)).toBeGreaterThanOrEqual(bandRank("elevated"))
@@ -319,6 +334,7 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
           legit: 0,
           meanAbuseDistance: 0.1,
           nearestDistance: 0.1,
+          medianDistance: 0.1,
         },
       }),
     )
@@ -334,6 +350,7 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
           legit: 0,
           meanAbuseDistance: 0.2,
           nearestDistance: 0.2,
+          medianDistance: 0.2,
         },
       }),
     )
@@ -346,6 +363,7 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
           legit: 2,
           meanAbuseDistance: 0.3,
           nearestDistance: 0.2,
+          medianDistance: 0.2,
         },
       }),
     )
@@ -367,7 +385,104 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
     expect(b.contributions.map((c) => c.rule)).not.toContain("trust.known_templates")
   })
 
-  it("is ruleset version 2", () => {
-    expect(RULESET_VERSION).toBe(2)
+  it("is ruleset version 3 (#222: trusted content left out of similarity)", () => {
+    expect(RULESET_VERSION).toBe(3)
+  })
+})
+
+describe("similarity evidence (#222)", () => {
+  const sim = (
+    over: Partial<NonNullable<ReturnType<typeof baseFacts>["similarity"]>> = {},
+  ): NonNullable<ReturnType<typeof baseFacts>["similarity"]> => ({
+    model: "minilm-l6-v2-q8",
+    similarPeers: 8,
+    youngFreeSimilar: 6,
+    taintedSimilar: 5,
+    bestTaintedSimilarity: 0.95,
+    neighbours: 17,
+    medianSimilarity: 0.912,
+    bestSimilarity: 0.974,
+    trusted: { template: 2, boilerplate: 1 },
+    boilerplateNear: { name: "clerk/reset-password", similarity: 0.881 },
+    ...over,
+  })
+
+  it("records what a content finding was based on, in the issue's shape", () => {
+    const a = evaluate(baseFacts({ similarity: sim() }))
+    const crowd = a.contributions.find((c) => c.rule === "content.semantic_crowd")
+    expect(crowd?.detail).toEqual({
+      signal: "content.semantic_crowd",
+      model: "minilm-l6-v2-q8",
+      neighbours: 17,
+      distinct_workspaces: 8,
+      median_similarity: 0.91,
+      best_similarity: 0.97,
+      confirmed_abuse_neighbours: 5,
+      known_template_matches: 2,
+      boilerplate_matches: 1,
+      boilerplate_match: { name: "clerk/reset-password", similarity: 0.88 },
+    })
+    expect(
+      a.contributions.find((c) => c.rule === "content.like_confirmed_abuse")?.detail
+        ?.signal,
+    ).toBe("content.like_confirmed_abuse")
+  })
+
+  it("records farm evidence as counts and closeness, never a peer's id", () => {
+    const peers = [
+      peer({ exactShared: 2, nearShared: 0, bestSimilarity: 1 }),
+      peer({ nearShared: 3, bestSimilarity: 0.5 }),
+      peer({ nearShared: 1, bestSimilarity: 0.25, held: true }),
+      peer({ nearShared: 1, bestSimilarity: 0.75 }),
+    ]
+    const a = evaluate(
+      baseFacts({ farm: { peers, trusted: { template: 0, boilerplate: 3 } } }),
+    )
+    const cluster = a.contributions.find((c) => c.rule === "farm.cluster")!
+    expect(cluster.detail).toMatchObject({
+      model: "minhash-8x4",
+      neighbours: 7,
+      distinct_workspaces: 4,
+      median_similarity: 0.63,
+      best_similarity: 1,
+      confirmed_abuse_neighbours: 1,
+      boilerplate_matches: 3,
+    })
+    const text = JSON.stringify(a.contributions)
+    for (const p of peers) expect(text).not.toContain(p.peer)
+  })
+
+  it("records behaviour evidence as distances", () => {
+    const a = evaluate(
+      baseFacts({
+        behaviour: {
+          labelled: 10,
+          abuse: 8,
+          legit: 2,
+          meanAbuseDistance: 0.3,
+          nearestDistance: 0.21,
+          medianDistance: 0.456,
+        },
+      }),
+    )
+    expect(
+      a.contributions.find((c) => c.rule === "behaviour.like_abuse")?.detail,
+    ).toMatchObject({
+      model: "behaviour-v1",
+      neighbours: 10,
+      confirmed_abuse_neighbours: 8,
+      median_distance: 0.46,
+      nearest_distance: 0.21,
+    })
+  })
+
+  it("leaves rules that are not about similarity without it", () => {
+    const a = evaluate(
+      ABUSE["a farm: five linked free workspaces sending the same mail"]!.facts(),
+    )
+    for (const c of a.contributions) {
+      if (!c.rule.startsWith("farm.") && !c.rule.startsWith("content.like"))
+        expect(c.detail).toBeUndefined()
+    }
   })
 })

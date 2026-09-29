@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { fingerprint, htmlToText } from "../risk/fingerprint.js"
+import type { TrustSource } from "../risk/trusted.js"
 import type { Embedder } from "./embed.js"
+import { classify, trustMark } from "./trust.js"
 import {
   compactable,
   derive,
@@ -21,7 +23,10 @@ import { embeddedAlready, storeContentVectors } from "./vectors.js"
  *      new one from two near-duplicate bodies (MinHash bands pick candidates);
  *   2. compacts bodies that fit an established template - static skeleton
  *      once, values per message - after a byte-exact check;
- *   3. embeds content it has not embedded yet, into pgvector.
+ *   3. embeds content it has not embedded yet, into pgvector;
+ *   4. credits bodies that ARE one of the workspace's approved templates or
+ *      known boilerplate (#222), and marks their vectors so the similarity
+ *      definers leave them out.
  *
  * ⚠ ONLY FINISHED MESSAGES. Sent, failed or canceled - never queued or
  * sending, so nothing the worker might still read is rewritten under it.
@@ -38,6 +43,10 @@ export interface ContentJobDeps {
   embedLimit?: number
   /** Matches a template needs before bodies are compacted against it. */
   promoteAt?: number
+  /** Boilerplate and approved templates (#222). Absent: nothing is trusted. */
+  trust?: TrustSource
+  /** Adds credited messages to each approved template's count. */
+  creditTemplates?: (counts: ReadonlyMap<string, number>) => Promise<void>
   log?: { warn?: (o: object, m: string) => void }
 }
 
@@ -48,6 +57,8 @@ export interface ContentJobResult {
   compacted: number
   bytesSaved: number
   embedded: number
+  /** Bodies newly credited to an approved template. */
+  trusted: number
 }
 
 interface Body {
@@ -60,6 +71,10 @@ interface Body {
   text: string | null
   bands: string[]
   exact: string | null
+  /** Set when an earlier run credited it to an approved template. */
+  trustedTemplateId: string | null
+  /** `template:<id>` or `boilerplate:<id>` when it fits one this run. */
+  trustedBy: string | null
 }
 
 interface KnownTemplate {
@@ -88,11 +103,13 @@ export async function processContent(
     compacted: 0,
     bytesSaved: 0,
     embedded: 0,
+    trusted: 0,
   }
 
   const [rows, known] = await withTenant(db, tenantId, async (tx) => {
     const bodies = (await tx.execute(sql`
-      select b.message_id, b.created_at::text as created_at, m.subject, b.html, b.text, b.template_id
+      select b.message_id, b.created_at::text as created_at, m.subject, b.html, b.text, b.template_id,
+             b.trusted_template_id
         from core.message_bodies b
         join core.messages m on m.id = b.message_id and m.created_at = b.created_at
        where b.tenant_id = ${tenantId}::uuid
@@ -109,6 +126,7 @@ export async function processContent(
       html: string | null
       text: string | null
       template_id: string | null
+      trusted_template_id: string | null
     }[]
     const templates = (await tx.execute(sql`
       select id, segments, bands, messages, skeleton_hash from core.content_templates
@@ -139,9 +157,55 @@ export async function processContent(
       text: r.text,
       bands: fp?.bands ?? [],
       exact: fp?.exact ?? null,
+      trustedTemplateId: r.trusted_template_id,
+      trustedBy: null,
     }
   })
   result.scanned = bodies.length
+
+  // ── 0. Trusted content (#222), before anything is compacted ──
+  //
+  // ⚠ THE SAME MATCHER AS ACCEPT, ON THE STORED BODY. Here the verdict
+  // callback may spend the Web Risk budget, so a hole's link the accept path
+  // could not vouch for yet gets its answer.
+  const trust =
+    deps.trust && bodies.length > 0
+      ? await deps.trust.forTenant(tenantId).catch((error: unknown) => {
+          deps.log?.warn?.({ err: error, tenantId }, "could not load trusted content")
+          return null
+        })
+      : null
+  const credits = new Map<string, number>()
+  if (trust && trust.entries.length > 0) {
+    const toCredit: Body[] = []
+    for (const body of bodies) {
+      const found = await classify(body, trust.entries, trust.ctx).catch(() => null)
+      if (!found) continue
+      body.trustedBy = trustMark(found.entry)
+      if (
+        found.entry.kind === "template" &&
+        body.trustedTemplateId !== found.entry.id
+      ) {
+        body.trustedTemplateId = found.entry.id
+        toCredit.push(body)
+      }
+    }
+    if (toCredit.length > 0) {
+      await withTenant(db, tenantId, async (tx) => {
+        for (const b of toCredit) {
+          await tx.execute(sql`
+            update core.message_bodies set trusted_template_id = ${b.trustedTemplateId}::uuid
+             where message_id = ${b.messageId}::uuid and created_at = ${b.createdAt}::timestamptz
+          `)
+          credits.set(
+            b.trustedTemplateId!,
+            (credits.get(b.trustedTemplateId!) ?? 0) + 1,
+          )
+        }
+      })
+      result.trusted = toCredit.length
+    }
+  }
 
   const templates: KnownTemplate[] = known.map((t) => ({
     id: t.id,
@@ -256,8 +320,18 @@ export async function processContent(
   if (deps.embedder) {
     const embedder = deps.embedder
     const distinct = new Map<string, Body>()
-    for (const b of bodies)
-      if (b.exact && !distinct.has(b.exact)) distinct.set(b.exact, b)
+    // ⚠ A VECTOR IS TRUSTED ONLY IF EVERY BODY WITH ITS FINGERPRINT FITTED
+    // THE SAME ENTRY - the accept path's rule, so the two never disagree.
+    const marks = new Map<string, string | null>()
+    for (const b of bodies) {
+      if (!b.exact) continue
+      if (!distinct.has(b.exact)) distinct.set(b.exact, b)
+      const prev = marks.get(b.exact)
+      marks.set(
+        b.exact,
+        prev === undefined || prev === b.trustedBy ? b.trustedBy : null,
+      )
+    }
     const have = await embeddedAlready(db, tenantId, embedder.model, [
       ...distinct.keys(),
     ])
@@ -280,6 +354,7 @@ export async function processContent(
             day: new Date(b.createdAt).toISOString().slice(0, 10),
             exact: b.exact!,
             embedding: vectors[i]!,
+            trustedBy: marks.get(b.exact!) ?? null,
           })),
         )
       } catch (error) {
@@ -287,6 +362,7 @@ export async function processContent(
       }
     }
   }
+  if (credits.size > 0 && deps.creditTemplates) await deps.creditTemplates(credits)
   return result
 }
 

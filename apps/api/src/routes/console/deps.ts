@@ -1,4 +1,5 @@
 import type { HoldStore } from "../../risk/holds.js"
+import type { TrustedTemplateStore } from "../../risk/trusted.js"
 import type { SubscriptionOps } from "../../billing/db.js"
 import type { TenantAuthDeps } from "../../middleware/tenant.js"
 import type { FreshAuthReader } from "../../middleware/session.js"
@@ -63,6 +64,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * the other stores the tests leave out; its routes then answer 501.
    */
   suppressions?: SuppressionStore
+  /**
+   * Templates submitted for staff review (#222) - the store `/trusted-templates`
+   * uses. Optional; without it the routes answer 501.
+   */
+  trustedTemplates?: TrustedTemplateStore
   usage: UsageStore
   onboarding: OnboardingStore
   marketing: MarketingStore

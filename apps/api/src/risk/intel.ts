@@ -100,7 +100,23 @@ export async function rdapRegistered(
   return at && !Number.isNaN(at.getTime()) ? at : null
 }
 
-/** Web Risk's threat types for a host, or an empty list when it is clean. */
+/** A refused or failed Web Risk call; `status` is null when nothing answered. */
+export class WebRiskError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+  ) {
+    super(message)
+    this.name = "WebRiskError"
+  }
+}
+
+/**
+ * Web Risk's threat types for a host, or an empty list when it is clean.
+ *
+ * ⚠ CALL IT THROUGH risk/webrisk.ts, NOT DIRECTLY. That is where the daily
+ * budget and the failure cache live; this is only the HTTP call.
+ */
 export async function webRiskLookup(
   host: string,
   key: string,
@@ -111,13 +127,15 @@ export async function webRiskLookup(
     params.append("threatTypes", t)
   params.set("uri", `http://${host}/`)
   params.set("key", key)
-  const res = await fetchImpl(
-    `https://webrisk.googleapis.com/v1/uris:search?${params}`,
-    {
+  let res: Response
+  try {
+    res = await fetchImpl(`https://webrisk.googleapis.com/v1/uris:search?${params}`, {
       signal: timed(),
-    },
-  )
-  if (!res.ok) throw new Error(`Web Risk answered ${res.status}`)
+    })
+  } catch (error) {
+    throw new WebRiskError(`Web Risk unreachable: ${String(error)}`, null)
+  }
+  if (!res.ok) throw new WebRiskError(`Web Risk answered ${res.status}`, res.status)
   const body = (await res.json()) as { threat?: { threatTypes?: string[] } }
   return body.threat?.threatTypes ?? []
 }

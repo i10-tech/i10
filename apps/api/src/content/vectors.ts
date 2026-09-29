@@ -26,14 +26,19 @@ export async function storeContentVectors(
   db: Database,
   tenantId: string,
   model: string,
-  rows: { day: string; exact: string; embedding: number[] }[],
+  rows: {
+    day: string
+    exact: string
+    embedding: number[]
+    trustedBy?: string | null
+  }[],
 ): Promise<number> {
   if (rows.length === 0) return 0
   await withTenant(db, tenantId, async (tx) => {
     for (const r of rows) {
       await tx.execute(sql`
-        insert into core.content_vectors (tenant_id, day, exact, model, embedding)
-        values (${tenantId}::uuid, ${r.day}::date, ${r.exact}, ${model}, ${literal(r.embedding)}::halfvec)
+        insert into core.content_vectors (tenant_id, day, exact, model, embedding, trusted_by)
+        values (${tenantId}::uuid, ${r.day}::date, ${r.exact}, ${model}, ${literal(r.embedding)}::halfvec, ${r.trustedBy ?? null})
         on conflict do nothing
       `)
     }
@@ -109,7 +114,12 @@ export interface ContentNeighbours {
   youngFreeSimilar: number
   taintedSimilar: number
   bestTaintedSimilarity: number | null
+  neighbours: number
+  medianSimilarity: number | null
+  bestSimilarity: number | null
 }
+
+const numOrNull = (v: unknown) => (v == null ? null : Number(v))
 
 export async function contentNeighbours(
   db: Database,
@@ -128,8 +138,10 @@ export async function contentNeighbours(
     similarPeers: Number(r.similar_peers ?? 0),
     youngFreeSimilar: Number(r.young_free_similar ?? 0),
     taintedSimilar: Number(r.tainted_similar ?? 0),
-    bestTaintedSimilarity:
-      r.best_tainted_similarity == null ? null : Number(r.best_tainted_similarity),
+    bestTaintedSimilarity: numOrNull(r.best_tainted_similarity),
+    neighbours: Number(r.neighbours ?? 0),
+    medianSimilarity: numOrNull(r.median_similarity),
+    bestSimilarity: numOrNull(r.best_similarity),
   }
 }
 
@@ -139,6 +151,7 @@ export interface BehaviourNeighbours {
   legit: number
   meanAbuseDistance: number | null
   nearestDistance: number | null
+  medianDistance: number | null
 }
 
 export async function behaviourNeighbours(
@@ -157,6 +170,7 @@ export async function behaviourNeighbours(
     legit: Number(r.legit ?? 0),
     meanAbuseDistance: num(r.mean_abuse_distance),
     nearestDistance: num(r.nearest_distance),
+    medianDistance: num(r.median_distance),
   }
 }
 

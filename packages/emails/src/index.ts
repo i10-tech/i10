@@ -18,6 +18,7 @@ import DomainTransfer from "./templates/domain-transfer.js"
 import SendingStatus, { sendingStatusSubject } from "./templates/sending-status.js"
 import SendingHeld, { sendingHeldSubject } from "./templates/sending-held.js"
 import SecurityAlert, { securityAlertSubject } from "./templates/security-alert.js"
+import TemplateReview, { templateReviewSubject } from "./templates/template-review.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -344,6 +345,22 @@ export async function renderSecurityAlert(
   const element = SecurityAlert(props)
   return {
     subject: securityAlertSubject(props.kind),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * The email telling a workspace owner how our review of a submitted template
+ * went, or that an approval was withdrawn (#222). Sent by the API's risk
+ * engine and by staff through risk-admin.
+ */
+export async function renderTemplateReview(
+  props: React.ComponentProps<typeof TemplateReview>,
+): Promise<RenderedEmail> {
+  const element = TemplateReview(props)
+  return {
+    subject: templateReviewSubject(props.decision, props.template),
     html: await render(element),
     text: await render(element, { plainText: true }),
   }

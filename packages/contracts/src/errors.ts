@@ -123,6 +123,12 @@ export const errorNames = [
    * lifts with better rates; a hold is ours and lifts with a review.
    */
   "sending_held",
+  /**
+   * ⚠ ADDITIVE (#222). The same template, fixed part for fixed part, is
+   * already waiting for review or approved in this workspace; a second copy
+   * would be a second approval nobody reviewed.
+   */
+  "template_already_submitted",
   "internal_server_error",
 ] as const
 

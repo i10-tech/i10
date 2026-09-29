@@ -1,7 +1,16 @@
 import type { Hono } from "hono"
 import type { BroadcastInput } from "../../console/marketing.js"
 import type { ConsoleDeps } from "./deps.js"
-import { asNullableString, notFound, parseDate, readJson, validation } from "./http.js"
+import { presentTrustedTemplate } from "../trusted-templates.js"
+import {
+  asNullableString,
+  isRecord,
+  notFound,
+  notWired,
+  parseDate,
+  readJson,
+  validation,
+} from "./http.js"
 
 /**
  * Broadcasts and the templates they are written from.
@@ -152,6 +161,82 @@ export function mountCampaigns(app: Hono, d: ConsoleDeps): void {
     return published
       ? c.json(published)
       : c.json(notFound("No template with that id."), 404)
+  })
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Templates submitted for review (#222)
+  //
+  // ⚠ THE SAME STORE AS `/trusted-templates`, so a submission from the console
+  // and one from the API are the same thing, limited and audited the same way.
+  // Staff decide in risk-admin; nothing here can approve.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  app.get("/trusted-templates", async (c) => {
+    if (!d.trustedTemplates) return c.json(notWired("Reviewed templates"), 501)
+    const { tenantId } = c.get("auth")
+    const rows = await d.trustedTemplates.list(tenantId)
+    return c.json({ data: rows.map(presentTrustedTemplate) })
+  })
+
+  app.post("/trusted-templates", async (c) => {
+    if (!d.trustedTemplates) return c.json(notWired("Reviewed templates"), 501)
+    const { tenantId } = c.get("auth")
+    const body = await readJson(c)
+    const name = typeof body?.name === "string" ? body.name : ""
+    const holes: Record<string, number> = {}
+    if (isRecord(body?.holes)) {
+      for (const [k, v] of Object.entries(body.holes)) {
+        const n = typeof v === "number" ? v : Number(v)
+        if (!Number.isFinite(n))
+          return c.json(validation(`The limit for {{${k}}} must be a number.`), 422)
+        holes[k] = n
+      }
+    }
+    const r = await d.trustedTemplates.submit(
+      tenantId,
+      {
+        name,
+        html: asNullableString(body?.html),
+        text: asNullableString(body?.text),
+        holes,
+      },
+      `user:${c.get("user").userId}`,
+    )
+    if ("error" in r) {
+      return r.code === "duplicate"
+        ? c.json(
+            {
+              statusCode: 409,
+              name: "template_already_submitted" as const,
+              message: r.error,
+            },
+            409,
+          )
+        : c.json(validation(r.error), 422)
+    }
+    return c.json(presentTrustedTemplate(r.template), 201)
+  })
+
+  app.get("/trusted-templates/:id", async (c) => {
+    if (!d.trustedTemplates) return c.json(notWired("Reviewed templates"), 501)
+    const { tenantId } = c.get("auth")
+    const found = await d.trustedTemplates.get(tenantId, c.req.param("id"))
+    return found
+      ? c.json(presentTrustedTemplate(found))
+      : c.json(notFound("No submission with that id."), 404)
+  })
+
+  app.delete("/trusted-templates/:id", async (c) => {
+    if (!d.trustedTemplates) return c.json(notWired("Reviewed templates"), 501)
+    const { tenantId } = c.get("auth")
+    const done = await d.trustedTemplates.withdraw(
+      tenantId,
+      c.req.param("id"),
+      `user:${c.get("user").userId}`,
+    )
+    return done
+      ? c.json(presentTrustedTemplate(done))
+      : c.json(notFound("No pending or approved submission with that id."), 404)
   })
 
   app.delete("/templates/:id", async (c) => {

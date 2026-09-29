@@ -74,6 +74,7 @@
               "confirmation_required",
               "sending_paused",
               "sending_held",
+              "template_already_submitted",
               "internal_server_error"
             ]
           },
@@ -763,6 +764,141 @@
         },
         "required": [
           "address"
+        ]
+      },
+      "TrustedTemplateList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "enum": [
+                    "trusted_template"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "rejected",
+                    "revoked",
+                    "withdrawn"
+                  ]
+                },
+                "html": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "holes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "max": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "max"
+                    ]
+                  }
+                },
+                "matched": {
+                  "type": "integer"
+                },
+                "submitted_at": {
+                  "type": "string"
+                },
+                "decided_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "decision_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "object",
+                "id",
+                "name",
+                "status",
+                "html",
+                "text",
+                "holes",
+                "matched",
+                "submitted_at",
+                "decided_at",
+                "decision_reason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "CreateTrustedTemplate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "html": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200000
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200000
+          },
+          "holes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        },
+        "required": [
+          "name"
         ]
       },
       "Domain": {
@@ -1914,6 +2050,555 @@
           },
           "503": {
             "description": "Our sending provider could not be updated; nothing changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trusted-templates": {
+      "get": {
+        "tags": [
+          "Trusted templates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List submitted templates",
+        "description": "Newest first, whatever their status.",
+        "responses": {
+          "200": {
+            "description": "The workspace's submissions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustedTemplateList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Trusted templates are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Trusted templates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Submit a template for review",
+        "description": "Send the body exactly as you will send it, with `{{name}}` wherever a value goes. Once our team approves it, messages matching it exactly stop counting as repeated content. Approval never excuses bounces or spam complaints, and is withdrawn automatically when they run high. Links inside values must point at your own verified domains.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTrustedTemplate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Submitted; waiting for review.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "trusted_template"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected",
+                        "revoked",
+                        "withdrawn"
+                      ]
+                    },
+                    "html": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "holes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "max": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "max"
+                        ]
+                      }
+                    },
+                    "matched": {
+                      "type": "integer"
+                    },
+                    "submitted_at": {
+                      "type": "string"
+                    },
+                    "decided_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "decision_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "name",
+                    "status",
+                    "html",
+                    "text",
+                    "holes",
+                    "matched",
+                    "submitted_at",
+                    "decided_at",
+                    "decision_reason"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The same template is already waiting for review or approved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The template is not acceptable, or the workspace is at its limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Trusted templates are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trusted-templates/{id}": {
+      "get": {
+        "tags": [
+          "Trusted templates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a submitted template",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The submission and its status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "trusted_template"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected",
+                        "revoked",
+                        "withdrawn"
+                      ]
+                    },
+                    "html": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "holes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "max": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "max"
+                        ]
+                      }
+                    },
+                    "matched": {
+                      "type": "integer"
+                    },
+                    "submitted_at": {
+                      "type": "string"
+                    },
+                    "decided_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "decision_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "name",
+                    "status",
+                    "html",
+                    "text",
+                    "holes",
+                    "matched",
+                    "submitted_at",
+                    "decided_at",
+                    "decision_reason"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No submission with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Trusted templates are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Trusted templates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Withdraw a submitted template",
+        "description": "Takes back a submission waiting for review, or an approval. Mail matching it is then treated like any other mail. The record stays, marked `withdrawn`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Withdrawn.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "trusted_template"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "rejected",
+                        "revoked",
+                        "withdrawn"
+                      ]
+                    },
+                    "html": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "holes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "max": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "max"
+                        ]
+                      }
+                    },
+                    "matched": {
+                      "type": "integer"
+                    },
+                    "submitted_at": {
+                      "type": "string"
+                    },
+                    "decided_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "decision_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "name",
+                    "status",
+                    "html",
+                    "text",
+                    "holes",
+                    "matched",
+                    "submitted_at",
+                    "decided_at",
+                    "decision_reason"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No pending or approved submission with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Trusted templates are not configured.",
             "content": {
               "application/json": {
                 "schema": {

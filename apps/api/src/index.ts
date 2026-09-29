@@ -713,6 +713,7 @@ const observeContent = (tenantId: string, payloads: readonly SendEmail[]) => {
     redis: cache,
     threshold: env.RISK_FARM_TRIPWIRE,
     rescore: (ids, trigger) => rescore.rescore(ids, trigger),
+    trust: risk.acceptTrust,
   })
     .then(() => markDirty(cache, [tenantId]))
     .catch((error: unknown) =>
@@ -748,6 +749,7 @@ const suppressions = suppressionStore({
 
 const app = createApp({
   suppressions,
+  trustedTemplates: risk.trustedTemplates,
   apiKeyAuth: {
     // ⚠ OUR OWN TABLE, NOT CLERK. See auth/api-key.ts for why, and note the
     // client above is still built - Clerk remains the identity provider for
@@ -968,6 +970,7 @@ const app = createApp({
     holds: risk.holds,
     ...(observeSession ? { observeSession } : {}),
     suppressions,
+    trustedTemplates: risk.trustedTemplates,
     usage: usageStore({
       db,
       meter: postgresMeter(db),

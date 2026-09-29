@@ -14,6 +14,8 @@ import { riskNotices } from "./notice.js"
 import type { RiskDeps } from "./runner.js"
 import { embedderModelName } from "../content/embed.js"
 import { assessmentStore } from "./store.js"
+import { boilerplateStore, trustSource, trustedTemplateStore } from "./trusted.js"
+import { asVerdict, webRiskChecker } from "./webrisk.js"
 
 /**
  * Building the risk engine (#170), once, the same way in every process that
@@ -56,6 +58,8 @@ export interface RiskSystemInput {
     | "LAYA_URL"
     | "LAYA_API_KEY"
     | "RISK_EMBEDDER"
+    | "WEBRISK_API_KEY"
+    | "WEBRISK_DAILY_LIMIT"
   >
   clerk: ClerkForRisk
   redis?: Redis
@@ -119,6 +123,30 @@ export function riskSystem(input: RiskSystemInput) {
     input.sender && input.consoleUrl
       ? riskNotices({ db, clerk, sender: input.sender, consoleUrl: input.consoleUrl })
       : undefined
+  const webRisk = webRiskChecker({
+    ...(env.WEBRISK_API_KEY ? { key: env.WEBRISK_API_KEY } : {}),
+    dailyLimit: env.WEBRISK_DAILY_LIMIT,
+    ...(redis ? { redis } : {}),
+    ...(log ? { log } : {}),
+  })
+  const trustedTemplates = trustedTemplateStore(db)
+  const boilerplate = boilerplateStore(db)
+  /*
+   * ⚠ TWO SOURCES, ONE DIFFERENCE: WHO MAY SPEND THE WEB RISK BUDGET. The
+   * accept path reads cached verdicts only - it runs per request, and a hole's
+   * link it cannot vouch for yet simply earns no credit until the hourly job,
+   * which may look the host up, has seen it.
+   */
+  const acceptTrust = trustSource(db, {
+    templates: trustedTemplates,
+    boilerplate,
+    verdict: async (host) => asVerdict(await webRisk.cached(host)),
+  })
+  const jobTrust = trustSource(db, {
+    templates: trustedTemplates,
+    boilerplate,
+    verdict: async (host) => asVerdict(await webRisk.lookup(host)),
+  })
 
   const deps: RiskDeps = {
     db,
@@ -141,6 +169,21 @@ export function riskSystem(input: RiskSystemInput) {
       ...(log ? { log } : {}),
     },
     labels,
+    webRisk,
+    trust: jobTrust,
+    trustedTemplates,
+    ...(notices
+      ? {
+          templateNotice: (tenantId, r) =>
+            notices.templateDecision({
+              tenantId,
+              templateId: r.template.id,
+              template: r.template.name,
+              decision: "revoked",
+              reason: r.template.decisionReason,
+            }),
+        }
+      : {}),
     contentModel: embedderModelName(env.RISK_EMBEDDER),
     switches: {
       enabled: env.RISK_ENABLED,
@@ -172,5 +215,18 @@ export function riskSystem(input: RiskSystemInput) {
       })
     : undefined
 
-  return { deps, tiers, holds, assessments, labels, identity, takeover, notices }
+  return {
+    deps,
+    tiers,
+    holds,
+    assessments,
+    labels,
+    identity,
+    takeover,
+    notices,
+    webRisk,
+    trustedTemplates,
+    boilerplate,
+    acceptTrust,
+  }
 }

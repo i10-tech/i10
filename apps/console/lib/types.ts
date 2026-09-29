@@ -451,6 +451,26 @@ export interface TemplateRow {
 }
 
 /**
+ * A template submitted for staff review (#222). The API's public shape, the
+ * same one `/trusted-templates` returns.
+ *
+ * ⚠ APPROVAL COVERS REPETITION, NEVER RESULTS. See apps/api/src/risk/trusted.ts.
+ */
+export interface TrustedTemplateRow {
+  object: "trusted_template"
+  id: string
+  name: string
+  status: "pending" | "approved" | "rejected" | "revoked" | "withdrawn"
+  html: string | null
+  text: string | null
+  holes: { name: string; max: number }[]
+  matched: number
+  submitted_at: string
+  decided_at: string | null
+  decision_reason: string | null
+}
+
+/**
  * Why a delegated domain has not verified. See apps/api/src/console/delegation.ts.
  *
  * ⚠ THE FINDINGS ARE A UNION RATHER THAN A STRING, because the console's whole
