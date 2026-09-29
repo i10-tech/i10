@@ -21,6 +21,18 @@ const config: NextConfig = {
   transpilePackages: ["@repo/ui"],
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    serverActions: {
+      /*
+       * ⚠ RAISED FROM 1 MB FOR ONE ACTION: A FOLDER OF TEMPLATES (#234). The
+       * API accepts up to 4 MiB of code per upload and the action sends the
+       * raw files as form data, so this is that plus room for the multipart
+       * framing. Next applies one limit to every action; the API's own limits
+       * are what bound each route.
+       */
+      bodySizeLimit: "5mb",
+    },
+  },
 
   /*
    * Security headers for every response.

@@ -11,6 +11,8 @@ import {
   PageTitle,
 } from "@repo/ui/components/page"
 import { NewTemplateButton } from "@/components/new-template"
+import { SourceBadge } from "@/components/template-source"
+import { UploadTemplatesButton } from "@/components/upload-templates"
 import {
   SubmitTrustedTemplateButton,
   WithdrawTrustedTemplate,
@@ -69,13 +71,15 @@ export default async function TemplatesPage() {
            */}
           {hasRows && (
             <PageActions>
+              <UploadTemplatesButton />
               <NewTemplateButton />
             </PageActions>
           )}
         </PageHeaderRow>
         <PageDescription>
-          Write once, send by id. Editing a template does not change what is going out
-          until you publish it.
+          Write one in the editor or upload React Email files, then send it by id. Every
+          change is a new version; nothing changes what is going out until it is
+          published, and any earlier version can be made live again.
         </PageDescription>
       </PageHeader>
 
@@ -85,7 +89,13 @@ export default async function TemplatesPage() {
         ) : !hasRows ? (
           <EmptyState
             title="No templates yet"
-            description="Create one and reference it from your send call, so changing the copy does not mean a deploy."
+            description="Write one in the editor, or upload React Email .tsx files or a folder of them. Then reference it from your send call, so changing the copy does not mean a deploy."
+            secondary={
+              <div className="flex flex-wrap justify-center gap-2">
+                <UploadTemplatesButton />
+                <NewTemplateButton />
+              </div>
+            }
           />
         ) : (
           <div className="space-y-6">
@@ -112,13 +122,21 @@ export default async function TemplatesPage() {
                           </p>
                         </div>
 
+                        {/*
+                         * ⚠ "UNPUBLISHED CHANGES" ONLY FOR EDITOR TEMPLATES.
+                         * An upload or a push IS a version, so for those the
+                         * draft is never ahead of what is live.
+                         */}
                         {template.published_at === null ? (
                           <Badge variant="outline">Never published</Badge>
                         ) : (
+                          template.source === "managed" &&
                           template.updated_at > template.published_at && (
                             <Badge variant="secondary">Unpublished changes</Badge>
                           )
                         )}
+
+                        <SourceBadge source={template.source} />
 
                         {template.version > 0 && (
                           <span className="tabular shrink-0 font-mono text-2xs text-muted-foreground">

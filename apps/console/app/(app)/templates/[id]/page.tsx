@@ -6,14 +6,23 @@ import { Button } from "@repo/ui/components/button"
 import { CopyField } from "@repo/ui/components/copy"
 import {
   Page,
+  PageActions,
   PageBody,
   PageHeader,
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
 import { TemplateEditor } from "@/components/template-editor"
+import { TemplateFiles } from "@/components/template-files"
+import { TemplatePreviewPanel } from "@/components/template-preview"
+import { SourceBadge } from "@/components/template-source"
+import { TemplateSubject } from "@/components/template-subject"
+import { TemplateTabs } from "@/components/template-tabs"
+import { TemplateVersions } from "@/components/template-versions"
+import { Time } from "@/components/time"
+import { UploadVersionButton } from "@/components/upload-templates"
 import { tryApi } from "@/lib/api"
-import type { TemplateRow } from "@/lib/types"
+import type { TemplateDetail } from "@/lib/types"
 
 export async function generateMetadata({
   params,
@@ -21,25 +30,35 @@ export async function generateMetadata({
   params: Promise<{ id: string }>
 }): Promise<Metadata> {
   const { id } = await params
-  const result = await tryApi<TemplateRow>(
+  const result = await tryApi<TemplateDetail>(
     `/console/templates/${encodeURIComponent(id)}`,
   )
   return { title: result.ok ? result.data.name : "Template" }
 }
 
 /**
+ * One template: its id, how to change it, how it looks, and every version.
+ *
  * ⚠ THE ID IS SHOWN PROMINENTLY BECAUSE IT IS WHAT CODE REFERENCES. A template
  * is useless until somebody can paste its id into a send call, and hunting for
  * it in a URL bar is the kind of friction that makes people give up and inline
  * the HTML instead.
+ *
+ * ⚠ WHAT CAN BE CHANGED HERE FOLLOWS WHERE THE TEMPLATE LIVES (#234). One made
+ * in the editor is edited here; an uploaded one gets a new version by upload;
+ * one kept in GitHub changes only by a push, so this page offers it nothing to
+ * type into that the next push would overwrite.
  */
 export default async function TemplatePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ tab?: string }>
 }) {
   const { id } = await params
-  const result = await tryApi<TemplateRow>(
+  const { tab } = await searchParams
+  const result = await tryApi<TemplateDetail>(
     `/console/templates/${encodeURIComponent(id)}`,
   )
 
@@ -47,6 +66,47 @@ export default async function TemplatePage({
     if (result.error.statusCode === 404) notFound()
     throw new Error(result.error.message)
   }
+  const template = result.data
+  const live = template.history.find((v) => v.live)
+
+  const preview = {
+    value: "preview",
+    label: "Preview",
+    content: (
+      <TemplatePreviewPanel templateId={template.id} history={template.history} />
+    ),
+  }
+  const versions = {
+    value: "versions",
+    label: `Versions${template.versions > 0 ? ` (${template.versions})` : ""}`,
+    content: <TemplateVersions templateId={template.id} history={template.history} />,
+  }
+  const tabs =
+    template.kind === "html"
+      ? [
+          {
+            value: "editor",
+            label: "Editor",
+            content: <TemplateEditor template={template} />,
+          },
+          preview,
+          versions,
+        ]
+      : [
+          preview,
+          versions,
+          ...(live
+            ? [
+                {
+                  value: "source",
+                  label: "Source",
+                  content: (
+                    <TemplateFiles templateId={template.id} number={live.number} />
+                  ),
+                },
+              ]
+            : []),
+        ]
 
   return (
     <Page>
@@ -63,18 +123,37 @@ export default async function TemplatePage({
                 <ArrowLeft />
               </Link>
             </Button>
-            <PageTitle className="truncate font-mono">{result.data.name}</PageTitle>
+            <PageTitle className="truncate font-mono">{template.name}</PageTitle>
+            <SourceBadge source={template.source} />
           </div>
+          {template.source === "upload" && (
+            <PageActions>
+              <UploadVersionButton templateId={template.id} name={template.name} />
+            </PageActions>
+          )}
         </PageHeaderRow>
       </PageHeader>
 
       <PageBody className="space-y-6">
-        <div className="max-w-md space-y-1">
-          <p className="text-xs text-muted-foreground">Template ID</p>
-          <CopyField value={result.data.id} />
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+          <div className="w-full max-w-md space-y-1">
+            <p className="text-xs text-muted-foreground">Template ID</p>
+            <CopyField value={template.id} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {live ? (
+              <>
+                v{live.number} live since <Time iso={live.created_at} mode="exact" />
+              </>
+            ) : (
+              "Nothing live yet: sends naming this template fail until a version exists."
+            )}
+          </p>
         </div>
 
-        <TemplateEditor template={result.data} />
+        {template.kind === "tsx" && <TemplateSubject template={template} />}
+
+        <TemplateTabs initial={tab ?? ""} tabs={tabs} />
       </PageBody>
     </Page>
   )

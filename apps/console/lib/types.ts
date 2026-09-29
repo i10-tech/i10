@@ -452,12 +452,16 @@ export interface BroadcastDetail extends BroadcastRow {
   }
 }
 
+/** Where a template is maintained (#234). See `templateSource` in the API's db/core.ts. */
+export type TemplateSource = "managed" | "upload" | "github"
+
 export interface TemplateRow {
   id: string
   name: string
   folder: string | null
-  /** `html` is written here; `tsx` is an uploaded React Email component (#160). */
+  /** `html` is written here; `tsx` is a React Email component (#160). */
   kind: "html" | "tsx"
+  source: TemplateSource
   subject: string | null
   /** The draft body of an `html` template. */
   html: string | null
@@ -471,6 +475,61 @@ export interface TemplateRow {
   created_at: string
   updated_at: string
 }
+
+/** One variable a version takes: its dotted path and the sample it previews with. */
+export interface TemplateVariable {
+  path: string
+  preview: string
+}
+
+/** A version in a template's history. Versions are immutable (#160). */
+export interface TemplateVersionSummary {
+  id: string
+  number: number
+  kind: TemplateRow["kind"]
+  subject: string | null
+  variables: TemplateVariable[]
+  /** Which React and React Email rendered a `tsx` version. */
+  runtime: string | null
+  /** The entry's path in the upload or repository. */
+  path: string | null
+  /** The commit a GitHub template's version came from. */
+  commit_sha: string | null
+  live: boolean
+  created_at: string
+}
+
+export interface TemplateVersionDetail extends TemplateVersionSummary {
+  /** The entry `.tsx`. */
+  source: string | null
+  /** The other files it imports, path to text. */
+  files: Record<string, string> | null
+  /** The skeleton with markers written as `{{ path }}`: for reading and diffing. */
+  display: { html: string | null; text: string | null }
+}
+
+export interface TemplateDetail extends TemplateRow {
+  history: TemplateVersionSummary[]
+}
+
+/** A version filled with sample or given values, exactly as a send would fill it. */
+export interface TemplatePreview {
+  subject: string | null
+  html: string | null
+  text: string | null
+}
+
+/** What happened to one template in an upload (#234). */
+export type TemplateUploadOutcome = {
+  path: string
+  name: string
+  folder: string | null
+  template_id: string | null
+} & (
+  | { outcome: "created" | "versioned" | "unchanged"; version: number }
+  | { outcome: "refused"; problems: string[] }
+  | { outcome: "unavailable"; message: string }
+)
 
 /**
  * A template submitted for staff review (#222). The API's public shape, the

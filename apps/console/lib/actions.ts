@@ -11,7 +11,10 @@ import type {
   Domain,
   PropertyRow,
   SegmentRow,
+  TemplatePreview,
   TemplateRow,
+  TemplateUploadOutcome,
+  TemplateVersionDetail,
   TopicRow,
   TrustedTemplateRow,
   VerifiedDomain,
@@ -925,6 +928,103 @@ export async function deleteTemplate(id: string) {
         method: "DELETE",
       }),
     ["/templates"],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * The files of an upload, from the form the browser sent: each entry's name is
+ * the file's path in the upload, and its value the file.
+ *
+ * ⚠ FORM DATA RATHER THAN JSON, BECAUSE THE FILES ARE CODE. JSON-escaping
+ * source text inflates it by a third, and a folder of templates is the largest
+ * thing the console ever sends; `serverActions.bodySizeLimit` is sized for the
+ * raw files (see next.config.ts). The API applies the real limits.
+ */
+async function filesOf(form: FormData): Promise<Record<string, string>> {
+  const files: Record<string, string> = {}
+  for (const [path, value] of form.entries()) {
+    if (path.startsWith("$")) continue // our own fields, not files
+    const entry: unknown = value
+    files[path] = entry instanceof Blob ? await entry.text() : String(entry)
+  }
+  return files
+}
+
+/** A folder of templates, or several `.tsx` files (#234). */
+export async function uploadTemplates(form: FormData) {
+  const files = await filesOf(form)
+  return run(
+    () =>
+      api<{ data: TemplateUploadOutcome[]; problems: string[] }>(
+        "/console/templates/upload",
+        { method: "POST", body: { files } },
+      ),
+    ["/templates"],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * A new version of one template: its entry, and the files it imports.
+ * `$entry` in the form names the entry.
+ */
+export async function uploadTemplateVersion(id: string, form: FormData) {
+  const entry = form.get("$entry")
+  const files = await filesOf(form)
+  return run(
+    () =>
+      api<TemplateVersionDetail & { unchanged: boolean }>(
+        `/console/templates/${encodeURIComponent(id)}/versions`,
+        {
+          method: "POST",
+          body: { entry: typeof entry === "string" ? entry : "", files },
+        },
+      ),
+    ["/templates", `/templates/${encodeURIComponent(id)}`],
+  )
+}
+
+/** Makes an existing version live. Rolling back is promoting an older one. */
+export async function promoteTemplateVersion(id: string, number: number) {
+  return run(
+    () =>
+      api<TemplateRow>(
+        `/console/templates/${encodeURIComponent(id)}/versions/${number}/promote`,
+        { method: "POST" },
+      ),
+    ["/templates", `/templates/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
+ * ⚠ READS, NOT WRITES, so neither revalidates nor refreshes. A preview is
+ * asked for on every edit of a sample value, and a refresh per keystroke would
+ * re-render the page under somebody's cursor.
+ */
+export async function previewTemplateVersion(
+  id: string,
+  number: number,
+  variables?: Record<string, unknown>,
+) {
+  return run(
+    () =>
+      api<TemplatePreview>(
+        `/console/templates/${encodeURIComponent(id)}/versions/${number}/preview`,
+        { method: "POST", body: variables ? { variables } : {} },
+      ),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export async function templateVersion(id: string, number: number) {
+  return run(
+    () =>
+      api<TemplateVersionDetail>(
+        `/console/templates/${encodeURIComponent(id)}/versions/${number}`,
+      ),
+    [],
     { refreshCaller: false },
   )
 }
