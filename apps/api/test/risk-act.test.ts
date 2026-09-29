@@ -1,11 +1,7 @@
 import { describe, expect, it, mock } from "bun:test"
 import type { SendEmail } from "@repo/contracts"
 import { act, type ActDeps } from "../src/risk/act.js"
-import {
-  MAX_FINGERPRINTS_PER_REQUEST,
-  recordContent,
-  type TripwireRedis,
-} from "../src/risk/content.js"
+import { recordContent, type TripwireRedis } from "../src/risk/content.js"
 import type { Database } from "../src/db/client.js"
 import { riskTrigger } from "../src/risk/trigger.js"
 import type { RiskDeps } from "../src/risk/runner.js"
@@ -279,18 +275,21 @@ describe("the accept-time recorder and tripwire", () => {
     expect(links[0]).not.toContain("u=")
   })
 
-  it("bounds the work per request", async () => {
+  it("stamps a stored body in the same transaction as its sightings", async () => {
     const { db, statements } = fakeDb()
-    const distinct = Array.from({ length: 100 }, (_, i) => ({
-      from: "a@x.top",
-      to: "r@example.com",
-      subject: `Topic ${"abcdefghij"[i % 10]}${"klmnopqrst"[Math.floor(i / 10)]}`,
-      text: `completely different body about subject ${"abcdefghij"[i % 10]} and ${"klmnopqrst"[Math.floor(i / 10)]} with enough words to be fingerprinted at all`,
-    })) as SendEmail[]
-    await recordContent("t1", distinct, { db, threshold: 5 })
-    expect(
-      statements.filter((s) => s.includes("content_fingerprints")).length,
-    ).toBeLessThanOrEqual(MAX_FINGERPRINTS_PER_REQUEST)
+    await recordContent(
+      "t1",
+      [
+        {
+          ...promo(1),
+          messageId: crypto.randomUUID(),
+          createdAt: "2026-09-29 10:00:00.123456+00",
+        },
+      ],
+      { db, threshold: 5 },
+    )
+    expect(statements.some((s) => s.includes("fingerprinted_at"))).toBe(true)
+    expect(statements.some((s) => s.includes("content_fingerprints"))).toBe(true)
   })
 
   it("re-scores the cluster when a fingerprint reaches the threshold, once per hour", async () => {

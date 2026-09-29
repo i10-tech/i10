@@ -133,11 +133,12 @@ export function riskSystem(input: RiskSystemInput) {
   const boilerplate = boilerplateStore(db)
   /*
    * ⚠ TWO SOURCES, ONE DIFFERENCE: WHO MAY SPEND THE WEB RISK BUDGET. The
-   * accept path reads cached verdicts only - it runs per request, and a hole's
-   * link it cannot vouch for yet simply earns no credit until the hourly job,
-   * which may look the host up, has seen it.
+   * five-minute fingerprint pass (content-store job) reads cached verdicts
+   * only - it runs twelve times an hour over every workspace, and a hole's link
+   * it cannot vouch for yet simply earns no credit until the hourly job, which
+   * may look the host up, has seen it.
    */
-  const acceptTrust = trustSource(db, {
+  const cachedTrust = trustSource(db, {
     templates: trustedTemplates,
     boilerplate,
     verdict: async (host) => asVerdict(await webRisk.cached(host)),
@@ -227,6 +228,6 @@ export function riskSystem(input: RiskSystemInput) {
     webRisk,
     trustedTemplates,
     boilerplate,
-    acceptTrust,
+    cachedTrust,
   }
 }

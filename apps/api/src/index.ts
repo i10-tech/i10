@@ -56,12 +56,9 @@ import { reputationService } from "./ses-status/reputation.js"
 import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
 import { workspaceOfSesTenant } from "./domains/identity.js"
-import { recordContent } from "./risk/content.js"
-import { markDirty } from "./risk/runner.js"
 import { sessionObserver } from "./risk/session.js"
 import { riskTrigger } from "./risk/trigger.js"
 import { riskSystem, systemTenantIds } from "./risk/wire.js"
-import type { SendEmail } from "@repo/contracts"
 import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
 import { domainTransferStore } from "./domains/transfers.js"
@@ -706,21 +703,6 @@ const sesFindingsWatched = {
   },
 }
 
-const observeContent = (tenantId: string, payloads: readonly SendEmail[]) => {
-  if (!env.RISK_ENABLED) return
-  void recordContent(tenantId, payloads, {
-    db,
-    redis: cache,
-    threshold: env.RISK_FARM_TRIPWIRE,
-    rescore: (ids, trigger) => rescore.rescore(ids, trigger),
-    trust: risk.acceptTrust,
-  })
-    .then(() => markDirty(cache, [tenantId]))
-    .catch((error: unknown) =>
-      log.warn({ err: error, tenantId }, "could not fingerprint accepted mail"),
-    )
-}
-
 const observeSession = env.RISK_ENABLED
   ? sessionObserver({
       store: risk.identity,
@@ -805,7 +787,6 @@ const app = createApp({
       // somebody waiting for a password reset.
       queues: sendQueues,
     }),
-    observe: observeContent,
     metering,
     log,
   },

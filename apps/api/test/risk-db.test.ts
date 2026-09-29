@@ -486,7 +486,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
   }
 
   it("discovers a template, links each match once, compacts only when established, and restores byte-exactly", async () => {
-    const { processContent } = await import("../src/content/job.js")
+    const { compactContent } = await import("../src/content/compact.js")
     const { restoreBodies } = await import("../src/content/restore.js")
     const { withTenant } = await import("../src/db/client.js")
     const sent = []
@@ -499,7 +499,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     }
     const queued = await seedSent(ids.clean, receipt("Queued", "9"), null, "queued")
 
-    const first = await processContent(ids.clean, { db, promoteAt: 3 })
+    const first = await compactContent(ids.clean, { db, promoteAt: 3 })
     expect(first.derived).toBeGreaterThan(0)
     expect(first.matched).toBe(5)
     expect(first.compacted).toBe(5)
@@ -508,7 +508,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     const [tmpl] =
       await owner`select messages from core.content_templates where tenant_id = ${ids.clean}`
     expect(tmpl?.messages).toBe(5)
-    const again = await processContent(ids.clean, { db, promoteAt: 3 })
+    const again = await compactContent(ids.clean, { db, promoteAt: 3 })
     expect(again.matched).toBe(0)
     const [tmpl2] =
       await owner`select messages from core.content_templates where tenant_id = ${ids.clean}`
@@ -542,10 +542,10 @@ suite("the risk engine against Postgres, as i10_api", () => {
   })
 
   it("links but does not compact below the promotion threshold", async () => {
-    const { processContent } = await import("../src/content/job.js")
+    const { compactContent } = await import("../src/content/compact.js")
     await seedSent(ids.e, receipt("A", "1"))
     await seedSent(ids.e, receipt("B", "2"))
-    const r = await processContent(ids.e, { db, promoteAt: 3 })
+    const r = await compactContent(ids.e, { db, promoteAt: 3 })
     expect(r.matched).toBe(2)
     expect(r.compacted).toBe(0)
     const rows =
@@ -813,7 +813,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
   it("reviews a workspace's own template, credits exact fits, and revokes it on bounces", async () => {
     const { trustedTemplateStore, trustSource, reviewTrusted } =
       await import("../src/risk/trusted.js")
-    const { processContent } = await import("../src/content/job.js")
+    const { analyseContent } = await import("../src/content/job.js")
     const t = await trustTenant(`shop-${RUN}.com`)
     const store = trustedTemplateStore(db)
     const html =
@@ -846,7 +846,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     const render = (name: string, url: string) =>
       html.replace("{{name}}", name).replace("{{url}}", url)
     await seedSent(t, render("Ada", `https://shop-${RUN}.com/l/abc`))
-    expect((await processContent(t, { db, trust })).trusted).toBe(0)
+    expect((await analyseContent(t, { db, trust })).trusted).toBe(0)
 
     const approved = await store.decide(t, tid, "approve", "staff@i10", "")
     expect(approved?.status).toBe("approved")
@@ -855,16 +855,19 @@ suite("the risk engine against Postgres, as i10_api", () => {
 
     await seedSent(t, render("Bob", `https://app.shop-${RUN}.com/l/def`))
     await seedSent(t, render("Cy", `https://evil-${RUN}.top/login`))
-    const credited = await processContent(t, {
+    const credited = await analyseContent(t, {
       db,
       trust,
-      creditTemplates: (counts) => store.credit(t, counts),
+      creditTemplates: (counts: ReadonlyMap<string, number>) => store.credit(t, counts),
     })
-    expect(credited.trusted).toBe(2)
+    // ⚠ BOB ONLY. Ada was analysed while the template was pending and is not
+    // read again (#171's `analysed_at`), so an approval credits mail from then
+    // on; Cy's link is not the workspace's own, so Cy never fits.
+    expect(credited.trusted).toBe(1)
     const bodies =
       await owner`select count(*)::int as n from core.message_bodies where tenant_id = ${t} and trusted_template_id = ${tid}`
-    expect(bodies[0]?.n).toBe(2)
-    expect((await store.get(t, tid))?.matched).toBe(2)
+    expect(bodies[0]?.n).toBe(1)
+    expect((await store.get(t, tid))?.matched).toBe(1)
 
     // The accept path marks the same content, and facts count it.
     await recordContent(

@@ -1066,9 +1066,63 @@ export const messageBodies = core.table(
      * approval when they cross the thresholds. See risk/trusted.ts.
      */
     trustedTemplateId: uuid("trusted_template_id"),
+
+    /**
+     * When the content-store job's compaction pass last looked at this body
+     * (#171). Set on EVERY body a pass reads - matched, linked or unique.
+     *
+     * ⚠ IT IS WHAT MAKES EVERY PASS PROGRESS. Without it a pass read the oldest
+     * uncompacted bodies of the last week, and unique mail is never compacted,
+     * so once a workspace had a batch's worth of unique finished bodies every
+     * run re-read exactly those and never reached newer mail - reproduced:
+     * five unique receipts starved six near-identical ones for good.
+     */
+    examinedAt: timestamp("examined_at", { withTimezone: true }),
+    /**
+     * The MinHash bands of an examined body that fitted no template (#171).
+     *
+     * ⚠ THE MEMORY THAT `examined_at` WOULD OTHERWISE ERASE. A template is
+     * derived from TWO near-duplicates; once a body is marked examined it is
+     * never re-read, so its twin arriving an hour later would find nobody to
+     * pair with. A later pass looks its bands up here, through the GIN index,
+     * and reads only the few bodies that share one.
+     */
+    contentBands: text("content_bands").array(),
+    /**
+     * When the hourly risk run credited and embedded this body (#170, #222).
+     * The same progress rule as `examined_at`, for the risk half of the old
+     * combined pass, so embeddings and trusted-template credit cannot starve.
+     */
+    analysedAt: timestamp("analysed_at", { withTimezone: true }),
+    /**
+     * When the content-store job fingerprinted this body for the farm checks
+     * (#170, #171). Fingerprinting used to run in the API after accept; #171's
+     * rule is that nothing beyond a hash runs on the send path.
+     */
+    fingerprintedAt: timestamp("fingerprinted_at", { withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.messageId, t.createdAt] }),
+    // What the compaction pass has not looked at yet.
+    index("message_bodies_unexamined_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(sql`${t.examinedAt} is null and ${t.compactedAt} is null`),
+    // Unmatched bodies a later near-duplicate can still pair with.
+    index("message_bodies_candidates_idx")
+      .using("gin", t.contentBands)
+      .where(sql`${t.templateId} is null and ${t.compactedAt} is null`),
+    // Linked bodies waiting for their template to be established.
+    index("message_bodies_linked_idx")
+      .on(t.templateId)
+      .where(sql`${t.templateId} is not null and ${t.compactedAt} is null`),
+    // What the risk run has not credited or embedded yet.
+    index("message_bodies_unanalysed_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(sql`${t.analysedAt} is null`),
+    // What the farm checks have not fingerprinted yet.
+    index("message_bodies_unfingerprinted_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(sql`${t.fingerprintedAt} is null`),
     // Retention deletes by tenant and age; the content-store job finds work
     // the same way.
     index("message_bodies_tenant_created_idx").on(t.tenantId, t.createdAt),

@@ -1,18 +1,24 @@
 import { sql } from "drizzle-orm"
-import type { SendEmail } from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
+import { restoreBodies } from "../content/restore.js"
 import { classify, trustMark } from "../content/trust.js"
 import { ALLOWLISTED, fingerprint, linkHosts, type Fingerprint } from "./fingerprint.js"
 import type { TrustSource } from "./trusted.js"
 
 /**
- * What accept records about content (#170): fingerprints, link hosts, and the
- * farm tripwire.
+ * What the content-store job records about content (#170, #171): fingerprints,
+ * link hosts, and the farm tripwire.
  *
- * ⚠ AFTER THE MESSAGES ARE WRITTEN AND NEVER AWAITED BY THE REQUEST. The
- * caller fires this and moves on; a Redis or Postgres hiccup here costs a
- * fingerprint, never a send, and never a millisecond of somebody's password
- * reset.
+ * ⚠ FROM STORED BODIES, OFF THE SEND PATH. This used to run in the API after
+ * every accept - a MinHash per message on the event loop that serves
+ * everybody's password resets. #171's rule is that nothing beyond a hash runs
+ * on the send path, so the content-store job now reads bodies it has not
+ * fingerprinted (`fingerprinted_at`) every five minutes, and the tripwire
+ * fires at that latency instead of at accept.
+ *
+ * ⚠ RECORDED AND STAMPED IN ONE TRANSACTION. A body counted into the daily
+ * rows is marked in the same commit, so a crash between the two can neither
+ * lose a sighting nor count one twice.
  *
  * ⚠ THE TRIPWIRE IS A PROMPT, NOT A VERDICT. Redis keeps, per fingerprint and
  * per MinHash band, the set of workspaces that sent it in the last 48 hours.
@@ -58,56 +64,74 @@ export interface ContentDeps {
 
 const WINDOW_SECONDS = 48 * 3600
 /**
- * ⚠ BOUNDED WORK PER REQUEST. A batch of 500 personalised copies of one
- * template is one fingerprint after normalising; a batch of 500 different
- * bodies is a batch that deserves sampling, not 500 signatures on the event
- * loop that serves everybody's password resets.
+ * One message's content. `messageId` and `createdAt` are the stored body's
+ * key: when present the body is stamped `fingerprinted_at` in the same
+ * transaction, and its sightings are counted on the day it was accepted.
  */
-export const MAX_FINGERPRINTS_PER_REQUEST = 25
+export interface ContentItem {
+  subject: string
+  html?: unknown
+  text?: unknown
+  messageId?: string
+  /** Postgres's own text for the partition key, never a JS Date. */
+  createdAt?: string
+}
 
 export async function recordContent(
   tenantId: string,
-  payloads: readonly SendEmail[],
+  items: readonly ContentItem[],
   deps: ContentDeps,
 ): Promise<void> {
+  // Keyed by day as well: a body is counted on the day it was accepted.
   const prints = new Map<
     string,
-    { bands: string[]; messages: number; trustedBy: string | null }
+    {
+      day: string
+      exact: string
+      bands: string[]
+      messages: number
+      trustedBy: string | null
+    }
   >()
-  const hosts = new Map<string, number>()
+  const hosts = new Map<string, { day: string; host: string; messages: number }>()
   const trust = deps.trust
     ? await deps.trust.forTenant(tenantId).catch(() => null)
     : null
-  let computed = 0
-  for (const p of payloads) {
+  const today = new Date().toISOString().slice(0, 10)
+  for (const p of items) {
     const html = typeof p.html === "string" ? p.html : null
     const text = typeof p.text === "string" ? p.text : null
-    if (computed < MAX_FINGERPRINTS_PER_REQUEST) {
-      const fp: Fingerprint | null = fingerprint(p.subject, html, text)
-      computed++
-      if (fp && !ALLOWLISTED.has(fp.exact)) {
-        const found =
-          trust && trust.entries.length > 0
-            ? await classify({ html, text }, trust.entries, trust.ctx).catch(() => null)
-            : null
-        const mark = found ? trustMark(found.entry) : null
-        const seen = prints.get(fp.exact)
-        prints.set(fp.exact, {
-          bands: fp.bands,
-          messages: (seen?.messages ?? 0) + 1,
-          // ⚠ FAILS CLOSED: one message with this fingerprint that did not fit
-          // makes the fingerprint count.
-          trustedBy: seen && seen.trustedBy !== mark ? null : mark,
-        })
-      }
+    const day = p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : today
+    const fp: Fingerprint | null = fingerprint(p.subject, html, text)
+    if (fp && !ALLOWLISTED.has(fp.exact)) {
+      const found =
+        trust && trust.entries.length > 0
+          ? await classify({ html, text }, trust.entries, trust.ctx).catch(() => null)
+          : null
+      const mark = found ? trustMark(found.entry) : null
+      const key = `${day}|${fp.exact}`
+      const seen = prints.get(key)
+      prints.set(key, {
+        day,
+        exact: fp.exact,
+        bands: fp.bands,
+        messages: (seen?.messages ?? 0) + 1,
+        // ⚠ FAILS CLOSED: one message with this fingerprint that did not fit
+        // makes the fingerprint count.
+        trustedBy: seen && seen.trustedBy !== mark ? null : mark,
+      })
     }
-    for (const h of linkHosts(html, text)) hosts.set(h, (hosts.get(h) ?? 0) + 1)
+    for (const h of linkHosts(html, text)) {
+      const key = `${day}|${h}`
+      const seen = hosts.get(key)
+      hosts.set(key, { day, host: h, messages: (seen?.messages ?? 0) + 1 })
+    }
   }
-  if (prints.size === 0 && hosts.size === 0) return
+  const stamped = items.filter((i) => i.messageId && i.createdAt)
+  if (prints.size === 0 && hosts.size === 0 && stamped.length === 0) return
 
-  const day = new Date().toISOString().slice(0, 10)
   await withTenant(deps.db, tenantId, async (tx) => {
-    for (const [exact, { bands, messages, trustedBy }] of prints) {
+    for (const { day, exact, bands, messages, trustedBy } of prints.values()) {
       // ⚠ THE MARK SURVIVES ONLY WHILE EVERY SIGHTING AGREES. A row first
       // seen untrusted stays untrusted for the day; a trusted row seen once
       // without the same mark loses it.
@@ -123,7 +147,7 @@ export async function recordContent(
                       end
       `)
     }
-    for (const [host, messages] of [...hosts].slice(0, 200)) {
+    for (const { day, host, messages } of [...hosts.values()].slice(0, 200)) {
       await tx.execute(sql`
         insert into core.link_hosts (tenant_id, day, host, messages)
         values (${tenantId}::uuid, ${day}::date, ${host}, ${messages})
@@ -131,18 +155,24 @@ export async function recordContent(
         do update set messages = core.link_hosts.messages + excluded.messages
       `)
     }
+    for (const i of stamped) {
+      await tx.execute(sql`
+        update core.message_bodies set fingerprinted_at = now()
+         where message_id = ${i.messageId}::uuid and created_at = ${i.createdAt}::timestamptz
+      `)
+    }
   })
 
   const redis = deps.redis
   if (!redis || !deps.rescore) return
   /*
-   * ⚠ ONE PIPELINE FOR THE WHOLE REQUEST. Nine keys per fingerprint, three
+   * ⚠ ONE PIPELINE FOR THE WHOLE BATCH. Nine keys per fingerprint, three
    * commands per key, awaited one by one, would be dozens of round trips per
-   * accepted request; pipelined it is one.
+   * workspace; pipelined it is one.
    */
-  const keys = [...prints]
-    .filter(([, { trustedBy }]) => trustedBy === null)
-    .flatMap(([exact, { bands }]) => [
+  const keys = [...prints.values()]
+    .filter(({ trustedBy }) => trustedBy === null)
+    .flatMap(({ exact, bands }) => [
       `risk:fp:x:${exact}`,
       ...bands.map((b) => `risk:fp:b:${b}`),
     ])
@@ -156,9 +186,74 @@ export async function recordContent(
     const n = Number(replies[i * 3 + 2]?.[1] ?? 0)
     if (n < deps.threshold) continue
     // ⚠ ONCE PER KEY PER HOUR. A farm sending all day would otherwise
-    // re-score its whole cluster on every single request.
+    // re-score its whole cluster on every single pass.
     const first = await redis.set(`${key}:tripped`, "1", "EX", 3600, "NX")
     if (first === null) continue
     deps.rescore(await redis.smembers(key), "farm-tripwire")
   }
+}
+
+export interface FingerprintDeps extends ContentDeps {
+  now?: Date
+  /** Bodies per workspace per pass. */
+  limit?: number
+}
+
+/**
+ * Fingerprints one workspace's bodies that have not been, oldest first.
+ *
+ * ⚠ ANY STATUS, NOT ONLY FINISHED. Accept fingerprinted every message the
+ * moment it was written, scheduled or not; the farm check reads sightings, not
+ * deliveries, and a farm queueing its mail for tonight is still a farm.
+ *
+ * ⚠ RESTORED FIRST: a body compaction already took apart is a template plus
+ * values, and a fingerprint of the values alone would match nothing.
+ */
+export async function fingerprintStored(
+  tenantId: string,
+  deps: FingerprintDeps,
+): Promise<number> {
+  const now = deps.now ?? new Date()
+  const rows = await withTenant(deps.db, tenantId, async (tx) => {
+    const raw = (await tx.execute(sql`
+      select b.message_id, b.created_at::text as created_at, m.subject, b.html, b.text,
+             b.template_id, b.template_values
+        from core.message_bodies b
+        join core.messages m on m.id = b.message_id and m.created_at = b.created_at
+       where b.tenant_id = ${tenantId}::uuid
+         and b.fingerprinted_at is null
+         and b.created_at > ${new Date(now.getTime() - 7 * 86_400_000).toISOString()}::timestamptz
+       order by b.created_at
+       limit ${deps.limit ?? 500}
+    `)) as unknown as {
+      message_id: string
+      created_at: string
+      subject: string
+      html: string | null
+      text: string | null
+      template_id: string | null
+      template_values: unknown
+    }[]
+    return restoreBodies(
+      tx,
+      raw.map((r) => ({
+        ...r,
+        templateId: r.template_id,
+        templateValues: r.template_values,
+      })),
+    )
+  })
+  if (rows.length === 0) return 0
+  await recordContent(
+    tenantId,
+    rows.map((r) => ({
+      subject: r.subject,
+      html: r.html,
+      text: r.text,
+      messageId: r.message_id,
+      createdAt: String(r.created_at),
+    })),
+    deps,
+  )
+  return rows.length
 }

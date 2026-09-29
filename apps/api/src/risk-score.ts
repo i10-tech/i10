@@ -17,23 +17,12 @@
  * like an hour in which nobody sent anything.
  */
 import pino from "pino"
-import { createClerkClient } from "@clerk/backend"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
-import {
-  captureError,
-  captureMessage,
-  initObservability,
-  withMonitor,
-} from "./observability.js"
-import { systemSenderFor } from "./auth-email/system.js"
-import { createCacheClient, createQueueClient } from "./cache/redis.js"
-import { postgresMetering } from "./metering/service.js"
-import { createSendQueue } from "./queue/send-queue.js"
-import { resilient } from "./send/metering.js"
+import { captureError, initObservability, withMonitor } from "./observability.js"
 import { runAll } from "./risk/runner.js"
 import { embedderFor } from "./content/embed.js"
-import { riskSystem, systemTenantIds } from "./risk/wire.js"
+import { riskRuntime } from "./risk/runtime.js"
 
 const log = pino({ name: "i10-risk-score" })
 
@@ -102,51 +91,19 @@ await withMonitor(
       return
     }
 
-    const cache = createCacheClient(env.REDIS_URL)
-    cache.on("error", (err: Error) => log.warn({ err }, "risk cache unavailable"))
-    const queueRedis = createQueueClient(env.REDIS_URL)
-    queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+    let runtime: Awaited<ReturnType<typeof riskRuntime>>
+    try {
+      runtime = await riskRuntime({ env, db, sql, log })
+    } catch (error) {
+      log.error({ err: error }, "could not build the risk engine")
+      captureError(error, { phase: "risk-score" })
+      await sql.end({ timeout: 5 })
+      process.exitCode = 1
+      return
+    }
+    const { risk, cache } = runtime
 
     try {
-      const queue = (cls: "transactional" | "bulk") =>
-        createSendQueue({
-          redis: queueRedis,
-          class: cls,
-          jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
-          maxAttempts: env.WORKER_MAX_ATTEMPTS,
-        })
-      // The same sender the API and the re-check use, so a hold email here is
-      // the same email, from the same tenant, as one the API would send.
-      const sender = await systemSenderFor({
-        sql,
-        db,
-        queues: { transactional: queue("transactional"), bulk: queue("bulk") },
-        metering: resilient(
-          postgresMetering({
-            db,
-            featureId: env.METERING_FEATURE_ID,
-            freePlanId: env.METERING_FREE_PLAN_ID,
-            log,
-          }),
-          log,
-        ),
-        from: env.AUTH_EMAIL_FROM,
-        tenantSlug: env.AUTH_EMAIL_TENANT_SLUG,
-        log,
-      })
-      const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
-      const consoleUrl = env.CONSOLE_ORIGINS[0]
-      const risk = riskSystem({
-        db,
-        env,
-        clerk,
-        redis: cache,
-        sender,
-        ...(consoleUrl ? { consoleUrl } : {}),
-        exempt: await systemTenantIds(db, env.AUTH_EMAIL_TENANT_SLUG),
-        alert: (message, level, context) => captureMessage(message, level, context),
-        log,
-      })
       const model = await risk.labels.model(true).catch(() => null)
       // ⚠ ONLY THIS JOB LOADS THE EMBEDDER (~300 MB for MiniLM); the API only
       // queries vectors by model name. See content/embed.ts.
@@ -183,8 +140,7 @@ await withMonitor(
       captureError(error, { phase: "risk-score" })
       process.exitCode = 1
     } finally {
-      await cache.quit().catch(() => {})
-      await queueRedis.quit().catch(() => {})
+      await runtime.close()
       await sql.end({ timeout: 5 })
     }
   },
