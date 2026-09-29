@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "i10-template-renderer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+
+  // ⚠ NO ROUTES AND NO CUSTOM DOMAIN, like the DNS OAuth broker: the API
+  // reaches this by its workers.dev URL and nothing else should.
+  //
+  // ⚠ ITS ONLY SECRET IS `RENDERER_SECRET`, SET OUT OF BAND:
+  //     wrangler secret put RENDERER_SECRET
+  // It is NOT in this file and must never be. The API holds the same value as
+  // `TEMPLATE_RENDERER_SECRET`.
+  "worker_loaders": [{ "binding": "LOADER" }],
+
+  // ⚠ THE SANDBOX RUNTIME IS TEXT, NOT A MODULE THIS WORKER IMPORTS AS CODE.
+  // It is passed to each Dynamic Worker; see scripts/build-runtime.ts.
+  // `.txt` so the same rule works under celld, which takes extension globs only.
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": false }],
+
+  "observability": { "enabled": true },
+}

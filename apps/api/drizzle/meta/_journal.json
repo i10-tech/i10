@@ -603,6 +603,20 @@
       "when": 1790709832070,
       "tag": "0085_body_packs_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1790716820407,
+      "tag": "0086_template_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1790716821076,
+      "tag": "0087_templates_drop_publish_columns",
+      "breakpoints": true
     }
   ]
 }

@@ -371,3 +371,53 @@ describe("a workspace held by the risk engine (#170)", () => {
     expect(((await res.json()) as { name: string }).name).toBe("sending_held")
   })
 })
+
+describe("POST /emails with a template (#160)", () => {
+  const templates = () => ({
+    versionIdFor: async (ref: { id: string }) => (ref.id === "welcome" ? "v1" : null),
+    version: async () => ({
+      id: "v1",
+      templateId: "t1",
+      number: 1,
+      subject: "Hi",
+      html: "<p>hi</p>",
+      text: null,
+      nonce: "abcdefghijkl",
+      variables: [],
+    }),
+  })
+  const templated = { from: "hello@i10.tech", to: "user@example.com" }
+
+  it("sends a template with no subject of its own", async () => {
+    const { app: a } = app({ templates })
+    const res = await post(a, "/emails", { ...templated, template: { id: "welcome" } })
+    expect(res.status).toBe(200)
+  })
+
+  it("answers 404 for a template that is not there", async () => {
+    const { app: a } = app({ templates })
+    const res = await post(a, "/emails", { ...templated, template: { id: "nope" } })
+    expect(res.status).toBe(404)
+    expect(((await res.json()) as { name: string }).name).toBe("not_found")
+  })
+
+  // ⚠ Resend refuses these too: which body "wins" would be a guess.
+  it("refuses a template beside html", async () => {
+    const { app: a } = app({ templates })
+    const res = await post(a, "/emails", {
+      ...templated,
+      template: { id: "welcome" },
+      html: "<p>x</p>",
+    })
+    expect(res.status).toBe(422)
+  })
+
+  it("still requires a subject without a template", async () => {
+    const { app: a } = app()
+    const res = await post(a, "/emails", { ...templated, text: "x" })
+    expect(res.status).toBe(422)
+    expect(((await res.json()) as { message: string }).message).toContain(
+      "`subject` is required",
+    )
+  })
+})

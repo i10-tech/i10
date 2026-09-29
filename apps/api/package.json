@@ -25,6 +25,7 @@
     "@repo/dns-providers": "workspace:*",
     "@repo/emails": "workspace:*",
     "@repo/metering": "workspace:*",
+    "@repo/templates": "workspace:*",
     "@sentry/node": "10.73.0",
     "@upyo/core": "^0.6.0",
     "@upyo/mime": "0.6.0",

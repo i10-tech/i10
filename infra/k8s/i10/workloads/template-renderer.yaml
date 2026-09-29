@@ -1,0 +1,113 @@
+# The template renderer (#160): runs an uploaded React Email `.tsx` ONCE, when a
+# template version is created. Sends never call it.
+#
+# ⚠ celld, A STOPGAP FOR CLOUDFLARE'S DYNAMIC WORKERS (decided 2026-09-30). The
+# same Worker deploys to Cloudflare from services/template-renderer/
+# wrangler.jsonc once the account is on Workers Paid; then this file, its
+# image and `TEMPLATE_RENDERER_URL` in api.yaml go, and nothing else changes.
+# Not meant for real customers' templates: see docs/decisions/templates.md.
+#
+# ⚠ celld's SANDBOX IS A V8 ISOLATE IN THE celld PROCESS, NOT A VM. Its own docs
+# say the boundary is not a claim about V8 escape safety. So this pod is built
+# to be worth nothing to an escape:
+#
+#   - no egress at all (the NetworkPolicy below), not even DNS;
+#   - no service account token;
+#   - one secret, the renderer's own, and none of the API's;
+#   - no route from outside the cluster (no IngressRoute).
+#
+# ⚠ THE IMAGE TAG BELOW IS A BOOTSTRAP VALUE - see console.yaml. The Build
+# workflow rewrites it on the first build.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-template-renderer
+  namespace: i10-prod
+spec:
+  selector:
+    app.kubernetes.io/name: i10-template-renderer
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-template-renderer
+  namespace: i10-prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-template-renderer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-template-renderer
+    spec:
+      # ⚠ NO KUBERNETES CREDENTIAL IN A POD THAT RUNS CUSTOMER CODE. The
+      # default token would hand an isolate escape the namespace's API access.
+      automountServiceAccountToken: false
+      containers:
+        - name: renderer
+          image: ghcr.io/i10-tech/i10-template-renderer:prod-latest
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 8787 }
+          env:
+            # ⚠ ONE KEY OF THE API'S SECRET, NOT `envFrom`. Both sides must hold
+            # the same value, and this is how they do without a second Doppler
+            # config - while every other key in `i10-api` (database, SES, Clerk)
+            # stays out of this pod.
+            #
+            # ⚠ OPTIONAL, SO A MISSING KEY STARTS A RENDERER THAT REFUSES EVERY
+            # REQUEST (`renderer_not_configured`) rather than a pod stuck in
+            # CreateContainerConfigError that says nothing about why.
+            - name: RENDERER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  { name: i10-api, key: TEMPLATE_RENDERER_SECRET, optional: true }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            # Isolates are per template and celld caps them at 256; a render
+            # is a few MiB. The ceiling is for a template that allocates in a
+            # loop until its CPU limit stops it.
+            limits: { memory: 768Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            # Numeric, matching the Dockerfile's USER - see api.yaml.
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          # ⚠ TCP, NOT HTTP. The Worker answers only `POST /compile`; every
+          # other path is a 404, which kubelet scores as a failure.
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+---
+# ⚠ EGRESS DENIED OUTRIGHT: `Egress` listed with no rules allows nothing, DNS
+# included. The Worker already blocks `fetch` and `connect` for templates
+# (`globalOutbound: null`, `subRequests: 0`); this is the layer that still
+# holds if a template gets out of its isolate. celld's own node traffic is on
+# loopback, which a NetworkPolicy does not touch.
+#
+# Ingress needs nothing here: `i10-prod` already admits its own pods, and the
+# bearer secret is what decides who may compile.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: template-renderer-no-egress
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-template-renderer
+  policyTypes: [Egress]
+  egress: []

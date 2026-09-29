@@ -181,6 +181,27 @@
           "text": {
             "type": "string"
           },
+          "template": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "version": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "variables": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
           "headers": {
             "type": "object",
             "additionalProperties": {
@@ -248,8 +269,7 @@
         },
         "required": [
           "from",
-          "to",
-          "subject"
+          "to"
         ]
       },
       "BatchSendResponse": {
@@ -370,6 +390,27 @@
             "text": {
               "type": "string"
             },
+            "template": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "variables": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id"
+              ]
+            },
             "headers": {
               "type": "object",
               "additionalProperties": {
@@ -437,8 +478,7 @@
           },
           "required": [
             "from",
-            "to",
-            "subject"
+            "to"
           ]
         },
         "minItems": 1,
@@ -1288,6 +1328,16 @@
               }
             }
           },
+          "404": {
+            "description": "The `template` named does not exist, or has no such version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "409": {
             "description": "This Idempotency-Key was already used with a different request body.",
             "content": {
@@ -1376,6 +1426,16 @@
           },
           "403": {
             "description": "This key is restricted to other domains than the `from` address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The `template` named does not exist, or has no such version.",
             "content": {
               "application/json": {
                 "schema": {

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import type { SendEmail } from "@repo/contracts"
+import { resolveTemplateSend, type TemplateLookup } from "@repo/templates"
 import type { SendClass, SendJob } from "../queue/send-queue.js"
 import { shouldSend, type Metering } from "./metering.js"
 import { domainOf } from "./address.js"
@@ -93,6 +94,15 @@ export type AcceptOutcome =
    * the wrong place.
    */
   | { status: "held"; message: string }
+  /**
+   * A send named a template that does not exist, or left out its variables
+   * (#160). `not_found` is a 404; `validation_error` is a 422.
+   */
+  | {
+      status: "invalid_template"
+      name: "not_found" | "validation_error"
+      message: string
+    }
 
 /**
  * A stable fingerprint of the request body.
@@ -122,9 +132,19 @@ function canonical(value: unknown): string {
   return `{${entries.join(",")}}`
 }
 
+/**
+ * A send with its body settled: a template reference has become `html`,
+ * `text` and `subject`, so everything after `acceptSend` sees one shape.
+ */
+export type ResolvedEmail = Omit<SendEmail, "template" | "subject"> & {
+  subject: string
+}
+
 /** One message as it will be written, after suppression filtering. */
 export interface PreparedMessage {
-  payload: SendEmail
+  payload: ResolvedEmail
+  /** The template version it was filled from, or null for a raw `html`/`text` send. */
+  templateVersionId: string | null
   /** Recipients that survived the suppression list. */
   to: string[]
   cc: string[]
@@ -153,14 +173,16 @@ export interface PreparedMessage {
  * shows what happened, which "422 invalid recipient" would not.
  */
 export function withoutSuppressed(
-  payload: SendEmail,
+  payload: ResolvedEmail,
   suppressed: ReadonlySet<string>,
+  templateVersionId: string | null = null,
 ): PreparedMessage {
   const keep = (list: readonly string[] | undefined) =>
     (list ?? []).filter((a) => !suppressed.has(addrSpec(a)))
 
   return {
     payload,
+    templateVersionId,
     to: keep(asList(payload.to)),
     cc: keep(asList(payload.cc)),
     bcc: keep(asList(payload.bcc)),
@@ -175,7 +197,7 @@ export function withoutSuppressed(
  * would be a bug rather than a bad request - and null (send now) is a safer
  * answer to a bug than a crash or a message that silently never goes.
  */
-function scheduleOf(payload: SendEmail): Date | null {
+function scheduleOf(payload: ResolvedEmail): Date | null {
   if (!payload.scheduled_at) return null
   const at = new Date(payload.scheduled_at)
   return Number.isNaN(at.getTime()) ? null : at
@@ -286,6 +308,17 @@ export interface AcceptOps {
    * sign-in codes must never wait on a review of some workspace.
    */
   sendingHeld?: (tenantId: string) => Promise<{ why: string } | null>
+
+  /**
+   * Where a send's `template` reference is looked up (#160).
+   *
+   * ⚠ A PORT, NOT A QUERY, BECAUSE THE SEND PATH'S FIRST LAYER IS MOVING TO
+   * CLOUDFLARE. What turns a reference into an email is `resolveTemplateSend`
+   * in @repo/templates, a pure function; this supplies its two lookups. Today
+   * they read Postgres; at the edge they will read a cache. Absent, a send
+   * naming a template is refused as not found.
+   */
+  templates?: (tenantId: string) => TemplateLookup
 
   /**
    * Pushes the batch. Called only after the transaction commits.
@@ -419,6 +452,21 @@ export async function acceptSend(
     }
   }
 
+  /*
+   * ⚠ BEFORE THE QUOTA, SO A SEND THAT NAMES A MISSING TEMPLATE OR LEAVES OUT A
+   * VARIABLE COSTS NOTHING. And all-or-nothing for a batch, like the scope
+   * check: one bad element refuses the request rather than writing the rest.
+   *
+   * ⚠ NO TEMPLATE CODE RUNS HERE. A version was rendered once when it was
+   * created; this fills its stored skeleton. See docs/decisions/templates.md.
+   */
+  const resolved = await resolveTemplates(
+    input.tenantId,
+    input.payloads,
+    deps.templates,
+  )
+  if (!resolved.ok) return resolved.outcome
+
   // ⚠ FIRST, AND CHEAPLY. Rejecting an over-quota tenant before writing
   // anything is the difference between a 429 in milliseconds and a database
   // full of messages that will never be allowed to send.
@@ -437,7 +485,9 @@ export async function acceptSend(
     ...asList(p.bcc),
   ])
   const suppressed = await deps.suppressedFor(input.tenantId, everyAddress)
-  const messages = input.payloads.map((p) => withoutSuppressed(p, suppressed))
+  const messages = resolved.payloads.map((p) =>
+    withoutSuppressed(p.payload, suppressed, p.templateVersionId),
+  )
 
   const written = await deps.persist({
     tenantId: input.tenantId,
@@ -526,4 +576,96 @@ function byDueTime(
   })
 
   return groups
+}
+
+/**
+ * Every payload's body settled: template references filled, raw sends passed
+ * through.
+ *
+ * ⚠ THE LOOKUPS ARE MEMOISED PER REQUEST. A batch of a hundred sends of one
+ * template is one lookup, not a hundred - and the same memo is what an edge
+ * layer would put a longer-lived cache behind.
+ */
+async function resolveTemplates(
+  tenantId: string,
+  payloads: readonly SendEmail[],
+  source: AcceptOps["templates"],
+): Promise<
+  | {
+      ok: true
+      payloads: { payload: ResolvedEmail; templateVersionId: string | null }[]
+    }
+  | { ok: false; outcome: AcceptOutcome }
+> {
+  let lookup: TemplateLookup | null = null
+  const out: { payload: ResolvedEmail; templateVersionId: string | null }[] = []
+
+  for (const payload of payloads) {
+    const { template, subject, ...rest } = payload
+    if (!template) {
+      // The contract requires a subject whenever there is no template.
+      out.push({
+        payload: { ...rest, subject: subject ?? "" },
+        templateVersionId: null,
+      })
+      continue
+    }
+    if (!source) {
+      return {
+        ok: false,
+        outcome: {
+          status: "invalid_template",
+          name: "not_found",
+          message: "Templates are not available on this deployment.",
+        },
+      }
+    }
+    lookup ??= memoised(source(tenantId))
+    const result = await resolveTemplateSend(
+      {
+        template: { id: template.id, version: template.version },
+        variables: template.variables,
+        subject,
+      },
+      lookup,
+    )
+    if (!result.ok) {
+      return {
+        ok: false,
+        outcome: {
+          status: "invalid_template",
+          name: result.error === "not_found" ? "not_found" : "validation_error",
+          message: result.message,
+        },
+      }
+    }
+    out.push({
+      payload: {
+        ...rest,
+        subject: result.subject,
+        ...(result.html !== null ? { html: result.html } : {}),
+        ...(result.text !== null ? { text: result.text } : {}),
+      },
+      templateVersionId: result.versionId,
+    })
+  }
+  return { ok: true, payloads: out }
+}
+
+function memoised(lookup: TemplateLookup): TemplateLookup {
+  const ids = new Map<string, Promise<string | null>>()
+  const versions = new Map<string, ReturnType<TemplateLookup["version"]>>()
+  return {
+    versionIdFor(ref) {
+      const key = `${ref.id}\u0000${ref.version ?? ""}`
+      let hit = ids.get(key)
+      if (!hit) ids.set(key, (hit = lookup.versionIdFor(ref)))
+      return hit
+    },
+    version(id) {
+      let hit = versions.get(id)
+      if (!hit) versions.set(id, (hit = lookup.version(id)))
+      return hit
+    },
+  }
 }

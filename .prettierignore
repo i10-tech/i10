@@ -28,6 +28,10 @@ apps/api/drizzle/meta/
 # only stops `format:check` failing on a developer's machine after a `tofu init`.
 **/.terraform/
 
+# Wrangler's local build and cache output, the same situation: untracked, and
+# only present after `wrangler dev` (services/template-renderer).
+**/.wrangler/
+
 # Vendored agent skills, installed by `bunx skills add`. Third-party files
 # whose formatting belongs to their publisher - reformatting them would produce
 # a diff against every upstream update for no benefit, and `.claude/skills`

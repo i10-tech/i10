@@ -40,6 +40,9 @@ const DOCKERFILES = [
   "apps/console/Dockerfile",
   "apps/docs/Dockerfile",
   "apps/web/Dockerfile",
+  // ⚠ `services/` HOLDS A BUN IMAGE TOO since #160: the template renderer.
+  // services/authd is Go and has no workspace manifests to check.
+  "services/template-renderer/Dockerfile",
 ]
 
 /** Every `package.json` a Dockerfile copies BEFORE it installs. */
@@ -71,7 +74,9 @@ function copiedManifests(dockerfile) {
 function workspaceIndex() {
   const byName = new Map()
   const lock = readFileSync(join(REPO, "bun.lock"), "utf8")
-  for (const [, path] of lock.matchAll(/"((?:apps|packages)\/[^/"]+)":\s*\{/g)) {
+  for (const [, path] of lock.matchAll(
+    /"((?:apps|packages|services)\/[^/"]+)":\s*\{/g,
+  )) {
     const manifest = `${path}/package.json`
     if (!existsSync(join(REPO, manifest))) continue
     const pkg = JSON.parse(readFileSync(join(REPO, manifest), "utf8"))

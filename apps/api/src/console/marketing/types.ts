@@ -81,9 +81,6 @@ export interface BroadcastRow {
  */
 export type BroadcastSummary = Omit<BroadcastRow, "html" | "text">
 
-/** A template in a list: the same row without its body, for the same reason. */
-export type TemplateSummary = Omit<TemplateRow, "html" | "text">
-
 /**
  * A write that named a segment or topic belonging to another workspace.
  *
@@ -102,19 +99,6 @@ export interface BroadcastStats {
   bounced: number
   complained: number
   failed: number
-}
-
-export interface TemplateRow {
-  id: string
-  name: string
-  folder: string | null
-  subject: string | null
-  html: string | null
-  text: string | null
-  published_at: string | null
-  version: number
-  created_at: string
-  updated_at: string
 }
 
 export interface ImportResult {
@@ -273,24 +257,4 @@ export interface MarketingStore {
     patch: Partial<BroadcastInput>,
   ): Promise<BroadcastRow | UnknownTarget | null>
   deleteBroadcast(tenantId: string, id: string): Promise<boolean>
-
-  listTemplates(tenantId: string): Promise<TemplateSummary[]>
-  getTemplate(tenantId: string, id: string): Promise<TemplateRow | null>
-  createTemplate(
-    tenantId: string,
-    input: { name: string; folder?: string | null },
-  ): Promise<TemplateRow | { conflict: true }>
-  updateTemplate(
-    tenantId: string,
-    id: string,
-    patch: {
-      name?: string
-      folder?: string | null
-      subject?: string | null
-      html?: string | null
-      text?: string | null
-    },
-  ): Promise<TemplateRow | null>
-  publishTemplate(tenantId: string, id: string): Promise<TemplateRow | null>
-  deleteTemplate(tenantId: string, id: string): Promise<boolean>
 }

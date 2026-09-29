@@ -4,7 +4,8 @@
   "description": "i10 - transactional and human email.",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "services/*"
   ],
   "scripts": {
     "dev": "bash dev/preflight.sh && turbo run dev",

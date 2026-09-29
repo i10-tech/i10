@@ -118,6 +118,27 @@ services:
       - "5354:53/udp"
       - "5354:53/tcp"
 
+  # The template renderer (#160): the sandbox that renders an uploaded `.tsx`
+  # once, on celld - the same image production runs. It IS a service the API
+  # depends on rather than an app you edit, which is why it is in here.
+  #
+  # ⚠ BUILT, NOT PULLED, so a change under services/template-renderer needs
+  # `docker compose -f compose.dev.yaml up -d --build template-renderer`.
+  #
+  # ⚠ 8788 ON THE HOST, NOT 8787, which is `wrangler dev`'s default.
+  #
+  # The API reaches it with
+  #   TEMPLATE_RENDERER_URL=http://localhost:8788
+  #   TEMPLATE_RENDERER_SECRET=local-dev-secret
+  template-renderer:
+    build:
+      context: .
+      dockerfile: services/template-renderer/Dockerfile
+    environment:
+      RENDERER_SECRET: local-dev-secret
+    ports:
+      - "8788:8787"
+
 volumes:
   postgres-cnpg:
   # The Alpine-era volume, kept so switching images loses nothing. Unused.

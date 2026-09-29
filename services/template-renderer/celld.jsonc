@@ -1,0 +1,16 @@
+// The renderer under celld (https://celld.dev), the stopgap for Cloudflare's
+// Dynamic Workers until the account is on Workers Paid. `wrangler.jsonc` is
+// the Cloudflare deployment of the same code.
+//
+// ⚠ A SEPARATE FILE BECAUSE celld REFUSES KEYS IT DOES NOT RUN - `observability`
+// among them - and stops the deployment rather than ignoring them.
+//
+// ⚠ `no_bundle`, POINTING AT A FILE `bun run build:celld` MADE. See
+// scripts/build-celld.ts for why the image carries no esbuild.
+{
+  "name": "i10-template-renderer",
+  "main": "dist/worker.js",
+  "compatibility_date": "2026-09-01",
+  "no_bundle": true,
+  "worker_loaders": [{ "binding": "LOADER" }],
+}

@@ -112,16 +112,40 @@ export const tagSchema = z
 export const SCHEDULE_HORIZON_DAYS = 30
 const SCHEDULE_HORIZON_MS = SCHEDULE_HORIZON_DAYS * 24 * 60 * 60 * 1000
 
+/**
+ * A send from a stored template: `{ id, variables }`, as in Resend, plus our
+ * optional `version`.
+ *
+ * ⚠ `id` IS AN ID OR A NAME. A template's name is unique in its workspace and
+ * is the alias a caller hard-codes; Resend accepts either in the same field.
+ *
+ * ⚠ `version` PINS; ITS ABSENCE FOLLOWS WHATEVER IS LIVE. Versions are
+ * immutable, so a pinned send renders the same email for ever, while an
+ * unpinned one changes when somebody promotes a new version in the console.
+ */
+export const templateRefSchema = z.object({
+  id: z.string().min(1).max(200),
+  version: z.number().int().positive().optional(),
+  variables: z.record(z.string(), z.unknown()).optional(),
+})
+
 export const sendEmailSchema = z
   .object({
     from: addressSchema,
     to: addressListSchema,
-    subject: z.string(),
+    /**
+     * ⚠ OPTIONAL ONLY WITH A TEMPLATE THAT HAS ONE. Without a template it is
+     * required, as it always was - see the refinement below. With one, the
+     * request's subject wins over the template's, as in Resend.
+     */
+    subject: z.string().optional(),
     bcc: addressListSchema.optional(),
     cc: addressListSchema.optional(),
     reply_to: addressListSchema.optional(),
     html: z.string().optional(),
     text: z.string().optional(),
+    /** Send a stored template instead of `html`/`text`. See `templateRefSchema`. */
+    template: templateRefSchema.optional(),
     headers: z.record(z.string(), z.string()).optional(),
     attachments: z.array(attachmentSchema).optional(),
     tags: z.array(tagSchema).optional(),
@@ -166,9 +190,26 @@ export const sendEmailSchema = z
       path: ["scheduled_at"],
     },
   )
-  .refine((v) => v.html !== undefined || v.text !== undefined, {
-    message: "Either `html` or `text` is required.",
-    path: ["html"],
+  // ⚠ A TEMPLATE REPLACES THE BODY; IT DOES NOT MERGE WITH ONE. Resend refuses
+  // `html`/`text` beside `template`, and so do we: which one "wins" is a guess
+  // somebody would find out about from a customer's inbox.
+  .refine(
+    (v) => v.template === undefined || (v.html === undefined && v.text === undefined),
+    {
+      message: "`template` cannot be combined with `html` or `text`.",
+      path: ["template"],
+    },
+  )
+  .refine(
+    (v) => v.template !== undefined || v.html !== undefined || v.text !== undefined,
+    {
+      message: "Either `html`, `text` or `template` is required.",
+      path: ["html"],
+    },
+  )
+  .refine((v) => v.template !== undefined || v.subject !== undefined, {
+    message: "`subject` is required.",
+    path: ["subject"],
   })
 
 export const sendEmailResponseSchema = z.object({
@@ -302,6 +343,7 @@ export type Address = z.infer<typeof addressSchema>
 export type Attachment = z.infer<typeof attachmentSchema>
 export type Tag = z.infer<typeof tagSchema>
 export type SendEmail = z.infer<typeof sendEmailSchema>
+export type TemplateRef = z.infer<typeof templateRefSchema>
 export type SendEmailResponse = z.infer<typeof sendEmailResponseSchema>
 export type BatchSend = z.infer<typeof batchSendSchema>
 export type BatchSendResponse = z.infer<typeof batchSendResponseSchema>
