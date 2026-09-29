@@ -353,6 +353,39 @@ suite("templates", () => {
       await counted.end()
     }
   })
+
+  it("publishes a visual template from its exported HTML, and keeps its document (#243)", async () => {
+    const t = await workspace()
+    const created = await store.create(t, { name: "visual", kind: "visual" })
+    if ("conflict" in created) throw new Error("conflict")
+    expect(created.source).toBe("managed")
+
+    const design = { type: "doc", content: [{ type: "paragraph" }] }
+    await store.update(t, created.id, {
+      subject: "Hi {{ name }}",
+      design,
+      html: '<p>Hi {{ name }}</p><a href="{{ url }}">go</a>',
+      text: "Hi {{ name }}",
+    })
+    const published = await store.publish(t, created.id)
+    expect(published && "version" in published && published.version).toBe(1)
+
+    const v1 = await store.version(t, created.id, 1)
+    expect(v1).toMatchObject({
+      kind: "visual",
+      design,
+      display: { html: '<p>Hi {{ name }}</p><a href="{{ url }}">go</a>' },
+    })
+    const sent = await resolveTemplateSend(
+      { template: { id: "visual" }, variables: { name: "<A>", url: "javascript:x" } },
+      store.lookup(t),
+    )
+    expect(sent).toMatchObject({
+      ok: true,
+      subject: "Hi <A>",
+      html: '<p>Hi &lt;A&gt;</p><a href="#">go</a>',
+    })
+  })
 })
 
 function skeleton() {

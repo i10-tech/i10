@@ -459,11 +459,39 @@ Welcome.PreviewProps = { name: "Ada", url: "https://acme.test/start" }
 const page = (inner: string) =>
   `<!DOCTYPE html><html><body style="font-family:Helvetica,Arial,sans-serif;background:#f6f6f6;padding:24px"><div style="max-width:520px;margin:0 auto;background:#fff;border-radius:8px;padding:24px">${inner}<p style="color:#888;font-size:12px">Acme Inc.</p></div></body></html>`
 
+const ONBOARDING_DESIGN = {
+  type: "doc",
+  content: [
+    {
+      type: "heading",
+      attrs: { level: 1 },
+      content: [{ type: "text", text: "Welcome to Acme, {{ name }}" }],
+    },
+    {
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Your workspace is ready. Here is what to do first: " },
+        {
+          type: "text",
+          marks: [{ type: "link", attrs: { href: "{{ url }}" } }],
+          text: "open your dashboard",
+        },
+        { type: "text", text: "." },
+      ],
+    },
+    {
+      type: "paragraph",
+      content: [{ type: "text", text: "Reply to this email if anything is unclear." }],
+    },
+  ],
+}
+
 const TEMPLATES: {
   id: string
   name: string
   folder: string | null
-  kind: "html" | "tsx"
+  kind: "html" | "tsx" | "visual"
+  design?: Record<string, unknown>
   source: "managed" | "upload" | "github"
   subject: string | null
   html: string | null
@@ -578,6 +606,33 @@ Receipt.PreviewProps = { order: { id: "A-1042", total: "$42.00" } }
     })),
   },
   {
+    id: "bf7a1c00-0000-4000-8000-000000000005",
+    name: "onboarding",
+    folder: "lifecycle",
+    kind: "visual",
+    source: "managed",
+    design: ONBOARDING_DESIGN,
+    subject: "Welcome to Acme, {{ name }}",
+    html: null,
+    text: null,
+    live: 2,
+    created_days: 20,
+    updated_days: 1,
+    versions: [1, 2].map((n) => ({
+      number: n,
+      subject: "Welcome to Acme, {{ name }}",
+      html: page(
+        `<h1>Welcome to Acme, {{ name }}</h1><p>Your workspace is ready. Here is what to do first: <a href="{{ url }}">open your dashboard</a>.</p>${n === 2 ? "<p>Reply to this email if anything is unclear.</p>" : ""}`,
+      ),
+      text: `Welcome to Acme, {{ name }}\n\nYour workspace is ready. Here is what to do first: open your dashboard ({{ url }}).${n === 2 ? "\n\nReply to this email if anything is unclear." : ""}`,
+      variables: [
+        { path: "name", preview: "" },
+        { path: "url", preview: "" },
+      ],
+      days: 20 - n * 9,
+    })),
+  },
+  {
     id: "bf7a1c00-0000-4000-8000-000000000004",
     name: "weekly-digest",
     folder: null,
@@ -635,6 +690,7 @@ function templateDetailFixture(id: string) {
     ...summary(t),
     html: t.html,
     text: t.text,
+    design: t.design ?? null,
     history: [...t.versions].reverse().map((v) => versionSummary(t, v)),
   }
 }
@@ -648,6 +704,7 @@ function templateVersionFixture(id: string, number: number) {
     ...versionSummary(t, v),
     source: v.source ?? null,
     files: v.files ?? null,
+    design: t.kind === "visual" ? (t.design ?? null) : null,
     display: { html: v.html, text: v.text },
     // Filled with samples (or the name itself), for the preview route.
     html: fillFixture(v.html, v.variables),

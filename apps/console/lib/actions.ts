@@ -893,7 +893,11 @@ export async function deleteBroadcast(id: string) {
 
 // ── Templates ───────────────────────────────────────────────────────────────
 
-export async function createTemplate(input: { name: string; folder?: string | null }) {
+export async function createTemplate(input: {
+  name: string
+  folder?: string | null
+  kind?: "html" | "visual"
+}) {
   return run(
     () => api<TemplateRow>("/console/templates", { method: "POST", body: input }),
     ["/templates"],
@@ -995,6 +999,31 @@ export async function promoteTemplateVersion(id: string, number: number) {
       ),
     ["/templates", `/templates/${encodeURIComponent(id)}`],
   )
+}
+
+/**
+ * Puts an earlier version back into the draft, to edit from there (#243).
+ *
+ * ⚠ THE DRAFT CHANGES; WHAT IS SENT DOES NOT. Nothing goes live until the
+ * draft is published, which makes a new version - the old one stays exactly
+ * as it was. The HTML copied is the readable form, `{{ name }}` where the
+ * variables go, which is what the editor works in.
+ */
+export async function restoreTemplateDraft(id: string, number: number) {
+  return run(async () => {
+    const version = await api<TemplateVersionDetail>(
+      `/console/templates/${encodeURIComponent(id)}/versions/${number}`,
+    )
+    return api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: {
+        subject: version.subject,
+        html: version.display.html,
+        text: version.display.text,
+        ...(version.kind === "visual" ? { design: version.design ?? null } : {}),
+      },
+    })
+  }, ["/templates", `/templates/${encodeURIComponent(id)}`])
 }
 
 /**

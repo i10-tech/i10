@@ -459,13 +459,18 @@ export interface TemplateRow {
   id: string
   name: string
   folder: string | null
-  /** `html` is written here; `tsx` is a React Email component (#160). */
-  kind: "html" | "tsx"
+  /**
+   * `html` is written here as HTML; `visual` in the React Email editor (#243);
+   * `tsx` is a React Email component, uploaded or pushed (#160).
+   */
+  kind: "html" | "tsx" | "visual"
   source: TemplateSource
   subject: string | null
-  /** The draft body of an `html` template. */
+  /** The draft body of an `html` template, or what a `visual` one exported. */
   html: string | null
   text: string | null
+  /** A `visual` template's draft: the editor's TipTap JSON. */
+  design?: Record<string, unknown> | null
   /** When the live version was created; null before the first publish. */
   published_at: string | null
   /** The live version's number; 0 before the first publish. */
@@ -504,6 +509,8 @@ export interface TemplateVersionDetail extends TemplateVersionSummary {
   source: string | null
   /** The other files it imports, path to text. */
   files: Record<string, string> | null
+  /** A `visual` version's editor document. */
+  design?: Record<string, unknown> | null
   /** The skeleton with markers written as `{{ path }}`: for reading and diffing. */
   display: { html: string | null; text: string | null }
 }

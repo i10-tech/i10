@@ -49,6 +49,30 @@ Templates we ship ready-made for customers are a separate, later idea.
 | `html` | HTML written in the console           | finding `{{ name }}` placeholders (no execution) |
 | `tsx`  | React Email files, uploaded or pushed | the sandbox Worker, `services/template-renderer` |
 
+### Visual templates (#243)
+
+The dash's visual editor is **`@react-email/editor`** (MIT, `resend/react-email`),
+built on TipTap. A template made in it has kind `visual` and source `managed`.
+
+- **The draft is the editor's document** (`templates.design`, TipTap JSON),
+  saved together with the HTML and text the editor exports from it
+  (`getEmail()`). The document is what reopens; the exported HTML is what a
+  version is made from.
+- **Publishing is the `html` path.** `{{ name }}` placeholders in the exported
+  HTML and text become markers; no sandbox, because the editor's output is
+  markup, not code. The version also keeps `design`, so any version can be
+  copied back into the draft ("Edit from here") and reopened.
+- **Variables are typed as `{{ name }}`**, in text and in link addresses. The
+  editor exports both unchanged (verified: `href="{{ url }}"` survives), so a
+  visual template fills exactly like an HTML one.
+- **Isolation (#189).** The editor is handed the template's own document,
+  never HTML, and ProseMirror renders only nodes its schema knows. It is loaded
+  on the client, only on the editor tab. Previews still go through the
+  sandboxed, CSP-constrained `EmailFrame`.
+- The document is sent to the server as a plain JSON copy. TipTap's attribute
+  objects are not plain, and a server action serializes them as temporary
+  references that arrive as nothing.
+
 ### Templates are file sets
 
 Real template folders share a layout, a footer, a button. So a `tsx` template
