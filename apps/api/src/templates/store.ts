@@ -18,6 +18,7 @@ import {
 import { withTenant, type Database } from "../db/client.js"
 import { templateVersions, templates } from "../db/core.js"
 import { LIST_CAP } from "../console/marketing/shared.js"
+import { VersionCache } from "./version-cache.js"
 
 /**
  * Templates and their versions (#160, #161).
@@ -185,7 +186,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 type Tx = Parameters<Parameters<typeof withTenant>[2]>[0]
 
-export function templateStore(db: Database): TemplateStore {
+export function templateStore(
+  db: Database,
+  versions: VersionCache = new VersionCache(),
+): TemplateStore {
   /** The template, its live version's number and date, and its version count. */
   const rowOf = async (tx: Tx, id: string): Promise<TemplateRow | null> => {
     const [row] = await tx.select().from(templates).where(eq(templates.id, id)).limit(1)
@@ -617,29 +621,45 @@ export function templateStore(db: Database): TemplateStore {
 
     lookup(tenantId) {
       return {
+        /*
+         * ⚠ ONE TRANSACTION PER SEND, AND ONE QUERY WHEN THE VERSION IS
+         * CACHED (#238). The reference is always resolved against Postgres,
+         * because live moves; the version's content is fetched in the same
+         * transaction only when this process has not seen it, and then kept.
+         */
         async versionIdFor(ref) {
           return withTenant(db, tenantId, async (tx) => {
             const byId = UUID.test(ref.id)
-            const [template] = await tx
-              .select({ id: templates.id, live: templates.liveVersionId })
-              .from(templates)
-              .where(byId ? eq(templates.id, ref.id) : eq(templates.name, ref.id))
-              .limit(1)
-            if (!template) return null
-            if (ref.version === undefined) return template.live
-            const [pinned] = await tx
+            const which = byId ? eq(templates.id, ref.id) : eq(templates.name, ref.id)
+            const [row] = await tx
               .select({ id: templateVersions.id })
-              .from(templateVersions)
-              .where(
-                and(
-                  eq(templateVersions.templateId, template.id),
-                  eq(templateVersions.number, ref.version),
-                ),
+              .from(templates)
+              .innerJoin(
+                templateVersions,
+                ref.version === undefined
+                  ? eq(templateVersions.id, templates.liveVersionId)
+                  : and(
+                      eq(templateVersions.templateId, templates.id),
+                      eq(templateVersions.number, ref.version),
+                    ),
               )
-            return pinned?.id ?? null
+              .where(which)
+              .limit(1)
+            if (!row) return null
+            if (!versions.get(tenantId, row.id)) {
+              const [v] = await tx
+                .select()
+                .from(templateVersions)
+                .where(eq(templateVersions.id, row.id))
+                .limit(1)
+              if (v) versions.set(tenantId, toStored(v))
+            }
+            return row.id
           })
         },
         async version(versionId) {
+          const cached = versions.get(tenantId, versionId)
+          if (cached) return cached
           if (!UUID.test(versionId)) return null
           return withTenant(db, tenantId, async (tx) => {
             const [v] = await tx
@@ -647,7 +667,10 @@ export function templateStore(db: Database): TemplateStore {
               .from(templateVersions)
               .where(eq(templateVersions.id, versionId))
               .limit(1)
-            return v ? toStored(v) : null
+            if (!v) return null
+            const stored = toStored(v)
+            versions.set(tenantId, stored)
+            return stored
           })
         },
       }

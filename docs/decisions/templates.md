@@ -199,6 +199,12 @@ The send path's first layer is moving to Cloudflare, so:
   - version id → content is **immutable**. Cache it by id, forever, anywhere.
 - **`StoredVersion` is plain JSON**, the same bytes in Postgres, in the API's
   answer and in any cache.
+- **Today, in the API (#238):** a template send is one tenant transaction. It
+  resolves the reference against Postgres every time, because live moves and
+  a promote must reach the very next send on every pod. It fetches the
+  version's content in that same transaction only on a miss. Versions are kept
+  in an in-process LRU keyed by tenant and version id (32 MB), so a warm send
+  is one query, pinned or not.
 
 ## Where the sandbox runs: celld for now
 
