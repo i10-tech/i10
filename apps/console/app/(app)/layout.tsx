@@ -6,7 +6,6 @@ import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
 import { SendingStatusBanner } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
-import { SendingHealthRail } from "@/components/sending-health"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { CommandMenu } from "@/components/command-menu"
 import { MobileNav } from "@/components/mobile-nav"
@@ -147,7 +146,7 @@ export default async function AppLayout({
         </div>
 
         {/*
-         * ⚠ THE USAGE METER IS PINNED TO THE BOTTOM OF THE RAIL, VISIBLE ON
+         * ⚠ THE USAGE RING IS PINNED TO THE BOTTOM OF THE RAIL, VISIBLE ON
          * EVERY SCREEN, AND THAT IS A PRODUCT DECISION RATHER THAN A LAYOUT
          * ONE. Metering that only appears on a billing page is metering nobody
          * looks at until they are refused a send. It is also the only
@@ -157,10 +156,12 @@ export default async function AppLayout({
          * the navigation. The rail renders, the number arrives.
          */}
         <div className="mt-auto space-y-1 border-t p-2">
+          {/*
+           * ⚠ NO SENDING-HEALTH PILL HERE ANY MORE (#153). A permanent "Healthy"
+           * badge was noise; trouble still reaches every page through the
+           * banner above the content, and the overview keeps the full card.
+           */}
           <Suspense fallback={<Skeleton className="h-8 w-full rounded-md" />}>
-            <SendingHealthRail />
-          </Suspense>
-          <Suspense fallback={<Skeleton className="h-16 w-full rounded-md" />}>
             <UsageRail />
           </Suspense>
 

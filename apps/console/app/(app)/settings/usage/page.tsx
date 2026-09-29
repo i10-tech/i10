@@ -181,7 +181,10 @@ function LimitRow({ limit }: { limit: SendingLimit }) {
 
   const allowance = limit.allowance
   const pct = allowance ? Math.round((limit.used / allowance) * 100) : 0
-  const over = allowance !== null && limit.used > allowance
+  // Past the line with overage; AT it on a hard cap, where sends are refused.
+  const over =
+    allowance !== null &&
+    (limit.overage ? limit.used > allowance : limit.used >= allowance)
 
   return (
     <div className="grid grid-cols-1 gap-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,13rem)_1fr_6rem] sm:items-center sm:gap-6">

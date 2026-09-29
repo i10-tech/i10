@@ -1,4 +1,3 @@
-import Link from "next/link"
 import { Status } from "@/components/status"
 import { Stat } from "@/components/stat"
 import { PanelError } from "@/components/panel-error"
@@ -36,31 +35,6 @@ const SUMMARY: Record<SendingStatus["health"], string> = {
   paused:
     "Our email provider paused sending. The API refuses new emails until it is lifted.",
   held: "Sending is on hold while we review this workspace. A person will look within a day.",
-}
-
-/**
- * The workspace's sending health in the sidebar, on every page (#158).
- *
- * ⚠ SHOWN WHEN IT IS GOOD, NOT ONLY WHEN IT IS BAD. A green "Healthy" that is
- * always there is what makes the amber one noticed when it changes - and it
- * answers "is anything wrong with my sending" without a click, which is the
- * question a customer asks most.
- *
- * ⚠ AND A FAILED READ RENDERS NOTHING, like the usage rail beside it. Ambient
- * furniture must never be the thing that alarms somebody.
- */
-export async function SendingHealthRail() {
-  const result = await tryApi<SendingStatus>("/console/sending-status")
-  if (!result.ok) return null
-  return (
-    <Link
-      href="/"
-      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/40"
-    >
-      <span className="text-xs font-medium text-muted-foreground">Sending</span>
-      <Status status={result.data.health} variant="pill" />
-    </Link>
-  )
 }
 
 /**

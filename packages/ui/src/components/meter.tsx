@@ -60,15 +60,20 @@ export function Meter({
   const includedPct = over ? (1 / ratio) * 100 : ratio * 100
   const overPct = over ? 100 - includedPct : 0
 
+  // ⚠ A HARD CAP IS RED AT 100%, NOT ONLY PAST IT: at exactly the limit the
+  // next send is refused, which is what red means. The same rule as the
+  // sidebar's usage ring (usage-ring.tsx), so the two never disagree.
   const tone = over
     ? overage
       ? "bg-info"
       : "bg-danger"
-    : ratio >= 0.9
-      ? overage
-        ? "bg-foreground"
-        : "bg-warning"
-      : "bg-foreground"
+    : ratio >= 1 && !overage
+      ? "bg-danger"
+      : ratio >= 0.9
+        ? overage
+          ? "bg-foreground"
+          : "bg-warning"
+        : "bg-foreground"
 
   return (
     <div
