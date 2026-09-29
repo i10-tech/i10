@@ -11,6 +11,12 @@ import {
   type TemplateStore,
 } from "../src/templates/store.js"
 import { uploadTemplates } from "../src/templates/upload.js"
+import { memoryStore } from "../src/content/object-store.js"
+import {
+  MAX_ASSET_BYTES,
+  assetFolder,
+  templateAssetStore,
+} from "../src/templates/assets.js"
 
 /**
  * Templates and versions (#160, #161) against the real schema as `i10_api`.
@@ -385,6 +391,58 @@ suite("templates", () => {
       subject: "Hi <A>",
       html: '<p>Hi &lt;A&gt;</p><a href="#">go</a>',
     })
+  })
+
+  it("stores a template image once per workspace, public, and deletes it with the workspace (#244)", async () => {
+    const bucket = memoryStore()
+    const assets = templateAssetStore({
+      db: drizzle(app, { schema }) as unknown as Database,
+      store: bucket,
+      publicUrl: "https://assets.test/",
+    })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3,
+    ])
+    const a = await workspace()
+    const b = await workspace()
+
+    const first = await assets.upload(a, png)
+    if (!first.ok) throw new Error(first.problem)
+    expect(first.asset.url).toBe(
+      `https://assets.test/${assetFolder(a)}/${first.asset.sha256}.png`,
+    )
+    expect(first.asset.url).not.toContain(a) // the public URL names no workspace
+    expect((await assets.upload(a, png)).ok).toBe(true)
+    expect(bucket.puts).toBe(1) // the same image again writes nothing
+
+    // Another workspace gets its own object, and cannot see the first's row.
+    const other = await assets.upload(b, png)
+    expect(other.ok && other.asset.url).not.toBe(first.asset.url)
+    expect(bucket.puts).toBe(2)
+    const [visible] = await app.begin(async (tx) => {
+      await tx`select set_config('app.tenant_id', ${b}, true)`
+      return tx`select count(*)::int as n from core.template_assets where tenant_id = ${a}`
+    })
+    expect(visible?.n).toBe(0)
+
+    expect(
+      await assets.upload(a, new TextEncoder().encode("<svg onload=alert(1)>")),
+    ).toEqual({
+      ok: false,
+      problem: "Only PNG, JPEG, GIF and WebP images can be used in emails.",
+    })
+    const big = new Uint8Array(MAX_ASSET_BYTES + 1)
+    big.set(png)
+    expect((await assets.upload(a, big)).ok).toBe(false)
+
+    // A live workspace keeps its images; a deleted one loses them all.
+    await owner`update core.tenants set status = 'deleted' where id = ${a}`
+    expect(await assets.sweepDeleted()).toBe(1)
+    expect(
+      bucket.objects.has(first.asset.url.replace("https://assets.test/", "")),
+    ).toBe(false)
+    expect(bucket.objects.size).toBe(1)
+    expect(await assets.sweepDeleted()).toBe(0)
   })
 })
 

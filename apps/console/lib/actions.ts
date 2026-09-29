@@ -4,6 +4,7 @@ import { refresh, revalidatePath } from "next/cache"
 import { api, ApiRequestError } from "@/lib/api"
 import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
+import { PREVIEW } from "@/lib/preview"
 import type {
   ApiKeyRow,
   ContactRow,
@@ -986,6 +987,44 @@ export async function uploadTemplateVersion(id: string, form: FormData) {
         },
       ),
     ["/templates", `/templates/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
+ * An image for the visual editor (#244): stored once per workspace in the
+ * public template images bucket, and its URL returned for the email.
+ *
+ * ⚠ THE BYTES GO TO THE API AS THEY ARE. The API reads the type from them and
+ * refuses anything but PNG, JPEG, GIF and WebP; what the browser said the file
+ * was is not passed on, because it is not evidence.
+ */
+export async function uploadTemplateImage(form: FormData) {
+  const file: unknown = form.get("file")
+  if (!(file instanceof Blob)) {
+    return {
+      ok: false as const,
+      error: "Choose an image.",
+      name: "validation_error",
+      status: 422,
+    }
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  if (PREVIEW) {
+    // Nothing is stored in preview mode; the image is shown from itself.
+    const type = file.type || "image/png"
+    return {
+      ok: true as const,
+      data: { url: `data:${type};base64,${Buffer.from(bytes).toString("base64")}` },
+    }
+  }
+  return run(
+    () =>
+      api<{ url: string; sha256: string; content_type: string; size: number }>(
+        "/console/templates/assets",
+        { method: "POST", rawBody: bytes, contentType: "application/octet-stream" },
+      ),
+    [],
+    { refreshCaller: false },
   )
 }
 

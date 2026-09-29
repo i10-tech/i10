@@ -187,7 +187,11 @@ export function createConsole(deps?: ConsoleDeps) {
     c.set("bodyLimited", true)
     return csvBodyLimit(c, next)
   })
-  for (const path of ["/templates/upload", "/templates/:id/versions"]) {
+  for (const path of [
+    "/templates/upload",
+    "/templates/assets",
+    "/templates/:id/versions",
+  ]) {
     app.use(path, async (c, next) => {
       c.set("bodyLimited", true)
       return templateBodyLimit(c, next)

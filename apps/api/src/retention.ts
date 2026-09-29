@@ -21,7 +21,8 @@
 import { sql } from "drizzle-orm"
 import pino from "pino"
 import { sweepObjects } from "./content/attachments.js"
-import { objectStoreFrom } from "./content/object-store.js"
+import { objectStoreFrom, templateAssetsBucketFrom } from "./content/object-store.js"
+import { templateAssetStore } from "./templates/assets.js"
 import { sweepPacks } from "./content/packs.js"
 import { sweepTemplates } from "./content/sweep.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
@@ -71,6 +72,7 @@ await withMonitor(
       templates: 0,
       objects: 0,
       packs: 0,
+      templateImages: 0,
       tombstonesPruned: 0,
       partitionsDropped: [] as string[],
       partitionsRefused: [] as string[],
@@ -123,6 +125,25 @@ await withMonitor(
         } catch (error) {
           summary.failed++
           log.error({ err: error, tenantId }, "could not sweep a workspace's content")
+        }
+      }
+
+      // ── 3b. Template images of deleted workspaces (#244) ──
+      // Kept while a workspace lives, because sent mail points at them; gone
+      // with the workspace. See templates/assets.ts.
+      const bucket = templateAssetsBucketFrom(env)
+      if (bucket) {
+        try {
+          summary.templateImages = await templateAssetStore({
+            db,
+            ...bucket,
+          }).sweepDeleted()
+        } catch (error) {
+          summary.failed++
+          log.error(
+            { err: error },
+            "could not sweep deleted workspaces' template images",
+          )
         }
       }
 
