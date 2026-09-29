@@ -67,7 +67,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: orphans
-              image: ghcr.io/i10-tech/i10-api:prod-99ce5b12c001e8ae174537b27f932e99aa17db7d@sha256:54399d2c32b436df8da8a017002c11b9aaff7e12ddf60cb7469e1226d951fb9f
+              image: ghcr.io/i10-tech/i10-api:prod-f7b2379b6dfe0ed2b6ddaa462c78dab815b6f18a@sha256:2a39eb8f1d3772fed52c48c39b1985a4dd784056d90ac2389b0aad80c48ede34
               imagePullPolicy: Always
               command: ["bun", "dist/domain-orphans.js"]
               envFrom:
