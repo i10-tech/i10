@@ -1045,6 +1045,16 @@ export const messageBodies = core.table(
     templateId: uuid("template_id"),
     templateValues: jsonb("template_values"),
     compactedAt: timestamp("compacted_at", { withTimezone: true }),
+
+    /**
+     * The workspace's staff-approved template this message fitted exactly
+     * (#222), set by the content job. Null for everything else.
+     *
+     * ⚠ IT IS HOW AN APPROVAL IS JUDGED BY ITS RESULTS. The hourly run counts
+     * the bounces and complaints of exactly these messages, and revokes the
+     * approval when they cross the thresholds. See risk/trusted.ts.
+     */
+    trustedTemplateId: uuid("trusted_template_id"),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.createdAt] })],
 )
@@ -2658,6 +2668,15 @@ export const contentFingerprints = core.table(
     exact: text("exact").notNull(),
     bands: text("bands").array().notNull(),
     messages: integer("messages").notNull().default(0),
+    /**
+     * Why this content does not count toward the cross-workspace rules
+     * (#222): `boilerplate:<id>` for known public boilerplate, `template:<id>`
+     * for the workspace's own staff-approved template. Null counts in full.
+     *
+     * ⚠ SET ONLY WHILE EVERY MESSAGE WITH THIS FINGERPRINT FITTED. One that
+     * did not clears it for the day - it fails closed, never open.
+     */
+    trustedBy: text("trusted_by"),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2902,6 +2921,8 @@ export const contentVectors = core.table(
     exact: text("exact").notNull(),
     model: text("model").notNull(),
     embedding: halfvec("embedding", { dimensions: CONTENT_DIMENSIONS }).notNull(),
+    /** As `content_fingerprints.trusted_by` (#222): why it does not count. */
+    trustedBy: text("trusted_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -2941,5 +2962,181 @@ export const behaviourVectors = core.table(
   (t) => [
     index("behaviour_vectors_hnsw_idx").using("hnsw", t.embedding.op("vector_l2_ops")),
     tenantPolicy("behaviour_vectors_tenant", t.tenantId),
+  ],
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trusted content (#222): known public boilerplate, and templates a workspace
+// submitted and staff approved. See docs/decisions/risk.md, "Trusted templates".
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Known public boilerplate (#222): Clerk's, Supabase's or NextAuth's default
+ * emails, React Email starters - mail many unrelated workspaces send because
+ * they all started from the same place.
+ *
+ * ⚠ GLOBAL, SO DENY-ALL LIKE `risk_models`. It is not any workspace's data, so
+ * a tenant policy cannot describe it; it is read and written only through
+ * definer functions (the risk migrations), and a direct query returns nothing.
+ *
+ * ⚠ A MATCH STOPS COUNTING TOWARD THE CROSS-WORKSPACE RULES AND NOTHING ELSE.
+ * The semantic crowd, the farm clusters and similarity to confirmed abuse skip
+ * it; bounces, complaints, velocity and identity count in full, because
+ * boilerplate sent to a bought list is still a bought list.
+ *
+ * ⚠ `segments` IS A SKELETON FOR THE EXISTING MATCHER (content/templates.ts),
+ * so a message counts as boilerplate only when it IS the boilerplate with its
+ * holes filled - within `hole_limits`, and with no markup or foreign links in
+ * the holes. See content/trust.ts.
+ */
+export const riskBoilerplate = core.table(
+  "risk_boilerplate",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    /** A short, stable handle staff read, e.g. `clerk/reset-password`. */
+    name: text("name").notNull(),
+    skeletonHash: text("skeleton_hash").notNull(),
+    segments: jsonb("segments").notNull(),
+    /** Longest value each hole may take, in order. */
+    holeLimits: jsonb("hole_limits").notNull(),
+    bands: text("bands").array().notNull(),
+    staticBytes: integer("static_bytes").notNull(),
+    holes: integer("holes").notNull(),
+    /** The embedder the embedding came from; null when none was loaded. */
+    model: text("model"),
+    embedding: halfvec("embedding", { dimensions: CONTENT_DIMENSIONS }),
+    reason: text("reason").notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("risk_boilerplate_name_unique").on(t.name),
+    uniqueIndex("risk_boilerplate_skeleton_unique").on(t.skeletonHash),
+    pgPolicy("risk_boilerplate_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/**
+ * Every change to the boilerplate list, append-only (#222): who, why, and the
+ * skeleton as it was. Deny-all for the same reason as the list.
+ */
+export const riskBoilerplateEvents = core.table(
+  "risk_boilerplate_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    /** No foreign key: a removal deletes the entry and keeps this row. */
+    boilerplateId: uuid("boilerplate_id").notNull(),
+    name: text("name").notNull(),
+    skeletonHash: text("skeleton_hash").notNull(),
+    /** `add` or `remove`. */
+    action: text("action").notNull(),
+    setBy: text("set_by").notNull(),
+    reason: text("reason").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("risk_boilerplate_events_time_idx").on(t.occurredAt),
+    pgPolicy("risk_boilerplate_events_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/**
+ * A template a workspace submitted for review, and staff's decision (#222).
+ *
+ * ⚠ WHAT IS APPROVED IS THE FIXED PART. `segments` is the skeleton between
+ * the holes the workspace marked; a message gets credit only when the
+ * existing matcher fits it EXACTLY, each hole within its limit, with no markup
+ * and no link off the workspace's own verified domains. The holes cannot carry
+ * a different message, so "submit something clean, send something else" does
+ * not work.
+ *
+ * ⚠ AN APPROVAL STOPS REPETITION COUNTING, NEVER RESULTS. Bounces, complaints
+ * and holds work exactly as before, and the hourly run revokes an approval
+ * whose messages bounce or complain past the thresholds, or on any staff abuse
+ * label. Per workspace, never shared across workspaces.
+ *
+ * `status`: `pending`, `approved`, `rejected`, `revoked` or `withdrawn`.
+ */
+export const trustedTemplates = core.table(
+  "trusted_templates",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** What was submitted, placeholders and all, for staff to read. */
+    html: text("html"),
+    text: text("text"),
+    skeletonHash: text("skeleton_hash").notNull(),
+    segments: jsonb("segments").notNull(),
+    /** `[{ name, max }]`, one per hole, in order. */
+    holes: jsonb("holes").notNull(),
+    bands: text("bands").array().notNull(),
+    /** Hosts the fixed part links to, checked with Web Risk before approval. */
+    staticHosts: text("static_hosts")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    status: text("status").notNull().default("pending"),
+    submittedBy: text("submitted_by").notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /** Shown to the workspace: staff write it knowing that. */
+    decisionReason: text("decision_reason"),
+    /** Messages credited to it. */
+    matched: integer("matched").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("trusted_templates_tenant_idx").on(t.tenantId, t.status),
+    // ⚠ ONE LIVE SUBMISSION PER SKELETON. A second copy of an approved
+    // template would be a second approval nobody reviewed.
+    uniqueIndex("trusted_templates_live_unique")
+      .on(t.tenantId, t.skeletonHash)
+      .where(sql`status in ('pending', 'approved')`),
+    tenantPolicy("trusted_templates_tenant", t.tenantId),
+  ],
+)
+
+/** Every submission, decision and revocation, append-only (#222). */
+export const trustedTemplateEvents = core.table(
+  "trusted_template_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    templateId: uuid("template_id").notNull(),
+    /** `submit`, `approve`, `reject`, `revoke` or `withdraw`. */
+    action: text("action").notNull(),
+    setBy: text("set_by").notNull(),
+    reason: text("reason"),
+    /** For automatic revocations: the numbers behind it. */
+    detail: jsonb("detail"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("trusted_template_events_tenant_idx").on(t.tenantId, t.occurredAt),
+    tenantPolicy("trusted_template_events_tenant", t.tenantId),
   ],
 )

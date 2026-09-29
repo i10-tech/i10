@@ -848,6 +848,13 @@ const schema = z.object({
   WEBRISK_API_KEY: z.string().min(1).optional(),
 
   /**
+   * Web Risk lookups allowed per UTC day, counted in Redis (#222). ⚠ GOOGLE
+   * ONLY LIMITS PER MINUTE, so this is the only thing standing between a burst
+   * of new hosts and a bill; 3,000 a day stays inside the free 100k a month.
+   */
+  WEBRISK_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(3000),
+
+  /**
    * Laya, the content classifier (docs/decisions/risk.md). It needs a GPU host
    * we do not run on the CX33, so it is off until this points somewhere.
    */

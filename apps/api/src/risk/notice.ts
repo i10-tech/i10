@@ -1,5 +1,9 @@
 import { eq } from "drizzle-orm"
-import { renderSecurityAlert, renderSendingHeld } from "@repo/emails"
+import {
+  renderSecurityAlert,
+  renderSendingHeld,
+  renderTemplateReview,
+} from "@repo/emails"
 import type { AuthEmailSender } from "../auth-email/deliver.js"
 import { withTenant, type Database } from "../db/client.js"
 import { tenants } from "../db/core.js"
@@ -25,6 +29,15 @@ interface ClerkUsers {
   }
 }
 
+/** A decision on a submitted template (#222), for the workspace's owner. */
+export interface TemplateDecisionNotice {
+  tenantId: string
+  templateId: string
+  template: string
+  decision: "approved" | "rejected" | "revoked"
+  reason: string | null
+}
+
 export function riskNotices({
   db,
   clerk,
@@ -38,6 +51,7 @@ export function riskNotices({
 }): HoldNotice & {
   security(userId: string, detail: Record<string, unknown>): Promise<void>
   keySpread(tenantId: string): Promise<void>
+  templateDecision(input: TemplateDecisionNotice): Promise<void>
 } {
   const emailOf = async (userId: string) => {
     const to = (await clerk.users.getUser(userId)).primaryEmailAddress?.emailAddress
@@ -84,6 +98,24 @@ export function riskNotices({
         to: await emailOf(userId),
         ...rendered,
         idempotencyKey: `risk-takeover:${userId}:${new Date().toISOString().slice(0, 10)}`,
+      })
+    },
+
+    async templateDecision({ tenantId, templateId, template, decision, reason }) {
+      const w = await workspace(tenantId)
+      const rendered = await renderTemplateReview({
+        decision,
+        workspace: w.name,
+        template,
+        reason,
+        url: `${consoleUrl.replace(/\/$/, "")}/templates`,
+      })
+      await sender.send({
+        to: await emailOf(w.owner),
+        ...rendered,
+        // ⚠ ONE EMAIL PER DECISION: a template is decided once and revoked
+        // once, so the id and the decision name the event.
+        idempotencyKey: `risk-template:${templateId}:${decision}`,
       })
     },
 

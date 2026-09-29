@@ -170,6 +170,10 @@ suite("the risk engine against Postgres, as i10_api", () => {
     await owner`delete from core.identity_events where clerk_user_id like 'risk-test-%'`.catch(
       () => {},
     )
+    // The boilerplate list is global: its test entries go by name.
+    await owner`delete from core.risk_boilerplate where name like ${`test/%-${RUN}`}`.catch(
+      () => {},
+    )
     await owner?.end()
     await app?.end()
   })
@@ -689,5 +693,311 @@ suite("the risk engine against Postgres, as i10_api", () => {
     const v = await actorVelocity(db, t!.owner_clerk_user_id)
     expect(v.linkedPeople).toBeGreaterThanOrEqual(4)
     expect(v.workspaces24h).toBeGreaterThanOrEqual(4)
+  })
+  // ─── #222: trusted content and similarity evidence ─────────────────────────
+
+  /** A fresh workspace with a verified domain, cleaned up with the rest. */
+  async function trustTenant(domain: string) {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 3 })
+    await owner`insert into core.domains (tenant_id, name, status, verified_at)
+                values (${id}, ${domain}, 'verified', now())`
+    return id
+  }
+
+  const BOILER = (name: string) =>
+    `<html><body><h2>Reset your password</h2><p>Hi ${name},</p><p>We received a request to reset ` +
+    `the password for your account. Enter the code below in the app to choose a new password. ` +
+    `If you did not request this, you can safely ignore this email.</p></body></html>`
+
+  const boilerMail = (name: string): SendEmail =>
+    ({
+      from: "noreply@x.com",
+      to: "r@example.com",
+      subject: "Reset your password",
+      html: BOILER(name),
+    }) as SendEmail
+
+  it("keeps the boilerplate list deny-all, and changes it only through audited definers", async () => {
+    const { boilerplateStore } = await import("../src/risk/trusted.js")
+    const { parseSubmission } = await import("../src/content/trust.js")
+    const store = boilerplateStore(db)
+    const skeleton = parseSubmission({ html: BOILER("{{name}}"), text: null })
+    if ("error" in skeleton) throw new Error(skeleton.error)
+    const id = await store.add({
+      name: `test/deny-${RUN}`,
+      skeleton,
+      model: null,
+      embedding: null,
+      reason: "integration test",
+      by: "risk-db",
+    })
+    expect((await store.list()).some((b) => b.id === id)).toBe(true)
+    expect(await app`select * from core.risk_boilerplate`).toHaveLength(0)
+    expect(await app`select * from core.risk_boilerplate_events`).toHaveLength(0)
+    const history = await store.history(20)
+    expect(history.some((h) => h.boilerplate_id === id && h.action === "add")).toBe(
+      true,
+    )
+
+    let refused = false
+    try {
+      await store.add({
+        name: `test/noreason-${RUN}`,
+        skeleton,
+        model: null,
+        embedding: null,
+        reason: " ",
+        by: "risk-db",
+      })
+    } catch {
+      refused = true
+    }
+    expect(refused).toBe(true)
+    expect(await store.remove(id, "done", "risk-db")).toBe(true)
+    expect(await store.remove(id, "again", "risk-db")).toBe(false)
+  })
+
+  it("leaves boilerplate out of farm detection on both sides, keeps the tripwire quiet, and counts again once removed", async () => {
+    const { boilerplateStore, trustSource } = await import("../src/risk/trusted.js")
+    const { parseSubmission } = await import("../src/content/trust.js")
+    const { farmPeers } = await import("../src/risk/facts.js")
+    const store = boilerplateStore(db)
+    const skeleton = parseSubmission({
+      html: BOILER("{{name}}"),
+      text: null,
+      holes: { name: 40 },
+    })
+    if ("error" in skeleton) throw new Error(skeleton.error)
+    const id = await store.add({
+      name: `test/farm-${RUN}`,
+      skeleton,
+      model: null,
+      embedding: null,
+      reason: "integration test",
+      by: "risk-db",
+    })
+    const f1 = await trustTenant(`one-${RUN}.com`)
+    const f2 = await trustTenant(`two-${RUN}.com`)
+    const redis = new FakeRedis()
+    const rescored: string[][] = []
+    const trust = trustSource(db, { verdict: async () => "clean", ttlMs: 0 })
+    for (const [t, name] of [
+      [f1, "Ada"],
+      [f2, "Bob"],
+    ] as const) {
+      await recordContent(t, [boilerMail(name)], {
+        db,
+        redis: redis as never,
+        threshold: 2,
+        rescore: (ids) => rescored.push(ids),
+        trust,
+      })
+    }
+    const marks =
+      await owner`select trusted_by from core.content_fingerprints where tenant_id in (${f1}, ${f2})`
+    expect(marks).toHaveLength(2)
+    expect(marks.every((m) => m.trusted_by === `boilerplate:${id}`)).toBe(true)
+    expect(redis.sets.size).toBe(0)
+    expect(rescored).toHaveLength(0)
+    expect(await farmPeers(db, f1, FREE, new Date())).toHaveLength(0)
+
+    // ⚠ Removing the entry takes the excuse away from the past too.
+    await store.remove(id, "being abused", "risk-db")
+    const peers = await farmPeers(db, f1, FREE, new Date())
+    expect(peers.map((p) => p.peer)).toContain(f2)
+    expect(peers.find((p) => p.peer === f2)!.bestSimilarity).toBeGreaterThan(0)
+  })
+
+  it("reviews a workspace's own template, credits exact fits, and revokes it on bounces", async () => {
+    const { trustedTemplateStore, trustSource, reviewTrusted } =
+      await import("../src/risk/trusted.js")
+    const { processContent } = await import("../src/content/job.js")
+    const t = await trustTenant(`shop-${RUN}.com`)
+    const store = trustedTemplateStore(db)
+    const html =
+      `<html><body><h1>Your sign-in link</h1><p>Hi {{name}}, use the link below to sign in to ` +
+      `your account. It works once and expires in fifteen minutes.</p>` +
+      `<p><a href="{{url}}">Sign in</a></p><p>Shop Inc, 1 Market St</p></body></html>`
+    const submitted = await store.submit(
+      t,
+      { name: "Sign-in link", html, text: null, holes: { name: 40, url: 120 } },
+      "user:risk-db",
+    )
+    if (!("template" in submitted)) throw new Error(submitted.error)
+    const tid = submitted.template.id
+    expect(submitted.template.status).toBe("pending")
+    const again = await store.submit(
+      t,
+      { name: "Again", html, text: null },
+      "user:risk-db",
+    )
+    expect("code" in again && again.code).toBe("duplicate")
+    // Another workspace cannot see it.
+    expect(await store.get(ids.clean, tid)).toBeNull()
+    const pending = (await app`select * from core.trusted_templates_pending()`) as {
+      id: string
+    }[]
+    expect(pending.some((p) => p.id === tid)).toBe(true)
+
+    // Pending is not trusted: nothing is credited yet.
+    const trust = trustSource(db, { verdict: async () => "clean", ttlMs: 0 })
+    const render = (name: string, url: string) =>
+      html.replace("{{name}}", name).replace("{{url}}", url)
+    await seedSent(t, render("Ada", `https://shop-${RUN}.com/l/abc`))
+    expect((await processContent(t, { db, trust })).trusted).toBe(0)
+
+    const approved = await store.decide(t, tid, "approve", "staff@i10", "")
+    expect(approved?.status).toBe("approved")
+    expect(approved?.decisionReason).toBeNull()
+    expect(await store.decide(t, tid, "reject", "staff@i10", "late")).toBeNull()
+
+    await seedSent(t, render("Bob", `https://app.shop-${RUN}.com/l/def`))
+    await seedSent(t, render("Cy", `https://evil-${RUN}.top/login`))
+    const credited = await processContent(t, {
+      db,
+      trust,
+      creditTemplates: (counts) => store.credit(t, counts),
+    })
+    expect(credited.trusted).toBe(2)
+    const bodies =
+      await owner`select count(*)::int as n from core.message_bodies where tenant_id = ${t} and trusted_template_id = ${tid}`
+    expect(bodies[0]?.n).toBe(2)
+    expect((await store.get(t, tid))?.matched).toBe(2)
+
+    // The accept path marks the same content, and facts count it.
+    await recordContent(
+      t,
+      [
+        {
+          from: "a@x.com",
+          to: "r@example.com",
+          subject: "Sign in",
+          html: render("Dee", `https://shop-${RUN}.com/l/x`),
+        } as SendEmail,
+      ],
+      { db, threshold: 99, trust },
+    )
+    const facts = await loadFacts(t, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+    })
+    expect(facts.farm.trusted.template).toBe(1)
+
+    // Under 100 sends nothing is judged; past it, 10% hard bounces revoke.
+    expect(await reviewTrusted(db, store, t, new Date())).toHaveLength(0)
+    await owner`
+      with m as (
+        insert into core.messages (tenant_id, from_address, to_addresses, subject, status, queue, sent_at)
+        select ${t}, 'a@x.com', '{a@example.com}', 'Sign in', 'sent', 'transactional', now()
+          from generate_series(1, 120)
+        returning id, created_at, tenant_id
+      ),
+      b as (
+        insert into core.message_bodies (message_id, created_at, tenant_id, html, trusted_template_id)
+        select id, created_at, tenant_id, 'x', ${tid}::uuid from m
+        returning message_id, tenant_id
+      )
+      insert into core.message_events (tenant_id, message_id, type, payload)
+      select tenant_id, message_id, 'sent', '{}'::jsonb from b`
+    await owner`
+      insert into core.message_events (tenant_id, message_id, type, payload)
+      select tenant_id, message_id, 'bounced', '{"bounce":{"bounceType":"Permanent"}}'::jsonb
+        from core.message_bodies where tenant_id = ${t} and trusted_template_id = ${tid} and html = 'x'
+       limit 12`
+    const revoked = await reviewTrusted(db, store, t, new Date())
+    expect(revoked).toHaveLength(1)
+    expect(revoked[0]!.category).toBe("bounces")
+    expect((await store.get(t, tid))?.status).toBe("revoked")
+    const cleared =
+      await owner`select count(*)::int as n from core.content_fingerprints where tenant_id = ${t} and trusted_by is not null`
+    expect(cleared[0]?.n).toBe(0)
+    const events = await store.events(t, tid)
+    expect(events.map((e) => e.action)).toEqual(["submit", "approve", "revoke"])
+  })
+
+  it("revokes every approval on a staff abuse label", async () => {
+    const { trustedTemplateStore, reviewTrusted } =
+      await import("../src/risk/trusted.js")
+    const t = await trustTenant(`abuse-${RUN}.com`)
+    const store = trustedTemplateStore(db)
+    const r = await store.submit(
+      t,
+      { name: "Receipt", html: receipt("{{name}}", "1"), text: null },
+      "user:risk-db",
+    )
+    if (!("template" in r)) throw new Error(r.error)
+    await store.decide(t, r.template.id, "approve", "staff@i10", "fine")
+    await labelStore(db).add({
+      tenantId: t,
+      label: "abuse",
+      source: "staff",
+      features: {},
+      setBy: "staff@i10",
+    })
+    const revoked = await reviewTrusted(db, store, t, new Date())
+    expect(revoked.map((x) => x.category)).toEqual(["abuse"])
+  })
+
+  it("leaves trusted vectors out of content neighbours and reports the evidence", async () => {
+    const { storeContentVectors, contentNeighbours, behaviourNeighbours } =
+      await import("../src/content/vectors.js")
+    const { hashEmbedder } = await import("../src/content/embed.js")
+    const { boilerplateStore } = await import("../src/risk/trusted.js")
+    const { parseSubmission } = await import("../src/content/trust.js")
+    const e = hashEmbedder()
+    const text =
+      `A unique weekly digest ${RUN}: new features shipped, three bugs fixed, and a note on ` +
+      `the upcoming maintenance window for the reporting service next Tuesday.`
+    const [v] = await e.embed([text])
+    const day = new Date().toISOString().slice(0, 10)
+    const [x, y, z] = [
+      await trustTenant(`x-${RUN}.com`),
+      await trustTenant(`y-${RUN}.com`),
+      await trustTenant(`z-${RUN}.com`),
+    ]
+    await storeContentVectors(db, x!, e.model, [
+      { day, exact: `n-${RUN}`, embedding: v! },
+    ])
+    await storeContentVectors(db, y!, e.model, [
+      { day, exact: `n-${RUN}`, embedding: v!, trustedBy: "template:t" },
+    ])
+    let near = await contentNeighbours(db, x!, e.model, FREE, new Date())
+    expect(near.similarPeers).toBe(0)
+    expect(near.neighbours).toBe(0)
+
+    await storeContentVectors(db, z!, e.model, [
+      { day, exact: `n-${RUN}`, embedding: v! },
+    ])
+    near = await contentNeighbours(db, x!, e.model, FREE, new Date())
+    expect(near.similarPeers).toBe(1)
+    expect(near.neighbours).toBe(1)
+    expect(near.bestSimilarity!).toBeGreaterThan(0.99)
+    expect(near.medianSimilarity!).toBeGreaterThan(0.99)
+
+    // The nearest boilerplate entry is named, as evidence only.
+    const skeleton = parseSubmission({
+      html: null,
+      text: `${text} {{x}}`,
+      holes: { x: 5 },
+    })
+    if ("error" in skeleton) throw new Error(skeleton.error)
+    const [bv] = await e.embed([text])
+    await boilerplateStore(db).add({
+      name: `test/near-${RUN}`,
+      skeleton,
+      model: e.model,
+      embedding: bv!,
+      reason: "integration test",
+      by: "risk-db",
+    })
+    const nearest = await boilerplateStore(db).nearest(x!, e.model, day)
+    expect(nearest?.name).toBe(`test/near-${RUN}`)
+    expect(nearest!.similarity).toBeGreaterThan(0.99)
+
+    const b = await behaviourNeighbours(db, ids.a)
+    if (b.labelled > 0) expect(b.medianDistance).not.toBeNull()
   })
 })

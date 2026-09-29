@@ -13,6 +13,7 @@ import type {
   SegmentRow,
   TemplateRow,
   TopicRow,
+  TrustedTemplateRow,
   VerifiedDomain,
   TransferOffer,
   WebhookEndpoint,
@@ -925,6 +926,34 @@ export async function deleteTemplate(id: string) {
       }),
     ["/templates"],
     { refreshCaller: false },
+  )
+}
+
+// ── Templates submitted for review (#222) ───────────────────────────────────
+
+export async function submitTrustedTemplate(input: {
+  name: string
+  html: string | null
+  text: string | null
+  holes: Record<string, number>
+}) {
+  return run(
+    () =>
+      api<TrustedTemplateRow>("/console/trusted-templates", {
+        method: "POST",
+        body: input,
+      }),
+    ["/templates"],
+  )
+}
+
+export async function withdrawTrustedTemplate(id: string) {
+  return run(
+    () =>
+      api<TrustedTemplateRow>(`/console/trusted-templates/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    ["/templates"],
   )
 }
 

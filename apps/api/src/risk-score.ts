@@ -159,7 +159,6 @@ await withMonitor(
         embedder,
         torRedis: cache,
         ...(env.IPINFO_TOKEN ? { ipinfoToken: env.IPINFO_TOKEN } : {}),
-        ...(env.WEBRISK_API_KEY ? { webRiskKey: env.WEBRISK_API_KEY } : {}),
       })
       log.info(
         { ...summary, model: model ? `v${model.version}` : null },

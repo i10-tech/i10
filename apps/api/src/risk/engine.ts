@@ -46,6 +46,7 @@ export function evaluate(facts: Facts, rules: readonly Rule[] = RULES): Assessme
       category: r.category,
       points: result.points,
       evidence: result.evidence,
+      ...(result.detail ? { detail: result.detail } : {}),
       ...(result.floor ? { floor: result.floor } : {}),
       ...(r.fresh && result.freshAt ? { freshAt: result.freshAt.toISOString() } : {}),
     })

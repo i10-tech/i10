@@ -512,6 +512,20 @@
       "when": 1790628533249,
       "tag": "0072_similarity_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790642631072,
+      "tag": "0073_trusted_content",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790642664043,
+      "tag": "0074_trusted_definers",
+      "breakpoints": true
     }
   ]
 }

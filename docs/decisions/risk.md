@@ -212,7 +212,9 @@ copies of one email look 6% alike. Every step is now forced unsigned. A workspac
 member when shared content lines up with at least two linking features:
 created within hours of each other, the same registrable parent domain, the
 same owner device or IP, the same sign-up country, both young and free. Our
-own docs' example templates are allowlisted.
+own docs' example templates are allowlisted, and since #222 known public
+boilerplate and a workspace's staff-approved templates are left out of every
+cross-workspace comparison (see "Trusted content and similarity evidence").
 
 **Identity (people, not workspaces):**
 
@@ -371,6 +373,139 @@ only superuser, `i10` a non-superuser owner, pgvector in `template1` so
 throwaway databases have it). All 72 migrations were proven to apply as the
 non-superuser owner.
 
+## Trusted content and similarity evidence (ruleset 3, #222)
+
+Added 2026-09-29, the follow-up to #221. Legitimate repeated mail must not
+look like a farm, and staff need to see why a similarity rule fired.
+
+⚠ **The false positive is many workspaces, not one.** No content rule counts
+a workspace repeating itself. What looks like a farm is many unrelated
+workspaces sending the same public boilerplate (Clerk's, Supabase's or
+NextAuth's default emails, React Email starters) - exactly what
+`content.semantic_crowd`, `content.like_confirmed_abuse` and the farm rules
+look for.
+
+### One matcher, two lists
+
+Both lists are skeletons for the existing matcher (`content/templates.ts`), and
+`content/trust.ts` decides whether a message IS an entry:
+
+- ⚠ **Byte-exact on the fixed part.** `match()` must fit the whole body. "Close
+  to the approved template" earns nothing.
+- ⚠ **The holes are fenced.** Each has a length limit (default 100, at most
+  1,000, and the limits together may not exceed the fixed text); no value may
+  contain `<` or `>`; two placeholders need fixed text between them. A value
+  that is a link target must be an `http(s)` address, and every host a value
+  carries - a URL, a hostname in plain text, the host after a fixed `https://` -
+  must be on the SENDING workspace's own verified domains and clean in Web
+  Risk. An unknown verdict is a no. So the holes cannot carry a new message:
+  submit-clean-send-something-else does not work.
+- **Where it runs.** At accept (`recordContent`, off the request path, reading
+  cached Web Risk verdicts only) and in the hourly content job (which may spend
+  the Web Risk budget). A matching fingerprint is stored with
+  `trusted_by = boilerplate:<id>` or `template:<id>`, and kept out of the Redis
+  tripwire; the job marks the vector the same way and records
+  `message_bodies.trusted_template_id` for approved templates.
+- ⚠ **Fails closed.** A fingerprint keeps its mark only while every message
+  with it fitted the same entry; one that did not clears it for the day.
+- ⚠ **Excluded on both sides.** `fingerprint_peers` and `content_neighbors`
+  (migration 0074) ignore trusted rows for the workspace being scored AND for
+  its neighbours: fifty workspaces sending Clerk's reset email are fifty
+  workspaces that installed Clerk, and none of them is evidence against the
+  others.
+- ⚠ **Taking trust away reaches the past.** Removing a boilerplate entry, or
+  revoking or withdrawing a template, clears its marks from the fingerprints
+  and vectors it excused, so the next score counts that mail in full.
+- **Nothing else changes.** Bounces, complaints, velocity, identity, link
+  reputation and holds count exactly as before. Boilerplate sent to a bought
+  list is still a bought list.
+
+### 1. Known public boilerplate (staff-kept, global)
+
+`core.risk_boilerplate` and `core.risk_boilerplate_events`, both deny-all like
+`risk_models`, read and written only through definers
+(`risk_boilerplate_list/add/remove/history/nearest`). Every add and remove
+requires who and why, and writes its event in the same statement. Until the
+admin app (#217):
+
+```
+bun run risk-admin boilerplate add --name clerk/reset-password --html reset.html \
+  [--text reset.txt] [--subject "..."] [--holes code=12] --by <you> --reason "<why>"
+bun run risk-admin boilerplate list | history
+bun run risk-admin boilerplate remove <id> --by <you> --reason "<why>"
+```
+
+Each entry also stores its MinHash bands and an embedding (from the loaded
+embedder). ⚠ The embedding never excuses anything: it only names, in the
+evidence, the entry a workspace's UNEXCUSED mail reads closest to ("reads like
+Clerk's reset email at 0.96 but did not fit it - a variant worth adding?").
+
+### 2. Workspace templates, reviewed by staff (per workspace)
+
+`core.trusted_templates` and `core.trusted_template_events`, tenant RLS. A
+workspace submits the body exactly as it sends it, with `{{name}}` where values
+go, from the console (`/templates`, "Reviewed for repeat sending") or the API
+(`POST /trusted-templates`, plus list, read and withdraw; domain-restricted
+keys are refused, as on `/suppressions`). Limits: 50 live and 10 pending per
+workspace, one live submission per skeleton.
+
+- **Staff decide in risk-admin:** `templates pending`, `templates show <id>`
+  (the skeleton with its holes named, the fixed part's links with their Web
+  Risk verdicts, and the history), `templates approve|reject|revoke <id> --by
+<you> [--reason "<note>"]`. ⚠ Approval refuses while any link in the fixed
+  part is not checked clean. ⚠ The reason is shown to the workspace, in the
+  console and in the decision email (`renderTemplateReview`).
+- **Approval stops repetition counting, never results.** The hourly run judges
+  each approval on exactly the messages it credited: 100+ sent and 4%+ hard
+  bounces, or 0.1%+ complaints with at least two, revokes it (the rules'
+  lines). Any staff abuse label (`label abuse`, `release --outcome upheld`)
+  revokes every approval of the workspace, at once in risk-admin and from the
+  label in the next run. The workspace is emailed on every decision.
+- Per workspace, never shared: another workspace sending the same skeleton
+  gets nothing from it.
+
+### 3. Evidence for every similarity finding
+
+`content.semantic_crowd`, `content.like_confirmed_abuse`,
+`behaviour.like_abuse`, `farm.cluster` and `farm.with_held` attach a `detail`
+to their contribution, stored in `risk_assessments.contributions` and every
+`risk_assessment_events` row, and printed by `risk-admin explain`:
+
+```json
+{
+  "signal": "content.semantic_crowd",
+  "model": "minilm-l6-v2-q8",
+  "neighbours": 17,
+  "distinct_workspaces": 8,
+  "median_similarity": 0.91,
+  "best_similarity": 0.97,
+  "confirmed_abuse_neighbours": 5,
+  "known_template_matches": 0,
+  "boilerplate_matches": 0,
+  "boilerplate_match": null
+}
+```
+
+⚠ Counts and distances only, never another workspace's id, content or
+domains. For farm rules the model is `minhash-8x4` and similarity is 1 for an
+identical fingerprint, else shared bands over 8; for behaviour it is
+`behaviour-v1` with `median_distance` and `nearest_distance` (L2) instead of
+similarities. `content_neighbors` now also returns every neighbour hit and
+their median and best similarity; `behaviour_neighbors` the median distance;
+`fingerprint_peers` the best near-duplicate band count. The ruleset is version
+3: no weight changed, but what the similarity rules see did.
+
+### 4. Web Risk under a daily budget
+
+Web Risk's quotas are per minute only, so the budget is ours
+(`risk/webrisk.ts`): a Redis counter per UTC day, `WEBRISK_DAILY_LIMIT`
+(default 3,000, about 90k a month, inside the free 100k), counted before each
+call, failed calls included. ⚠ No Redis means no lookups: a budget that cannot
+be counted is spent. A 429, a 5xx or no answer stops every lookup for five
+minutes; a 4xx about one host parks that host for an hour. A host nobody could
+answer for stays unchecked and is asked next run; it is never recorded clean.
+Verdicts stay cached for a day and shared across workspaces, as before.
+
 ## Account takeover is a separate response
 
 Impossible travel usually means stolen credentials, not a spammer. When it
@@ -391,9 +526,9 @@ day emails the owner as a possible leak.
 - **Customers see categories, not thresholds** ("bounce rate", "linked to a
   flagged group of workspaces"), so the rules cannot be gamed.
 - **Appeals before #217 exist:** the hold email says to reply. Staff use
-  `bun run risk-admin` (explain, hold, release, pin, label, train, clusters),
-  which goes through the same doors as the score and requires `--by` and
-  `--reason`.
+  `bun run risk-admin` (explain, hold, release, pin, label, train, clusters,
+  and since #222 boilerplate and templates), which goes through the same doors
+  as the score and requires `--by` and `--reason`.
 
 ---
 
@@ -426,6 +561,7 @@ day emails the owner as a possible leak.
 | `CLIENT_CONTEXT_SECRET`    | unset   | shared with the console; unset means no forwarded identity       |
 | `IPINFO_TOKEN`             | unset   | network enrichment                                               |
 | `WEBRISK_API_KEY`          | unset   | link reputation                                                  |
+| `WEBRISK_DAILY_LIMIT`      | `3000`  | Web Risk lookups per UTC day, counted in Redis (#222)            |
 | `LAYA_URL`, `LAYA_API_KEY` | unset   | content classifier                                               |
 
 Every action has its own switch so a bad rule can be turned off without a

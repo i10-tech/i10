@@ -1,6 +1,6 @@
 import { parse } from "tldts"
 import { countryLongitude } from "./geo.js"
-import type { Band, Facts, Hit, Rule } from "./types.js"
+import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./types.js"
 
 /**
  * The rules (#170). Every one is a pure function of `Facts`, adds or
@@ -23,7 +23,7 @@ import type { Band, Facts, Hit, Rule } from "./types.js"
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 2
+export const RULESET_VERSION = 3
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -361,6 +361,94 @@ const domainRules: Rule[] = [
   ),
 ]
 
+// ─── Evidence for similarity findings (#222) ─────────────────────────────────
+
+const round2 = (n: number | null | undefined) =>
+  n === null || n === undefined || !Number.isFinite(n)
+    ? null
+    : Math.round(n * 100) / 100
+
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null
+  const v = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(v.length / 2)
+  return v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2
+}
+
+/**
+ * ⚠ COUNTS AND DISTANCES, NEVER WHO. Peer ids are in the facts (a rule needs
+ * them to count linking features) and deliberately never reach the evidence.
+ */
+export function contentEvidence(
+  signal: string,
+  f: Facts,
+): SimilarityEvidence | undefined {
+  const s = f.similarity
+  if (!s) return undefined
+  return {
+    signal,
+    model: s.model,
+    neighbours: s.neighbours,
+    distinct_workspaces: s.similarPeers,
+    median_similarity: round2(s.medianSimilarity),
+    best_similarity: round2(s.bestSimilarity),
+    confirmed_abuse_neighbours: s.taintedSimilar,
+    known_template_matches: s.trusted.template,
+    boilerplate_matches: s.trusted.boilerplate,
+    boilerplate_match: s.boilerplateNear
+      ? {
+          name: s.boilerplateNear.name,
+          similarity: round2(s.boilerplateNear.similarity)!,
+        }
+      : null,
+  }
+}
+
+export function farmEvidence(
+  signal: string,
+  f: Facts,
+  peers: readonly FarmPeer[],
+): SimilarityEvidence {
+  return {
+    signal,
+    model: "minhash-8x4",
+    neighbours: peers.reduce((n, p) => n + p.exactShared + p.nearShared, 0),
+    distinct_workspaces: peers.length,
+    median_similarity: round2(median(peers.map((p) => p.bestSimilarity))),
+    best_similarity: round2(Math.max(0, ...peers.map((p) => p.bestSimilarity))),
+    confirmed_abuse_neighbours: peers.filter((p) => p.held).length,
+    known_template_matches: f.farm.trusted.template,
+    boilerplate_matches: f.farm.trusted.boilerplate,
+    boilerplate_match: null,
+  }
+}
+
+export function behaviourEvidence(
+  signal: string,
+  f: Facts,
+): SimilarityEvidence | undefined {
+  const b = f.behaviour
+  if (!b) return undefined
+  return {
+    signal,
+    model: "behaviour-v1",
+    neighbours: b.labelled,
+    distinct_workspaces: b.labelled,
+    median_similarity: null,
+    best_similarity: null,
+    median_distance: round2(b.medianDistance),
+    nearest_distance: round2(b.nearestDistance),
+    confirmed_abuse_neighbours: b.abuse,
+    known_template_matches: f.similarity?.trusted.template ?? f.farm.trusted.template,
+    boilerplate_matches:
+      f.similarity?.trusted.boilerplate ?? f.farm.trusted.boilerplate,
+    boilerplate_match: null,
+  }
+}
+
+const withDetail = (h: Hit, detail: SimilarityEvidence | undefined): Hit =>
+  detail ? { ...h, detail } : h
+
 // ─── Farms: the priority (see docs/decisions/risk.md) ────────────────────────
 
 /** How many linking features a peer shares, beyond the content itself. */
@@ -382,19 +470,14 @@ const farmRules: Rule[] = [
     (f) => {
       const linked = f.farm.peers.filter((p) => linkingFeatures(p) >= 2)
       const loose = f.farm.peers.filter((p) => linkingFeatures(p) === 1)
+      const detail = farmEvidence("farm.cluster", f, [...linked, ...loose])
+      const evidence = { linkedPeers: linked.length, loosePeers: loose.length }
       if (linked.length >= 4) {
-        return hit(
-          55,
-          { linkedPeers: linked.length, loosePeers: loose.length },
-          { floor: "high" },
-        )
+        return withDetail(hit(55, evidence, { floor: "high" }), detail)
       }
-      if (linked.length >= 2) {
-        return hit(30, { linkedPeers: linked.length, loosePeers: loose.length })
-      }
-      if (linked.length + loose.length >= 4) {
-        return hit(15, { linkedPeers: linked.length, loosePeers: loose.length })
-      }
+      if (linked.length >= 2) return withDetail(hit(30, evidence), detail)
+      if (linked.length + loose.length >= 4)
+        return withDetail(hit(15, evidence), detail)
       return null
     },
   ),
@@ -404,7 +487,12 @@ const farmRules: Rule[] = [
     "Sends the same content as a workspace confirmed abusive by staff",
     (f) => {
       const held = f.farm.peers.filter((p) => p.held)
-      return held.length > 0 ? hit(35, { heldPeers: held.length }) : null
+      return held.length > 0
+        ? withDetail(
+            hit(35, { heldPeers: held.length }),
+            farmEvidence("farm.with_held", f, f.farm.peers),
+          )
+        : null
     },
   ),
 ]
@@ -612,14 +700,14 @@ const similarityRules: Rule[] = [
     (f) => {
       const s = f.similarity
       if (!s || s.taintedSimilar === 0) return null
-      return hit(s.taintedSimilar >= 2 ? 30 : 20, {
-        confirmedWorkspaces: s.taintedSimilar,
-        similarity:
-          s.bestTaintedSimilarity === null
-            ? null
-            : Math.round(s.bestTaintedSimilarity * 100) / 100,
-        model: s.model,
-      })
+      return withDetail(
+        hit(s.taintedSimilar >= 2 ? 30 : 20, {
+          confirmedWorkspaces: s.taintedSimilar,
+          similarity: round2(s.bestTaintedSimilarity),
+          model: s.model,
+        }),
+        contentEvidence("content.like_confirmed_abuse", f),
+      )
     },
   ),
   rule(
@@ -629,7 +717,10 @@ const similarityRules: Rule[] = [
     (f) => {
       const n = f.similarity?.youngFreeSimilar ?? 0
       return n >= 4
-        ? hit(12, { youngFreeWorkspaces: n, model: f.similarity!.model })
+        ? withDetail(
+            hit(12, { youngFreeWorkspaces: n, model: f.similarity!.model }),
+            contentEvidence("content.semantic_crowd", f),
+          )
         : null
     },
   ),
@@ -647,7 +738,10 @@ const similarityRules: Rule[] = [
       ] as const)
       return points === null
         ? null
-        : hit(points, { abuseNeighbours: b.abuse, labelledNeighbours: b.labelled })
+        : withDetail(
+            hit(points, { abuseNeighbours: b.abuse, labelledNeighbours: b.labelled }),
+            behaviourEvidence("behaviour.like_abuse", f),
+          )
     },
   ),
 ]

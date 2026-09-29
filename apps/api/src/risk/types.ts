@@ -71,6 +71,8 @@ export interface FarmPeer {
   peer: string
   exactShared: number
   nearShared: number
+  /** The closest shared content: 1 for identical, else shared MinHash bands / 8. */
+  bestSimilarity: number
   free: boolean
   held: boolean
   young: boolean
@@ -162,7 +164,11 @@ export interface Facts {
 
   identity: IdentityFacts | null
 
-  farm: { peers: FarmPeer[] }
+  farm: {
+    peers: FarmPeer[]
+    /** This workspace's recent fingerprints left out as trusted (#222). */
+    trusted: TrustedCounts
+  }
 
   parents: { sharedWith: number; sharedWithHeldOrDead: number }
 
@@ -188,6 +194,13 @@ export interface Facts {
     youngFreeSimilar: number
     taintedSimilar: number
     bestTaintedSimilarity: number | null
+    /** Every neighbour hit at or above the threshold, across recent content. */
+    neighbours: number
+    medianSimilarity: number | null
+    bestSimilarity: number | null
+    trusted: TrustedCounts
+    /** The boilerplate entry the unexcused content reads closest to (#222). */
+    boilerplateNear: { name: string; similarity: number } | null
   } | null
 
   /** Its nearest LABELLED neighbours by behaviour (pgvector). */
@@ -197,6 +210,7 @@ export interface Facts {
     legit: number
     meanAbuseDistance: number | null
     nearestDistance: number | null
+    medianDistance: number | null
   } | null
 
   /** The workspace's own discovered templates: its normal mail. */
@@ -205,10 +219,45 @@ export interface Facts {
   model: { probability: number; version: number } | null
 }
 
+/** Recent content left out of the cross-workspace rules as trusted (#222). */
+export interface TrustedCounts {
+  /** Distinct contents that fitted the workspace's own approved templates. */
+  template: number
+  /** Distinct contents that fitted known public boilerplate. */
+  boilerplate: number
+}
+
+/**
+ * What a similarity finding was based on (#222), stored with the assessment
+ * and shown to staff.
+ *
+ * ⚠ COUNTS AND DISTANCES ONLY. Never another workspace's id, content or
+ * domains: staff see that eight workspaces sent something this close, not
+ * which eight - the same line every definer draws.
+ */
+export interface SimilarityEvidence {
+  signal: string
+  /** The embedder, `minhash-8x4` for fingerprints, `behaviour-v1` for behaviour. */
+  model: string
+  neighbours: number
+  distinct_workspaces: number
+  median_similarity: number | null
+  best_similarity: number | null
+  /** Behaviour only: L2 distances between standardised feature vectors. */
+  median_distance?: number | null
+  nearest_distance?: number | null
+  confirmed_abuse_neighbours: number
+  known_template_matches: number
+  boilerplate_matches: number
+  boilerplate_match: { name: string; similarity: number } | null
+}
+
 /** What a rule says when it fires. */
 export interface Hit {
   points: number
   evidence: Record<string, number | string | boolean | null>
+  /** The evidence behind a similarity finding (#222). */
+  detail?: SimilarityEvidence
   /** The lowest band this rule allows, whatever the points. */
   floor?: Band
   /**
@@ -234,6 +283,7 @@ export interface Contribution {
   category: Category
   points: number
   evidence: Hit["evidence"]
+  detail?: SimilarityEvidence
   floor?: Band
   freshAt?: string
 }

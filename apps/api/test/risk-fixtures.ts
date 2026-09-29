@@ -1,5 +1,8 @@
 import type { Counts, Facts, FarmPeer, IdentityFacts } from "../src/risk/types.js"
 
+/** Nothing left out as trusted (#222). */
+export const NO_TRUST = { template: 0, boilerplate: 0 }
+
 /**
  * Facts for the risk engine's tests (#170): a quiet, legitimate baseline, and
  * the synthetic scenarios every rule change is held to.
@@ -77,7 +80,7 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
       workspaces: 1,
     },
     identity: identity(),
-    farm: { peers: [] },
+    farm: { peers: [], trusted: { template: 0, boilerplate: 0 } },
     parents: { sharedWith: 0, sharedWithHeldOrDead: 0 },
     links: { unsafe: [] },
     content: null,
@@ -113,6 +116,7 @@ export function peer(over: Partial<FarmPeer> = {}): FarmPeer {
     peer: crypto.randomUUID(),
     exactShared: 0,
     nearShared: 1,
+    bestSimilarity: 0.5,
     free: true,
     held: false,
     young: true,
@@ -265,7 +269,7 @@ export const ABUSE: Record<
           unsubscribes7d: 0,
           trailingDaily: [0, 0, 0, 0, 0, 0],
         },
-        farm: { peers: [peer(), peer(), peer(), peer(), peer()] },
+        farm: { peers: [peer(), peer(), peer(), peer(), peer()], trusted: NO_TRUST },
         domains: {
           total: 1,
           added7d: 1,
@@ -282,7 +286,10 @@ export const ABUSE: Record<
     facts: () =>
       baseFacts({
         createdAt: daysAgo(1),
-        farm: { peers: [peer({ held: true }), peer(), peer(), peer()] },
+        farm: {
+          peers: [peer({ held: true }), peer(), peer(), peer()],
+          trusted: NO_TRUST,
+        },
         parents: { sharedWith: 3, sharedWithHeldOrDead: 1 },
         identity: identity({ heldDevicePeers: 1, devicePeers: 3 }),
       }),

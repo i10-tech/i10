@@ -11,7 +11,6 @@ import {
   layaClassify,
   rdapRegistered,
   refreshTorExits,
-  webRiskLookup,
   type Fetch,
 } from "./intel.js"
 import type { LabelStore, ModelRecord } from "./labels.js"
@@ -22,6 +21,13 @@ import type { Embedder } from "../content/embed.js"
 import { processContent } from "../content/job.js"
 import { restoreBodies } from "../content/restore.js"
 import { purgeVectors, storeBehaviour } from "../content/vectors.js"
+import {
+  reviewTrusted,
+  type Revocation,
+  type TrustSource,
+  type TrustedTemplateStore,
+} from "./trusted.js"
+import type { WebRiskChecker } from "./webrisk.js"
 
 /**
  * Running the score (#170): one workspace, or all of them.
@@ -83,6 +89,14 @@ export interface RiskDeps {
   /** The active model, loaded once per run by the caller. */
   model?: ModelRecord | null
   laya?: { url: string; apiKey?: string }
+  /** Web Risk behind the daily budget (#222). Absent: links are never checked. */
+  webRisk?: WebRiskChecker
+  /** Boilerplate and approved templates, for the content job (#222). */
+  trust?: TrustSource
+  /** Approvals, judged by their results every run (#222). */
+  trustedTemplates?: TrustedTemplateStore
+  /** Tells a workspace its approval was taken away. */
+  templateNotice?: (tenantId: string, revocation: Revocation) => Promise<void>
   fetch?: Fetch
   log?: {
     info?: (o: object, m: string) => void
@@ -371,7 +385,6 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
 
 export interface HousekeepingDeps {
   ipinfoToken?: string
-  webRiskKey?: string
   torRedis?: import("ioredis").Redis
 }
 
@@ -387,6 +400,8 @@ export interface RunSummary {
   purged: number
   rdap: number
   webRisk: number
+  /** Web Risk lookups counted against today's budget, after the run. */
+  webRiskSpent: number | null
   unsafe: number
   retrained: string | null
   content: {
@@ -395,7 +410,11 @@ export interface RunSummary {
     compacted: number
     bytesSaved: number
     embedded: number
+    /** Messages newly credited to an approved template (#222). */
+    trusted: number
   }
+  /** Approvals taken away this run, for bounces, complaints or abuse (#222). */
+  revoked: number
 }
 
 /**
@@ -455,9 +474,18 @@ export async function runAll(
     purged: 0,
     rdap: 0,
     webRisk: 0,
+    webRiskSpent: null,
     unsafe: 0,
     retrained: null,
-    content: { scanned: 0, derived: 0, compacted: 0, bytesSaved: 0, embedded: 0 },
+    content: {
+      scanned: 0,
+      derived: 0,
+      compacted: 0,
+      bytesSaved: 0,
+      embedded: 0,
+      trusted: 0,
+    },
+    revoked: 0,
   }
 
   // ── Housekeeping first: fresher intel means a better score this hour ──
@@ -484,8 +512,8 @@ export async function runAll(
         const id = ids[cursor++]!
         try {
           summary.rdap += await refreshRdap(deps, id)
-          if (deps.webRiskKey) {
-            const r = await checkLinks(deps, id, deps.webRiskKey)
+          if (deps.webRisk) {
+            const r = await checkLinks(deps, id, deps.webRisk)
             summary.webRisk += r.checked
             summary.unsafe += r.unsafe
           }
@@ -493,9 +521,14 @@ export async function runAll(
           // ⚠ CONTENT BEFORE THE SCORE, so this hour's vectors are the ones it
           // compares. Its failure costs this workspace's content pass, not its score.
           try {
+            const store = deps.trustedTemplates
             const c = await processContent(id, {
               db: deps.db,
               ...(deps.embedder ? { embedder: deps.embedder } : {}),
+              ...(deps.trust ? { trust: deps.trust } : {}),
+              ...(store
+                ? { creditTemplates: (counts) => store.credit(id, counts) }
+                : {}),
               now,
               ...(deps.log ? { log: deps.log } : {}),
             })
@@ -504,10 +537,14 @@ export async function runAll(
             summary.content.compacted += c.compacted
             summary.content.bytesSaved += c.bytesSaved
             summary.content.embedded += c.embedded
+            summary.content.trusted += c.trusted
             await purgeVectors(deps.db, id, now)
           } catch (error) {
             deps.log?.warn?.({ err: error, tenantId: id }, "content pass failed")
           }
+          // ⚠ APPROVALS ARE JUDGED BEFORE THE SCORE, so a template revoked for
+          // its bounces this hour stops being excused in this hour's score.
+          summary.revoked += await reviewApprovals(deps, id, now)
           const r = await scoreTenant(id, "hourly", deps)
           if (r.status === "locked") summary.locked++
           if (r.status === "scored") {
@@ -525,7 +562,36 @@ export async function runAll(
   await Promise.all(workers)
 
   summary.retrained = await maybeRetrain(deps, now)
+  summary.webRiskSpent = deps.webRisk
+    ? await deps.webRisk.spent().catch(() => null)
+    : null
   return summary
+}
+
+/** Revokes approvals that failed on their results, and tells the workspace. */
+async function reviewApprovals(deps: RiskDeps, tenantId: string, now: Date) {
+  if (!deps.trustedTemplates) return 0
+  try {
+    const revoked = await reviewTrusted(deps.db, deps.trustedTemplates, tenantId, now)
+    for (const r of revoked) {
+      deps.log?.info?.(
+        { tenantId, template: r.template.id, category: r.category, ...r.detail },
+        "trusted template revoked",
+      )
+      await deps
+        .templateNotice?.(tenantId, r)
+        .catch((error: unknown) =>
+          deps.log?.warn?.(
+            { err: error, tenantId },
+            "could not send the revocation email",
+          ),
+        )
+    }
+    return revoked.length
+  } catch (error) {
+    deps.log?.warn?.({ err: error, tenantId }, "could not review trusted templates")
+    return 0
+  }
 }
 
 async function enrichIdentities(deps: RiskDeps, token: string): Promise<number> {
@@ -607,8 +673,14 @@ async function refreshRdap(deps: RiskDeps, tenantId: string): Promise<number> {
   return n
 }
 
-/** Web Risk verdicts for this workspace's unchecked link hosts (last 7 days). */
-async function checkLinks(deps: RiskDeps, tenantId: string, key: string) {
+/**
+ * Web Risk verdicts for this workspace's unchecked link hosts (last 7 days).
+ *
+ * ⚠ THROUGH THE BUDGETED CHECKER (risk/webrisk.ts). A host it cannot answer
+ * for - budget spent, quota refused, outage - stays unchecked and is asked
+ * again next run; it is never recorded as clean.
+ */
+async function checkLinks(deps: RiskDeps, tenantId: string, webRisk: WebRiskChecker) {
   const rows = (await withTenant(deps.db, tenantId, (tx) =>
     tx.execute(sql`
       select distinct host from core.link_hosts
@@ -622,19 +694,9 @@ async function checkLinks(deps: RiskDeps, tenantId: string, key: string) {
   for (const { host } of rows) {
     // ⚠ A HOST'S VERDICT IS SHARED ACROSS WORKSPACES FOR A DAY, so a link
     // every customer sends (a CDN, a social network) costs one lookup, not one
-    // per workspace, against the 100k-a-month free tier.
-    const cacheKey = `risk:webrisk:${host}`
-    let verdict = await deps.redis?.get(cacheKey).catch(() => null)
-    if (!verdict) {
-      try {
-        const threats = await webRiskLookup(host, key, deps.fetch)
-        verdict = threats.length ? threats.join(",") : "clean"
-        await deps.redis?.setex(cacheKey, 86_400, verdict).catch(() => {})
-      } catch (error) {
-        deps.log?.warn?.({ err: error, host }, "Web Risk lookup failed")
-        continue
-      }
-    }
+    // per workspace, against the budget.
+    const verdict = await webRisk.lookup(host)
+    if (!verdict) continue
     await withTenant(deps.db, tenantId, (tx) =>
       tx.execute(sql`
         update core.link_hosts set verdict = ${verdict}, checked_at = now()

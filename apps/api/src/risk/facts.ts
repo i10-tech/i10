@@ -2,7 +2,9 @@ import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { reputationStore } from "../ses-status/reputation-store.js"
 import { looksRandomLabel, registrable, subdomainOf } from "./rules.js"
-import type { Facts, FarmPeer, IdentityFacts } from "./types.js"
+import { BAND_COUNT } from "./fingerprint.js"
+import { boilerplateStore } from "./trusted.js"
+import type { Facts, FarmPeer, IdentityFacts, TrustedCounts } from "./types.js"
 import {
   actorVelocity,
   behaviourNeighbours,
@@ -196,6 +198,8 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     similarity,
     behaviour,
     templates,
+    trusted,
+    boilerplateNear,
   ] = await Promise.all([
     identityFacts(db, owner, now),
     ownerWorkspaces(db, owner),
@@ -208,7 +212,18 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
       : Promise.resolve(null),
     soft(behaviourNeighbours(db, tenantId)),
     soft(templateFacts(db, tenantId, now)),
+    soft(trustedCounts(db, tenantId, now)),
+    deps.contentModel
+      ? soft(
+          boilerplateStore(db).nearest(
+            tenantId,
+            deps.contentModel,
+            new Date(now.getTime() - 7 * DAY).toISOString().slice(0, 10),
+          ),
+        )
+      : Promise.resolve(null),
   ])
+  const trustedNow: TrustedCounts = trusted ?? { template: 0, boilerplate: 0 }
 
   const emailDomain = info?.email?.split("@")[1]?.toLowerCase() ?? null
   const plan =
@@ -289,7 +304,7 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
       workspaces,
     },
     identity,
-    farm: { peers: farm },
+    farm: { peers: farm, trusted: trustedNow },
     parents: shared,
     links: {
       unsafe: t.unsafe.map((u) => ({
@@ -301,7 +316,9 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     content: null,
     model: null,
     actor,
-    similarity,
+    similarity: similarity
+      ? { ...similarity, trusted: trustedNow, boilerplateNear: boilerplateNear ?? null }
+      : null,
     behaviour: behaviour && behaviour.labelled > 0 ? behaviour : null,
     templates,
   }
@@ -348,7 +365,8 @@ export async function farmPeers(
 ): Promise<FarmPeer[]> {
   const since = new Date(now.getTime() - 7 * DAY).toISOString().slice(0, 10)
   const shared = (await db.execute(sql`
-    select peer, exact_shared, near_shared from core.fingerprint_peers(${tenantId}::uuid, ${since}::date)
+    select peer, exact_shared, near_shared, best_near_bands
+      from core.fingerprint_peers(${tenantId}::uuid, ${since}::date)
   `)) as unknown as Row[]
   if (shared.length === 0) return []
   const ids = `{${shared.map((s) => String(s.peer)).join(",")}}`
@@ -361,6 +379,8 @@ export async function farmPeers(
       peer: String(s.peer),
       exactShared: num(s.exact_shared),
       nearShared: num(s.near_shared),
+      bestSimilarity:
+        num(s.exact_shared) > 0 ? 1 : Math.min(1, num(s.best_near_bands) / BAND_COUNT),
       free: p.free !== false,
       held: p.held === true,
       young: p.young === true,
@@ -426,5 +446,30 @@ async function templateFacts(
     established: Number(r.established),
     recentMatchedShare:
       Number(r.recent) > 0 ? Number(r.matched) / Number(r.recent) : null,
+  }
+}
+
+/**
+ * How much of this workspace's recent content was left out of the
+ * cross-workspace rules as trusted (#222): its own approved templates, and
+ * known boilerplate. Its own rows, read under its own policy.
+ */
+async function trustedCounts(
+  db: Database,
+  tenantId: string,
+  now: Date,
+): Promise<TrustedCounts> {
+  const since = new Date(now.getTime() - 7 * DAY).toISOString().slice(0, 10)
+  const rows = (await withTenant(db, tenantId, (tx) =>
+    tx.execute(sql`
+      select count(distinct exact) filter (where trusted_by like 'template:%')::int as template,
+             count(distinct exact) filter (where trusted_by like 'boilerplate:%')::int as boilerplate
+        from core.content_fingerprints
+       where tenant_id = ${tenantId}::uuid and day >= ${since}::date and trusted_by is not null
+    `),
+  )) as unknown as { template: number; boilerplate: number }[]
+  return {
+    template: num(rows[0]?.template),
+    boilerplate: num(rows[0]?.boilerplate),
   }
 }

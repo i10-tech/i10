@@ -40,6 +40,8 @@ declare module "hono" {
     domains?: import("../domains/store.js").DomainStore
     /** The workspace's suppression list, ours and SES's. */
     suppressions?: import("../suppressions/store.js").SuppressionStore
+    /** Templates submitted for review (#222). */
+    trustedTemplates?: import("../risk/trusted.js").TrustedTemplateStore
     /**
      * The signed-in person, set by `requireUser`. Present only on the routes
      * that take a session - see middleware/session.ts on why those are a
