@@ -1,3 +1,4 @@
+import type { HoldStore } from "../../risk/holds.js"
 import type { SubscriptionOps } from "../../billing/db.js"
 import type { TenantAuthDeps } from "../../middleware/tenant.js"
 import type { FreshAuthReader } from "../../middleware/session.js"
@@ -42,6 +43,21 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * overview's sending-health card. Optional; without it both read healthy.
    */
   sesReputation?: Pick<ReputationStore, "openFindings" | "counts">
+  /**
+   * The risk engine's hold on the workspace (#170), for the same banner.
+   * Optional; without it no hold ever shows.
+   */
+  holds?: Pick<HoldStore, "current">
+  /**
+   * Records who is using the console, from where and on what (#170). Called
+   * after `requireTenant`, never awaited: a failure costs a sighting, never a
+   * page. See risk/identity.ts.
+   */
+  observeSession?: (input: {
+    userId: string
+    tenantId: string
+    request: Request
+  }) => void
   /**
    * The suppression list - the same store `/suppressions` uses. Optional like
    * the other stores the tests leave out; its routes then answer 501.

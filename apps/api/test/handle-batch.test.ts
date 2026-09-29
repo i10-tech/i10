@@ -456,3 +456,29 @@ describe("routing within one batch", () => {
     expect(markSent).toHaveBeenCalledWith(expect.anything(), "mta-7", "direct")
   })
 })
+
+describe("a workspace held by the risk engine (#170)", () => {
+  it("cancels what it claimed and sends none of it", async () => {
+    const markCanceled = mock(async () => {})
+    const { deps: d, transport } = deps({ held: async () => true, markCanceled })
+    const result = await handleBatch(job(3), d)
+    expect(result).toMatchObject({ claimed: 3, sent: 0, canceled: 3 })
+    expect(markCanceled).toHaveBeenCalledTimes(3)
+    expect(transport.sent).toHaveLength(0)
+  })
+
+  it("sends normally when not held, and when the check itself fails", async () => {
+    for (const held of [
+      async () => false,
+      async () => {
+        throw new Error("pg")
+      },
+    ]) {
+      const markCanceled = mock(async () => {})
+      const { deps: d } = deps({ held, markCanceled })
+      const result = await handleBatch(job(2), d)
+      expect(result.sent).toBe(2)
+      expect(markCanceled).not.toHaveBeenCalled()
+    }
+  })
+})

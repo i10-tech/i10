@@ -1,0 +1,74 @@
+# Scores workspaces for abuse risk and acts on the result, hourly (#170).
+#
+# ⚠ THE SAME IMAGE AND ANOTHER COMMAND, like the re-check and the sweep.
+# `bun dist/risk-score.js` runs one pass and exits. See docs/decisions/risk.md
+# and apps/api/src/risk-score.ts.
+#
+# ⚠ IT SCORES WHAT CHANGED, NOT EVERYTHING. Accept, the SES webhook and console
+# sightings mark workspaces dirty in Redis; this pass scores that set, anything
+# not scored in a day, and anything already elevated or held. It does not grow
+# with the number of quiet workspaces.
+#
+# ⚠ THE SAME PASS IS ALSO RUN ON DEMAND BY THE API, for one workspace at a time,
+# when SES pauses it, a farm tripwire fires or a sign-in contradicts the last.
+# A lease per workspace in Redis stops the two scoring the same one at once.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-risk-score
+  namespace: i10-prod
+spec:
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/risk-score.ts, AND THEY MUST AGREE.
+  # Sentry judges a run missing by comparing the clock to the schedule the job
+  # declares in its check-in.
+  schedule: "7 * * * *"
+  # ⚠ NEVER TWO AT ONCE. Harmless if it happened - every workspace is leased -
+  # but two passes would double the RDAP, Web Risk and IPinfo lookups.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  # A pass that could not start within ten minutes is skipped; the next is an
+  # hour away and the API re-scores urgent cases on its own in the meantime.
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Under the hour, so a hung pass can never turn Forbid into a job that
+      # never runs again.
+      activeDeadlineSeconds: 3000
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: risk-score
+              image: ghcr.io/i10-tech/i10-api:prod-a03c3dfb46e40b99abcf6584240191d2d7935611@sha256:d45544ec69317721501c3994d75ea2b936f4628d85702a448a768c728dc8b533
+              imagePullPolicy: Always
+              command: ["bun", "dist/risk-score.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER. Every cross-workspace question
+                # goes through the narrow definer functions of migration 0069.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                # ⚠ THE EMBEDDER IS THE MEMORY. all-MiniLM-L6-v2 on WebAssembly
+                # holds ~310 MB resident (measured, content/embed.ts); the rest
+                # is one workspace's facts per worker. Only this job loads it -
+                # the API never does - and only for the minutes the pass runs.
+                requests: { cpu: 100m, memory: 384Mi }
+                limits: { memory: 896Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

@@ -36,6 +36,23 @@ export function parseSesEnabled(value: string | undefined): boolean {
   )
 }
 
+/**
+ * A boolean that is ON unless it says otherwise, read the same strict way as
+ * `SES_ENABLED` - an uninterpretable value refuses to boot rather than
+ * guessing which way a kill switch was meant to point.
+ */
+const switchOn = () =>
+  z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      const raw = (v ?? "true").trim().toLowerCase()
+      if (["true", "1", "yes", "on"].includes(raw)) return true
+      if (["false", "0", "no", "off"].includes(raw)) return false
+      ctx.addIssue({ code: "custom", message: `expected true/false, got "${v}"` })
+      return z.NEVER
+    })
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -793,6 +810,57 @@ const schema = z.object({
    * broke.
    */
   SENTRY_ENVIRONMENT: z.string().min(1).default("development"),
+
+  /**
+   * The risk engine (#170) and each of its levers. See docs/decisions/risk.md.
+   *
+   * ⚠ ONE SWITCH PER ACTION, ALL ON BY DEFAULT. The user chose protection from
+   * day 1; the switches exist so a rule that misfires in production can be
+   * disarmed in Doppler without a revert, while the score keeps computing and
+   * recording what it WOULD have done (`suppressed:` in the event row).
+   * `RISK_ENABLED=false` stops scoring entirely.
+   */
+  RISK_ENABLED: switchOn(),
+  RISK_ACT_TIERS: switchOn(),
+  RISK_ACT_HOLDS: switchOn(),
+  RISK_ACT_SES_POLICY: switchOn(),
+  RISK_ACT_TAKEOVER: switchOn(),
+
+  /**
+   * How many distinct workspaces may send the same fingerprint in 48 hours
+   * before they are re-scored immediately. A prompt, not a verdict - see
+   * risk/content.ts.
+   */
+  RISK_FARM_TRIPWIRE: z.coerce.number().int().min(2).max(1000).default(5),
+
+  /**
+   * Shared with the console, which signs the person's IP, country, user agent,
+   * timezone and device id with it (`x-i10-client`). ⚠ UNSET MEANS NO
+   * FORWARDED IDENTITY AT ALL: an unsigned header anybody could set would let
+   * an attacker choose which country they appear to be in.
+   */
+  CLIENT_CONTEXT_SECRET: z.string().min(32).optional(),
+
+  /** IPinfo Lite, for the network behind an IP. Unset: no hosting signal. */
+  IPINFO_TOKEN: z.string().min(1).optional(),
+
+  /** Google Web Risk, for link reputation. Unset: no unsafe-link signal. */
+  WEBRISK_API_KEY: z.string().min(1).optional(),
+
+  /**
+   * Laya, the content classifier (docs/decisions/risk.md). It needs a GPU host
+   * we do not run on the CX33, so it is off until this points somewhere.
+   */
+  LAYA_URL: z.url().optional(),
+
+  /**
+   * Which embedder turns content into vectors (content/embed.ts): `minilm`,
+   * the local all-MiniLM-L6-v2 on WebAssembly (meaning), or `hash` (wording,
+   * zero dependencies). ⚠ `minilm` FALLS BACK TO `hash`, loudly, when the model
+   * files are missing - vectors are tagged with their model and never mixed.
+   */
+  RISK_EMBEDDER: z.enum(["minilm", "hash"]).default("minilm"),
+  LAYA_API_KEY: z.string().min(1).optional(),
 })
 
 /**

@@ -60,3 +60,6 @@ apps/*/src/**/*.d.ts.map
 # with. It is not secret (the private key never leaves the container), it is
 # simply meaningless anywhere but the laptop that produced it.
 dev/.caddy-root.crt
+
+# Pinned embedding model, fetched by apps/api/scripts/fetch-models.ts (#170).
+apps/api/models/

@@ -76,6 +76,8 @@ const TONE: Record<string, { tone: Tone; label: string }> = {
   healthy: { tone: "success", label: "Healthy" },
   at_risk: { tone: "warning", label: "At risk" },
   paused: { tone: "danger", label: "Paused" },
+  // Our own review's hold (#170): as serious as a pause, and lifted by a person.
+  held: { tone: "danger", label: "On hold" },
   // A finding's impact. HIGH is what SES pauses on, so it reads red.
   high: { tone: "danger", label: "Serious" },
   low: { tone: "warning", label: "Minor" },

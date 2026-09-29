@@ -35,6 +35,7 @@ const SUMMARY: Record<SendingStatus["health"], string> = {
     "Our email provider flagged recent mail. Sending still works, but it will be paused if this continues.",
   paused:
     "Our email provider paused sending. The API refuses new emails until it is lifted.",
+  held: "Sending is on hold while we review this workspace. A person will look within a day.",
 }
 
 /**

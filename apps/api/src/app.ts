@@ -302,6 +302,12 @@ export function createApp(deps: AppDeps = {}) {
           durationMs: Date.now() - started,
           errorName: status >= 400 ? await errorNameOf(c.res) : null,
           userAgent: c.req.header("user-agent") ?? null,
+          // ⚠ CLOUDFLARE'S, BECAUSE api.i10.tech IS PROXIED AND THE SOCKET IS
+          // CLOUDFLARE'S EDGE. A caller reaching the origin directly could forge
+          // these; the worst it buys them is hiding where a key is used from,
+          // which a proxy buys them anyway (#170).
+          clientIp: c.req.header("cf-connecting-ip") ?? null,
+          country: c.req.header("cf-ipcountry") ?? null,
         })
       })().catch((error: unknown) => {
         requestLogger?.warn(

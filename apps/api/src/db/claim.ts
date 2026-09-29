@@ -241,3 +241,29 @@ export function markFailedStatement(
     returning id
   `
 }
+
+/**
+ * Records a claimed message as canceled because its workspace is held (#170).
+ *
+ * ⚠ GUARDED LIKE THE OTHER TWO, on `status = 'sending'` and on the claim, so a
+ * worker whose lease expired cannot cancel a message another worker has since
+ * sent.
+ */
+export function markCanceledStatement(
+  ref: MessageRef,
+  workerId: string,
+  reason: string,
+): SQL {
+  return sql`
+    update core.messages
+       set status     = 'canceled',
+           last_error = ${reason.slice(0, 2000)},
+           claimed_by = null,
+           claimed_at = null
+     where id = ${ref.id}::uuid
+       and created_at = ${ref.createdAt.toISOString()}::timestamptz
+       and status = 'sending'
+       and claimed_by = ${workerId}
+    returning id
+  `
+}

@@ -114,6 +114,13 @@ export interface TierChange {
   reason: string
   /** The staff member's name, or `risk-score`. */
   setBy: string
+  /**
+   * ⚠ THE SCORE PASSES TRUE, AND IT IS CHECKED UNDER THE LOCK. A tier a person
+   * set is a decision the score must not undo; checking `current()` first and
+   * calling `set()` second would leave a window in which staff could set it
+   * and the next hourly run overwrite it anyway (#170).
+   */
+  respectStaff?: boolean
 }
 
 export interface CurrentTier {
@@ -139,7 +146,9 @@ export interface SendingTierStore {
    * Returns whether the tier moved. Setting the tier a row already holds
    * writes nothing.
    */
-  set(change: TierChange): Promise<{ changed: boolean; from: SendingTier }>
+  set(
+    change: TierChange,
+  ): Promise<{ changed: boolean; from: SendingTier; refused?: "staff" }>
 }
 
 export function sendingTierStore(db: Database): SendingTierStore {
@@ -173,12 +182,15 @@ export function sendingTierStore(db: Database): SendingTierStore {
         // ⚠ `FOR UPDATE`, so two writers (the score and a person) cannot both
         // read the old tier and both write an audit row claiming to move from it.
         const [row] = await tx
-          .select({ tier: sendingTiers.tier })
+          .select({ tier: sendingTiers.tier, source: sendingTiers.source })
           .from(sendingTiers)
           .where(eq(sendingTiers.tenantId, change.tenantId))
           .for("update")
           .limit(1)
         const from = row?.tier ?? DEFAULT_TIER
+        if (change.respectStaff && row?.source === "staff") {
+          return { changed: false, from, refused: "staff" as const }
+        }
         if (from === change.tier && row) return { changed: false, from }
 
         const at = new Date()

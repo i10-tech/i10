@@ -73,6 +73,7 @@
               "restricted_api_key",
               "confirmation_required",
               "sending_paused",
+              "sending_held",
               "internal_server_error"
             ]
           },

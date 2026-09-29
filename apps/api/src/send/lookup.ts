@@ -1,3 +1,4 @@
+import { restoreBodies } from "../content/restore.js"
 import type { EmailEventName, GetEmailResponse } from "@repo/contracts"
 import { and, eq, gte, lte } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
@@ -103,7 +104,12 @@ export function emailLookup(db: Database): EmailLookup {
         // the one endpoint SDKs poll.
         const [bodies, events] = await Promise.all([
           tx
-            .select({ text: messageBodies.text, html: messageBodies.html })
+            .select({
+              text: messageBodies.text,
+              html: messageBodies.html,
+              templateId: messageBodies.templateId,
+              templateValues: messageBodies.templateValues,
+            })
             .from(messageBodies)
             .where(
               and(
@@ -142,6 +148,9 @@ export function emailLookup(db: Database): EmailLookup {
             ),
         ])
 
+        // A body stored as a template plus values (#171) reads like a full one.
+        const [body] = await restoreBodies(tx, bodies)
+
         return {
           object: "email" as const,
           id: message.id,
@@ -151,8 +160,8 @@ export function emailLookup(db: Database): EmailLookup {
           bcc: message.bccAddresses,
           reply_to: message.replyTo,
           subject: message.subject,
-          text: bodies[0]?.text ?? null,
-          html: bodies[0]?.html ?? null,
+          text: body?.text ?? null,
+          html: body?.html ?? null,
           created_at: message.createdAt.toISOString(),
           scheduled_at: message.scheduledAt?.toISOString() ?? null,
           last_event: lastEvent(

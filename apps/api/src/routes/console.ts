@@ -81,6 +81,26 @@ export function createConsole(deps?: ConsoleDeps) {
     await next()
   })
   app.use("*", requireTenant)
+  /*
+   * ⚠ AFTER `requireTenant`, SO ONLY A VERIFIED PERSON IS EVER RECORDED, and
+   * never awaited: the sighting is for the risk engine (#170), and a page must
+   * not wait on it or fail because of it.
+   */
+  if (d.observeSession) {
+    const observe = d.observeSession
+    app.use("*", async (c, next) => {
+      const user = c.get("user") as { userId: string } | undefined
+      const auth = c.get("auth") as { tenantId: string } | undefined
+      if (user && auth) {
+        try {
+          observe({ userId: user.userId, tenantId: auth.tenantId, request: c.req.raw })
+        } catch {
+          /* a sighting is never worth a page */
+        }
+      }
+      await next()
+    })
+  }
 
   /**
    * "Prove it is you", asked before a destructive flow rather than during it.

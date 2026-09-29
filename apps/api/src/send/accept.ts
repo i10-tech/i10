@@ -84,6 +84,15 @@ export type AcceptOutcome =
    * prevent.
    */
   | { status: "paused"; message: string }
+  /**
+   * Our own risk engine holds this workspace (#170).
+   *
+   * ⚠ ITS OWN STATUS, NOT `paused`. SES paused a workspace for its rates and
+   * the remedy is the list; we hold one pending a person's review and the
+   * remedy is to reply to us. One name for both would send half the callers to
+   * the wrong place.
+   */
+  | { status: "held"; message: string }
 
 /**
  * A stable fingerprint of the request body.
@@ -270,6 +279,24 @@ export interface AcceptOps {
   sendingPaused?: (tenantId: string) => Promise<{ cause: string | null } | null>
 
   /**
+   * Whether the risk engine holds this workspace (#170), and in which
+   * customer-facing words. Null when it does not.
+   *
+   * ⚠ OPTIONAL AND ABSENT FOR OUR OWN MAIL, for the reason `sendingPaused` is:
+   * sign-in codes must never wait on a review of some workspace.
+   */
+  sendingHeld?: (tenantId: string) => Promise<{ why: string } | null>
+
+  /**
+   * Sees what was accepted, after the commit: the risk engine's content
+   * fingerprints, link hosts and farm tripwire (#170).
+   *
+   * ⚠ FIRE-AND-FORGET, AND IT MUST NEVER THROW INTO A SEND. It is called with
+   * the payloads and not awaited; a failure costs a fingerprint, not a message.
+   */
+  observe?: (tenantId: string, payloads: readonly SendEmail[]) => void
+
+  /**
    * Pushes the batch. Called only after the transaction commits.
    *
    * `runAt` delays the job - see the scheduling note in `acceptSend`.
@@ -390,6 +417,17 @@ export async function acceptSend(
     }
   }
 
+  const held = await deps.sendingHeld?.(input.tenantId)
+  if (held) {
+    return {
+      status: "held",
+      message:
+        `Sending is on hold for this workspace while we review it: ${held.why}. ` +
+        "A person will review it within a day. Reply to the email we sent the " +
+        "workspace owner, or contact support, to speed that up.",
+    }
+  }
+
   // ⚠ FIRST, AND CHEAPLY. Rejecting an over-quota tenant before writing
   // anything is the difference between a 429 in milliseconds and a database
   // full of messages that will never be allowed to send.
@@ -432,6 +470,15 @@ export async function acceptSend(
   // claim would be the only thing standing between that and a duplicate.
   if (written.status === "replayed") {
     return { status: "replayed", ids: written.ids }
+  }
+
+  try {
+    deps.observe?.(input.tenantId, input.payloads)
+  } catch (err) {
+    deps.log.error(
+      { err, tenantId: input.tenantId },
+      "risk observer threw; the send is unaffected",
+    )
   }
 
   // ⚠ ONLY MESSAGES WITH A SURVIVING RECIPIENT ARE QUEUED. The rest are

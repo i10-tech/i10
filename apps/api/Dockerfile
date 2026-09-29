@@ -73,13 +73,18 @@ RUN bunx turbo run build --filter=@i10/api
 # Keep in step with the `command:` lines in infra/k8s/i10/workloads/*.yaml.
 RUN set -eu; \
     for entry in index worker migrate sweep reconcile recheck \
-                 domain-catchup domain-prove domain-orphans; do \
+                 domain-catchup domain-prove domain-orphans risk-score risk-admin; do \
       if [ ! -f "apps/api/dist/${entry}.js" ]; then \
         echo "dist/${entry}.js is missing - bun build moved the output layout."; \
         echo "Found instead:"; ls apps/api/dist; \
         exit 1; \
       fi; \
     done
+
+# The risk engine's embedding model (#170): all-MiniLM-L6-v2, pinned by commit
+# and checked by SHA-256 by the script itself - a file that changed upstream
+# fails the build instead of silently changing every vector we store.
+RUN cd apps/api && bun scripts/fetch-models.ts /repo/models/minilm
 
 # ⚠ NO node_modules IN THE RUNTIME STAGE, AND NOTHING TO FLATTEN ONE WITH.
 # The pnpm image ran `pnpm deploy --prod --legacy /app` to turn the workspace
@@ -146,6 +151,14 @@ COPY --from=build --chown=i10:i10 /repo/apps/api/drizzle /app/drizzle
 # symlink into bun's store.
 COPY --from=build --chown=i10:i10 /repo/node_modules/groupmq/dist/lua /app/dist/lua
 RUN test -s /app/dist/lua/enqueue.lua && test -s /app/dist/lua/reserve-batch.lua
+# ⚠ THE SAME TRAP AS THE LUA ABOVE: onnxruntime-web loads its WebAssembly at
+# runtime from beside the code, and `bun build` does not carry it. Without
+# these two files the embedder falls back to hash-v1 (content/embed.ts) - loud
+# in the log, but no longer meaning, only wording.
+COPY --from=build --chown=i10:i10 /repo/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs /app/dist/ort/
+COPY --from=build --chown=i10:i10 /repo/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm /app/dist/ort/
+COPY --from=build --chown=i10:i10 /repo/models/minilm /app/dist/models/minilm
+RUN test -s /app/dist/ort/ort-wasm-simd-threaded.wasm && test -s /app/dist/models/minilm/model.onnx
 
 USER 1001:1001
 EXPOSE 3001

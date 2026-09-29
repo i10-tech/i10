@@ -1,3 +1,4 @@
+import { restoreBodies } from "../content/restore.js"
 import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { ts, withTenant, type Database } from "../db/client.js"
@@ -271,6 +272,9 @@ export interface RequestRecord {
   durationMs: number
   errorName?: string | null
   userAgent?: string | null
+  /** From Cloudflare's headers (#170): which places this key is used from. */
+  clientIp?: string | null
+  country?: string | null
 }
 
 export function consoleQueries(db: Database): ConsoleQueries {
@@ -594,7 +598,9 @@ export function consoleQueries(db: Database): ConsoleQueries {
             .orderBy(messageEvents.occurredAt),
         ])
 
-        const body = bodies[0]
+        // ⚠ RESTORED, so a body stored as a template plus values (#171) shows
+        // exactly what was sent.
+        const [body] = await restoreBodies(tx, bodies)
 
         return {
           id: message.id,
@@ -779,6 +785,8 @@ export function consoleQueries(db: Database): ConsoleQueries {
           // ⚠ TRUNCATED. A user agent is unbounded and attacker-controlled;
           // 200 characters names an SDK and a version, which is the question.
           userAgent: input.userAgent ? input.userAgent.slice(0, 200) : null,
+          clientIp: input.clientIp ?? null,
+          country: input.country ? input.country.slice(0, 2).toUpperCase() : null,
         })
       })
     },

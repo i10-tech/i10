@@ -1,13 +1,15 @@
+import { restoreBodies } from "../content/restore.js"
 import type { Attachment, Tag } from "@repo/contracts"
-import { inArray } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import {
   claimStatement,
+  markCanceledStatement,
   markFailedStatement,
   markSentStatement,
   type MessageRef,
 } from "../db/claim.js"
 import { withTenant, type Database } from "../db/client.js"
-import { messageBodies } from "../db/core.js"
+import { messageBodies, sendingHolds } from "../db/core.js"
 import type { RouteOverride } from "../domains/route.js"
 import type { SendJob } from "../queue/send-queue.js"
 import type { OutboundMessage } from "../send/transport.js"
@@ -68,7 +70,10 @@ export interface AdapterOptions {
 
 export function databaseOps(
   opts: AdapterOptions,
-): Pick<BatchDeps<ClaimedMessage>, "claim" | "markSent" | "markFailed"> {
+): Pick<
+  BatchDeps<ClaimedMessage>,
+  "claim" | "markSent" | "markFailed" | "held" | "markCanceled"
+> {
   return {
     async claim(job: SendJob): Promise<ClaimedMessage[]> {
       return withTenant(opts.db, job.tenantId, async (tx) => {
@@ -94,9 +99,15 @@ export function databaseOps(
             headers: messageBodies.headers,
             attachments: messageBodies.attachments,
             tags: messageBodies.tags,
+            templateId: messageBodies.templateId,
+            templateValues: messageBodies.templateValues,
           })
           .from(messageBodies)
           .where(inArray(messageBodies.messageId, ids))
+          // ⚠ RESTORED EVEN HERE. Compaction only touches finished messages, so
+          // a claim should never meet a compacted body - but a retry of a
+          // failed message would, and it must send the real thing (#171).
+          .then((rows) => restoreBodies(tx, rows))
 
         const byId = new Map(bodies.map((b) => [b.messageId, b]))
 
@@ -141,6 +152,23 @@ export function databaseOps(
 
       const at = rows[0]?.sent_at
       return at ? new Date(at as string | Date) : null
+    },
+
+    async held(tenantId) {
+      const rows = await withTenant(opts.db, tenantId, (tx) =>
+        tx
+          .select({ tenantId: sendingHolds.tenantId })
+          .from(sendingHolds)
+          .where(eq(sendingHolds.tenantId, tenantId))
+          .limit(1),
+      )
+      return rows.length > 0
+    },
+
+    async markCanceled(message, reason) {
+      await withTenant(opts.db, message.tenantId, (tx) =>
+        tx.execute(markCanceledStatement(refOf(message), opts.workerId, reason)),
+      )
     },
 
     async markFailed(message, reason, permanent) {

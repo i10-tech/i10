@@ -9,12 +9,16 @@ import {
   jsonb,
   pgPolicy,
   pgSchema,
+  halfvec,
   primaryKey,
+  real,
   text,
   timestamp,
   unique,
   uniqueIndex,
   uuid,
+  vector,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 
 /**
@@ -472,6 +476,17 @@ export const domains = core.table(
      * `refresh`. Cleared by this row's own successful verify.
      */
     displacedAt: timestamp("displaced_at", { withTimezone: true }),
+
+    /**
+     * When the registrable domain was registered, from RDAP (#170).
+     *
+     * ⚠ LOOKED UP ONCE BY THE HOURLY RISK RUN, NOT ON EVERY SCORE. A
+     * registration date does not change, and rdap.org allows ten requests in
+     * ten seconds. Null with `rdap_checked_at` set means the registry has no
+     * RDAP (many ccTLDs) - which the score reads as unknown, never as young.
+     */
+    registeredAt: timestamp("registered_at", { withTimezone: true }),
+    rdapCheckedAt: timestamp("rdap_checked_at", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1015,6 +1030,21 @@ export const messageBodies = core.table(
      * Names beginning `i10_` are refused at the contract.
      */
     tags: jsonb("tags"),
+
+    /**
+     * The body, stored as a template and its values instead of in full
+     * (#169, #171). Null until the content job compacts it.
+     *
+     * ⚠ COMPACTED ONLY AFTER A BYTE-EXACT CHECK, AND ONLY ONCE THE MESSAGE IS
+     * DONE. The job reconstructs the body from the template and the values and
+     * compares it with `html`/`text` before it nulls them; any difference and
+     * the row is left as it was. It never touches a message still queued or
+     * sending. Every reader restores through `restoreBodies` (content/
+     * templates.ts), so a compacted row reads exactly like a full one.
+     */
+    templateId: uuid("template_id"),
+    templateValues: jsonb("template_values"),
+    compactedAt: timestamp("compacted_at", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.createdAt] })],
 )
@@ -2430,7 +2460,486 @@ export const apiRequests = core.table(
      */
     userAgent: text("user_agent"),
 
+    /**
+     * Where the call came from, from Cloudflare's headers (#170).
+     *
+     * ⚠ RECORDED FOR ONE QUESTION: IS THIS KEY BEING USED FROM PLACES ITS OWNER
+     * IS NOT. A key called from three countries in a day has usually leaked.
+     * Kept only as long as the log itself (30 days), which is inside the 90
+     * days docs/decisions/risk.md allows for a raw IP.
+     */
+    clientIp: text("client_ip"),
+    country: text("country"),
+
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("api_requests_tenant_idx").on(t.tenantId, t.occurredAt)],
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Risk (#170). See docs/decisions/risk.md for the whole design.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** How worried the score is. The thresholds are `bandFor` in risk/engine.ts. */
+export const riskBand = core.enum("risk_band", ["low", "elevated", "high", "critical"])
+
+/**
+ * What a hold stops. `api` is every send through our pipeline; `all` also
+ * stops the workspace's mailboxes, and only staff may set it.
+ */
+export const holdScope = core.enum("hold_scope", ["api", "all"])
+
+/** The same tenant policy every other `core` table carries, written once. */
+const tenantPolicy = (name: string, tenantId: AnyPgColumn) =>
+  pgPolicy(name, {
+    for: "all",
+    using: sql`${tenantId} = current_setting('app.tenant_id')::uuid`,
+    withCheck: sql`${tenantId} = current_setting('app.tenant_id')::uuid`,
+  })
+
+/**
+ * A workspace's current risk assessment, one row per workspace.
+ *
+ * ⚠ THE CURRENT ANSWER, NOT THE HISTORY. It is rewritten by every run so the
+ * console and staff read one row; `risk_assessment_events` keeps every move
+ * that mattered. `contributions` is the explanation - rule id, points,
+ * category and the evidence numbers - and it is what an appeal is argued from.
+ *
+ * ⚠ THE ACTION STATE LIVES HERE TOO. What the score did to SES's policy and
+ * when, and the cut-off a staff release set, have to survive the next run,
+ * and this is the one row every run reads first.
+ */
+export const riskAssessments = core.table(
+  "risk_assessments",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    score: integer("score").notNull(),
+    band: riskBand("band").notNull(),
+    /** Which rules produced it. See `RULESET_VERSION` in risk/rules.ts. */
+    rulesetVersion: integer("ruleset_version").notNull(),
+    contributions: jsonb("contributions").notNull(),
+    /** The model's probability when a model was consulted; null otherwise. */
+    modelScore: real("model_score"),
+    /** When the band last changed. Hysteresis reads it. */
+    bandSince: timestamp("band_since", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * ⚠ SET BY A STAFF RELEASE OR PIN. Until then the score may not hold, demote
+     * or tighten this workspace unless a `fresh` rule fires on evidence newer
+     * than `cleared_at`.
+     */
+    autoActionsPausedUntil: timestamp("auto_actions_paused_until", {
+      withTimezone: true,
+    }),
+    clearedAt: timestamp("cleared_at", { withTimezone: true }),
+    /** The SES reputation policy the score last set, and when. */
+    sesPolicy: text("ses_policy"),
+    sesPolicySetAt: timestamp("ses_policy_set_at", { withTimezone: true }),
+    /** When staff were last alerted about this workspace's band. */
+    alertedAt: timestamp("alerted_at", { withTimezone: true }),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [tenantPolicy("risk_assessments_tenant", t.tenantId)],
+)
+
+/**
+ * Every assessment that mattered: a band change, a move of ten points or more,
+ * or an action taken. Append-only.
+ */
+export const riskAssessmentEvents = core.table(
+  "risk_assessment_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    score: integer("score").notNull(),
+    band: riskBand("band").notNull(),
+    fromBand: riskBand("from_band"),
+    rulesetVersion: integer("ruleset_version").notNull(),
+    contributions: jsonb("contributions").notNull(),
+    /** What the run did: `tier:strict`, `hold`, `ses:strict`, `alert`, ... */
+    actions: text("actions")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** What woke the run: `hourly`, `ses-event`, `farm-tripwire`, `staff`, ... */
+    trigger: text("trigger").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("risk_assessment_events_tenant_idx").on(t.tenantId, t.occurredAt),
+    tenantPolicy("risk_assessment_events_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * A workspace whose sending is held (#170).
+ *
+ * ⚠ ONE ROW PER HELD WORKSPACE, READ ON EVERY SEND. `accept()` refuses a held
+ * workspace before anything is written, so this has to be a primary-key
+ * lookup; no row means not held. A release deletes the row and writes the
+ * event - the history is `sending_hold_events`.
+ *
+ * ⚠ NOT `tenants.status` AND NOT AN SES PAUSE. See docs/decisions/risk.md:
+ * the first is a billing field nothing enforces, and releasing the second
+ * puts SES in a grace state that ignores the tenant's findings.
+ */
+export const sendingHolds = core.table(
+  "sending_holds",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    scope: holdScope("scope").notNull().default("api"),
+    /** `score` or `staff`. */
+    source: text("source").notNull(),
+    /** For staff and appeals: the whole reason. */
+    reason: text("reason").notNull(),
+    /** For the customer: a category, never a threshold. */
+    category: text("category").notNull(),
+    setBy: text("set_by").notNull(),
+    heldAt: timestamp("held_at", { withTimezone: true }).notNull().defaultNow(),
+    /** ⚠ A HUMAN MUST LOOK BY THEN (GDPR Article 22). The hourly run alerts. */
+    reviewDueAt: timestamp("review_due_at", { withTimezone: true }).notNull(),
+    reviewAlertedAt: timestamp("review_alerted_at", { withTimezone: true }),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    /** How many queued or scheduled messages the hold canceled. */
+    canceledMessages: integer("canceled_messages").notNull().default(0),
+  },
+  (t) => [tenantPolicy("sending_holds_tenant", t.tenantId)],
+)
+
+/** Every hold and release, append-only. `action` is `hold` or `release`. */
+export const sendingHoldEvents = core.table(
+  "sending_hold_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    scope: holdScope("scope").notNull(),
+    source: text("source").notNull(),
+    reason: text("reason").notNull(),
+    category: text("category"),
+    setBy: text("set_by").notNull(),
+    /** On a release: staff's verdict, `false_positive` or `resolved`. */
+    outcome: text("outcome"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("sending_hold_events_tenant_idx").on(t.tenantId, t.occurredAt),
+    tenantPolicy("sending_hold_events_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * Content fingerprints of accepted mail, per workspace per day (#170).
+ *
+ * ⚠ FINGERPRINTS, NEVER CONTENT. `exact` is a SHA-256 of the normalised
+ * subject and body and `bands` the LSH bands of its MinHash signature; neither
+ * can be turned back into the email. See risk/fingerprint.ts for why MinHash. Kept 30 days. They exist to find the same
+ * message sent from many workspaces - a farm - which no per-workspace rate can
+ * see.
+ */
+export const contentFingerprints = core.table(
+  "content_fingerprints",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    exact: text("exact").notNull(),
+    bands: text("bands").array().notNull(),
+    messages: integer("messages").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day, t.exact] }),
+    index("content_fingerprints_exact_idx").on(t.exact, t.day),
+    // ⚠ THE NEAR-DUPLICATE LOOKUP IS AN ARRAY OVERLAP (`&&`), WHICH ONLY GIN
+    // SERVES. Without it `fingerprint_peers` is a scan of every workspace's
+    // fingerprints for every workspace scored.
+    index("content_fingerprints_bands_idx").using("gin", t.bands),
+    index("content_fingerprints_day_idx").on(t.day),
+    tenantPolicy("content_fingerprints_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * Hostnames linked from accepted mail, per workspace per day, and Web Risk's
+ * verdict on each (#170).
+ *
+ * ⚠ HOSTS, NEVER URLS. A URL in an email routinely carries a recipient's token
+ * or address; the host is all a reputation lookup needs.
+ */
+export const linkHosts = core.table(
+  "link_hosts",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    host: text("host").notNull(),
+    messages: integer("messages").notNull().default(0),
+    /** Null until checked; `clean`, or Web Risk's threat types joined by `,`. */
+    verdict: text("verdict"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day, t.host] }),
+    index("link_hosts_unchecked_idx").on(t.day, t.checkedAt),
+    tenantPolicy("link_hosts_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * What we saw of a person when they used the product (#170): sign-ins,
+ * console sessions, security anomalies.
+ *
+ * ⚠ KEYED ON THE PERSON, NOT THE WORKSPACE, AND THAT IS WHY ITS POLICY DENIES
+ * EVERYTHING. A sign-up happens before any workspace exists, and the questions
+ * asked of this table - how many accounts share this device, this subnet -
+ * compare people with each other. A tenant policy cannot express that, and a
+ * readable table would hand every workspace every other user's IP. So it is
+ * written and read ONLY through narrow SECURITY DEFINER functions that return
+ * counts and ids (see the risk migration), and a direct query returns nothing.
+ *
+ * ⚠ RAW IP AND USER AGENT ARE NULLED AFTER 90 DAYS by the hourly run; the
+ * derived country, network and device id stay for the life of the account.
+ */
+export const identityEvents = core.table(
+  "identity_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The workspace in scope, when there was one. */
+    tenantId: uuid("tenant_id"),
+    /** `session`, `api_key`, `anomaly`, `takeover_response`. */
+    kind: text("kind").notNull(),
+    sessionId: text("session_id"),
+    ip: text("ip"),
+    /** `a.b.c` for IPv4, the /48 for IPv6: what "the same network" compares. */
+    subnet: text("subnet"),
+    country: text("country"),
+    asn: integer("asn"),
+    asName: text("as_name"),
+    hosting: boolean("hosting"),
+    tor: boolean("tor"),
+    userAgent: text("user_agent"),
+    deviceId: text("device_id"),
+    timezone: text("timezone"),
+    language: text("language"),
+    /** For anomalies: what fired and its evidence. */
+    detail: jsonb("detail"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("identity_events_user_idx").on(t.clerkUserId, t.occurredAt),
+    index("identity_events_device_idx").on(t.deviceId, t.occurredAt),
+    index("identity_events_subnet_idx").on(t.subnet, t.occurredAt),
+    index("identity_events_unenriched_idx").on(t.asn, t.occurredAt),
+    pgPolicy("identity_events_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/**
+ * What a workspace turned out to be, for training the model (#170).
+ *
+ * ⚠ THE FEATURES ARE STORED WITH THE LABEL, AS THEY WERE WHEN IT WAS GIVEN.
+ * Training then never reconstructs history, and a label cannot quietly start
+ * describing a workspace that has since changed. `weight` lets a staff verdict
+ * count for more than an inference like "an AWS-managed pause".
+ */
+export const riskLabels = core.table(
+  "risk_labels",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** `abuse` or `legit`. */
+    label: text("label").notNull(),
+    /** `staff`, `hold_upheld`, `hold_released`, `ses_aws_pause`, `tenure`. */
+    source: text("source").notNull(),
+    weight: real("weight").notNull().default(1),
+    features: jsonb("features").notNull(),
+    setBy: text("set_by").notNull(),
+    note: text("note"),
+    labeledAt: timestamp("labeled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("risk_labels_tenant_idx").on(t.tenantId, t.labeledAt),
+    tenantPolicy("risk_labels_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * Trained models (#170). Global rather than per workspace, so, like
+ * `identity_events`, readable only through definer functions.
+ *
+ * ⚠ `active` IS THE EVALUATION GATE, NOT A PREFERENCE. A model is only
+ * consulted when its held-out evaluation on real labels passed; every other
+ * version is kept for comparison and contributes nothing.
+ */
+export const riskModels = core.table(
+  "risk_models",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    version: integer("version").notNull(),
+    /** Feature names in order, weights, bias, and normalisation. */
+    weights: jsonb("weights").notNull(),
+    /** Label counts, AUC, precision and recall on the held-out set. */
+    evaluation: jsonb("evaluation").notNull(),
+    active: boolean("active").notNull().default(false),
+    trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("risk_models_version_unique").on(t.version),
+    pgPolicy("risk_models_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content intelligence (#169, #170, #171): templates discovered from what a
+// workspace sends, and the vectors that let similar mail and similar
+// workspaces be found. See docs/decisions/risk.md, "Templates and vectors".
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Dimensions of every content embedding, whichever embedder produced it. */
+export const CONTENT_DIMENSIONS = 384
+
+/**
+ * A template the content job discovered in a workspace's own mail (#169).
+ *
+ * ⚠ NEVER SHOWN TO THE CUSTOMER AND NEVER SHARED ACROSS WORKSPACES. It is how
+ * we store less (the static skeleton once, the per-message values beside each
+ * message) and how the risk engine knows what "normal" looks like for this
+ * workspace. Scoped per tenant like everything else, and deleted with it.
+ *
+ * ⚠ `segments` IS THE SKELETON: the static text between the holes, in order.
+ * Rendering is `segments[0] + values[0] + segments[1] + ...`, which is why a
+ * compacted body is byte-exact by construction - and checked anyway.
+ */
+export const contentTemplates = core.table(
+  "content_templates",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** SHA-256 of the skeleton: the identity of the template within a workspace. */
+    skeletonHash: text("skeleton_hash").notNull(),
+    segments: jsonb("segments").notNull(),
+    /** MinHash bands of a message it was derived from, for candidate lookup. */
+    bands: text("bands").array().notNull(),
+    staticBytes: integer("static_bytes").notNull(),
+    holes: integer("holes").notNull(),
+    /** Messages matched to it, compacted or not. */
+    messages: integer("messages").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("content_templates_skeleton_unique").on(t.tenantId, t.skeletonHash),
+    index("content_templates_bands_idx").using("gin", t.bands),
+    tenantPolicy("content_templates_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * An embedding of one piece of content a workspace sent (#170), per day.
+ *
+ * ⚠ AN EMBEDDING IS DERIVED FROM THE MAIL AND CAN LEAK SOME OF IT, so it is
+ * treated like the mail: tenant-scoped under RLS, kept 30 days like the
+ * fingerprints, never sent anywhere but our own database. Cross-workspace
+ * questions ("is this close to mail a confirmed abuser sent?") go through
+ * definer functions that return distances and counts, never another
+ * workspace's vectors.
+ *
+ * ⚠ `model` IS PART OF THE KEY AND OF EVERY QUERY. Vectors from two embedders
+ * live in different spaces; comparing them is meaningless, so they are never
+ * compared.
+ */
+export const contentVectors = core.table(
+  "content_vectors",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    exact: text("exact").notNull(),
+    model: text("model").notNull(),
+    embedding: halfvec("embedding", { dimensions: CONTENT_DIMENSIONS }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day, t.exact, t.model] }),
+    // ⚠ HNSW ON COSINE, IN HALF PRECISION: half the memory of `vector` for a
+    // recall loss that does not matter at a 0.9 similarity threshold.
+    index("content_vectors_hnsw_idx").using(
+      "hnsw",
+      t.embedding.op("halfvec_cosine_ops"),
+    ),
+    index("content_vectors_day_idx").on(t.day),
+    tenantPolicy("content_vectors_tenant", t.tenantId),
+  ],
+)
+
+/** Dimensions of the behaviour vector: `FEATURE_NAMES` in risk/model.ts. */
+export const BEHAVIOUR_DIMENSIONS = 39
+
+/**
+ * Each workspace's behaviour as a point in space: its model features,
+ * standardised (#170).
+ *
+ * ⚠ THIS IS HOW "A NEW WORKSPACE THAT LOOKS LIKE A BAD ONE" IS ASKED. Its
+ * nearest neighbours among LABELLED workspaces are a fact the rules read -
+ * observations, never another workspace's score, so no score can feed
+ * another (the feedback-loop rule in docs/decisions/risk.md).
+ */
+export const behaviourVectors = core.table(
+  "behaviour_vectors",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    embedding: vector("embedding", { dimensions: BEHAVIOUR_DIMENSIONS }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("behaviour_vectors_hnsw_idx").using("hnsw", t.embedding.op("vector_l2_ops")),
+    tenantPolicy("behaviour_vectors_tenant", t.tenantId),
+  ],
 )

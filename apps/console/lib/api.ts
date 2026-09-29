@@ -2,6 +2,7 @@ import { normaliseError, type ApiError } from "./api-error"
 import "server-only"
 import { auth } from "@clerk/nextjs/server"
 import { safeFailure } from "@/lib/failure"
+import { clientContextHeader } from "@/lib/client-context"
 import {
   previewFor,
   PREVIEW,
@@ -239,6 +240,8 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   }
 
   const headers: Record<string, string> = { Authorization: header }
+  const context = await clientContextHeader()
+  if (context) headers["x-i10-client"] = context
   let body: string | undefined
 
   if (options.rawBody !== undefined) {

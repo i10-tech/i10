@@ -19,15 +19,17 @@
 #   bun run dev         start the apps
 services:
   postgres:
-    # ⚠ THE SAME MAJOR AS THE CNPG CLUSTER. A migration that works on 16 and
-    # fails on 18 is a thing that exists, and the only place to find out is
-    # here - after CI has merged it is a PreSync hook failure that blocks every
-    # later migration.
-    image: postgres:18-alpine
-    environment:
-      POSTGRES_USER: i10
-      POSTGRES_PASSWORD: i10
-      POSTGRES_DB: i10
+    # ⚠ THE PRODUCTION IMAGE, BYTE FOR BYTE: the one infra/k8s/i10/platform-db/
+    # cluster.yaml pins. It was postgres:18-alpine - the same major, but musl
+    # instead of glibc (text sorts differently) and without pgvector, which the
+    # risk engine's migrations need (#170). Keep the two tags in step.
+    image: ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookworm
+    # ⚠ THE IMAGE HAS NO ENTRYPOINT; dev/postgres/cnpg-entry.sh bootstraps it
+    # the way CNPG does in the cluster - `postgres` the only superuser, `i10`
+    # the NON-superuser owner, extensions created by the superuser. It starts as
+    # root only to hand the volume to uid 26, then drops privileges.
+    user: "0"
+    entrypoint: ["/usr/local/bin/cnpg-entry.sh"]
     ports:
       # ⚠ 5433, NOT 5432. A Homebrew `postgresql@18` is already installed on at
       # least one machine here and binds 5432 on boot; colliding with it
@@ -35,19 +37,17 @@ services:
       # while `psql` connects perfectly well to the wrong database.
       - "5433:5432"
     volumes:
-      # ⚠ `/var/lib/postgresql`, NOT `/var/lib/postgresql/data`. Postgres 18's
-      # image changed the convention: it now expects a single mount one level up
-      # and puts the cluster in a MAJOR-VERSION subdirectory beneath it, so that
-      # `pg_upgrade --link` does not have to cross a mount boundary. Mounting the
-      # old path makes the entrypoint refuse to start with a long essay about
-      # finding "PostgreSQL data in /var/lib/postgresql/data (unused
-      # mount/volume)" - which reads like a corrupt volume and is not.
-      - postgres:/var/lib/postgresql
+      # ⚠ A NEW VOLUME, NOT THE ALPINE ONE. The old `postgres` volume is musl-
+      # initialised and laid out for the official image; reusing it under glibc
+      # would leave every text index sorted the wrong way. It is kept, untouched,
+      # below - delete it with `docker volume rm i10_postgres` once unwanted.
+      - postgres-cnpg:/var/lib/postgresql/data
+      - ./dev/postgres/cnpg-entry.sh:/usr/local/bin/cnpg-entry.sh:ro
       # ⚠ RUNS ONCE, ON AN EMPTY DATA DIRECTORY. Changing it later does nothing
       # until the volume is removed - `bun run dev:reset`.
       - ./dev/postgres/init.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U i10 -d i10"]
+      test: ["CMD-SHELL", "pg_isready -U i10 -d i10 -h 127.0.0.1"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -119,6 +119,8 @@ services:
       - "5354:53/tcp"
 
 volumes:
+  postgres-cnpg:
+  # The Alpine-era volume, kept so switching images loses nothing. Unused.
   postgres:
   caddy-data:
   caddy-config:

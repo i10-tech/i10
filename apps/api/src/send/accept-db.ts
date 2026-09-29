@@ -6,9 +6,11 @@ import {
   idempotencyKeys,
   messageBodies,
   messages,
+  sendingHolds,
   sesTenantStatus,
   suppressions,
 } from "../db/core.js"
+import { CATEGORY_TEXT, type Category } from "../risk/types.js"
 import { enqueueBatch, type SendClass, type SendJob } from "../queue/send-queue.js"
 import { addrSpec, asList, type AcceptOps } from "./accept.js"
 import { domainOf } from "./address.js"
@@ -62,6 +64,12 @@ export interface SendPathOptions {
    * own tenant (`SYSTEM_SES_TENANT`), not the workspace's.
    */
   honourSesPause?: boolean
+  /**
+   * Refuse sends while the risk engine holds the workspace (#170). On unless
+   * set false - our own mail's ops again, for the same reason: sign-in codes
+   * must never wait on a review of some customer's workspace.
+   */
+  honourHolds?: boolean
 }
 
 type Row = Record<string, unknown>
@@ -303,6 +311,32 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
                 .limit(1),
             )
             return row ? { cause: row.cause } : null
+          },
+        }),
+
+    ...(opts.honourHolds === false
+      ? {}
+      : {
+          /*
+           * ⚠ A PRIMARY-KEY LOOKUP ON EVERY SEND, AND THAT IS ITS WHOLE COST.
+           * No row is the overwhelming answer; the category is what the
+           * customer reads, never the reason staff read.
+           */
+          async sendingHeld(tenantId: string) {
+            const [row] = await withTenant(opts.db, tenantId, (tx) =>
+              tx
+                .select({ category: sendingHolds.category })
+                .from(sendingHolds)
+                .where(eq(sendingHolds.tenantId, tenantId))
+                .limit(1),
+            )
+            return row
+              ? {
+                  why:
+                    CATEGORY_TEXT[row.category as Category] ??
+                    "unusual sending activity",
+                }
+              : null
           },
         }),
 

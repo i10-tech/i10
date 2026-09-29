@@ -263,13 +263,16 @@ function AttentionMark({
     a.proof_missing > 0 && `${a.proof_missing} losing verification`,
     a.transfers > 0 &&
       `${a.transfers} transfer ${a.transfers === 1 ? "offer" : "offers"}`,
+    a.reputation === "held" && "sending on hold",
     a.reputation === "paused" && "sending paused",
     a.reputation === "at_risk" && "sending at risk",
   ].filter(Boolean)
   return (
     <span className="ml-auto flex items-center" title={reasons.join(", ")}>
       <StatusDot
-        tone={a.reputation === "paused" ? "danger" : "warning"}
+        tone={
+          a.reputation === "paused" || a.reputation === "held" ? "danger" : "warning"
+        }
         className="size-2"
       />
       <span className="sr-only">Needs attention: {reasons.join(", ")}</span>
