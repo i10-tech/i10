@@ -5,6 +5,7 @@ import {
   assignedTenantIdsStatement,
   hasAssignmentStatement,
   meterEventStore,
+  meterWindowStore,
   planAssignmentStore,
   usageSnapshotStatement,
 } from "./postgres.js"
@@ -65,6 +66,8 @@ export function postgresMeter(db: Database): Meter {
     // for the rest. `storage.gb` is deliberately absent - see levels.ts and
     // docs/decisions/metering.md for why it is not readable yet.
     levels: postgresLevels(db),
+    // Where the free plan's `first_use` windows start (0078).
+    windows: meterWindowStore(db),
   })
 }
 

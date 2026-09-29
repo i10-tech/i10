@@ -76,6 +76,7 @@ describe("sending limits", () => {
         remaining: 50,
         resets_at: "2026-09-30T00:00:00.000Z",
         overage: false,
+        starts_on_send: false,
         status: "ok",
       },
       {
@@ -88,6 +89,7 @@ describe("sending limits", () => {
         remaining: 1160,
         resets_at: "2026-10-12T00:00:00.000Z",
         overage: false,
+        starts_on_send: false,
         status: "ok",
       },
     ])
@@ -120,5 +122,15 @@ describe("sending limits", () => {
       reason: "not free",
     }).limits("t")
     expect(limits.map((l) => l.window)).toEqual(["day", "week", "month"])
+  })
+
+  it("says a free limit starts with the next send when no window is open", async () => {
+    const idle: BalanceOutcome = { ...freeDay, used: 0, remaining: 100, window: null }
+    const limits = await store(meterOf(idle), tierMonth).limits("t")
+    expect(limits[0]).toMatchObject({
+      window: "day",
+      starts_on_send: true,
+      resets_at: null,
+    })
   })
 })

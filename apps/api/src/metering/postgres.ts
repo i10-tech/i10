@@ -9,6 +9,7 @@ import type {
   ResetWindow,
   UsageEvent,
   UsageStore,
+  WindowStore,
 } from "@repo/metering"
 
 /**
@@ -61,6 +62,9 @@ const entitlement = z.discriminatedUnion("kind", [
       overage,
       interval: z.enum(["day", "week", "month", "year", "lifetime"]),
       intervalCount: z.number().int().positive().optional(),
+      // ⚠ MUST BE LISTED, BECAUSE THE SCHEMA IS STRICT: an unknown key throws,
+      // and a throw here fails every free workspace's quota check at once.
+      start: z.enum(["anchor", "first_use"]).optional(),
     })
     .strict(),
   z
@@ -99,11 +103,15 @@ const planRow = z.object({
    */
   anchor: z.coerce.date(),
   overage_enabled: z.boolean(),
+  // ⚠ OPTIONAL: absent (a row read by a pod older than 0079), nothing is
+  // bounded, exactly as before. Required would fail every quota check at once.
+  plan_since: z.coerce.date().optional(),
 })
 
 /** One tenant's plan and anchor, or nothing. */
 export const assignmentStatement = (tenantId: string): SQL => sql`
-  select p.id as plan_id, p.source, p.entitlements, a.anchor, a.overage_enabled
+  select p.id as plan_id, p.source, p.entitlements, a.anchor, a.overage_enabled,
+         a.plan_since
     from core.plan_assignments a
     join core.plans p on p.id = a.plan_id
    where a.tenant_id = ${tenantId}::uuid
@@ -231,6 +239,20 @@ export const hasAssignmentStatement = (tenantId: string): SQL => sql`
  * range, the event's `occurred_at`. This one was the exception, which is
  * exactly why nobody looked at it.
  */
+/**
+ * The earliest usage event in `[from, to]`: where a `first_use` window opens.
+ * Uses the same index as `usedInStatement`.
+ */
+export const firstEventStatement = (key: MeterKey, from: Date, to: Date): SQL => sql`
+  select min(occurred_at) as first
+    from core.meter_events
+   where tenant_id   = ${key.tenantId}::uuid
+     and feature_id  = ${key.featureId}
+     and shard       = ${key.shard}
+     and occurred_at >= ${ts(from)}
+     and occurred_at <= ${ts(to)}
+`
+
 export const usedInStatement = (key: MeterKey, window: ResetWindow): SQL => sql`
   select coalesce(sum(value), 0)::bigint as used
     from core.meter_events
@@ -308,6 +330,7 @@ export function planAssignmentStore(db: Database): PlanAssignments {
           tenantId,
           anchor: row.anchor,
           overageEnabled: row.overage_enabled,
+          ...(row.plan_since ? { planSince: row.plan_since } : {}),
           plan: {
             id: row.plan_id,
             source: row.source,
@@ -333,6 +356,18 @@ export function planAssignmentStore(db: Database): PlanAssignments {
 
 export function meterEventStore(db: Database): UsageStore {
   return {
+    async firstEventAt(key, from, to) {
+      return withTenant(db, key.tenantId, async (tx) => {
+        const rows = (await tx.execute(
+          firstEventStatement(key, from, to),
+        )) as unknown as {
+          first: string | Date | null
+        }[]
+        const first = rows[0]?.first
+        return first ? new Date(first) : null
+      })
+    },
+
     async usedIn(key, window) {
       return withTenant(db, key.tenantId, async (tx) => {
         const rows = (await tx.execute(usedInStatement(key, window))) as unknown as {
@@ -389,4 +424,36 @@ function dedupe(events: readonly UsageEvent[]): UsageEvent[] {
   const seen = new Map<string, UsageEvent>()
   for (const event of events) if (!seen.has(event.id)) seen.set(event.id, event)
   return [...seen.values()]
+}
+
+/**
+ * `core.meter_windows`: where each `first_use` window starts.
+ *
+ * ⚠ THE UPSERT ONLY MOVES FORWARD (`where ... < excluded.started_at`), so two
+ * checks racing to open the same window cannot move it back.
+ */
+export function meterWindowStore(db: Database): WindowStore {
+  return {
+    async startOf(key, windowId) {
+      return withTenant(db, key.tenantId, async (tx) => {
+        const rows = (await tx.execute(sql`
+          select started_at from core.meter_windows
+           where tenant_id = ${key.tenantId}::uuid and feature_id = ${key.featureId}
+             and shard = ${key.shard} and window_id = ${windowId}
+        `)) as unknown as { started_at: string | Date }[]
+        return rows[0] ? new Date(rows[0].started_at) : null
+      })
+    },
+    async advance(key, windowId, start) {
+      await withTenant(db, key.tenantId, (tx) =>
+        tx.execute(sql`
+          insert into core.meter_windows (tenant_id, feature_id, shard, window_id, started_at)
+          values (${key.tenantId}::uuid, ${key.featureId}, ${key.shard}, ${windowId}, ${ts(start)})
+          on conflict (tenant_id, feature_id, shard, window_id)
+          do update set started_at = excluded.started_at
+           where core.meter_windows.started_at < excluded.started_at
+        `),
+      )
+    },
+  }
 }

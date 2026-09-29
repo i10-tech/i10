@@ -364,6 +364,7 @@ export interface SendingLimit {
   remaining: number | null
   resets_at: string | null
   overage: boolean
+  starts_on_send: boolean
   status: "ok" | "unreadable"
 }
 

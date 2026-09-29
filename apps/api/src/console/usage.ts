@@ -113,6 +113,11 @@ export interface SendingLimit {
   resets_at: string | null
   /** The plan bills past the line instead of refusing. Never true for a tier. */
   overage: boolean
+  /**
+   * A free limit whose window has not opened: nothing sent since the last one
+   * ended, so it starts with the next send and there is no reset to show.
+   */
+  starts_on_send: boolean
   /** `unreadable`: the meter threw. Shown as a dash, never as a zero. */
   status: "ok" | "unreadable"
 }
@@ -436,6 +441,7 @@ async function sendingLimits(
       remaining: allowance === null ? null : plan.remaining,
       resets_at: plan.window?.end?.toISOString() ?? null,
       overage: plan.overage,
+      starts_on_send: allowance !== null && plan.window === null,
       status: "ok",
     })
   }
@@ -459,6 +465,7 @@ async function sendingLimits(
         remaining: balance.remaining,
         resets_at: balance.window?.end?.toISOString() ?? null,
         overage: false,
+        starts_on_send: balance.window === null,
         status: "ok",
       })
     }
@@ -477,6 +484,7 @@ async function sendingLimits(
       remaining: null,
       resets_at: null,
       overage: false,
+      starts_on_send: false,
       status: planUnreadable ? "unreadable" : "ok",
     })
   }

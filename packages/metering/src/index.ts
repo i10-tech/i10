@@ -37,6 +37,7 @@ export type {
   RecordResult,
   UsageEvent,
   UsageStore,
+  WindowStore,
 } from "./ports.js"
 
 export { createMeter } from "./meter.js"
