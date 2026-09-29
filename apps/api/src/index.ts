@@ -31,6 +31,7 @@ import { mailboxDirectory } from "./mailboxes/store.js"
 import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
+import { objectStoreFrom } from "./content/object-store.js"
 import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
 import { dnsConnectionStore } from "./dns/connections.js"
@@ -654,6 +655,14 @@ const sesFindings = reputationService({
  * queue client.
  */
 const riskExempt = await systemTenantIds(db, env.AUTH_EMAIL_TENANT_SLUG)
+/*
+ * ⚠ THE API READS R2 ONLY TO SHOW A BODY WHOSE DATA-URI IMAGES MOVED THERE
+ * (#168): `GET /emails/:id` and the console's email detail. Unset in dev, and
+ * then no body can have moved, because the content-store job moves nothing
+ * without it either.
+ */
+const contentStore = objectStoreFrom(env)
+
 const risk = riskSystem({
   db,
   env,
@@ -790,7 +799,7 @@ const app = createApp({
     metering,
     log,
   },
-  emailLookup: emailLookup(db),
+  emailLookup: emailLookup(db, contentStore),
   ...(env.METRICS_TOKEN
     ? {
         metrics: {
@@ -945,7 +954,7 @@ const app = createApp({
     tenants: tenantResolver(db),
     activeOrg,
     freshAuth,
-    queries: consoleQueries(db),
+    queries: consoleQueries(db, contentStore),
     sesStatus,
     sesReputation,
     holds: risk.holds,

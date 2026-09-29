@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto"
 import { describe, expect, it, mock } from "bun:test"
 import { createApp } from "../src/app.js"
-import { decide, type PolarEvent } from "../src/billing/events.js"
+import { decide, stillEntitles, type PolarEvent } from "../src/billing/events.js"
 
 // Fixed so the file does not start failing on the day `current_period_end`
 // below goes past - entitlement genuinely depends on the clock now.
@@ -429,5 +429,54 @@ describe("POST /webhooks/polar", () => {
     })
     const res = await post(app, "null")
     expect(res.status).toBe(202)
+  })
+})
+
+describe("stillEntitles: one rule for the webhook and the billing page", () => {
+  const now = new Date("2026-09-29T12:00:00Z")
+  const later = new Date("2026-10-26T21:10:53Z")
+  const earlier = new Date("2026-09-01T00:00:00Z")
+
+  it("a revoked subscription entitles nothing, whatever date it was paid to", () => {
+    // The prod case: plan back to Free, row still carrying Oct 26.
+    expect(
+      stillEntitles(
+        { status: "canceled", cancelAtPeriodEnd: false, currentPeriodEnd: later },
+        now,
+      ),
+    ).toBe(false)
+  })
+
+  it("an active one does, including past_due and a cancellation not yet due", () => {
+    for (const status of ["active", "trialing", "past_due"]) {
+      expect(
+        stillEntitles(
+          { status, cancelAtPeriodEnd: false, currentPeriodEnd: later },
+          now,
+        ),
+      ).toBe(true)
+    }
+    expect(
+      stillEntitles(
+        { status: "active", cancelAtPeriodEnd: true, currentPeriodEnd: later },
+        now,
+      ),
+    ).toBe(true)
+  })
+
+  it("a cancellation past its date ends it, even if the revoke never arrived", () => {
+    expect(
+      stillEntitles(
+        { status: "active", cancelAtPeriodEnd: true, currentPeriodEnd: earlier },
+        now,
+      ),
+    ).toBe(false)
+    // A renewing one briefly past its date is still paying.
+    expect(
+      stillEntitles(
+        { status: "active", cancelAtPeriodEnd: false, currentPeriodEnd: earlier },
+        now,
+      ),
+    ).toBe(true)
   })
 })

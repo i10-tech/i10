@@ -55,6 +55,25 @@ export const attachmentSchema = z
     content: z.base64().optional(),
     path: z.url().optional(),
     content_type: z.string().max(255).optional(),
+    /**
+     * Makes the file an INLINE image the HTML refers to as `cid:<content_id>`
+     * (#168), Resend's name for the same field. The file is sent as a part of
+     * `multipart/related` with this `Content-ID` and `Content-Disposition:
+     * inline`, instead of as a download.
+     *
+     * ⚠ NO WHITESPACE, NO ANGLE BRACKETS, NO QUOTES. It goes into a
+     * `Content-ID: <...>` header, so a newline is header injection and a `>`
+     * would close the id early; we add the brackets, the caller does not.
+     */
+    content_id: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(
+        /^[^\s<>"]+$/,
+        "`content_id` may not contain whitespace, quotes or angle brackets.",
+      )
+      .optional(),
   })
   .refine((a) => a.content !== undefined, {
     // ⚠ A DELIBERATE GAP AGAINST RESEND, AND THE REASON IS NOT EFFORT. Fetching

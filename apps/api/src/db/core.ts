@@ -1030,6 +1030,17 @@ export const messageBodies = core.table(
     attachments: jsonb("attachments"),
     /** When the content-store job moved this row's files to R2. */
     attachmentsStoredAt: timestamp("attachments_stored_at", { withTimezone: true }),
+    /**
+     * The R2 objects this body's html references in place of data-URI images
+     * (#168), by SHA-256. Null until the content-store job extracts any; see
+     * content/inline.ts for the reference format.
+     *
+     * ⚠ IT IS WHAT THE OBJECT SWEEP COUNTS, HOWEVER THE BODY IS STORED. After
+     * compaction the references live in a template's skeleton or in this
+     * message's values, where no index can see them; this list stays on the
+     * row, so an image is freed exactly when the last body using it goes.
+     */
+    inlineObjects: text("inline_objects").array(),
 
     /**
      * The caller's own labels, forwarded to SES as `EmailTags` and echoed back
@@ -1135,6 +1146,8 @@ export const messageBodies = core.table(
       "gin",
       t.attachments.op("jsonb_path_ops"),
     ),
+    // "Does any body still reference this image?" - the object sweep's other half.
+    index("message_bodies_inline_objects_gin_idx").using("gin", t.inlineObjects),
     // "Does any body still use this template?" - the template sweep's question.
     index("message_bodies_template_idx")
       .on(t.templateId)

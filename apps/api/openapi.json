@@ -208,6 +208,12 @@
                 "content_type": {
                   "type": "string",
                   "maxLength": 255
+                },
+                "content_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[^\\s<>\"]+$"
                 }
               },
               "required": [
@@ -391,6 +397,12 @@
                   "content_type": {
                     "type": "string",
                     "maxLength": 255
+                  },
+                  "content_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": "^[^\\s<>\"]+$"
                   }
                 },
                 "required": [

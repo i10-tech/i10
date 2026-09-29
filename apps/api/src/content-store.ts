@@ -114,6 +114,8 @@ await withMonitor(
         bytes: 0,
         errors: 0,
         examined: 0,
+        inlineExtracted: 0,
+        inlineBytes: 0,
         linked: 0,
         derived: 0,
         compacted: 0,
@@ -132,6 +134,7 @@ await withMonitor(
               threshold: env.RISK_FARM_TRIPWIRE,
               rescore: (tenantIds, why) => trigger.rescore(tenantIds, why),
               trust: runtime.risk.cachedTrust,
+              store,
             })
             total.fingerprinted += n
             if (n > 0) await markDirty(runtime.cache, [tenantId])
@@ -160,8 +163,10 @@ await withMonitor(
         }
         if (compactionDue.has(tenantId)) {
           try {
-            const c = await compactContent(tenantId, { db, log })
+            const c = await compactContent(tenantId, { db, store, log })
             total.examined += c.scanned
+            total.inlineExtracted += c.extracted
+            total.inlineBytes += c.inlineBytes
             total.linked += c.matched
             total.derived += c.derived
             total.compacted += c.compacted

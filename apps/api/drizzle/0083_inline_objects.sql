@@ -1,0 +1,2 @@
+ALTER TABLE "core"."message_bodies" ADD COLUMN "inline_objects" text[];--> statement-breakpoint
+CREATE INDEX "message_bodies_inline_objects_gin_idx" ON "core"."message_bodies" USING gin ("inline_objects");
