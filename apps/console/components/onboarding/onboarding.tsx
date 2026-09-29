@@ -251,7 +251,7 @@ export function Onboarding({
                   {done ? (
                     <Check
                       key="done"
-                      className="size-2.5 animate-in zoom-in-50 fade-in-0 duration-(--duration-dismiss)"
+                      className="motion-surface size-2.5 animate-[surface-enter_var(--duration-dismiss)_var(--ease-quint-out)]"
                     />
                   ) : (
                     i + 1

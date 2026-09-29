@@ -79,7 +79,7 @@ export function SidebarNav({
 
   return (
     <nav
-      className="flex flex-col gap-5 px-2 py-1"
+      className="flex flex-col gap-4 px-2 py-1"
       aria-label={settings ? "Settings" : "Primary"}
     >
       {settings && (
@@ -93,7 +93,7 @@ export function SidebarNav({
         <Link
           href="/"
           className={cn(
-            "flex h-8 items-center gap-2.5 rounded-md px-2 text-sm transition-colors",
+            "flex h-7 items-center gap-2.5 rounded-md px-2 text-sm transition-colors",
             "duration-(--duration-instant) ease-(--ease-linear)",
             "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
           )}
@@ -106,7 +106,7 @@ export function SidebarNav({
       {shown.map((group, i) => (
         <div key={group.label ?? `group-${i}`} className="flex flex-col gap-0.5">
           {group.label && (
-            <h2 className="px-2 pt-1 pb-1.5 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
+            <h2 className="px-2 pt-1 pb-1 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
               {group.label}
             </h2>
           )}
@@ -143,7 +143,11 @@ export function SidebarNav({
                     // stacking context, so the highlight's `-z-10` puts it
                     // under this row's text rather than under the sidebar
                     // itself, where it would simply be invisible.
-                    "group relative isolate flex h-8 items-center gap-2.5 rounded-md px-2 text-sm",
+                    // ⚠ 28px ROWS, NOT 32, SO THE RAIL FITS A LAPTOP WITHOUT
+                    // SCROLLING (decided 2026-09-29). Thirteen rows at 32px
+                    // overflowed a 700px-tall window by 40px; at 28 they fit
+                    // with room, and still clear the 24px minimum target.
+                    "group relative isolate flex h-7 items-center gap-2.5 rounded-md px-2 text-sm",
                     // ⚠ COLOUR ONLY, SO `--ease-linear` IS CORRECT HERE. The
                     // motion rules reserve eased curves for things that MOVE;
                     // a linear ramp on a background is exactly what Base's

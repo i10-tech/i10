@@ -40,6 +40,20 @@ export function Theme({ children }: { children: React.ReactNode }) {
       defaultTheme="dark"
       enableSystem
       disableTransitionOnChange
+      /*
+       * ⚠ `text/plain` IN THE BROWSER, SO REACT STOPS REPORTING THE SCRIPT AS
+       * AN ERROR. next-themes renders its no-flash script from a client
+       * component, and React 19.2 flags any <script> it renders on the client
+       * ("Encountered a script tag while rendering React component") because
+       * such a script never runs there. It does not need to: the server's copy
+       * already ran during parsing, before first paint. Next's own guide
+       * (docs/01-app/02-guides/preventing-flash-before-hydration.md) gives this
+       * exact fix; next-themes already sets `suppressHydrationWarning` on the
+       * tag, which absorbs the type differing between the two renders.
+       */
+      scriptProps={{
+        type: typeof window === "undefined" ? "text/javascript" : "text/plain",
+      }}
     >
       {children}
     </ThemeProvider>

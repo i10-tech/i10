@@ -1,8 +1,7 @@
 "use client"
 
 import { OrganizationSwitcher } from "@clerk/nextjs"
-import { Badge } from "@repo/ui/components/badge"
-import type { PlanSummary, TenantProfile } from "@/lib/types"
+import type { TenantProfile } from "@/lib/types"
 
 /**
  * Which workspace you are in.
@@ -18,8 +17,11 @@ import type { PlanSummary, TenantProfile } from "@/lib/types"
  * roles, invitations and who may switch to what are Clerk's to answer;
  * rebuilding the switcher would mean projecting membership into our database
  * and keeping it fresh, and the one place a stale copy of "who is an admin"
- * matters is authorization. We render the plan badge beside it, because that
- * part IS ours.
+ * matters is authorization.
+ *
+ * ⚠ NO PLAN BADGE HERE ANY MORE. It moved to the account row at the foot of
+ * the rail, beside the usage ring it explains (decided 2026-09-29) - one place
+ * for the plan, not two.
  *
  * ⚠ AND SWITCHING ORGANIZATION CHANGES THE TENANT UNDERNEATH EVERY PAGE.
  * `tenant_for_principal` resolves the active org first - see migration 0038 -
@@ -30,11 +32,9 @@ import type { PlanSummary, TenantProfile } from "@/lib/types"
  */
 export function WorkspaceBar({
   tenant,
-  plan,
   clerkEnabled,
 }: {
   tenant: TenantProfile | null
-  plan: PlanSummary | null
   /**
    * ⚠ PASSED FROM THE SERVER RATHER THAN DETECTED HERE. Clerk's hooks throw
    * outside a `<ClerkProvider>`, and the provider is only mounted when a
@@ -55,11 +55,6 @@ export function WorkspaceBar({
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {tenant?.name ?? "Workspace"}
         </span>
-        {plan && (
-          <Badge variant="outline" className="shrink-0 font-mono text-2xs uppercase">
-            {plan.id}
-          </Badge>
-        )}
       </div>
     )
   }
@@ -79,8 +74,19 @@ export function WorkspaceBar({
               // from the provider now, so there is nothing to restate here.
               // See @repo/ui/clerk.
               rootBox: "w-full min-w-0",
+              /*
+               * ⚠ ICON LEFT, NAME BESIDE IT, CHEVRON AT THE FAR RIGHT. Clerk
+               * packs all three together on the left, which leaves the chevron
+               * floating mid-row with no edge to belong to; the preview takes
+               * the free width so the chevron lands on the rail's edge, where
+               * a select's arrow is expected to be.
+               */
               organizationSwitcherTrigger:
-                "w-full min-w-0 justify-start gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-sidebar-accent",
+                "w-full min-w-0 justify-between gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-sidebar-accent",
+              organizationPreview: "min-w-0 flex-1 gap-2",
+              organizationPreviewTextContainer: "min-w-0",
+              organizationPreviewMainIdentifier: "truncate",
+              organizationSwitcherTriggerIcon: "ms-auto shrink-0",
             },
           }}
           /*
@@ -96,16 +102,6 @@ export function WorkspaceBar({
           <span className="truncate text-sm text-muted-foreground">Workspace</span>
         )}
       </div>
-
-      {plan && (
-        <Badge
-          variant="outline"
-          className="shrink-0 font-mono text-2xs uppercase"
-          title={`${plan.name} plan`}
-        >
-          {plan.id}
-        </Badge>
-      )}
     </div>
   )
 }

@@ -40,7 +40,7 @@ export function Meter({
     return (
       <div
         data-slot="meter"
-        className={cn("h-1.5 w-full rounded-full bg-muted", className)}
+        className={cn("h-1.5 w-full rounded-full bg-track", className)}
         {...props}
       />
     )
@@ -84,7 +84,7 @@ export function Meter({
       aria-valuemax={limit}
       aria-valuetext={`${used.toLocaleString()} of ${limit.toLocaleString()}`}
       className={cn(
-        "flex h-1.5 w-full overflow-hidden rounded-full bg-muted",
+        "flex h-1.5 w-full overflow-hidden rounded-full bg-track",
         className,
       )}
       {...props}

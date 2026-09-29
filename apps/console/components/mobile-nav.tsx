@@ -39,13 +39,18 @@ import { useResetWhen } from "@/lib/react"
 export function MobileNav({
   tenant,
   plan,
+  fallbackEmail,
   clerkEnabled,
   attention,
+  usage,
 }: {
   tenant: TenantProfile | null
   plan: PlanSummary | null
+  fallbackEmail?: string | null
   clerkEnabled: boolean
   attention?: Promise<Attention["domains"] | null>
+  /** The usage ring, rendered by the server - the same row as the desktop rail. */
+  usage?: React.ReactNode
 }) {
   const [open, setOpen] = React.useState(false)
   const pathname = usePathname()
@@ -80,7 +85,7 @@ export function MobileNav({
           </SheetHeader>
 
           <div className="px-2 py-2">
-            <WorkspaceBar tenant={tenant} plan={plan} clerkEnabled={clerkEnabled} />
+            <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
           </div>
           <Separator />
           {/*
@@ -89,7 +94,9 @@ export function MobileNav({
            * its content, so a long navigation pushes the account row off the
            * bottom of the drawer rather than scrolling inside it.
            */}
-          <div className="min-h-0 flex-1 overflow-y-auto py-2">
+          {/* ⚠ THE SAME FIT-FIRST RULE AS THE DESKTOP RAIL: it fits, and only
+              scrolls when the screen truly cannot hold it (app/(app)/layout.tsx). */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2">
             {/*
              * ⚠ ITS OWN `scope`, SO THE DRAWER'S ACTIVE HIGHLIGHT AND THE
              * DESKTOP RAIL'S ARE DIFFERENT OBJECTS. Both are mounted while the
@@ -100,12 +107,15 @@ export function MobileNav({
           </div>
 
           {/* The same reading order as the desktop rail: workspace, then where
-              to go, then who I am. */}
-          {clerkEnabled && (
-            <div className="border-t p-2">
-              <AccountBar />
-            </div>
-          )}
+              to go, then who I am and what it is costing. */}
+          <div className="border-t p-2">
+            <AccountBar
+              clerkEnabled={clerkEnabled}
+              plan={plan}
+              fallbackEmail={fallbackEmail ?? null}
+              usage={usage}
+            />
+          </div>
         </SheetContent>
       </Sheet>
 
