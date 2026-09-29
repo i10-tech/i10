@@ -456,11 +456,18 @@ export interface TemplateRow {
   id: string
   name: string
   folder: string | null
+  /** `html` is written here; `tsx` is an uploaded React Email component (#160). */
+  kind: "html" | "tsx"
   subject: string | null
+  /** The draft body of an `html` template. */
   html: string | null
   text: string | null
+  /** When the live version was created; null before the first publish. */
   published_at: string | null
+  /** The live version's number; 0 before the first publish. */
   version: number
+  /** How many versions exist. */
+  versions: number
   created_at: string
   updated_at: string
 }

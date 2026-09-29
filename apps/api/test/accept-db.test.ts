@@ -1,4 +1,3 @@
-import type { SendEmail } from "@repo/contracts"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { describe, expect, it, mock } from "bun:test"
 import type { Database } from "../src/db/client.js"
@@ -12,7 +11,7 @@ import {
 } from "../src/db/core.js"
 import type { SendJob } from "../src/queue/send-queue.js"
 import { acceptDatabaseOps } from "../src/send/accept-db.js"
-import type { AcceptOps, PreparedMessage } from "../src/send/accept.js"
+import type { AcceptOps, PreparedMessage, ResolvedEmail } from "../src/send/accept.js"
 
 /**
  * The adapter, against a fake transaction.
@@ -152,18 +151,19 @@ function ops(canned: Canned = {}, alwaysSendable?: readonly string[]) {
   return { ...adapter, recorded, add }
 }
 
-const prepared = (over: Partial<SendEmail> = {}): PreparedMessage => ({
+const prepared = (over: Partial<ResolvedEmail> = {}): PreparedMessage => ({
   payload: {
     from: "hello@i10.tech",
     to: "user@example.com",
     subject: "Hi",
     text: "body",
     ...over,
-  } as SendEmail,
+  } as ResolvedEmail,
   to: ["user@example.com"],
   cc: [],
   bcc: [],
   scheduledAt: null,
+  templateVersionId: null,
 })
 
 type PersistInput = Parameters<AcceptOps["persist"]>[0]

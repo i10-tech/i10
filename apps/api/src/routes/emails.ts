@@ -115,6 +115,30 @@ function acceptError(outcome: AcceptOutcome) {
       status: 403 as const,
     }
   }
+  /*
+   * ⚠ 404 FOR A TEMPLATE THAT IS NOT THERE, 422 FOR VARIABLES THAT ARE. Both
+   * are the request's fault and neither is fixed by retrying; the difference
+   * tells the caller whether to check the template's id or their data.
+   */
+  if (outcome.status === "invalid_template") {
+    return outcome.name === "not_found"
+      ? {
+          body: {
+            statusCode: 404,
+            name: "not_found" as const,
+            message: outcome.message,
+          },
+          status: 404 as const,
+        }
+      : {
+          body: {
+            statusCode: 422,
+            name: "validation_error" as const,
+            message: outcome.message,
+          },
+          status: 422 as const,
+        }
+  }
   if (outcome.status === "quota_exceeded") {
     return {
       body: {
@@ -173,6 +197,7 @@ const send = createRoute({
     403: errorResponse(
       "This key is restricted to other domains than the `from` address.",
     ),
+    404: errorResponse("The `template` named does not exist, or has no such version."),
     422: errorResponse("The request body failed validation."),
     409: errorResponse(
       "This Idempotency-Key was already used with a different request body.",
@@ -258,6 +283,7 @@ const sendBatch = createRoute({
     403: errorResponse(
       "This key is restricted to other domains than the `from` address.",
     ),
+    404: errorResponse("The `template` named does not exist, or has no such version."),
     422: errorResponse("The request body failed validation."),
     409: errorResponse(
       "This Idempotency-Key was already used with a different request body.",

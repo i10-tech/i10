@@ -160,6 +160,12 @@ spec:
                 secretKeyRef: { name: i10-api-db-role, key: password }
             - name: DATABASE_URL
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+            # The template renderer (#160), in this namespace on celld until
+            # Dynamic Workers move to Cloudflare - see template-renderer.yaml.
+            # Not a secret, so it lives here; `TEMPLATE_RENDERER_SECRET` is in
+            # Doppler's `api` config, and the API ignores the URL without it.
+            - name: TEMPLATE_RENDERER_URL
+              value: http://i10-template-renderer.i10-prod.svc.cluster.local
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 512Mi }

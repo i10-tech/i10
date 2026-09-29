@@ -8,6 +8,7 @@ import { notWired } from "./console/http.js"
 import { mountAccount } from "./console/account.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
+import { mountTemplates } from "./console/templates.js"
 import { mountCredentials } from "./console/credentials.js"
 import { mountDns } from "./console/dns.js"
 import { mountDomains } from "./console/domains.js"
@@ -197,6 +198,7 @@ export function createConsole(deps?: ConsoleDeps) {
   mountCredentials(app, d)
   mountAudience(app, d)
   mountCampaigns(app, d)
+  mountTemplates(app, d)
   mountDns(app, d)
 
   return app

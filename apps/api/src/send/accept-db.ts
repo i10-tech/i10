@@ -235,6 +235,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
             headers: m.payload.headers ?? null,
             attachments: m.payload.attachments ?? null,
             tags: m.payload.tags ?? null,
+            templateVersionId: m.templateVersionId,
           })),
         )
 

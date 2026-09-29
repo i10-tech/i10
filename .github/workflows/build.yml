@@ -100,10 +100,12 @@ jobs:
             #   next      → console
             #   ui        → console, web, auth
             #   api       → docs   (docs generates its API reference from it)
+            #   templates → api, docs, template-renderer
             api:
               - 'apps/api/**'
               - 'packages/contracts/**'
               - 'packages/emails/**'
+              - 'packages/templates/**'
             console:
               - 'apps/console/**'
               - 'packages/ui/**'
@@ -126,6 +128,12 @@ jobs:
               - 'apps/api/**'
               - 'packages/contracts/**'
               - 'packages/emails/**'
+              - 'packages/templates/**'
+            # The sandbox that renders uploaded templates (#160), on celld in
+            # the cluster until it moves to Cloudflare.
+            template-renderer:
+              - 'services/template-renderer/**'
+              - 'packages/templates/**'
             # A Go module with its own go.sum, deliberately outside the bun
             # workspace. Nothing in the bun sentinel below can affect it.
             authd:
@@ -178,6 +186,7 @@ jobs:
           CH_WEB: ${{ steps.filter.outputs.web }}
           CH_DOCS: ${{ steps.filter.outputs.docs }}
           CH_AUTHD: ${{ steps.filter.outputs.authd }}
+          CH_RENDERER: ${{ steps.filter.outputs.template-renderer }}
         run: |
           set -euo pipefail
 
@@ -194,13 +203,15 @@ jobs:
             --arg web "${CH_WEB:-false}" \
             --arg docs "${CH_DOCS:-false}" \
             --arg authd "${CH_AUTHD:-false}" \
+            --arg renderer "${CH_RENDERER:-false}" \
             '[
               {name:"api",     image:"i10-api",     context:".",              file:"apps/api/Dockerfile",       bun:true,   changed:$api},
               {name:"console", image:"i10-console", context:".",              file:"apps/console/Dockerfile",   bun:true,   changed:$console},
               {name:"auth",    image:"i10-auth",    context:".",              file:"apps/auth/Dockerfile",      bun:true,   changed:$auth},
               {name:"web",     image:"i10-web",     context:".",              file:"apps/web/Dockerfile",       bun:true,   changed:$web},
               {name:"docs",    image:"i10-docs",    context:".",              file:"apps/docs/Dockerfile",      bun:true,   changed:$docs},
-              {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", bun:false,  changed:$authd}
+              {name:"authd",   image:"i10-authd",   context:"services/authd", file:"services/authd/Dockerfile", bun:false,  changed:$authd},
+              {name:"template-renderer", image:"i10-template-renderer", context:".", file:"services/template-renderer/Dockerfile", bun:true, changed:$renderer}
             ]')
 
           decided=$(jq -c \

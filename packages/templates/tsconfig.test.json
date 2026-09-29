@@ -1,0 +1,16 @@
+{
+  // The tests, and the sources as the tests see them. See tsconfig.json for why
+  // this is a second program rather than one `include` with `types: ["bun"]`.
+  //
+  // ⚠ THE TESTS RENDER REAL REACT EMAIL TEMPLATES, hence `jsx` and the .tsx
+  // include. What the gate in src/ has to survive is React's own output -
+  // separator comments, escaping, uppercased headings in plain text - and a
+  // hand-written fixture would only test our guess about it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "test/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -11,7 +11,7 @@ import { identityStore, recordSighting } from "../src/risk/identity.js"
 import { labelStore } from "../src/risk/labels.js"
 import { runAll, scoreTenant, type RiskDeps } from "../src/risk/runner.js"
 import { assessmentStore } from "../src/risk/store.js"
-import type { SendEmail } from "@repo/contracts"
+import type { ResolvedEmail } from "../src/send/accept.js"
 
 /**
  * The risk engine against a real Postgres, as the role the API runs as (#170).
@@ -139,13 +139,13 @@ async function seedTenant(
   await owner`insert into core.plan_assignments (tenant_id, plan_id, anchor) values (${id}, ${FREE}, now())`
 }
 
-const promo = (i: number): SendEmail =>
+const promo = (i: number): ResolvedEmail =>
   ({
     from: "a@x.top",
     to: `r${i}@example.com`,
     subject: "Exclusive offer just for you",
     html: `<p>Claim your reward today, friend ${i}. Limited stock, act now before the offer ends. Visit https://deals.example.top/c?u=${i}</p>`,
-  }) as SendEmail
+  }) as ResolvedEmail
 
 suite("the risk engine against Postgres, as i10_api", () => {
   beforeAll(async () => {
@@ -711,13 +711,13 @@ suite("the risk engine against Postgres, as i10_api", () => {
     `the password for your account. Enter the code below in the app to choose a new password. ` +
     `If you did not request this, you can safely ignore this email.</p></body></html>`
 
-  const boilerMail = (name: string): SendEmail =>
+  const boilerMail = (name: string): ResolvedEmail =>
     ({
       from: "noreply@x.com",
       to: "r@example.com",
       subject: "Reset your password",
       html: BOILER(name),
-    }) as SendEmail
+    }) as ResolvedEmail
 
   it("keeps the boilerplate list deny-all, and changes it only through audited definers", async () => {
     const { boilerplateStore } = await import("../src/risk/trusted.js")
@@ -878,7 +878,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
           to: "r@example.com",
           subject: "Sign in",
           html: render("Dee", `https://shop-${RUN}.com/l/x`),
-        } as SendEmail,
+        } as ResolvedEmail,
       ],
       { db, threshold: 99, trust },
     )

@@ -14,15 +14,13 @@ export type {
   MarketingStore,
   PropertyRow,
   SegmentRow,
-  TemplateRow,
-  TemplateSummary,
   TopicRow,
 } from "./marketing/types.js"
 export { PROPERTY_KEY, parseContactCsv } from "./marketing/csv.js"
 
 /**
- * Everything behind the console's Contacts, Segments, Topics, Broadcasts and
- * Templates screens, as one object.
+ * Everything behind the console's Contacts, Segments, Topics and Broadcasts
+ * screens, as one object. Templates have their own store: templates/store.ts.
  *
  * ⚠ ONE INTERFACE, THREE MODULES, AND THE SEAM IS DELIBERATELY NOT AN
  * ABSTRACTION. `ConsoleDeps.marketing` is a single store because every route

@@ -1,0 +1,13 @@
+{
+  // The parent Worker: Workers types only. Tests and the build script are a
+  // second program (tsconfig.test.json), because `bun` types and Workers types
+  // declare the same globals differently and cannot share one.
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"],
+    "jsx": "react-jsx",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

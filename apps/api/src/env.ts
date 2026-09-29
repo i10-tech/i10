@@ -772,6 +772,20 @@ const schema = z.object({
   DNS_OAUTH_BROKER_SECRET: z.string().min(1).optional(),
 
   /**
+   * The sandbox Worker that renders an uploaded React Email `.tsx` ONCE, when
+   * a version is created (services/template-renderer, #160).
+   *
+   * ⚠ NEVER CALLED ON THE SEND PATH. A send fills the version's stored
+   * rendering; this is only reached from a console upload. So it being down
+   * stops uploads and nothing else.
+   *
+   * ⚠ BOTH OR NEITHER, like the DNS broker. Neither: HTML templates work and a
+   * `.tsx` upload answers 501. The secret is the Worker's `RENDERER_SECRET`.
+   */
+  TEMPLATE_RENDERER_URL: z.url().optional(),
+  TEMPLATE_RENDERER_SECRET: z.string().min(1).optional(),
+
+  /**
    * Where Polar returns the browser after payment.
    *
    * ⚠ A PAGE THAT POLLS, NOT A PAGE THAT GRANTS. Anybody can navigate here -

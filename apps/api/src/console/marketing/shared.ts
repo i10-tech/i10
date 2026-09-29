@@ -1,13 +1,7 @@
 import { and, eq, sql } from "drizzle-orm"
 import { type Database } from "../../db/client.js"
-import {
-  broadcasts,
-  contacts,
-  messageEvents,
-  messages,
-  templates,
-} from "../../db/core.js"
-import type { BroadcastRow, BroadcastStats, ContactRow, TemplateRow } from "./types.js"
+import { broadcasts, contacts, messageEvents, messages } from "../../db/core.js"
+import type { BroadcastRow, BroadcastStats, ContactRow } from "./types.js"
 
 /**
  * What the four store modules have in common: the row mappers that turn a
@@ -95,21 +89,6 @@ export function toBroadcastRow(
     sent_at: row.sentAt?.toISOString() ?? null,
     recipient_count: row.recipientCount,
     created_at: row.createdAt.toISOString(),
-  }
-}
-
-export function toTemplateRow(row: typeof templates.$inferSelect): TemplateRow {
-  return {
-    id: row.id,
-    name: row.name,
-    folder: row.folder,
-    subject: row.subject,
-    html: row.html,
-    text: row.text,
-    published_at: row.publishedAt?.toISOString() ?? null,
-    version: row.version,
-    created_at: row.createdAt.toISOString(),
-    updated_at: row.updatedAt.toISOString(),
   }
 }
 

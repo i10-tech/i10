@@ -1,4 +1,3 @@
-import type { SendEmail } from "@repo/contracts"
 import { describe, expect, it, mock } from "bun:test"
 import {
   acceptSend,
@@ -8,17 +7,18 @@ import {
   hashRequest,
   withoutSuppressed,
   type AcceptOps,
+  type ResolvedEmail,
 } from "../src/send/accept.js"
 import { unmetered, type Metering } from "../src/send/metering.js"
 
-const email = (over: Partial<SendEmail> = {}): SendEmail =>
+const email = (over: Partial<ResolvedEmail> = {}): ResolvedEmail =>
   ({
     from: "hello@i10.tech",
     to: "user@example.com",
     subject: "Hi",
     text: "body",
     ...over,
-  }) as SendEmail
+  }) as ResolvedEmail
 
 function ops(over: Partial<AcceptOps> = {}) {
   const enqueue = mock(async () => {})

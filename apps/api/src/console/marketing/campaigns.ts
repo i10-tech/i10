@@ -1,12 +1,12 @@
 import { and, desc, eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../../db/client.js"
-import { broadcasts, segments, templates, topics } from "../../db/core.js"
+import { broadcasts, segments, topics } from "../../db/core.js"
 import type { MarketingStore } from "./types.js"
 import type { Tx } from "./shared.js"
-import { LIST_CAP, broadcastStats, toBroadcastRow, toTemplateRow } from "./shared.js"
+import { LIST_CAP, broadcastStats, toBroadcastRow } from "./shared.js"
 
 /**
- * Broadcasts and the templates they are written from.
+ * Broadcasts. Templates have their own store: templates/store.ts.
  *
  * ⚠ READING A LIST NEVER READS A BODY. A broadcast's `html` is a whole
  * marketing email, and the list pages render a name and a status - see
@@ -21,12 +21,6 @@ export function campaignsStore(
   | "createBroadcast"
   | "updateBroadcast"
   | "deleteBroadcast"
-  | "listTemplates"
-  | "getTemplate"
-  | "createTemplate"
-  | "updateTemplate"
-  | "publishTemplate"
-  | "deleteTemplate"
 > {
   /**
    * Refuses a `segment_id` or `topic_id` that is not this workspace's.
@@ -237,119 +231,6 @@ export function campaignsStore(
             ),
           )
           .returning({ id: broadcasts.id })
-        return deleted.length > 0
-      })
-    },
-
-    // ── Templates ───────────────────────────────────────────────────────────
-
-    async listTemplates(tenantId) {
-      return withTenant(db, tenantId, async (tx) => {
-        // ⚠ NO `html`, NO `text`, AND A CEILING - see `listBroadcasts` above.
-        const rows = await tx
-          .select({
-            id: templates.id,
-            name: templates.name,
-            folder: templates.folder,
-            subject: templates.subject,
-            publishedAt: templates.publishedAt,
-            version: templates.version,
-            createdAt: templates.createdAt,
-            updatedAt: templates.updatedAt,
-          })
-          .from(templates)
-          .orderBy(templates.folder, templates.name)
-          .limit(LIST_CAP)
-
-        return rows.map((r) => ({
-          id: r.id,
-          name: r.name,
-          folder: r.folder,
-          subject: r.subject,
-          published_at: r.publishedAt?.toISOString() ?? null,
-          version: r.version,
-          created_at: r.createdAt.toISOString(),
-          updated_at: r.updatedAt.toISOString(),
-        }))
-      })
-    },
-
-    async getTemplate(tenantId, id) {
-      return withTenant(db, tenantId, async (tx) => {
-        const rows = await tx
-          .select()
-          .from(templates)
-          .where(eq(templates.id, id))
-          .limit(1)
-        return rows[0] ? toTemplateRow(rows[0]) : null
-      })
-    },
-
-    async createTemplate(tenantId, input) {
-      return withTenant(db, tenantId, async (tx) => {
-        const [row] = await tx
-          .insert(templates)
-          .values({
-            tenantId,
-            name: input.name.trim(),
-            folder: input.folder ?? null,
-          })
-          .onConflictDoNothing({ target: [templates.tenantId, templates.name] })
-          .returning()
-
-        return row ? toTemplateRow(row) : { conflict: true as const }
-      })
-    },
-
-    async updateTemplate(tenantId, id, patch) {
-      return withTenant(db, tenantId, async (tx) => {
-        const set: Record<string, unknown> = { updatedAt: new Date() }
-        if (patch.name !== undefined) set.name = patch.name.trim()
-        if (patch.folder !== undefined) set.folder = patch.folder
-        if (patch.subject !== undefined) set.subject = patch.subject
-        if (patch.html !== undefined) set.html = patch.html
-        if (patch.text !== undefined) set.text = patch.text
-
-        const [row] = await tx
-          .update(templates)
-          .set(set)
-          .where(eq(templates.id, id))
-          .returning()
-        return row ? toTemplateRow(row) : null
-      })
-    },
-
-    async publishTemplate(tenantId, id) {
-      return withTenant(db, tenantId, async (tx) => {
-        /*
-         * ⚠ THE COPY HAPPENS IN SQL, IN ONE STATEMENT, SO THERE IS NO WINDOW IN
-         * WHICH THE PUBLISHED SUBJECT IS NEW AND THE PUBLISHED BODY IS OLD. A
-         * read-then-write would have one, and a send landing inside it would go
-         * out with mismatched halves of two versions.
-         */
-        const [row] = await tx
-          .update(templates)
-          .set({
-            publishedHtml: sql`${templates.html}`,
-            publishedText: sql`${templates.text}`,
-            publishedSubject: sql`${templates.subject}`,
-            publishedAt: new Date(),
-            version: sql`${templates.version} + 1`,
-            updatedAt: new Date(),
-          })
-          .where(eq(templates.id, id))
-          .returning()
-
-        return row ? toTemplateRow(row) : null
-      })
-    },
-
-    async deleteTemplate(tenantId, id) {
-      return withTenant(db, tenantId, async (tx) => {
-        const deleted = await tx
-          .delete(templates)
-          .where(eq(templates.id, id))
-          .returning({ id: templates.id })
         return deleted.length > 0
       })
     },

@@ -1,0 +1,32 @@
+{
+  "name": "@i10/template-renderer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:celld": "bun scripts/build-runtime.ts && bun scripts/build-celld.ts",
+    "build:runtime": "bun scripts/build-runtime.ts",
+    "check-types": "bun scripts/build-runtime.ts && tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "deploy": "bun scripts/build-runtime.ts && wrangler deploy",
+    "dev": "bun scripts/build-runtime.ts && wrangler dev",
+    "lint": "eslint . --max-warnings 0",
+    "test": "bun scripts/build-runtime.ts && bun test"
+  },
+  "dependencies": {
+    "@repo/templates": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-email": "6.9.3",
+    "sucrase": "3.35.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260928.1",
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "^1.4.2",
+    "@types/react": "^19.2.0",
+    "eslint": "^9.39.5",
+    "typescript": "6.0.3",
+    "wrangler": "^4.143.0"
+  }
+}

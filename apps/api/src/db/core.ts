@@ -1069,6 +1069,17 @@ export const messageBodies = core.table(
     compactedAt: timestamp("compacted_at", { withTimezone: true }),
 
     /**
+     * The template version this message was sent from (#160). Null for a send
+     * that gave its own `html`/`text`.
+     *
+     * ⚠ NOT `template_id` ABOVE, WHICH IS THE CONTENT JOB'S DISCOVERED SKELETON
+     * (#171). This one is the customer's own template, named in the request;
+     * it is provenance - "which version went out" - and the body is still
+     * stored in full, where compaction deduplicates it like any other.
+     */
+    templateVersionId: uuid("template_version_id"),
+
+    /**
      * The workspace's staff-approved template this message fitted exactly
      * (#222), set by the content job. Null for everything else.
      *
@@ -2444,13 +2455,23 @@ export const broadcasts = core.table(
 )
 
 /**
- * A reusable email, referenced by id from a send.
+ * How a template's versions are written.
  *
- * ⚠ DRAFT AND PUBLISHED ARE TWO DIFFERENT COLUMNS, NOT ONE COLUMN AND A FLAG.
- * A template is referenced by `template_id` from production code that is sending
- * mail right now; editing it has to be possible without that edit going live
- * mid-sentence. `published_html` is what a send renders and `html` is what the
- * editor shows, and "Publish" is the one operation that copies one to the other.
+ *   html  hand-written HTML with `{{ name }}` placeholders, edited in the console
+ *   tsx   an uploaded React Email component, rendered once per version in the
+ *         sandbox (services/template-renderer)
+ *
+ * The visual editor (#162) and our managed templates will add their own.
+ */
+export const templateKind = core.enum("template_kind", ["html", "tsx"])
+
+/**
+ * A reusable email, referenced by id or by name from a send (#160, #161).
+ *
+ * ⚠ THIS ROW IS THE TEMPLATE'S IDENTITY AND ITS DRAFT; WHAT A SEND USES IS A
+ * VERSION. Versions (`template_versions`) are immutable, and `live_version_id`
+ * says which one an unpinned send gets. Editing the draft changes nothing that
+ * is going out; publishing creates a version and makes it live.
  */
 export const templates = core.table(
   "templates",
@@ -2462,21 +2483,29 @@ export const templates = core.table(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
 
+    /** Unique in the workspace, and the alias a send may use instead of the id. */
     name: text("name").notNull(),
     /** A path like `transactional/auth`. Flat storage, rendered as a tree. */
     folder: text("folder"),
+    kind: templateKind("kind").notNull().default("html"),
 
+    /** The draft subject, with `{{ name }}` placeholders. Copied into each version. */
     subject: text("subject"),
+    /** The draft body of an `html` template. Unused by `tsx`, whose source is a version's. */
     html: text("html"),
     text: text("text"),
 
-    /** ⚠ WHAT A SEND ACTUALLY RENDERS. See the note above. */
-    publishedHtml: text("published_html"),
-    publishedText: text("published_text"),
-    publishedSubject: text("published_subject"),
-    publishedAt: timestamp("published_at", { withTimezone: true }),
-    /** Bumped on every publish. Cheap provenance for "which one went out". */
-    version: integer("version").notNull().default(0),
+    /**
+     * The version an unpinned send renders. Null until the first publish.
+     *
+     * ⚠ THE ONLY MUTABLE THING ABOUT WHAT A SEND RENDERS, and so the only thing
+     * a cache in front of the send path (which will live at Cloudflare) has to
+     * expire. Everything it points at is immutable.
+     */
+    liveVersionId: uuid("live_version_id").references(
+      (): AnyPgColumn => templateVersions.id,
+      { onDelete: "set null" },
+    ),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2484,6 +2513,69 @@ export const templates = core.table(
   (t) => [
     index("templates_tenant_idx").on(t.tenantId, t.createdAt),
     uniqueIndex("templates_tenant_name_uq").on(t.tenantId, t.name),
+  ],
+)
+
+/**
+ * One immutable version of a template: the email as it was rendered ONCE.
+ *
+ * ⚠ `html` AND `text` ARE A SKELETON, NOT A SOURCE. Every variable in them is a
+ * marker (`⟦i10<nonce>_<n>⟧`, see @repo/templates), and a send fills the
+ * markers by substitution. For a `tsx` version the skeleton is what the
+ * sandbox rendered when the version was created; customer code never runs
+ * again after that, and never on the send path. See docs/decisions/templates.md.
+ *
+ * ⚠ NEVER UPDATED. A version is what went out for every send that named it -
+ * `message_bodies.template_version_id` points here - so changing one would
+ * rewrite history. Publishing creates a new row.
+ */
+export const templateVersions = core.table(
+  "template_versions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => templates.id, { onDelete: "cascade" }),
+    /** 1, 2, 3 … per template. What a send pins with `version`. */
+    number: integer("number").notNull(),
+    kind: templateKind("kind").notNull(),
+
+    subject: text("subject"),
+    html: text("html"),
+    text: text("text"),
+    /** The markers' nonce. Random per version. */
+    nonce: text("nonce").notNull(),
+    /** `[{ path, preview }]` - what a send must provide, in marker order. */
+    variables: jsonb("variables")
+      .notNull()
+      .$type<{ path: string; preview: string }[]>(),
+
+    /**
+     * The uploaded `.tsx`, kept per version (#161). The skeleton is what sends
+     * use; the source is what somebody reads to understand it, and a connected
+     * repository can be deleted or force-pushed out from under us.
+     */
+    source: text("source"),
+    sourceSha256: text("source_sha256"),
+    /** Which React and React Email rendered it, e.g. `react@19.2.8+…+react-email@6.9.3`. */
+    runtime: text("runtime"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("template_versions_number_uq").on(t.templateId, t.number),
+    index("template_versions_tenant_idx").on(t.tenantId, t.createdAt),
+    // Inline rather than `tenantPolicy`, which is declared further down.
+    pgPolicy("template_versions_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
   ],
 )
 

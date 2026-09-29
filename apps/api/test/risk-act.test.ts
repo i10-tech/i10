@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test"
-import type { SendEmail } from "@repo/contracts"
+import type { ResolvedEmail } from "../src/send/accept.js"
 import { act, type ActDeps } from "../src/risk/act.js"
 import { recordContent, type TripwireRedis } from "../src/risk/content.js"
 import type { Database } from "../src/db/client.js"
@@ -256,13 +256,13 @@ describe("the accept-time recorder and tripwire", () => {
     }
   }
 
-  const promo = (i: number): SendEmail =>
+  const promo = (i: number): ResolvedEmail =>
     ({
       from: "a@x.top",
       to: `r${i}@example.com`,
       subject: "Exclusive offer",
       html: `<p>Claim your reward today, recipient ${i}. Limited stock, act now before the offer ends at https://deals.example.top/c?u=${i}</p>`,
-    }) as SendEmail
+    }) as ResolvedEmail
 
   it("stores one fingerprint for a batch of personalised copies, and the link host", async () => {
     const { db, statements } = fakeDb()
@@ -320,7 +320,7 @@ describe("the accept-time recorder and tripwire", () => {
     const { db, statements } = fakeDb()
     await recordContent(
       "t1",
-      [{ from: "a@b.c", to: "x@y.z", subject: "hi", text: "test" } as SendEmail],
+      [{ from: "a@b.c", to: "x@y.z", subject: "hi", text: "test" } as ResolvedEmail],
       { db, threshold: 5 },
     )
     expect(statements).toHaveLength(0)

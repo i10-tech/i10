@@ -32,10 +32,12 @@ COPY packages/dns-providers/package.json packages/dns-providers/
 COPY packages/emails/package.json packages/emails/
 COPY packages/eslint-config/package.json packages/eslint-config/
 COPY packages/metering/package.json packages/metering/
+COPY packages/templates/package.json packages/templates/
 COPY packages/next/package.json packages/next/
 COPY packages/node/package.json packages/node/
 COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
+COPY services/template-renderer/package.json services/template-renderer/
 # BUN_INSTALL_CACHE_DIR is set explicitly rather than left to default under
 # $HOME, so the cache mount below targets a path that does not move when the
 # stage's user does.

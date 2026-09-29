@@ -40,6 +40,8 @@ import { dnsOAuth } from "./dns/oauth.js"
 import { dnsPublisher } from "./dns/publish.js"
 import { credentialRenewal } from "./dns/renew.js"
 import { marketingStore } from "./console/marketing.js"
+import { templateStore } from "./templates/store.js"
+import { templateRenderer } from "./templates/renderer.js"
 import { onboardingStore } from "./console/onboarding.js"
 import { tenantProfileStore } from "./console/tenant.js"
 import { usageStore } from "./console/usage.js"
@@ -199,6 +201,16 @@ cache.on("error", (err: Error) => log.warn({ err }, "api key cache unavailable")
 // through the sweep, so this client retries where the cache one gives up.
 const queueRedis = createQueueClient(env.REDIS_URL)
 queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+
+if (Boolean(env.TEMPLATE_RENDERER_URL) !== Boolean(env.TEMPLATE_RENDERER_SECRET)) {
+  log.warn(
+    { haveUrl: Boolean(env.TEMPLATE_RENDERER_URL) },
+    "template renderer ignored: TEMPLATE_RENDERER_URL and TEMPLATE_RENDERER_SECRET " +
+      "must be set together - .tsx uploads will answer 501",
+  )
+}
+// One store for the console and the send path: the same rows, read two ways.
+const templates = templateStore(db)
 
 /**
  * ⚠ THERE IS NO LONGER AN UNMETERED MODE TO FALL INTO, AND THAT IS THE POINT OF
@@ -803,6 +815,7 @@ const app = createApp({
       // somebody waiting for a password reset.
       queues: sendQueues,
     }),
+    templates: (tenantId: string) => templates.lookup(tenantId),
     metering,
     log,
   },
@@ -982,6 +995,15 @@ const app = createApp({
     }),
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
     marketing: marketingStore(db),
+    templates,
+    ...(env.TEMPLATE_RENDERER_URL && env.TEMPLATE_RENDERER_SECRET
+      ? {
+          templateRenderer: templateRenderer({
+            url: env.TEMPLATE_RENDERER_URL,
+            secret: env.TEMPLATE_RENDERER_SECRET,
+          }),
+        }
+      : {}),
     profile: tenantProfileStore(db),
     /*
      * ⚠ RENAMING THE WORKSPACE NOW RENAMES THE ORGANIZATION, and this call used
