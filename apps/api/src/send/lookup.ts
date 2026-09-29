@@ -1,5 +1,5 @@
-import { restoreInline } from "../content/inline.js"
-import type { ObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { restoreContent } from "../content/packs.js"
 import { restoreBodies } from "../content/restore.js"
 import type { EmailEventName, GetEmailResponse } from "@repo/contracts"
 import { and, eq, gte, lte } from "drizzle-orm"
@@ -56,15 +56,24 @@ export interface EmailLookup {
   get: (tenantId: string, id: string) => Promise<GetEmailResponse | null>
 }
 
+/** What of a body lives in R2 (#168, #188). */
+interface Stored {
+  inlineObjects: string[] | null
+  packId: string | null
+  packOffset: number | null
+  packLength: number | null
+  bodyKey: string | null
+}
+
 export function emailLookup(
   db: Database,
   /** Where data-URI images moved to (#168). Null: none can have moved. */
-  store: ObjectStore | null = null,
+  store: ContentStore | null = null,
 ): EmailLookup {
   return {
     async get(tenantId, id) {
       const minted = timestampFromUuidV7(id)
-      let inlineObjects = null as string[] | null
+      let stored = null as Stored | null
 
       const email = await withTenant(db, tenantId, async (tx) => {
         // ⚠ THE RANGE IS OMITTED FOR AN ID WE CANNOT DATE rather than guessed.
@@ -117,6 +126,10 @@ export function emailLookup(
               templateId: messageBodies.templateId,
               templateValues: messageBodies.templateValues,
               inlineObjects: messageBodies.inlineObjects,
+              packId: messageBodies.packId,
+              packOffset: messageBodies.packOffset,
+              packLength: messageBodies.packLength,
+              bodyKey: messageBodies.bodyKey,
             })
             .from(messageBodies)
             .where(
@@ -158,7 +171,7 @@ export function emailLookup(
 
         // A body stored as a template plus values (#171) reads like a full one.
         const [body] = await restoreBodies(tx, bodies)
-        inlineObjects = body?.inlineObjects ?? null
+        stored = body && (body.inlineObjects?.length || body.packId) ? body : null
 
         return {
           object: "email" as const,
@@ -180,13 +193,18 @@ export function emailLookup(
           ),
         }
       })
-      // ⚠ AFTER THE TRANSACTION: an image read from R2 holds nothing open in
-      // Postgres. Only bodies whose data-URI images moved (#168) read at all.
-      if (!email || !inlineObjects) return email
-      const [restored] = await restoreInline(store, tenantId, [
-        { html: email.html, inlineObjects },
+      // ⚠ AFTER THE TRANSACTION: a read from R2 holds nothing open in
+      // Postgres. Only packed bodies (#188) and bodies whose data-URI images
+      // moved (#168) read at all.
+      if (!email || !stored) return email
+      const [restored] = await restoreContent(store, tenantId, [
+        { ...stored, messageId: email.id, html: email.html, text: email.text },
       ])
-      return { ...email, html: restored?.html ?? email.html }
+      return {
+        ...email,
+        html: restored?.html ?? email.html,
+        text: restored?.text ?? email.text,
+      }
     },
   }
 }

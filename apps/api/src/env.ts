@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { parseKeyring } from "./content/seal.js"
 import { SYSTEM_FROM } from "./system-mail.js"
 
 /**
@@ -885,6 +886,52 @@ const schema = z.object({
    * content/sweep.ts.
    */
   CONTENT_TEMPLATE_STALE_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+
+  /**
+   * Master keys that wrap each message body's own key before it goes to R2
+   * (#184, #188): `kid:base64,kid:base64`, 32 random bytes each, the current
+   * key first. Generate one with `openssl rand -base64 32`.
+   *
+   * ⚠ UNSET, BODIES STAY IN POSTGRES. The content store alone moves
+   * attachments; bodies move only when they can be encrypted.
+   *
+   * ⚠ LOSING THESE LOSES EVERY PACKED BODY. Keep a copy outside Doppler, and
+   * when rotating keep the old key listed until every body it wrapped has
+   * expired.
+   */
+  CONTENT_KEYS: z
+    .string()
+    .min(1)
+    .optional()
+    .superRefine((value, ctx) => {
+      if (value === undefined) return
+      try {
+        parseKeyring(value)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+      }
+    }),
+
+  /**
+   * Bytes of bodies waiting that make an R2 write worth it (#188). Below it, a
+   * workspace's bodies wait for the next run, up to `CONTENT_PACK_MAX_WAIT_HOURS`.
+   */
+  CONTENT_PACK_TARGET_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(4 * 1024 * 1024),
+
+  /** How long a ready body may wait for its pack to fill before it ships anyway. */
+  CONTENT_PACK_MAX_WAIT_HOURS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 7)
+    .default(6),
+
+  /** Opened bodies the API keeps in memory, in megabytes (#188). */
+  CONTENT_BODY_CACHE_MB: z.coerce.number().int().min(0).max(4096).default(64),
 
   /** Messages retention deletes per statement. */
   RETENTION_BATCH: z.coerce.number().int().min(1).max(10_000).default(1000),

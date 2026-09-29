@@ -3,19 +3,22 @@
 **Decided:** 2026-09-29. **Status:** attachments to R2 (#136, #168) and
 retention built on one branch; the content job reworked for #171 (progress
 markers, compaction out of the risk run, fingerprints off the send path).
-Bodies to R2 (#188) not started.
+Bodies to R2 in sealed packs (#188) built; the design is agreed in
+i10-tech/i10#188.
 
 ---
 
 ## What lives where
 
-| What                                          | Where                                         | Until                                  |
-| --------------------------------------------- | --------------------------------------------- | -------------------------------------- |
-| Message row, body, events, webhook deliveries | Postgres, monthly partitions                  | the plan's retention period            |
-| Attachment and inline-image bytes             | R2 `i10-content`, `<tenant_id>/sha256/<hash>` | no body names the hash, plus 24h grace |
-| Template skeletons (#167, #169)               | `core.content_templates`                      | no body uses it AND unseen 7 days      |
-| Tombstone (message id, tenant)                | `core.expired_messages`                       | 90 days after expiry                   |
-| Usage                                         | `core.meter_events`                           | never touched by retention             |
+| What                                        | Where                                         | Until                                  |
+| ------------------------------------------- | --------------------------------------------- | -------------------------------------- |
+| Message row, events, webhook deliveries     | Postgres, monthly partitions                  | the plan's retention period            |
+| Body, until packed; compacted bodies always | Postgres, `message_bodies`                    | the plan's retention period            |
+| Full body, once packed (#188)               | R2 `i10-content`, `<tenant_id>/packs/<id>`    | no body points into the pack, plus 24h |
+| Attachment and inline-image bytes           | R2 `i10-content`, `<tenant_id>/sha256/<hash>` | no body names the hash, plus 24h grace |
+| Template skeletons (#167, #169)             | `core.content_templates`                      | no body uses it AND unseen 7 days      |
+| Tombstone (message id, tenant)              | `core.expired_messages`                       | 90 days after expiry                   |
+| Usage                                       | `core.meter_events`                           | never touched by retention             |
 
 ## Retention, like Resend
 
@@ -157,6 +160,62 @@ fingerprinted, since accept had already counted it.
 analysed after the approval; mail analysed while it was pending is not
 re-read. The old retroactive week was an accident of the starvation.
 
+## Bodies to R2 (#188)
+
+**Compacted bodies stay in Postgres; full bodies go to R2 in packs.** A
+compacted body is a template plus a few hundred bytes of values, and an R2
+write each would cost more than it saves. What is still a full body - unique
+mail, and linked mail whose template never established within a day (unlinked
+first) - is packed.
+
+**Packs, because R2 bills per write.** Every five minutes, per workspace, the
+content job takes bodies that are finished, examined by compaction, at least an
+hour old (the window a twin has to pair into a template), and, with risk on,
+already fingerprinted and analysed (or a day old). It ships them only when it
+is worth the write: `CONTENT_PACK_TARGET_BYTES` waiting (4 MiB), or the oldest
+has waited `CONTENT_PACK_MAX_WAIT_HOURS` past its hour (6). Up to 16 MiB of
+bodies per pack and 4 packs per workspace per run; a backlog drains over runs.
+
+**R2 is never the only copy until it has proved it holds the bytes.**
+
+1. The pack row is written first (so a pack that uploads and never commits is
+   found and swept).
+2. The pack is uploaded, then read back whole and compared byte for byte.
+3. Only then, in one transaction, each body's `html` and `text` are cleared
+   and its row points at `(pack_id, pack_offset, pack_length)`, guarded on the
+   body still being exactly what was sealed.
+
+An R2 that fails, times out or returns anything else leaves every body in
+Postgres, and the next run tries again. Sending never waits on R2: the worker
+sends from the row before anything is packed.
+
+**Sealed, one key per body** (`content/seal.ts`). Each body is compressed
+(zstd) then encrypted with its own AES-256-GCM key; that key is wrapped by a
+master key from `CONTENT_KEYS` and kept on the row (`body_key`). The workspace
+and the message are bound in as associated data, so a record cannot open as
+another message.
+
+- **Deleting one email is deleting its key** (crypto-shredding). Retention
+  deletes the row and the key together, so the body is unreadable at once; the
+  pack goes when no row points into it (`sweepPacks`, same grace as objects).
+- `CONTENT_KEYS` is `kid:base64,...`, current first. Rotate by putting a new
+  key first and keeping the old ones until what they wrapped has expired.
+- ⚠ Losing the master keys loses every packed body. Keep a copy outside
+  Doppler. A deleted body key survives in Postgres backups until they rotate.
+
+**Reading stays one lookup.** Lists read metadata only. Opening an email is one
+Postgres read and, for a packed body, one ranged GET of just that body's bytes,
+then decrypt and decompress. The API keeps opened bodies in memory
+(`CONTENT_BODY_CACHE_MB`, 64; never Redis, which would be a second place
+holding plaintext mail). Every reader restores through `restoreContent` after
+`restoreBodies`: the worker (a retry), `GET /emails/:id`, the console detail,
+and the risk passes. While R2 is down, packed bodies cannot be opened (the
+cache still serves recent ones); sending is unaffected.
+
+**Byte-exact.** Sealing opens what it sealed before returning, the pack is
+compared after the round trip, and the release is guarded on md5 of the exact
+stored text.
+
 ## Credentials
 
 R2 tokens scope per bucket, never per prefix, so content has its own buckets
@@ -164,11 +223,13 @@ R2 tokens scope per bucket, never per prefix, so content has its own buckets
 `prod_platform` is the CNPG backups key and must never be reused. Settings:
 `CONTENT_STORE_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`,
 all four or none. Unset, attachments stay inline and the product works as
-before.
+before. Bodies also need `CONTENT_KEYS` (in `prod_api` and `dev`); unset,
+bodies stay in Postgres.
 
 ## Not yet
 
-- Bodies (html/text) to R2 compressed (#188). Measure first: compaction
-  already shrinks them.
+- Per-tenant zstd dictionaries for packed bodies. Measure first.
+- An erasure API for one message and a no-body-retention mode (#184): both are
+  a matter of deleting `body_key`.
 - An attachment download route for the console.
 - Multi-window quotas (daily and monthly) and the usage page to show them.

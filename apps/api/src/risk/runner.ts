@@ -19,8 +19,8 @@ import { registrable } from "./rules.js"
 import { bandRank, type Assessment, type Band } from "./types.js"
 import type { Embedder } from "../content/embed.js"
 import { analyseContent } from "../content/job.js"
-import { restoreInline } from "../content/inline.js"
-import type { ObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { restoreContent } from "../content/packs.js"
 import { restoreBodies } from "../content/restore.js"
 import { purgeVectors, storeBehaviour } from "../content/vectors.js"
 import {
@@ -90,7 +90,7 @@ export interface RiskDeps {
    * Where data-URI images moved to (#168). The content passes and the sample
    * the classifier reads restore them; null until any have moved.
    */
-  objects?: ObjectStore | null
+  objects?: ContentStore | null
   /** Workspaces the score never touches: our own system tenant. */
   exempt?: ReadonlySet<string>
   /** The active model, loaded once per run by the caller. */
@@ -353,7 +353,8 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
   }
   const rows = await withTenant(deps.db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
-      select m.subject, b.text, b.html, b.template_id, b.template_values, b.inline_objects
+      select m.id as message_id, m.subject, b.text, b.html, b.template_id, b.template_values,
+             b.inline_objects, b.pack_id, b.pack_offset, b.pack_length, b.body_key
         from core.messages m join core.message_bodies b on b.message_id = m.id
        where m.tenant_id = ${tenantId}::uuid
          and m.created_at > now() - interval '24 hours'
@@ -365,7 +366,12 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
       html: string | null
       template_id: string | null
       template_values: unknown
+      message_id: string
       inline_objects: string[] | null
+      pack_id: string | null
+      pack_offset: string | number | null
+      pack_length: number | null
+      body_key: string | null
     }[]
     // A compacted body reads like a full one (#171).
     return restoreBodies(
@@ -377,11 +383,19 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
       })),
     )
   })
-  // And its images are back in place (#168).
-  const [m] = await restoreInline(
+  // And a packed body (#188) and its images (#168) are back in place.
+  const [m] = await restoreContent(
     deps.objects ?? null,
     tenantId,
-    rows.slice(0, 1).map((r) => ({ ...r, inlineObjects: r.inline_objects })),
+    rows.slice(0, 1).map((r) => ({
+      ...r,
+      messageId: r.message_id,
+      inlineObjects: r.inline_objects,
+      packId: r.pack_id,
+      packOffset: r.pack_offset,
+      packLength: r.pack_length,
+      bodyKey: r.body_key,
+    })),
   )
   if (!m || !deps.laya) return null
   const text = `${m.subject}\n\n${m.text ?? (m.html ? htmlToText(m.html) : "")}`

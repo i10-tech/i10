@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
-import { restoreInline } from "../content/inline.js"
-import type { ObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { restoreContent } from "../content/packs.js"
 import { restoreBodies } from "../content/restore.js"
 import { classify, trustMark } from "../content/trust.js"
 import { ALLOWLISTED, fingerprint, linkHosts, type Fingerprint } from "./fingerprint.js"
@@ -198,7 +198,7 @@ export async function recordContent(
 export interface FingerprintDeps extends ContentDeps {
   now?: Date
   /** Where data-URI images moved to (#168); needed only once any have. */
-  store?: ObjectStore | null
+  store?: ContentStore | null
   /** Bodies per workspace per pass. */
   limit?: number
 }
@@ -221,7 +221,7 @@ export async function fingerprintStored(
   const restored = await withTenant(deps.db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
       select b.message_id, b.created_at::text as created_at, m.subject, b.html, b.text,
-             b.template_id, b.template_values, b.inline_objects
+             b.template_id, b.template_values, b.inline_objects, b.pack_id, b.pack_offset, b.pack_length, b.body_key
         from core.message_bodies b
         join core.messages m on m.id = b.message_id and m.created_at = b.created_at
        where b.tenant_id = ${tenantId}::uuid
@@ -238,6 +238,10 @@ export async function fingerprintStored(
       template_id: string | null
       template_values: unknown
       inline_objects: string[] | null
+      pack_id: string | null
+      pack_offset: string | number | null
+      pack_length: number | null
+      body_key: string | null
     }[]
     return restoreBodies(
       tx,
@@ -249,10 +253,20 @@ export async function fingerprintStored(
     )
   })
   if (restored.length === 0) return 0
-  const rows = await restoreInline(
+  // Packed bodies (#188) and images (#168) back in: the tripwire reads what
+  // was sent.
+  const rows = await restoreContent(
     deps.store ?? null,
     tenantId,
-    restored.map((r) => ({ ...r, inlineObjects: r.inline_objects })),
+    restored.map((r) => ({
+      ...r,
+      messageId: r.message_id,
+      inlineObjects: r.inline_objects,
+      packId: r.pack_id,
+      packOffset: r.pack_offset,
+      packLength: r.pack_length,
+      bodyKey: r.body_key,
+    })),
   )
   await recordContent(
     tenantId,

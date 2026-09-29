@@ -11,6 +11,10 @@
  *      (content/compact.ts). It used to ride the hourly risk run, so switching
  *      risk off stopped it, and the system tenant - exempt from scoring, and
  *      sender of our most templated mail - never compacted at all.
+ *   4. BODIES TO R2 (content store and CONTENT_KEYS set, #188): full bodies
+ *      compaction left alone, sealed and packed per workspace, released from
+ *      Postgres only once R2 has returned the pack intact (content/packs.ts).
+ *      Last, so compaction has had its look at everything it packs.
  *
  * ⚠ EVERY FIVE MINUTES, SO WORK WAITS MINUTES, NOT HOURS. Accept writes the raw
  * message and returns; this is the "process later" half of #188, and the farm
@@ -23,13 +27,15 @@
  *
  * ⚠ EACH HALF IS OPTIONAL ON ITS OWN SWITCH, AND NONE STOPS THE OTHERS.
  * Without the CONTENT_STORE_* settings attachments stay inline; without
- * RISK_ENABLED nothing is fingerprinted; compaction runs either way.
+ * CONTENT_KEYS bodies stay in Postgres; without RISK_ENABLED nothing is
+ * fingerprinted; compaction runs either way.
  */
 import { sql } from "drizzle-orm"
 import pino from "pino"
 import { storeAttachments } from "./content/attachments.js"
 import { compactContent, PROMOTE_AT, WINDOW_DAYS } from "./content/compact.js"
 import { objectStoreFrom } from "./content/object-store.js"
+import { packBodies } from "./content/packs.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
@@ -63,6 +69,10 @@ await withMonitor(
   async () => {
     const store = objectStoreFrom(env)
     if (!store) log.warn("CONTENT_STORE_* is not set; attachments stay in Postgres")
+    else if (!store.keys) log.warn("CONTENT_KEYS is not set; bodies stay in Postgres")
+    const packing = Boolean(store?.keys)
+    // A body younger than this is not packed: see content/packs.ts.
+    const PACK_MIN_AGE_MINUTES = 60
     const { sql: client, db } = createDb(env.DATABASE_URL)
     let runtime: Awaited<ReturnType<typeof riskRuntime>> | null = null
     try {
@@ -91,7 +101,21 @@ await withMonitor(
             )
           : [],
       )
-      const due = [...new Set([...fingerprintDue, ...attachmentsDue, ...compactionDue])]
+      const packDue = new Set(
+        packing
+          ? await ids(
+              sql`select tenant_id from core.content_pack_due(${DUE_LIMIT}, ${new Date(Date.now() - PACK_MIN_AGE_MINUTES * 60_000).toISOString()}::timestamptz)`,
+            )
+          : [],
+      )
+      const due = [
+        ...new Set([
+          ...fingerprintDue,
+          ...attachmentsDue,
+          ...compactionDue,
+          ...packDue,
+        ]),
+      ]
 
       /*
        * ⚠ THE RISK ENGINE ONLY WHEN SOMETHING WILL BE FINGERPRINTED. The
@@ -120,6 +144,12 @@ await withMonitor(
         derived: 0,
         compacted: 0,
         bytesSaved: 0,
+        packs: 0,
+        packedBodies: 0,
+        packedRawBytes: 0,
+        packedSealedBytes: 0,
+        packsWaiting: 0,
+        packErrors: 0,
       }
       let failed = 0
       for (const tenantId of due) {
@@ -176,6 +206,29 @@ await withMonitor(
             log.error({ err: error, tenantId }, "compaction pass failed")
           }
         }
+        if (store && packing && packDue.has(tenantId)) {
+          try {
+            const p = await packBodies(tenantId, {
+              db,
+              store,
+              minAgeMinutes: PACK_MIN_AGE_MINUTES,
+              targetBytes: env.CONTENT_PACK_TARGET_BYTES,
+              maxWaitHours: env.CONTENT_PACK_MAX_WAIT_HOURS,
+              awaitRisk: env.RISK_ENABLED,
+              windowDays: WINDOW_DAYS,
+              log,
+            })
+            total.packs += p.packs
+            total.packedBodies += p.bodies
+            total.packedRawBytes += p.rawBytes
+            total.packedSealedBytes += p.sealedBytes
+            if (p.waiting) total.packsWaiting++
+            total.packErrors += p.errors
+          } catch (error) {
+            ok = false
+            log.error({ err: error, tenantId }, "pack pass failed")
+          }
+        }
         if (!ok) failed++
       }
 
@@ -187,7 +240,8 @@ await withMonitor(
       const tried = total.moved + total.errors
       if (
         (due.length > 0 && failed === due.length) ||
-        (tried > 0 && total.moved === 0)
+        (tried > 0 && total.moved === 0) ||
+        (total.packErrors > 0 && total.packs === 0)
       ) {
         process.exitCode = 1
       }

@@ -32,6 +32,7 @@ import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
 import { objectStoreFrom } from "./content/object-store.js"
+import { BodyCache } from "./content/packs.js"
 import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
 import { dnsConnectionStore } from "./dns/connections.js"
@@ -656,12 +657,18 @@ const sesFindings = reputationService({
  */
 const riskExempt = await systemTenantIds(db, env.AUTH_EMAIL_TENANT_SLUG)
 /*
- * ⚠ THE API READS R2 ONLY TO SHOW A BODY WHOSE DATA-URI IMAGES MOVED THERE
- * (#168): `GET /emails/:id` and the console's email detail. Unset in dev, and
- * then no body can have moved, because the content-store job moves nothing
- * without it either.
+ * ⚠ THE API READS R2 ONLY TO SHOW ONE EMAIL: a body packed there (#188), or
+ * one whose data-URI images moved there (#168), for `GET /emails/:id` and the
+ * console's email detail. Unset in dev, and then nothing can have moved,
+ * because the content-store job moves nothing without it either.
+ *
+ * ⚠ WITH A CACHE, so opening the same email again reads R2 once. In this
+ * process's memory only; see content/packs.ts.
  */
 const contentStore = objectStoreFrom(env)
+if (contentStore && env.CONTENT_BODY_CACHE_MB > 0) {
+  contentStore.cache = new BodyCache(env.CONTENT_BODY_CACHE_MB * 1024 * 1024)
+}
 
 const risk = riskSystem({
   db,

@@ -589,6 +589,20 @@
       "when": 1790659734770,
       "tag": "0083_inline_objects",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1790709822898,
+      "tag": "0084_body_packs",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1790709832070,
+      "tag": "0085_body_packs_definers",
+      "breakpoints": true
     }
   ]
 }
