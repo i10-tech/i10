@@ -12,7 +12,10 @@ import { ResumeRemount } from "../_lib/resume"
 export function ResumeBoundary({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <script dangerouslySetInnerHTML={{ __html: HIDE_WHILE_RESUMING }} />
+      <script
+        // eslint-disable-next-line react/no-danger -- a constant of ours, no input reaches it
+        dangerouslySetInnerHTML={{ __html: HIDE_WHILE_RESUMING }}
+      />
       <ResumeRemount>{children}</ResumeRemount>
     </>
   )

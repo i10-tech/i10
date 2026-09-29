@@ -1,3 +1,5 @@
+import type { Context } from "hono"
+import { bodyLimit } from "hono/body-limit"
 import pkg from "../package.json" with { type: "json" }
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { HTTPException } from "hono/http-exception"
@@ -388,6 +390,27 @@ export function createApp(deps: AppDeps = {}) {
     }),
   )
 
+  /*
+   * ⚠ A BODY LIMIT ON THE SEND ROUTES, ENFORCED AS THE BODY STREAMS (#189).
+   * Without one, any key could make this process buffer a body of any size
+   * before a line of validation ran. A single email is bounded by its parts -
+   * 10 MB of attachments (13.4 MB as base64) and 5 M characters each of html
+   * and text - so 24 MB; a batch is bounded by SES's own 40 MB message
+   * ceiling, since nothing larger could be sent anyway.
+   */
+  const tooLarge = (c: Context) =>
+    c.json(
+      {
+        statusCode: 413 as const,
+        name: "validation_error" as const,
+        message: "That request body is too large.",
+      },
+      413,
+    )
+  const oneEmail = bodyLimit({ maxSize: 24 * 1024 * 1024, onError: tooLarge })
+  const batch = bodyLimit({ maxSize: 40 * 1024 * 1024, onError: tooLarge })
+  app.use("/emails/batch", batch)
+  app.use("/emails", oneEmail)
   app.route("/emails", emails)
 
   // Customer-facing, API-key authenticated. ⚠ Deliberately NOT under

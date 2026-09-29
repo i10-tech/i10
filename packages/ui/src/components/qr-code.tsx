@@ -77,6 +77,7 @@ export function QrCode({
        * into the markup, so there is no string from the caller that can reach
        * the DOM as anything other than black and white squares.
        */
+      // eslint-disable-next-line react/no-danger -- generated squares only; see above
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )

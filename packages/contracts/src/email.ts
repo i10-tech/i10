@@ -16,8 +16,66 @@ import { z } from "zod"
  * a compatibility guarantee. Treat that diff as a release gate.
  */
 
-/** `Name <addr@example.com>` or a bare address. */
-export const addressSchema = z.string().min(3).max(320)
+/**
+ * `Name <addr@example.com>` or a bare address.
+ *
+ * ⚠ NO LINE BREAKS AND NO CONTROL CHARACTERS (#189). An address is written
+ * into `From`, `To`, `Cc` and `Reply-To` headers, and a CR or LF in a display
+ * name is header injection: `Evil\r\nX-Anything: …<me@verified.test>` still
+ * parses as an address on the verified domain, and would put a header of the
+ * caller's choosing - or a blank line and a body - into the message.
+ */
+export const addressSchema = z
+  .string()
+  .min(3)
+  .max(320)
+  .refine(
+    (s) => !hasControl(s),
+    "An address may not contain line breaks or control characters.",
+  )
+
+/** True when the string has a C0 control character (CR and LF among them) or DEL. */
+export function hasControl(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x20 || c === 0x7f) return true
+  }
+  return false
+}
+
+/**
+ * A lone surrogate: text that cannot be encoded as UTF-8 at all. JSON can
+ * carry one (`"\ud800"`), and it would reach the recipient as a replacement
+ * character wherever it happened to be (#189).
+ */
+const LONE_SURROGATE =
+  /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+const wellFormed = (s: string) => !LONE_SURROGATE.test(s)
+const NOT_UTF8 = "Must be valid Unicode text (it contains a lone surrogate)."
+
+/** The largest `html` or `text`, in characters. Mail far past this is refused by receivers anyway. */
+export const MAX_BODY_CHARS = 5 * 1024 * 1024
+
+/**
+ * At most this many attachments. SES refuses a message of more than 500 MIME
+ * parts; the body takes up to three, so this keeps a send that SES would
+ * refuse later, asynchronously, a 422 now.
+ */
+export const MAX_ATTACHMENTS = 490
+
+/**
+ * A header name as RFC 5322 defines one: printable ASCII, no colon, no space.
+ *
+ * ⚠ THE NAME IS WRITTEN RAW, before the colon (#189). A name carrying a line
+ * break is header injection exactly as a value would be, and values are
+ * flattened before they are written but names never were.
+ */
+export const headerNameSchema = z
+  .string()
+  .regex(
+    /^[\x21-\x39\x3b-\x7e]{1,76}$/,
+    "Header names are printable ASCII, without spaces or colons, at most 76 characters.",
+  )
 
 export const addressListSchema = z.union([
   addressSchema,
@@ -138,16 +196,16 @@ export const sendEmailSchema = z
      * required, as it always was - see the refinement below. With one, the
      * request's subject wins over the template's, as in Resend.
      */
-    subject: z.string().optional(),
+    subject: z.string().refine(wellFormed, NOT_UTF8).optional(),
     bcc: addressListSchema.optional(),
     cc: addressListSchema.optional(),
     reply_to: addressListSchema.optional(),
-    html: z.string().optional(),
-    text: z.string().optional(),
+    html: z.string().max(MAX_BODY_CHARS).refine(wellFormed, NOT_UTF8).optional(),
+    text: z.string().max(MAX_BODY_CHARS).refine(wellFormed, NOT_UTF8).optional(),
     /** Send a stored template instead of `html`/`text`. See `templateRefSchema`. */
     template: templateRefSchema.optional(),
-    headers: z.record(z.string(), z.string()).optional(),
-    attachments: z.array(attachmentSchema).optional(),
+    headers: z.record(headerNameSchema, z.string().max(998)).optional(),
+    attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).optional(),
     tags: z.array(tagSchema).optional(),
     /**
      * When to send it, as an ISO 8601 timestamp - `2026-09-03T09:00:00Z`.
