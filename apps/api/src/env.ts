@@ -852,6 +852,14 @@ const schema = z.object({
    * we do not run on the CX33, so it is off until this points somewhere.
    */
   LAYA_URL: z.url().optional(),
+
+  /**
+   * Which embedder turns content into vectors (content/embed.ts): `minilm`,
+   * the local all-MiniLM-L6-v2 on WebAssembly (meaning), or `hash` (wording,
+   * zero dependencies). ⚠ `minilm` FALLS BACK TO `hash`, loudly, when the model
+   * files are missing - vectors are tagged with their model and never mixed.
+   */
+  RISK_EMBEDDER: z.enum(["minilm", "hash"]).default("minilm"),
   LAYA_API_KEY: z.string().min(1).optional(),
 })
 

@@ -18,6 +18,10 @@ import type { LabelStore, ModelRecord } from "./labels.js"
 import { features, predict } from "./model.js"
 import { registrable } from "./rules.js"
 import { bandRank, type Assessment, type Band } from "./types.js"
+import type { Embedder } from "../content/embed.js"
+import { processContent } from "../content/job.js"
+import { restoreBodies } from "../content/restore.js"
+import { purgeVectors, storeBehaviour } from "../content/vectors.js"
 
 /**
  * Running the score (#170): one workspace, or all of them.
@@ -67,6 +71,13 @@ export interface RiskDeps {
   labels: LabelStore
   switches: RiskSwitches
   redis?: RiskLockRedis
+  /**
+   * Turns content into vectors (content/embed.ts). Absent: no content vectors
+   * are made and the similarity facts are not consulted.
+   */
+  embedder?: Embedder
+  /** The model name to compare vectors under, where no embedder is loaded (the API). */
+  contentModel?: string
   /** Workspaces the score never touches: our own system tenant. */
   exempt?: ReadonlySet<string>
   /** The active model, loaded once per run by the caller. */
@@ -138,6 +149,9 @@ async function scoreLocked(
     freePlanId: deps.freePlanId,
     ownerInfo: deps.ownerInfo,
     now,
+    ...(deps.embedder || deps.contentModel
+      ? { contentModel: deps.embedder?.model ?? deps.contentModel! }
+      : {}),
   })
 
   // ── Content classifier: only where there is already reason to look ──
@@ -158,6 +172,14 @@ async function scoreLocked(
     modelScore = predict(deps.model.weights, feats)
     facts.model = { probability: modelScore, version: deps.model.version }
   }
+
+  // ⚠ THE BEHAVIOUR POINT IS STORED FROM OBSERVATIONS, BEFORE ANY SCORE. It is
+  // what the NEXT workspace is compared with; the neighbours this one was just
+  // compared with came from the previous run's points. Nothing here reads a
+  // score.
+  await storeBehaviour(deps.db, tenantId, feats).catch((error: unknown) =>
+    deps.log?.warn?.({ err: error, tenantId }, "could not store the behaviour vector"),
+  )
 
   const assessment: Assessment = evaluate(facts)
   const hold = await deps.act.holds.current(tenantId)
@@ -308,16 +330,31 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
     const c = JSON.parse(cached) as { probability: number; at: string }
     return { probability: c.probability, at: new Date(c.at) }
   }
-  const rows = (await withTenant(deps.db, tenantId, (tx) =>
-    tx.execute(sql`
-      select m.subject, b.text, b.html
+  const rows = await withTenant(deps.db, tenantId, async (tx) => {
+    const raw = (await tx.execute(sql`
+      select m.subject, b.text, b.html, b.template_id, b.template_values
         from core.messages m join core.message_bodies b on b.message_id = m.id
        where m.tenant_id = ${tenantId}::uuid
          and m.created_at > now() - interval '24 hours'
        order by m.created_at desc
        limit 1
-    `),
-  )) as unknown as { subject: string; text: string | null; html: string | null }[]
+    `)) as unknown as {
+      subject: string
+      text: string | null
+      html: string | null
+      template_id: string | null
+      template_values: unknown
+    }[]
+    // A compacted body reads like a full one (#171).
+    return restoreBodies(
+      tx,
+      raw.map((r) => ({
+        ...r,
+        templateId: r.template_id,
+        templateValues: r.template_values,
+      })),
+    )
+  })
   const m = rows[0]
   if (!m || !deps.laya) return null
   const text = `${m.subject}\n\n${m.text ?? (m.html ? htmlToText(m.html) : "")}`
@@ -352,6 +389,13 @@ export interface RunSummary {
   webRisk: number
   unsafe: number
   retrained: string | null
+  content: {
+    scanned: number
+    derived: number
+    compacted: number
+    bytesSaved: number
+    embedded: number
+  }
 }
 
 /**
@@ -413,6 +457,7 @@ export async function runAll(
     webRisk: 0,
     unsafe: 0,
     retrained: null,
+    content: { scanned: 0, derived: 0, compacted: 0, bytesSaved: 0, embedded: 0 },
   }
 
   // ── Housekeeping first: fresher intel means a better score this hour ──
@@ -445,6 +490,24 @@ export async function runAll(
             summary.unsafe += r.unsafe
           }
           await purgeContent(deps, id, now)
+          // ⚠ CONTENT BEFORE THE SCORE, so this hour's vectors are the ones it
+          // compares. Its failure costs this workspace's content pass, not its score.
+          try {
+            const c = await processContent(id, {
+              db: deps.db,
+              ...(deps.embedder ? { embedder: deps.embedder } : {}),
+              now,
+              ...(deps.log ? { log: deps.log } : {}),
+            })
+            summary.content.scanned += c.scanned
+            summary.content.derived += c.derived
+            summary.content.compacted += c.compacted
+            summary.content.bytesSaved += c.bytesSaved
+            summary.content.embedded += c.embedded
+            await purgeVectors(deps.db, id, now)
+          } catch (error) {
+            deps.log?.warn?.({ err: error, tenantId: id }, "content pass failed")
+          }
           const r = await scoreTenant(id, "hourly", deps)
           if (r.status === "locked") summary.locked++
           if (r.status === "scored") {

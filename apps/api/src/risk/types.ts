@@ -170,6 +170,38 @@ export interface Facts {
 
   content: { probability: number; at: Date } | null
 
+  /** How fast the person behind this workspace, and people sharing their device or network, create things. */
+  actor: {
+    linkedPeople: number
+    workspaces24h: number
+    workspaces7d: number
+    linkedWorkspaces: number
+    linkedTainted: number
+    domains24h: number
+    keys24h: number
+  } | null
+
+  /** How close this workspace's recent mail is to other workspaces' (pgvector). */
+  similarity: {
+    model: string
+    similarPeers: number
+    youngFreeSimilar: number
+    taintedSimilar: number
+    bestTaintedSimilarity: number | null
+  } | null
+
+  /** Its nearest LABELLED neighbours by behaviour (pgvector). */
+  behaviour: {
+    labelled: number
+    abuse: number
+    legit: number
+    meanAbuseDistance: number | null
+    nearestDistance: number | null
+  } | null
+
+  /** The workspace's own discovered templates: its normal mail. */
+  templates: { established: number; recentMatchedShare: number | null } | null
+
   model: { probability: number; version: number } | null
 }
 

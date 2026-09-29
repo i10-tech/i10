@@ -16,7 +16,14 @@ import type { Facts } from "./types.js"
  * consulted by nobody, and the rules carry the whole score. Synthetic
  * scenarios test the rules; they never train this.
  */
-export const FEATURE_NAMES = [
+/**
+ * ⚠ THE FIRST 39 ARE THE BEHAVIOUR VECTOR AND THEIR ORDER IS FROZEN. They are
+ * stored in `core.behaviour_vectors` (vector(39)); reordering or inserting one
+ * would silently compare today's vectors with last month's in a different
+ * space. New features go in `EXTRA_FEATURES`, which the model learns from and
+ * the behaviour vector does not carry.
+ */
+export const BEHAVIOUR_FEATURES = [
   "age_days_log",
   "paid",
   "ses_paused_now",
@@ -57,6 +64,21 @@ export const FEATURE_NAMES = [
   "tier_demotions",
   "upheld_holds",
 ] as const
+
+/**
+ * Features the model learns from beyond the behaviour vector: the actor's
+ * velocity and what the similarity layer found. ⚠ NOT IN THE BEHAVIOUR VECTOR,
+ * because "how close to labelled abusers" must not be computed from itself.
+ */
+export const EXTRA_FEATURES = [
+  "actor_workspaces_24h",
+  "actor_linked_workspaces",
+  "content_tainted_similar",
+  "content_young_free_similar",
+  "behaviour_abuse_share",
+] as const
+
+export const FEATURE_NAMES = [...BEHAVIOUR_FEATURES, ...EXTRA_FEATURES] as const
 
 export type FeatureName = (typeof FEATURE_NAMES)[number]
 export type Features = Record<FeatureName, number>
@@ -115,6 +137,14 @@ export function features(f: Facts): Features {
     unsafe_links: f.links.unsafe.length > 0 ? 1 : 0,
     tier_demotions: f.history.tierDemotions90d,
     upheld_holds: f.history.upheldHolds,
+    actor_workspaces_24h: log1p(f.actor?.workspaces24h ?? 0),
+    actor_linked_workspaces: log1p(f.actor?.linkedWorkspaces ?? 0),
+    content_tainted_similar: log1p(f.similarity?.taintedSimilar ?? 0),
+    content_young_free_similar: log1p(f.similarity?.youngFreeSimilar ?? 0),
+    behaviour_abuse_share:
+      f.behaviour && f.behaviour.labelled > 0
+        ? f.behaviour.abuse / f.behaviour.labelled
+        : 0,
   }
 }
 

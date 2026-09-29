@@ -9,6 +9,7 @@ import {
   jsonb,
   pgPolicy,
   pgSchema,
+  halfvec,
   primaryKey,
   real,
   text,
@@ -16,6 +17,7 @@ import {
   unique,
   uniqueIndex,
   uuid,
+  vector,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 
@@ -1028,6 +1030,21 @@ export const messageBodies = core.table(
      * Names beginning `i10_` are refused at the contract.
      */
     tags: jsonb("tags"),
+
+    /**
+     * The body, stored as a template and its values instead of in full
+     * (#169, #171). Null until the content job compacts it.
+     *
+     * ⚠ COMPACTED ONLY AFTER A BYTE-EXACT CHECK, AND ONLY ONCE THE MESSAGE IS
+     * DONE. The job reconstructs the body from the template and the values and
+     * compares it with `html`/`text` before it nulls them; any difference and
+     * the row is left as it was. It never touches a message still queued or
+     * sending. Every reader restores through `restoreBodies` (content/
+     * templates.ts), so a compacted row reads exactly like a full one.
+     */
+    templateId: uuid("template_id"),
+    templateValues: jsonb("template_values"),
+    compactedAt: timestamp("compacted_at", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.createdAt] })],
 )
@@ -2805,5 +2822,124 @@ export const riskModels = core.table(
       using: sql`false`,
       withCheck: sql`false`,
     }),
+  ],
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content intelligence (#169, #170, #171): templates discovered from what a
+// workspace sends, and the vectors that let similar mail and similar
+// workspaces be found. See docs/decisions/risk.md, "Templates and vectors".
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Dimensions of every content embedding, whichever embedder produced it. */
+export const CONTENT_DIMENSIONS = 384
+
+/**
+ * A template the content job discovered in a workspace's own mail (#169).
+ *
+ * ⚠ NEVER SHOWN TO THE CUSTOMER AND NEVER SHARED ACROSS WORKSPACES. It is how
+ * we store less (the static skeleton once, the per-message values beside each
+ * message) and how the risk engine knows what "normal" looks like for this
+ * workspace. Scoped per tenant like everything else, and deleted with it.
+ *
+ * ⚠ `segments` IS THE SKELETON: the static text between the holes, in order.
+ * Rendering is `segments[0] + values[0] + segments[1] + ...`, which is why a
+ * compacted body is byte-exact by construction - and checked anyway.
+ */
+export const contentTemplates = core.table(
+  "content_templates",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** SHA-256 of the skeleton: the identity of the template within a workspace. */
+    skeletonHash: text("skeleton_hash").notNull(),
+    segments: jsonb("segments").notNull(),
+    /** MinHash bands of a message it was derived from, for candidate lookup. */
+    bands: text("bands").array().notNull(),
+    staticBytes: integer("static_bytes").notNull(),
+    holes: integer("holes").notNull(),
+    /** Messages matched to it, compacted or not. */
+    messages: integer("messages").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("content_templates_skeleton_unique").on(t.tenantId, t.skeletonHash),
+    index("content_templates_bands_idx").using("gin", t.bands),
+    tenantPolicy("content_templates_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * An embedding of one piece of content a workspace sent (#170), per day.
+ *
+ * ⚠ AN EMBEDDING IS DERIVED FROM THE MAIL AND CAN LEAK SOME OF IT, so it is
+ * treated like the mail: tenant-scoped under RLS, kept 30 days like the
+ * fingerprints, never sent anywhere but our own database. Cross-workspace
+ * questions ("is this close to mail a confirmed abuser sent?") go through
+ * definer functions that return distances and counts, never another
+ * workspace's vectors.
+ *
+ * ⚠ `model` IS PART OF THE KEY AND OF EVERY QUERY. Vectors from two embedders
+ * live in different spaces; comparing them is meaningless, so they are never
+ * compared.
+ */
+export const contentVectors = core.table(
+  "content_vectors",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    exact: text("exact").notNull(),
+    model: text("model").notNull(),
+    embedding: halfvec("embedding", { dimensions: CONTENT_DIMENSIONS }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day, t.exact, t.model] }),
+    // ⚠ HNSW ON COSINE, IN HALF PRECISION: half the memory of `vector` for a
+    // recall loss that does not matter at a 0.9 similarity threshold.
+    index("content_vectors_hnsw_idx").using(
+      "hnsw",
+      t.embedding.op("halfvec_cosine_ops"),
+    ),
+    index("content_vectors_day_idx").on(t.day),
+    tenantPolicy("content_vectors_tenant", t.tenantId),
+  ],
+)
+
+/** Dimensions of the behaviour vector: `FEATURE_NAMES` in risk/model.ts. */
+export const BEHAVIOUR_DIMENSIONS = 39
+
+/**
+ * Each workspace's behaviour as a point in space: its model features,
+ * standardised (#170).
+ *
+ * ⚠ THIS IS HOW "A NEW WORKSPACE THAT LOOKS LIKE A BAD ONE" IS ASKED. Its
+ * nearest neighbours among LABELLED workspaces are a fact the rules read -
+ * observations, never another workspace's score, so no score can feed
+ * another (the feedback-loop rule in docs/decisions/risk.md).
+ */
+export const behaviourVectors = core.table(
+  "behaviour_vectors",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    embedding: vector("embedding", { dimensions: BEHAVIOUR_DIMENSIONS }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("behaviour_vectors_hnsw_idx").using("hnsw", t.embedding.op("vector_l2_ops")),
+    tenantPolicy("behaviour_vectors_tenant", t.tenantId),
   ],
 )

@@ -23,7 +23,7 @@ import type { Band, Facts, Hit, Rule } from "./types.js"
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 1
+export const RULESET_VERSION = 2
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -401,7 +401,7 @@ const farmRules: Rule[] = [
   rule(
     "farm.with_held",
     "linked_workspaces",
-    "Sends the same content as a workspace that is held",
+    "Sends the same content as a workspace confirmed abusive by staff",
     (f) => {
       const held = f.farm.peers.filter((p) => p.held)
       return held.length > 0 ? hit(35, { heldPeers: held.length }) : null
@@ -415,7 +415,7 @@ const identityRules: Rule[] = [
   rule(
     "identity.ban_evasion",
     "account_security",
-    "The owner's device or sign-up network is shared with a held workspace's owner",
+    "The owner's device or sign-up network is shared with the owner of a workspace confirmed abusive",
     (f) => {
       const id = f.identity
       if (!id) return null
@@ -558,7 +558,115 @@ const contentRules: Rule[] = [
 
 // ─── Earned trust: negative points ───────────────────────────────────────────
 
+// ─── Actors: the person behind the workspace, and everyone sharing their device ─
+
+const actorRules: Rule[] = [
+  rule(
+    "actor.velocity",
+    "linked_workspaces",
+    "The person behind this workspace (or people on their device or network) created several workspaces in a day",
+    (f) => {
+      const n = f.actor?.workspaces24h ?? 0
+      const points = graded([
+        [n >= 6, 30],
+        [n >= 3, 15],
+      ] as const)
+      return points === null
+        ? null
+        : hit(points, { workspaces24h: n, linkedPeople: f.actor!.linkedPeople })
+    },
+  ),
+  rule(
+    "actor.domain_velocity",
+    "sending_pattern",
+    "Ten or more domains added across the actor's workspaces in a day",
+    (f) =>
+      (f.actor?.domains24h ?? 0) >= 10
+        ? hit(10, { domains24h: f.actor!.domains24h })
+        : null,
+  ),
+  rule(
+    "actor.cluster_size",
+    "linked_workspaces",
+    "The actor's device or network reaches ten or more live workspaces",
+    (f) =>
+      (f.actor?.linkedWorkspaces ?? 0) >= 10
+        ? hit(10, { linkedWorkspaces: f.actor!.linkedWorkspaces })
+        : null,
+  ),
+]
+
+// ─── Similarity (pgvector): evidence, deliberately not verdicts ──────────────
+
+/**
+ * ⚠ MODEST POINTS ON PURPOSE. Embedding similarity is new here and has not
+ * been calibrated on real traffic; it is evidence that adds up with other
+ * evidence, never enough alone to hold anybody. The weights rise once labels
+ * show how it performs - which is also when the model starts to weigh it.
+ */
+const similarityRules: Rule[] = [
+  rule(
+    "content.like_confirmed_abuse",
+    "content",
+    "Recent mail reads like mail from a workspace confirmed abusive",
+    (f) => {
+      const s = f.similarity
+      if (!s || s.taintedSimilar === 0) return null
+      return hit(s.taintedSimilar >= 2 ? 30 : 20, {
+        confirmedWorkspaces: s.taintedSimilar,
+        similarity:
+          s.bestTaintedSimilarity === null
+            ? null
+            : Math.round(s.bestTaintedSimilarity * 100) / 100,
+        model: s.model,
+      })
+    },
+  ),
+  rule(
+    "content.semantic_crowd",
+    "linked_workspaces",
+    "The same message, reworded, is going out from four or more new free workspaces",
+    (f) => {
+      const n = f.similarity?.youngFreeSimilar ?? 0
+      return n >= 4
+        ? hit(12, { youngFreeWorkspaces: n, model: f.similarity!.model })
+        : null
+    },
+  ),
+  rule(
+    "behaviour.like_abuse",
+    "sending_pattern",
+    "Behaves like workspaces that turned out to be abusive",
+    (f) => {
+      const b = f.behaviour
+      if (!b || b.labelled < 5) return null
+      const share = b.abuse / b.labelled
+      const points = graded([
+        [share >= 0.7, 20],
+        [share >= 0.5, 8],
+      ] as const)
+      return points === null
+        ? null
+        : hit(points, { abuseNeighbours: b.abuse, labelledNeighbours: b.labelled })
+    },
+  ),
+]
+
 const trustRules: Rule[] = [
+  rule(
+    "trust.known_templates",
+    "trust",
+    "Recent mail fits the workspace's own long-established templates",
+    (f) => {
+      const t = f.templates
+      return t && t.established > 0 && (t.recentMatchedShare ?? 0) >= 0.8
+        ? hit(-5, {
+            established: t.established,
+            matchedShare: Math.round((t.recentMatchedShare ?? 0) * 100) / 100,
+          })
+        : null
+    },
+  ),
   rule(
     "trust.tenure",
     "trust",
@@ -612,6 +720,8 @@ export const RULES: readonly Rule[] = [
   ...farmRules,
   ...identityRules,
   ...contentRules,
+  ...actorRules,
+  ...similarityRules,
   ...trustRules,
 ]
 

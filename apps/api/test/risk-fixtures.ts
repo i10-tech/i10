@@ -82,6 +82,10 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
     links: { unsafe: [] },
     content: null,
     model: null,
+    actor: null,
+    similarity: null,
+    behaviour: null,
+    templates: null,
     ...over,
   }
 }

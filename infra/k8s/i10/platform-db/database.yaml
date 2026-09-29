@@ -1,0 +1,33 @@
+# The `i10` database itself, declared so CNPG manages its extensions (#170).
+#
+# ⚠ IT ADOPTS THE DATABASE `bootstrap.initdb` ALREADY CREATED; it does not make
+# a new one. `ensure: present` on an existing database is a no-op for the
+# database, and `databaseReclaimPolicy: retain` means deleting this resource
+# can never drop it - the same setting the Stalwart database uses.
+#
+# ⚠ WHY EXTENSIONS LIVE HERE AND NOT IN A MIGRATION. pgvector is not a trusted
+# extension, so only a superuser may create it, and migrations run as `i10`,
+# the owner, which is not one (cluster.yaml). CNPG runs this as the superuser.
+# Migration 0070 then says `CREATE EXTENSION IF NOT EXISTS vector`, which is a
+# no-op when this has run and a loud failure when it has not.
+#
+# ⚠ ORDER AT DEPLOY: this lives in the i10-platform-db Argo app, the migration
+# in i10-api's PreSync hook - two apps, no ordering between them. The first
+# rollout that needs pgvector must see this synced first (see
+# docs/decisions/risk.md, "Deploying the vector layer").
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: i10-app-db
+  namespace: i10-prod
+spec:
+  cluster:
+    name: i10-platform
+  name: i10
+  owner: i10
+  ensure: present
+  databaseReclaimPolicy: retain
+  extensions:
+    - name: vector
+      ensure: present

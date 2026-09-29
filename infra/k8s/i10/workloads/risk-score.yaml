@@ -60,10 +60,12 @@ spec:
                 - name: DATABASE_URL
                   value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
               resources:
-                # Mostly waiting on Postgres and on outside lookups; the memory
-                # ceiling holds one workspace's facts at a time per worker.
-                requests: { cpu: 50m, memory: 128Mi }
-                limits: { memory: 384Mi }
+                # ⚠ THE EMBEDDER IS THE MEMORY. all-MiniLM-L6-v2 on WebAssembly
+                # holds ~310 MB resident (measured, content/embed.ts); the rest
+                # is one workspace's facts per worker. Only this job loads it -
+                # the API never does - and only for the minutes the pass runs.
+                requests: { cpu: 100m, memory: 384Mi }
+                limits: { memory: 896Mi }
               securityContext:
                 allowPrivilegeEscalation: false
                 runAsNonRoot: true

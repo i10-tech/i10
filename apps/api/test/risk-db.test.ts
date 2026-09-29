@@ -23,12 +23,17 @@ import type { SendEmail } from "@repo/contracts"
  *
  * Run it against a THROWAWAY database with every migration applied:
  *
- *   RISK_TEST_DATABASE_URL=postgres://i10:<pw>@localhost:5433/i10_risk_scratch bun test test/risk-db.test.ts
+ *   RISK_TEST_DATABASE_URL=postgres://i10:i10@localhost:5433/risk_scratch bun test test/risk-db.test.ts
  *
- * The URL is the OWNER's (to seed); the code under test connects with
- * `role=i10_api`, which is what makes RLS apply.
+ * The URL is the OWNER's (to seed); the code under test logs in as `i10_api`
+ * (the dev password, or RISK_TEST_API_DATABASE_URL), which is what makes RLS
+ * apply. ⚠ IT NEEDS PGVECTOR: the dev compose runs the production CNPG image,
+ * whose template1 carries it, so a database `i10` creates has it too.
  */
 const URL = process.env.RISK_TEST_DATABASE_URL
+const API_URL =
+  process.env.RISK_TEST_API_DATABASE_URL ??
+  URL?.replace(/\/\/[^@]+@/, "//i10_api:i10_api@")
 const FREE = "free"
 const suite = URL ? describe : describe.skip
 /** Unique per run, so a scratch database reused across runs never leaks rows into a count. */
@@ -37,6 +42,9 @@ const RUN = crypto.randomUUID().slice(0, 8)
 let owner: ReturnType<typeof postgres>
 let app: ReturnType<typeof postgres>
 let db: Database
+
+/** Workspaces a test creates on its own, cleaned up with the rest. */
+const extra: string[] = []
 
 const ids = {
   a: crypto.randomUUID(),
@@ -142,12 +150,9 @@ const promo = (i: number): SendEmail =>
 suite("the risk engine against Postgres, as i10_api", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
-    app = postgres(URL!, {
-      max: 4,
-      onnotice: () => {},
-      connection: { role: "i10_api" } as never,
-      prepare: false,
-    })
+    // ⚠ LOGS IN AS i10_api ITSELF, the way the API does. On the CNPG image the
+    // owner `i10` is not a superuser (as in production) and cannot SET ROLE.
+    app = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
     db = drizzle(app, { schema }) as unknown as Database
     const [plan] = await owner`select id from core.plans where id = ${FREE}`
     if (!plan) {
@@ -160,7 +165,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
   })
 
   afterAll(async () => {
-    for (const id of Object.values(ids))
+    for (const id of [...Object.values(ids), ...extra])
       await owner`delete from core.tenants where id = ${id}`.catch(() => {})
     await owner`delete from core.identity_events where clerk_user_id like 'risk-test-%'`.catch(
       () => {},
@@ -445,5 +450,244 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(r.active).toBe(false)
     expect((await labels.model(true))?.active ?? false).toBe(false)
     expect((await labels.model(false))?.version).toBe(r.version)
+  })
+
+  // ─── Templates, compaction and the vector layer (#169, #170, #171) ───
+
+  const receipt = (name: string, order: string) =>
+    `<html><body><table width="600"><tr><td><img src="https://cdn.acme.com/logo.png"></td></tr>` +
+    `<tr><td><h1>Thanks for your order, ${name}!</h1><p>Your order <b>#${order}</b> is confirmed ` +
+    `and ships within two business days. Questions? Reply to this email and our team will help.</p>` +
+    `<p style="color:#999">Acme Inc, 1 Market St, San Francisco</p></td></tr></table></body></html>`
+
+  async function seedSent(
+    tenantId: string,
+    html: string,
+    text: string | null = null,
+    status = "sent",
+  ) {
+    // ⚠ ONE STATEMENT. Reading `created_at` back into a JS Date drops the
+    // microseconds, and the body would then not join its message - the same
+    // reason the worker threads `createdAt` through instead of re-deriving it.
+    const [m] = await owner`
+      with m as (
+        insert into core.messages (tenant_id, from_address, to_addresses, subject, status, queue, sent_at)
+        values (${tenantId}, 'shop@acme.com', '{a@example.com}', 'Your order', ${status}, 'transactional', now())
+        returning id, created_at, tenant_id
+      )
+      insert into core.message_bodies (message_id, created_at, tenant_id, html, text)
+      select id, created_at, tenant_id, ${html}, ${text} from m
+      returning message_id as id`
+    return m!
+  }
+
+  it("discovers a template, links each match once, compacts only when established, and restores byte-exactly", async () => {
+    const { processContent } = await import("../src/content/job.js")
+    const { restoreBodies } = await import("../src/content/restore.js")
+    const { withTenant } = await import("../src/db/client.js")
+    const sent = []
+    for (const [i, n] of ["John", "Sarah", "Li", "Zo\u00eb", "O'Brien"].entries()) {
+      sent.push({
+        m: await seedSent(ids.clean, receipt(n, String(1000 + i)), `Thanks ${n}`),
+        html: receipt(n, String(1000 + i)),
+        text: `Thanks ${n}`,
+      })
+    }
+    const queued = await seedSent(ids.clean, receipt("Queued", "9"), null, "queued")
+
+    const first = await processContent(ids.clean, { db, promoteAt: 3 })
+    expect(first.derived).toBeGreaterThan(0)
+    expect(first.matched).toBe(5)
+    expect(first.compacted).toBe(5)
+    expect(first.bytesSaved).toBeGreaterThan(0)
+
+    const [tmpl] =
+      await owner`select messages from core.content_templates where tenant_id = ${ids.clean}`
+    expect(tmpl?.messages).toBe(5)
+    const again = await processContent(ids.clean, { db, promoteAt: 3 })
+    expect(again.matched).toBe(0)
+    const [tmpl2] =
+      await owner`select messages from core.content_templates where tenant_id = ${ids.clean}`
+    expect(tmpl2?.messages).toBe(5)
+
+    const [q] =
+      await owner`select html, template_id from core.message_bodies where message_id = ${queued.id}`
+    expect(q?.template_id).toBeNull()
+    expect(q?.html).toBe(receipt("Queued", "9"))
+
+    for (const { m, html, text } of sent) {
+      const [raw] =
+        await owner`select html, text, template_id from core.message_bodies where message_id = ${m.id}`
+      expect(raw?.html).toBeNull()
+      expect(raw?.template_id).not.toBeNull()
+      const restored = await withTenant(db, ids.clean, async (tx) => {
+        const rows = await tx
+          .select({
+            html: schema.messageBodies.html,
+            text: schema.messageBodies.text,
+            templateId: schema.messageBodies.templateId,
+            templateValues: schema.messageBodies.templateValues,
+          })
+          .from(schema.messageBodies)
+          .where((await import("drizzle-orm")).eq(schema.messageBodies.messageId, m.id))
+        return restoreBodies(tx, rows)
+      })
+      expect(restored[0]?.html).toBe(html)
+      expect(restored[0]?.text).toBe(text)
+    }
+  })
+
+  it("links but does not compact below the promotion threshold", async () => {
+    const { processContent } = await import("../src/content/job.js")
+    await seedSent(ids.e, receipt("A", "1"))
+    await seedSent(ids.e, receipt("B", "2"))
+    const r = await processContent(ids.e, { db, promoteAt: 3 })
+    expect(r.matched).toBe(2)
+    expect(r.compacted).toBe(0)
+    const rows =
+      await owner`select html, template_id from core.message_bodies where tenant_id = ${ids.e} and template_id is not null`
+    expect(rows).toHaveLength(2)
+    expect(rows.every((x) => x.html !== null)).toBe(true)
+  })
+
+  it("stores content vectors under RLS and finds mail like a confirmed abuser's", async () => {
+    const { storeContentVectors, contentNeighbours } =
+      await import("../src/content/vectors.js")
+    const { hashEmbedder } = await import("../src/content/embed.js")
+    const e = hashEmbedder()
+    const scam =
+      "Your account has been selected for a special reward. Claim your prize today at our secure portal before it expires tonight."
+    const [v1, v2, v3] = await e.embed([
+      scam,
+      scam.replace("tonight", "at midnight"),
+      "Quarterly engineering newsletter: our migration to Postgres 18 and what we learned about partitioning.",
+    ])
+    const day = new Date().toISOString().slice(0, 10)
+    await storeContentVectors(db, ids.c, e.model, [
+      { day, exact: "scam-c", embedding: v1! },
+    ])
+    await storeContentVectors(db, ids.b, e.model, [
+      { day, exact: "scam-b", embedding: v2! },
+    ])
+    await storeContentVectors(db, ids.clean, e.model, [
+      { day, exact: "news", embedding: v3! },
+    ])
+
+    // c is held by staff (earlier test) = confirmed. b's mail reads like c's.
+    const near = await contentNeighbours(db, ids.b, e.model, FREE, new Date())
+    expect(near.taintedSimilar).toBe(1)
+    expect(near.bestTaintedSimilarity!).toBeGreaterThan(0.8)
+    const far = await contentNeighbours(db, ids.clean, e.model, FREE, new Date())
+    expect(far.taintedSimilar).toBe(0)
+
+    // ⚠ Another workspace's vectors are unreachable: with no tenant context the
+    // policy RAISES (by design, see db/core.ts), and from inside another
+    // workspace's context the rows simply are not there.
+    // (postgres.js queries are lazy thenables, not Promises; `expect().rejects`
+    // does not drive them, so the refusal is caught explicitly.)
+    let refused = false
+    try {
+      await app`select * from core.content_vectors where tenant_id = ${ids.c}`
+    } catch {
+      refused = true
+    }
+    expect(refused).toBe(true)
+    const { withTenant } = await import("../src/db/client.js")
+    const { sql: q } = await import("drizzle-orm")
+    const leaked = await withTenant(db, ids.b, (tx) =>
+      tx.execute(
+        q`select * from core.content_vectors where tenant_id = ${ids.c}::uuid`,
+      ),
+    )
+    expect(leaked).toHaveLength(0)
+  })
+
+  it("does not let an automatic hold taint anybody: only confirmed abuse does", async () => {
+    const { contentNeighbours, storeContentVectors } =
+      await import("../src/content/vectors.js")
+    const { hashEmbedder } = await import("../src/content/embed.js")
+    const e = hashEmbedder()
+    const [v] = await e.embed([
+      "Limited offer only today: claim the free gift card waiting in your account, click to verify now.",
+    ])
+    const day = new Date().toISOString().slice(0, 10)
+    const suspect = crypto.randomUUID()
+    const bystander = crypto.randomUUID()
+    await seedTenant(suspect)
+    await seedTenant(bystander)
+    extra.push(suspect, bystander)
+    await storeContentVectors(db, suspect, e.model, [
+      { day, exact: "gift-s", embedding: v! },
+    ])
+    await storeContentVectors(db, bystander, e.model, [
+      { day, exact: "gift-b", embedding: v! },
+    ])
+
+    // Held by the SCORE, awaiting review: not evidence against anyone else.
+    await holdStore(db).hold({
+      tenantId: suspect,
+      source: "score",
+      reason: "auto",
+      category: "content",
+      setBy: "risk-score",
+    })
+    expect(
+      (await contentNeighbours(db, bystander, e.model, FREE, new Date()))
+        .taintedSimilar,
+    ).toBe(0)
+
+    // A person confirms it: now it is.
+    await labelStore(db).add({
+      tenantId: suspect,
+      label: "abuse",
+      source: "staff",
+      features: {},
+      setBy: "mo",
+    })
+    expect(
+      (await contentNeighbours(db, bystander, e.model, FREE, new Date()))
+        .taintedSimilar,
+    ).toBe(1)
+  })
+
+  it("finds labelled behavioural neighbours and counts an actor's velocity", async () => {
+    const { storeBehaviour, behaviourNeighbours, actorVelocity } =
+      await import("../src/content/vectors.js")
+    const { features } = await import("../src/risk/model.js")
+    const { loadFacts } = await import("../src/risk/facts.js")
+    for (const id of [ids.a, ids.b, ids.c, ids.d, ids.clean]) {
+      const f = await loadFacts(id, {
+        db,
+        freePlanId: FREE,
+        ownerInfo: async () => null,
+      })
+      await storeBehaviour(db, id, features(f))
+    }
+    const labels = labelStore(db)
+    for (const id of [ids.a, ids.c, ids.d]) {
+      await labels.add({
+        tenantId: id,
+        label: "abuse",
+        source: "staff",
+        features: {},
+        setBy: "mo",
+      })
+    }
+    await labels.add({
+      tenantId: ids.clean,
+      label: "legit",
+      source: "staff",
+      features: {},
+      setBy: "mo",
+    })
+    const n = await behaviourNeighbours(db, ids.b, 10)
+    expect(n.labelled).toBe(4)
+    expect(n.abuse).toBe(3)
+
+    const [t] =
+      await owner`select owner_clerk_user_id from core.tenants where id = ${ids.a}`
+    const v = await actorVelocity(db, t!.owner_clerk_user_id)
+    expect(v.linkedPeople).toBeGreaterThanOrEqual(4)
+    expect(v.workspaces24h).toBeGreaterThanOrEqual(4)
   })
 })

@@ -1,3 +1,4 @@
+import { restoreBodies } from "../content/restore.js"
 import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { ts, withTenant, type Database } from "../db/client.js"
@@ -597,7 +598,9 @@ export function consoleQueries(db: Database): ConsoleQueries {
             .orderBy(messageEvents.occurredAt),
         ])
 
-        const body = bodies[0]
+        // ⚠ RESTORED, so a body stored as a template plus values (#171) shows
+        // exactly what was sent.
+        const [body] = await restoreBodies(tx, bodies)
 
         return {
           id: message.id,

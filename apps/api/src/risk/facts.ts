@@ -3,6 +3,11 @@ import { withTenant, type Database } from "../db/client.js"
 import { reputationStore } from "../ses-status/reputation-store.js"
 import { looksRandomLabel, registrable, subdomainOf } from "./rules.js"
 import type { Facts, FarmPeer, IdentityFacts } from "./types.js"
+import {
+  actorVelocity,
+  behaviourNeighbours,
+  contentNeighbours,
+} from "../content/vectors.js"
 
 /**
  * Everything a rule may read about one workspace (#170).
@@ -23,6 +28,11 @@ export interface FactsDeps {
   /** Clerk's view of the owner. Cached by the caller; may fail to null. */
   ownerInfo: (clerkUserId: string) => Promise<OwnerInfo | null>
   now?: Date
+  /**
+   * Which embedder's vectors to compare (content/embed.ts). Absent: the
+   * similarity layer is not consulted and `similarity` is null.
+   */
+  contentModel?: string
 }
 
 type Row = Record<string, unknown>
@@ -171,12 +181,33 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     .map((d) => date(d.registered_at))
     .filter(Boolean) as Date[]
 
-  const [identity, workspaces, farm, shared, info] = await Promise.all([
+  /*
+   * ⚠ THE SIMILARITY LAYER FAILS SOFT. pgvector answering slowly, or an index
+   * still building, costs those facts for one run - never the whole score.
+   */
+  const soft = <T>(p: Promise<T>) => p.catch(() => null)
+  const [
+    identity,
+    workspaces,
+    farm,
+    shared,
+    info,
+    actor,
+    similarity,
+    behaviour,
+    templates,
+  ] = await Promise.all([
     identityFacts(db, owner, now),
     ownerWorkspaces(db, owner),
     farmPeers(db, tenantId, deps.freePlanId, now),
     sharedParents(db, parents, tenantId),
     deps.ownerInfo(owner).catch(() => null),
+    soft(actorVelocity(db, owner)),
+    deps.contentModel
+      ? soft(contentNeighbours(db, tenantId, deps.contentModel, deps.freePlanId, now))
+      : Promise.resolve(null),
+    soft(behaviourNeighbours(db, tenantId)),
+    soft(templateFacts(db, tenantId, now)),
   ])
 
   const emailDomain = info?.email?.split("@")[1]?.toLowerCase() ?? null
@@ -269,6 +300,10 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     },
     content: null,
     model: null,
+    actor,
+    similarity,
+    behaviour: behaviour && behaviour.labelled > 0 ? behaviour : null,
+    templates,
   }
 }
 
@@ -358,5 +393,38 @@ async function sharedParents(
   return {
     sharedWith: tenants.size,
     sharedWithHeldOrDead: [...tenants.values()].filter(Boolean).length,
+  }
+}
+
+/**
+ * The workspace's own discovered templates (#169): how many are established -
+ * seen 500+ times over two weeks - and how much of the last week's finished
+ * mail fits one. Mail that matches its own long-standing templates is the
+ * workspace behaving like itself.
+ */
+async function templateFacts(
+  db: Database,
+  tenantId: string,
+  now: Date,
+): Promise<Facts["templates"]> {
+  const rows = (await withTenant(db, tenantId, (tx) =>
+    tx.execute(sql`
+      select
+        (select count(*)::int from core.content_templates
+          where tenant_id = ${tenantId}::uuid and messages >= 500
+            and first_seen_at < ${new Date(now.getTime() - 14 * DAY).toISOString()}::timestamptz) as established,
+        (select count(*)::int from core.message_bodies
+          where tenant_id = ${tenantId}::uuid and created_at > ${new Date(now.getTime() - 7 * DAY).toISOString()}::timestamptz
+            and template_id is not null) as matched,
+        (select count(*)::int from core.message_bodies
+          where tenant_id = ${tenantId}::uuid and created_at > ${new Date(now.getTime() - 7 * DAY).toISOString()}::timestamptz) as recent
+    `),
+  )) as unknown as { established: number; matched: number; recent: number }[]
+  const r = rows[0]
+  if (!r) return null
+  return {
+    established: Number(r.established),
+    recentMatchedShare:
+      Number(r.recent) > 0 ? Number(r.matched) / Number(r.recent) : null,
   }
 }

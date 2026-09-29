@@ -12,6 +12,7 @@ import { identityStore, takeoverResponder } from "./identity.js"
 import { labelStore } from "./labels.js"
 import { riskNotices } from "./notice.js"
 import type { RiskDeps } from "./runner.js"
+import { embedderModelName } from "../content/embed.js"
 import { assessmentStore } from "./store.js"
 
 /**
@@ -54,6 +55,7 @@ export interface RiskSystemInput {
     | "AWS_REGION"
     | "LAYA_URL"
     | "LAYA_API_KEY"
+    | "RISK_EMBEDDER"
   >
   clerk: ClerkForRisk
   redis?: Redis
@@ -139,6 +141,7 @@ export function riskSystem(input: RiskSystemInput) {
       ...(log ? { log } : {}),
     },
     labels,
+    contentModel: embedderModelName(env.RISK_EMBEDDER),
     switches: {
       enabled: env.RISK_ENABLED,
       tiers: env.RISK_ACT_TIERS,

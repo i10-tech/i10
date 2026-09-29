@@ -1,3 +1,4 @@
+import { restoreBodies } from "../content/restore.js"
 import type { Attachment, Tag } from "@repo/contracts"
 import { eq, inArray } from "drizzle-orm"
 import {
@@ -98,9 +99,15 @@ export function databaseOps(
             headers: messageBodies.headers,
             attachments: messageBodies.attachments,
             tags: messageBodies.tags,
+            templateId: messageBodies.templateId,
+            templateValues: messageBodies.templateValues,
           })
           .from(messageBodies)
           .where(inArray(messageBodies.messageId, ids))
+          // ⚠ RESTORED EVEN HERE. Compaction only touches finished messages, so
+          // a claim should never meet a compacted body - but a retry of a
+          // failed message would, and it must send the real thing (#171).
+          .then((rows) => restoreBodies(tx, rows))
 
         const byId = new Map(bodies.map((b) => [b.messageId, b]))
 

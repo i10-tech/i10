@@ -252,6 +252,125 @@ email on one of the workspace's own verified domains, long clean volume.
 
 ---
 
+## Templates and vectors (ruleset 2)
+
+Added 2026-09-29, after the first review of this design (the user's, and an
+outside one). Four ideas, one core.
+
+### One core, two uses: templates
+
+`content/templates.ts` discovers a workspace's own templates from its
+finished mail: two near-duplicate bodies (MinHash bands) are diffed at token
+level (Myers), their common runs become the static skeleton, and what differs
+becomes holes. A body that fits is stored as the template id plus its values
+(#167, #169, #171) - the same 20 KB receipt kept once, not ten thousand times.
+The same templates tell the risk engine what NORMAL mail looks like for this
+workspace (`trust.known_templates`).
+
+- ⚠ **Byte-exact, by construction and by check.** Rendering is concatenation,
+  so any split reconstructs exactly; `compactable` still renders and compares
+  before anything is released, and the UPDATE is guarded on the original bytes.
+- ⚠ **Linked once, compacted when established.** A new match is LINKED
+  (template and values recorded, original kept) and counted once; it is
+  COMPACTED only when its template has 3 matches. One coincidence never
+  rewrites mail.
+- ⚠ **Only finished messages** (sent, failed, canceled). Every reader of
+  `message_bodies` restores through `content/restore.ts`: the worker's claim,
+  `GET /emails/:id`, the console detail, the risk sampler.
+- Per workspace, never shared across workspaces, deleted with it.
+- ⚠ The first version of the job linked nothing: it read `created_at` into a
+  JavaScript Date (milliseconds) and keyed the UPDATE on it, while the column
+  has microseconds. It now carries Postgres's own text. The integration test
+  caught it.
+
+### pgvector inside the CNPG cluster
+
+pgvector 0.8.6 ships in the production image (`18.6-standard-bookworm`), so
+the vectors live in the same database: same transactions, same RLS, same
+definer rules, no vendor. Pinecone would send embeddings of customer mail to a
+third party; a separate Neon database would be a second store to keep
+consistent. Neither buys anything at our scale.
+
+- `core.content_vectors`: one embedding per distinct content per day,
+  `halfvec(384)` with an HNSW cosine index, 30-day retention, tenant RLS.
+- `core.behaviour_vectors`: each workspace's 39 behaviour features,
+  standardised with fixed scales, `vector(39)` with an HNSW L2 index.
+- Cross-workspace questions go through definers (migration 0072) that return
+  counts and distances only: `content_neighbors` (iterative HNSW scan, so a
+  filter cannot empty the top-k), `behaviour_neighbors` (labelled workspaces
+  only), `actor_velocity`.
+
+### The embedder: MiniLM, locally, on WebAssembly
+
+`content/embed.ts`. all-MiniLM-L6-v2 (Apache-2.0, 384 dimensions, 23 MB
+quantised), pinned by Hugging Face commit and SHA-256, run by
+onnxruntime-web's WASM backend. Measured before choosing:
+
+- `@huggingface/transformers` in Node offers only NATIVE onnxruntime, whose
+  binaries are glibc; the runtime image is Alpine. WASM runs anywhere Bun
+  does and was proven on `oven/bun:1.4.2-alpine`, amd64, and in the built
+  production image (`bun dist/risk-score.js --check-embedder`).
+- About 80 ms per 120-word email on one thread, ~310 MB resident, 0.2 s load.
+  Only the hourly job loads it; the API only compares stored vectors.
+- Its WordPiece tokenizer is implemented here and gives token ids identical to
+  the reference library's; embeddings agree at cosine 0.98 or better.
+- It separates meaning: two different phishing emails scored 0.63 against
+  each other, 0.19 against a receipt.
+- multilingual-e5-small was also measured (same speed, 100 languages) but
+  its runtime was native-only here; MiniLM is English-first. Multilingual is a
+  model swap once needed.
+- `RISK_EMBEDDER=hash` (or missing model files) falls back to `hash-v1`,
+  feature hashing over words, word pairs and character trigrams - wording, not
+  meaning. Vectors are tagged with their model and never compared across models.
+
+### Rules the layer feeds (ruleset 2)
+
+| Rule                           | Points                     | Why this weight                                                                         |
+| ------------------------------ | -------------------------- | --------------------------------------------------------------------------------------- |
+| `content.like_confirmed_abuse` | 20, or 30 at 2+ workspaces | mail reads like a confirmed abuser's                                                    |
+| `content.semantic_crowd`       | 12                         | the same message, reworded, from 4+ new free workspaces                                 |
+| `behaviour.like_abuse`         | 8 or 20                    | 50% / 70% of the 10 nearest labelled neighbours were abuse (5+ labelled needed)         |
+| `actor.velocity`               | 15 or 30                   | the actor (owner plus anyone on their device or network) made 3 / 6 workspaces in a day |
+| `actor.domain_velocity`        | 10                         | 10+ domains across the actor's workspaces in a day                                      |
+| `actor.cluster_size`           | 10                         | the actor reaches 10+ live workspaces                                                   |
+| `trust.known_templates`        | -5                         | 80%+ of recent mail fits the workspace's own established templates                      |
+
+⚠ **Similarity is evidence, not a verdict.** Its weights are modest until real
+labels show how it performs, and a test proves no amount of similarity alone
+can reach critical. The model also learns from it (five new features beyond
+the 39 behaviour features).
+
+### The feedback-loop rule
+
+**No score may feed another score.** Before ruleset 2, "linked to a HELD
+workspace" was penalised, and a hold can be the score's own automatic action
+still awaiting review: A held by the score, B critical by association, B held,
+then C - a cascade built from the engine agreeing with itself. Linkage now
+counts only CONFIRMED abuse (`core.risk_tainted_tenants`): a hold staff
+placed, a hold staff upheld, or a staff abuse label. Observations and human
+verdicts go in; scores never do. Behaviour neighbours are labelled by outcomes
+for the same reason. The integration test proves a score hold taints nobody
+until a person confirms it.
+
+### Deploying the vector layer
+
+pgvector is not a trusted extension; only a superuser can create it, and
+migrations run as `i10`, which is not one. So:
+
+1. **CNPG creates it** from `infra/k8s/i10/platform-db/database.yaml` (a
+   `Database` resource adopting `i10`, `databaseReclaimPolicy: retain`).
+2. Migration 0070 says `CREATE EXTENSION IF NOT EXISTS vector`: a no-op when
+   step 1 has run, a loud failure when it has not.
+3. ⚠ The two are different Argo apps with no ordering between them, so the
+   Database resource must be applied BEFORE the merge that carries 0070:
+   `kubectl apply -f infra/k8s/i10/platform-db/database.yaml`.
+
+Locally, `compose.dev.yaml` now runs the same CNPG image, bootstrapped by
+`dev/postgres/cnpg-entry.sh` to mirror production's roles (`postgres` the
+only superuser, `i10` a non-superuser owner, pgvector in `template1` so
+throwaway databases have it). All 72 migrations were proven to apply as the
+non-superuser owner.
+
 ## Account takeover is a separate response
 
 Impossible travel usually means stolen credentials, not a spammer. When it

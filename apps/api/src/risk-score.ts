@@ -32,9 +32,40 @@ import { postgresMetering } from "./metering/service.js"
 import { createSendQueue } from "./queue/send-queue.js"
 import { resilient } from "./send/metering.js"
 import { runAll } from "./risk/runner.js"
+import { embedderFor } from "./content/embed.js"
 import { riskSystem, systemTenantIds } from "./risk/wire.js"
 
 const log = pino({ name: "i10-risk-score" })
+
+/*
+ * ⚠ `--check-embedder` PROVES THE IMAGE CAN EMBED, WITHOUT A DATABASE. The
+ * model and onnxruntime's WebAssembly are copied beside the bundle by the
+ * Dockerfile, and `bun build` once silently dropped groupmq's Lua the same way
+ * - so this is run against the built image, and can be run in the cluster:
+ *   kubectl -n i10-prod run embed-check --rm -it --image=<api image> -- bun dist/risk-score.js --check-embedder
+ */
+if (process.argv.includes("--check-embedder")) {
+  const e = await embedderFor(process.env.RISK_EMBEDDER ?? "minilm", log)
+  const [a, b, c] = await e.embed([
+    "Verify your password now or your mailbox will be closed within 24 hours.",
+    "Your mailbox storage is full. Confirm your login details immediately to avoid suspension.",
+    "Thanks for your order. Your receipt for the annual plan is attached.",
+  ])
+  const cos = (x: number[], y: number[]) => x.reduce((s, v, i) => s + v * y[i]!, 0)
+  console.log(
+    JSON.stringify({
+      model: e.model,
+      phishing: cos(a!, b!).toFixed(3),
+      receipt: cos(a!, c!).toFixed(3),
+    }),
+  )
+  process.exit(
+    e.model === "hash-v1" && (process.env.RISK_EMBEDDER ?? "minilm") === "minilm"
+      ? 1
+      : 0,
+  )
+}
+
 const env = loadEnv()
 
 initObservability({
@@ -117,10 +148,15 @@ await withMonitor(
         log,
       })
       const model = await risk.labels.model(true).catch(() => null)
+      // ⚠ ONLY THIS JOB LOADS THE EMBEDDER (~300 MB for MiniLM); the API only
+      // queries vectors by model name. See content/embed.ts.
+      const embedder = await embedderFor(env.RISK_EMBEDDER, log)
+      log.info({ embedder: embedder.model }, "content embedder ready")
 
       const summary = await runAll({
         ...risk.deps,
         model,
+        embedder,
         torRedis: cache,
         ...(env.IPINFO_TOKEN ? { ipinfoToken: env.IPINFO_TOKEN } : {}),
         ...(env.WEBRISK_API_KEY ? { webRiskKey: env.WEBRISK_API_KEY } : {}),

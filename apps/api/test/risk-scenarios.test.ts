@@ -245,3 +245,129 @@ describe("helpers", () => {
     expect(c?.points).toBe(3)
   })
 })
+
+describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
+  const actor = (
+    over: Partial<NonNullable<ReturnType<typeof baseFacts>["actor"]>> = {},
+  ) => ({
+    linkedPeople: 1,
+    workspaces24h: 1,
+    workspaces7d: 1,
+    linkedWorkspaces: 1,
+    linkedTainted: 0,
+    domains24h: 0,
+    keys24h: 0,
+    ...over,
+  })
+  const sim = (
+    over: Partial<NonNullable<ReturnType<typeof baseFacts>["similarity"]>> = {},
+  ) => ({
+    model: "minilm-l6-v2-q8",
+    similarPeers: 0,
+    youngFreeSimilar: 0,
+    taintedSimilar: 0,
+    bestTaintedSimilarity: null,
+    ...over,
+  })
+
+  it("catches an actor minting workspaces: six in a day across one device", () => {
+    const a = evaluate(
+      baseFacts({
+        actor: actor({ linkedPeople: 5, workspaces24h: 6, domains24h: 12 }),
+      }),
+    )
+    expect(a.contributions.map((c) => c.rule)).toEqual(
+      expect.arrayContaining(["actor.velocity", "actor.domain_velocity"]),
+    )
+    expect(bandRank(a.band)).toBeGreaterThanOrEqual(bandRank("elevated"))
+  })
+
+  it("leaves one person making two workspaces alone", () => {
+    expect(evaluate(baseFacts({ actor: actor({ workspaces24h: 2 }) })).band).toBe("low")
+  })
+
+  it("treats mail like a confirmed abuser's as evidence, not a verdict", () => {
+    const one = evaluate(
+      baseFacts({
+        similarity: sim({ taintedSimilar: 1, bestTaintedSimilarity: 0.91 }),
+      }),
+    )
+    expect(
+      one.contributions.find((c) => c.rule === "content.like_confirmed_abuse")?.points,
+    ).toBe(20)
+    expect(one.band).toBe("low")
+    const withFarm = evaluate(
+      baseFacts({
+        similarity: sim({ taintedSimilar: 2, bestTaintedSimilarity: 0.95 }),
+        farm: { peers: [peer(), peer()] },
+      }),
+    )
+    expect(bandRank(withFarm.band)).toBeGreaterThanOrEqual(bandRank("elevated"))
+  })
+
+  it("never holds anybody on similarity alone", () => {
+    const a = evaluate(
+      baseFacts({
+        similarity: sim({
+          taintedSimilar: 5,
+          youngFreeSimilar: 9,
+          bestTaintedSimilarity: 0.99,
+        }),
+        behaviour: {
+          labelled: 10,
+          abuse: 10,
+          legit: 0,
+          meanAbuseDistance: 0.1,
+          nearestDistance: 0.1,
+        },
+      }),
+    )
+    expect(a.band).not.toBe("critical")
+  })
+
+  it("needs five labelled neighbours before behaviour speaks", () => {
+    const few = evaluate(
+      baseFacts({
+        behaviour: {
+          labelled: 3,
+          abuse: 3,
+          legit: 0,
+          meanAbuseDistance: 0.2,
+          nearestDistance: 0.2,
+        },
+      }),
+    )
+    expect(few.contributions.map((c) => c.rule)).not.toContain("behaviour.like_abuse")
+    const many = evaluate(
+      baseFacts({
+        behaviour: {
+          labelled: 10,
+          abuse: 8,
+          legit: 2,
+          meanAbuseDistance: 0.3,
+          nearestDistance: 0.2,
+        },
+      }),
+    )
+    expect(
+      many.contributions.find((c) => c.rule === "behaviour.like_abuse")?.points,
+    ).toBe(20)
+  })
+
+  it("earns trust for mail that fits the workspace's own established templates", () => {
+    const a = evaluate(
+      baseFacts({ templates: { established: 2, recentMatchedShare: 0.9 } }),
+    )
+    expect(
+      a.contributions.find((c) => c.rule === "trust.known_templates")?.points,
+    ).toBe(-5)
+    const b = evaluate(
+      baseFacts({ templates: { established: 2, recentMatchedShare: 0.4 } }),
+    )
+    expect(b.contributions.map((c) => c.rule)).not.toContain("trust.known_templates")
+  })
+
+  it("is ruleset version 2", () => {
+    expect(RULESET_VERSION).toBe(2)
+  })
+})
