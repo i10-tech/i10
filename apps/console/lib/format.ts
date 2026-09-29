@@ -219,3 +219,28 @@ export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)}s`
 }
+
+/**
+ * `5 hr 12 min`, `3 days`, `12 min` - how long until `iso`, for a limit's
+ * reset line ("Resets in 5 hr 12 min"), the way Claude's usage page says it.
+ *
+ * ⚠ HOURS AND MINUTES UNDER A DAY, WHOLE DAYS PAST ONE. "Resets in 11 days 4
+ * hr" is precision nobody budgets against; "Resets in 4 hr 38 min" is the
+ * number somebody waiting to send again actually wants.
+ *
+ * ⚠ `now` IS A PARAMETER, and like `formatRelative` this belongs in a server
+ * component: the server and the browser would disagree by the render's delay.
+ */
+export function formatUntil(iso: string, now: number = Date.now()): string {
+  const ms = new Date(iso).getTime() - now
+  if (Number.isNaN(ms)) return iso
+  const minutes = Math.max(1, Math.ceil(ms / 60_000))
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    const rest = minutes % 60
+    return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`
+  }
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? "" : "s"}`
+}

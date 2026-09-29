@@ -353,6 +353,20 @@ export interface FeatureUsage {
   status: "ok" | "unentitled" | "unreadable"
 }
 
+/** One sending limit, per window. Mirrors `SendingLimit` in the API. */
+export interface SendingLimit {
+  window: "day" | "week" | "month" | "year" | "lifetime"
+  count: number
+  source: "plan" | "tier" | "none"
+  tier?: string
+  used: number
+  allowance: number | null
+  remaining: number | null
+  resets_at: string | null
+  overage: boolean
+  status: "ok" | "unreadable"
+}
+
 export interface ContactRow {
   id: string
   email: string

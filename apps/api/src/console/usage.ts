@@ -80,6 +80,43 @@ export interface FeatureUsage {
   status: "ok" | "unentitled" | "unreadable"
 }
 
+/**
+ * One sending limit: a window of time and how much of it has been used, like
+ * Claude's "current session" and "weekly" rows.
+ *
+ * ⚠ A SEND IS REFUSED WHEN ANY ONE OF THEM IS FULL, SO THEY ARE SHOWN
+ * TOGETHER. A free workspace has two - 100 a day from its plan, and a monthly
+ * line from its sending tier (#165) - and the one that binds is whichever is
+ * closer to full. A paid plan has one, and its other rows say so rather than
+ * disappearing, so the page reads the same for everybody.
+ *
+ * ⚠ ORDERED BY WINDOW LENGTH, AND NOT FIXED AT TWO. A plan with a weekly line
+ * (or anything else `ResetInterval` can express) adds a row with no console
+ * change.
+ */
+export interface SendingLimit {
+  /** `day`, `week`, `month`, `year` or `lifetime`. */
+  window: string
+  /** `intervalCount` of the window: 3 with `month` is quarterly. */
+  count: number
+  /**
+   * `plan` - the workspace's plan sets it.
+   * `tier` - the free sending tier sets it (#165); `tier` names which.
+   * `none` - nothing limits this window. Shown as "No daily limit".
+   */
+  source: "plan" | "tier" | "none"
+  tier?: string
+  used: number
+  /** Null for `none`, and for an unlimited allowance. */
+  allowance: number | null
+  remaining: number | null
+  resets_at: string | null
+  /** The plan bills past the line instead of refusing. Never true for a tier. */
+  overage: boolean
+  /** `unreadable`: the meter threw. Shown as a dash, never as a zero. */
+  status: "ok" | "unreadable"
+}
+
 export interface PlanSummary {
   id: string
   name: string
@@ -123,6 +160,8 @@ export interface BillingState {
 
 export interface UsageStore {
   usage(tenantId: string): Promise<FeatureUsage[]>
+  /** The email sending limits, one per window (see `SendingLimit`). */
+  limits(tenantId: string): Promise<SendingLimit[]>
   billing(tenantId: string): Promise<BillingState>
   catalog(tenantId: string): Promise<PlanSummary[]>
 }
@@ -234,11 +273,11 @@ export function usageStore({
           }
         }),
       )
-      const [features, monthly] = await Promise.all([
-        reported,
-        tiers ? tierUsage(tiers, tenantId, at, log) : null,
-      ])
-      return monthly ? [...features, monthly] : features
+      return reported
+    },
+
+    async limits(tenantId) {
+      return sendingLimits({ meter, tiers, log }, tenantId, now())
     },
 
     async billing(tenantId) {
@@ -342,43 +381,124 @@ function toPlanSummary(plan: typeof plans.$inferSelect): PlanSummary {
   }
 }
 
-const TIER_LABEL = { strict: "Strict", normal: "Normal" } as const
+/** The windows every workspace is shown, whether or not anything limits them. */
+const ALWAYS_SHOWN = ["day", "month"] as const
+
+const WINDOW_ORDER = ["day", "week", "month", "year", "lifetime"]
 
 /**
- * A free workspace's monthly ceiling as one more usage row (#165), or null for
- * a paid workspace - which has no tier and must not be shown one.
+ * The email limits, from the same meters the send path enforces with: the
+ * plan's, and for a free workspace the tier's (metering/tiers.ts).
  *
- * ⚠ SILENT ON FAILURE. The row is extra information; a failed read leaves the
- * page with its ordinary rows rather than a dash that reads like a problem.
+ * ⚠ A FAILED READ IS A ROW MARKED `unreadable`, NOT A MISSING ROW. A missing
+ * daily row on a free workspace reads as "no daily limit", which is false and
+ * is the worst thing this page could say by accident.
  */
-async function tierUsage(
-  tiers: NonNullable<UsageDeps["tiers"]>,
+async function sendingLimits(
+  { meter, tiers, log }: Pick<UsageDeps, "meter" | "tiers" | "log">,
   tenantId: string,
   at: Date,
-  log: UsageDeps["log"],
-): Promise<FeatureUsage | null> {
-  try {
-    const [balance, current] = await Promise.all([
-      tiers.meter.balanceOf({ tenantId, featureId: "emails", at }),
-      tiers.store.current(tenantId),
-    ])
-    if (balance.status !== "ok" || balance.allowance === "unlimited") return null
-    return {
-      feature_id: "emails.monthly",
-      label: `Emails this month (${TIER_LABEL[current.tier]} tier)`,
-      unit: "",
-      used: balance.used,
-      allowance: balance.allowance,
-      remaining: balance.remaining,
-      resets_at: balance.window?.end?.toISOString() ?? null,
-      overage: false,
+): Promise<SendingLimit[]> {
+  const found: SendingLimit[] = []
+  let planUnreadable = false
+
+  const [plan, tier] = await Promise.all([
+    meter.balanceOf({ tenantId, featureId: "emails", at }).catch((error: unknown) => {
+      log?.warn(
+        { err: describeErrorChain(error), tenantId },
+        "could not read the plan's sending limit",
+      )
+      planUnreadable = true
+      return null
+    }),
+    tiers
+      ? Promise.all([
+          tiers.meter.balanceOf({ tenantId, featureId: "emails", at }),
+          tiers.store.current(tenantId),
+        ]).catch((error: unknown) => {
+          log?.warn(
+            { err: describeErrorChain(error), tenantId },
+            "could not read the sending tier's limit",
+          )
+          return null
+        })
+      : null,
+  ])
+
+  if (plan?.status === "ok" && plan.interval) {
+    const allowance = plan.allowance === "unlimited" ? null : plan.allowance
+    found.push({
+      window: plan.interval,
+      count: plan.intervalCount ?? 1,
+      source: allowance === null ? "none" : "plan",
+      used: plan.used,
+      allowance,
+      remaining: allowance === null ? null : plan.remaining,
+      resets_at: plan.window?.end?.toISOString() ?? null,
+      overage: plan.overage,
       status: "ok",
-    }
-  } catch (error) {
-    log?.warn(
-      { err: describeErrorChain(error), tenantId },
-      "could not read the sending tier's usage",
-    )
-    return null
+    })
   }
+
+  // ⚠ `unentitled` FROM THE TIER METER MEANS "NOT A FREE WORKSPACE", which is
+  // exactly true of a paid one - no row, and the month says "no limit".
+  if (tier) {
+    const [balance, current] = tier
+    if (
+      balance.status === "ok" &&
+      balance.interval &&
+      balance.allowance !== "unlimited"
+    ) {
+      found.push({
+        window: balance.interval,
+        count: balance.intervalCount ?? 1,
+        source: "tier",
+        tier: current.tier,
+        used: balance.used,
+        allowance: balance.allowance,
+        remaining: balance.remaining,
+        resets_at: balance.window?.end?.toISOString() ?? null,
+        overage: false,
+        status: "ok",
+      })
+    }
+  }
+
+  // Every window always shown, filled with "no limit" when nothing sets it -
+  // or with a dash when the plan could not be read, since it may set it.
+  for (const window of ALWAYS_SHOWN) {
+    if (found.some((l) => l.window === window && l.count === 1)) continue
+    found.push({
+      window,
+      count: 1,
+      source: "none",
+      used: planUsedIn(window, plan),
+      allowance: null,
+      remaining: null,
+      resets_at: null,
+      overage: false,
+      status: planUnreadable ? "unreadable" : "ok",
+    })
+  }
+
+  return found.sort(
+    (a, b) =>
+      WINDOW_ORDER.indexOf(a.window) - WINDOW_ORDER.indexOf(b.window) ||
+      a.count - b.count,
+  )
+}
+
+/**
+ * Usage to show on a window nothing limits: the plan's own count when the plan
+ * measures that same window, else nothing we can honestly state.
+ *
+ * ⚠ ZERO RATHER THAN A SECOND QUERY. A "no daily limit" row on a paid plan
+ * does not need a daily count, and computing one here would be the second
+ * implementation of usage this file exists to avoid.
+ */
+function planUsedIn(
+  window: string,
+  plan: Awaited<ReturnType<Meter["balanceOf"]>> | null,
+): number {
+  return plan?.status === "ok" && plan.interval === window ? plan.used : 0
 }

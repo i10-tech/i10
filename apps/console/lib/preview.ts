@@ -890,11 +890,25 @@ const ROUTES: [
           overage: false,
           status: "unreadable" as const,
         },
-        // A free workspace's tier ceiling (#165).
+      ],
+      // A free workspace: the plan's 100 a day, and its tier's month (#165).
+      limits: [
         {
-          feature_id: "emails.monthly",
-          label: "Emails this month (Normal tier)",
-          unit: "",
+          window: "day" as const,
+          count: 1,
+          source: "plan" as const,
+          used: 62,
+          allowance: 100,
+          remaining: 38,
+          resets_at: new Date(Date.now() + 5 * 3_600_000 + 12 * 60_000).toISOString(),
+          overage: false,
+          status: "ok" as const,
+        },
+        {
+          window: "month" as const,
+          count: 1,
+          source: "tier" as const,
+          tier: "normal",
           used: 1840,
           allowance: 3000,
           remaining: 1160,

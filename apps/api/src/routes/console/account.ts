@@ -112,11 +112,12 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
 
   app.get("/usage", async (c) => {
     const { tenantId } = c.get("auth")
-    const [usage, billing] = await Promise.all([
+    const [usage, limits, billing] = await Promise.all([
       d.usage.usage(tenantId),
+      d.usage.limits(tenantId),
       d.usage.billing(tenantId),
     ])
-    return c.json({ usage, billing })
+    return c.json({ usage, limits, billing })
   })
 
   app.get("/plans", async (c) => {
