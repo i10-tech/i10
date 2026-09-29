@@ -526,6 +526,20 @@
       "when": 1790642664043,
       "tag": "0074_trusted_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790649790703,
+      "tag": "0075_content_storage",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1790649813575,
+      "tag": "0076_content_storage_definers",
+      "breakpoints": true
     }
   ]
 }

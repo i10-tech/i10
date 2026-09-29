@@ -65,6 +65,46 @@ resource "cloudflare_r2_bucket" "backups" {
   lifecycle { prevent_destroy = true }
 }
 
+# Message content: attachments now (#136, #168), bodies later (#188). Objects
+# are content-addressed per tenant, `<tenant_id>/sha256/<hash>`.
+#
+# ⚠ PRIVATE, AND NOT `i10`. The files bucket sits behind cdn.i10.tech; nothing
+# here may ever have a custom domain or the r2.dev URL. Customers reach content
+# only through our API, behind the tenant check. Created by hand on 2026-09-29
+# with no public access, then imported like the rest.
+#
+# ⚠ NO LIFECYCLE RULE, EVER. Objects are shared by every message that carries
+# the same bytes, so an object's age says nothing about whether it is still
+# referenced. Our own sweep deletes an object once its last reference is gone.
+
+import {
+  to = cloudflare_r2_bucket.content
+  id = "${var.cloudflare_account_id}/i10-content/default"
+}
+
+resource "cloudflare_r2_bucket" "content" {
+  account_id    = var.cloudflare_account_id
+  name          = "i10-content"
+  location      = var.r2_location
+  storage_class = "Standard"
+
+  lifecycle { prevent_destroy = true }
+}
+
+import {
+  to = cloudflare_r2_bucket.content_dev
+  id = "${var.cloudflare_account_id}/i10-content-dev/default"
+}
+
+resource "cloudflare_r2_bucket" "content_dev" {
+  account_id    = var.cloudflare_account_id
+  name          = "i10-content-dev"
+  location      = var.r2_location
+  storage_class = "Standard"
+
+  lifecycle { prevent_destroy = true }
+}
+
 # ⚠ DO NOT PUT A BUCKET LOCK ON i10-backups. PSL learned this on its own
 # archive: a lock tuned to one tool's prune horizon silently breaks a second
 # tool that prunes on its own schedule. CNPG's Barman deletes expired WAL and

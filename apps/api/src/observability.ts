@@ -46,6 +46,8 @@ export type Service =
   | "domain-prove"
   | "domain-orphans"
   | "risk-score"
+  | "content-store"
+  | "retention"
 
 export interface ObservabilityOptions {
   /**

@@ -357,6 +357,18 @@ export interface EventOps {
 
   /** Pushes the deliveries. Called only after the transaction commits. */
   enqueue: (deliveries: readonly DeliveryRef[]) => Promise<void>
+
+  /**
+   * Who a message retention already deleted belonged to, from its tombstone
+   * (`core.expired_messages`), and the suppressions alone, for that tenant.
+   *
+   * ⚠ OPTIONAL SO A TEST DOUBLE CAN LEAVE IT OUT, NEVER IN PRODUCTION. Without
+   * it a complaint that arrives after a three-day plan expired its message
+   * suppresses nothing, and the workspace keeps mailing the person who
+   * complained.
+   */
+  expiredOwnerOf?: (messageId: string) => Promise<string | null>
+  suppressOnly?: (input: { tenantId: string; event: NormalisedEvent }) => Promise<void>
 }
 
 export type IngestOutcome =
@@ -364,6 +376,8 @@ export type IngestOutcome =
   | { status: "duplicate" }
   /** The tag named a message we have no row for. */
   | { status: "unknown_message" }
+  /** Its message expired; only its suppressions were written. */
+  | { status: "suppressed_expired" }
   /** A type we do not carry - open, click, or something new. */
   | { status: "ignored" }
 
@@ -404,6 +418,16 @@ export async function ingestEvent(
   deps: EventOps & { log: Logger },
 ): Promise<IngestOutcome> {
   const owner = await deps.ownerOf(event.messageId)
+  if (!owner && event.suppress.length > 0 && deps.expiredOwnerOf && deps.suppressOnly) {
+    // ⚠ RETENTION DELETED THE MESSAGE, NOT THE OBLIGATION. The event row and
+    // the customer's webhook go with the message - there is nothing left to
+    // attach them to - but a bounce or a complaint still stops the address.
+    const tenantId = await deps.expiredOwnerOf(event.messageId)
+    if (tenantId) {
+      await deps.suppressOnly({ tenantId, event })
+      return { status: "suppressed_expired" }
+    }
+  }
   if (!owner) {
     // ⚠ NOT AN ERROR, AND NOT A RETRY. The likeliest cause is retention: the
     // partition holding a months-old message was dropped and a very late event

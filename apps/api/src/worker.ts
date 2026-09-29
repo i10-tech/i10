@@ -33,6 +33,7 @@ import { webhookDeliveryOps } from "./webhooks/db.js"
 import { deliverWebhook } from "./webhooks/deliver.js"
 import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
+import { objectStoreFrom } from "./content/object-store.js"
 import { handleBatch } from "./worker/handle-batch.js"
 
 /**
@@ -249,6 +250,7 @@ const ops = databaseOps({
   db,
   workerId,
   staleAfter: env.WORKER_CLAIM_STALE_AFTER,
+  store: objectStoreFrom(env),
 })
 
 function startWorker(cls: SendClass) {

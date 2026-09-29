@@ -93,6 +93,31 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
       }
     },
 
+    async expiredOwnerOf(messageId) {
+      const rows = (await opts.db.execute(
+        sql`select core.expired_message_owner(${messageId}::uuid) as tenant_id`,
+      )) as unknown as Row[]
+      const id = rows[0]?.tenant_id
+      return id ? String(id) : null
+    },
+
+    async suppressOnly({ tenantId, event }) {
+      if (event.suppress.length === 0) return
+      await withTenant(opts.db, tenantId, (tx) =>
+        tx
+          .insert(suppressions)
+          .values(
+            event.suppress.map((entry) => ({
+              tenantId,
+              address: entry.address,
+              reason: entry.reason,
+              messageId: event.messageId,
+            })),
+          )
+          .onConflictDoNothing(),
+      )
+    },
+
     async record({ tenantId, event }) {
       return withTenant(opts.db, tenantId, async (tx) => {
         // ⚠ THE EVENT ROW IS THE DEDUPE, AND IT IS WRITTEN FIRST. SNS retries a

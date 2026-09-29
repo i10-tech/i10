@@ -1,0 +1,60 @@
+# Moves finished messages' attachments to R2, on a schedule (#136, #168, #188).
+#
+# ⚠ THE SAME IMAGE AND ANOTHER COMMAND, like the sweep and the reconciler.
+# `bun dist/content-store.js` runs one pass and exits.
+#
+# ⚠ ACCEPT STILL WRITES FILES INLINE, and this is the "process later" half:
+# nothing touches object storage before the 202, and files wait in Postgres
+# minutes, not hours. Without the CONTENT_STORE_* keys (Doppler, prod_api) it
+# logs and exits 0, and attachments stay where they are.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-content-store
+  namespace: i10-prod
+spec:
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/content-store.ts, AND THEY MUST
+  # AGREE, or Sentry reports runs as missed while they work.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Under the five-minute interval, so a hung upload cannot hold `Forbid`.
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: content-store
+              image: ghcr.io/i10-tech/i10-api:prod-5084da3dd090946d5e1606b05e8a82145e22762a@sha256:442f4d55621c5f7e7075b32d26dc001b8c5f96660c9ee006f4edbb3adf132e4a
+              imagePullPolicy: Always
+              command: ["bun", "dist/content-store.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER. The pass finds its workspaces
+                # through SECURITY DEFINER functions that return ids only (0076)
+                # and does the work per tenant, under RLS.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 512Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }
