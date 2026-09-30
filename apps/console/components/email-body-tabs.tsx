@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
 import { CopyButton } from "@repo/ui/components/copy"
+import { EmailFrame } from "@/components/email-frame"
 
 /**
  * What was actually sent: rendered, as source, as text, and as headers.
@@ -27,10 +28,11 @@ import { CopyButton } from "@repo/ui/components/copy"
  * document's origin. The sandbox would still contain it, but the two mechanisms
  * would be fighting and only one of them is load-bearing.
  *
- * What we accept in exchange: remote images do not load, because the frame has
- * no network permission the parent can grant it beyond the default - which is
- * fine and arguably correct, since loading them would fire the sender's own
- * tracking pixels every time somebody opened the log.
+ * ⚠ THE SANDBOX ALONE DID NOT STOP REMOTE IMAGES, whatever this comment once
+ * said: `sandbox` restricts scripts, forms and navigation, not subresources.
+ * `EmailFrame` adds the CSP that does (#189), so opening a log no longer fires
+ * the sender's tracking pixels, and the viewer can still load images on
+ * purpose.
  */
 export function EmailBodyTabs({
   html,
@@ -87,19 +89,10 @@ export function EmailBodyTabs({
 
         <TabsContent value="preview" className="m-0">
           {html ? (
-            <iframe
-              // ⚠ SEE THE BLOCK COMMENT. Do not add tokens to this attribute.
-              sandbox=""
-              srcDoc={html}
-              title="Email preview"
-              className="h-[36rem] w-full bg-white"
-              // ⚠ `referrerPolicy` AND `loading` ARE BELT AND BRACES. The frame
-              // cannot navigate, but any subresource it references would
-              // otherwise carry our URL - which contains the message id - to a
-              // third-party image host.
-              referrerPolicy="no-referrer"
-              loading="lazy"
-            />
+            // ⚠ SEE `EmailFrame`: sandboxed, with a CSP that keeps the
+            // sender's tracking pixels from firing every time somebody opens
+            // the log, and remote images one click away (#189).
+            <EmailFrame html={html} title="Email preview" className="h-[36rem]" />
           ) : (
             <Empty>This message had no HTML body.</Empty>
           )}

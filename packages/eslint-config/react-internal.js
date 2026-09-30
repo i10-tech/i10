@@ -28,6 +28,11 @@ export const config = [
     rules: {
       ...pluginReactHooks.configs.recommended.rules,
       "react/react-in-jsx-scope": "off",
+      // ⚠ BANNED (#189): the console renders what customers wrote, and HTML
+      // set this way runs in our origin with the person's session. Emails
+      // render in `EmailFrame`; source renders as text. The few uses of our
+      // own generated markup carry a disable with the reason on the line.
+      "react/no-danger": "error",
     },
   },
 ]

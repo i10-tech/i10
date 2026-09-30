@@ -41,6 +41,9 @@ export interface MimeAttachment {
 
 const CRLF = "\r\n"
 
+/** RFC 5322 `field-name`: printable ASCII except the colon. */
+const FIELD_NAME = /^[\x21-\x39\x3b-\x7e]+$/
+
 /**
  * ⚠ HEADERS WE OWN. A caller-supplied copy of any of these is dropped: `From`
  * and `To` decide who the mail is from and to, `Message-ID` is ours to derive
@@ -99,6 +102,10 @@ export function buildRawMessage(
 
   for (const [name, value] of Object.entries(message.headers ?? {})) {
     if (OWNED.has(name.toLowerCase())) continue
+    // ⚠ A NAME THAT IS NOT A FIELD NAME IS DROPPED, NOT WRITTEN (#189). The
+    // contract refuses them; this is the second line, for any path that did
+    // not come through it, because a name is written raw before the colon.
+    if (!FIELD_NAME.test(name)) continue
     // ⚠ THE CALLER'S LINE BREAKS ARE STILL FLATTENED FIRST, AND THEN WE FOLD.
     // A CR or LF arriving in a header value is header injection - the caller
     // could otherwise append headers, or a whole second MIME part, to their own
@@ -476,7 +483,15 @@ export function formatAddressList(addresses: readonly string[]): string {
   return addresses.map(formatAddress).join(", ")
 }
 
-function formatAddress(address: string): string {
+function formatAddress(input: string): string {
+  // ⚠ CONTROL CHARACTERS BECOME A SPACE BEFORE ANYTHING ELSE (#189). The
+  // contract refuses them; this keeps a CR or LF in a display name from ever
+  // reaching a header by any other path.
+  let address = ""
+  for (const ch of input) {
+    const c = ch.charCodeAt(0)
+    address += c < 0x20 || c === 0x7f ? " " : ch
+  }
   const match = /^\s*(.*?)\s*<([^>]*)>\s*$/.exec(address)
   if (!match) return address.trim()
 
