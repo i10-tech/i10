@@ -8,6 +8,12 @@
       "port": 3010
     },
     {
+      "name": "web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--filter", "@i10/web", "dev"],
+      "port": 3002
+    },
+    {
       "name": "template-renderer",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["--filter", "@i10/template-renderer", "dev"],
