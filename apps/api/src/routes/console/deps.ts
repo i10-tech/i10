@@ -11,6 +11,9 @@ import type { MarketingStore } from "../../console/marketing.js"
 import type { TemplateStore } from "../../templates/store.js"
 import type { Renderer } from "../../templates/renderer.js"
 import type { TemplateAssets } from "../../templates/assets.js"
+import type { GitHubApp } from "../../github/client.js"
+import type { GithubStore } from "../../github/store.js"
+import type { GithubSyncer } from "../../github/sync.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
 import type { UsageStore } from "../../console/usage.js"
 import type { DomainStore } from "../../domains/store.js"
@@ -90,6 +93,17 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * settings, uploads answer 501 and the editor takes image addresses only.
    */
   templateAssets?: TemplateAssets
+  /**
+   * GitHub-connected templates (#235). Optional: without the GITHUB_APP_*
+   * settings the routes answer 501 and nothing else changes.
+   */
+  github?: {
+    app: GitHubApp
+    store: GithubStore
+    syncer: GithubSyncer
+    /** The app's OAuth client secret, which also keys the install state. */
+    clientSecret: string
+  }
   profile: TenantProfileStore
   /**
    * Renaming the Clerk organization behind the workspace.

@@ -492,6 +492,7 @@ const TEMPLATES: {
   folder: string | null
   kind: "html" | "tsx" | "visual"
   design?: Record<string, unknown>
+  github?: { repository: string; directory: string; path: string; removed: boolean }
   source: "managed" | "upload" | "github"
   subject: string | null
   html: string | null
@@ -567,6 +568,12 @@ const TEMPLATES: {
     folder: "billing",
     kind: "tsx",
     source: "github",
+    github: {
+      repository: "acme/emails",
+      directory: "emails",
+      path: "billing/receipt.tsx",
+      removed: false,
+    },
     subject: "Your receipt from Acme",
     html: null,
     text: null,
@@ -584,7 +591,7 @@ const TEMPLATES: {
         { path: "order.id", preview: "A-1042" },
         { path: "order.total", preview: "$42.00" },
       ],
-      path: "emails/billing/receipt.tsx",
+      path: "billing/receipt.tsx",
       commit_sha:
         n === 1
           ? "4f1c2a9e0b7d3c55a6e1f00d9b2c8e7a61d3b4c2"
@@ -662,6 +669,7 @@ function summary(full: (typeof TEMPLATES)[number]) {
     published_at: live ? ago(live.days) : null,
     version: full.live,
     versions: full.versions.length,
+    github: full.github ?? null,
     created_at: ago(full.created_days),
     updated_at: ago(full.updated_days),
   }
@@ -721,6 +729,86 @@ function fillFixture(
     const v = variables.find((x) => x.path === path)
     return (v?.preview || path).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
   })
+}
+
+const GITHUB_STATE = {
+  configured: true,
+  app_slug: "i10",
+  installations: [
+    {
+      installation_id: 50123,
+      account_login: "acme",
+      account_type: "Organization",
+      suspended: false,
+      created_at: ago(40),
+    },
+  ],
+  repositories: [
+    {
+      id: "c0a1c000-0000-4000-8000-000000000001",
+      installation_id: 50123,
+      repo_id: 1,
+      full_name: "acme/emails",
+      target_branch: "main",
+      directory: "emails",
+      last_commit_sha: "a91e03b7c4d2f68e15a0b9c3d7e2f41806c5b9d1",
+      last_synced_at: ago(0, 3),
+      removed: false,
+      templates: 1,
+      last_sync: {
+        id: "c0a1c000-0000-4000-8000-0000000000a1",
+        commit_sha: "a91e03b7c4d2f68e15a0b9c3d7e2f41806c5b9d1",
+        status: "done",
+        outcomes: [
+          {
+            path: "billing/receipt.tsx",
+            name: "receipt",
+            folder: "billing",
+            template_id: "bf7a1c00-0000-4000-8000-000000000003",
+            outcome: "versioned",
+            version: 2,
+          },
+        ],
+        problems: [],
+        created_at: ago(0, 3),
+        finished_at: ago(0, 3),
+      },
+      created_at: ago(40),
+    },
+    {
+      id: "c0a1c000-0000-4000-8000-000000000002",
+      installation_id: 50123,
+      repo_id: 3,
+      full_name: "acme/transactional",
+      target_branch: "trunk",
+      directory: "src/emails",
+      last_commit_sha: "77c0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192",
+      last_synced_at: ago(1),
+      removed: false,
+      templates: 0,
+      last_sync: {
+        id: "c0a1c000-0000-4000-8000-0000000000a2",
+        commit_sha: "77c0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192",
+        status: "done",
+        outcomes: [
+          {
+            path: "promo.tsx",
+            name: "promo",
+            folder: null,
+            template_id: null,
+            outcome: "refused",
+            problems: [
+              "A variable is used as a condition or measured. A template is rendered once, so every variable must always be inserted the same way.",
+            ],
+          },
+        ],
+        problems: [],
+        created_at: ago(1),
+        finished_at: ago(1),
+      },
+      created_at: ago(2),
+    },
+  ],
 }
 
 const TEMPLATE_UPLOAD = [
@@ -1446,6 +1534,31 @@ const ROUTES: [
     }),
   ],
 
+  [/^\/console\/github$/, () => GITHUB_STATE],
+  [
+    /^\/console\/github\/install$/,
+    () => ({ url: "https://github.com/apps/i10/installations/new?state=preview" }),
+  ],
+  [
+    /^\/console\/github\/installations\/(\d+)\/repositories$/,
+    () => ({
+      data: [
+        { id: 1, full_name: "acme/emails", default_branch: "main", private: true },
+        {
+          id: 2,
+          full_name: "acme/marketing-site",
+          default_branch: "main",
+          private: false,
+        },
+        {
+          id: 3,
+          full_name: "acme/transactional",
+          default_branch: "trunk",
+          private: true,
+        },
+      ],
+    }),
+  ],
   [/^\/console\/templates\/upload$/, () => ({ data: TEMPLATE_UPLOAD, problems: [] })],
 
   [

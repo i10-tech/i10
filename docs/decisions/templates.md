@@ -118,6 +118,66 @@ the template's live version.
   thumbnail shows its images. Any other remote image waits for the viewer to
   ask, in the full preview.
 
+### GitHub-connected templates (#235)
+
+A workspace can keep React Email templates in a repository. **A push to the
+target branch (default `main`) goes live.** Once a change is merged there, it
+is what customers receive.
+
+- **What a push does.** `/webhooks/github` checks `X-Hub-Signature-256` (the
+  whole of its authorization), maps the installation and repository to the
+  workspaces that connected them (definer functions in 0094, ids only), and
+  records a sync before answering. The sync reads the tree at the commit and
+  the code files under the template directory (the upload limits apply),
+  finds templates exactly as a folder upload does, and makes a version,
+  recorded with the commit SHA and path, of each template whose files changed.
+  Unchanged templates get nothing. A template whose file disappeared keeps its
+  live version and keeps sending, marked as removed from the repository.
+- **Every other branch is only compiled**, and the result is reported as an
+  `i10 templates` check run on the commit, so a pull request says whether its
+  templates would be accepted before it merges. The target branch reports
+  there too.
+- **The branch head wins.** A sync whose commit is no longer the head of its
+  branch versions nothing; it syncs the head instead. Two quick pushes that
+  arrive or finish out of order can therefore never put the older email live.
+  Syncs of one repository run one at a time in a process; across pods, this
+  rule plus the unchanged check make a duplicate harmless.
+- **Nothing is lost to a deploy.** The webhook answers GitHub at once, so the
+  sync row is the promise. Every minute, the API picks up syncs pending for
+  over two minutes, or running for over fifteen.
+- **Identity is repository plus path.** A renamed file is a new template. A
+  name that already belongs to another template is refused, never taken over.
+- **Connecting proves ownership.** "Connect GitHub" sends the person to the
+  app's install page with a signed `state` naming the workspace. On the way
+  back, the API checks the state against the workspace signed in now, exchanges
+  `code` for the person's GitHub token, and accepts `installation_id` only if
+  that token lists it. The id is a URL parameter, and without this check anyone
+  could claim another organization's installation. An installation belongs to
+  one workspace.
+- **Disconnecting never deletes a template.** Its templates become uploads,
+  with every version kept. Uninstalling the app does the same.
+
+#### Setting up the app (once per environment)
+
+Create `i10` (production) and `i10-dev` (development) under the `i10-tech`
+organization, installable by any account:
+
+| Setting                                                | Value                                                                   |
+| ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| Permissions                                            | Contents: Read, Metadata: Read, Checks: Read and write                  |
+| Events                                                 | Push, Installation, Installation repositories                           |
+| Webhook URL                                            | `https://api.i10.tech/webhooks/github` (dev: the dev API)               |
+| Setup URL                                              | `https://dash.i10.tech/templates/github/setup`, "Redirect on update" on |
+| Request user authorization (OAuth) during installation | On                                                                      |
+| Callback URL                                           | the same as the setup URL                                               |
+
+Then put these in Doppler's `api` config (and `dev`), all six or none:
+`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` (the PEM),
+`GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_CLIENT_ID` and
+`GITHUB_APP_CLIENT_SECRET`. Restart the API afterwards: the operator syncs the
+Secret, but nothing reloads it. Unset, the console hides GitHub, the routes
+answer 501 and the webhook answers 503.
+
 ### Templates are file sets
 
 Real template folders share a layout, a footer, a button. So a `tsx` template

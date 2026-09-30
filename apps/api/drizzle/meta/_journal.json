@@ -652,6 +652,20 @@
       "when": 1790725539696,
       "tag": "0092_template_assets_sweep",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1790767592910,
+      "tag": "0093_github_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1790767593481,
+      "tag": "0094_github_definers",
+      "breakpoints": true
     }
   ]
 }

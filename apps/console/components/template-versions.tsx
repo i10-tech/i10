@@ -43,10 +43,13 @@ export function TemplateVersions({
   history,
   editable = false,
   imagesFrom = null,
+  github = null,
 }: {
   templateId: string
   history: TemplateVersionSummary[]
   imagesFrom?: string | null
+  /** A GitHub template's repository and file, to link each commit to it. */
+  github?: { repository: string; directory: string; path: string } | null
   /** An editor template: any version can be copied back into the draft. */
   editable?: boolean
 }) {
@@ -77,7 +80,18 @@ export function TemplateVersions({
                 {v.subject || <em className="text-muted-foreground">No subject</em>}
               </p>
               <p className="truncate font-mono text-2xs text-muted-foreground">
-                {versionOrigin(v)}
+                {github && v.commit_sha ? (
+                  <a
+                    href={`https://github.com/${github.repository}/blob/${v.commit_sha}/${[github.directory, v.path ?? github.path].filter(Boolean).join("/")}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline-offset-4 hover:underline"
+                  >
+                    {versionOrigin(v)}
+                  </a>
+                ) : (
+                  versionOrigin(v)
+                )}
               </p>
             </div>
             {v.live && <Badge>Live</Badge>}

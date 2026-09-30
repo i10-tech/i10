@@ -2523,6 +2523,27 @@ export const templates = core.table(
     design: jsonb("design").$type<Record<string, unknown>>(),
 
     /**
+     * The connected repository a `github` template lives in (#235), and its
+     * entry file's path under the repository's template directory. Together
+     * they are the template's identity for a push: a file renamed in the
+     * repository is a new template, a file moved back is the same one.
+     *
+     * ⚠ SET NULL, NOT CASCADE, WHEN THE CONNECTION GOES. Disconnecting a
+     * repository must never delete templates production code is sending by
+     * id; they become uploads, and keep every version.
+     */
+    githubRepositoryId: uuid("github_repository_id").references(
+      (): AnyPgColumn => githubRepositories.id,
+      { onDelete: "set null" },
+    ),
+    path: text("path"),
+    /**
+     * When a push no longer had this template's file. The template keeps its
+     * live version and keeps sending; the console says it is gone upstream.
+     */
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+
+    /**
      * The version an unpinned send renders. Null until the first publish.
      *
      * ⚠ THE ONLY MUTABLE THING ABOUT WHAT A SEND RENDERS, and so the only thing
@@ -2540,6 +2561,9 @@ export const templates = core.table(
   (t) => [
     index("templates_tenant_idx").on(t.tenantId, t.createdAt),
     uniqueIndex("templates_tenant_name_uq").on(t.tenantId, t.name),
+    uniqueIndex("templates_github_path_uq")
+      .on(t.githubRepositoryId, t.path)
+      .where(sql`${t.githubRepositoryId} is not null`),
   ],
 )
 
@@ -2614,6 +2638,134 @@ export const templateVersions = core.table(
     index("template_versions_tenant_idx").on(t.tenantId, t.createdAt),
     // Inline rather than `tenantPolicy`, which is declared further down.
     pgPolicy("template_versions_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * A GitHub App installation a workspace connected (#235).
+ *
+ * ⚠ ONE WORKSPACE PER INSTALLATION, and only after proof. The setup redirect's
+ * `installation_id` is a URL parameter anybody can edit; it is accepted only
+ * when the signed-in person's own GitHub token lists it (see github/connect.ts).
+ * A second workspace claiming the same installation is refused, so a push is
+ * never versioned into somebody else's templates.
+ */
+export const githubInstallations = core.table(
+  "github_installations",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    installationId: bigint("installation_id", { mode: "number" })
+      .notNull()
+      .unique("github_installations_installation_uq"),
+    /** The user or organization it is installed on, e.g. `acme`. */
+    accountLogin: text("account_login").notNull(),
+    accountType: text("account_type").notNull(),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy("github_installations_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * A repository whose templates a workspace keeps in GitHub (#235).
+ *
+ * ⚠ A PUSH TO `target_branch` GOES LIVE. What is merged there is, from then
+ * on, what customers receive; every other branch is only compiled and
+ * reported on the commit.
+ */
+export const githubRepositories = core.table(
+  "github_repositories",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    installationId: bigint("installation_id", { mode: "number" })
+      .notNull()
+      .references(() => githubInstallations.installationId, { onDelete: "cascade" }),
+    repoId: bigint("repo_id", { mode: "number" }).notNull(),
+    /** `owner/name`, as of the last event: repositories are renamed. */
+    fullName: text("full_name").notNull(),
+    targetBranch: text("target_branch").notNull().default("main"),
+    /** The templates' root in the repository. Empty for the repository's root. */
+    directory: text("directory").notNull().default("emails"),
+    lastCommitSha: text("last_commit_sha"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    /** Set when the installation lost access to the repository. */
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("github_repositories_tenant_repo_uq").on(t.tenantId, t.repoId),
+    index("github_repositories_repo_idx").on(t.repoId),
+    pgPolicy("github_repositories_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+export const githubSyncStatus = core.enum("github_sync_status", [
+  "pending",
+  "running",
+  "done",
+  "failed",
+])
+
+/**
+ * One sync of a repository at one commit (#235): what a push, a connect or a
+ * manual resync asked for, and what happened to each template.
+ *
+ * ⚠ WRITTEN BEFORE THE WORK STARTS. The webhook answers GitHub at once and the
+ * sync runs after; a deploy in between would lose it, so the row is the
+ * promise, and a periodic sweep picks up any that were left pending.
+ */
+export const githubSyncs = core.table(
+  "github_syncs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    repositoryId: uuid("repository_id")
+      .notNull()
+      .references(() => githubRepositories.id, { onDelete: "cascade" }),
+    commitSha: text("commit_sha").notNull(),
+    status: githubSyncStatus("status").notNull().default("pending"),
+    /** `[{ path, name, outcome, version?, problems? }]`, as an upload answers. */
+    outcomes: jsonb("outcomes").$type<Record<string, unknown>[]>(),
+    /** Problems with the set as a whole, or why the sync could not run. */
+    problems: jsonb("problems").$type<string[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("github_syncs_repository_idx").on(t.repositoryId, t.createdAt),
+    index("github_syncs_pending_idx")
+      .on(t.createdAt)
+      .where(sql`${t.status} in ('pending', 'running')`),
+    pgPolicy("github_syncs_tenant", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

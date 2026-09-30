@@ -893,6 +893,25 @@ const schema = z.object({
   TEMPLATE_ASSETS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   TEMPLATE_ASSETS_PUBLIC_URL: z.url().optional(),
 
+  /**
+   * The GitHub App behind GitHub-connected templates (#235): `i10` in
+   * production, `i10-dev` for development. From the app's settings page.
+   *
+   * ⚠ ALL SIX OR NONE, checked below. Unset, the GitHub routes answer 501 and
+   * the webhook 503; everything else about templates works.
+   *
+   * `GITHUB_APP_PRIVATE_KEY` is the PEM GitHub generates, newlines and all
+   * (Doppler keeps them). `GITHUB_APP_CLIENT_ID`/`_SECRET` are the app's OAuth
+   * credentials, used once per installation to prove the person installing
+   * it can see it - see github/connect.ts.
+   */
+  GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
+  GITHUB_APP_SLUG: z.string().min(1).optional(),
+  GITHUB_APP_PRIVATE_KEY: z.string().min(1).optional(),
+  GITHUB_APP_WEBHOOK_SECRET: z.string().min(16).optional(),
+  GITHUB_APP_CLIENT_ID: z.string().min(1).optional(),
+  GITHUB_APP_CLIENT_SECRET: z.string().min(1).optional(),
+
   /** Bodies with files the content-store job moves per workspace per run. */
   CONTENT_STORE_BATCH: z.coerce.number().int().min(1).max(5000).default(200),
 
@@ -1096,6 +1115,23 @@ const validated = schema.superRefine((env, ctx) => {
       message:
         `the content store needs all of ${store.join(", ")} or none of them; ` +
         `with some set it looks configured and stores nothing.`,
+    })
+  }
+
+  const github = [
+    "GITHUB_APP_ID",
+    "GITHUB_APP_SLUG",
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_APP_WEBHOOK_SECRET",
+    "GITHUB_APP_CLIENT_ID",
+    "GITHUB_APP_CLIENT_SECRET",
+  ] as const
+  const githubSet = github.filter((k) => env[k] !== undefined)
+  if (githubSet.length > 0 && githubSet.length < github.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: [github.find((k) => env[k] === undefined)!],
+      message: `the GitHub App needs all of ${github.join(", ")} or none of them.`,
     })
   }
 

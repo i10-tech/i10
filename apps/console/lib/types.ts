@@ -477,8 +477,57 @@ export interface TemplateRow {
   version: number
   /** How many versions exist. */
   versions: number
+  /** Where a GitHub template lives (#235); null for every other template. */
+  github?: {
+    repository: string
+    directory: string
+    path: string
+    /** The last push no longer had the file; the template still sends. */
+    removed: boolean
+  } | null
   created_at: string
   updated_at: string
+}
+
+/** One sync of a connected repository at one commit (#235). */
+export interface GithubSync {
+  id: string
+  commit_sha: string
+  status: "pending" | "running" | "done" | "failed"
+  outcomes: TemplateUploadOutcome[] | null
+  problems: string[] | null
+  created_at: string
+  finished_at: string | null
+}
+
+export interface GithubRepository {
+  id: string
+  installation_id: number
+  repo_id: number
+  full_name: string
+  target_branch: string
+  directory: string
+  last_commit_sha: string | null
+  last_synced_at: string | null
+  /** The app lost access to it. */
+  removed: boolean
+  templates: number
+  last_sync: GithubSync | null
+  created_at: string
+}
+
+export interface GithubState {
+  /** False when the GitHub App is not set up on this deployment. */
+  configured: boolean
+  app_slug?: string
+  installations: {
+    installation_id: number
+    account_login: string
+    account_type: string
+    suspended: boolean
+    created_at: string
+  }[]
+  repositories: GithubRepository[]
 }
 
 /** One variable a version takes: its dotted path and the sample it previews with. */
