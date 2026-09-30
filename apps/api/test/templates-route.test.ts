@@ -205,7 +205,11 @@ describe("uploading a template image (#244)", () => {
               problem: "Only PNG, JPEG, GIF and WebP images can be used in emails.",
             },
     )
-    const post = images({ upload, sweepDeleted: async () => 0 })
+    const post = images({
+      origin: "https://a.test",
+      upload,
+      sweepDeleted: async () => 0,
+    })
     const ok = await post(new Uint8Array([0x89, 1, 2]))
     expect(ok.status).toBe(201)
     expect(upload.mock.calls[0]?.[1]).toEqual(new Uint8Array([0x89, 1, 2]))

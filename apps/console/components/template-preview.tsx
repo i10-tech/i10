@@ -32,9 +32,11 @@ import type { TemplatePreview, TemplateVersionSummary } from "@/lib/types"
 export function TemplatePreviewPanel({
   templateId,
   history,
+  imagesFrom = null,
 }: {
   templateId: string
   history: TemplateVersionSummary[]
+  imagesFrom?: string | null
 }) {
   const live = history.find((v) => v.live) ?? history[0]
   const [number, setNumber] = React.useState(live?.number ?? 0)
@@ -166,6 +168,7 @@ export function TemplatePreviewPanel({
             <TabsContent value="preview" className="m-0">
               {preview?.html ? (
                 <EmailFrame
+                  imagesFrom={imagesFrom}
                   html={preview.html}
                   title={`v${number} preview`}
                   className="h-[36rem]"

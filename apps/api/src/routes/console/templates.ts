@@ -42,7 +42,11 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
 
   app.get("/templates", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
-    return c.json({ data: await d.templates.list(c.get("auth").tenantId) })
+    return c.json({
+      data: await d.templates.list(c.get("auth").tenantId),
+      // Where our own template images load from, for previews' CSP (#248).
+      assets_origin: d.templateAssets?.origin ?? null,
+    })
   })
 
   app.post("/templates", async (c) => {
@@ -63,7 +67,9 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
   app.get("/templates/:id", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
     const found = await d.templates.get(c.get("auth").tenantId, c.req.param("id"))
-    return found ? c.json(found) : c.json(notFound("No template with that id."), 404)
+    return found
+      ? c.json({ ...found, assets_origin: d.templateAssets?.origin ?? null })
+      : c.json(notFound("No template with that id."), 404)
   })
 
   app.patch("/templates/:id", async (c) => {

@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import Link from "next/link"
 import { Badge } from "@repo/ui/components/badge"
 import {
   Page,
@@ -11,7 +10,7 @@ import {
   PageTitle,
 } from "@repo/ui/components/page"
 import { NewTemplateButton } from "@/components/new-template"
-import { SourceBadge } from "@/components/template-source"
+import { TemplateGrid } from "@/components/template-grid"
 import { UploadTemplatesButton } from "@/components/upload-templates"
 import {
   SubmitTrustedTemplateButton,
@@ -37,24 +36,12 @@ export const metadata: Metadata = { title: "Templates" }
  */
 export default async function TemplatesPage() {
   const [result, trusted] = await Promise.all([
-    tryApi<{ data: TemplateSummary[] }>("/console/templates"),
+    tryApi<{ data: TemplateSummary[]; assets_origin?: string | null }>(
+      "/console/templates",
+    ),
     tryApi<{ data: TrustedTemplateRow[] }>("/console/trusted-templates"),
   ])
   const hasRows = result.ok && result.data.data.length > 0
-
-  // ⚠ GROUPED IN THE RENDER RATHER THAN BY THE API. Folders are a display
-  // concept - the column is a flat string - so the grouping belongs where the
-  // tree is drawn. An API that returned a nested shape would make every other
-  // consumer unpack it.
-  const grouped = new Map<string, TemplateSummary[]>()
-  if (result.ok) {
-    for (const template of result.data.data) {
-      const key = template.folder ?? ""
-      const list = grouped.get(key)
-      if (list) list.push(template)
-      else grouped.set(key, [template])
-    }
-  }
 
   return (
     <Page>
@@ -98,65 +85,10 @@ export default async function TemplatesPage() {
             }
           />
         ) : (
-          <div className="space-y-6">
-            {[...grouped.entries()].map(([folder, templates]) => (
-              <section key={folder || "root"}>
-                {folder && (
-                  <h2 className="mb-2 font-mono text-xs text-muted-foreground">
-                    {folder}
-                  </h2>
-                )}
-                <ul className="divide-y overflow-hidden rounded-lg border">
-                  {templates.map((template) => (
-                    <li key={template.id}>
-                      <Link
-                        href={`/templates/${template.id}`}
-                        className="flex items-center gap-3 px-4 py-3 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/30"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">
-                            {template.name}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {template.subject || <em>No subject yet</em>}
-                          </p>
-                        </div>
-
-                        {/*
-                         * ⚠ "UNPUBLISHED CHANGES" ONLY FOR EDITOR TEMPLATES.
-                         * An upload or a push IS a version, so for those the
-                         * draft is never ahead of what is live.
-                         */}
-                        {template.published_at === null ? (
-                          <Badge variant="outline">Never published</Badge>
-                        ) : (
-                          template.source === "managed" &&
-                          template.updated_at > template.published_at && (
-                            <Badge variant="secondary">Unpublished changes</Badge>
-                          )
-                        )}
-
-                        <SourceBadge source={template.source} />
-
-                        {template.version > 0 && (
-                          <span className="tabular shrink-0 font-mono text-2xs text-muted-foreground">
-                            v{template.version}
-                          </span>
-                        )}
-
-                        <span
-                          className="shrink-0 text-xs whitespace-nowrap text-muted-foreground"
-                          title={template.updated_at}
-                        >
-                          {formatRelative(template.updated_at)}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-          </div>
+          <TemplateGrid
+            templates={result.data.data}
+            imagesFrom={result.data.assets_origin ?? null}
+          />
         )}
 
         <ReviewedTemplates result={trusted} />

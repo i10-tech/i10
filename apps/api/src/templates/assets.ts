@@ -84,6 +84,11 @@ export interface Asset {
 }
 
 export interface TemplateAssets {
+  /**
+   * The origin images are served from, e.g. `https://assets.i10.tech`: what a
+   * preview's CSP lets images load from without asking (#248).
+   */
+  origin: string
   upload(
     tenantId: string,
     bytes: Uint8Array,
@@ -101,6 +106,7 @@ export function templateAssetStore(deps: {
   const urlOf = (key: string) => `${base}/${key}`
 
   return {
+    origin: new URL(base).origin,
     async upload(tenantId, bytes) {
       if (bytes.byteLength === 0) return { ok: false, problem: "The file is empty." }
       if (bytes.byteLength > MAX_ASSET_BYTES) {
