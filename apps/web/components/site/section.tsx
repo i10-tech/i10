@@ -37,8 +37,13 @@ export function Frame({
           <div className="absolute inset-y-0 right-[var(--gutter)] w-px bg-line-faint" />
           {seam ? (
             <>
-              <Cross className="absolute top-0 left-[var(--gutter)] -translate-x-1/2 -translate-y-1/2" />
-              <Cross className="absolute top-0 right-[var(--gutter)] translate-x-1/2 -translate-y-1/2" />
+              {/* ⚠ OFFSET BY 5px, NOT translate(-50%). A 1px line fills the
+                  pixel from g to g+1, so its centre is g + 0.5; centring the
+                  11px cross on g put it half a pixel up and left and smeared
+                  both strokes over two pixels. The cross's middle pixel
+                  (column/row 5) is laid exactly on the rail's and seam's. */}
+              <Cross className="absolute top-[-5px] left-[calc(var(--gutter)-5px)]" />
+              <Cross className="absolute top-[-5px] right-[calc(var(--gutter)-5px)]" />
             </>
           ) : null}
         </div>
@@ -50,7 +55,14 @@ export function Frame({
 
 export function Cross({ className }: { className?: string }) {
   return (
-    <svg aria-hidden viewBox="0 0 11 11" width="11" height="11" className={cn("pointer-events-none text-fg-4 max-md:hidden", className)}>
+    <svg
+      aria-hidden
+      viewBox="0 0 11 11"
+      width="11"
+      height="11"
+      shapeRendering="crispEdges"
+      className={cn("pointer-events-none text-fg-4 max-md:hidden", className)}
+    >
       <path d="M5.5 0v11M0 5.5h11" stroke="currentColor" strokeWidth="1" />
     </svg>
   )
