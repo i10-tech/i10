@@ -53,7 +53,7 @@ function Card({ stage, name, body, href }: { stage: React.ReactNode; name: strin
         <span className="text-fg">{name}</span> {body}
       </p>
       <div className="mt-5 flex items-center gap-4">
-        <ButtonLink href={hosts.signUp} size="sm">
+        <ButtonLink href={hosts.signIn} size="sm">
           Start now
         </ButtonLink>
         <ButtonLink href={href} variant="ghost" arrow>

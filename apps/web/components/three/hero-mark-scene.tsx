@@ -13,10 +13,9 @@ import { prefersReducedMotion } from "@/lib/gsap"
 /*
  * The hero object: the i10 mark, extruded from the exact path the logo uses.
  *
- * Faces are near-black lacquer; the extruded sides are post yellow, so the
- * mark reads as a black glyph until it turns and the edge catches light.
- * Lighting is built from Lightformers - no HDR file is fetched, so the scene
- * has no network dependency and looks the same offline.
+ * Post yellow, faces and sides alike. Lighting is built from
+ * Lightformers - no HDR file is fetched, so the scene has no network
+ * dependency and looks the same offline.
  *
  * Interaction: the mark leans toward the pointer, and dragging spins it with
  * inertia that decays back into a slow idle drift.
@@ -31,13 +30,19 @@ function useMarkGeometry() {
       bevelEnabled: true,
       bevelThickness: 3,
       bevelSize: 2.2,
-      bevelSegments: 6,
-      curveSegments: 28,
+      bevelSegments: 12,
+      curveSegments: 96,
     })
     geometry.center()
-    // SVG's y axis points down; flip once here rather than rotating the mesh.
-    geometry.scale(0.024, -0.024, 0.024)
-    geometry.computeVertexNormals()
+    // SVG's y axis points down. Turn it over with a ROTATION, not scale(1, -1):
+    // a negative scale mirrors the winding, and every face then lights from
+    // the inside.
+    geometry.rotateX(Math.PI)
+    geometry.scale(0.024, 0.024, 0.024)
+    // ⚠ NO computeVertexNormals(). ExtrudeGeometry is not indexed, so
+    // recomputing gives every triangle its own flat normal: the curved walls
+    // of the 0 and the bevels turned into visible stripes. The normals it
+    // builds itself are smooth along the walls and sharp at the corners.
     return geometry
   }, [])
 }
@@ -45,10 +50,10 @@ function useMarkGeometry() {
 function MarkMesh({ drag }: { drag: React.RefObject<{ vx: number; vy: number; dragging: boolean }> }) {
   const group = useRef<THREE.Group>(null)
   const geometry = useMarkGeometry()
-  // Fit the mark to the canvas: 3.8 units wide at scale 1, kept inside 82% of
-  // the visible width and 70% of the height, whichever binds first.
+  // Fit the mark to the canvas: 3.8 units wide at scale 1, kept inside 96% of
+  // the visible width and 82% of the height, whichever binds first.
   const viewport = useThree((state) => state.viewport)
-  const fit = Math.min(1, (viewport.width * 0.82) / 3.8, (viewport.height * 0.7) / 2.5)
+  const fit = Math.min(1.4, (viewport.width * 0.96) / 3.8, (viewport.height * 0.82) / 2.5)
   const spin = useRef({ y: -0.35, x: 0.12 })
   // Under reduced motion the mark holds still until it is dragged: no idle
   // drift, no bob. Dragging is the reader's own motion, so it stays.
@@ -58,15 +63,18 @@ function MarkMesh({ drag }: { drag: React.RefObject<{ vx: number; vy: number; dr
   // it keeps that speed and decays it locally, which is the inertia.
   const vel = useRef({ x: still ? 0 : 0.12, y: 0 })
 
+  // Post yellow on every surface, not just the extruded sides: the faces
+  // are the same lacquer as the rims, a shade lighter and glossier, so the
+  // glyph reads as one solid yellow object that still shows its depth.
   const materials = useMemo(
     () => [
       new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color("#101013"),
-        metalness: 0.55,
-        roughness: 0.22,
+        color: new THREE.Color("#f7d63f"),
+        metalness: 0.25,
+        roughness: 0.28,
         clearcoat: 1,
-        clearcoatRoughness: 0.12,
-        reflectivity: 0.6,
+        clearcoatRoughness: 0.1,
+        emissive: new THREE.Color("#3a2c00"),
       }),
       new THREE.MeshPhysicalMaterial({
         color: new THREE.Color("#f2cf3c"),

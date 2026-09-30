@@ -29,14 +29,14 @@ export function Hero() {
       <div aria-hidden className="hero-grid pointer-events-none absolute inset-0" />
       <div aria-hidden className="hero-glow pointer-events-none absolute" />
 
-      <div className="container-site relative grid items-center gap-10 lg:grid-cols-[1.35fr_0.65fr]">
+      <div className="container-site relative grid items-center gap-10 lg:min-h-[calc(100svh-var(--nav-h)-5.5rem)] lg:grid-cols-[1.35fr_0.65fr]">
         <div className="relative z-10 flex flex-col items-start">
           <Link
             href="/changelog"
             data-reveal
-            className="group/btn mb-8 inline-flex h-8 items-center gap-2.5 rounded-full py-1 pr-3 pl-1 text-[12.5px] text-fg-2 shadow-[inset_0_0_0_1px_var(--line-strong)] transition-colors hover:text-fg"
+            className="group/btn mb-8 inline-flex h-8 items-center gap-2.5 rounded-full pr-3 pl-[9px] text-[12.5px] text-fg-2 shadow-[inset_0_0_0_1px_var(--line-strong)] transition-colors hover:text-fg"
           >
-            <span className="rounded-full bg-brand px-2 py-[3px] font-mono text-[10px] leading-none font-semibold tracking-[0.08em] text-brand-ink uppercase">
+            <span className="flex h-5 items-center rounded-full bg-brand px-2 font-mono text-[10px] leading-none font-semibold tracking-[0.08em] text-brand-ink uppercase">
               New
             </span>
             Templates that publish on git push
@@ -55,7 +55,7 @@ export function Hero() {
           </p>
 
           <div data-reveal data-reveal-delay="0.45" className="mt-9 flex flex-wrap items-center gap-3">
-            <ButtonLink href={hosts.signUp} size="lg" arrow>
+            <ButtonLink href={hosts.signIn} size="lg" arrow>
               Start sending free
             </ButtonLink>
             <ButtonLink href={hosts.docs} size="lg" variant="secondary">
@@ -70,12 +70,15 @@ export function Hero() {
           </div>
         </div>
 
-        <div data-reveal="fade" data-reveal-delay="0.2" className="relative -mx-[var(--gutter)] h-[360px] sm:h-[420px] lg:-mr-[6vw] lg:ml-[-4vw] lg:h-[540px]">
+        <div data-reveal="fade" data-reveal-delay="0.2" className="relative -mx-[var(--gutter)] h-[400px] sm:h-[480px] lg:-mr-[2vw] lg:ml-[-12vw] lg:h-[680px]">
           <HeroMarkScene />
           <HeroOrbit />
         </div>
       </div>
 
+      {/* The first block fills the first screen (min-height above), so the
+          stats always start below the fold: revealed, they never peek in
+          cut off at the bottom of the opening view. */}
       <div className="container-site relative mt-16 md:mt-20">
         <dl data-reveal className="grid grid-cols-2 gap-px overflow-hidden rounded-[14px] bg-line md:grid-cols-4">
           {[
@@ -104,7 +107,7 @@ export function Hero() {
 function HeroOrbit() {
   const text = "SIGNED · SEALED · DELIVERED · EU-CENTRAL-1 · DKIM · SPF · DMARC · "
   return (
-    <svg aria-hidden viewBox="0 0 400 400" className="hero-orbit pointer-events-none absolute top-1/2 left-1/2 w-[min(84%,520px)] -translate-x-1/2 lg:w-[min(92%,520px)] -translate-y-1/2">
+    <svg aria-hidden viewBox="0 0 400 400" className="hero-orbit pointer-events-none absolute top-1/2 left-1/2 w-[min(92%,600px)] -translate-x-1/2 lg:w-[min(96%,660px)] -translate-y-1/2">
       <defs>
         <path id="orbit-path" d="M200 200m-172 0a172 172 0 1 1 344 0a172 172 0 1 1-344 0" />
       </defs>

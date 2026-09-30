@@ -11,7 +11,7 @@ import { hosts } from "@/lib/site"
 export function Closing() {
   return (
     <section data-nav-tone="brand" className="relative px-2 pt-10 md:px-3">
-      <div className="closing-card relative overflow-hidden rounded-[28px] bg-brand text-brand-ink">
+      <div className="closing-card selection-ink relative overflow-hidden rounded-[28px] bg-brand text-brand-ink">
         <div aria-hidden className="closing-dots pointer-events-none absolute inset-0" />
         <div aria-hidden className="closing-glow pointer-events-none absolute" />
         <div className="container-site relative flex flex-col items-center py-24 text-center md:py-36">
@@ -24,7 +24,7 @@ export function Closing() {
           </p>
           <div data-reveal className="mt-10 flex flex-wrap justify-center gap-3">
             <Link
-              href={hosts.signUp}
+              href={hosts.signIn}
               className="group/btn inline-flex h-12 items-center gap-2.5 rounded-full bg-brand-ink px-6 text-[15px] font-[540] text-fg transition-transform active:scale-[0.98]"
             >
               Start sending free <Arrow />

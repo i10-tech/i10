@@ -44,29 +44,30 @@ export function SplitReveal({
       const el = ref.current
       if (!el) return
       const words = Array.from(el.querySelectorAll<HTMLElement>(".sw-i"))
+      gsap.set(el, { autoAlpha: 1 })
+      // Back to plain inline text once played, so selection paints as one
+      // run per line (see [data-split-done] in globals.css).
+      const done = () => {
+        gsap.set(words, { clearProps: "transform,opacity,filter" })
+        el.dataset.splitDone = ""
+      }
       if (prefersReducedMotion() || !words.length) {
-        gsap.set(el, { autoAlpha: 1 })
+        done()
         return
       }
-      gsap.set(el, { autoAlpha: 1 })
 
       const scrollTrigger = onScroll ? { trigger: el, start: "top 86%", once: true } : undefined
+      const tl = gsap.timeline({ scrollTrigger, onComplete: done })
 
       if (mode === "scatter") {
-        gsap.fromTo(
-          words,
-          { opacity: 0, y: "0.35em", filter: "blur(8px)" },
-          {
-            opacity: 1,
-            y: 0,
-            filter: "blur(0px)",
-            duration: 0.95,
-            ease: "site.out",
-            delay: () => delay + Math.random() * 0.4,
-            scrollTrigger,
-            clearProps: "filter",
-          },
-        )
+        words.forEach((word) => {
+          tl.fromTo(
+            word,
+            { opacity: 0, y: "0.35em", filter: "blur(8px)" },
+            { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.95, ease: "site.out" },
+            delay + Math.random() * 0.4,
+          )
+        })
         return
       }
 
@@ -77,18 +78,14 @@ export function SplitReveal({
         if (!tops.has(top)) tops.set(top, tops.size)
         return tops.get(top)!
       })
-      gsap.fromTo(
-        words,
-        { yPercent: 115, rotate: 3 },
-        {
-          yPercent: 0,
-          rotate: 0,
-          duration: 1.15,
-          ease: "site.out",
-          delay: (i: number) => delay + (lineOf[i] ?? 0) * 0.09,
-          scrollTrigger,
-        },
-      )
+      words.forEach((word, i) => {
+        tl.fromTo(
+          word,
+          { yPercent: 115, rotate: 3 },
+          { yPercent: 0, rotate: 0, duration: 1.15, ease: "site.out" },
+          delay + (lineOf[i] ?? 0) * 0.09,
+        )
+      })
     },
     { scope: ref, dependencies: [mode, onScroll, delay] },
   )

@@ -55,15 +55,24 @@ export function SiteNav() {
 
   const [open, setOpen] = useState<MenuId | null>(null)
   const [direction, setDirection] = useState<1 | -1>(1)
-  const [highlight, setHighlight] = useState<{ x: number; w: number; on: boolean }>({ x: 0, w: 0, on: false })
+  // `jump`: the pill was hidden, so it appears in place instead of sliding
+  // over from wherever the pointer last left the bar.
+  const [highlight, setHighlight] = useState<{ x: number; w: number; on: boolean; jump: boolean }>({
+    x: 0,
+    w: 0,
+    on: false,
+    jump: true,
+  })
   const [panelX, setPanelX] = useState(0)
+  // Same for the menu viewport: opened from closed, it appears at its trigger
+  // at its size; only a switch between open menus slides and resizes.
+  const [panelJump, setPanelJump] = useState(true)
   const [sizes, setSizes] = useState<Record<MenuId, { w: number; h: number }>>({
     product: { w: 760, h: 300 },
     developers: { w: 700, h: 280 },
     resources: { w: 640, h: 260 },
   })
   const [floating, setFloating] = useState(false)
-  const [compact, setCompact] = useState(false)
   const [tone, setTone] = useState<"dark" | "brand" | "light">("dark")
   const [sheet, setSheet] = useState(false)
 
@@ -90,6 +99,17 @@ export function SiteNav() {
     setOpen(null)
     setHighlight((h) => ({ ...h, on: false }))
   }, [])
+  // Closes the open menu but leaves the hover pill where it is. Pricing and
+  // Docs call this on hover: going through close() made the pill fade out
+  // 140ms after it had just slid under them, which read as a flash.
+  const closeMenuOnly = () => {
+    clearTimers()
+    if (!openRef.current) return
+    closeTimer.current = setTimeout(() => {
+      openRef.current = null
+      setOpen(null)
+    }, 140)
+  }
 
   // Every panel measures itself once; the viewport animates between them.
   useEffect(() => {
@@ -116,7 +136,8 @@ export function SiteNav() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- observe once; the callback reads the current sizes through the closure it replaces
   }, [])
 
-  // Floating after the first few pixels; compact while travelling down.
+  // Floating glass after the first few pixels. The bar itself is pinned: it
+  // never hides or shifts with scroll direction.
   useEffect(() => {
     let last = window.scrollY
     let frame = 0
@@ -125,16 +146,8 @@ export function SiteNav() {
       frame = requestAnimationFrame(() => {
         const y = window.scrollY
         const delta = y - last
+        last = y
         setFloating(y > 8)
-        // Near the top the full bar always shows, however we got there (a
-        // route change or an anchor jump arrives with no downward travel).
-        if (y <= 240) {
-          setCompact(false)
-          last = y
-        } else if (Math.abs(delta) > 4) {
-          setCompact(delta > 0)
-          last = y
-        }
         if (delta > 0 && openRef.current) close()
       })
     }
@@ -190,7 +203,7 @@ export function SiteNav() {
   }, [sheet])
 
   const moveHighlight = (el: HTMLElement) => {
-    setHighlight({ x: el.offsetLeft, w: el.offsetWidth, on: true })
+    setHighlight((h) => ({ x: el.offsetLeft, w: el.offsetWidth, on: true, jump: !h.on }))
   }
 
   const openMenu = (id: MenuId, el: HTMLElement, immediate: boolean) => {
@@ -198,6 +211,7 @@ export function SiteNav() {
     const run = () => {
       const prev = openRef.current
       if (prev && prev !== id) setDirection(MENU_ORDER.indexOf(id) > MENU_ORDER.indexOf(prev) ? 1 : -1)
+      setPanelJump(!prev)
       openRef.current = id
       setOpen(id)
       const bar = barRef.current
@@ -234,8 +248,7 @@ export function SiteNav() {
 
       <header
         className={cn(
-          "fixed inset-x-0 top-0 z-50 transition-transform duration-500 ease-[var(--ease-out-expo)]",
-          compact && !sheet ? "-translate-y-1" : "translate-y-0",
+          "fixed inset-x-0 top-0 z-50",
         )}
         onMouseLeave={scheduleClose}
         onMouseEnter={() => closeTimer.current && clearTimeout(closeTimer.current)}
@@ -245,37 +258,25 @@ export function SiteNav() {
             ref={barRef}
             className={cn(
               "nav-bar relative flex h-[52px] items-center rounded-[16px] pr-2 pl-4 transition-[background-color,box-shadow,backdrop-filter] duration-500",
-              floating && !compact ? "nav-bar--floating" : "",
+              floating ? "nav-bar--floating" : "",
+              // Over the yellow card the dark glass turns olive; there the bar
+              // goes to a pale wash with ink links instead.
+              tone === "brand" && !sheet && "nav-bar--on-brand",
             )}
           >
             {/* Logo: stays put in every state, recoloured by the section below it. */}
             <Link
               href="/"
               aria-label="i10 home"
-              className={cn(
-                "relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2 transition-[color,background-color,box-shadow,backdrop-filter] duration-500",
-                logoColor,
-                // Alone on the page while compact: it gets its own glass chip so
-                // it never sits bare on top of body text.
-                // Over the yellow card a dark glass chip turns olive, so there
-                // it becomes a faint ink wash instead.
-                compact &&
-                  (tone === "brand" && !sheet
-                    ? "bg-[rgb(11_11_12/0.07)] shadow-[inset_0_0_0_1px_rgb(11_11_12/0.14)]"
-                    : "bg-[rgb(14_14_17/0.62)] shadow-[inset_0_0_0_1px_var(--line)] backdrop-blur-lg"),
-              )}
+              // .nav-logo hands off to the footer's mark once that scrolls in
+              // (see FooterLogo): one i10 on screen at a time.
+              className={cn("nav-logo relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2", logoColor)}
               onMouseEnter={scheduleClose}
             >
-              <Mark className="h-[17px] w-auto" />
+              <Mark className="h-[19px] w-auto" shapeRendering="geometricPrecision" />
             </Link>
 
-            {/* Links: fade and lift out while scrolling down. */}
-            <div
-              className={cn(
-                "ml-6 hidden flex-1 items-center transition-[opacity,transform,filter] duration-300 md:flex",
-                compact ? "pointer-events-none -translate-y-1 opacity-0 blur-[2px]" : "opacity-100",
-              )}
-            >
+            <div className="ml-6 hidden flex-1 items-center md:flex">
               <ul
                 ref={listRef}
                 className="relative flex items-center"
@@ -283,8 +284,10 @@ export function SiteNav() {
               >
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute top-1/2 left-0 h-8 rounded-[9px] bg-white/[0.07] transition-[transform,width,opacity] duration-[260ms] ease-[var(--ease-out-quint)]"
+                  className="pointer-events-none absolute top-1/2 left-0 h-8 rounded-[9px] bg-white/[0.07] ease-[var(--ease-out-quint)]"
                   style={{
+                    transition: highlight.jump ? "opacity 200ms linear" : "transform 260ms, width 260ms, opacity 260ms",
+                    transitionTimingFunction: "var(--ease-out-quint)",
                     width: highlight.w,
                     transform: `translate3d(${highlight.x}px, -50%, 0)`,
                     opacity: highlight.on ? 1 : 0,
@@ -321,7 +324,7 @@ export function SiteNav() {
                       {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                       onMouseEnter={(e) => {
                         moveHighlight(e.currentTarget)
-                        scheduleClose()
+                        closeMenuOnly()
                       }}
                       onFocus={(e) => moveHighlight(e.currentTarget)}
                       className={cn(
@@ -337,20 +340,19 @@ export function SiteNav() {
               </ul>
             </div>
 
-            {/* Right side: the session-aware link and the one primary action. */}
+            {/* Right side: one action. Signed in it opens the dashboard; signed
+                out it goes to the auth page, which both signs in and signs up,
+                so a separate "Log in" would be a second door to the same room. */}
             <div className="ml-auto flex items-center gap-1.5">
-              <div
-                className={cn(
-                  "hidden transition-[opacity,transform] duration-300 md:block",
-                  compact ? "pointer-events-none -translate-y-1 opacity-0" : "opacity-100",
-                )}
-              >
-                <SessionLink signedIn={signedIn} />
-              </div>
               <Link
-                href={signedIn ? hosts.dashboard : hosts.signUp}
+                href={signedIn ? hosts.dashboard : hosts.signIn}
                 onMouseEnter={scheduleClose}
-                className="nav-cta group/btn relative inline-flex h-9 items-center gap-2 overflow-hidden rounded-[11px] bg-fg px-3.5 text-[13px] font-[540] text-brand-ink transition-colors hover:bg-white"
+                // Wears the logo's colour: yellow on the dark page, white over
+                // the yellow card (where the logo goes ink).
+                className={cn(
+                  "nav-cta group/btn relative inline-flex h-9 items-center gap-2 overflow-hidden rounded-[11px] px-3.5 text-[13px] font-[540] text-brand-ink transition-[background-color,filter] duration-500",
+                  tone === "brand" && !sheet ? "bg-fg hover:bg-white" : "bg-brand hover:brightness-105",
+                )}
               >
                 <span className="relative">{signedIn ? "Open dashboard" : "Start sending"}</span>
                 <Arrow />
@@ -391,6 +393,7 @@ export function SiteNav() {
                 width: size?.w,
                 height: size?.h,
                 transform: `translate3d(${panelX}px, ${open ? 0 : -4}px, 0)`,
+                ...(panelJump ? { transition: "opacity 180ms linear" } : {}),
               }}
               onMouseEnter={() => closeTimer.current && clearTimeout(closeTimer.current)}
             >
@@ -408,7 +411,7 @@ export function SiteNav() {
         </div>
       </header>
 
-      <MobileSheet open={sheet} onClose={() => setSheet(false)} signedIn={signedIn} />
+      <MobileSheet open={sheet} onClose={() => setSheet(false)} />
     </>
   )
 }
@@ -449,27 +452,7 @@ function PanelSlot({
   )
 }
 
-/*
- * "Log in" and "Dashboard" occupy the same grid cell, so the link is always
- * as wide as the longer word and swapping them moves nothing beside it.
- */
-function SessionLink({ signedIn }: { signedIn: boolean }) {
-  return (
-    <Link
-      href={signedIn ? hosts.dashboard : hosts.signIn}
-      className="grid h-9 items-center rounded-[11px] px-3 text-[13.5px] text-fg-2 transition-colors hover:bg-white/[0.05] hover:text-fg"
-    >
-      <span className={cn("col-start-1 row-start-1 transition-opacity", signedIn ? "opacity-0" : "opacity-100")} aria-hidden={signedIn}>
-        Log in
-      </span>
-      <span className={cn("col-start-1 row-start-1 transition-opacity", signedIn ? "opacity-100" : "opacity-0")} aria-hidden={!signedIn}>
-        Dashboard
-      </span>
-    </Link>
-  )
-}
-
-function MobileSheet({ open, onClose, signedIn }: { open: boolean; onClose: () => void; signedIn: boolean }) {
+function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const groups = [
     { title: "Product", items: productNav },
     { title: "Developers", items: developerNav },
@@ -508,9 +491,6 @@ function MobileSheet({ open, onClose, signedIn }: { open: boolean; onClose: () =
         <div className="flex flex-col gap-2 border-t border-line pt-6">
           <Link href="/pricing" onClick={onClose} className="px-2 py-2 text-[15px] text-fg">
             Pricing
-          </Link>
-          <Link href={signedIn ? hosts.dashboard : hosts.signIn} className="px-2 py-2 text-[15px] text-fg-2">
-            {signedIn ? "Dashboard" : "Log in"}
           </Link>
         </div>
       </nav>

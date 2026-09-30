@@ -39,7 +39,7 @@ export function ComparePageView({ slug, page }: { slug: string; page: ComparePag
     <>
       <PageHero eyebrow="Compare" title={page.title} lede={page.lede}>
         <div data-reveal data-reveal-delay="0.25" className="mt-9 flex flex-wrap gap-3">
-          <ButtonLink href={hosts.signUp} size="lg" arrow>
+          <ButtonLink href={hosts.signIn} size="lg" arrow>
             Start sending
           </ButtonLink>
           <ButtonLink href="/migrate/resend" size="lg" variant="secondary">

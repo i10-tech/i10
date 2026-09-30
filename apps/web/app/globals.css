@@ -239,10 +239,20 @@
     line-height: 1.6;
     overflow-x: clip;
   }
+  /* Opaque on purpose: a translucent highlight doubles up wherever two
+     line boxes overlap (display type sets its lines tighter than the font's
+     own ascent + descent), which reads as stripes of a darker yellow. */
   ::selection {
-    background: oklch(0.88 0.17 95 / 0.88);
+    background: var(--brand);
     color: var(--brand-ink);
   }
+  /* On yellow, a yellow box vanishes: there it is ink with yellow text. */
+  .selection-ink ::selection,
+  .selection-ink::selection {
+    background: var(--brand-ink);
+    color: var(--brand);
+  }
+
   :focus-visible {
     outline: 2px solid var(--brand);
     outline-offset: 3px;
@@ -377,6 +387,26 @@ html.js:not([data-hydrated]) [data-split] {
     inset 0 1px 0 rgb(255 255 255 / 0.05),
     0 16px 40px -16px rgb(0 0 0 / 0.7);
 }
+.nav-bar--on-brand {
+  background: rgb(255 255 255 / 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgb(11 11 12 / 0.12),
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    0 16px 40px -20px rgb(90 70 0 / 0.35);
+}
+.nav-bar--on-brand ul :is(a, button) {
+  color: rgb(11 11 12 / 0.68);
+}
+.nav-bar--on-brand ul :is(a, button):hover,
+.nav-bar--on-brand ul [aria-expanded="true"] {
+  color: var(--brand-ink);
+}
+.nav-bar--on-brand ul svg {
+  color: rgb(11 11 12 / 0.45);
+}
+.nav-bar--on-brand ul > span {
+  background: rgb(11 11 12 / 0.07);
+}
 .nav-viewport {
   background: rgb(19 19 22 / 0.94);
   backdrop-filter: blur(20px) saturate(1.4);
@@ -390,6 +420,46 @@ html.js:not([data-hydrated]) [data-split] {
     height 380ms var(--ease-out-quint),
     transform 380ms var(--ease-out-quint),
     opacity 180ms linear;
+}
+/*
+ * Logo hand-off (FooterLogo): with the footer's mark on screen the nav's
+ * drops down and out, and the footer's drops in from above. One i10 at a
+ * time, and it reads as the same one moving.
+ */
+.nav-logo {
+  transition:
+    color 500ms var(--ease-out-quad),
+    opacity 380ms var(--ease-out-quad),
+    transform 620ms var(--ease-out-expo),
+    filter 380ms var(--ease-out-quad);
+}
+.js[data-footer-logo] .nav-logo {
+  opacity: 0;
+  transform: translateY(14px) scale(0.92);
+  filter: blur(4px);
+  pointer-events: none;
+}
+.footer-logo {
+  transition:
+    opacity 420ms var(--ease-out-quad) 120ms,
+    transform 700ms var(--ease-out-expo) 120ms,
+    filter 420ms var(--ease-out-quad) 120ms;
+}
+.js:not([data-footer-logo]) .footer-logo {
+  opacity: 0;
+  transform: translateY(-18px) scale(0.92);
+  filter: blur(4px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-logo,
+  .footer-logo {
+    transition: opacity 200ms linear;
+  }
+  .js[data-footer-logo] .nav-logo,
+  .js:not([data-footer-logo]) .footer-logo {
+    transform: none;
+    filter: none;
+  }
 }
 .nav-cta {
   box-shadow:
@@ -622,6 +692,42 @@ html.js:not([data-hydrated]) [data-split] {
 [data-split="scatter"] .sw {
   overflow: visible;
 }
+/*
+ * Once the reveal has played the words go back to plain inline text. Each
+ * inline-block is its own line box, so while they stay blocks a selection
+ * paints word by word at the font's own height, with the spaces between them
+ * as slivers at the parent's height (the "dots" above a selected line).
+ */
+[data-split-done] .sw,
+[data-split-done] .sw-i {
+  display: inline;
+  overflow: visible;
+  padding: 0;
+  margin: 0;
+  will-change: auto;
+}
+
+/* Manifesto icons (Dub's): the active one tips and lifts, and its glow tints
+   the words around it. White text x hue = hue; the dark canvas stays dark. */
+.mf-glow {
+  background: radial-gradient(closest-side, var(--glow), transparent);
+  mix-blend-mode: multiply;
+  opacity: 0;
+  transition: opacity 700ms var(--ease-out-quad);
+}
+.mf-icon[data-active] .mf-glow {
+  opacity: 1;
+}
+.mf-tile {
+  transform: translateY(-0.08em);
+  transition:
+    transform 550ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 400ms var(--ease-out-quad);
+}
+.mf-icon[data-active] .mf-tile {
+  transform: translateY(-0.28em) rotate(var(--tilt));
+  filter: drop-shadow(0 0.2em 0.3em rgb(0 0 0 / 0.55));
+}
 
 /* Hero backdrop: a blueprint grid fading out from the top, and a warm glow behind the mark. */
 .hero-grid {
@@ -644,9 +750,12 @@ html.js:not([data-hydrated]) [data-split] {
 .hero-orbit {
   animation: orbit-spin 90s linear infinite;
 }
+/* ⚠ `rotate`, NOT `transform`. Tailwind's -translate-x/y-1/2 centring lives
+   in the separate `translate` property; a keyframe on `transform` stacked a
+   second, animated -50% on top of it, and the ring drifted off the mark. */
 @keyframes orbit-spin {
   to {
-    transform: translate(-50%, -50%) rotate(360deg);
+    rotate: 360deg;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -760,6 +869,20 @@ html.js:not([data-hydrated]) [data-split] {
   transition:
     opacity 450ms var(--ease-out-quad),
     transform 700ms var(--ease-out-expo);
+}
+/* Works-with strip: the same hover as the SDK grid, minus the lift. */
+.ww-cell .ww-mark {
+  color: var(--fg-3);
+  transition: color 450ms var(--ease-out-expo);
+}
+@media (hover: hover) {
+  .ww-cell:hover .ww-mark {
+    color: var(--brand-c);
+  }
+  .ww-cell:hover .fw-dots {
+    opacity: 0.45;
+    transform: none;
+  }
 }
 /* Hover only where a pointer can hover: a tap on a phone would otherwise
    leave the last cell stuck lit. Touch screens get the labels at rest. */

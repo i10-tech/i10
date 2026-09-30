@@ -1,10 +1,10 @@
 import Link from "next/link"
 import { BrandIcon, type BrandName } from "@/components/brand/brand-icon"
-import { Mark } from "@/components/brand/mark"
 import { Badge } from "@/components/ui/badge"
 import { ArrowUpRight } from "@/components/ui/button-link"
 import { StatusPill } from "@/components/site/status-pill"
 import { footerColumns, socials } from "@/lib/site"
+import { FooterLogo } from "./footer-logo"
 import { FooterMark } from "./footer-mark"
 import { FooterWordmark } from "./footer-wordmark"
 
@@ -31,9 +31,7 @@ export function SiteFooter() {
 
       <div className="container-site relative grid grid-cols-2 gap-x-6 gap-y-12 pt-14 pb-12 md:grid-cols-5 xl:grid-cols-[1.35fr_repeat(5,1fr)]">
         <div className="col-span-2 flex flex-col gap-6 md:col-span-5 md:flex-row md:items-start md:justify-between xl:col-span-1 xl:flex-col xl:justify-start">
-          <Link href="/" aria-label="i10 home" className="w-fit text-brand">
-            <Mark className="h-5 w-auto" />
-          </Link>
+          <FooterLogo />
           <p className="max-w-[16rem] text-[13px] leading-5 text-fg-3">
             <span className="text-fg-2">i + 10 letters.</span> Email for developers and mailboxes for everyone else, sent from
             Frankfurt.

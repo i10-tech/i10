@@ -158,6 +158,23 @@ export type BrandName = keyof typeof registry
 export const brandTitle = (name: BrandName) => registry[name].title
 export const brandHex = (name: BrandName) => `#${registry[name].hex}`
 
+/*
+ * A brand's colour, made readable on the dark canvas. Black marks (Next,
+ * Bun, Express...) go white; deep navies and greens (OVH, Ionos, Django,
+ * Prisma) are lifted toward white just enough to show.
+ */
+export const brandHexOnDark = (name: BrandName) => {
+  const hex = registry[name].hex
+  const [r, g, b] = [0, 2, 4].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }) as [number, number, number]
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  if (luminance < 0.02) return "#ffffff"
+  if (luminance < 0.12) return `color-mix(in oklch, #${hex} 55%, white)`
+  return `#${hex}`
+}
+
 export function BrandIcon({
   name,
   size = 20,

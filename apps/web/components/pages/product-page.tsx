@@ -39,7 +39,7 @@ export function ProductPageView({ slug, page }: { slug: string; page: ProductPag
         }
       >
         <div data-reveal data-reveal-delay="0.25" className="mt-9 flex flex-wrap gap-3">
-          <ButtonLink href={hosts.signUp} size="lg" arrow>
+          <ButtonLink href={hosts.signIn} size="lg" arrow>
             Start sending
           </ButtonLink>
           <ButtonLink href={hosts.docs} size="lg" variant="secondary">

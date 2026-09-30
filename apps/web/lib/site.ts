@@ -8,8 +8,9 @@
 export const hosts = {
   site: "https://i10.tech",
   dashboard: "https://dash.i10.tech",
+  // One page signs in and signs up: there is no separate sign-up route, so
+  // every "Start sending" and "Log in" lands here.
   signIn: "https://auth.i10.tech/sign-in",
-  signUp: "https://auth.i10.tech/sign-up",
   docs: "https://docs.i10.tech",
   api: "https://api.i10.tech",
   github: "https://github.com/i10-tech",

@@ -179,7 +179,7 @@ function CodeWindow() {
   return (
     <div ref={root} data-reveal className="code-window flex min-w-0 flex-col overflow-hidden rounded-[16px] bg-surface-1">
       <div className="flex items-center justify-between border-b border-line pr-2">
-        <div role="tablist" aria-label="Language" className="flex min-w-0 overflow-x-auto [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_78%,transparent)]" data-lenis-prevent>
+        <div role="tablist" aria-label="Language" className="flex min-w-0 overflow-x-auto [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_78%,transparent)]">
           {LANGS.map((l, i) => (
             <button
               key={l.id}
@@ -205,7 +205,11 @@ function CodeWindow() {
         <span className="size-1.5 rounded-full bg-fg-4" />
         {active.file}
       </div>
-      <div className="relative min-h-[340px] flex-1 overflow-x-auto py-4 font-mono text-[12.5px] leading-[22px]" data-lenis-prevent>
+      {/* ⚠ NO data-lenis-prevent. It hands the wheel to this box, and with
+          nothing to scroll vertically (plus overscroll-behavior: contain)
+          the page stopped dead whenever the pointer crossed the code.
+          Horizontal scrolling for long lines still works natively. */}
+      <div className="relative min-h-[340px] flex-1 overflow-x-auto py-4 font-mono text-[12.5px] leading-[22px]">
         <AnimatePresence mode="wait" initial={false}>
           <motion.pre
             key={active.id}
@@ -288,8 +292,11 @@ function TestMode() {
           Send
         </button>
       </div>
-      <ul className="mt-4 flex flex-col gap-1 font-mono text-[11.5px]">
-        <AnimatePresence initial={false}>
+      {/* Pinned to four rows from the start, and popLayout takes the leaving
+          row out of the flow at once, so a send never changes the card's
+          height: the new row slides in and pushes the rest down. */}
+      <ul className="relative mt-4 flex h-[92px] flex-col gap-1 overflow-hidden font-mono text-[11.5px]">
+        <AnimatePresence initial={false} mode="popLayout">
           {log.map((row, i) => (
             <motion.li
               key={row.id}
@@ -298,7 +305,7 @@ function TestMode() {
               animate={{ opacity: 1 - i * 0.22, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-              className="flex items-center gap-3 truncate"
+              className="flex h-[20px] shrink-0 items-center gap-3 truncate"
             >
               <span className="text-delivered">{row.status}</span>
               <span className="truncate text-fg-3">
@@ -350,9 +357,11 @@ function WebhookStream() {
         <span className="text-[14px] font-[540] text-fg">Webhooks</span>
         <span className="font-mono text-[10.5px] text-fg-4">signed · retried · replayable</span>
       </div>
-      <ul className="relative mt-4 flex flex-col">
+      {/* Same as the test log: three rows, fixed, and the leaving row pops
+          out of the flow instead of stretching the card for a beat. */}
+      <ul className="relative mt-4 flex h-[141px] flex-col overflow-hidden">
         <span aria-hidden className="absolute top-3 bottom-3 left-[15px] w-px bg-line" />
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {items.map((item) => (
             <motion.li
               key={item.key}
@@ -361,7 +370,7 @@ function WebhookStream() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, transition: { duration: 0.15 } }}
               transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-              className="relative flex items-center gap-3 py-2"
+              className="relative flex h-[47px] shrink-0 items-center gap-3"
             >
               <span className={cn("relative grid size-[31px] shrink-0 place-items-center rounded-[9px] bg-surface-3 shadow-[inset_0_0_0_1px_var(--line)]", item.tone)}>
                 <PixelIcon name={item.icon} size={13} />

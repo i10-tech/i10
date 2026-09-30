@@ -16,10 +16,10 @@ export const useLenis = () => useContext(LenisContext)
  * GSAP's - is the classic source of pinned sections that shiver by a pixel.
  *
  * Tuning, arrived at by feel against lenis.dev and Linear:
- *  - `lerp` 0.09: a touch heavier than Lenis's 0.1 default. Enough glide to
- *    read as intentional, short enough that the page never feels late.
- *  - `wheelMultiplier` 0.95: trackpads on macOS already overshoot; this keeps
- *    a two-finger flick from skipping a whole section.
+ *  - `lerp` 0.13: quicker than Lenis's 0.1 default. Still a glide, but the
+ *    page catches up with the wheel fast enough never to feel late.
+ *  - `wheelMultiplier` 1.15: a notch past native distance per wheel tick;
+ *    at 0.95 the page read as slow to cover.
  *  - touch stays native (`syncTouch` off). Smoothed touch fights the OS's own
  *    momentum and feels wrong on every phone it has ever shipped on.
  *
@@ -34,8 +34,8 @@ export function SmoothScroll({ children }: { children: ReactNode }) {
     if (prefersReducedMotion()) return
 
     const instance = new Lenis({
-      lerp: 0.09,
-      wheelMultiplier: 0.95,
+      lerp: 0.13,
+      wheelMultiplier: 1.15,
       touchMultiplier: 1.4,
       smoothWheel: true,
       syncTouch: false,

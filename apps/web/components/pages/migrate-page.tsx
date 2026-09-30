@@ -78,7 +78,7 @@ export function MigratePageView({ page }: { page: SpecialPage }) {
     <>
       <PageHero eyebrow={page.eyebrow} title={page.title} lede={page.lede} color="var(--hue-send)">
         <div data-reveal data-reveal-delay="0.25" className="mt-9 flex flex-wrap gap-3">
-          <ButtonLink href={hosts.signUp} size="lg" arrow>
+          <ButtonLink href={hosts.signIn} size="lg" arrow>
             Get an API key
           </ButtonLink>
           <ButtonLink href="/compare/resend" size="lg" variant="secondary">
