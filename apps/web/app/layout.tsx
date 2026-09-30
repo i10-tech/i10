@@ -46,7 +46,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           {`document.documentElement.classList.add("js")`}
         </Script>
       </head>
-      <body>
+      {/* Extensions (Grammarly and the like) stamp attributes on <body>
+          before React hydrates; this silences that one element only. */}
+      <body suppressHydrationWarning>
         <a
           href="#main"
           className="type-label fixed top-3 left-3 z-[100] -translate-y-20 rounded-md bg-brand px-3 py-2.5 text-brand-ink transition-transform focus-visible:translate-y-0"

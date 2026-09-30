@@ -6,12 +6,15 @@ import { hosts } from "@/lib/site"
 /*
  * The last word, on a post-yellow card inset from the page edges the way
  * Cloudflare frames its hero. The nav reads `data-nav-tone="brand"` and turns
- * its logo to ink while it passes over.
+ * its logo and button white while it passes over.
  */
 export function Closing() {
+  // The tone sits on the CARD, not the section: tagged on the section, its
+  // dark top padding switched the bar to its yellow look 40px early. The
+  // section carries no tone, so the one before it holds until the card.
   return (
-    <section data-nav-tone="brand" className="relative px-2 pt-10 md:px-3">
-      <div className="closing-card selection-ink relative overflow-hidden rounded-[28px] bg-brand text-brand-ink">
+    <section className="relative px-2 pt-10 md:px-3">
+      <div data-nav-tone="brand" className="closing-card selection-ink relative overflow-hidden rounded-[28px] bg-brand text-brand-ink">
         <div aria-hidden className="closing-dots pointer-events-none absolute inset-0" />
         <div aria-hidden className="closing-glow pointer-events-none absolute" />
         <div className="container-site relative flex flex-col items-center py-24 text-center md:py-36">

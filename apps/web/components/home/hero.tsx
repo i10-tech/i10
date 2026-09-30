@@ -29,7 +29,7 @@ export function Hero() {
       <div aria-hidden className="hero-grid pointer-events-none absolute inset-0" />
       <div aria-hidden className="hero-glow pointer-events-none absolute" />
 
-      <div className="container-site relative grid items-center gap-10 lg:min-h-[calc(100svh-var(--nav-h)-5.5rem)] lg:grid-cols-[1.35fr_0.65fr]">
+      <div className="container-site relative grid items-center gap-10 lg:min-h-[calc(100svh-var(--nav-h)-5.5rem)] lg:grid-cols-[1.1fr_0.9fr]">
         <div className="relative z-10 flex flex-col items-start">
           <Link
             href="/changelog"
@@ -70,7 +70,7 @@ export function Hero() {
           </div>
         </div>
 
-        <div data-reveal="fade" data-reveal-delay="0.2" className="relative -mx-[var(--gutter)] h-[400px] sm:h-[480px] lg:-mr-[2vw] lg:ml-[-12vw] lg:h-[680px]">
+        <div data-reveal="fade" data-reveal-delay="0.2" className="relative -mx-[var(--gutter)] h-[440px] sm:h-[540px] lg:-mr-[5vw] lg:ml-[-12vw] lg:h-[760px]">
           <HeroMarkScene />
           <HeroOrbit />
         </div>

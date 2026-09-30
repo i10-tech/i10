@@ -50,10 +50,11 @@ function useMarkGeometry() {
 function MarkMesh({ drag }: { drag: React.RefObject<{ vx: number; vy: number; dragging: boolean }> }) {
   const group = useRef<THREE.Group>(null)
   const geometry = useMarkGeometry()
-  // Fit the mark to the canvas: 3.8 units wide at scale 1, kept inside 96% of
-  // the visible width and 82% of the height, whichever binds first.
+  // Fit the mark to the canvas: 3.8 units wide at scale 1, kept inside 86% of
+  // the visible width (the rest is room for the lean and the spin) and 86% of
+  // the height, whichever binds first.
   const viewport = useThree((state) => state.viewport)
-  const fit = Math.min(1.4, (viewport.width * 0.96) / 3.8, (viewport.height * 0.82) / 2.5)
+  const fit = Math.min(2, (viewport.width * 0.86) / 3.8, (viewport.height * 0.86) / 2.5)
   const spin = useRef({ y: -0.35, x: 0.12 })
   // Under reduced motion the mark holds still until it is dragged: no idle
   // drift, no bob. Dragging is the reader's own motion, so it stays.

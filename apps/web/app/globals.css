@@ -21,6 +21,8 @@
  */
 
 :root {
+  /* The nav logo's height. */
+  --logo-h: 22px;
   /* Canvas and surfaces - each step is small on purpose. Depth on this site
      comes from hairlines and light, not from big value jumps. */
   --canvas: #09090b;
@@ -213,6 +215,22 @@
   font-weight: 400;
   letter-spacing: -0.01em;
   font-variation-settings: normal;
+}
+/* The nav bar's frame: wider than the page grid, so the logo and the button
+   sit out toward the screen edges (Cloudflare's bar). */
+@utility container-nav {
+  width: 100%;
+  max-width: 1720px;
+  margin-inline: auto;
+  /* Whole pixels only: a vw padding put the logo on a fractional x, and a
+     mark between pixels renders soft. */
+  padding-inline: 12px;
+  @media (width >= 48rem) {
+    padding-inline: 28px;
+  }
+  @media (width >= 80rem) {
+    padding-inline: 40px;
+  }
 }
 @utility container-site {
   width: 100%;
@@ -420,46 +438,6 @@ html.js:not([data-hydrated]) [data-split] {
     height 380ms var(--ease-out-quint),
     transform 380ms var(--ease-out-quint),
     opacity 180ms linear;
-}
-/*
- * Logo hand-off (FooterLogo): with the footer's mark on screen the nav's
- * drops down and out, and the footer's drops in from above. One i10 at a
- * time, and it reads as the same one moving.
- */
-.nav-logo {
-  transition:
-    color 500ms var(--ease-out-quad),
-    opacity 380ms var(--ease-out-quad),
-    transform 620ms var(--ease-out-expo),
-    filter 380ms var(--ease-out-quad);
-}
-.js[data-footer-logo] .nav-logo {
-  opacity: 0;
-  transform: translateY(14px) scale(0.92);
-  filter: blur(4px);
-  pointer-events: none;
-}
-.footer-logo {
-  transition:
-    opacity 420ms var(--ease-out-quad) 120ms,
-    transform 700ms var(--ease-out-expo) 120ms,
-    filter 420ms var(--ease-out-quad) 120ms;
-}
-.js:not([data-footer-logo]) .footer-logo {
-  opacity: 0;
-  transform: translateY(-18px) scale(0.92);
-  filter: blur(4px);
-}
-@media (prefers-reduced-motion: reduce) {
-  .nav-logo,
-  .footer-logo {
-    transition: opacity 200ms linear;
-  }
-  .js[data-footer-logo] .nav-logo,
-  .js:not([data-footer-logo]) .footer-logo {
-    transform: none;
-    filter: none;
-  }
 }
 .nav-cta {
   box-shadow:

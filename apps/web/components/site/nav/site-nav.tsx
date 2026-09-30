@@ -73,6 +73,11 @@ export function SiteNav() {
     resources: { w: 640, h: 260 },
   })
   const [floating, setFloating] = useState(false)
+  // Compact: only the logo and the button, while travelling down. In the
+  // footer it stays compact whichever way you scroll, and opens up again on
+  // leaving it.
+  const [compact, setCompact] = useState(false)
+  const [onFooter, setOnFooter] = useState(false)
   const [tone, setTone] = useState<"dark" | "brand" | "light">("dark")
   const [sheet, setSheet] = useState(false)
 
@@ -136,8 +141,10 @@ export function SiteNav() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- observe once; the callback reads the current sizes through the closure it replaces
   }, [])
 
-  // Floating glass after the first few pixels. The bar itself is pinned: it
-  // never hides or shifts with scroll direction.
+  // Floating after the first few pixels; compact while travelling down.
+  // ⚠ THE BAR NEVER TRANSLATES. Only the links and the glass fade; the logo
+  // and the button hold their pixel in every state, which is what lets the
+  // footer's top row line up with them exactly.
   useEffect(() => {
     let last = window.scrollY
     let frame = 0
@@ -146,8 +153,15 @@ export function SiteNav() {
       frame = requestAnimationFrame(() => {
         const y = window.scrollY
         const delta = y - last
-        last = y
         setFloating(y > 8)
+        // Near the top the full bar always shows, however we got there.
+        if (y <= 240) {
+          setCompact(false)
+          last = y
+        } else if (Math.abs(delta) > 4) {
+          setCompact(delta > 0)
+          last = y
+        }
         if (delta > 0 && openRef.current) close()
       })
     }
@@ -185,6 +199,22 @@ export function SiteNav() {
       window.removeEventListener("resize", build)
     }
   }, [pathname])
+
+  // In the footer once its top is past the upper two thirds of the screen.
+  useEffect(() => {
+    const footer = document.querySelector("footer")
+    if (!footer) return
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        const next = Boolean(entry?.isIntersecting)
+        setOnFooter(next)
+        if (next && openRef.current) close()
+      },
+      { rootMargin: "0px 0px -35% 0px" },
+    )
+    io.observe(footer)
+    return () => io.disconnect()
+  }, [pathname, close])
 
   // Close everything on navigation and on Escape.
   useEffect(() => {
@@ -233,7 +263,9 @@ export function SiteNav() {
 
   const size = open ? sizes[open] : null
   // The open sheet is always dark, whatever section sits under it.
-  const logoColor = sheet ? "text-brand" : tone === "brand" ? "text-brand-ink" : tone === "light" ? "text-canvas" : "text-brand"
+  // Over the yellow card the logo goes white, like the button beside it.
+  const logoColor = sheet ? "text-brand" : tone === "brand" ? "text-white" : tone === "light" ? "text-canvas" : "text-brand"
+  const shrunk = (compact || onFooter) && !sheet
 
   return (
     <>
@@ -253,30 +285,44 @@ export function SiteNav() {
         onMouseLeave={scheduleClose}
         onMouseEnter={() => closeTimer.current && clearTimeout(closeTimer.current)}
       >
-        <div className="container-site pt-3">
+        <div className="container-nav pt-3">
           <div
             ref={barRef}
             className={cn(
               "nav-bar relative flex h-[52px] items-center rounded-[16px] pr-2 pl-4 transition-[background-color,box-shadow,backdrop-filter] duration-500",
-              floating ? "nav-bar--floating" : "",
+              floating && !shrunk ? "nav-bar--floating" : "",
               // Over the yellow card the dark glass turns olive; there the bar
               // goes to a pale wash with ink links instead.
-              tone === "brand" && !sheet && "nav-bar--on-brand",
+              tone === "brand" && !sheet && !shrunk && "nav-bar--on-brand",
             )}
           >
             {/* Logo: stays put in every state, recoloured by the section below it. */}
             <Link
               href="/"
               aria-label="i10 home"
-              // .nav-logo hands off to the footer's mark once that scrolls in
-              // (see FooterLogo): one i10 on screen at a time.
-              className={cn("nav-logo relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2", logoColor)}
+              className={cn(
+                "relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2 transition-[color,background-color,box-shadow,backdrop-filter] duration-500",
+                logoColor,
+                // Alone on the page while compact it gets a glass chip, so it
+                // never sits bare on body text; over yellow a faint ink wash.
+                // In the footer it goes bare, sitting in the footer's own top row.
+                shrunk &&
+                  !onFooter &&
+                  (tone === "brand"
+                    ? "bg-[rgb(11_11_12/0.07)] shadow-[inset_0_0_0_1px_rgb(11_11_12/0.14)]"
+                    : "bg-[rgb(14_14_17/0.62)] shadow-[inset_0_0_0_1px_var(--line)] backdrop-blur-lg"),
+              )}
               onMouseEnter={scheduleClose}
             >
-              <Mark className="h-[19px] w-auto" shapeRendering="geometricPrecision" />
+              <Mark className="h-[var(--logo-h)] w-auto" shapeRendering="geometricPrecision" />
             </Link>
 
-            <div className="ml-6 hidden flex-1 items-center md:flex">
+            <div
+              className={cn(
+                "ml-6 hidden flex-1 items-center transition-[opacity,filter] duration-300 md:flex",
+                shrunk ? "pointer-events-none opacity-0 blur-[2px]" : "opacity-100",
+              )}
+            >
               <ul
                 ref={listRef}
                 className="relative flex items-center"
@@ -284,10 +330,13 @@ export function SiteNav() {
               >
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute top-1/2 left-0 h-8 rounded-[9px] bg-white/[0.07] ease-[var(--ease-out-quint)]"
+                  className="pointer-events-none absolute top-1/2 left-0 h-8 rounded-[9px] bg-white/[0.07]"
                   style={{
-                    transition: highlight.jump ? "opacity 200ms linear" : "transform 260ms, width 260ms, opacity 260ms",
-                    transitionTimingFunction: "var(--ease-out-quint)",
+                    // One shorthand, easing inline: mixing it with a separate
+                    // transitionTimingFunction makes React warn on re-render.
+                    transition: highlight.jump
+                      ? "opacity 200ms linear"
+                      : "transform 260ms var(--ease-out-quint), width 260ms var(--ease-out-quint), opacity 260ms var(--ease-out-quint)",
                     width: highlight.w,
                     transform: `translate3d(${highlight.x}px, -50%, 0)`,
                     opacity: highlight.on ? 1 : 0,
