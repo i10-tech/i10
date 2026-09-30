@@ -32,14 +32,51 @@ export function EmailFrame({
   html,
   title,
   className,
+  imagesFrom = null,
+  inert = false,
+  style,
 }: {
   html: string
   title: string
   className?: string
+  /**
+   * An origin whose images always load: our own template images host
+   * (#244, #248). Everything else remote waits for the viewer to ask.
+   */
+  imagesFrom?: string | null
+  /**
+   * A thumbnail: no controls, no pointer, no focus, hidden from assistive
+   * technology - the card around it is the link, and says what it is.
+   */
+  inert?: boolean
+  style?: React.CSSProperties
 }) {
   const [remote, setRemote] = React.useState(false)
-  const hasRemote = React.useMemo(() => REMOTE_IMAGE.test(html), [html])
-  const doc = React.useMemo(() => displayCopy(html, remote), [html, remote])
+  const hasRemote = React.useMemo(
+    () => remoteImagesIn(html, imagesFrom),
+    [html, imagesFrom],
+  )
+  const doc = React.useMemo(
+    () => displayCopy(html, remote, imagesFrom),
+    [html, remote, imagesFrom],
+  )
+
+  if (inert) {
+    return (
+      <iframe
+        sandbox=""
+        srcDoc={doc}
+        title={title}
+        aria-hidden
+        tabIndex={-1}
+        style={style}
+        className={cn("pointer-events-none block border-0 bg-white", className)}
+        referrerPolicy="no-referrer"
+        // Not `loading="lazy"`: a thumbnail is only mounted once its card is
+        // on screen, and deferring it twice only delays the paint.
+      />
+    )
+  }
 
   return (
     <div className={cn("relative", className)}>
@@ -69,7 +106,17 @@ export function EmailFrame({
   )
 }
 
-const REMOTE_IMAGE = /\b(?:src|background)\s*=\s*["']?\s*https?:|url\(\s*["']?https?:/i
+const REMOTE_IMAGE =
+  /\b(?:src|background)\s*=\s*["']?\s*(https?:[^"'\s>]+)|url\(\s*["']?(https?:[^"')\s]+)/gi
+
+/** Whether the email loads any image from somewhere other than `own`. */
+export function remoteImagesIn(html: string, own: string | null): boolean {
+  for (const m of html.matchAll(REMOTE_IMAGE)) {
+    const url = m[1] ?? m[2] ?? ""
+    if (!own || !url.startsWith(`${own}/`)) return true
+  }
+  return false
+}
 
 const DOCTYPE = /^\s*<!doctype[^>]*>/i
 
@@ -84,8 +131,16 @@ const REFRESH = /<meta\b[^>]*http-equiv\s*=\s*["']?\s*refresh[^>]*>/gi
  * can only narrow. Anything before the doctype would put the document into
  * quirks mode and change how the email lays out.
  */
-export function displayCopy(html: string, remoteImages: boolean): string {
-  const img = remoteImages ? "data: cid: https: http:" : "data: cid:"
+export function displayCopy(
+  html: string,
+  remoteImages: boolean,
+  imagesFrom: string | null = null,
+): string {
+  const own =
+    imagesFrom && /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(imagesFrom)
+      ? ` ${imagesFrom}`
+      : ""
+  const img = remoteImages ? "data: cid: https: http:" : `data: cid:${own}`
   const policy = [
     "default-src 'none'",
     `img-src ${img}`,

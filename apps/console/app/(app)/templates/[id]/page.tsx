@@ -74,7 +74,11 @@ export default async function TemplatePage({
     value: "preview",
     label: "Preview",
     content: (
-      <TemplatePreviewPanel templateId={template.id} history={template.history} />
+      <TemplatePreviewPanel
+        templateId={template.id}
+        history={template.history}
+        imagesFrom={template.assets_origin ?? null}
+      />
     ),
   }
   const versions = {
@@ -85,6 +89,7 @@ export default async function TemplatePage({
         templateId={template.id}
         history={template.history}
         editable={template.source === "managed"}
+        imagesFrom={template.assets_origin ?? null}
       />
     ),
   }

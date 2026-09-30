@@ -42,9 +42,11 @@ export function TemplateVersions({
   templateId,
   history,
   editable = false,
+  imagesFrom = null,
 }: {
   templateId: string
   history: TemplateVersionSummary[]
+  imagesFrom?: string | null
   /** An editor template: any version can be copied back into the draft. */
   editable?: boolean
 }) {
@@ -102,7 +104,13 @@ export function TemplateVersions({
         ))}
       </ul>
 
-      {history.length > 1 && <VersionDiff templateId={templateId} history={history} />}
+      {history.length > 1 && (
+        <VersionDiff
+          templateId={templateId}
+          history={history}
+          imagesFrom={imagesFrom}
+        />
+      )}
 
       <ConfirmDialog
         open={restoring !== null}
@@ -166,9 +174,11 @@ export function TemplateVersions({
 function VersionDiff({
   templateId,
   history,
+  imagesFrom,
 }: {
   templateId: string
   history: TemplateVersionSummary[]
+  imagesFrom: string | null
 }) {
   const live = history.find((v) => v.live) ?? history[0]!
   const [to, setTo] = React.useState(live.number)
@@ -270,7 +280,12 @@ function VersionDiff({
                   v{n}
                 </figcaption>
                 {p?.html ? (
-                  <EmailFrame html={p.html} title={`v${n}`} className="h-[28rem]" />
+                  <EmailFrame
+                    imagesFrom={imagesFrom}
+                    html={p.html}
+                    title={`v${n}`}
+                    className="h-[28rem]"
+                  />
                 ) : (
                   <pre className="h-[28rem] overflow-auto bg-muted/30 px-3 py-2 font-mono text-xs whitespace-pre-wrap">
                     {p?.text ?? ""}

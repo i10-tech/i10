@@ -517,6 +517,8 @@ export interface TemplateVersionDetail extends TemplateVersionSummary {
 
 export interface TemplateDetail extends TemplateRow {
   history: TemplateVersionSummary[]
+  /** Where the workspace's own template images load from (#244, #248). */
+  assets_origin?: string | null
 }
 
 /** A version filled with sample or given values, exactly as a send would fill it. */

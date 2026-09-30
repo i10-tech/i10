@@ -99,6 +99,25 @@ separation is a bucket.
   `_SECRET_ACCESS_KEY` and `_PUBLIC_URL`, all or none. Unset, uploads answer
   501 and the editor takes image addresses only.
 
+### Thumbnails (#248)
+
+The templates page is a grid of cards, as in Resend. Each card shows the top of
+the template's live version.
+
+- **The real email, not a picture of it.** The API fills the live version with
+  its samples (the same call as the preview tab), and the card draws it in the
+  sandboxed, CSP-locked `EmailFrame`, at 600 px and scaled down. It is inert:
+  no pointer, no focus, hidden from assistive technology.
+- **Screenshots were rejected** because they need a headless browser in the
+  cluster, a render per version, and somewhere to keep them, for a picture
+  that is out of date the moment a version is promoted.
+- **Loaded when a card scrolls into view**, and cached for the session by
+  template and version, which never change.
+- **Our own images load everywhere we preview.** The CSP allows the template
+  images host (#244) alongside `data:` and `cid:`, so a visual template's
+  thumbnail shows its images. Any other remote image waits for the viewer to
+  ask, in the full preview.
+
 ### Templates are file sets
 
 Real template folders share a layout, a footer, a button. So a `tsx` template
