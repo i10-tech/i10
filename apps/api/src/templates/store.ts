@@ -16,7 +16,7 @@ import {
   type Variable,
 } from "@repo/templates"
 import { withTenant, type Database } from "../db/client.js"
-import { templateVersions, templates } from "../db/core.js"
+import { githubRepositories, templateVersions, templates } from "../db/core.js"
 import { LIST_CAP } from "../console/marketing/shared.js"
 import { VersionCache } from "./version-cache.js"
 
@@ -48,6 +48,17 @@ export interface TemplateSummary {
   /** When the live version was created. Null before the first publish. */
   published_at: string | null
   versions: number
+  /**
+   * Where a `github` template lives (#235): the repository, the template
+   * directory in it, the entry's path under that directory, and whether the
+   * last push still had the file. Null for every other template.
+   */
+  github: {
+    repository: string
+    directory: string
+    path: string
+    removed: boolean
+  } | null
   created_at: string
   updated_at: string
 }
@@ -141,6 +152,8 @@ export interface TemplateStore {
       folder?: string | null
       kind?: TemplateKind
       source?: TemplateSource
+      /** A `github` template's repository and entry path (#235). */
+      github?: { repositoryId: string; path: string }
     },
   ): Promise<TemplateRow | { conflict: true }>
   /** By id or by name, as a send names it. */
@@ -212,6 +225,15 @@ export function templateStore(
       .select({ n: count() })
       .from(templateVersions)
       .where(eq(templateVersions.templateId, id))
+    const [repo] = row.githubRepositoryId
+      ? await tx
+          .select({
+            fullName: githubRepositories.fullName,
+            directory: githubRepositories.directory,
+          })
+          .from(githubRepositories)
+          .where(eq(githubRepositories.id, row.githubRepositoryId))
+      : []
     return {
       id: row.id,
       name: row.name,
@@ -225,6 +247,14 @@ export function templateStore(
       version: live?.number ?? 0,
       published_at: live?.createdAt.toISOString() ?? null,
       versions: n,
+      github: repo
+        ? {
+            repository: repo.fullName,
+            directory: repo.directory,
+            path: row.path ?? "",
+            removed: row.removedAt !== null,
+          }
+        : null,
       created_at: row.createdAt.toISOString(),
       updated_at: row.updatedAt.toISOString(),
     }
@@ -308,11 +338,19 @@ export function templateStore(
             liveNumber: templateVersions.number,
             liveAt: templateVersions.createdAt,
             versions: sql<number>`(select count(*)::int from ${templateVersions} v where v.template_id = ${templates.id})`,
+            repository: githubRepositories.fullName,
+            directory: githubRepositories.directory,
+            path: templates.path,
+            removedAt: templates.removedAt,
             createdAt: templates.createdAt,
             updatedAt: templates.updatedAt,
           })
           .from(templates)
           .leftJoin(templateVersions, eq(templateVersions.id, templates.liveVersionId))
+          .leftJoin(
+            githubRepositories,
+            eq(githubRepositories.id, templates.githubRepositoryId),
+          )
           .orderBy(templates.folder, templates.name)
           .limit(LIST_CAP)
 
@@ -326,6 +364,14 @@ export function templateStore(
           version: r.liveNumber ?? 0,
           published_at: r.liveAt?.toISOString() ?? null,
           versions: r.versions,
+          github: r.repository
+            ? {
+                repository: r.repository,
+                directory: r.directory ?? "",
+                path: r.path ?? "",
+                removed: r.removedAt !== null,
+              }
+            : null,
           created_at: r.createdAt.toISOString(),
           updated_at: r.updatedAt.toISOString(),
         }))
@@ -364,6 +410,8 @@ export function templateStore(
             folder: input.folder ?? null,
             kind: input.kind ?? "html",
             source: input.source ?? (input.kind === "tsx" ? "upload" : "managed"),
+            githubRepositoryId: input.github?.repositoryId ?? null,
+            path: input.github?.path ?? null,
           })
           .onConflictDoNothing({ target: [templates.tenantId, templates.name] })
           .returning({ id: templates.id })

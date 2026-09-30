@@ -1097,6 +1097,89 @@ export async function templateVersion(id: string, number: number) {
   )
 }
 
+// ── GitHub-connected templates (#235) ──────────────────────────────────────
+
+/** Where "Connect GitHub" goes: GitHub's install page, with a signed state. */
+export async function githubInstallUrl() {
+  return run(
+    () => api<{ url: string }>("/console/github/install", { method: "POST" }),
+    [],
+    {
+      refreshCaller: false,
+    },
+  )
+}
+
+/** The installations' repositories, for the picker. */
+export async function githubRepositoriesOf(installationId: number) {
+  return run(
+    () =>
+      api<{
+        data: {
+          id: number
+          full_name: string
+          default_branch: string
+          private: boolean
+        }[]
+      }>(`/console/github/installations/${installationId}/repositories`),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export async function connectGithubRepository(input: {
+  installation_id: number
+  full_name: string
+  target_branch?: string
+  directory?: string
+}) {
+  return run(
+    () =>
+      api<{ id: string; sync_id: string | null }>("/console/github/repositories", {
+        method: "POST",
+        body: input,
+      }),
+    ["/templates"],
+  )
+}
+
+export async function updateGithubRepository(
+  id: string,
+  patch: { target_branch?: string; directory?: string },
+) {
+  return run(
+    () =>
+      api<{ id: string }>(`/console/github/repositories/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: patch,
+      }),
+    ["/templates"],
+  )
+}
+
+export async function syncGithubRepository(id: string) {
+  return run(
+    () =>
+      api<{ sync_id: string }>(
+        `/console/github/repositories/${encodeURIComponent(id)}/sync`,
+        {
+          method: "POST",
+        },
+      ),
+    ["/templates"],
+  )
+}
+
+export async function disconnectGithubRepository(id: string) {
+  return run(
+    () =>
+      api<{ deleted: true }>(`/console/github/repositories/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    ["/templates"],
+  )
+}
+
 // ── Templates submitted for review (#222) ───────────────────────────────────
 
 export async function submitTrustedTemplate(input: {

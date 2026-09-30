@@ -11,6 +11,7 @@ import {
 } from "@repo/ui/components/page"
 import { NewTemplateButton } from "@/components/new-template"
 import { TemplateGrid } from "@/components/template-grid"
+import { GithubPanel } from "@/components/github-panel"
 import { UploadTemplatesButton } from "@/components/upload-templates"
 import {
   SubmitTrustedTemplateButton,
@@ -20,7 +21,7 @@ import { EmptyState } from "@/components/empty-state"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { formatRelative } from "@/lib/format"
-import type { TemplateSummary, TrustedTemplateRow } from "@/lib/types"
+import type { GithubState, TemplateSummary, TrustedTemplateRow } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Templates" }
 
@@ -35,11 +36,12 @@ export const metadata: Metadata = { title: "Templates" }
  * in.
  */
 export default async function TemplatesPage() {
-  const [result, trusted] = await Promise.all([
+  const [result, trusted, github] = await Promise.all([
     tryApi<{ data: TemplateSummary[]; assets_origin?: string | null }>(
       "/console/templates",
     ),
     tryApi<{ data: TrustedTemplateRow[] }>("/console/trusted-templates"),
+    tryApi<GithubState>("/console/github"),
   ])
   const hasRows = result.ok && result.data.data.length > 0
 
@@ -89,6 +91,17 @@ export default async function TemplatesPage() {
             templates={result.data.data}
             imagesFrom={result.data.assets_origin ?? null}
           />
+        )}
+
+        {/*
+         * ⚠ AFTER THE TEMPLATES, NOT BEFORE. The page is for the templates;
+         * where some of them come from is a setting of the workspace, looked
+         * at far less often than the emails themselves.
+         */}
+        {github.ok && github.data.configured && (
+          <div className="mt-10">
+            <GithubPanel state={github.data} />
+          </div>
         )}
 
         <ReviewedTemplates result={trusted} />

@@ -12,6 +12,7 @@ import {
 } from "./routes/checkout-status.js"
 import { createConsole, type ConsoleDeps } from "./routes/console.js"
 import { createPolarWebhooks, type PolarWebhookDeps } from "./routes/polar-events.js"
+import { createGithubWebhooks, type GithubWebhookDeps } from "./routes/github-events.js"
 import type { AcceptOps, Logger as AcceptLogger } from "./send/accept.js"
 import type { Metering } from "./send/metering.js"
 import { createAutoconfig, type AutoconfigDeps } from "./routes/autoconfig.js"
@@ -142,6 +143,8 @@ export interface AppDeps {
    * by way of something it happens to have been passed.
    */
   polarWebhooks?: PolarWebhookDeps
+  /** GitHub-connected templates' events (#235). Absent: the route answers 503. */
+  githubWebhooks?: GithubWebhookDeps
   /** Starting a checkout, and reading back the plan in force. API-key authed. */
   billing?: BillingDeps
   /**
@@ -458,6 +461,10 @@ export function createApp(deps: AppDeps = {}) {
   // that moves money into entitlement, so the signature check is the whole of
   // the authorisation - see routes/polar-events.ts.
   app.route("/webhooks", createPolarWebhooks(deps.polarWebhooks))
+
+  // GitHub App events for connected templates (#235), same prefix, same rule:
+  // the signature is the whole of the authorization.
+  app.route("/webhooks", createGithubWebhooks(deps.githubWebhooks))
 
   // The dashboard. Mounted unconditionally so an unconfigured deployment
   // answers 501 with a reason rather than 404 - which would read as the console

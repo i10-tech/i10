@@ -90,6 +90,7 @@ export default async function TemplatePage({
         history={template.history}
         editable={template.source === "managed"}
         imagesFrom={template.assets_origin ?? null}
+        github={template.github ?? null}
       />
     ),
   }
@@ -167,6 +168,33 @@ export default async function TemplatePage({
             )}
           </p>
         </div>
+
+        {template.github && (
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <p>
+              Kept in{" "}
+              <a
+                href={`https://github.com/${template.github.repository}/blob/${live?.commit_sha ?? "HEAD"}/${[template.github.directory, template.github.path].filter(Boolean).join("/")}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-foreground underline-offset-4 hover:underline"
+              >
+                {template.github.repository}/
+                {[template.github.directory, template.github.path]
+                  .filter(Boolean)
+                  .join("/")}
+              </a>
+              . A push to its target branch makes a new version and puts it live.
+            </p>
+            {template.github.removed && (
+              <p className="rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-warning">
+                The last push no longer had this file. The template still sends v
+                {template.version}; add the file back, or stop sending it and delete the
+                template.
+              </p>
+            )}
+          </div>
+        )}
 
         {template.kind === "tsx" && <TemplateSubject template={template} />}
 

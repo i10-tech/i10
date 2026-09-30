@@ -43,6 +43,9 @@ import { marketingStore } from "./console/marketing.js"
 import { templateStore } from "./templates/store.js"
 import { templateRenderer } from "./templates/renderer.js"
 import { templateAssetStore } from "./templates/assets.js"
+import { githubApp } from "./github/client.js"
+import { githubStore } from "./github/store.js"
+import { githubSyncer } from "./github/sync.js"
 import { onboardingStore } from "./console/onboarding.js"
 import { tenantProfileStore } from "./console/tenant.js"
 import { usageStore } from "./console/usage.js"
@@ -213,6 +216,64 @@ if (Boolean(env.TEMPLATE_RENDERER_URL) !== Boolean(env.TEMPLATE_RENDERER_SECRET)
 // One store for the console and the send path: the same rows, read two ways.
 const templates = templateStore(db)
 const templateAssetsBucket = templateAssetsBucketFrom(env)
+const renderer =
+  env.TEMPLATE_RENDERER_URL && env.TEMPLATE_RENDERER_SECRET
+    ? templateRenderer({
+        url: env.TEMPLATE_RENDERER_URL,
+        secret: env.TEMPLATE_RENDERER_SECRET,
+      })
+    : null
+
+/**
+ * GitHub-connected templates (#235): only with the app's six settings AND the
+ * renderer, since every pushed template is rendered once in the sandbox.
+ */
+const github =
+  renderer &&
+  env.GITHUB_APP_ID &&
+  env.GITHUB_APP_SLUG &&
+  env.GITHUB_APP_PRIVATE_KEY &&
+  env.GITHUB_APP_WEBHOOK_SECRET &&
+  env.GITHUB_APP_CLIENT_ID &&
+  env.GITHUB_APP_CLIENT_SECRET
+    ? (() => {
+        const app = githubApp({
+          appId: env.GITHUB_APP_ID!,
+          slug: env.GITHUB_APP_SLUG!,
+          privateKey: env.GITHUB_APP_PRIVATE_KEY!,
+          clientId: env.GITHUB_APP_CLIENT_ID!,
+          clientSecret: env.GITHUB_APP_CLIENT_SECRET!,
+        })
+        const store = githubStore(db)
+        const syncer = githubSyncer({
+          db,
+          github: app,
+          store,
+          templates,
+          renderer,
+          log,
+        })
+        return {
+          app,
+          store,
+          syncer,
+          clientSecret: env.GITHUB_APP_CLIENT_SECRET!,
+          webhookSecret: env.GITHUB_APP_WEBHOOK_SECRET!,
+        }
+      })()
+    : null
+if (github) {
+  // ⚠ SYNCS LEFT BEHIND BY A RESTART ARE PICKED UP HERE, once a minute. The
+  // webhook records a sync before it starts it, so a deploy mid-sync leaves a
+  // row, never a lost push. See `recover` in github/sync.ts.
+  setInterval(() => {
+    github.syncer
+      .recover()
+      .catch((error: unknown) =>
+        log.error({ err: error }, "github sync recovery failed"),
+      )
+  }, 60_000).unref()
+}
 
 /**
  * ⚠ THERE IS NO LONGER AN UNMETERED MODE TO FALL INTO, AND THAT IS THE POINT OF
@@ -853,6 +914,17 @@ const app = createApp({
         },
       }
     : {}),
+  ...(github
+    ? {
+        githubWebhooks: {
+          secret: github.webhookSecret,
+          db,
+          store: github.store,
+          syncer: github.syncer,
+          log,
+        },
+      }
+    : {}),
   ...(grants && env.POLAR_WEBHOOK_SECRET
     ? {
         polarWebhooks: {
@@ -998,12 +1070,15 @@ const app = createApp({
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
     marketing: marketingStore(db),
     templates,
-    ...(env.TEMPLATE_RENDERER_URL && env.TEMPLATE_RENDERER_SECRET
+    ...(renderer ? { templateRenderer: renderer } : {}),
+    ...(github
       ? {
-          templateRenderer: templateRenderer({
-            url: env.TEMPLATE_RENDERER_URL,
-            secret: env.TEMPLATE_RENDERER_SECRET,
-          }),
+          github: {
+            app: github.app,
+            store: github.store,
+            syncer: github.syncer,
+            clientSecret: github.clientSecret,
+          },
         }
       : {}),
     ...(templateAssetsBucket
