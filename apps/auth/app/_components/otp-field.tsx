@@ -101,11 +101,30 @@ export function OtpField({
         autoFocus={autoFocus}
         containerClassName="justify-center"
       >
-        <InputOTPGroup>
-          {Array.from({ length: OTP_LENGTH }, (_, i) => (
-            <InputOTPSlot key={i} index={i} state={tone} />
-          ))}
-        </InputOTPGroup>
+        {/*
+         * ⚠ A COLUMN SO THE VERDICT LINE IS EXACTLY AS WIDE AS THE BOXES. The
+         * container centres its children in a row; the line has to measure
+         * the group, not the field, or it overhangs the first and last box.
+         */}
+        <div
+          className={cn(
+            "flex flex-col gap-2",
+            /*
+             * ⚠ THE SHAKE REPLAYS ON EVERY REJECTION WITHOUT A `key`. Callers
+             * drop `invalid` on the first keystroke of the next attempt, so
+             * each rejection removes and re-adds the animation, and the
+             * browser starts it again from the first frame.
+             */
+            tone === "invalid" && "animate-[verdict-shake_360ms_var(--ease-quad-out)]",
+          )}
+        >
+          <InputOTPGroup>
+            {Array.from({ length: OTP_LENGTH }, (_, i) => (
+              <InputOTPSlot key={i} index={i} state={tone} />
+            ))}
+          </InputOTPGroup>
+          <VerdictLine tone={tone} />
+        </div>
       </InputOTP>
       {/*
        * ⚠ THE ROW IS ALWAYS RENDERED AND ALWAYS RESERVED, for the reason the
@@ -142,5 +161,36 @@ export function OtpField({
         )}
       </p>
     </Field>
+  )
+}
+
+/**
+ * The line under the boxes that carries the verdict (#151).
+ *
+ * ⚠ IT IS ALWAYS IN THE LAYOUT AND ONLY ITS FILL CHANGES. Mounting it on the
+ * verdict would push the hint row down by its height at the exact moment the
+ * person is reading it.
+ *
+ * ⚠ `aria-hidden`, because the hint row below already says "Verified" or the
+ * rejection in words and is the live region. A line is the same news drawn,
+ * and announcing it twice is noise.
+ */
+function VerdictLine({ tone }: { tone: FieldState }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="relative block h-0.5 w-full overflow-hidden rounded-pill"
+    >
+      <span
+        className={cn(
+          "absolute inset-0 origin-left rounded-pill",
+          tone === "valid" &&
+            "bg-success animate-[verdict-fill_var(--duration-exit)_var(--ease-quint-out)]",
+          // Already full: a rejection is not progress, it is an answer.
+          tone === "invalid" && "bg-danger",
+          tone !== "valid" && tone !== "invalid" && "bg-transparent",
+        )}
+      />
+    </span>
   )
 }
