@@ -831,6 +831,42 @@
 }
 
 /*
+ * The code field's verdict, as one movement in two tones (#151).
+ *
+ * ⚠ SUCCESS AND FAILURE ARE THE SAME COMPONENT. A line under the six boxes
+ * fills green from the left when the code is accepted; on a rejection it is
+ * red and already full, and the boxes shake once. Two unrelated effects for
+ * the two outcomes would read as two different features.
+ *
+ * ⚠ THE SHAKE IS SMALL AND DAMPED: 6px, three swings, 360ms. A wider or
+ * longer one is a cartoon, and on a screen where the person is about to type
+ * the code again it gets in the way of the boxes.
+ *
+ * Under reduced motion the blanket rule in `@layer base` cuts both to their end
+ * frame: the line is simply full and the boxes do not move.
+ */
+@keyframes verdict-fill {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes verdict-shake {
+  20% {
+    transform: translateX(-6px);
+  }
+  45% {
+    transform: translateX(5px);
+  }
+  70% {
+    transform: translateX(-3px);
+  }
+  90% {
+    transform: translateX(1px);
+  }
+}
+
+/*
  * ⚠ REDUCED MOTION IS A 100ms FADE, NOT NOTHING. The blanket rule above cuts
  * every animation to 0.01ms, which for an overlay is a hard cut - Base asks for
  * a short crossfade instead. An overlay carries `motion-surface`; this keeps its
