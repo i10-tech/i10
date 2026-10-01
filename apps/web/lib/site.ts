@@ -97,19 +97,71 @@ export const productNav: NavItem[] = [
 ]
 
 export const developerNav: NavItem[] = [
-  { title: "Documentation", href: hosts.docs, description: "Guides and concepts.", icon: "book", external: true },
-  { title: "API reference", href: `${hosts.docs}/api`, description: "Every endpoint, typed.", icon: "code", external: true },
-  { title: "SDKs", href: "/developers", description: "@i10/node, @i10/next and more.", icon: "terminal" },
-  { title: "Migrate from Resend", href: "/migrate/resend", description: "Swap the import. Keep the code.", icon: "migrate" },
-  { title: "Changelog", href: "/changelog", description: "What shipped, when.", icon: "changelog" },
-  { title: "Status", href: "/status", description: "Live system health.", icon: "status" },
+  {
+    title: "Documentation",
+    href: hosts.docs,
+    description: "Guides and concepts.",
+    icon: "book",
+    external: true,
+  },
+  {
+    title: "API reference",
+    href: `${hosts.docs}/api`,
+    description: "Every endpoint, typed.",
+    icon: "code",
+    external: true,
+  },
+  {
+    title: "SDKs",
+    href: "/developers",
+    description: "@i10/node, @i10/next and more.",
+    icon: "terminal",
+  },
+  {
+    title: "Migrate from Resend",
+    href: "/migrate/resend",
+    description: "Swap the import. Keep the code.",
+    icon: "migrate",
+  },
+  {
+    title: "Changelog",
+    href: "/changelog",
+    description: "What shipped, when.",
+    icon: "changelog",
+  },
+  {
+    title: "Status",
+    href: "/status",
+    description: "Live system health.",
+    icon: "status",
+  },
 ]
 
 export const resourceNav: NavItem[] = [
-  { title: "Blog", href: "/blog", description: "Notes from building i10.", icon: "blog" },
-  { title: "Customers", href: "/customers", description: "Teams sending with i10.", icon: "people" },
-  { title: "Security", href: "/security", description: "Sealed bodies, EU region, audits.", icon: "key" },
-  { title: "Brand", href: "/brand", description: "Marks, colours and type.", icon: "brand" },
+  {
+    title: "Blog",
+    href: "/blog",
+    description: "Notes from building i10.",
+    icon: "blog",
+  },
+  {
+    title: "Customers",
+    href: "/customers",
+    description: "Teams sending with i10.",
+    icon: "people",
+  },
+  {
+    title: "Security",
+    href: "/security",
+    description: "Sealed bodies, EU region, audits.",
+    icon: "key",
+  },
+  {
+    title: "Brand",
+    href: "/brand",
+    description: "Marks, colours and type.",
+    icon: "brand",
+  },
 ]
 
 export interface FooterColumn {

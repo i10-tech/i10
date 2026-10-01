@@ -72,12 +72,23 @@ export function DesignNav() {
 }
 
 /* A swatch that copies `var(--token)` and says so where the click landed. */
-export function Swatch({ token, value, dark }: { token: string; value: string; dark?: boolean }) {
+export function Swatch({
+  token,
+  value,
+  dark,
+}: {
+  token: string
+  value: string
+  dark?: boolean
+}) {
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
 
   return (
     <button
@@ -94,7 +105,10 @@ export function Swatch({ token, value, dark }: { token: string; value: string; d
       }}
       className="group flex cursor-pointer flex-col overflow-hidden rounded-[14px] bg-surface-1 text-left shadow-[inset_0_0_0_1px_var(--line)] transition-shadow duration-300 hover:shadow-[inset_0_0_0_1px_var(--line-strong)]"
     >
-      <span className="relative m-1 block h-16 rounded-[10px] shadow-[inset_0_0_0_1px_var(--line)]" style={{ background: `var(${token})` }}>
+      <span
+        className="relative m-1 block h-16 rounded-[10px] shadow-[inset_0_0_0_1px_var(--line)]"
+        style={{ background: `var(${token})` }}
+      >
         <span
           className={cn(
             "absolute inset-0 grid place-items-center font-mono text-[10.5px] transition-opacity duration-200",
@@ -107,7 +121,9 @@ export function Swatch({ token, value, dark }: { token: string; value: string; d
       </span>
       <span className="px-3 pt-1.5 pb-3">
         <span className="block font-mono text-[11.5px] text-fg">{token}</span>
-        <span className="mt-0.5 block truncate font-mono text-[10.5px] text-fg-4">{value}</span>
+        <span className="mt-0.5 block truncate font-mono text-[10.5px] text-fg-4">
+          {value}
+        </span>
       </span>
     </button>
   )
@@ -120,7 +136,12 @@ const SCALE = [
   { cls: "type-display-s", name: "Display S", sample: "Questions, answered." },
   { cls: "type-title", name: "Title", sample: "GitHub-connected templates" },
   { cls: "type-lead", name: "Lead", sample: "Start free and pay for what you send." },
-  { cls: "type-body", name: "Body", sample: "Replays with the same key return the first result instead of sending again." },
+  {
+    cls: "type-body",
+    name: "Body",
+    sample:
+      "Replays with the same key return the first result instead of sending again.",
+  },
   { cls: "type-label", name: "Label", sample: "Deliverable addresses" },
 ]
 
@@ -154,17 +175,26 @@ export function TypeScale() {
   return (
     <div className="flex flex-col">
       {SCALE.map((s, i) => (
-        <div key={s.cls} className="grid items-baseline gap-3 border-t border-line py-7 md:grid-cols-[200px_1fr] md:gap-10">
+        <div
+          key={s.cls}
+          className="grid items-baseline gap-3 border-t border-line py-7 md:grid-cols-[200px_1fr] md:gap-10"
+        >
           <div className="flex flex-col gap-1">
             <span className="text-[13px] font-[540] text-fg">{s.name}</span>
             <span className="font-mono text-[11px] text-fg-4">.{s.cls}</span>
-            <span className="font-mono text-[11px] text-fg-3 tabular-nums">{metrics[i] || " "}</span>
+            <span className="font-mono text-[11px] text-fg-3 tabular-nums">
+              {metrics[i] || " "}
+            </span>
           </div>
           <p
             ref={(el) => {
               refs.current[i] = el
             }}
-            className={cn(s.cls, "min-w-0 text-fg", s.cls === "type-label" && "text-fg-3")}
+            className={cn(
+              s.cls,
+              "min-w-0 text-fg",
+              s.cls === "type-label" && "text-fg-3",
+            )}
           >
             {s.sample}
           </p>
@@ -175,10 +205,30 @@ export function TypeScale() {
 }
 
 const EASES = [
-  { name: "Out expo", token: "--ease-out-expo", curve: [0.16, 1, 0.3, 1], use: "Reveals, panels, anything arriving" },
-  { name: "Out quint", token: "--ease-out-quint", curve: [0.22, 1, 0.36, 1], use: "Hover lifts and small moves" },
-  { name: "In-out quart", token: "--ease-in-out-quart", curve: [0.77, 0, 0.175, 1], use: "Things that leave and come back" },
-  { name: "Back", token: "--ease-back", curve: [0.175, 0.885, 0.32, 1.1], use: "Stamps and toggles, sparingly" },
+  {
+    name: "Out expo",
+    token: "--ease-out-expo",
+    curve: [0.16, 1, 0.3, 1],
+    use: "Reveals, panels, anything arriving",
+  },
+  {
+    name: "Out quint",
+    token: "--ease-out-quint",
+    curve: [0.22, 1, 0.36, 1],
+    use: "Hover lifts and small moves",
+  },
+  {
+    name: "In-out quart",
+    token: "--ease-in-out-quart",
+    curve: [0.77, 0, 0.175, 1],
+    use: "Things that leave and come back",
+  },
+  {
+    name: "Back",
+    token: "--ease-back",
+    curve: [0.175, 0.885, 0.32, 1.1],
+    use: "Stamps and toggles, sparingly",
+  },
 ] as const
 
 /*
@@ -208,7 +258,10 @@ export function MotionBench() {
           className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-full bg-surface-3 px-3.5 text-[13px] text-fg shadow-[inset_0_0_0_1px_var(--line-strong)] transition-colors hover:bg-surface-4"
         >
           <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
-            <path d="M3 1.8v8.4a.6.6 0 0 0 .9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3a.6.6 0 0 0-.9.5Z" fill="currentColor" />
+            <path
+              d="M3 1.8v8.4a.6.6 0 0 0 .9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3a.6.6 0 0 0-.9.5Z"
+              fill="currentColor"
+            />
           </svg>
           {run ? "Replay" : "Play"}
         </button>
@@ -217,14 +270,33 @@ export function MotionBench() {
         {EASES.map((e) => {
           const [x1, y1, x2, y2] = e.curve
           return (
-            <div key={e.token} className="grid items-center gap-4 sm:grid-cols-[150px_64px_1fr] sm:gap-6">
+            <div
+              key={e.token}
+              className="grid items-center gap-4 sm:grid-cols-[150px_64px_1fr] sm:gap-6"
+            >
               <div>
                 <p className="text-[13.5px] font-[540] text-fg">{e.name}</p>
                 <p className="mt-0.5 text-[12px] leading-[18px] text-fg-3">{e.use}</p>
               </div>
-              <svg viewBox="-4 -14 68 78" className="h-16 w-16 max-sm:hidden" aria-hidden>
-                <rect x="0" y="0" width="60" height="60" fill="none" stroke="var(--line)" />
-                <path d={`M0 60C${x1 * 60} ${60 - y1 * 60} ${x2 * 60} ${60 - y2 * 60} 60 0`} fill="none" stroke="var(--brand)" strokeWidth="1.5" />
+              <svg
+                viewBox="-4 -14 68 78"
+                className="h-16 w-16 max-sm:hidden"
+                aria-hidden
+              >
+                <rect
+                  x="0"
+                  y="0"
+                  width="60"
+                  height="60"
+                  fill="none"
+                  stroke="var(--line)"
+                />
+                <path
+                  d={`M0 60C${x1 * 60} ${60 - y1 * 60} ${x2 * 60} ${60 - y2 * 60} 60 0`}
+                  fill="none"
+                  stroke="var(--brand)"
+                  strokeWidth="1.5"
+                />
               </svg>
               {/* The track is a size container so the dot can travel its width
                   on transform alone (100cqw), never on `left`. */}
@@ -232,8 +304,12 @@ export function MotionBench() {
                 <span
                   className="absolute top-1/2 left-1 size-5 -translate-y-1/2 rounded-full bg-fg shadow-[0_0_20px_color-mix(in_oklch,var(--brand)_40%,transparent)]"
                   style={{
-                    transform: at ? "translateX(calc(100cqw - 1.75rem))" : "translateX(0)",
-                    transition: at ? `transform 900ms cubic-bezier(${e.curve.join(",")})` : "none",
+                    transform: at
+                      ? "translateX(calc(100cqw - 1.75rem))"
+                      : "translateX(0)",
+                    transition: at
+                      ? `transform 900ms cubic-bezier(${e.curve.join(",")})`
+                      : "none",
                   }}
                 />
               </div>

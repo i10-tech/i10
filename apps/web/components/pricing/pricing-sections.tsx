@@ -9,12 +9,18 @@ export function AddOns() {
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {ADD_ONS.map((a) => (
-        <div key={a.name} data-reveal className="flex flex-col rounded-[18px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)]">
+        <div
+          key={a.name}
+          data-reveal
+          className="flex flex-col rounded-[18px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)]"
+        >
           <div className="flex items-baseline justify-between gap-4">
             <p className="text-[16px] font-[540] text-fg">{a.name}</p>
             <p className="font-mono text-[12px] text-fg-2">{a.price}</p>
           </div>
-          <p className="mt-3 max-w-[46ch] text-[14px] leading-[22px] text-fg-3">{a.body}</p>
+          <p className="mt-3 max-w-[46ch] text-[14px] leading-[22px] text-fg-3">
+            {a.body}
+          </p>
           <ButtonLink href="/contact" variant="ghost" arrow className="mt-6 w-fit">
             {a.cta}
           </ButtonLink>
@@ -43,7 +49,9 @@ export function CompareTable() {
       </div>
       {COMPARE.map((section) => (
         <div key={section.section} className="mt-10">
-          <p className="px-4 text-[15px] font-[560] tracking-[-0.01em] text-fg">{section.section}</p>
+          <p className="px-4 text-[15px] font-[560] tracking-[-0.01em] text-fg">
+            {section.section}
+          </p>
           <div className="mt-3 border-t border-line">
             {section.rows.map((row) => (
               <div
@@ -52,10 +60,26 @@ export function CompareTable() {
               >
                 <span className="text-[13.5px] text-fg-2">{row.label}</span>
                 {row.values.map((v, i) => (
-                  <span key={i} className="flex justify-center text-center text-[13px] text-fg-2">
+                  <span
+                    key={i}
+                    className="flex justify-center text-center text-[13px] text-fg-2"
+                  >
                     {v === true ? (
-                      <svg viewBox="0 0 16 16" width="15" height="15" aria-label="Included" className="text-delivered">
-                        <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                      <svg
+                        viewBox="0 0 16 16"
+                        width="15"
+                        height="15"
+                        aria-label="Included"
+                        className="text-delivered"
+                      >
+                        <path
+                          d="m3.5 8.5 3 3 6-7"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
                       </svg>
                     ) : v === false ? (
                       <span aria-label="Not included" className="text-fg-4">
@@ -96,12 +120,24 @@ export function Faq() {
               {item.q}
               <span className="relative grid size-5 shrink-0 place-items-center text-fg-3">
                 <span className="absolute h-px w-3 bg-current" />
-                <span className={cn("absolute h-3 w-px bg-current transition-transform duration-300", isOpen && "scale-y-0")} />
+                <span
+                  className={cn(
+                    "absolute h-3 w-px bg-current transition-transform duration-300",
+                    isOpen && "scale-y-0",
+                  )}
+                />
               </span>
             </button>
-            <div className={cn("grid transition-[grid-template-rows,opacity] duration-400 ease-[var(--ease-out-quint)]", isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
+            <div
+              className={cn(
+                "grid transition-[grid-template-rows,opacity] duration-400 ease-[var(--ease-out-quint)]",
+                isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+              )}
+            >
               <div className="overflow-hidden">
-                <p className="max-w-[60ch] pb-6 text-[14.5px] leading-[24px] text-fg-3">{item.a}</p>
+                <p className="max-w-[60ch] pb-6 text-[14.5px] leading-[24px] text-fg-3">
+                  {item.a}
+                </p>
               </div>
             </div>
           </li>

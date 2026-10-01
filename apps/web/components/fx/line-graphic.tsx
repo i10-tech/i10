@@ -16,7 +16,15 @@ import { prefersReducedMotion } from "@/lib/gsap"
  */
 export type GraphicVariant = "rings" | "burst" | "field" | "gauge" | "stack" | "branch"
 
-export function LineGraphic({ variant, accent = "var(--brand)", className }: { variant: GraphicVariant; accent?: string; className?: string }) {
+export function LineGraphic({
+  variant,
+  accent = "var(--brand)",
+  className,
+}: {
+  variant: GraphicVariant
+  accent?: string
+  className?: string
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -46,7 +54,8 @@ export function LineGraphic({ variant, accent = "var(--brand)", className }: { v
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
 
-    const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+    const ease = (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
     const draw = DRAWERS[variant]
     let frame = 0
     let start = performance.now()
@@ -94,8 +103,19 @@ export function LineGraphic({ variant, accent = "var(--brand)", className }: { v
   return <canvas ref={canvasRef} aria-hidden className={className ?? "size-full"} />
 }
 
-type Palette = { stroke: string; dim: string; accent: string; ease: (t: number) => number }
-type Drawer = (ctx: CanvasRenderingContext2D, w: number, h: number, t: number, p: Palette) => void
+type Palette = {
+  stroke: string
+  dim: string
+  accent: string
+  ease: (t: number) => number
+}
+type Drawer = (
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  t: number,
+  p: Palette,
+) => void
 
 const DRAWERS: Record<GraphicVariant, Drawer> = {
   // Concentric rings drawing themselves in, inner to outer, a message leaving.
@@ -117,7 +137,13 @@ const DRAWERS: Record<GraphicVariant, Drawer> = {
       if (tip <= 0 || tip - tail < 0.002) continue
       ctx.strokeStyle = i === 0 ? p.accent : p.stroke
       ctx.beginPath()
-      ctx.arc(cx, cy, r, -Math.PI / 2 + tail * Math.PI * 2, -Math.PI / 2 + tip * Math.PI * 2)
+      ctx.arc(
+        cx,
+        cy,
+        r,
+        -Math.PI / 2 + tail * Math.PI * 2,
+        -Math.PI / 2 + tip * Math.PI * 2,
+      )
       ctx.stroke()
     }
     ctx.fillStyle = p.accent

@@ -17,14 +17,53 @@ import { hosts } from "@/lib/site"
  * Every record here is one the docs actually give (apps/docs dns.mdx).
  */
 const RECORDS = [
-  { name: "DKIM", host: "i10._domainkey", type: "TXT", value: "p=MIIBIjANBgkqh…", note: "Enough to start sending" },
-  { name: "Return path", host: "send", type: "MX", value: "10 feedback-smtp.eu-central-1…", note: "Bounces come home" },
-  { name: "SPF", host: "send", type: "TXT", value: "v=spf1 include:_spf.i10.tech ~all", note: "Envelope on your domain" },
-  { name: "DMARC", host: "_dmarc", type: "TXT", value: "v=DMARC1; p=quarantine", note: "Passes on alignment" },
-  { name: "Mailboxes", host: "@", type: "MX", value: "10 mail.i10.tech", note: "Real inboxes, same domain" },
+  {
+    name: "DKIM",
+    host: "i10._domainkey",
+    type: "TXT",
+    value: "p=MIIBIjANBgkqh…",
+    note: "Enough to start sending",
+  },
+  {
+    name: "Return path",
+    host: "send",
+    type: "MX",
+    value: "10 feedback-smtp.eu-central-1…",
+    note: "Bounces come home",
+  },
+  {
+    name: "SPF",
+    host: "send",
+    type: "TXT",
+    value: "v=spf1 include:_spf.i10.tech ~all",
+    note: "Envelope on your domain",
+  },
+  {
+    name: "DMARC",
+    host: "_dmarc",
+    type: "TXT",
+    value: "v=DMARC1; p=quarantine",
+    note: "Passes on alignment",
+  },
+  {
+    name: "Mailboxes",
+    host: "@",
+    type: "MX",
+    value: "10 mail.i10.tech",
+    note: "Real inboxes, same domain",
+  },
 ]
 
-const PROVIDERS: BrandName[] = ["cloudflare", "godaddy", "namecheap", "porkbun", "hetzner", "ovh", "ionos", "gandi"]
+const PROVIDERS: BrandName[] = [
+  "cloudflare",
+  "godaddy",
+  "namecheap",
+  "porkbun",
+  "hetzner",
+  "ovh",
+  "ionos",
+  "gandi",
+]
 
 // The drum shows the list twice over so the turn never reveals an empty slot.
 const TILES = [...RECORDS, ...RECORDS]
@@ -76,7 +115,10 @@ function Drum() {
   useEffect(() => {
     if (prefersReducedMotion()) return
     let visible = false
-    const io = new IntersectionObserver(([e]) => (visible = Boolean(e?.isIntersecting)), { threshold: 0.3 })
+    const io = new IntersectionObserver(
+      ([e]) => (visible = Boolean(e?.isIntersecting)),
+      { threshold: 0.3 },
+    )
     if (root.current) io.observe(root.current)
     const timers: ReturnType<typeof setTimeout>[] = []
     const id = setInterval(() => {
@@ -93,7 +135,11 @@ function Drum() {
   }, [])
 
   return (
-    <div ref={root} data-reveal className="relative h-[460px] overflow-hidden rounded-[20px]">
+    <div
+      ref={root}
+      data-reveal
+      className="relative h-[460px] overflow-hidden rounded-[20px]"
+    >
       <div aria-hidden className="drum-stripes pointer-events-none absolute inset-0" />
       {/* The arc's sideways step is a variable so phones get a shallower arc:
           at 10px a step, the lead tile touched the edge of a 375px screen. */}
@@ -128,14 +174,26 @@ function Drum() {
                 <Toggle on={on} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-[14px] font-[540] text-fg">{record.name}</span>
-                    <span className="rounded-[5px] bg-white/[0.05] px-1.5 py-px font-mono text-[10px] text-fg-3">{record.type}</span>
+                    <span className="text-[14px] font-[540] text-fg">
+                      {record.name}
+                    </span>
+                    <span className="rounded-[5px] bg-white/[0.05] px-1.5 py-px font-mono text-[10px] text-fg-3">
+                      {record.type}
+                    </span>
                   </div>
                   <p className="mt-0.5 truncate font-mono text-[11px] text-fg-3">
                     <span className="text-fg-2">{record.host}</span> · {record.value}
                   </p>
                 </div>
-                <Status state={rel < 0 || (center && settled) ? "verified" : center ? "checking" : "pending"} />
+                <Status
+                  state={
+                    rel < 0 || (center && settled)
+                      ? "verified"
+                      : center
+                        ? "checking"
+                        : "pending"
+                  }
+                />
               </div>
             </div>
           )
@@ -165,15 +223,35 @@ function Toggle({ on }: { on: boolean }) {
 
 function Status({ state }: { state: "verified" | "checking" | "pending" }) {
   const map = {
-    verified: { label: "Verified", cls: "bg-delivered/12 text-delivered shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-delivered)_28%,transparent)]" },
-    checking: { label: "Checking", cls: "bg-complained/12 text-complained shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-complained)_28%,transparent)]" },
-    pending: { label: "Pending", cls: "bg-white/[0.04] text-fg-3 shadow-[inset_0_0_0_1px_var(--line)]" },
+    verified: {
+      label: "Verified",
+      cls: "bg-delivered/12 text-delivered shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-delivered)_28%,transparent)]",
+    },
+    checking: {
+      label: "Checking",
+      cls: "bg-complained/12 text-complained shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-complained)_28%,transparent)]",
+    },
+    pending: {
+      label: "Pending",
+      cls: "bg-white/[0.04] text-fg-3 shadow-[inset_0_0_0_1px_var(--line)]",
+    },
   }[state]
   return (
-    <span className={cn("grid h-6 shrink-0 items-center rounded-[7px] px-2 text-[11px] font-[520] transition-colors duration-300", map.cls)}>
+    <span
+      className={cn(
+        "grid h-6 shrink-0 items-center rounded-[7px] px-2 text-[11px] font-[520] transition-colors duration-300",
+        map.cls,
+      )}
+    >
       {/* All three labels share one cell, so the chip keeps its width. */}
       {(["Verified", "Checking", "Pending"] as const).map((l) => (
-        <span key={l} className={cn("col-start-1 row-start-1 text-center transition-opacity duration-200", l === map.label ? "opacity-100" : "opacity-0")}>
+        <span
+          key={l}
+          className={cn(
+            "col-start-1 row-start-1 text-center transition-opacity duration-200",
+            l === map.label ? "opacity-100" : "opacity-0",
+          )}
+        >
           {l}
         </span>
       ))}

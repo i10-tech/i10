@@ -19,7 +19,14 @@ import { SplitText } from "gsap/SplitText"
 let registered = false
 
 if (typeof window !== "undefined" && !registered) {
-  gsap.registerPlugin(ScrollTrigger, SplitText, ScrambleTextPlugin, DrawSVGPlugin, CustomEase, useGSAP)
+  gsap.registerPlugin(
+    ScrollTrigger,
+    SplitText,
+    ScrambleTextPlugin,
+    DrawSVGPlugin,
+    CustomEase,
+    useGSAP,
+  )
   CustomEase.create("site.out", "0.16, 1, 0.3, 1")
   CustomEase.create("site.quint", "0.22, 1, 0.36, 1")
   CustomEase.create("site.inOut", "0.77, 0, 0.175, 1")
@@ -29,6 +36,7 @@ if (typeof window !== "undefined" && !registered) {
 }
 
 export const prefersReducedMotion = () =>
-  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
 export { gsap, ScrollTrigger, SplitText, useGSAP }

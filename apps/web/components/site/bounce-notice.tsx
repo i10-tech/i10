@@ -42,24 +42,55 @@ export function BounceNotice() {
       </dl>
       <div className="px-5 py-5 text-fg-3">
         <p>This is the mail system at host i10.tech.</p>
-        <p className="mt-3">I&apos;m sorry to have to inform you that your request could not be delivered to one or more recipients.</p>
+        <p className="mt-3">
+          I&apos;m sorry to have to inform you that your request could not be delivered
+          to one or more recipients.
+        </p>
         <p className="mt-4 text-fg-2">
           &lt;<span className="text-brand">{pathname}</span>&gt;: host i10.tech said:
         </p>
-        <p className="mt-1 text-bounced">550 5.1.1 Recipient address rejected: page unknown in local recipient table</p>
+        <p className="mt-1 text-bounced">
+          550 5.1.1 Recipient address rejected: page unknown in local recipient table
+        </p>
         <p className="mt-4 text-fg-4">Reporting-MTA: dns; i10.tech</p>
         <p className="text-fg-4">Action: failed · Status: 5.1.1</p>
       </div>
-      <svg aria-hidden viewBox="0 0 200 200" className="bounce-stamp pointer-events-none absolute -right-6 -bottom-8 w-[170px] text-brand">
+      <svg
+        aria-hidden
+        viewBox="0 0 200 200"
+        className="bounce-stamp pointer-events-none absolute -right-6 -bottom-8 w-[170px] text-brand"
+      >
         <defs>
-          <path id="stamp-path" d="M100 100m-72 0a72 72 0 1 1 144 0a72 72 0 1 1-144 0" />
+          <path
+            id="stamp-path"
+            d="M100 100m-72 0a72 72 0 1 1 144 0a72 72 0 1 1-144 0"
+          />
         </defs>
-        <circle cx="100" cy="100" r="92" fill="none" stroke="currentColor" strokeWidth="2" />
-        <circle cx="100" cy="100" r="54" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        <circle
+          cx="100"
+          cy="100"
+          r="92"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="100"
+          cy="100"
+          r="54"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+        />
         <text className="fill-current font-mono text-[15px] font-semibold tracking-[0.2em]">
           <textPath href="#stamp-path">RETURN TO SENDER · RETURN TO SENDER · </textPath>
         </text>
-        <text x="100" y="112" textAnchor="middle" className="fill-current font-mono text-[34px] font-bold">
+        <text
+          x="100"
+          y="112"
+          textAnchor="middle"
+          className="fill-current font-mono text-[34px] font-bold"
+        >
           404
         </text>
       </svg>

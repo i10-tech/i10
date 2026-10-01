@@ -51,7 +51,7 @@ export function SiteFooter() {
             beside the nav logo, at any screen width: its left edge is the
             logo's right edge (--nav-logo-right) plus the gap, minus where the
             page column starts. */}
-        <div className="col-span-2 flex flex-col gap-6 md:col-span-5 md:flex-row md:items-start md:justify-between xl:col-span-1 xl:flex-col xl:justify-start min-[1440px]:ml-[calc(var(--nav-logo-right)+28px-max(var(--gutter),(100vw-var(--container))/2))]">
+          <div className="col-span-2 flex flex-col gap-6 md:col-span-5 md:flex-row md:items-start md:justify-between xl:col-span-1 xl:flex-col xl:justify-start min-[1440px]:ml-[calc(var(--nav-logo-right)+28px-max(var(--gutter),(100vw-var(--container))/2))]">
             <p className="max-w-[16rem] text-[13px] leading-5 text-fg-3">
               <span className="text-fg-2">i + 10 letters.</span> Email for developers
               and mailboxes for everyone else, sent from Frankfurt.

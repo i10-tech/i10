@@ -26,7 +26,9 @@ export const inter = localFont({
  * headline, never for running text, so the upright cut is not shipped.
  */
 export const instrumentSerif = localFont({
-  src: [{ path: "./fonts/instrument-serif-italic.woff2", style: "italic", weight: "400" }],
+  src: [
+    { path: "./fonts/instrument-serif-italic.woff2", style: "italic", weight: "400" },
+  ],
   variable: "--font-instrument",
   display: "swap",
   adjustFontFallback: "Times New Roman",

@@ -43,7 +43,8 @@ export function RevealController() {
           duration: 1,
           ease: "site.out",
           stagger: 0.07,
-          delay: (_i: number, el: Element) => Number((el as HTMLElement).dataset.revealDelay ?? 0),
+          delay: (_i: number, el: Element) =>
+            Number((el as HTMLElement).dataset.revealDelay ?? 0),
           overwrite: true,
           // ⚠ MARK, DON'T clearProps. Clearing the inline transform hands the
           // element back to the CSS start state (translated 18px down) - the

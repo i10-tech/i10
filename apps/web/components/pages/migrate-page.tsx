@@ -16,7 +16,14 @@ type Line = { t: string; d?: "-" | "+" }
  * `emails.batch`, the transport is Bearer auth byte for byte, and @i10/next
  * verifies `webhook-id` / `webhook-signature` (Standard Webhooks).
  */
-const STEPS: { title: string; body: string; file: string; lang: "ts" | "sh"; lines: Line[]; copy: string }[] = [
+const STEPS: {
+  title: string
+  body: string
+  file: string
+  lang: "ts" | "sh"
+  lines: Line[]
+  copy: string
+}[] = [
   {
     title: "Install the SDK",
     body: "Zero runtime dependencies. npm, pnpm and yarn work the same.",
@@ -62,21 +69,32 @@ const STEPS: { title: string; body: string; file: string; lang: "ts" | "sh"; lin
 
 const SAME = [
   ["Authorization: Bearer", "The header, byte for byte."],
-  ["Request and response shapes", "POST /emails and POST /emails/batch take what Resend takes."],
+  [
+    "Request and response shapes",
+    "POST /emails and POST /emails/batch take what Resend takes.",
+  ],
   ["Error names", "The same machine names, thrown as I10Error with a retryable flag."],
   ["Idempotency-Key", "Replays return the first result instead of sending twice."],
 ]
 
 const DIFFERENT = [
   ["Key format", "i10_live_ and i10_test_, where Resend uses re_."],
-  ["Webhooks", "Signed to Standard Webhooks: webhook-id, webhook-timestamp and webhook-signature, all three covered by the signature."],
+  [
+    "Webhooks",
+    "Signed to Standard Webhooks: webhook-id, webhook-timestamp and webhook-signature, all three covered by the signature.",
+  ],
   ["Region", "Mail is relayed from eu-central-1, Frankfurt."],
 ]
 
 export function MigratePageView({ page }: { page: SpecialPage }) {
   return (
     <>
-      <PageHero eyebrow={page.eyebrow} title={page.title} lede={page.lede} color="var(--hue-send)">
+      <PageHero
+        eyebrow={page.eyebrow}
+        title={page.title}
+        lede={page.lede}
+        color="var(--hue-send)"
+      >
         <div data-reveal data-reveal-delay="0.25" className="mt-9 flex flex-wrap gap-3">
           <ButtonLink href={hosts.signIn} size="lg" arrow>
             Get an API key
@@ -90,20 +108,31 @@ export function MigratePageView({ page }: { page: SpecialPage }) {
       <Frame className="py-16 md:py-20">
         <ol className="flex flex-col">
           {STEPS.map((step, i) => (
-            <li key={step.title} data-reveal className="grid gap-6 border-line-faint py-10 not-first:border-t lg:grid-cols-[0.8fr_1.2fr] lg:gap-16">
+            <li
+              key={step.title}
+              data-reveal
+              className="grid gap-6 border-line-faint py-10 not-first:border-t lg:grid-cols-[0.8fr_1.2fr] lg:gap-16"
+            >
               <div className="flex gap-5">
                 <span className="grid size-8 shrink-0 place-items-center rounded-full bg-surface-2 font-mono text-[12px] text-fg shadow-[inset_0_0_0_1px_var(--line-strong)]">
                   {i + 1}
                 </span>
                 <div>
-                  <h2 className="text-[20px] leading-8 font-[560] tracking-[-0.02em] text-fg">{step.title}</h2>
-                  <p className="mt-2 max-w-[26rem] text-[14.5px] leading-[23px] text-fg-3">{step.body}</p>
+                  <h2 className="text-[20px] leading-8 font-[560] tracking-[-0.02em] text-fg">
+                    {step.title}
+                  </h2>
+                  <p className="mt-2 max-w-[26rem] text-[14.5px] leading-[23px] text-fg-3">
+                    {step.body}
+                  </p>
                 </div>
               </div>
               <div className="code-window overflow-hidden rounded-[16px] bg-surface-1 shadow-[inset_0_0_0_1px_var(--line)]">
                 <div className="flex h-10 items-center justify-between border-b border-line-faint pr-2 pl-4">
                   <span className="font-mono text-[11px] text-fg-4">{step.file}</span>
-                  <CopyButton value={step.copy} label={`Copy ${step.title.toLowerCase()}`} />
+                  <CopyButton
+                    value={step.copy}
+                    label={`Copy ${step.title.toLowerCase()}`}
+                  />
                 </div>
                 <pre className="overflow-x-auto py-3 font-mono text-[12.5px] leading-[22px]">
                   {step.lines.map((l, j) => (
@@ -119,12 +148,18 @@ export function MigratePageView({ page }: { page: SpecialPage }) {
                         aria-hidden
                         className={cn(
                           "w-5 shrink-0 select-none",
-                          l.d === "-" ? "text-bounced" : l.d === "+" ? "text-delivered" : "text-transparent",
+                          l.d === "-"
+                            ? "text-bounced"
+                            : l.d === "+"
+                              ? "text-delivered"
+                              : "text-transparent",
                         )}
                       >
                         {l.d ?? " "}
                       </span>
-                      <code className={cn(l.d === "-" && "opacity-60")}>{l.t ? highlight(l.t, step.lang) : " "}</code>
+                      <code className={cn(l.d === "-" && "opacity-60")}>
+                        {l.t ? highlight(l.t, step.lang) : " "}
+                      </code>
                     </div>
                   ))}
                 </pre>

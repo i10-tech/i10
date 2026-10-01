@@ -40,7 +40,10 @@ export function StatusBoard() {
     const probe = () =>
       fetch("/api/status", { cache: "no-store" })
         .then((r) => r.json() as Promise<Probe>)
-        .catch((): Probe => ({ status: "unreachable", checkedAt: new Date().toISOString() }))
+        .catch((): Probe => ({
+          status: "unreachable",
+          checkedAt: new Date().toISOString(),
+        }))
         .then((p) => alive && setProbes((prev) => [...prev, p].slice(-SLOTS)))
     probe()
     const id = setInterval(probe, EVERY)
@@ -53,7 +56,10 @@ export function StatusBoard() {
   const latest = probes.at(-1)
   const state = latest?.status ?? "checking"
   const tone = latest ? TONE[latest.status] : "var(--fg-4)"
-  const slots = Array.from({ length: SLOTS }, (_, i) => probes[i - (SLOTS - probes.length)])
+  const slots = Array.from(
+    { length: SLOTS },
+    (_, i) => probes[i - (SLOTS - probes.length)],
+  )
 
   return (
     <div className="flex flex-col gap-3">
@@ -66,8 +72,13 @@ export function StatusBoard() {
         <div className="relative flex flex-wrap items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <span className="relative flex size-3 items-center justify-center">
-              {state === "operational" ? <span className="status-ping absolute inset-0 rounded-full bg-delivered" /> : null}
-              <span className="relative size-3 rounded-full transition-colors duration-500" style={{ background: tone }} />
+              {state === "operational" ? (
+                <span className="status-ping absolute inset-0 rounded-full bg-delivered" />
+              ) : null}
+              <span
+                className="relative size-3 rounded-full transition-colors duration-500"
+                style={{ background: tone }}
+              />
             </span>
             <div className="grid">
               <AnimatePresence initial={false} mode="popLayout">
@@ -85,7 +96,9 @@ export function StatusBoard() {
             </div>
           </div>
           <span className="font-mono text-[11.5px] text-fg-4 tabular-nums">
-            {latest ? `Checked ${new Date(latest.checkedAt).toLocaleTimeString("en-GB")}` : "Probing api.i10.tech"}
+            {latest
+              ? `Checked ${new Date(latest.checkedAt).toLocaleTimeString("en-GB")}`
+              : "Probing api.i10.tech"}
           </span>
         </div>
 
@@ -96,11 +109,18 @@ export function StatusBoard() {
               {latest?.latencyMs != null ? `${latest.latencyMs} ms` : " "}
             </span>
           </div>
-          <div className="mt-3 flex h-9 gap-[3px]" role="img" aria-label={`${probes.length} probes of the API since this page opened`}>
+          <div
+            className="mt-3 flex h-9 gap-[3px]"
+            role="img"
+            aria-label={`${probes.length} probes of the API since this page opened`}
+          >
             {slots.map((p, i) => (
               <span
                 key={i}
-                className={cn("flex-1 rounded-[2px] transition-colors duration-500", !p && "bg-white/[0.05]")}
+                className={cn(
+                  "flex-1 rounded-[2px] transition-colors duration-500",
+                  !p && "bg-white/[0.05]",
+                )}
                 style={p ? { background: TONE[p.status] } : undefined}
               />
             ))}
@@ -114,9 +134,14 @@ export function StatusBoard() {
 
       <ul className="overflow-hidden rounded-[22px] bg-surface-1 shadow-[inset_0_0_0_1px_var(--line)]">
         {["Sending", "Webhooks", "Mailboxes", "Console"].map((name) => (
-          <li key={name} className="flex items-center justify-between border-t border-line-faint px-6 py-4 first:border-t-0 md:px-8">
+          <li
+            key={name}
+            className="flex items-center justify-between border-t border-line-faint px-6 py-4 first:border-t-0 md:px-8"
+          >
             <span className="text-[14px] text-fg-2">{name}</span>
-            <span className="font-mono text-[11px] text-fg-4">Not probed from this page yet</span>
+            <span className="font-mono text-[11px] text-fg-4">
+              Not probed from this page yet
+            </span>
           </li>
         ))}
       </ul>

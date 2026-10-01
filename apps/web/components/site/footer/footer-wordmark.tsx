@@ -23,7 +23,12 @@ export function FooterWordmark() {
   }
 
   return (
-    <div ref={ref} onPointerMove={move} className="footer-wordmark group relative select-none" aria-hidden>
+    <div
+      ref={ref}
+      onPointerMove={move}
+      className="footer-wordmark group relative select-none"
+      aria-hidden
+    >
       <span className="footer-wordmark__text footer-wordmark__base">Integration</span>
       <span className="footer-wordmark__text footer-wordmark__glow">Integration</span>
     </div>

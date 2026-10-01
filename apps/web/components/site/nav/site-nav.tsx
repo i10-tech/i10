@@ -2,7 +2,14 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react"
 import { cn } from "cn"
 import { Mark } from "@/components/brand/mark"
 import { IconTile } from "@/components/brand/icon-tile"
@@ -57,7 +64,12 @@ export function SiteNav() {
   const [direction, setDirection] = useState<1 | -1>(1)
   // `jump`: the pill was hidden, so it appears in place instead of sliding
   // over from wherever the pointer last left the bar.
-  const [highlight, setHighlight] = useState<{ x: number; w: number; on: boolean; jump: boolean }>({
+  const [highlight, setHighlight] = useState<{
+    x: number
+    w: number
+    on: boolean
+    jump: boolean
+  }>({
     x: 0,
     w: 0,
     on: false,
@@ -83,7 +95,11 @@ export function SiteNav() {
 
   const barRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
-  const panelRefs = useRef<Record<MenuId, HTMLDivElement | null>>({ product: null, developers: null, resources: null })
+  const panelRefs = useRef<Record<MenuId, HTMLDivElement | null>>({
+    product: null,
+    developers: null,
+    resources: null,
+  })
   // Panels register themselves through a callback rather than writing into a
   // ref object handed down as a prop.
   const registerPanel = useCallback((id: MenuId, el: HTMLDivElement | null) => {
@@ -188,9 +204,13 @@ export function SiteNav() {
             }
           }
         },
-        { rootMargin: `-${line}px 0px -${Math.max(0, window.innerHeight - line - 1)}px 0px` },
+        {
+          rootMargin: `-${line}px 0px -${Math.max(0, window.innerHeight - line - 1)}px 0px`,
+        },
       )
-      document.querySelectorAll<HTMLElement>("[data-nav-tone]").forEach((el) => observer?.observe(el))
+      document
+        .querySelectorAll<HTMLElement>("[data-nav-tone]")
+        .forEach((el) => observer?.observe(el))
     }
     build()
     window.addEventListener("resize", build)
@@ -233,14 +253,20 @@ export function SiteNav() {
   }, [sheet])
 
   const moveHighlight = (el: HTMLElement) => {
-    setHighlight((h) => ({ x: el.offsetLeft, w: el.offsetWidth, on: true, jump: !h.on }))
+    setHighlight((h) => ({
+      x: el.offsetLeft,
+      w: el.offsetWidth,
+      on: true,
+      jump: !h.on,
+    }))
   }
 
   const openMenu = (id: MenuId, el: HTMLElement, immediate: boolean) => {
     clearTimers()
     const run = () => {
       const prev = openRef.current
-      if (prev && prev !== id) setDirection(MENU_ORDER.indexOf(id) > MENU_ORDER.indexOf(prev) ? 1 : -1)
+      if (prev && prev !== id)
+        setDirection(MENU_ORDER.indexOf(id) > MENU_ORDER.indexOf(prev) ? 1 : -1)
       setPanelJump(!prev)
       openRef.current = id
       setOpen(id)
@@ -264,7 +290,13 @@ export function SiteNav() {
   const size = open ? sizes[open] : null
   // The open sheet is always dark, whatever section sits under it.
   // Over the yellow card the logo goes white, like the button beside it.
-  const logoColor = sheet ? "text-brand" : tone === "brand" ? "text-white" : tone === "light" ? "text-canvas" : "text-brand"
+  const logoColor = sheet
+    ? "text-brand"
+    : tone === "brand"
+      ? "text-white"
+      : tone === "light"
+        ? "text-canvas"
+        : "text-brand"
   const shrunk = (compact || onFooter) && !sheet
 
   return (
@@ -279,9 +311,7 @@ export function SiteNav() {
       />
 
       <header
-        className={cn(
-          "fixed inset-x-0 top-0 z-50",
-        )}
+        className={cn("fixed inset-x-0 top-0 z-50")}
         onMouseLeave={scheduleClose}
         onMouseEnter={() => closeTimer.current && clearTimeout(closeTimer.current)}
       >
@@ -301,10 +331,16 @@ export function SiteNav() {
               href="/"
               aria-label="i10 home"
               // Bare in every state: no chip behind it, compact or not.
-              className={cn("relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2 transition-colors duration-500", logoColor)}
+              className={cn(
+                "relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2 transition-colors duration-500",
+                logoColor,
+              )}
               onMouseEnter={scheduleClose}
             >
-              <Mark className="h-[var(--logo-h)] w-auto" shapeRendering="geometricPrecision" />
+              <Mark
+                className="h-[var(--logo-h)] w-auto"
+                shapeRendering="geometricPrecision"
+              />
             </Link>
 
             <div
@@ -316,7 +352,9 @@ export function SiteNav() {
               <ul
                 ref={listRef}
                 className="relative flex items-center"
-                onMouseLeave={() => !openRef.current && setHighlight((h) => ({ ...h, on: false }))}
+                onMouseLeave={() =>
+                  !openRef.current && setHighlight((h) => ({ ...h, on: false }))
+                }
               >
                 <span
                   aria-hidden
@@ -343,7 +381,11 @@ export function SiteNav() {
                         openMenu(menu.id, e.currentTarget, false)
                       }}
                       onFocus={(e) => moveHighlight(e.currentTarget)}
-                      onClick={(e) => (open === menu.id ? close() : openMenu(menu.id, e.currentTarget, true))}
+                      onClick={(e) =>
+                        open === menu.id
+                          ? close()
+                          : openMenu(menu.id, e.currentTarget, true)
+                      }
                       className={cn(
                         "relative flex h-8 cursor-pointer items-center gap-1.5 rounded-[9px] px-3 text-[13.5px] transition-colors duration-[120ms]",
                         open === menu.id ? "text-fg" : "text-fg-2 hover:text-fg",
@@ -351,7 +393,10 @@ export function SiteNav() {
                     >
                       {menu.label}
                       <Chevron
-                        className={cn("mt-px text-fg-4 transition-transform duration-300", open === menu.id && "rotate-180 text-fg-2")}
+                        className={cn(
+                          "mt-px text-fg-4 transition-transform duration-300",
+                          open === menu.id && "rotate-180 text-fg-2",
+                        )}
                       />
                     </button>
                   </li>
@@ -360,7 +405,9 @@ export function SiteNav() {
                   <li key={link.href}>
                     <Link
                       href={link.href}
-                      {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                      {...(link.external
+                        ? { target: "_blank", rel: "noopener noreferrer" }
+                        : {})}
                       onMouseEnter={(e) => {
                         moveHighlight(e.currentTarget)
                         closeMenuOnly()
@@ -390,10 +437,14 @@ export function SiteNav() {
                 // the yellow card (where the logo goes ink).
                 className={cn(
                   "nav-cta group/btn relative inline-flex h-9 items-center gap-2 overflow-hidden rounded-[11px] px-3.5 text-[13px] font-[540] text-brand-ink transition-[background-color,filter] duration-500",
-                  tone === "brand" && !sheet ? "bg-fg hover:bg-white" : "bg-brand hover:brightness-105",
+                  tone === "brand" && !sheet
+                    ? "bg-fg hover:bg-white"
+                    : "bg-brand hover:brightness-105",
                 )}
               >
-                <span className="relative">{signedIn ? "Open dashboard" : "Start sending"}</span>
+                <span className="relative">
+                  {signedIn ? "Open dashboard" : "Start sending"}
+                </span>
                 <Arrow />
               </Link>
               <button
@@ -403,7 +454,9 @@ export function SiteNav() {
                 onClick={() => setSheet((s) => !s)}
                 className={cn(
                   "relative grid size-9 cursor-pointer place-items-center rounded-[11px] transition-colors duration-500 md:hidden",
-                  tone === "brand" && !sheet ? "text-brand-ink hover:bg-black/[0.06]" : "text-fg-2 hover:bg-white/[0.06]",
+                  tone === "brand" && !sheet
+                    ? "text-brand-ink hover:bg-black/[0.06]"
+                    : "text-fg-2 hover:bg-white/[0.06]",
                 )}
               >
                 <span
@@ -426,7 +479,9 @@ export function SiteNav() {
               id="site-nav-viewport"
               className={cn(
                 "nav-viewport absolute top-[calc(100%+8px)] left-0 hidden overflow-hidden rounded-[16px] md:block",
-                open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+                open
+                  ? "pointer-events-auto opacity-100"
+                  : "pointer-events-none opacity-0",
               )}
               style={{
                 width: size?.w,
@@ -434,15 +489,32 @@ export function SiteNav() {
                 transform: `translate3d(${panelX}px, ${open ? 0 : -4}px, 0)`,
                 ...(panelJump ? { transition: "opacity 180ms linear" } : {}),
               }}
-              onMouseEnter={() => closeTimer.current && clearTimeout(closeTimer.current)}
+              onMouseEnter={() =>
+                closeTimer.current && clearTimeout(closeTimer.current)
+              }
             >
-              <PanelSlot id="product" open={open} direction={direction} register={registerPanel}>
+              <PanelSlot
+                id="product"
+                open={open}
+                direction={direction}
+                register={registerPanel}
+              >
                 <ProductPanel onNavigate={close} />
               </PanelSlot>
-              <PanelSlot id="developers" open={open} direction={direction} register={registerPanel}>
+              <PanelSlot
+                id="developers"
+                open={open}
+                direction={direction}
+                register={registerPanel}
+              >
                 <DevelopersPanel onNavigate={close} />
               </PanelSlot>
-              <PanelSlot id="resources" open={open} direction={direction} register={registerPanel}>
+              <PanelSlot
+                id="resources"
+                open={open}
+                direction={direction}
+                register={registerPanel}
+              >
                 <ResourcesPanel onNavigate={close} />
               </PanelSlot>
             </div>
@@ -511,14 +583,24 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           <div
             key={group.title}
             className="transition-[opacity,transform] duration-500 ease-[var(--ease-out-expo)]"
-            style={{ transitionDelay: open ? `${60 + gi * 50}ms` : "0ms", opacity: open ? 1 : 0, transform: open ? "none" : "translateY(10px)" }}
+            style={{
+              transitionDelay: open ? `${60 + gi * 50}ms` : "0ms",
+              opacity: open ? 1 : 0,
+              transform: open ? "none" : "translateY(10px)",
+            }}
           >
             <p className="type-label mb-2 px-2 text-fg-4">{group.title}</p>
             <ul className="flex flex-col">
               {group.items.map((item) => (
                 <li key={item.href}>
-                  <Link href={item.href} onClick={onClose} className="group flex items-center gap-3 rounded-xl p-2 active:bg-white/5">
-                    {item.icon ? <IconTile icon={item.icon} hue={item.hue} size="sm" /> : null}
+                  <Link
+                    href={item.href}
+                    onClick={onClose}
+                    className="group flex items-center gap-3 rounded-xl p-2 active:bg-white/5"
+                  >
+                    {item.icon ? (
+                      <IconTile icon={item.icon} hue={item.hue} size="sm" />
+                    ) : null}
                     <span className="text-[15px] text-fg">{item.title}</span>
                     {item.badge ? <Badge kind={item.badge} /> : null}
                   </Link>
@@ -528,7 +610,11 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           </div>
         ))}
         <div className="flex flex-col gap-2 border-t border-line pt-6">
-          <Link href="/pricing" onClick={onClose} className="px-2 py-2 text-[15px] text-fg">
+          <Link
+            href="/pricing"
+            onClick={onClose}
+            className="px-2 py-2 text-[15px] text-fg"
+          >
             Pricing
           </Link>
         </div>

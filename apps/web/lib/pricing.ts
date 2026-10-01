@@ -85,7 +85,10 @@ const PRO_MARKETING: Record<number, { price: number; contacts: string }> = {
   7: { price: 650, contacts: "150,000" },
 }
 
-export function plansFor(product: Product, stop: number): { plans: PlanView[]; recommended: string } {
+export function plansFor(
+  product: Product,
+  stop: number,
+): { plans: PlanView[]; recommended: string } {
   if (product === "transactional") {
     const scale = SCALE[stop] ?? SCALE[0]!
     const pro100 = stop >= 2
@@ -161,7 +164,8 @@ export function plansFor(product: Product, stop: number): { plans: PlanView[]; r
         href: CONTACT,
       },
     ]
-    const recommended = stop === 0 ? "free" : stop <= 2 ? "pro" : stop <= 7 ? "scale" : "enterprise"
+    const recommended =
+      stop === 0 ? "free" : stop <= 2 ? "pro" : stop <= 7 ? "scale" : "enterprise"
     return { plans, recommended }
   }
 
@@ -249,7 +253,10 @@ export const ADD_ONS = [
 ]
 
 type Cell = boolean | string
-export const COMPARE: { section: string; rows: { label: string; values: [Cell, Cell, Cell, Cell] }[] }[] = [
+export const COMPARE: {
+  section: string
+  rows: { label: string; values: [Cell, Cell, Cell, Cell] }[]
+}[] = [
   {
     section: "Sending",
     rows: [

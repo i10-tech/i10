@@ -40,7 +40,10 @@ export function Primitives() {
       </div>
       {/* One action for the row: the three cards are one argument, so they
           share one way in rather than three copies of the same two buttons. */}
-      <div data-reveal className="mt-12 flex flex-wrap items-center justify-center gap-3">
+      <div
+        data-reveal
+        className="mt-12 flex flex-wrap items-center justify-center gap-3"
+      >
         <ButtonLink href={hosts.signIn} size="lg" arrow>
           Start sending
         </ButtonLink>
@@ -52,10 +55,20 @@ export function Primitives() {
   )
 }
 
-function Card({ stage, name, body }: { stage: React.ReactNode; name: string; body: string }) {
+function Card({
+  stage,
+  name,
+  body,
+}: {
+  stage: React.ReactNode
+  name: string
+  body: string
+}) {
   return (
     <div data-reveal className="flex flex-col">
-      <div className="relative h-[280px] overflow-hidden border border-line bg-canvas">{stage}</div>
+      <div className="relative h-[280px] overflow-hidden border border-line bg-canvas">
+        {stage}
+      </div>
       <p className="mt-6 text-[17px] leading-[26px] tracking-[-0.01em] text-fg-3">
         <span className="text-fg">{name}</span> {body}
       </p>
@@ -63,15 +76,42 @@ function Card({ stage, name, body }: { stage: React.ReactNode; name: string; bod
   )
 }
 
-const ORBIT: BrandName[] = ["gmail", "outlook", "icloud", "proton", "zoho", "apple", "thunderbird", "gmail", "outlook", "icloud"]
+const ORBIT: BrandName[] = [
+  "gmail",
+  "outlook",
+  "icloud",
+  "proton",
+  "zoho",
+  "apple",
+  "thunderbird",
+  "gmail",
+  "outlook",
+  "icloud",
+]
 
 function Orbit() {
   return (
     <div className="absolute inset-0 grid place-items-center">
       <svg aria-hidden viewBox="0 0 400 280" className="absolute inset-0 size-full">
-        <ellipse cx="200" cy="250" rx="190" ry="190" fill="none" stroke="var(--line-strong)" strokeDasharray="3 5" />
+        <ellipse
+          cx="200"
+          cy="250"
+          rx="190"
+          ry="190"
+          fill="none"
+          stroke="var(--line-strong)"
+          strokeDasharray="3 5"
+        />
         <ellipse cx="200" cy="250" rx="130" ry="130" fill="none" stroke="var(--line)" />
-        <ellipse cx="200" cy="250" rx="70" ry="70" fill="none" stroke="var(--line)" strokeDasharray="1 4" />
+        <ellipse
+          cx="200"
+          cy="250"
+          rx="70"
+          ry="70"
+          fill="none"
+          stroke="var(--line)"
+          strokeDasharray="1 4"
+        />
       </svg>
       <div className="orbit-ring absolute top-[250px] left-1/2 size-0">
         {ORBIT.map((name, i) => {
@@ -81,7 +121,9 @@ function Orbit() {
             <span
               key={`${name}-${i}`}
               className="orbit-node absolute grid size-9 place-items-center rounded-full bg-surface-2 text-fg-2 shadow-[inset_0_0_0_1px_var(--line-strong)]"
-              style={{ transform: `translate(-50%, -50%) translate(${Math.cos(a) * r}px, ${Math.sin(a) * r}px)` }}
+              style={{
+                transform: `translate(-50%, -50%) translate(${Math.cos(a) * r}px, ${Math.sin(a) * r}px)`,
+              }}
             >
               <span className="orbit-counter grid place-items-center">
                 <BrandIcon name={name} size={15} />
@@ -112,13 +154,29 @@ function Pipeline() {
     <div className="pipeline-mask absolute inset-x-6 inset-y-0">
       <div className="pipeline-track flex flex-col gap-3 py-3">
         {[...STEPS, ...STEPS].map((s, i) => (
-          <div key={i} className="rounded-[10px] bg-surface-1 px-3.5 py-2.5 shadow-[inset_0_0_0_1px_var(--line)]">
+          <div
+            key={i}
+            className="rounded-[10px] bg-surface-1 px-3.5 py-2.5 shadow-[inset_0_0_0_1px_var(--line)]"
+          >
             <p className="flex items-center gap-2 text-[12.5px] text-fg">
               <span className="font-mono text-fg-4">&gt;_</span> {s.t}
             </p>
             <p className="mt-1 flex items-center gap-2 font-mono text-[11.5px] text-fg-3">
-              <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden className="text-delivered">
-                <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <svg
+                viewBox="0 0 16 16"
+                width="11"
+                height="11"
+                aria-hidden
+                className="text-delivered"
+              >
+                <path
+                  d="m3.5 8.5 3 3 6-7"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
               {s.d}
             </p>
@@ -147,7 +205,8 @@ function FileTree() {
       <div className="absolute inset-x-[16%] top-5 rounded-[12px] bg-surface-1 p-2 shadow-[inset_0_0_0_1px_var(--line-strong),0_20px_40px_-20px_black]">
         <p className="flex items-center justify-between px-2 py-1.5 text-[12.5px] text-fg">
           <span className="flex items-center gap-2">
-            <PixelIcon name="template" size={12} className="text-hue-template" /> emails/
+            <PixelIcon name="template" size={12} className="text-hue-template" />{" "}
+            emails/
           </span>
           <span className="font-mono text-[10.5px] text-fg-4">main</span>
         </p>
@@ -161,7 +220,11 @@ function FileTree() {
           >
             <span className="font-mono text-[10px] text-hue-send">TS</span>
             {f.name}
-            {f.active ? <span className="ml-auto font-mono text-[10px] text-delivered">+12 −3</span> : null}
+            {f.active ? (
+              <span className="ml-auto font-mono text-[10px] text-delivered">
+                +12 −3
+              </span>
+            ) : null}
           </p>
         ))}
       </div>

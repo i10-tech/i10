@@ -47,7 +47,11 @@ function useMarkGeometry() {
   }, [])
 }
 
-function MarkMesh({ drag }: { drag: React.RefObject<{ vx: number; vy: number; dragging: boolean }> }) {
+function MarkMesh({
+  drag,
+}: {
+  drag: React.RefObject<{ vx: number; vy: number; dragging: boolean }>
+}) {
   const group = useRef<THREE.Group>(null)
   const geometry = useMarkGeometry()
   // Fit the mark to the canvas: 3.8 units wide at scale 1, kept inside 86% of
@@ -130,7 +134,10 @@ export default function HeroMarkScene() {
   useEffect(() => {
     const el = wrap.current
     if (!el) return
-    const io = new IntersectionObserver(([entry]) => setVisible(Boolean(entry?.isIntersecting)), { rootMargin: "80px" })
+    const io = new IntersectionObserver(
+      ([entry]) => setVisible(Boolean(entry?.isIntersecting)),
+      { rootMargin: "80px" },
+    )
     io.observe(el)
     return () => io.disconnect()
   }, [])
@@ -149,7 +156,11 @@ export default function HeroMarkScene() {
         if (!drag.current.dragging || !l) return
         const now = performance.now()
         const dt = Math.max(8, now - l.t) / 1000
-        drag.current.vx = THREE.MathUtils.clamp(((e.clientX - l.x) / dt) * 0.006, -14, 14)
+        drag.current.vx = THREE.MathUtils.clamp(
+          ((e.clientX - l.x) / dt) * 0.006,
+          -14,
+          14,
+        )
         drag.current.vy = THREE.MathUtils.clamp(((e.clientY - l.y) / dt) * 0.004, -6, 6)
         last.current = { x: e.clientX, y: e.clientY, t: now }
       }}
@@ -170,12 +181,35 @@ export default function HeroMarkScene() {
       >
         <ambientLight intensity={0.15} />
         <directionalLight position={[4, 6, 5]} intensity={1.2} />
-        <pointLight position={[-4, -2, 3]} intensity={18} color="#f2cf3c" distance={12} />
+        <pointLight
+          position={[-4, -2, 3]}
+          intensity={18}
+          color="#f2cf3c"
+          distance={12}
+        />
         <MarkMesh drag={drag} />
         <Environment resolution={256}>
-          <Lightformer form="rect" intensity={3} position={[0, 4, -6]} scale={[12, 2, 1]} />
-          <Lightformer form="rect" intensity={1.6} position={[-6, 0, 2]} rotation-y={Math.PI / 2} scale={[8, 3, 1]} />
-          <Lightformer form="rect" intensity={2.2} color="#f2cf3c" position={[6, -1, 1]} rotation-y={-Math.PI / 2} scale={[6, 2, 1]} />
+          <Lightformer
+            form="rect"
+            intensity={3}
+            position={[0, 4, -6]}
+            scale={[12, 2, 1]}
+          />
+          <Lightformer
+            form="rect"
+            intensity={1.6}
+            position={[-6, 0, 2]}
+            rotation-y={Math.PI / 2}
+            scale={[8, 3, 1]}
+          />
+          <Lightformer
+            form="rect"
+            intensity={2.2}
+            color="#f2cf3c"
+            position={[6, -1, 1]}
+            rotation-y={-Math.PI / 2}
+            scale={[6, 2, 1]}
+          />
           <Lightformer form="ring" intensity={1.4} position={[0, 0, 8]} scale={4} />
         </Environment>
       </Canvas>

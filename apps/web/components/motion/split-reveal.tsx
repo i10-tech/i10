@@ -1,6 +1,13 @@
 "use client"
 
-import { Children, cloneElement, isValidElement, useRef, type ReactElement, type ReactNode } from "react"
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useRef,
+  type ReactElement,
+  type ReactNode,
+} from "react"
 import { cn } from "cn"
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap"
 
@@ -56,7 +63,9 @@ export function SplitReveal({
         return
       }
 
-      const scrollTrigger = onScroll ? { trigger: el, start: "top 86%", once: true } : undefined
+      const scrollTrigger = onScroll
+        ? { trigger: el, start: "top 86%", once: true }
+        : undefined
       const tl = gsap.timeline({ scrollTrigger, onComplete: done })
 
       if (mode === "scatter") {

@@ -20,12 +20,21 @@ export function IconTile({
   className?: string
 }) {
   const color = hue ? `var(--hue-${hue})` : "var(--fg-2)"
-  const box = size === "sm" ? "size-7 rounded-[8px]" : size === "lg" ? "size-12 rounded-[14px]" : "size-9 rounded-[10px]"
+  const box =
+    size === "sm"
+      ? "size-7 rounded-[8px]"
+      : size === "lg"
+        ? "size-12 rounded-[14px]"
+        : "size-9 rounded-[10px]"
   const px = size === "sm" ? 14 : size === "lg" ? 22 : 16
 
   return (
     <span
-      className={cn("icon-tile relative inline-flex shrink-0 items-center justify-center", box, className)}
+      className={cn(
+        "icon-tile relative inline-flex shrink-0 items-center justify-center",
+        box,
+        className,
+      )}
       style={{ "--tile": color, color } as CSSProperties}
     >
       <PixelIcon name={icon} size={px} />

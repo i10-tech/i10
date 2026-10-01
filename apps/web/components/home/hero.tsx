@@ -25,7 +25,10 @@ const HeroMarkScene = dynamic(() => import("@/components/three/hero-mark-scene")
 
 export function Hero() {
   return (
-    <section data-nav-tone="dark" className="relative overflow-hidden pt-[calc(var(--nav-h)+5.5rem)] pb-20 md:pb-28">
+    <section
+      data-nav-tone="dark"
+      className="relative overflow-hidden pt-[calc(var(--nav-h)+5.5rem)] pb-20 md:pb-28"
+    >
       <div aria-hidden className="hero-grid pointer-events-none absolute inset-0" />
       <div aria-hidden className="hero-glow pointer-events-none absolute" />
 
@@ -43,18 +46,34 @@ export function Hero() {
             <Arrow className="text-fg-3" />
           </Link>
 
-          <SplitReveal as="h1" mode="scatter" onScroll={false} delay={0.15} className="type-display-xl">
+          <SplitReveal
+            as="h1"
+            mode="scatter"
+            onScroll={false}
+            delay={0.15}
+            className="type-display-xl"
+          >
             Email for developers. <br className="max-sm:hidden" />
             <span className="text-fg-3">Mailboxes for</span>{" "}
-            <span className="type-accent text-fg">everyone</span> <span className="text-fg-3">else.</span>
+            <span className="type-accent text-fg">everyone</span>{" "}
+            <span className="text-fg-3">else.</span>
           </SplitReveal>
 
-          <p data-reveal data-reveal-delay="0.35" className="type-lead mt-7 max-w-[34rem]">
-            A Resend-compatible API, real mailboxes on your own domain, and one DNS record to start sending.{" "}
+          <p
+            data-reveal
+            data-reveal-delay="0.35"
+            className="type-lead mt-7 max-w-[34rem]"
+          >
+            A Resend-compatible API, real mailboxes on your own domain, and one DNS
+            record to start sending.{" "}
             <span className="text-fg">Keep your code, change one import.</span>
           </p>
 
-          <div data-reveal data-reveal-delay="0.45" className="mt-9 flex flex-wrap items-center gap-3">
+          <div
+            data-reveal
+            data-reveal-delay="0.45"
+            className="mt-9 flex flex-wrap items-center gap-3"
+          >
             <ButtonLink href={hosts.signIn} size="lg" arrow>
               Start sending free
             </ButtonLink>
@@ -63,14 +82,22 @@ export function Hero() {
             </ButtonLink>
           </div>
 
-          <div data-reveal data-reveal-delay="0.55" className="mt-6 flex items-center gap-1 rounded-[10px] py-1 pr-1 pl-3 font-mono text-[12.5px] text-fg-2 shadow-[inset_0_0_0_1px_var(--line)]">
+          <div
+            data-reveal
+            data-reveal-delay="0.55"
+            className="mt-6 flex items-center gap-1 rounded-[10px] py-1 pr-1 pl-3 font-mono text-[12.5px] text-fg-2 shadow-[inset_0_0_0_1px_var(--line)]"
+          >
             <span className="text-fg-4">$</span>
             <span className="ml-2">bun add @i10/node</span>
             <CopyButton value="bun add @i10/node" className="ml-3" />
           </div>
         </div>
 
-        <div data-reveal="fade" data-reveal-delay="0.2" className="relative -mx-[var(--gutter)] h-[440px] sm:h-[540px] lg:-mr-[5vw] lg:ml-[-12vw] lg:h-[760px]">
+        <div
+          data-reveal="fade"
+          data-reveal-delay="0.2"
+          className="relative -mx-[var(--gutter)] h-[440px] sm:h-[540px] lg:-mr-[5vw] lg:ml-[-12vw] lg:h-[760px]"
+        >
           <HeroMarkScene />
           <HeroOrbit />
         </div>
@@ -80,7 +107,10 @@ export function Hero() {
           stats always start below the fold: revealed, they never peek in
           cut off at the bottom of the opening view. */}
       <div className="container-site relative mt-16 md:mt-20">
-        <dl data-reveal className="grid grid-cols-2 gap-px overflow-hidden rounded-[14px] bg-line md:grid-cols-4">
+        <dl
+          data-reveal
+          className="grid grid-cols-2 gap-px overflow-hidden rounded-[14px] bg-line md:grid-cols-4"
+        >
           {[
             ["1", "DNS record to start"],
             ["~2 min", "to your first send"],
@@ -107,11 +137,25 @@ export function Hero() {
 function HeroOrbit() {
   const text = "SIGNED · SEALED · DELIVERED · EU-CENTRAL-1 · DKIM · SPF · DMARC · "
   return (
-    <svg aria-hidden viewBox="0 0 400 400" className="hero-orbit pointer-events-none absolute top-1/2 left-1/2 w-[min(92%,600px)] -translate-x-1/2 lg:w-[min(96%,660px)] -translate-y-1/2">
+    <svg
+      aria-hidden
+      viewBox="0 0 400 400"
+      className="hero-orbit pointer-events-none absolute top-1/2 left-1/2 w-[min(92%,600px)] -translate-x-1/2 lg:w-[min(96%,660px)] -translate-y-1/2"
+    >
       <defs>
-        <path id="orbit-path" d="M200 200m-172 0a172 172 0 1 1 344 0a172 172 0 1 1-344 0" />
+        <path
+          id="orbit-path"
+          d="M200 200m-172 0a172 172 0 1 1 344 0a172 172 0 1 1-344 0"
+        />
       </defs>
-      <circle cx="200" cy="200" r="190" fill="none" stroke="var(--line)" strokeDasharray="1 5" />
+      <circle
+        cx="200"
+        cy="200"
+        r="190"
+        fill="none"
+        stroke="var(--line)"
+        strokeDasharray="1 5"
+      />
       <circle cx="200" cy="200" r="150" fill="none" stroke="var(--line-faint)" />
       <text className="fill-fg-4 font-mono text-[9.5px] tracking-[0.32em]">
         <textPath href="#orbit-path">{text + text}</textPath>

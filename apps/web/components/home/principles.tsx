@@ -15,7 +15,10 @@ import { gsap, prefersReducedMotion, ScrollTrigger, useGSAP } from "@/lib/gsap"
  */
 const COS = Math.cos(Math.PI / 6)
 const SIN = Math.sin(Math.PI / 6)
-const iso = (x: number, y: number, z: number): [number, number] => [(x - y) * COS, (x + y) * SIN - z]
+const iso = (x: number, y: number, z: number): [number, number] => [
+  (x - y) * COS,
+  (x + y) * SIN - z,
+]
 const pt = (p: [number, number]) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`
 
 /*
@@ -29,7 +32,12 @@ interface Shape {
 }
 
 function box(x: number, y: number, z: number, w: number, d: number, h: number): Shape {
-  const t = [iso(x, y, z + h), iso(x + w, y, z + h), iso(x + w, y + d, z + h), iso(x, y + d, z + h)]
+  const t = [
+    iso(x, y, z + h),
+    iso(x + w, y, z + h),
+    iso(x + w, y + d, z + h),
+    iso(x, y + d, z + h),
+  ]
   const b = [iso(x + w, y, z), iso(x + w, y + d, z), iso(x, y + d, z)]
   return {
     fill: `M${pt(t[0]!)}L${pt(t[1]!)}L${pt(b[0]!)}L${pt(b[1]!)}L${pt(b[2]!)}L${pt(t[3]!)}Z`,
@@ -49,7 +57,9 @@ function envelopeOnTop(x: number, y: number, z: number, w: number, d: number): S
   const c = iso(x + w - i, y + d - i, z)
   const e = iso(x + i, y + d - i, z)
   const m = iso(x + w / 2, y + d / 2 + 6, z)
-  return { strokes: [`M${pt(a)}L${pt(b)}L${pt(c)}L${pt(e)}Z`, `M${pt(a)}L${pt(m)}L${pt(b)}`] }
+  return {
+    strokes: [`M${pt(a)}L${pt(b)}L${pt(c)}L${pt(e)}Z`, `M${pt(a)}L${pt(m)}L${pt(b)}`],
+  }
 }
 
 /*
@@ -66,46 +76,67 @@ interface Figure {
 
 const wave = (t: number, speed: number, phase = 0) => Math.sin(t * speed + phase)
 
-const FIGS: { fig: string; title: string; body: string; at: (t: number) => Figure }[] = [
-  {
-    fig: "FIG 0.1",
-    title: "Compatible by design",
-    body: "The same requests, responses and error names as Resend. Your call sites never find out.",
-    at: (t) => {
-      // The lid lifts off its base and settles: same shape, swapped in place.
-      const lift = 46 + 10 * (0.5 - 0.5 * Math.cos(t * 1.1))
-      return {
-        shapes: [box(0, 0, 0, 130, 130, 14), box(0, 0, lift, 130, 130, 14), envelopeOnTop(0, 0, lift + 14, 130, 130)],
-        dashed: [
-          `M${pt(iso(0, 130, 14))}L${pt(iso(0, 130, lift))}`,
-          `M${pt(iso(130, 130, 14))}L${pt(iso(130, 130, lift))}`,
-          `M${pt(iso(130, 0, 14))}L${pt(iso(130, 0, lift))}`,
-        ],
-      }
+const FIGS: { fig: string; title: string; body: string; at: (t: number) => Figure }[] =
+  [
+    {
+      fig: "FIG 0.1",
+      title: "Compatible by design",
+      body: "The same requests, responses and error names as Resend. Your call sites never find out.",
+      at: (t) => {
+        // The lid lifts off its base and settles: same shape, swapped in place.
+        const lift = 46 + 10 * (0.5 - 0.5 * Math.cos(t * 1.1))
+        return {
+          shapes: [
+            box(0, 0, 0, 130, 130, 14),
+            box(0, 0, lift, 130, 130, 14),
+            envelopeOnTop(0, 0, lift + 14, 130, 130),
+          ],
+          dashed: [
+            `M${pt(iso(0, 130, 14))}L${pt(iso(0, 130, lift))}`,
+            `M${pt(iso(130, 130, 14))}L${pt(iso(130, 130, lift))}`,
+            `M${pt(iso(130, 0, 14))}L${pt(iso(130, 0, lift))}`,
+          ],
+        }
+      },
     },
-  },
-  {
-    fig: "FIG 0.2",
-    title: "Aligned from the first send",
-    body: "SPF and DKIM both align, so the inbox shows your domain. One record to start, two to own it.",
-    at: (t) => {
-      const h = [28, 56, 84, 40].map((base, i) => Math.max(12, base + 18 * (wave(t, 0.9, i * 1.7) - Math.sin(i * 1.7))))
-      return {
-        shapes: [box(0, 0, 0, 56, 56, h[0]!), box(0, 60, 0, 56, 56, h[1]!), box(64, 0, 0, 56, 56, h[2]!), box(64, 64, 0, 56, 56, h[3]!)],
+    {
+      fig: "FIG 0.2",
+      title: "Aligned from the first send",
+      body: "SPF and DKIM both align, so the inbox shows your domain. One record to start, two to own it.",
+      at: (t) => {
+        const h = [28, 56, 84, 40].map((base, i) =>
+          Math.max(12, base + 18 * (wave(t, 0.9, i * 1.7) - Math.sin(i * 1.7))),
+        )
+        return {
+          shapes: [
+            box(0, 0, 0, 56, 56, h[0]!),
+            box(0, 60, 0, 56, 56, h[1]!),
+            box(64, 0, 0, 56, 56, h[2]!),
+            box(64, 64, 0, 56, 56, h[3]!),
+          ],
+          dashed: [],
+        }
+      },
+    },
+    {
+      fig: "FIG 0.3",
+      title: "Mail that stays yours",
+      body: "Bodies sealed in per-workspace packs, sent from Frankfurt. Ten slats: one for every letter i10 leaves out.",
+      at: (t) => ({
+        shapes: Array.from({ length: 10 }, (_, i) =>
+          box(
+            i * 13,
+            0,
+            0,
+            5,
+            118,
+            120 - i * 10 + 12 * (wave(t, 1.4, -i * 0.55) - Math.sin(-i * 0.55)),
+          ),
+        ),
         dashed: [],
-      }
+      }),
     },
-  },
-  {
-    fig: "FIG 0.3",
-    title: "Mail that stays yours",
-    body: "Bodies sealed in per-workspace packs, sent from Frankfurt. Ten slats: one for every letter i10 leaves out.",
-    at: (t) => ({
-      shapes: Array.from({ length: 10 }, (_, i) => box(i * 13, 0, 0, 5, 118, 120 - i * 10 + 12 * (wave(t, 1.4, -i * 0.55) - Math.sin(-i * 0.55)))),
-      dashed: [],
-    }),
-  },
-]
+  ]
 
 export function Principles() {
   const root = useRef<HTMLDivElement>(null)
@@ -171,7 +202,12 @@ export function Principles() {
         },
       })
       paths.forEach((p, i) => {
-        draw.fromTo(p.strokes, { drawSVG: "0%" }, { drawSVG: "100%", duration: 1.6, ease: "site.inOut", stagger: 0.05 }, i * 0.15)
+        draw.fromTo(
+          p.strokes,
+          { drawSVG: "0%" },
+          { drawSVG: "100%", duration: 1.6, ease: "site.inOut", stagger: 0.05 },
+          i * 0.15,
+        )
       })
 
       return () => gsap.ticker.remove(tick)
@@ -185,19 +221,44 @@ export function Principles() {
         {FIGS.map((f, i) => {
           const rest = f.at(0)
           return (
-            <div key={f.fig} className="relative flex flex-col px-2 pt-10 pb-12 md:px-8 md:first:pl-2 md:last:pr-2">
-              {i > 0 ? <div aria-hidden className="absolute inset-y-10 left-0 w-px bg-line-faint max-md:hidden" /> : null}
+            <div
+              key={f.fig}
+              className="relative flex flex-col px-2 pt-10 pb-12 md:px-8 md:first:pl-2 md:last:pr-2"
+            >
+              {i > 0 ? (
+                <div
+                  aria-hidden
+                  className="absolute inset-y-10 left-0 w-px bg-line-faint max-md:hidden"
+                />
+              ) : null}
               <span data-reveal className="type-label text-fg-4">
                 {f.fig}
               </span>
-              <div data-fig className="my-10 flex h-[220px] items-center justify-center">
-                <svg viewBox="-130 -110 260 250" className="h-full w-auto overflow-visible" aria-hidden>
+              <div
+                data-fig
+                className="my-10 flex h-[220px] items-center justify-center"
+              >
+                <svg
+                  viewBox="-130 -110 260 250"
+                  className="h-full w-auto overflow-visible"
+                  aria-hidden
+                >
                   {rest.dashed.map((d, k) => (
-                    <path key={k} data-dashed d={d} fill="none" stroke="var(--line-bright)" strokeWidth="1" strokeDasharray="2 4" />
+                    <path
+                      key={k}
+                      data-dashed
+                      d={d}
+                      fill="none"
+                      stroke="var(--line-bright)"
+                      strokeWidth="1"
+                      strokeDasharray="2 4"
+                    />
                   ))}
                   {rest.shapes.map((shape, j) => (
                     <g key={j}>
-                      {shape.fill ? <path data-fill d={shape.fill} fill="var(--canvas)" /> : null}
+                      {shape.fill ? (
+                        <path data-fill d={shape.fill} fill="var(--canvas)" />
+                      ) : null}
                       {shape.strokes.map((d, k) => (
                         <path
                           key={k}
@@ -214,10 +275,16 @@ export function Principles() {
                   ))}
                 </svg>
               </div>
-              <h3 data-reveal className="text-[16px] font-[540] tracking-[-0.01em] text-fg">
+              <h3
+                data-reveal
+                className="text-[16px] font-[540] tracking-[-0.01em] text-fg"
+              >
                 {f.title}
               </h3>
-              <p data-reveal className="mt-2 max-w-[22rem] text-[15px] leading-[24px] text-fg-3">
+              <p
+                data-reveal
+                className="mt-2 max-w-[22rem] text-[15px] leading-[24px] text-fg-3"
+              >
                 {f.body}
               </p>
             </div>

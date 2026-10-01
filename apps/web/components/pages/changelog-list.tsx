@@ -24,7 +24,10 @@ const TAG_HUE: Record<Tag, string> = {
  */
 export function ChangelogList() {
   const [filter, setFilter] = useState<Tag | "All">("All")
-  const tags = useMemo(() => ["All", ...new Set(changelog.map((e) => e.tag))] as (Tag | "All")[], [])
+  const tags = useMemo(
+    () => ["All", ...new Set(changelog.map((e) => e.tag))] as (Tag | "All")[],
+    [],
+  )
 
   // The page changes height when the list re-flows; every trigger below it
   // (the footer's reveals among them) was measured against the old height.
@@ -42,7 +45,11 @@ export function ChangelogList() {
 
   return (
     <div>
-      <div role="tablist" aria-label="Filter by area" className="flex flex-wrap gap-1.5">
+      <div
+        role="tablist"
+        aria-label="Filter by area"
+        className="flex flex-wrap gap-1.5"
+      >
         {tags.map((t) => (
           <button
             key={t}
@@ -62,7 +69,13 @@ export function ChangelogList() {
               />
             ) : null}
             <span className="relative flex items-center gap-2">
-              {t !== "All" ? <span aria-hidden className="size-[5px]" style={{ background: TAG_HUE[t] }} /> : null}
+              {t !== "All" ? (
+                <span
+                  aria-hidden
+                  className="size-[5px]"
+                  style={{ background: TAG_HUE[t] }}
+                />
+              ) : null}
               {t}
             </span>
           </button>
@@ -83,7 +96,10 @@ export function ChangelogList() {
                 className="grid gap-6 border-t border-line py-10 md:grid-cols-[200px_1fr] md:gap-12"
               >
                 <div className="md:sticky md:top-[calc(var(--nav-h)+2rem)] md:self-start">
-                  <time dateTime={date} className="font-mono text-[12px] tracking-wide text-fg-3 uppercase">
+                  <time
+                    dateTime={date}
+                    className="font-mono text-[12px] tracking-wide text-fg-3 uppercase"
+                  >
                     {formatDate(date)}
                   </time>
                 </div>
@@ -99,12 +115,22 @@ export function ChangelogList() {
                         transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                       >
                         <span className="type-label flex items-center gap-2 text-fg-4">
-                          <span aria-hidden className="size-[5px]" style={{ background: TAG_HUE[e.tag] }} />
+                          <span
+                            aria-hidden
+                            className="size-[5px]"
+                            style={{ background: TAG_HUE[e.tag] }}
+                          />
                           {e.tag}
-                          {e.pr ? <span className="text-fg-4/70">· #{e.pr}</span> : null}
+                          {e.pr ? (
+                            <span className="text-fg-4/70">· #{e.pr}</span>
+                          ) : null}
                         </span>
-                        <h2 className="mt-3 text-[22px] leading-[30px] font-[560] tracking-[-0.02em] text-fg">{e.title}</h2>
-                        <p className="mt-2 max-w-[38rem] text-[15px] leading-[25px] text-fg-3">{e.summary}</p>
+                        <h2 className="mt-3 text-[22px] leading-[30px] font-[560] tracking-[-0.02em] text-fg">
+                          {e.title}
+                        </h2>
+                        <p className="mt-2 max-w-[38rem] text-[15px] leading-[25px] text-fg-3">
+                          {e.summary}
+                        </p>
                       </motion.article>
                     ))}
                   </AnimatePresence>

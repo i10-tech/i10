@@ -2,8 +2,8 @@
 
 Per-site teardown gathered live in the browser (1024px pane) plus open-source code where available. Companion to BRIEF.md. Values like font sizes and letter-spacing are computed styles read from the live pages.
 
-
 ## i10 facts (repo)
+
 - i10 = i + 10 letters = integration. Hosts: i10.tech (web), dash.i10.tech (console), auth.i10.tech, api.i10.tech, docs.i10.tech, mail.i10.tech
 - Resend-compatible API: "Keep your code, change one import." resend/node -> @i10/node (zero deps). @i10/next webhook handler.
 - Keys i10_live_ / i10_test_. Idempotency keys. error.retryable. rate_limit_exceeded vs daily_quota_exceeded.
@@ -17,6 +17,7 @@ Per-site teardown gathered live in the browser (1024px pane) plus open-source co
 - Local fonts: Amazon Ember Display (Lt/Rg/Md/Bd/He), Bricolage Grotesque variable.
 
 ## Linear
+
 - bg #08090a, Inter Variable w510, ffs "cv01","ss03". h1 64/64 -0.022em; h2 48/48 -0.022em (second sentence grey #8a8f98 in same h2). p 15/24 #8a8f98. Berkeley Mono.
 - header fixed 73px, bg transparent, backdrop blur(20px), border-bottom white/8%.
 - CTA pill 32px, 13px w510, bg #e5e5e6 text dark. Secondary dark pill.
@@ -26,6 +27,7 @@ Per-site teardown gathered live in the browser (1024px pane) plus open-source co
 - Sections: hero -> big app window w/ perspective bottom glow; logos row + mono caption "POWERING THE COMPANIES..."; big h2 two-tone; FIG 0.1/0.2/0.3 isometric line art columns w/ vertical dividers; feature sections w/ app fragments; "Features" accordion list w/ +; changelog cards (mono date); colored testimonial cards; centered CTA "Built for the future. Available today."; footer 6 columns small logo.
 
 ## Attio (light)
+
 - interDisplay h1 64 w600 lh.95 -0.02em; inter body 18 w500 ss03; tiempos serif for quotes; JetBrains Mono.
 - Hero: stacked app windows (terminal + app + side panels) scale up/converge on scroll. Logo grid bordered cells w/ corner arrow on hover.
 - Page framed by vertical rails. Sticky left index (Build pipeline / Convert leads...) with active line indicator. Workflow node graph on dotted canvas.
@@ -33,6 +35,7 @@ Per-site teardown gathered live in the browser (1024px pane) plus open-source co
 - Serif quote with grey second half, dotted bg. Footer: "New" blue pill badge, external links with ↗.
 
 ## Clerk (light + dark bands)
+
 - font suisse + "geistNumbers" (digits from Geist via unicode-range first in stack). h1 64/72 w700 -0.025em.
 - Floating nav: inset rounded bar, sticky top; changes theme over dark sections.
 - Logos: bordered cells that swap logos staggered: opacity+filter(blur)+scale .13s cubic-bezier(.175,.885,.32,1.1).
@@ -41,11 +44,13 @@ Per-site teardown gathered live in the browser (1024px pane) plus open-source co
 - Eyebrow colored small text above h2 (Frameworks cyan / Integrations purple).
 
 ## WorkOS (light, Webflow)
+
 - Untitled Sans; h1 80/84 w500 ls -0.07em (very tight); gradient text purple->blue on 2nd line.
 - Hero right: vertical drum of toggle tiles (Audit Logs, Enterprise SSO, SCIM, RBAC, Connectors, Bot Blocking, Agent Auth); steps every ~1.5s; center tile larger + shifted left, toggle flips on, "Ready" -> green "Enabled". Behind: vertical periwinkle stripes in circular radial mask. Tiles above center = on (dark toggle), below = off & faded.
 - Logos in soft grey cells grid. Glossy 3D-ish app icons for features. HTTP 200 JSON code card. Footer plain.
 
 ## Resend (dark) - closest competitor
+
 - bg #000. h1 Domaine (serif display) 96/96 -0.01em, ss01 ss04 ss05 ss11. h2 ABC Favorit 56 -0.05em. body Inter 18/27 #a1a4a5. mono Commit Mono.
 - Hero 3D cube = VIDEO (4 <video>), no canvas. Badge pill "Join us at Resend Forward >".
 - Header sticky 58px; after: bg-black/60 backdrop-blur-md + texture png; before: backdrop-blur-2xl backdrop-brightness-200 masked to 1px line = refractive bright hairline.
@@ -65,62 +70,86 @@ Per-site teardown gathered live in the browser (1024px pane) plus open-source co
   - FAQ: annual discounts; non-profit/education; payment methods; free trial; custom plan contact; exceed limits; transactional vs marketing; unlimited broadcast; broadcasts count?; inbound counted?
 
 ## Supabase (dark green-tint)
+
 - bg oklch(.19 .0025 157). h1 Manrope 46 w500 two lines, second line brand green. Inter 450 body. Cta green 26px tall 12px radius 8.
 - Bento product cards each with its own live illustration: auth (email list with blur), edge fn (wireframe globe + "$ supabase functions deploy"), storage (image tiles), realtime (cursors on grid), vector (3D cube w/ glowing points), data API (route pills with dashed lines).
 - Two-tone line "Use one or all. Best of breed..." Logo wall. "Use Supabase with React" framework icon tabs + code. Tweet wall columns scrolling vertically w/ masks.
 
 ## Neon (via render service; site serves agent-markdown to Claude UA)
+
 - black, big hero canvas/video top. h1 two lines. White pill + outline pill.
 - Numbered chapters "▶ BUILD YOUR BACKEND" red mono eyebrow + huge dim "01" numerals; 5 product columns staggered heights; "WHERE STARTUPS START" mono uppercase on green highlight blocks (terminal selection look); stat "100K+" box over faded logo wall; terminal widget "Initialization complete" progress bar w/ checkboxes.
 
 ## Databuddy (dark #18181c, LT Superior 600)
+
 - pixel-art mascot (bunny) + warm orange/purple radial glow. Chips row (13 KB script, Cookieless, Privacy, Open source 1,166). Tabbed dashboard preview + insight card.
 - Logo wall with YC batch badges. Bento live widgets: funnel, live users area chart, web vitals rings, sessions list, error tracking, flags w/ toggles, events counts.
 - Cards with crop-mark corner brackets. Heading icon "≡" pink pixel accent. Investigation checklist "0 of 7 sources checked" animating.
 
 ## Autumn (black, Geist + Geist Mono)
+
 - Page framed by rails; triple-hairline band separators; "// PRICING MODELS" mono comment labels.
 - Nav: mono uppercase items each w/ 3x3 diamond pixel icon; hover = GSAP stagger fills pixels (opacity/scale) + text brightens. Dashboard CTA purple block at right edge.
 - Badge "NEW · HOW TO BUILD A CREDIT LEDGER ↗" purple tinted w/ dotted texture. h1 Geist 56 -4% mixed grey/white words. Square purple CTA with arrow icon box + vertical stripe filler. Purple dotted gradient band behind code window. Colored testimonial carousel (side cards peeking), crop-mark corners.
 
 ## PostHog
+
 - Desktop OS metaphor (windows, desktop icons, taskbar). Humor (cookie banner). Marker highlights on key phrases, tactile 3D buttons, mascot illos. Honest pricing copy.
 
 ## GSAP (gsap 3.15, ScrollSmoother; bg #0e100f, cream #fffce1, font Mori)
+
 - Hero giant type w/ glossy 3D shapes embedded in letters; "{ Why GSAP® }" curly-brace labels; big paragraph with scroll-scrubbed word color highlight (gradient green); sticker chips "Animate"/"Anything" tilted; tool rows (Scroll/SVG/Text/UI) with gradient 3D shapes, colored category names; showreel carousel; footer: color-coded link groups; cream newsletter footer band.
 
 ## Bird (warm black #100f0c, TWK Lausanne 400; jetbrainsMono; "Fake Receipt" font)
+
 - h1 64 -0.045em, second line grey. 3D globe canvas w/ city lights + pulse arcs + live counter "≈1,865,249 messages since you landed". MCP demo "Send a welcome email. Let me know when it arrives." tool rows email_send Sending. SDK tabs row. Links row with ↗. "Ready to build?" CTA. Footer giant "Bird" wordmark + ASCII art at very bottom; "● All Systems Operational" right.
 
 ## Vercel (black, Geist)
+
 - h1 64 w400 -0.06em; h2 56 w450 -0.06em. Hero glowing triangle w/ grain halo (canvas). Logos row.
 - Sticky split: left big stat sentence (white + grey) + "Features" list; right product screenshots. "Recently shipped" cards.
 - /ai: 3 hairline-framed cards: AI Gateway orbit rings w/ provider icon nodes around center logo; Sandbox auto-scrolling step list (Execute ✓ pnpm install) w/ fade masks; eve file tree w/ faint architecture boxes. Title: bold name + grey desc same para. White pill "Start now" + "Read the docs ›".
 - Footer: "New" grey badges; mono blue "● ALL SYSTEMS NORMAL."; theme switch.
 
 ## Cloudflare (warm dark #151414, cream #fffbf5, FT Kunst Grotesk 500, Apercu Mono)
+
 - h1 56 -0.025em. Hero = inset orange rounded card (8px margin) w/ dot texture + sun glow at bottom. Pill badge "Connect 2026 ... (->)".
 - Nav: logo + items with up/down chevrons; "Under attack?" red; Login + Contact sales pills; search circle. On hover a bordered highlight pill SLIDES between items; dropdown panel resizes (w/h) and content crossfades; panel radius ~12, columns split by hairlines, footer row (orange link + small links).
 - On scroll down: nav items + wordmark collapse, only cloud mark remains top-left (white over orange hero, orange over dark; multiple colored logo layers crossfade), floating orange "Start building" pill at right. Scroll up restores.
 - "Region: Earth" dotted globe w/ orange nodes + callout boxes w/ corner ticks. 3-col feature strip w/ crop-mark corners.
 
 ## Dub (light) - scroll paragraph: lines brighten grey->ink as you scroll, inline colored icon tiles after keywords, tilted floating UI cards + icon tiles w/ parallax, dotted bg inside rails. Logo grid with CASE STUDY tags. Webhook node diagram "New Event / Lead created". Tabs w/ active left bar.
+
 ## Tailscale (warm off-white) - product tabs (active = filled red card), big stat cards, blue gradient band, tweet cards, dark CTA card, mono small caps.
+
 ## Stripe - WebGL ribbon gradient hero, live "Global GDP running on Stripe" counter, two-tone h1 paragraph, gradient bento, particle globe, rails.
+
 ## Stytch (warm light, Booton 700 + Chivo Mono) - BLUEPRINT: page framed by double rails w/ L notches at every section seam; mono nav/buttons; chartreuse announcement badge; monochrome 1px line-art UI drawings; dark bands w/ animated pixel noise (dither) behind code; ⌘ bullets; accordion w/ square bullets; pastel icon squares; footer big clipped wordmark.
+
 ## Pinecone - "SELECT EXPERIENCE: Builder/Business Leader" toggle; agent install tabs (Claude Code/Cursor/...); madlib estimator "I'm building a [RAG pipeline] for a [production app]"; "{lower cost}" brace tags; corner-tick frame on CTA.
+
 ## Svix - logo grid w/ blue corner flags; hexagon bullets; mono body; giant SVIX footer wordmark on blue band; "We're Hiring" badge.
+
 ## Cursor - warm grey; product windows in tinted panels; alternating text/visual.
+
 ## Anthropic - kinetic hero: words of two phrases interleave/strike/fade ("products / safety / and put / the frontier"); release cards w/ mono DATE/CATEGORY/DETAILS rows.
+
 ## ElevenLabs - gradient orb carousel, bento w/ pastel gradients, rails w/ corner ticks.
+
 ## Webflow - "What [marketing teams ▾] love about Webflow" inline select; footer giant blue W mark cropped bottom-right + "Made in Webflow" badge.
+
 ## Framer - dark; neon-blue glowing prompt input hero.
+
 ## Notion - inline pill in headline "agents ● Think together"; stats ticker row with icons.
+
 ## Mintlify - "Agent traffic 69.8291%" live counter badge; "Agents at work today" ticker w/ mono live counters; green accent bar left of headings.
+
 ## GitBook - orange 3D tube knot hero; agent traffic tracker; "Get started with AI" Claude/ChatGPT/Cursor pill tabs + copy prompt.
+
 ## Scalar - landing laid out like the docs app (left sidebar nav); tilted 3D stickers; founder letter.
 
 ## POLAR (focus; dark #0a0a0a, PP Neue Montreal 400; Inter/InterDisplay; GeistMono) - studied live + source (polarsource/polar clients/apps/web/src/components/Landing)
+
 - Announcement bar top (#141414) "Introducing ... ->". Nav 88px: logo, grey links (white on hover/active), Sign in, white pill "Get Started >" (14px w550, pad 12/20, h40).
 - Features = full-width mega panel w/ large type links (Usage Billing / Subscriptions / MoR ~30px) + "More Features" column; bg matches page, hairline bottom.
 - Hero: "Meet Polar" white + muted grey continuation, 36/45. MissionRulers: canvas rulers w/ ticks scrolling (tokens 210M..270M; revenue $42k..$66k), current value in white pill w/ caret, bump near pointer; sine-swell rate. "Tokens in, / revenue out" centered two-tone 48.
@@ -139,6 +168,7 @@ Per-site teardown gathered live in the browser (1024px pane) plus open-source co
 - Resource pricing: doc layout, TOC rows w/ ↓, left label/right prose, tables.
 
 ## LIVE REDOS + remaining
+
 - Plane (light, Satoshi 430): app shot over painterly blurred photo; mega menu: icon+title+desc grid, promo cards right (Self-host; "Works with your stack" chips ↗), bottom strip "New: ... Release v3.3.0 Learn more" + "Download app"; page dims behind. Autoplay tabs with progress line on top of active tab. "COMING SOON" tag. Footer: compare list, download buttons.
 - Tailscale: mostly static; hamburger at this width.
 - Stripe: mega menu blurs page behind (backdrop blur), panel morphs height, content slides horizontally between tabs, chevron morphs. GDP counter ticks. Bento cards swap gradient art -> live UI.

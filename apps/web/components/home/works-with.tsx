@@ -2,7 +2,12 @@
 
 import { AnimatePresence, motion } from "motion/react"
 import { useEffect, useRef, useState, type CSSProperties } from "react"
-import { BrandIcon, brandHexOnDark, brandTitle, type BrandName } from "@/components/brand/brand-icon"
+import {
+  BrandIcon,
+  brandHexOnDark,
+  brandTitle,
+  type BrandName,
+} from "@/components/brand/brand-icon"
 import { prefersReducedMotion } from "@/lib/gsap"
 
 /*
@@ -40,10 +45,14 @@ export function WorksWith() {
     let last = -1
     const id = setInterval(() => {
       // Any cell but the one that just changed and the one under the pointer.
-      const choices = CELLS.map((_, i) => i).filter((i) => i !== last && i !== hovered.current)
+      const choices = CELLS.map((_, i) => i).filter(
+        (i) => i !== last && i !== hovered.current,
+      )
       const target = choices[Math.floor(Math.random() * choices.length)]!
       last = target
-      setIndexes((prev) => prev.map((v, i) => (i === target ? pick(CELLS[i]!.length, v) : v)))
+      setIndexes((prev) =>
+        prev.map((v, i) => (i === target ? pick(CELLS[i]!.length, v) : v)),
+      )
     }, 1300)
     return () => clearInterval(id)
   }, [])
@@ -51,10 +60,14 @@ export function WorksWith() {
   return (
     <section data-nav-tone="dark" className="relative">
       <div className="container-site">
-        <div data-reveal className="grid grid-cols-2 border-y border-line md:grid-cols-[1.4fr_repeat(5,1fr)]">
+        <div
+          data-reveal
+          className="grid grid-cols-2 border-y border-line md:grid-cols-[1.4fr_repeat(5,1fr)]"
+        >
           <div className="col-span-2 flex items-center border-line px-1 py-6 md:col-span-1 md:border-r md:py-0 md:pr-6">
             <p className="max-w-[15rem] text-[14px] leading-[21px] text-fg-2">
-              Works with the stack you already run. <span className="text-fg-4">Anything that speaks HTTP.</span>
+              Works with the stack you already run.{" "}
+              <span className="text-fg-4">Anything that speaks HTTP.</span>
             </p>
           </div>
           {/* On phones: the sentence spans the first row, cells pair up below it
@@ -83,7 +96,9 @@ export function WorksWith() {
                   >
                     <BrandIcon name={name} size={wordmark ?? 20} />
                     {wordmark ? null : (
-                      <span className="text-[14px] font-[520] tracking-[-0.01em]">{brandTitle(name).replace(".js", "")}</span>
+                      <span className="text-[14px] font-[520] tracking-[-0.01em]">
+                        {brandTitle(name).replace(".js", "")}
+                      </span>
                     )}
                   </motion.span>
                 </AnimatePresence>

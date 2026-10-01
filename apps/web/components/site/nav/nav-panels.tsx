@@ -20,24 +20,44 @@ function PanelItem({ item, onNavigate }: { item: NavItem; onNavigate: () => void
         <span className="flex items-center gap-2 text-[13.5px] leading-5 font-[520] text-fg">
           {item.title}
           {item.badge ? <Badge kind={item.badge} /> : null}
-          {external ? <ArrowUpRight className="text-fg-4 transition-colors group-hover:text-fg-2" /> : null}
+          {external ? (
+            <ArrowUpRight className="text-fg-4 transition-colors group-hover:text-fg-2" />
+          ) : null}
         </span>
         {item.description ? (
-          <span className="text-[12.5px] leading-[18px] text-fg-3 transition-colors group-hover:text-fg-2">{item.description}</span>
+          <span className="text-[12.5px] leading-[18px] text-fg-3 transition-colors group-hover:text-fg-2">
+            {item.description}
+          </span>
         ) : null}
       </span>
     </Link>
   )
 }
 
-function PanelFoot({ label, children, href, cta, onNavigate }: { label: string; children: React.ReactNode; href: string; cta: string; onNavigate: () => void }) {
+function PanelFoot({
+  label,
+  children,
+  href,
+  cta,
+  onNavigate,
+}: {
+  label: string
+  children: React.ReactNode
+  href: string
+  cta: string
+  onNavigate: () => void
+}) {
   return (
     <div className="flex items-center justify-between gap-6 border-t border-line px-5 py-3">
       <p className="truncate text-[12.5px] text-fg-3">
         <span className="mr-2 font-[520] text-brand">{label}</span>
         {children}
       </p>
-      <Link href={href} onClick={onNavigate} className="group/btn inline-flex shrink-0 items-center gap-1.5 text-[12.5px] text-fg-2 transition-colors hover:text-fg">
+      <Link
+        href={href}
+        onClick={onNavigate}
+        className="group/btn inline-flex shrink-0 items-center gap-1.5 text-[12.5px] text-fg-2 transition-colors hover:text-fg"
+      >
         {cta}
         <Arrow />
       </Link>
@@ -61,11 +81,17 @@ export function ProductPanel({ onNavigate }: { onNavigate: () => void }) {
         >
           <span className="type-label text-fg-3">Migrate in a minute</span>
           <span className="mt-4 flex flex-col gap-1 font-mono text-[11px] leading-[18px]">
-            <span className="rounded-[4px] bg-bounced/10 px-1.5 text-bounced/90">- from &quot;resend&quot;</span>
-            <span className="rounded-[4px] bg-delivered/10 px-1.5 text-delivered">+ from &quot;@i10/node&quot;</span>
+            <span className="rounded-[4px] bg-bounced/10 px-1.5 text-bounced/90">
+              - from &quot;resend&quot;
+            </span>
+            <span className="rounded-[4px] bg-delivered/10 px-1.5 text-delivered">
+              + from &quot;@i10/node&quot;
+            </span>
           </span>
           <span className="mt-5">
-            <span className="block text-[13.5px] font-[520] text-fg">Keep your code.</span>
+            <span className="block text-[13.5px] font-[520] text-fg">
+              Keep your code.
+            </span>
             <span className="flex items-center gap-1.5 text-[12.5px] text-fg-3 transition-colors group-hover/btn:text-fg-2">
               Change one import <Arrow />
             </span>
@@ -97,7 +123,8 @@ export function DevelopersPanel({ onNavigate }: { onNavigate: () => void }) {
             <CopyButton value="bun add @i10/node" />
           </div>
           <p className="mt-4 text-[12.5px] leading-[18px] text-fg-3">
-            Zero runtime dependencies. Typed errors with <span className="font-mono text-fg-2">retryable</span> computed for you.
+            Zero runtime dependencies. Typed errors with{" "}
+            <span className="font-mono text-fg-2">retryable</span> computed for you.
           </p>
         </div>
       </div>
@@ -122,10 +149,17 @@ export function ResourcesPanel({ onNavigate }: { onNavigate: () => void }) {
           <span className="type-label text-fg-3">Latest shipped</span>
           <ul className="mt-3 flex flex-col">
             {recent.map((entry) => (
-              <li key={entry.title} className="border-t border-line-faint py-2.5 first:border-t-0 first:pt-1">
+              <li
+                key={entry.title}
+                className="border-t border-line-faint py-2.5 first:border-t-0 first:pt-1"
+              >
                 <Link href="/changelog" onClick={onNavigate} className="group block">
-                  <span className="block font-mono text-[10.5px] tracking-wide text-fg-4 uppercase">{formatDate(entry.date)}</span>
-                  <span className="mt-1 block text-[13px] leading-[18px] text-fg-2 transition-colors group-hover:text-fg">{entry.title}</span>
+                  <span className="block font-mono text-[10.5px] tracking-wide text-fg-4 uppercase">
+                    {formatDate(entry.date)}
+                  </span>
+                  <span className="mt-1 block text-[13px] leading-[18px] text-fg-2 transition-colors group-hover:text-fg">
+                    {entry.title}
+                  </span>
                 </Link>
               </li>
             ))}

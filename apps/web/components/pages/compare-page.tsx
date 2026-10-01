@@ -18,22 +18,50 @@ import { PageHero } from "./page-hero"
 function Cell({ value, strong }: { value: string; strong?: boolean }) {
   if (value === "Yes")
     return (
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-label="Yes" className="text-delivered">
-        <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <svg
+        viewBox="0 0 16 16"
+        width="16"
+        height="16"
+        aria-label="Yes"
+        className="text-delivered"
+      >
+        <path
+          d="m3.5 8.5 3 3 6-7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     )
   if (value === "No")
     return (
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-label="No" className="text-fg-4">
-        <path d="m5 5 6 6m0-6-6 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <svg
+        viewBox="0 0 16 16"
+        width="16"
+        height="16"
+        aria-label="No"
+        className="text-fg-4"
+      >
+        <path
+          d="m5 5 6 6m0-6-6 6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
       </svg>
     )
-  if (value === "To verify") return <span className="font-mono text-[11px] text-fg-4">To verify</span>
+  if (value === "To verify")
+    return <span className="font-mono text-[11px] text-fg-4">To verify</span>
   return <span className={strong ? "text-fg" : "text-fg-2"}>{value}</span>
 }
 
 export function ComparePageView({ slug, page }: { slug: string; page: ComparePage }) {
-  const others = Object.entries(PAGES).filter(([key, p]) => p.kind === "compare" && key !== slug)
+  const others = Object.entries(PAGES).filter(
+    ([key, p]) => p.kind === "compare" && key !== slug,
+  )
 
   return (
     <>
@@ -56,13 +84,19 @@ export function ComparePageView({ slug, page }: { slug: string; page: ComparePag
                 <th scope="col" className="w-[44%] pb-4 font-normal">
                   <span className="type-label text-fg-4">Feature</span>
                 </th>
-                <th scope="col" className="w-[28%] rounded-t-[14px] bg-surface-2 px-5 pt-5 pb-4 text-[14px] font-[560] text-fg shadow-[inset_0_2px_0_var(--brand)]">
+                <th
+                  scope="col"
+                  className="w-[28%] rounded-t-[14px] bg-surface-2 px-5 pt-5 pb-4 text-[14px] font-[560] text-fg shadow-[inset_0_2px_0_var(--brand)]"
+                >
                   <span className="flex items-center gap-2">
                     <span aria-hidden className="size-[5px] bg-brand" />
                     i10
                   </span>
                 </th>
-                <th scope="col" className="w-[28%] px-5 pt-5 pb-4 text-[14px] font-[560] text-fg-2">
+                <th
+                  scope="col"
+                  className="w-[28%] px-5 pt-5 pb-4 text-[14px] font-[560] text-fg-2"
+                >
                   {page.them}
                 </th>
               </tr>
@@ -73,7 +107,12 @@ export function ComparePageView({ slug, page }: { slug: string; page: ComparePag
                   <th scope="row" className="py-4 pr-4 font-normal text-fg-2">
                     {row.label}
                   </th>
-                  <td className={cn("bg-surface-2 px-5 py-4", i === page.rows.length - 1 && "rounded-b-[14px]")}>
+                  <td
+                    className={cn(
+                      "bg-surface-2 px-5 py-4",
+                      i === page.rows.length - 1 && "rounded-b-[14px]",
+                    )}
+                  >
                     <Cell value={row.i10} strong />
                   </td>
                   <td className="px-5 py-4">
@@ -85,7 +124,8 @@ export function ComparePageView({ slug, page }: { slug: string; page: ComparePag
           </table>
         </div>
         <p className="mt-6 font-mono text-[11px] text-fg-4">
-          Draft comparison. Every cell is checked against the provider&apos;s public documentation before this page is published.
+          Draft comparison. Every cell is checked against the provider&apos;s public
+          documentation before this page is published.
         </p>
       </Frame>
 

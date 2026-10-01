@@ -15,14 +15,26 @@ const TONE: Record<BadgeKind, string> = {
  */
 export function Badge({ kind, className }: { kind: BadgeKind; className?: string }) {
   return (
-    <span className={cn("font-mono text-[9.5px] leading-none font-medium tracking-[0.12em] uppercase", TONE[kind], className)}>
+    <span
+      className={cn(
+        "font-mono text-[9.5px] leading-none font-medium tracking-[0.12em] uppercase",
+        TONE[kind],
+        className,
+      )}
+    >
       {kind}
     </span>
   )
 }
 
 /* The pill form, for places a badge stands alone (announcement bars, cards). */
-export function Pill({ children, className }: { children: React.ReactNode; className?: string }) {
+export function Pill({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
   return (
     <span
       className={cn(

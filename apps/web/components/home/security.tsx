@@ -59,7 +59,16 @@ export function Security() {
         gsap.fromTo(
           sig,
           { drawSVG: "0%" },
-          { drawSVG: "100%", ease: "none", scrollTrigger: { trigger: sig, start: "top 85%", end: "bottom 35%", scrub: 0.6 } },
+          {
+            drawSVG: "100%",
+            ease: "none",
+            scrollTrigger: {
+              trigger: sig,
+              start: "top 85%",
+              end: "bottom 35%",
+              scrub: 0.6,
+            },
+          },
         )
       }
       const lines = gsap.utils.toArray<HTMLElement>("[data-scramble]", root.current)
@@ -68,8 +77,17 @@ export function Security() {
         gsap.to(line, {
           duration: 1.2,
           delay: i * 0.12,
-          scrambleText: { text, chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=", speed: 0.6, revealDelay: 0.2 },
-          scrollTrigger: { trigger: root.current?.querySelector("[data-header]"), start: "top 80%", once: true },
+          scrambleText: {
+            text,
+            chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
+            speed: 0.6,
+            revealDelay: 0.2,
+          },
+          scrollTrigger: {
+            trigger: root.current?.querySelector("[data-header]"),
+            start: "top 80%",
+            once: true,
+          },
         })
       })
     },
@@ -97,18 +115,31 @@ export function Security() {
           </ul>
         </div>
 
-        <div data-reveal className="relative overflow-hidden rounded-[20px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)] md:p-8">
-          <div aria-hidden className="security-lines pointer-events-none absolute inset-0" />
+        <div
+          data-reveal
+          className="relative overflow-hidden rounded-[20px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)] md:p-8"
+        >
+          <div
+            aria-hidden
+            className="security-lines pointer-events-none absolute inset-0"
+          />
           <div className="relative flex items-center justify-between">
             <span className="type-label text-fg-4">Message headers</span>
             <span className="flex items-center gap-2 font-mono text-[11px] text-delivered">
-              <span className="size-1.5 rounded-full bg-delivered" /> dkim=pass spf=pass dmarc=pass
+              <span className="size-1.5 rounded-full bg-delivered" /> dkim=pass spf=pass
+              dmarc=pass
             </span>
           </div>
-          <pre data-header className="relative mt-6 overflow-hidden font-mono text-[12px] leading-[21px] text-fg-3">
+          <pre
+            data-header
+            className="relative mt-6 overflow-hidden font-mono text-[12px] leading-[21px] text-fg-3"
+          >
             {HEADER.map((line, i) => (
               <span key={i} className="block whitespace-pre">
-                <span data-scramble={line} className={i === 0 ? "text-fg-2" : undefined}>
+                <span
+                  data-scramble={line}
+                  className={i === 0 ? "text-fg-2" : undefined}
+                >
                   {line}
                 </span>
               </span>
@@ -121,7 +152,11 @@ export function Security() {
                 acme.co <span className="text-fg-4">via</span> i10
               </p>
             </div>
-            <svg viewBox="0 0 300 110" className="h-[92px] w-auto overflow-visible" aria-hidden>
+            <svg
+              viewBox="0 0 300 110"
+              className="h-[92px] w-auto overflow-visible"
+              aria-hidden
+            >
               <path
                 data-signature
                 d="M14 86c10-2 18-14 22-30 3-12 2-22-2-18-5 5-4 34 2 44 4 7 11 4 16-4 7-12 9-30 16-38 3-4 6-2 5 3-2 14-6 44-2 54 3 6 9 1 12-6 8-20 14-48 32-54 16-5 22 12 20 28-2 20-18 36-30 32-12-4-10-26 2-38 14-14 40-10 52 4 14 16 8 40 30 42 20 2 40-10 58-22M44 20c1 0 2 1 1 2"

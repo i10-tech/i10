@@ -3,7 +3,12 @@ import type { ReactNode } from "react"
 import { cn } from "cn"
 import { IconTile } from "@/components/brand/icon-tile"
 import { ICON_NAMES } from "@/components/brand/pixel-icon"
-import { DesignNav, MotionBench, Swatch, TypeScale } from "@/components/design/design-client"
+import {
+  DesignNav,
+  MotionBench,
+  Swatch,
+  TypeScale,
+} from "@/components/design/design-client"
 import { PageHero } from "@/components/pages/page-hero"
 import { Eyebrow, Frame, SectionHeader } from "@/components/site/section"
 import { StatusPill } from "@/components/site/status-pill"
@@ -15,7 +20,8 @@ import type { Hue } from "@/lib/site"
 
 export const metadata: Metadata = {
   title: "Design system",
-  description: "The tokens, type, colour, motion and components i10's site and console are built from.",
+  description:
+    "The tokens, type, colour, motion and components i10's site and console are built from.",
 }
 
 /*
@@ -25,7 +31,11 @@ export const metadata: Metadata = {
  * console adopts the system it adopts these files, and this page is where a
  * change is seen first.
  */
-const COLOUR_GROUPS: { title: string; note: string; tokens: [string, string, boolean?][] }[] = [
+const COLOUR_GROUPS: {
+  title: string
+  note: string
+  tokens: [string, string, boolean?][]
+}[] = [
   {
     title: "Surfaces",
     note: "Each step is one notch lighter. Cards sit on surface-1, controls on surface-3.",
@@ -125,10 +135,19 @@ export default function DesignPage() {
       <DesignNav />
 
       <Frame id="colour" className="scroll-mt-24 py-24">
-        <SectionHeader eyebrow={<Eyebrow>Colour</Eyebrow>} title="A lot of dark," muted="one yellow, and nothing loud." size="s" />
+        <SectionHeader
+          eyebrow={<Eyebrow>Colour</Eyebrow>}
+          title="A lot of dark,"
+          muted="one yellow, and nothing loud."
+          size="s"
+        />
         <div className="mt-12 flex flex-col gap-12">
           {COLOUR_GROUPS.map((g) => (
-            <div key={g.title} data-reveal className="grid gap-5 lg:grid-cols-[220px_1fr] lg:gap-10">
+            <div
+              key={g.title}
+              data-reveal
+              className="grid gap-5 lg:grid-cols-[220px_1fr] lg:gap-10"
+            >
               <div>
                 <p className="text-[14px] font-[540] text-fg">{g.title}</p>
                 <p className="mt-1.5 text-[13px] leading-5 text-fg-3">{g.note}</p>
@@ -143,11 +162,16 @@ export default function DesignPage() {
           <div data-reveal className="grid gap-5 lg:grid-cols-[220px_1fr] lg:gap-10">
             <div>
               <p className="text-[14px] font-[540] text-fg">Hairlines</p>
-              <p className="mt-1.5 text-[13px] leading-5 text-fg-3">White at low alpha, so a line reads the same on every surface.</p>
+              <p className="mt-1.5 text-[13px] leading-5 text-fg-3">
+                White at low alpha, so a line reads the same on every surface.
+              </p>
             </div>
             <div className="grid gap-2.5 sm:grid-cols-2">
               {LINES.map(([token, alpha, use]) => (
-                <div key={token} className="rounded-[14px] bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--line)]">
+                <div
+                  key={token}
+                  className="rounded-[14px] bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--line)]"
+                >
                   <div className="h-px" style={{ background: `var(${token})` }} />
                   <div className="mt-4 flex items-baseline justify-between gap-3">
                     <span className="font-mono text-[11.5px] text-fg">{token}</span>
@@ -184,15 +208,24 @@ export default function DesignPage() {
         />
         <div data-reveal className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {RADII.map(({ r, use }) => (
-            <div key={r} className="flex flex-col gap-4 rounded-[16px] bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--line)]">
+            <div
+              key={r}
+              className="flex flex-col gap-4 rounded-[16px] bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--line)]"
+            >
               <div className="grid h-24 place-items-center">
                 <div
                   className="bg-surface-3 shadow-[inset_0_0_0_1px_var(--line-strong)]"
-                  style={{ borderRadius: r === 999 ? 999 : r, width: r === 999 ? 96 : 64, height: r === 999 ? 36 : 64 }}
+                  style={{
+                    borderRadius: r === 999 ? 999 : r,
+                    width: r === 999 ? 96 : 64,
+                    height: r === 999 ? 36 : 64,
+                  }}
                 />
               </div>
               <div>
-                <p className="font-mono text-[12px] text-fg">{r === 999 ? "full" : `${r}px`}</p>
+                <p className="font-mono text-[12px] text-fg">
+                  {r === 999 ? "full" : `${r}px`}
+                </p>
                 <p className="mt-0.5 text-[12.5px] leading-[18px] text-fg-3">{use}</p>
               </div>
             </div>
@@ -226,17 +259,25 @@ export default function DesignPage() {
           <div data-reveal>
             <MotionBench />
           </div>
-          <div data-reveal className="rounded-[20px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)] md:p-8">
+          <div
+            data-reveal
+            className="rounded-[20px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)] md:p-8"
+          >
             <span className="type-label text-fg-4">Durations</span>
             <div className="mt-8 flex flex-col gap-5">
               {DURATIONS.map(([token, ms, use]) => (
                 <div key={token}>
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="font-mono text-[11.5px] text-fg">{token}</span>
-                    <span className="font-mono text-[11px] text-fg-3 tabular-nums">{ms}ms</span>
+                    <span className="font-mono text-[11px] text-fg-3 tabular-nums">
+                      {ms}ms
+                    </span>
                   </div>
                   <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.05]">
-                    <div className="h-full rounded-full bg-brand" style={{ width: `${(ms / 900) * 100}%` }} />
+                    <div
+                      className="h-full rounded-full bg-brand"
+                      style={{ width: `${(ms / 900) * 100}%` }}
+                    />
                   </div>
                   <p className="mt-1.5 text-[12px] text-fg-4">{use}</p>
                 </div>
@@ -254,7 +295,10 @@ export default function DesignPage() {
           description="Pixel icons on the same grid as the site's dither and barcode motifs. Each pixel carries a delay from its diagonal, so a hover lights the icon corner to corner in CSS alone."
           size="s"
         />
-        <div data-reveal className="mt-12 grid grid-cols-3 gap-2.5 sm:grid-cols-6 lg:grid-cols-9">
+        <div
+          data-reveal
+          className="mt-12 grid grid-cols-3 gap-2.5 sm:grid-cols-6 lg:grid-cols-9"
+        >
           {ICON_NAMES.map((name, i) => (
             <div
               key={name}
@@ -268,9 +312,17 @@ export default function DesignPage() {
       </Frame>
 
       <Frame id="components" className="scroll-mt-24 py-24">
-        <SectionHeader eyebrow={<Eyebrow>Components</Eyebrow>} title="The pieces," muted="as they ship." size="s" />
+        <SectionHeader
+          eyebrow={<Eyebrow>Components</Eyebrow>}
+          title="The pieces,"
+          muted="as they ship."
+          size="s"
+        />
         <div className="mt-12 grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-2">
-          <Specimen title="Buttons" note="Always links. The arrow is the only thing that moves.">
+          <Specimen
+            title="Buttons"
+            note="Always links. The arrow is the only thing that moves."
+          >
             <div className="flex flex-wrap items-center gap-3">
               <ButtonLink href="#components" arrow>
                 Primary
@@ -298,7 +350,10 @@ export default function DesignPage() {
             </div>
           </Specimen>
 
-          <Specimen title="Badges" note="Tiny caps beside a link; the pill form when a badge stands alone.">
+          <Specimen
+            title="Badges"
+            note="Tiny caps beside a link; the pill form when a badge stands alone."
+          >
             <div className="flex flex-wrap items-center gap-5">
               <span className="flex items-center gap-2 text-[14px] text-fg-2">
                 Templates <Badge kind="new" />
@@ -318,11 +373,17 @@ export default function DesignPage() {
             </div>
           </Specimen>
 
-          <Specimen title="Status" note="Measured, never asserted. Only operational pulses.">
+          <Specimen
+            title="Status"
+            note="Measured, never asserted. Only operational pulses."
+          >
             <StatusPill />
           </Specimen>
 
-          <Specimen title="Eyebrow and copy" note="A square in the section's hue; copy confirms where the click landed.">
+          <Specimen
+            title="Eyebrow and copy"
+            note="A square in the section's hue; copy confirms where the click landed."
+          >
             <div className="flex items-center gap-6">
               <Eyebrow color="var(--hue-domain)">Domains</Eyebrow>
               <span className="flex items-center gap-2 rounded-[10px] bg-surface-2 py-1 pr-1 pl-3 font-mono text-[12px] text-fg-2 shadow-[inset_0_0_0_1px_var(--line)]">
@@ -332,7 +393,11 @@ export default function DesignPage() {
             </div>
           </Specimen>
 
-          <Specimen title="Code" note="A small highlighter: strings, calls, keywords and punctuation." className="lg:col-span-2">
+          <Specimen
+            title="Code"
+            note="A small highlighter: strings, calls, keywords and punctuation."
+            className="lg:col-span-2"
+          >
             <pre className="overflow-x-auto rounded-[14px] bg-canvas p-5 font-mono text-[12.5px] leading-[22px] shadow-[inset_0_0_0_1px_var(--line)]">
               <code>
                 {highlight(
@@ -347,9 +412,25 @@ export default function DesignPage() {
   )
 }
 
-function Specimen({ title, note, className, children }: { title: string; note: string; className?: string; children: ReactNode }) {
+function Specimen({
+  title,
+  note,
+  className,
+  children,
+}: {
+  title: string
+  note: string
+  className?: string
+  children: ReactNode
+}) {
   return (
-    <div data-reveal className={cn("flex flex-col gap-8 rounded-[20px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)] md:p-8", className)}>
+    <div
+      data-reveal
+      className={cn(
+        "flex flex-col gap-8 rounded-[20px] bg-surface-1 p-6 shadow-[inset_0_0_0_1px_var(--line)] md:p-8",
+        className,
+      )}
+    >
       <div>
         <p className="text-[14px] font-[540] text-fg">{title}</p>
         <p className="mt-1 text-[13px] text-fg-3">{note}</p>

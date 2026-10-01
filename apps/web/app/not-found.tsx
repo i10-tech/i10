@@ -9,26 +9,54 @@ import { hosts, type Hue, type IconName } from "@/lib/site"
  * page you addressed does not exist, here is the notice, and here are places
  * that do (Polar's 404 ends the same way, with destinations).
  */
-const DESTINATIONS: { title: string; href: string; icon: IconName; hue: Hue; note: string }[] = [
+const DESTINATIONS: {
+  title: string
+  href: string
+  icon: IconName
+  hue: Hue
+  note: string
+}[] = [
   { title: "Home", href: "/", icon: "send", hue: "send", note: "Start at the top" },
-  { title: "Documentation", href: hosts.docs, icon: "book", hue: "deliver", note: "Guides and API" },
-  { title: "Pricing", href: "/pricing", icon: "status", hue: "domain", note: "Plans and limits" },
-  { title: "Changelog", href: "/changelog", icon: "changelog", hue: "template", note: "What shipped" },
+  {
+    title: "Documentation",
+    href: hosts.docs,
+    icon: "book",
+    hue: "deliver",
+    note: "Guides and API",
+  },
+  {
+    title: "Pricing",
+    href: "/pricing",
+    icon: "status",
+    hue: "domain",
+    note: "Plans and limits",
+  },
+  {
+    title: "Changelog",
+    href: "/changelog",
+    icon: "changelog",
+    hue: "template",
+    note: "What shipped",
+  },
 ]
 
 export default function NotFound() {
   return (
-    <section data-nav-tone="dark" className="relative overflow-hidden pt-[calc(var(--nav-h)+5rem)] pb-28">
+    <section
+      data-nav-tone="dark"
+      className="relative overflow-hidden pt-[calc(var(--nav-h)+5rem)] pb-28"
+    >
       <div aria-hidden className="hero-grid pointer-events-none absolute inset-0" />
       <div className="container-site relative grid items-center gap-14 lg:grid-cols-[1fr_1fr]">
         <div>
           <p className="type-label text-bounced">Error 404 · 550 5.1.1</p>
           <h1 className="type-display-l mt-6 max-w-[14ch]">
-            Mail delivery failed. <span className="text-fg-3">Returning page to</span> <span className="type-accent">sender.</span>
+            Mail delivery failed. <span className="text-fg-3">Returning page to</span>{" "}
+            <span className="type-accent">sender.</span>
           </h1>
           <p className="type-lead mt-6 max-w-[30rem]">
-            The page you addressed does not exist, or it moved without leaving a forwarding address. It happens to the best of
-            mailboxes.
+            The page you addressed does not exist, or it moved without leaving a
+            forwarding address. It happens to the best of mailboxes.
           </p>
           <div className="mt-9 flex flex-wrap gap-3">
             <ButtonLink href="/" size="lg" arrow>

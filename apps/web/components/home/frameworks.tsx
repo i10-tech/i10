@@ -1,6 +1,11 @@
 import type { CSSProperties } from "react"
 import { cn } from "cn"
-import { BrandIcon, brandHex, brandTitle, type BrandName } from "@/components/brand/brand-icon"
+import {
+  BrandIcon,
+  brandHex,
+  brandTitle,
+  type BrandName,
+} from "@/components/brand/brand-icon"
 import { Eyebrow, Frame, SectionHeader } from "@/components/site/section"
 import { ButtonLink } from "@/components/ui/button-link"
 import { hosts } from "@/lib/site"
@@ -22,11 +27,12 @@ const FRAMEWORKS: { name: BrandName; label?: string; color?: string }[] = [
   { name: "astro", label: "Astro", color: "#ff5d01" },
 ]
 
-const INTEGRATIONS: { name: BrandName; label: string; note: string; color?: string }[] = [
-  { name: "cloudflare", label: "Cloudflare", note: "DNS in one click" },
-  { name: "github", label: "GitHub", note: "Templates on push", color: "#ffffff" },
-  { name: "react", label: "React Email", note: "Write mail in JSX" },
-]
+const INTEGRATIONS: { name: BrandName; label: string; note: string; color?: string }[] =
+  [
+    { name: "cloudflare", label: "Cloudflare", note: "DNS in one click" },
+    { name: "github", label: "GitHub", note: "Templates on push", color: "#ffffff" },
+    { name: "react", label: "React Email", note: "Write mail in JSX" },
+  ]
 
 export function Frameworks() {
   return (
@@ -40,13 +46,26 @@ export function Frameworks() {
             title="SDKs for the stack you ship."
             description="First-party packages for Node and Next.js. Everything else speaks HTTP, and so does i10."
           >
-            <ButtonLink href={`${hosts.docs}/sdks`} variant="ghost" arrow className="mx-auto">
+            <ButtonLink
+              href={`${hosts.docs}/sdks`}
+              variant="ghost"
+              arrow
+              className="mx-auto"
+            >
               All SDKs
             </ButtonLink>
           </SectionHeader>
-          <div data-reveal className="mt-12 grid w-full grid-cols-3 border-t border-l border-line">
+          <div
+            data-reveal
+            className="mt-12 grid w-full grid-cols-3 border-t border-l border-line"
+          >
             {FRAMEWORKS.map((f) => (
-              <Cell key={f.name} name={f.name} label={f.label ?? brandTitle(f.name)} color={f.color} />
+              <Cell
+                key={f.name}
+                name={f.name}
+                label={f.label ?? brandTitle(f.name)}
+                color={f.color}
+              />
             ))}
           </div>
         </div>
@@ -62,9 +81,19 @@ export function Frameworks() {
               All integrations
             </ButtonLink>
           </SectionHeader>
-          <div data-reveal className="mt-12 grid w-full grid-cols-3 border-t border-l border-line">
+          <div
+            data-reveal
+            className="mt-12 grid w-full grid-cols-3 border-t border-l border-line"
+          >
             {INTEGRATIONS.map((f) => (
-              <Cell key={f.name} name={f.name} label={f.label} note={f.note} color={f.color} tall />
+              <Cell
+                key={f.name}
+                name={f.name}
+                label={f.label}
+                note={f.note}
+                color={f.color}
+                tall
+              />
             ))}
           </div>
         </div>
@@ -73,7 +102,19 @@ export function Frameworks() {
   )
 }
 
-function Cell({ name, label, note, color, tall }: { name: BrandName; label: string; note?: string; color?: string; tall?: boolean }) {
+function Cell({
+  name,
+  label,
+  note,
+  color,
+  tall,
+}: {
+  name: BrandName
+  label: string
+  note?: string
+  color?: string
+  tall?: boolean
+}) {
   return (
     <div
       // `tall` matches the two-row SDK grid beside it; stacked on a phone
@@ -90,7 +131,9 @@ function Cell({ name, label, note, color, tall }: { name: BrandName; label: stri
       </span>
       <span className="fw-label absolute inset-x-0 flex flex-col items-center text-[12.5px] font-[520] text-fg">
         {label}
-        {note ? <span className="mt-0.5 text-[11.5px] font-normal text-fg-3">{note}</span> : null}
+        {note ? (
+          <span className="mt-0.5 text-[11.5px] font-normal text-fg-3">{note}</span>
+        ) : null}
       </span>
     </div>
   )

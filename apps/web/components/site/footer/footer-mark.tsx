@@ -1,7 +1,12 @@
 "use client"
 
 import { useRef, type CSSProperties, type PointerEvent } from "react"
-import { MARK_ASPECT, MARK_PATH, MARK_VIEWBOX, markMaskUrl } from "@/components/brand/mark"
+import {
+  MARK_ASPECT,
+  MARK_PATH,
+  MARK_VIEWBOX,
+  markMaskUrl,
+} from "@/components/brand/mark"
 
 /*
  * The big mark in the footer corner, after Webflow's: a solid glyph bleeding
@@ -32,10 +37,26 @@ const SUBJECTS = [
   ["Magic link for dash", "deliver"],
 ] as const
 
-function Column({ offset, duration, reverse }: { offset: number; duration: number; reverse?: boolean }) {
+function Column({
+  offset,
+  duration,
+  reverse,
+}: {
+  offset: number
+  duration: number
+  reverse?: boolean
+}) {
   const items = [...SUBJECTS.slice(offset), ...SUBJECTS.slice(0, offset)]
   return (
-    <div className="footer-mark__col" style={{ "--dur": `${duration}s`, animationDirection: reverse ? "reverse" : "normal" } as CSSProperties}>
+    <div
+      className="footer-mark__col"
+      style={
+        {
+          "--dur": `${duration}s`,
+          animationDirection: reverse ? "reverse" : "normal",
+        } as CSSProperties
+      }
+    >
       {[...items, ...items].map(([subject, hue], i) => (
         <div
           key={i}
@@ -69,7 +90,13 @@ export function FooterMark({ className }: { className?: string }) {
       onPointerMove={move}
       aria-hidden
       className={`footer-mark group ${className ?? ""}`}
-      style={{ aspectRatio: MARK_ASPECT, maskImage: markMaskUrl, WebkitMaskImage: markMaskUrl } as CSSProperties}
+      style={
+        {
+          aspectRatio: MARK_ASPECT,
+          maskImage: markMaskUrl,
+          WebkitMaskImage: markMaskUrl,
+        } as CSSProperties
+      }
     >
       <div className="footer-mark__fill" />
       <div className="footer-mark__stream">
@@ -79,8 +106,17 @@ export function FooterMark({ className }: { className?: string }) {
         <Column offset={2} duration={38} reverse />
         <Column offset={6} duration={31} />
       </div>
-      <svg viewBox={MARK_VIEWBOX} preserveAspectRatio="none" className="footer-mark__hit absolute inset-0 size-full">
-        <path transform="skewX(-10)" fillRule="evenodd" d={MARK_PATH} fill="transparent" />
+      <svg
+        viewBox={MARK_VIEWBOX}
+        preserveAspectRatio="none"
+        className="footer-mark__hit absolute inset-0 size-full"
+      >
+        <path
+          transform="skewX(-10)"
+          fillRule="evenodd"
+          d={MARK_PATH}
+          fill="transparent"
+        />
       </svg>
     </div>
   )

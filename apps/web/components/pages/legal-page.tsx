@@ -5,7 +5,11 @@ import { PAGES, type DocPage } from "@/lib/pages"
 import { DocToc } from "./doc-toc"
 import { PageHero } from "./page-hero"
 
-const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
+const slugify = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
 
 /*
  * A legal document: a sticky table of contents, a readable measure, and a
@@ -14,12 +18,18 @@ const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").repla
  */
 export function LegalPageView({ slug, page }: { slug: string; page: DocPage }) {
   const items = page.sections.map((s) => ({ id: slugify(s.title), title: s.title }))
-  const siblings = Object.entries(PAGES).filter(([key, p]) => p.kind === "legal" && key !== slug)
+  const siblings = Object.entries(PAGES).filter(
+    ([key, p]) => p.kind === "legal" && key !== slug,
+  )
 
   return (
     <>
       <PageHero eyebrow="Legal" title={page.title} lede={page.lede}>
-        <p data-reveal data-reveal-delay="0.25" className="mt-8 font-mono text-[11.5px] text-fg-4">
+        <p
+          data-reveal
+          data-reveal-delay="0.25"
+          className="mt-8 font-mono text-[11.5px] text-fg-4"
+        >
           Last updated {page.updated}
         </p>
       </PageHero>
@@ -32,7 +42,11 @@ export function LegalPageView({ slug, page }: { slug: string; page: DocPage }) {
               <div className="flex flex-col">
                 <span className="type-label mb-4 text-fg-4">Legal</span>
                 {siblings.map(([key, p]) => (
-                  <Link key={key} href={`/${key}`} className="py-1.5 text-[13px] text-fg-3 transition-colors hover:text-fg">
+                  <Link
+                    key={key}
+                    href={`/${key}`}
+                    className="py-1.5 text-[13px] text-fg-3 transition-colors hover:text-fg"
+                  >
                     {p.title}
                   </Link>
                 ))}
@@ -47,9 +61,13 @@ export function LegalPageView({ slug, page }: { slug: string; page: DocPage }) {
             >
               <span aria-hidden className="mt-[7px] size-[6px] shrink-0 bg-brand" />
               <p>
-                <span className="font-[540] text-fg">Draft.</span> This document is a placeholder while i10 prepares its terms. It is not in
-                force and does not describe a binding agreement. Questions until then go to{" "}
-                <a href="mailto:legal@i10.tech" className="text-fg underline decoration-line-strong underline-offset-4 hover:decoration-fg">
+                <span className="font-[540] text-fg">Draft.</span> This document is a
+                placeholder while i10 prepares its terms. It is not in force and does
+                not describe a binding agreement. Questions until then go to{" "}
+                <a
+                  href="mailto:legal@i10.tech"
+                  className="text-fg underline decoration-line-strong underline-offset-4 hover:decoration-fg"
+                >
                   legal@i10.tech
                 </a>
                 .
@@ -57,9 +75,21 @@ export function LegalPageView({ slug, page }: { slug: string; page: DocPage }) {
             </div>
 
             {page.sections.map((section, i) => (
-              <section key={section.title} id={items[i]?.id} className={cn("scroll-mt-[calc(var(--nav-h)+2rem)]", i === 0 ? "mt-14" : "mt-12")}>
-                <h2 data-reveal className="flex items-baseline gap-3 text-[21px] leading-7 font-[560] tracking-[-0.02em] text-fg">
-                  <span className="font-mono text-[12px] font-normal text-fg-4 tabular-nums">{String(i + 1).padStart(2, "0")}</span>
+              <section
+                key={section.title}
+                id={items[i]?.id}
+                className={cn(
+                  "scroll-mt-[calc(var(--nav-h)+2rem)]",
+                  i === 0 ? "mt-14" : "mt-12",
+                )}
+              >
+                <h2
+                  data-reveal
+                  className="flex items-baseline gap-3 text-[21px] leading-7 font-[560] tracking-[-0.02em] text-fg"
+                >
+                  <span className="font-mono text-[12px] font-normal text-fg-4 tabular-nums">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
                   {section.title}
                 </h2>
                 {section.paragraphs.map((para) => (

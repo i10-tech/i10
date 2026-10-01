@@ -42,28 +42,84 @@ const SEED: Omit<Row, "id" | "status" | "at">[] = [
 ]
 
 const INITIAL: Row[] = [
-  { id: 1, to: "hello@acme.co", subject: "Your trial ends in 3 days", status: "opened", at: "2m" },
-  { id: 2, to: "eli@sparrow.dev", subject: "Deploy finished: production", status: "delivered", at: "4m" },
-  { id: 3, to: "nora@typeset.io", subject: "Someone mentioned you", status: "delivered", at: "9m" },
-  { id: 4, to: "bounce@nowhere.invalid", subject: "Verify your email", status: "bounced", at: "12m" },
-  { id: 5, to: "ravi@loom.works", subject: "Invoice #2040 is ready", status: "delivered", at: "18m" },
-  { id: 6, to: "june@atlas.tools", subject: "2 new comments on your doc", status: "opened", at: "26m" },
+  {
+    id: 1,
+    to: "hello@acme.co",
+    subject: "Your trial ends in 3 days",
+    status: "opened",
+    at: "2m",
+  },
+  {
+    id: 2,
+    to: "eli@sparrow.dev",
+    subject: "Deploy finished: production",
+    status: "delivered",
+    at: "4m",
+  },
+  {
+    id: 3,
+    to: "nora@typeset.io",
+    subject: "Someone mentioned you",
+    status: "delivered",
+    at: "9m",
+  },
+  {
+    id: 4,
+    to: "bounce@nowhere.invalid",
+    subject: "Verify your email",
+    status: "bounced",
+    at: "12m",
+  },
+  {
+    id: 5,
+    to: "ravi@loom.works",
+    subject: "Invoice #2040 is ready",
+    status: "delivered",
+    at: "18m",
+  },
+  {
+    id: 6,
+    to: "june@atlas.tools",
+    subject: "2 new comments on your doc",
+    status: "opened",
+    at: "26m",
+  },
 ]
 
 const CHIP: Record<Status, { label: string; className: string }> = {
-  queued: { label: "Queued", className: "bg-white/[0.06] text-fg-2 shadow-[inset_0_0_0_1px_var(--line)]" },
-  sent: { label: "Sent", className: "bg-queued/12 text-queued shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-queued)_25%,transparent)]" },
+  queued: {
+    label: "Queued",
+    className: "bg-white/[0.06] text-fg-2 shadow-[inset_0_0_0_1px_var(--line)]",
+  },
+  sent: {
+    label: "Sent",
+    className:
+      "bg-queued/12 text-queued shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-queued)_25%,transparent)]",
+  },
   delivered: {
     label: "Delivered",
-    className: "bg-delivered/12 text-delivered shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-delivered)_25%,transparent)]",
+    className:
+      "bg-delivered/12 text-delivered shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-delivered)_25%,transparent)]",
   },
-  opened: { label: "Opened", className: "bg-hue-mail/12 text-hue-mail shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--hue-mail)_25%,transparent)]" },
-  bounced: { label: "Bounced", className: "bg-bounced/12 text-bounced shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-bounced)_25%,transparent)]" },
+  opened: {
+    label: "Opened",
+    className:
+      "bg-hue-mail/12 text-hue-mail shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--hue-mail)_25%,transparent)]",
+  },
+  bounced: {
+    label: "Bounced",
+    className:
+      "bg-bounced/12 text-bounced shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--state-bounced)_25%,transparent)]",
+  },
 }
 
 const TIMELINE = [
   { title: "Accepted", detail: "POST /emails · 202", mono: "14:02:11.041" },
-  { title: "Idempotency checked", detail: "key signup-7f3a · first use", mono: "14:02:11.043" },
+  {
+    title: "Idempotency checked",
+    detail: "key signup-7f3a · first use",
+    mono: "14:02:11.043",
+  },
   { title: "DKIM signed", detail: "d=acme.co · s=i10", mono: "14:02:11.058" },
   { title: "Handed to SES", detail: "eu-central-1 · Frankfurt", mono: "14:02:11.212" },
   { title: "Delivered", detail: "gmail-smtp-in.l.google.com", mono: "14:02:12.806" },
@@ -97,7 +153,12 @@ export function ConsoleTeaser() {
           y: 0,
           opacity: 1,
           ease: "none",
-          scrollTrigger: { trigger: stage.current, start: "top 95%", end: "top 20%", scrub: 0.6 },
+          scrollTrigger: {
+            trigger: stage.current,
+            start: "top 95%",
+            end: "top 20%",
+            scrub: 0.6,
+          },
         },
       )
     },
@@ -109,7 +170,10 @@ export function ConsoleTeaser() {
       <div className="container-site">
         <div ref={stage} className="relative [perspective:1800px]">
           <div aria-hidden className="console-halo pointer-events-none absolute" />
-          <div ref={win} className="console-window relative origin-[50%_0%] overflow-hidden rounded-[18px] will-change-transform">
+          <div
+            ref={win}
+            className="console-window relative origin-[50%_0%] overflow-hidden rounded-[18px] will-change-transform"
+          >
             <ConsoleApp />
           </div>
         </div>
@@ -129,7 +193,10 @@ function ConsoleApp() {
   useEffect(() => {
     const el = root.current
     if (!el || prefersReducedMotion()) return
-    const io = new IntersectionObserver(([e]) => setRunning(Boolean(e?.isIntersecting)), { threshold: 0.25 })
+    const io = new IntersectionObserver(
+      ([e]) => setRunning(Boolean(e?.isIntersecting)),
+      { threshold: 0.25 },
+    )
     io.observe(el)
     return () => io.disconnect()
   }, [])
@@ -142,16 +209,27 @@ function ConsoleApp() {
       const seed = SEED[c.seed % SEED.length]!
       c.seed += 1
       const id = ++c.id
-      setRows((prev): Row[] => [{ ...seed, id, status: "queued" as const, at: "now" }, ...prev].slice(0, 7))
+      setRows((prev): Row[] =>
+        [{ ...seed, id, status: "queued" as const, at: "now" }, ...prev].slice(0, 7),
+      )
       setStep(0)
       const set = (status: Status, after: number) =>
-        timers.push(setTimeout(() => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r))), after))
-      for (let s = 1; s <= TIMELINE.length; s++) timers.push(setTimeout(() => setStep(s), s * 380))
+        timers.push(
+          setTimeout(
+            () =>
+              setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r))),
+            after,
+          ),
+        )
+      for (let s = 1; s <= TIMELINE.length; s++)
+        timers.push(setTimeout(() => setStep(s), s * 380))
       set("sent", 700)
       set(c.seed % 4 === 3 ? "opened" : "delivered", 1900)
       timers.push(
         setTimeout(() => {
-          setRows((prev) => prev.map((r, i) => (i === 0 ? r : { ...r, at: bump(r.at) })))
+          setRows((prev) =>
+            prev.map((r, i) => (i === 0 ? r : { ...r, at: bump(r.at) })),
+          )
         }, 2600),
       )
     }
@@ -166,7 +244,10 @@ function ConsoleApp() {
   const newest = rows[0]
 
   return (
-    <div ref={root} className="grid h-[600px] grid-cols-[200px_1fr] bg-surface-1 text-[12.5px] max-lg:grid-cols-1 md:h-[640px] lg:grid-cols-[208px_1fr_300px]">
+    <div
+      ref={root}
+      className="grid h-[600px] grid-cols-[200px_1fr] bg-surface-1 text-[12.5px] max-lg:grid-cols-1 md:h-[640px] lg:grid-cols-[208px_1fr_300px]"
+    >
       {/* Sidebar */}
       <aside className="flex flex-col border-r border-line bg-canvas/60 p-3 max-lg:hidden">
         <div className="flex items-center gap-2 rounded-[10px] px-2 py-1.5">
@@ -174,12 +255,26 @@ function ConsoleApp() {
             <Mark className="h-[9px] w-auto" />
           </span>
           <span className="font-[540] text-fg">Acme</span>
-          <span className="rounded-[5px] bg-white/[0.06] px-1.5 py-px font-mono text-[10px] text-fg-3">PRO</span>
+          <span className="rounded-[5px] bg-white/[0.06] px-1.5 py-px font-mono text-[10px] text-fg-3">
+            PRO
+          </span>
         </div>
         <div className="mt-3 flex items-center gap-2 rounded-[9px] px-2.5 py-1.5 text-fg-4 shadow-[inset_0_0_0_1px_var(--line)]">
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
-            <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-            <path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            <circle
+              cx="7"
+              cy="7"
+              r="4.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+            />
+            <path
+              d="m10.5 10.5 3 3"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
           </svg>
           Search
           <span className="ml-auto font-mono text-[10px]">⌘K</span>
@@ -193,9 +288,17 @@ function ConsoleApp() {
                 item.active ? "bg-white/[0.06] text-fg" : "text-fg-3",
               )}
             >
-              <PixelIcon name={item.icon} size={13} className={item.active ? "text-brand" : ""} />
+              <PixelIcon
+                name={item.icon}
+                size={13}
+                className={item.active ? "text-brand" : ""}
+              />
               {item.label}
-              {item.count ? <span className="ml-auto font-mono text-[10.5px] text-fg-4">{item.count}</span> : null}
+              {item.count ? (
+                <span className="ml-auto font-mono text-[10.5px] text-fg-4">
+                  {item.count}
+                </span>
+              ) : null}
             </span>
           ))}
         </nav>
@@ -212,7 +315,9 @@ function ConsoleApp() {
       <div className="flex min-w-0 flex-col">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <h3 className="text-[17px] font-[560] tracking-[-0.02em] text-fg">Emails</h3>
+            <h3 className="text-[17px] font-[560] tracking-[-0.02em] text-fg">
+              Emails
+            </h3>
             <span className="flex items-center gap-1.5 font-mono text-[10.5px] text-delivered">
               <span className="size-1.5 animate-pulse rounded-full bg-delivered" /> LIVE
             </span>
@@ -222,18 +327,20 @@ function ConsoleApp() {
           </span>
         </div>
         <div className="flex gap-2 px-6 py-3">
-          {["All statuses", "Last 3 days", "acme.co", "API key: production"].map((f, i) => (
-            <span
-              key={f}
-              className={cn(
-                "rounded-[8px] px-2.5 py-1 text-[11.5px] shadow-[inset_0_0_0_1px_var(--line)]",
-                i === 0 ? "text-fg-2" : "text-fg-3",
-                i === 3 && "max-md:hidden",
-              )}
-            >
-              {f}
-            </span>
-          ))}
+          {["All statuses", "Last 3 days", "acme.co", "API key: production"].map(
+            (f, i) => (
+              <span
+                key={f}
+                className={cn(
+                  "rounded-[8px] px-2.5 py-1 text-[11.5px] shadow-[inset_0_0_0_1px_var(--line)]",
+                  i === 0 ? "text-fg-2" : "text-fg-3",
+                  i === 3 && "max-md:hidden",
+                )}
+              >
+                {f}
+              </span>
+            ),
+          )}
         </div>
         <div className="grid grid-cols-[1.2fr_110px_1.6fr_56px] gap-4 border-y border-line bg-white/[0.015] px-6 py-2 font-mono text-[10.5px] tracking-wide text-fg-4 uppercase max-md:grid-cols-[1fr_96px_52px]">
           <span>To</span>
@@ -247,10 +354,18 @@ function ConsoleApp() {
               <motion.li
                 key={row.id}
                 layout
-                initial={{ opacity: 0, y: -16, backgroundColor: "rgba(242,207,60,0.06)" }}
+                initial={{
+                  opacity: 0,
+                  y: -16,
+                  backgroundColor: "rgba(242,207,60,0.06)",
+                }}
                 animate={{ opacity: 1, y: 0, backgroundColor: "rgba(242,207,60,0)" }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1], backgroundColor: { duration: 1.6 } }}
+                transition={{
+                  duration: 0.55,
+                  ease: [0.16, 1, 0.3, 1],
+                  backgroundColor: { duration: 1.6 },
+                }}
                 className="grid grid-cols-[1.2fr_110px_1.6fr_56px] items-center gap-4 border-b border-line-faint px-6 py-[13px] max-md:grid-cols-[1fr_96px_52px]"
               >
                 <span className="flex min-w-0 items-center gap-2.5">
@@ -263,7 +378,9 @@ function ConsoleApp() {
                   <StatusChip status={row.status} />
                 </span>
                 <span className="truncate text-fg-2 max-md:hidden">{row.subject}</span>
-                <span className="text-right font-mono text-[11px] text-fg-4">{row.at}</span>
+                <span className="text-right font-mono text-[11px] text-fg-4">
+                  {row.at}
+                </span>
               </motion.li>
             ))}
           </AnimatePresence>
@@ -273,14 +390,21 @@ function ConsoleApp() {
       {/* Timeline of the newest message */}
       <aside className="flex flex-col border-l border-line bg-canvas/40 p-5 max-lg:hidden">
         <span className="type-label text-fg-4">Latest message</span>
-        <p className="mt-3 truncate text-[13.5px] font-[520] text-fg">{newest?.subject}</p>
+        <p className="mt-3 truncate text-[13.5px] font-[520] text-fg">
+          {newest?.subject}
+        </p>
         <p className="mt-1 truncate font-mono text-[11px] text-fg-3">to {newest?.to}</p>
         <ol className="relative mt-6 flex flex-col gap-5">
-          <span aria-hidden className="absolute top-2 bottom-2 left-[5px] w-px bg-line" />
+          <span
+            aria-hidden
+            className="absolute top-2 bottom-2 left-[5px] w-px bg-line"
+          />
           <span
             aria-hidden
             className="absolute top-2 left-[5px] w-px bg-brand transition-[height] duration-500 ease-[var(--ease-out-quint)]"
-            style={{ height: `calc(${(Math.min(step, TIMELINE.length) - 1) / (TIMELINE.length - 1)} * (100% - 16px))` }}
+            style={{
+              height: `calc(${(Math.min(step, TIMELINE.length) - 1) / (TIMELINE.length - 1)} * (100% - 16px))`,
+            }}
           />
           {TIMELINE.map((t, i) => {
             const done = i < step
@@ -289,20 +413,30 @@ function ConsoleApp() {
                 <span
                   className={cn(
                     "relative mt-[5px] size-[11px] shrink-0 rounded-full transition-[background-color,box-shadow] duration-300",
-                    done ? "bg-brand shadow-[0_0_0_4px_rgb(242_207_60/0.14)]" : "bg-surface-4",
+                    done
+                      ? "bg-brand shadow-[0_0_0_4px_rgb(242_207_60/0.14)]"
+                      : "bg-surface-4",
                   )}
                 />
-                <span className={cn("flex min-w-0 flex-col transition-opacity duration-300", done ? "opacity-100" : "opacity-40")}>
+                <span
+                  className={cn(
+                    "flex min-w-0 flex-col transition-opacity duration-300",
+                    done ? "opacity-100" : "opacity-40",
+                  )}
+                >
                   <span className="text-[12.5px] text-fg">{t.title}</span>
                   <span className="truncate text-[11.5px] text-fg-3">{t.detail}</span>
-                  <span className="mt-0.5 font-mono text-[10px] text-fg-4">{t.mono}</span>
+                  <span className="mt-0.5 font-mono text-[10px] text-fg-4">
+                    {t.mono}
+                  </span>
                 </span>
               </li>
             )
           })}
         </ol>
         <div className="mt-auto rounded-[10px] p-3 font-mono text-[10.5px] leading-[16px] text-fg-3 shadow-[inset_0_0_0_1px_var(--line)]">
-          <span className="text-hue-hook">email.delivered</span> → <span className="text-fg-2">https://acme.co/hooks</span>
+          <span className="text-hue-hook">email.delivered</span> →{" "}
+          <span className="text-fg-2">https://acme.co/hooks</span>
           <br />
           <span className="text-delivered">200 OK</span> · signed · 41ms
         </div>
@@ -314,7 +448,12 @@ function ConsoleApp() {
 function StatusChip({ status }: { status: Status }) {
   const chip = CHIP[status]
   return (
-    <span className={cn("inline-flex h-[22px] items-center rounded-[6px] px-2 text-[11px] font-[520] transition-colors duration-300", chip.className)}>
+    <span
+      className={cn(
+        "inline-flex h-[22px] items-center rounded-[6px] px-2 text-[11px] font-[520] transition-colors duration-300",
+        chip.className,
+      )}
+    >
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={status}
@@ -335,8 +474,24 @@ function UsageRing({ value }: { value: number }) {
   const c = 2 * Math.PI * r
   return (
     <svg viewBox="0 0 28 28" width="28" height="28" aria-hidden className="-rotate-90">
-      <circle cx="14" cy="14" r={r} fill="none" stroke="var(--surface-4)" strokeWidth="3" />
-      <circle cx="14" cy="14" r={r} fill="none" stroke="var(--brand)" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${c * value} ${c}`} />
+      <circle
+        cx="14"
+        cy="14"
+        r={r}
+        fill="none"
+        stroke="var(--surface-4)"
+        strokeWidth="3"
+      />
+      <circle
+        cx="14"
+        cy="14"
+        r={r}
+        fill="none"
+        stroke="var(--brand)"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={`${c * value} ${c}`}
+      />
     </svg>
   )
 }

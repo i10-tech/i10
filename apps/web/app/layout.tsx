@@ -19,7 +19,8 @@ export const metadata: Metadata = {
     type: "website",
     siteName: "i10",
     title: "i10 - Email for developers",
-    description: "Resend-compatible sending and real mailboxes on your domain. One DNS record to start.",
+    description:
+      "Resend-compatible sending and real mailboxes on your domain. One DNS record to start.",
   },
 }
 
@@ -28,7 +29,9 @@ export const viewport: Viewport = {
   colorScheme: "dark",
 }
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="en"

@@ -51,15 +51,25 @@ export function StatusPill({ className }: { className?: string }) {
       )}
     >
       <span className="relative flex size-2 items-center justify-center">
-        {status === "operational" ? <span className="status-ping absolute inset-0 rounded-full bg-delivered" /> : null}
-        <span className={cn("relative size-2 rounded-full transition-colors duration-500", DOT[status])} />
+        {status === "operational" ? (
+          <span className="status-ping absolute inset-0 rounded-full bg-delivered" />
+        ) : null}
+        <span
+          className={cn(
+            "relative size-2 rounded-full transition-colors duration-500",
+            DOT[status],
+          )}
+        />
       </span>
       <span className="grid">
         {(Object.keys(COPY) as Status[]).map((key) => (
           <span
             key={key}
             aria-hidden={key !== status}
-            className={cn("col-start-1 row-start-1 transition-opacity duration-300", key === status ? "opacity-100" : "opacity-0")}
+            className={cn(
+              "col-start-1 row-start-1 transition-opacity duration-300",
+              key === status ? "opacity-100" : "opacity-0",
+            )}
           >
             {COPY[key]}
           </span>

@@ -63,7 +63,12 @@ export default async function Page({ params }: Props) {
     case "status":
       return (
         <>
-          <PageHero eyebrow={page.eyebrow} title={page.title} lede={page.lede} color="var(--state-delivered)" />
+          <PageHero
+            eyebrow={page.eyebrow}
+            title={page.title}
+            lede={page.lede}
+            color="var(--state-delivered)"
+          />
           <Frame className="py-16 md:py-20">
             <StatusBoard />
           </Frame>

@@ -28,7 +28,13 @@ export function Mark({
   ...props
 }: SVGProps<SVGSVGElement> & { title?: string }) {
   return (
-    <svg viewBox={MARK_VIEWBOX} fill="currentColor" role="img" aria-label={title} {...props}>
+    <svg
+      viewBox={MARK_VIEWBOX}
+      fill="currentColor"
+      role="img"
+      aria-label={title}
+      {...props}
+    >
       <path transform="skewX(-10)" fillRule="evenodd" d={MARK_PATH} />
     </svg>
   )

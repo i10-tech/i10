@@ -20,7 +20,11 @@ export async function GET() {
     })
     const body = (await res.json().catch(() => null)) as { ok?: boolean } | null
     const status = res.ok && body?.ok ? "operational" : "degraded"
-    return Response.json({ status, latencyMs: Date.now() - started, checkedAt: new Date().toISOString() })
+    return Response.json({
+      status,
+      latencyMs: Date.now() - started,
+      checkedAt: new Date().toISOString(),
+    })
   } catch {
     return Response.json({ status: "unreachable", checkedAt: new Date().toISOString() })
   }

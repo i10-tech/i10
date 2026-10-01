@@ -96,16 +96,34 @@ export const PAGES: Record<string, SitePage> = {
       },
     ],
     terms: [
-      { term: "Batch sends", body: "Up to a hundred messages in one request, each with its own result." },
-      { term: "Typed errors", body: "Every non-2xx throws an I10Error with the API's machine name and a computed retryable flag." },
-      { term: "Inline images", body: "Reference attachments by Content-ID or pass data URIs; the multipart tree is built for you." },
-      { term: "Quotas you can read", body: "rate_limit_exceeded is worth retrying. daily_quota_exceeded is a billing state, and never is." },
+      {
+        term: "Batch sends",
+        body: "Up to a hundred messages in one request, each with its own result.",
+      },
+      {
+        term: "Typed errors",
+        body: "Every non-2xx throws an I10Error with the API's machine name and a computed retryable flag.",
+      },
+      {
+        term: "Inline images",
+        body: "Reference attachments by Content-ID or pass data URIs; the multipart tree is built for you.",
+      },
+      {
+        term: "Quotas you can read",
+        body: "rate_limit_exceeded is worth retrying. daily_quota_exceeded is a billing state, and never is.",
+      },
     ],
     cards: [
       { title: "@i10/node", body: "The SDK, with zero runtime dependencies." },
-      { title: "@i10/next", body: "A server client and a signed webhook route handler." },
+      {
+        title: "@i10/next",
+        body: "A server client and a signed webhook route handler.",
+      },
       { title: "REST", body: "Any language that can make an HTTP request." },
-      { title: "Test keys", body: "i10_test_ keys accept sends and fire events without delivering." },
+      {
+        title: "Test keys",
+        body: "i10_test_ keys accept sends and fire events without delivering.",
+      },
     ],
   },
   "product/mailboxes": {
@@ -131,14 +149,32 @@ export const PAGES: Record<string, SitePage> = {
       },
     ],
     terms: [
-      { term: "IMAP, JMAP, SMTP", body: "Apple Mail, Outlook, Thunderbird and every client that speaks the standards." },
-      { term: "Webmail", body: "A fast webmail for the people who never open a mail client." },
-      { term: "Aliases and groups", body: "support@, billing@ and team addresses that fan out to people." },
-      { term: "Managed from the console", body: "Create, suspend and remove mailboxes next to your sending domains." },
+      {
+        term: "IMAP, JMAP, SMTP",
+        body: "Apple Mail, Outlook, Thunderbird and every client that speaks the standards.",
+      },
+      {
+        term: "Webmail",
+        body: "A fast webmail for the people who never open a mail client.",
+      },
+      {
+        term: "Aliases and groups",
+        body: "support@, billing@ and team addresses that fan out to people.",
+      },
+      {
+        term: "Managed from the console",
+        body: "Create, suspend and remove mailboxes next to your sending domains.",
+      },
     ],
     cards: [
-      { title: "Stalwart inside", body: "A modern mail server, run and upgraded by i10." },
-      { title: "EU hosted", body: "Mailboxes stay in the EU with the rest of your mail." },
+      {
+        title: "Stalwart inside",
+        body: "A modern mail server, run and upgraded by i10.",
+      },
+      {
+        title: "EU hosted",
+        body: "Mailboxes stay in the EU with the rest of your mail.",
+      },
       { title: "Per seat", body: "Pay per mailbox, add and remove whenever you like." },
       { title: "Your domain", body: "Same DNS onboarding as sending, one extra MX." },
     ],
@@ -166,10 +202,22 @@ export const PAGES: Record<string, SitePage> = {
       },
     ],
     terms: [
-      { term: "Provider detection", body: "A live NS lookup finds your DNS host and shows its exact steps." },
-      { term: "Connect Cloudflare", body: "One click writes the records through Cloudflare's API." },
-      { term: "Domain Connect", body: "One-click setup on the registrars that support the standard." },
-      { term: "Continuous checks", body: "Records are re-verified, and the console marks what needs attention." },
+      {
+        term: "Provider detection",
+        body: "A live NS lookup finds your DNS host and shows its exact steps.",
+      },
+      {
+        term: "Connect Cloudflare",
+        body: "One click writes the records through Cloudflare's API.",
+      },
+      {
+        term: "Domain Connect",
+        body: "One-click setup on the registrars that support the standard.",
+      },
+      {
+        term: "Continuous checks",
+        body: "Records are re-verified, and the console marks what needs attention.",
+      },
     ],
     cards: [
       { title: "DKIM", body: "i10._domainkey TXT - enough to start." },
@@ -201,10 +249,22 @@ export const PAGES: Record<string, SitePage> = {
       },
     ],
     terms: [
-      { term: "React Email", body: "Write templates in JSX with the components you already know." },
-      { term: "Visual editor", body: "Design without code, and still get a versioned template." },
-      { term: "Images", body: "Uploaded to a public, content-addressed bucket per workspace." },
-      { term: "Versions", body: "Every change is a version, with a preview and a diff." },
+      {
+        term: "React Email",
+        body: "Write templates in JSX with the components you already know.",
+      },
+      {
+        term: "Visual editor",
+        body: "Design without code, and still get a versioned template.",
+      },
+      {
+        term: "Images",
+        body: "Uploaded to a public, content-addressed bucket per workspace.",
+      },
+      {
+        term: "Versions",
+        body: "Every change is a version, with a preview and a diff.",
+      },
     ],
     cards: [
       { title: "Sandboxed", body: "Rendering runs isolated from your data." },
@@ -236,10 +296,22 @@ export const PAGES: Record<string, SitePage> = {
       },
     ],
     terms: [
-      { term: "Standard Webhooks", body: "Any conforming library verifies an i10 webhook." },
-      { term: "createWebhookHandler", body: "@i10/next mounts a verified route handler in one line." },
-      { term: "Every event type", body: "Sent, delivered, opened, clicked, bounced, complained and more." },
-      { term: "Per-domain tracking", body: "Open and click tracking switched per sending domain." },
+      {
+        term: "Standard Webhooks",
+        body: "Any conforming library verifies an i10 webhook.",
+      },
+      {
+        term: "createWebhookHandler",
+        body: "@i10/next mounts a verified route handler in one line.",
+      },
+      {
+        term: "Every event type",
+        body: "Sent, delivered, opened, clicked, bounced, complained and more.",
+      },
+      {
+        term: "Per-domain tracking",
+        body: "Open and click tracking switched per sending domain.",
+      },
     ],
     cards: [
       { title: "email.delivered", body: "The receiving server accepted it." },
@@ -264,8 +336,15 @@ export const PAGES: Record<string, SitePage> = {
         body: "Inbound parsing is on the roadmap. This page will describe it once it is real; until then the changelog is the source of truth.",
       },
     ],
-    terms: [{ term: "Planned", body: "Parsed messages delivered to your endpoint as signed webhooks." }],
-    cards: [{ title: "Follow along", body: "Watch the changelog for the first release." }],
+    terms: [
+      {
+        term: "Planned",
+        body: "Parsed messages delivered to your endpoint as signed webhooks.",
+      },
+    ],
+    cards: [
+      { title: "Follow along", body: "Watch the changelog for the first release." },
+    ],
   },
   "product/broadcasts": {
     kind: "product",
@@ -286,8 +365,14 @@ export const PAGES: Record<string, SitePage> = {
     terms: [
       { term: "Contacts", body: "Import, export and manage contacts per workspace." },
       { term: "Segments", body: "Target the people a message is for." },
-      { term: "Topics", body: "Preference-based unsubscribes instead of all-or-nothing." },
-      { term: "Suppressions", body: "Shared with transactional, so a complaint is honoured everywhere." },
+      {
+        term: "Topics",
+        body: "Preference-based unsubscribes instead of all-or-nothing.",
+      },
+      {
+        term: "Suppressions",
+        body: "Shared with transactional, so a complaint is honoured everywhere.",
+      },
     ],
     cards: [{ title: "Beta", body: "Available in the console, still changing." }],
   },
@@ -315,8 +400,14 @@ export const PAGES: Record<string, SitePage> = {
     ],
     terms: [
       { term: "Suppression lists", body: "Per workspace, with an API and an export." },
-      { term: "Complaint guard", body: "A complaint suppresses the address before the next send." },
-      { term: "Risk engine", body: "Rules that hold abusive workspaces before they hurt everyone else." },
+      {
+        term: "Complaint guard",
+        body: "A complaint suppresses the address before the next send.",
+      },
+      {
+        term: "Risk engine",
+        body: "Rules that hold abusive workspaces before they hurt everyone else.",
+      },
       { term: "Sending health", body: "Daily snapshots per domain in the console." },
     ],
     cards: [
@@ -327,44 +418,64 @@ export const PAGES: Record<string, SitePage> = {
     ],
   },
 
-  "legal/privacy": legal("Privacy policy", "How i10 collects, uses and protects personal data.", [
-    "Who we are",
-    "What we collect",
-    "How we use it",
-    "Where it is stored",
-    "Your rights",
-    "Contact",
-  ]),
-  "legal/terms": legal("Terms of service", "The agreement between you and i10 for using the service.", [
-    "Accounts",
-    "Acceptable use",
-    "Fees and billing",
-    "Service levels",
-    "Liability",
-    "Termination",
-  ]),
-  "legal/dpa": legal("Data processing agreement", "How i10 processes personal data on your behalf under the GDPR.", [
-    "Scope",
-    "Processing instructions",
-    "Security measures",
+  "legal/privacy": legal(
+    "Privacy policy",
+    "How i10 collects, uses and protects personal data.",
+    [
+      "Who we are",
+      "What we collect",
+      "How we use it",
+      "Where it is stored",
+      "Your rights",
+      "Contact",
+    ],
+  ),
+  "legal/terms": legal(
+    "Terms of service",
+    "The agreement between you and i10 for using the service.",
+    [
+      "Accounts",
+      "Acceptable use",
+      "Fees and billing",
+      "Service levels",
+      "Liability",
+      "Termination",
+    ],
+  ),
+  "legal/dpa": legal(
+    "Data processing agreement",
+    "How i10 processes personal data on your behalf under the GDPR.",
+    [
+      "Scope",
+      "Processing instructions",
+      "Security measures",
+      "Subprocessors",
+      "International transfers",
+      "Audits",
+    ],
+  ),
+  "legal/aup": legal(
+    "Acceptable use policy",
+    "What you may and may not send through i10.",
+    ["Permitted use", "Prohibited content", "Consent and unsubscribes", "Enforcement"],
+  ),
+  "legal/subprocessors": legal(
     "Subprocessors",
-    "International transfers",
-    "Audits",
+    "The third parties that process data for i10.",
+    [
+      "Infrastructure",
+      "Email delivery",
+      "Authentication",
+      "Billing",
+      "Changes to this list",
+    ],
+  ),
+  "legal/cookies": legal("Cookie policy", "The cookies i10's websites set, and why.", [
+    "Essential cookies",
+    "Session cookies",
+    "Analytics",
+    "Your choices",
   ]),
-  "legal/aup": legal("Acceptable use policy", "What you may and may not send through i10.", [
-    "Permitted use",
-    "Prohibited content",
-    "Consent and unsubscribes",
-    "Enforcement",
-  ]),
-  "legal/subprocessors": legal("Subprocessors", "The third parties that process data for i10.", [
-    "Infrastructure",
-    "Email delivery",
-    "Authentication",
-    "Billing",
-    "Changes to this list",
-  ]),
-  "legal/cookies": legal("Cookie policy", "The cookies i10's websites set, and why.", ["Essential cookies", "Session cookies", "Analytics", "Your choices"]),
 
   "compare/resend": {
     kind: "compare",
@@ -420,10 +531,26 @@ export const PAGES: Record<string, SitePage> = {
     lede: "First-party packages for Node and Next.js, and a REST API for everything else.",
     variant: "grid",
     blocks: [
-      { title: "@i10/node", meta: "bun add @i10/node", body: "The SDK. Zero runtime dependencies, typed errors with a computed retryable flag." },
-      { title: "@i10/next", meta: "bun add @i10/next", body: "A cached server client and a Standard Webhooks route handler for the App Router." },
-      { title: "REST API", meta: "api.i10.tech", body: "Bearer auth, JSON in and out, the same shapes as Resend." },
-      { title: "OpenAPI", meta: "docs.i10.tech/api", body: "The full reference, generated from the wire contract." },
+      {
+        title: "@i10/node",
+        meta: "bun add @i10/node",
+        body: "The SDK. Zero runtime dependencies, typed errors with a computed retryable flag.",
+      },
+      {
+        title: "@i10/next",
+        meta: "bun add @i10/next",
+        body: "A cached server client and a Standard Webhooks route handler for the App Router.",
+      },
+      {
+        title: "REST API",
+        meta: "api.i10.tech",
+        body: "Bearer auth, JSON in and out, the same shapes as Resend.",
+      },
+      {
+        title: "OpenAPI",
+        meta: "docs.i10.tech/api",
+        body: "The full reference, generated from the wire contract.",
+      },
     ],
   },
   blog: {
@@ -433,10 +560,26 @@ export const PAGES: Record<string, SitePage> = {
     lede: "Notes from building an email platform, most of them about the thing that broke.",
     variant: "list",
     blocks: [
-      { title: "Why SPF names us with an include, never an address", meta: "Deliverability · Draft", body: "One include lets us change relays without asking anyone to touch DNS again." },
-      { title: "Sealing message bodies into packs", meta: "Storage · Draft", body: "Why the only copy of a message is never the one in flight." },
-      { title: "The first connection to a ClusterIP is refused", meta: "Infrastructure · Draft", body: "A race that only showed up once our images started in milliseconds." },
-      { title: "Render once, fill on send", meta: "Templates · Draft", body: "How template sends cost what plain sends do." },
+      {
+        title: "Why SPF names us with an include, never an address",
+        meta: "Deliverability · Draft",
+        body: "One include lets us change relays without asking anyone to touch DNS again.",
+      },
+      {
+        title: "Sealing message bodies into packs",
+        meta: "Storage · Draft",
+        body: "Why the only copy of a message is never the one in flight.",
+      },
+      {
+        title: "The first connection to a ClusterIP is refused",
+        meta: "Infrastructure · Draft",
+        body: "A race that only showed up once our images started in milliseconds.",
+      },
+      {
+        title: "Render once, fill on send",
+        meta: "Templates · Draft",
+        body: "How template sends cost what plain sends do.",
+      },
     ],
   },
   customers: {
@@ -446,8 +589,14 @@ export const PAGES: Record<string, SitePage> = {
     lede: "i10 is new. The first teams sending with it will be here, with their permission and in their words.",
     variant: "grid",
     blocks: [
-      { title: "Your team here", body: "Sending with i10 and happy to talk about it? We would love to tell your story." },
-      { title: "Migrating from Resend?", body: "Tell us what you are sending and we will help you move it." },
+      {
+        title: "Your team here",
+        body: "Sending with i10 and happy to talk about it? We would love to tell your story.",
+      },
+      {
+        title: "Migrating from Resend?",
+        body: "Tell us what you are sending and we will help you move it.",
+      },
     ],
   },
   security: {
@@ -457,12 +606,30 @@ export const PAGES: Record<string, SitePage> = {
     lede: "How i10 protects the mail it sends and the data it keeps.",
     variant: "grid",
     blocks: [
-      { title: "Sealed bodies", body: "Message bodies are sealed into per-workspace packs and only released from Postgres after a read-back." },
-      { title: "EU region", body: "Mail is relayed through eu-central-1, Frankfurt. Data stays in the EU." },
-      { title: "Key hygiene", body: "API keys are stored as SHA-256 hashes, prefixed for secret scanners, and revoked immediately." },
-      { title: "Input guards", body: "Header injection is refused at the contract and again in the MIME builder." },
-      { title: "Isolation", body: "A default-deny network policy, row-level security in Postgres, and separate credentials per service." },
-      { title: "Disclosure", body: "Found something? Email security@i10.tech. We reply to every report." },
+      {
+        title: "Sealed bodies",
+        body: "Message bodies are sealed into per-workspace packs and only released from Postgres after a read-back.",
+      },
+      {
+        title: "EU region",
+        body: "Mail is relayed through eu-central-1, Frankfurt. Data stays in the EU.",
+      },
+      {
+        title: "Key hygiene",
+        body: "API keys are stored as SHA-256 hashes, prefixed for secret scanners, and revoked immediately.",
+      },
+      {
+        title: "Input guards",
+        body: "Header injection is refused at the contract and again in the MIME builder.",
+      },
+      {
+        title: "Isolation",
+        body: "A default-deny network policy, row-level security in Postgres, and separate credentials per service.",
+      },
+      {
+        title: "Disclosure",
+        body: "Found something? Email security@i10.tech. We reply to every report.",
+      },
     ],
   },
   about: {
@@ -472,8 +639,14 @@ export const PAGES: Record<string, SitePage> = {
     lede: "i10 is i + 10 letters: integration. An email platform for developers, with mailboxes for everyone else.",
     variant: "list",
     blocks: [
-      { title: "Why", body: "Email is the one API every product needs and nobody wants to own. We think it should feel as good to use as the rest of your stack." },
-      { title: "How", body: "Resend-compatible on purpose, EU-hosted by design, and honest about what is not built yet." },
+      {
+        title: "Why",
+        body: "Email is the one API every product needs and nobody wants to own. We think it should feel as good to use as the rest of your stack.",
+      },
+      {
+        title: "How",
+        body: "Resend-compatible on purpose, EU-hosted by design, and honest about what is not built yet.",
+      },
       { title: "Where", body: "Built in the open from the European Union." },
     ],
   },
@@ -483,7 +656,13 @@ export const PAGES: Record<string, SitePage> = {
     eyebrow: "Careers",
     lede: "There are no open roles right now. If i10 is the kind of thing you want to build, say hello anyway.",
     variant: "list",
-    blocks: [{ title: "No open roles", meta: "Check back soon", body: "Send a note to hello@i10.tech with what you would want to work on." }],
+    blocks: [
+      {
+        title: "No open roles",
+        meta: "Check back soon",
+        body: "Send a note to hello@i10.tech with what you would want to work on.",
+      },
+    ],
   },
   contact: {
     kind: "simple",
@@ -492,16 +671,51 @@ export const PAGES: Record<string, SitePage> = {
     lede: "Real people, real inboxes - on i10, naturally.",
     variant: "grid",
     blocks: [
-      { title: "Sales", meta: "sales@i10.tech", body: "Volume pricing, dedicated IPs and Enterprise terms.", href: "mailto:sales@i10.tech" },
-      { title: "Support", meta: "support@i10.tech", body: "Something not working? We answer every message.", href: "mailto:support@i10.tech" },
-      { title: "Security", meta: "security@i10.tech", body: "Responsible disclosure goes straight to the engineers.", href: "mailto:security@i10.tech" },
-      { title: "Hello", meta: "hello@i10.tech", body: "Anything else. Press, partnerships, kind words.", href: "mailto:hello@i10.tech" },
+      {
+        title: "Sales",
+        meta: "sales@i10.tech",
+        body: "Volume pricing, dedicated IPs and Enterprise terms.",
+        href: "mailto:sales@i10.tech",
+      },
+      {
+        title: "Support",
+        meta: "support@i10.tech",
+        body: "Something not working? We answer every message.",
+        href: "mailto:support@i10.tech",
+      },
+      {
+        title: "Security",
+        meta: "security@i10.tech",
+        body: "Responsible disclosure goes straight to the engineers.",
+        href: "mailto:security@i10.tech",
+      },
+      {
+        title: "Hello",
+        meta: "hello@i10.tech",
+        body: "Anything else. Press, partnerships, kind words.",
+        href: "mailto:hello@i10.tech",
+      },
     ],
   },
 
-  changelog: { kind: "changelog", title: "Changelog", eyebrow: "Changelog", lede: "What shipped, when, and why it matters. Taken straight from the repository." },
-  status: { kind: "status", title: "Status", eyebrow: "Status", lede: "Live health of the i10 API, measured from this page every time it loads." },
-  brand: { kind: "brand", title: "Brand", eyebrow: "Brand", lede: "The i10 mark, the colours and the type. Use them well, and never stretch the mark." },
+  changelog: {
+    kind: "changelog",
+    title: "Changelog",
+    eyebrow: "Changelog",
+    lede: "What shipped, when, and why it matters. Taken straight from the repository.",
+  },
+  status: {
+    kind: "status",
+    title: "Status",
+    eyebrow: "Status",
+    lede: "Live health of the i10 API, measured from this page every time it loads.",
+  },
+  brand: {
+    kind: "brand",
+    title: "Brand",
+    eyebrow: "Brand",
+    lede: "The i10 mark, the colours and the type. Use them well, and never stretch the mark.",
+  },
   "migrate/resend": {
     kind: "migrate",
     title: "Migrate from Resend",

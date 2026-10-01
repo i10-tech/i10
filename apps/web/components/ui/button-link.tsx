@@ -8,7 +8,8 @@ type Size = "sm" | "md" | "lg"
 const VARIANT: Record<Variant, string> = {
   primary:
     "bg-fg text-brand-ink shadow-[inset_0_-1px_0_rgb(0_0_0/0.18),0_1px_0_rgb(255_255_255/0.08)] hover:bg-white",
-  brand: "bg-brand text-brand-ink shadow-[inset_0_-1px_0_rgb(0_0_0/0.2)] hover:brightness-105",
+  brand:
+    "bg-brand text-brand-ink shadow-[inset_0_-1px_0_rgb(0_0_0/0.2)] hover:brightness-105",
   secondary:
     "bg-surface-3 text-fg shadow-[inset_0_0_0_1px_var(--line-strong),inset_0_1px_0_rgb(255_255_255/0.06)] hover:bg-surface-4",
   ghost: "text-fg-2 hover:text-fg",
@@ -76,23 +77,56 @@ export function Arrow({ className }: { className?: string }) {
         className,
       )}
     >
-      <path d="M3.5 8h8.5M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M3.5 8h8.5M8.5 4.5 12 8l-3.5 3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
 
 export function ArrowUpRight({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden className={cn("shrink-0", className)}>
-      <path d="M5 11 11 5M6 5h5v5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      aria-hidden
+      className={cn("shrink-0", className)}
+    >
+      <path
+        d="M5 11 11 5M6 5h5v5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
 
 export function Chevron({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden className={cn("shrink-0", className)}>
-      <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 16 16"
+      width="10"
+      height="10"
+      aria-hidden
+      className={cn("shrink-0", className)}
+    >
+      <path
+        d="m4 6 4 4 4-4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }

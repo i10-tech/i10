@@ -14,16 +14,31 @@ export function Closing() {
   // section carries no tone, so the one before it holds until the card.
   return (
     <section className="relative px-2 pt-10 md:px-3">
-      <div data-nav-tone="brand" className="closing-card selection-ink relative overflow-hidden rounded-[28px] bg-brand text-brand-ink">
-        <div aria-hidden className="closing-dots pointer-events-none absolute inset-0" />
+      <div
+        data-nav-tone="brand"
+        className="closing-card selection-ink relative overflow-hidden rounded-[28px] bg-brand text-brand-ink"
+      >
+        <div
+          aria-hidden
+          className="closing-dots pointer-events-none absolute inset-0"
+        />
         <div aria-hidden className="closing-glow pointer-events-none absolute" />
         <div className="container-site relative flex flex-col items-center py-24 text-center md:py-36">
-          <p className="type-label text-brand-ink/60">3,000 emails a month, free · no card</p>
-          <SplitReveal as="h2" className="type-display-l mt-6 max-w-[16ch] text-brand-ink">
+          <p className="type-label text-brand-ink/60">
+            3,000 emails a month, free · no card
+          </p>
+          <SplitReveal
+            as="h2"
+            className="type-display-l mt-6 max-w-[16ch] text-brand-ink"
+          >
             Send your first email in <span className="type-accent">two minutes.</span>
           </SplitReveal>
-          <p data-reveal className="mt-6 max-w-[34rem] text-[17px] leading-[27px] text-brand-ink/70">
-            One DNS record, one import, one call. The rest of i10 is there when you need it.
+          <p
+            data-reveal
+            className="mt-6 max-w-[34rem] text-[17px] leading-[27px] text-brand-ink/70"
+          >
+            One DNS record, one import, one call. The rest of i10 is there when you need
+            it.
           </p>
           <div data-reveal className="mt-10 flex flex-wrap justify-center gap-3">
             <Link

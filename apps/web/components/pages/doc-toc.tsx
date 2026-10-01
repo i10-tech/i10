@@ -14,10 +14,14 @@ export function DocToc({ items }: { items: { id: string; title: string }[] }) {
   const [active, setActive] = useState(items[0]?.id)
 
   useEffect(() => {
-    const els = items.map((i) => document.getElementById(i.id)).filter((el): el is HTMLElement => el !== null)
+    const els = items
+      .map((i) => document.getElementById(i.id))
+      .filter((el): el is HTMLElement => el !== null)
     const io = new IntersectionObserver(
       (entries) => {
-        const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
         if (visible[0]) setActive(visible[0].target.id)
       },
       { rootMargin: "-20% 0px -65% 0px" },
@@ -43,7 +47,10 @@ export function DocToc({ items }: { items: { id: string; title: string }[] }) {
             <a
               href={`#${item.id}`}
               aria-current={active === item.id ? "location" : undefined}
-              className={cn("block py-1.5 pl-4 text-[13px] leading-5 transition-colors duration-200", active === item.id ? "text-fg" : "text-fg-3 hover:text-fg-2")}
+              className={cn(
+                "block py-1.5 pl-4 text-[13px] leading-5 transition-colors duration-200",
+                active === item.id ? "text-fg" : "text-fg-3 hover:text-fg-2",
+              )}
             >
               {item.title}
             </a>

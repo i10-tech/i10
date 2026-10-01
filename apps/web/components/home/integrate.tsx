@@ -21,7 +21,14 @@ import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap"
  * `i10_test_` key accepts sends and fires events without delivering) and a
  * webhook stream signed to the Standard Webhooks spec.
  */
-type Lang = { id: string; label: string; icon: BrandName; file: string; lang: "ts" | "sh" | "py" | "go"; lines: { t: string; d?: "-" | "+" }[] }
+type Lang = {
+  id: string
+  label: string
+  icon: BrandName
+  file: string
+  lang: "ts" | "sh" | "py" | "go"
+  lines: { t: string; d?: "-" | "+" }[]
+}
 
 const LANGS: Lang[] = [
   {
@@ -161,7 +168,9 @@ function CodeWindow() {
       const removed = gsap.utils.toArray<HTMLElement>("[data-diff='-']", root.current)
       const added = gsap.utils.toArray<HTMLElement>("[data-diff='+']", root.current)
       if (!removed.length) return
-      const tl = gsap.timeline({ scrollTrigger: { trigger: root.current, start: "top 70%", once: true } })
+      const tl = gsap.timeline({
+        scrollTrigger: { trigger: root.current, start: "top 70%", once: true },
+      })
       tl.fromTo(removed, { opacity: 1 }, { opacity: 0.45, duration: 0.5, stagger: 0.2 })
         .fromTo(
           removed.map((r) => r.querySelector("[data-strike]")),
@@ -169,17 +178,33 @@ function CodeWindow() {
           { scaleX: 1, duration: 0.5, stagger: 0.2, ease: "site.inOut" },
           0,
         )
-        .fromTo(added, { opacity: 0, x: -10, height: 0 }, { opacity: 1, x: 0, height: "auto", duration: 0.7, stagger: 0.25 }, 0.45)
+        .fromTo(
+          added,
+          { opacity: 0, x: -10, height: 0 },
+          { opacity: 1, x: 0, height: "auto", duration: 0.7, stagger: 0.25 },
+          0.45,
+        )
     },
     { scope: root },
   )
 
-  const text = active.lines.filter((l) => l.d !== "-").map((l) => l.t).join("\n")
+  const text = active.lines
+    .filter((l) => l.d !== "-")
+    .map((l) => l.t)
+    .join("\n")
 
   return (
-    <div ref={root} data-reveal className="code-window flex min-w-0 flex-col overflow-hidden rounded-[16px] bg-surface-1">
+    <div
+      ref={root}
+      data-reveal
+      className="code-window flex min-w-0 flex-col overflow-hidden rounded-[16px] bg-surface-1"
+    >
       <div className="flex items-center justify-between border-b border-line pr-2">
-        <div role="tablist" aria-label="Language" className="flex min-w-0 overflow-x-auto [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_78%,transparent)]">
+        <div
+          role="tablist"
+          aria-label="Language"
+          className="flex min-w-0 overflow-x-auto [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_78%,transparent)]"
+        >
           {LANGS.map((l, i) => (
             <button
               key={l.id}
@@ -191,10 +216,18 @@ function CodeWindow() {
                 i === tab ? "text-fg" : "text-fg-3 hover:text-fg-2",
               )}
             >
-              {l.id === "curl" ? <PixelIcon name="terminal" size={13} /> : <BrandIcon name={l.icon} size={13} />}
+              {l.id === "curl" ? (
+                <PixelIcon name="terminal" size={13} />
+              ) : (
+                <BrandIcon name={l.icon} size={13} />
+              )}
               {l.label}
               {i === tab ? (
-                <motion.span layoutId="code-tab" className="absolute inset-x-3 -bottom-px h-px bg-brand" transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }} />
+                <motion.span
+                  layoutId="code-tab"
+                  className="absolute inset-x-3 -bottom-px h-px bg-brand"
+                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                />
               ) : null}
             </button>
           ))}
@@ -229,12 +262,25 @@ function CodeWindow() {
                   line.d === "+" && "bg-delivered/[0.07]",
                 )}
               >
-                <span className="w-12 shrink-0 pr-4 text-right text-fg-4 select-none">{i + 1}</span>
-                <span className={cn("w-4 shrink-0 select-none", line.d === "-" ? "text-bounced" : "text-delivered")}>{line.d ?? ""}</span>
+                <span className="w-12 shrink-0 pr-4 text-right text-fg-4 select-none">
+                  {i + 1}
+                </span>
+                <span
+                  className={cn(
+                    "w-4 shrink-0 select-none",
+                    line.d === "-" ? "text-bounced" : "text-delivered",
+                  )}
+                >
+                  {line.d ?? ""}
+                </span>
                 <span className="relative whitespace-pre">
                   {highlight(line.t, active.lang === "go" ? "go" : active.lang)}
                   {line.d === "-" ? (
-                    <span data-strike aria-hidden className="absolute inset-x-0 top-1/2 h-px origin-left scale-x-0 bg-bounced/70" />
+                    <span
+                      data-strike
+                      aria-hidden
+                      className="absolute inset-x-0 top-1/2 h-px origin-left scale-x-0 bg-bounced/70"
+                    />
                   ) : null}
                 </span>
               </div>
@@ -254,10 +300,15 @@ function TestMode() {
     { id: "0e4c7a1d-5b7f-4b62-9c1a-2f5d8e0a41b7", status: 202, target: "delivered" },
   ])
   const send = () =>
-    setLog((prev) => [{ id: crypto.randomUUID(), status: 202, target }, ...prev].slice(0, 4))
+    setLog((prev) =>
+      [{ id: crypto.randomUUID(), status: 202, target }, ...prev].slice(0, 4),
+    )
 
   return (
-    <div data-reveal className="flex flex-col rounded-[16px] bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]">
+    <div
+      data-reveal
+      className="flex flex-col rounded-[16px] bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]"
+    >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span className="text-[14px] font-[540] text-fg">Test mode</span>
@@ -278,7 +329,11 @@ function TestMode() {
               )}
             >
               {target === t ? (
-                <motion.span layoutId="test-target" className="absolute inset-0 rounded-[8px] bg-white/[0.07]" transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }} />
+                <motion.span
+                  layoutId="test-target"
+                  className="absolute inset-0 rounded-[8px] bg-white/[0.07]"
+                  transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                />
               ) : null}
               <span className="relative">{t}</span>
             </button>
@@ -309,7 +364,8 @@ function TestMode() {
             >
               <span className="text-delivered">{row.status}</span>
               <span className="truncate text-fg-3">
-                {"{ "}&quot;id&quot;: &quot;<span className="text-fg-2">{row.id}</span>&quot;{" }"}
+                {"{ "}&quot;id&quot;: &quot;<span className="text-fg-2">{row.id}</span>
+                &quot;{" }"}
               </span>
               <span className="ml-auto shrink-0 text-fg-4">{row.target}</span>
             </motion.li>
@@ -321,15 +377,42 @@ function TestMode() {
 }
 
 const EVENTS = [
-  { type: "email.delivered", tone: "text-delivered", detail: "to maya@northwind.dev", icon: "send" as const },
-  { type: "email.opened", tone: "text-hue-mail", detail: "Apple Mail · macOS", icon: "mailbox" as const },
-  { type: "email.clicked", tone: "text-queued", detail: "acme.co/welcome", icon: "migrate" as const },
-  { type: "email.bounced", tone: "text-bounced", detail: "550 5.1.1 · hard bounce", icon: "shield" as const },
-  { type: "email.complained", tone: "text-complained", detail: "feedback loop · Yahoo", icon: "status" as const },
+  {
+    type: "email.delivered",
+    tone: "text-delivered",
+    detail: "to maya@northwind.dev",
+    icon: "send" as const,
+  },
+  {
+    type: "email.opened",
+    tone: "text-hue-mail",
+    detail: "Apple Mail · macOS",
+    icon: "mailbox" as const,
+  },
+  {
+    type: "email.clicked",
+    tone: "text-queued",
+    detail: "acme.co/welcome",
+    icon: "migrate" as const,
+  },
+  {
+    type: "email.bounced",
+    tone: "text-bounced",
+    detail: "550 5.1.1 · hard bounce",
+    icon: "shield" as const,
+  },
+  {
+    type: "email.complained",
+    tone: "text-complained",
+    detail: "feedback loop · Yahoo",
+    icon: "status" as const,
+  },
 ]
 
 function WebhookStream() {
-  const [items, setItems] = useState(() => EVENTS.slice(0, 3).map((e, i) => ({ ...e, key: i, at: `03:09:${41 - i * 2}` })))
+  const [items, setItems] = useState(() =>
+    EVENTS.slice(0, 3).map((e, i) => ({ ...e, key: i, at: `03:09:${41 - i * 2}` })),
+  )
   const root = useRef<HTMLDivElement>(null)
   const next = useRef(3)
 
@@ -343,7 +426,16 @@ function WebhookStream() {
       const n = next.current++
       const e = EVENTS[n % EVENTS.length]!
       const s = 41 + (n - 2) * 2
-      setItems((prev) => [{ ...e, key: n, at: `03:${String(9 + Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}` }, ...prev].slice(0, 3))
+      setItems((prev) =>
+        [
+          {
+            ...e,
+            key: n,
+            at: `03:${String(9 + Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`,
+          },
+          ...prev,
+        ].slice(0, 3),
+      )
     }, 2600)
     return () => {
       clearInterval(id)
@@ -352,15 +444,24 @@ function WebhookStream() {
   }, [])
 
   return (
-    <div ref={root} data-reveal className="flex flex-col overflow-hidden rounded-[16px] bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]">
+    <div
+      ref={root}
+      data-reveal
+      className="flex flex-col overflow-hidden rounded-[16px] bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]"
+    >
       <div className="flex items-center justify-between">
         <span className="text-[14px] font-[540] text-fg">Webhooks</span>
-        <span className="font-mono text-[10.5px] text-fg-4">signed · retried · replayable</span>
+        <span className="font-mono text-[10.5px] text-fg-4">
+          signed · retried · replayable
+        </span>
       </div>
       {/* Same as the test log: three rows, fixed, and the leaving row pops
           out of the flow instead of stretching the card for a beat. */}
       <ul className="relative mt-4 flex h-[141px] flex-col overflow-hidden">
-        <span aria-hidden className="absolute top-3 bottom-3 left-[15px] w-px bg-line" />
+        <span
+          aria-hidden
+          className="absolute top-3 bottom-3 left-[15px] w-px bg-line"
+        />
         <AnimatePresence initial={false} mode="popLayout">
           {items.map((item) => (
             <motion.li
@@ -372,14 +473,23 @@ function WebhookStream() {
               transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
               className="relative flex h-[47px] shrink-0 items-center gap-3"
             >
-              <span className={cn("relative grid size-[31px] shrink-0 place-items-center rounded-[9px] bg-surface-3 shadow-[inset_0_0_0_1px_var(--line)]", item.tone)}>
+              <span
+                className={cn(
+                  "relative grid size-[31px] shrink-0 place-items-center rounded-[9px] bg-surface-3 shadow-[inset_0_0_0_1px_var(--line)]",
+                  item.tone,
+                )}
+              >
                 <PixelIcon name={item.icon} size={13} />
               </span>
               <span className="flex min-w-0 flex-col">
-                <span className={cn("font-mono text-[12px]", item.tone)}>{item.type}</span>
+                <span className={cn("font-mono text-[12px]", item.tone)}>
+                  {item.type}
+                </span>
                 <span className="truncate text-[11.5px] text-fg-3">{item.detail}</span>
               </span>
-              <span className="ml-auto shrink-0 font-mono text-[10.5px] text-fg-4">{item.at}</span>
+              <span className="ml-auto shrink-0 font-mono text-[10.5px] text-fg-4">
+                {item.at}
+              </span>
             </motion.li>
           ))}
         </AnimatePresence>

@@ -144,7 +144,7 @@ Full teardown per site: **`docs/landing/RESEARCH.md`**.
 - **Nav collapse on scroll** (Cloudflare, ElevenLabs): wordmark and links
   collapse, the mark stays (recoloured per section), a CTA pill stays.
 - **Refractive hairline** under the header (Resend): a `backdrop-filter:
-  blur() brightness(2)` layer masked to 1 px.
+blur() brightness(2)` layer masked to 1 px.
 - **Logo cells that swap** (Clerk): staggered opacity + blur + scale, 130 ms,
   `cubic-bezier(.175,.885,.32,1.1)`.
 - **Framework grid hover** (Clerk): icon lifts and takes its brand color, label
@@ -296,7 +296,7 @@ brand logos), shadcn/ui + Radix via `@repo/ui`. All installed in `apps/web`.
 14. **Changelog teaser** from real git history.
 15. **Pricing teaser** + closing CTA.
 16. **Footer**: giant "Integration", link columns with badges, status pill,
-   socials, Webflow-style i10 mark, "Ask AI about i10" links.
+    socials, Webflow-style i10 mark, "Ask AI about i10" links.
 
 ---
 
@@ -333,6 +333,7 @@ brand logos), shadcn/ui + Radix via `@repo/ui`. All installed in `apps/web`.
 - [x] Delete `app/fonttest`, final review, one-line commit message
 
 Open, deliberately:
+
 - Legal, compare and blog copy is placeholder and says so on the page. Compare cells about other providers read "To verify" until checked against their docs.
 - Pricing is Resend's, as asked; the mailbox add-on price is invented.
 - Social links other than GitHub point at /contact until handles exist.

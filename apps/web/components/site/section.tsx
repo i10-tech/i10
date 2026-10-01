@@ -26,13 +26,22 @@ export function Frame({
   seam?: boolean
 }) {
   return (
-    <section id={id} data-nav-tone={tone ?? "dark"} className={cn("relative", className)}>
-      {seam ? <div aria-hidden className="absolute inset-x-0 top-0 h-px bg-line" /> : null}
+    <section
+      id={id}
+      data-nav-tone={tone ?? "dark"}
+      className={cn("relative", className)}
+    >
+      {seam ? (
+        <div aria-hidden className="absolute inset-x-0 top-0 h-px bg-line" />
+      ) : null}
       {/* ⚠ THE RAILS SPAN THE SECTION, NOT THE CONTENT. The section carries the
           vertical padding, so rails drawn inside the content box stop short of
           the seam and the crosses float a padding's height below it. */}
       {rails ? (
-        <div aria-hidden className="container-site pointer-events-none absolute inset-y-0 inset-x-0 max-md:hidden">
+        <div
+          aria-hidden
+          className="container-site pointer-events-none absolute inset-y-0 inset-x-0 max-md:hidden"
+        >
           <div className="absolute inset-y-0 left-[var(--gutter)] w-px bg-line-faint" />
           <div className="absolute inset-y-0 right-[var(--gutter)] w-px bg-line-faint" />
           {seam ? (
@@ -68,9 +77,19 @@ export function Cross({ className }: { className?: string }) {
   )
 }
 
-export function Eyebrow({ children, className, color = "var(--brand)" }: { children: ReactNode; className?: string; color?: string }) {
+export function Eyebrow({
+  children,
+  className,
+  color = "var(--brand)",
+}: {
+  children: ReactNode
+  className?: string
+  color?: string
+}) {
   return (
-    <span className={cn("type-label inline-flex items-center gap-2 text-fg-3", className)}>
+    <span
+      className={cn("type-label inline-flex items-center gap-2 text-fg-3", className)}
+    >
       <span aria-hidden className="size-[5px]" style={{ background: color }} />
       {children}
     </span>
@@ -100,16 +119,29 @@ export function SectionHeader({
   className?: string
   children?: ReactNode
 }) {
-  const type = size === "l" ? "type-display-l" : size === "s" ? "type-display-s" : "type-display-m"
+  const type =
+    size === "l" ? "type-display-l" : size === "s" ? "type-display-s" : "type-display-m"
   return (
-    <div className={cn("flex flex-col gap-5", align === "center" && "items-center text-center", className)}>
+    <div
+      className={cn(
+        "flex flex-col gap-5",
+        align === "center" && "items-center text-center",
+        className,
+      )}
+    >
       {eyebrow ? <div data-reveal>{eyebrow}</div> : null}
-      <SplitReveal as="h2" className={cn(type, align === "center" ? "max-w-[22ch]" : "max-w-[20ch]")}>
+      <SplitReveal
+        as="h2"
+        className={cn(type, align === "center" ? "max-w-[22ch]" : "max-w-[20ch]")}
+      >
         {title}
         {muted ? <span className="text-fg-3"> {muted}</span> : null}
       </SplitReveal>
       {description ? (
-        <p data-reveal className={cn("type-lead max-w-[36rem]", align === "center" && "mx-auto")}>
+        <p
+          data-reveal
+          className={cn("type-lead max-w-[36rem]", align === "center" && "mx-auto")}
+        >
           {description}
         </p>
       ) : null}
