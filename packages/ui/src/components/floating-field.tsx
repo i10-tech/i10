@@ -584,6 +584,7 @@ export function FloatingInput({
   controlClassName,
   containerClassName,
   adornment,
+  underlay,
   id: providedId,
   ...props
 }: Omit<React.ComponentProps<"input">, "placeholder"> & {
@@ -616,6 +617,15 @@ export function FloatingInput({
   containerClassName?: string
   /** A button or icon pinned to the trailing edge - reveal, clear, spinner. */
   adornment?: React.ReactNode
+  /**
+   * Drawn in the control, level with the value - the email box's ghost text.
+   *
+   * ⚠ BEFORE THE INPUT IN THE DOM, unlike the notch and the adornment, because
+   * the `peer-*` rules only look at FOLLOWING siblings; nothing reads this one.
+   * It is positioned, so it still paints over the transparent input, and it
+   * must be `pointer-events-none` wherever it is not itself a target.
+   */
+  underlay?: React.ReactNode
 }) {
   const generated = React.useId()
   const id = providedId ?? generated
@@ -631,6 +641,7 @@ export function FloatingInput({
       className={containerClassName}
     >
       <div className={cn(CONTROL, "h-14 rounded-pill", controlClassName)}>
+        {underlay}
         <input
           id={id}
           data-slot="floating-input"

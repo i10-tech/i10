@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { EmailInput } from "@repo/ui/components/email-input"
 import { emailProblem } from "@repo/ui/checks"
 import { addSuppression } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
@@ -82,10 +82,9 @@ export function AddSuppressionButton() {
             </DialogHeader>
 
             <div className="py-4">
-              <ValidatedInput
+              <EmailInput
                 id="suppress-address"
                 label="Email address"
-                type="email"
                 value={address}
                 onChange={(event) => setAddress(event.target.value)}
                 autoComplete="off"

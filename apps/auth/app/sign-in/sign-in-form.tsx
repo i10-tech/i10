@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { useAuth, useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field, FieldGroup, FieldSeparator } from "@repo/ui/components/field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { EmailInput } from "@repo/ui/components/email-input"
 import { emailProblem } from "@repo/ui/checks"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepStage } from "@repo/ui/components/step-stage"
@@ -475,10 +475,9 @@ export function SignInForm({
                */}
               <div className="relative">
                 {lastUsed === "password" && <LastUsedBadge placement="field" />}
-                <ValidatedInput
+                <EmailInput
                   id="email"
                   name="email"
-                  type="email"
                   label="Email address"
                   value={identifier}
                   onChange={(event) => setIdentifier(event.target.value)}
