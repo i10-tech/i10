@@ -1,6 +1,6 @@
 "use client"
 
-import { motion, useSpring, useTransform } from "motion/react"
+import { animate, motion, useMotionValue, useSpring, useTransform } from "motion/react"
 import { useEffect, useState, type CSSProperties } from "react"
 import { cn } from "cn"
 import { ButtonLink } from "@/components/ui/button-link"
@@ -128,13 +128,18 @@ function Price({ value }: { value: number }) {
   return <motion.span>{display}</motion.span>
 }
 
-/* The volume above the slider, counting rather than swapping. */
+/*
+ * The volume above the slider, counting rather than swapping. A short linear
+ * tween, not a spring: a spring's tail spends half its time on the last few
+ * digits, so the count crawled into place. This one arrives at full speed.
+ */
 function Volume({ value, plus }: { value: number; plus: boolean }) {
-  const spring = useSpring(value, { stiffness: 140, damping: 26 })
-  const display = useTransform(spring, (v) => Math.round(v).toLocaleString("en-US") + (plus ? "+" : ""))
+  const count = useMotionValue(value)
+  const display = useTransform(count, (v) => Math.round(v).toLocaleString("en-US") + (plus ? "+" : ""))
   useEffect(() => {
-    spring.set(value)
-  }, [spring, value])
+    const controls = animate(count, value, { duration: 0.35, ease: "linear" })
+    return () => controls.stop()
+  }, [count, value])
   return <motion.span>{display}</motion.span>
 }
 
