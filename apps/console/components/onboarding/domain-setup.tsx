@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { ArrowLeft, Check, Pencil, Wand2 } from "lucide-react"
+import { ArrowLeft, Check, Network, Pencil } from "lucide-react"
+import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
@@ -376,7 +377,7 @@ export function DomainSetup({ onDone }: { onDone: () => void }) {
       >
         {canDelegate && (
           <Choice
-            icon={<Wand2 className="size-4" />}
+            icon={<Network className="size-4" />}
             title="Delegate to i10"
             recommended
             description="Point three names at us once. We keep SPF, DKIM, DMARC and MX correct forever, including when they change."
@@ -591,11 +592,7 @@ function Choice({
       <span className="min-w-0 flex-1 space-y-1">
         <span className="flex items-center gap-2">
           <span className="text-sm font-medium">{title}</span>
-          {recommended && (
-            <span className="rounded-pill border px-1.5 py-0.5 text-2xs text-muted-foreground">
-              Recommended
-            </span>
-          )}
+          {recommended && <Badge variant="outline">Recommended</Badge>}
         </span>
         <span className="block text-xs text-muted-foreground">{description}</span>
       </span>

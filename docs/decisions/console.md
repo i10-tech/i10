@@ -146,6 +146,27 @@ globally in tokens.css.
 **Density.** Table rows are 40px. The type ramp starts at 14px and steps by a
 major second. Spacing is multiples of 4.
 
+**Don'ts (#145).** Things that make an interface read as generated rather than
+designed. They crept in once; this list is here so they do not again. Applies to
+the console, auth, docs and anything else built on `packages/ui`.
+
+- No filled "promo" pills. A badge is `@repo/ui/components/badge`: small radius,
+  a wash or a hairline, one weight. No solid primary fill, no glow, no gradient.
+  Do not hand-roll a pill at the call site; use the component.
+- No plan or tier chips. The plan is a plain word in muted text, the way the
+  account bar shows it, not a badge that reads as an upsell.
+- No sparkle, wand, magic or rocket icons, and no emoji in product UI. An icon
+  says what a thing does (a network for delegation, an upload for publishing),
+  not that it is impressive.
+- No gradient text, and no gradient or glow backgrounds behind content. A fade
+  that masks a scroll edge is fine; decoration is not.
+- No icon-in-a-tinted-circle headers on cards, dialogs or empty states. A
+  heading is a heading.
+- No filler microcopy: "seamless", "effortless", "powerful", "supercharge",
+  "unlock", exclamation marks. Say what happens, in the fewest words.
+- No "Recommended" or "New" chip unless it changes the decision in front of the
+  person, and then the outline badge, never a coloured one.
+
 ---
 
 ## 4. Onboarding

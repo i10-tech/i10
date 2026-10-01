@@ -16,7 +16,6 @@ import {
 import { useTheme } from "next-themes"
 import { useClerk, useUser } from "@clerk/nextjs"
 import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar"
-import { Badge } from "@repo/ui/components/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -212,17 +211,18 @@ function AccountRow({
              * which read as a gap in the row; at the edge the badge and the
              * ring sit together, the two halves of "your plan, your usage".
              */
-            <Badge
-              variant="secondary"
-              // ⚠ `bg-track`, NOT `secondary`: secondary is 0.97 on a
-              // near-white rail and 0.20 on a black one, so the badge had no
-              // visible ground in either theme. The track's translucent wash
-              // reads on both, the same as the empty ring beside it.
-              className="ms-auto shrink-0 bg-track px-1.5 py-0 text-2xs text-foreground/80"
+            /*
+             * ⚠ A PLAIN WORD, NOT A CHIP (#145). The plan used to sit in a
+             * filled pill, which beside the usage ring read as an upsell
+             * badge. It is a fact about the workspace, the same weight as the
+             * name next to it, only quieter.
+             */
+            <span
+              className="ms-auto shrink-0 text-2xs text-muted-foreground"
               title={`${plan.name} plan`}
             >
               {plan.name}
-            </Badge>
+            </span>
           )}
         </DropdownMenuTrigger>
 

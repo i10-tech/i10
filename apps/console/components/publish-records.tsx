@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Wand2 } from "lucide-react"
+import { CloudUpload } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
@@ -107,7 +107,7 @@ export function PublishRecords({
   return (
     <>
       <Button size="sm" onClick={() => publish(false)} disabled={pending}>
-        {pending ? <Spinner /> : <Wand2 />}
+        {pending ? <Spinner /> : <CloudUpload />}
         Publish these for me
       </Button>
 
