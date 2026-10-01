@@ -5,6 +5,7 @@ import { Toaster } from "@repo/ui/components/sonner"
 import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
 import { TooltipProvider } from "@repo/ui/components/tooltip"
+import { NoCacheInvalidation } from "./_components/no-cache-invalidation"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -99,6 +100,7 @@ export default function RootLayout({
     >
       <html lang="en" suppressHydrationWarning>
         <body>
+          <NoCacheInvalidation />
           {/*
            * ⚠ `preconnect` FOR THE FONT ORIGIN, AND `crossOrigin` IS NOT OPTIONAL
            * ON IT. Fonts are fetched in CORS mode whatever the stylesheet says, so
