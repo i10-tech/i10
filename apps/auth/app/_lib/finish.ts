@@ -2,6 +2,7 @@
 
 import type { SignInFlow } from "./clerk-types"
 import { confirmSignIn } from "./last-used"
+import { rememberSignedInAccount } from "./remembered"
 import { forgetFlow } from "./resume"
 
 /**
@@ -28,6 +29,8 @@ export function leaveFor(url: string) {
    * success rather than written on click.
    */
   confirmSignIn()
+  // The card on the sign-in page for next time - see _lib/remembered.ts.
+  rememberSignedInAccount()
   // ⚠ AND THE STORED STEPS GO WITH IT - a finished flow must not come back as
   // a half-finished one the next time this tab opens the auth app.
   forgetFlow()
