@@ -8,6 +8,7 @@ import {
   useSession,
 } from "@clerk/nextjs"
 import { Spinner } from "@repo/ui/components/spinner"
+import { leaveFor } from "../../_lib/finish"
 
 /**
  * Whichever step Clerk is holding this session on.
@@ -43,7 +44,9 @@ export function TasksPanel({ afterAuthUrl }: { afterAuthUrl: string }) {
   useEffect(() => {
     if (!isLoaded) return
     if (task) return
-    window.location.replace(afterAuthUrl)
+    // Through `leaveFor`, which carries the session to the console on a
+    // development instance - see `carrySession` in _lib/finish.ts.
+    leaveFor(afterAuthUrl)
   }, [isLoaded, task, afterAuthUrl])
 
   if (!isLoaded || !task) {

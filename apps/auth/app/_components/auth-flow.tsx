@@ -3,6 +3,7 @@
 import { StepStage } from "@repo/ui/components/step-stage"
 import type { SsoProvider } from "../_lib/providers"
 import { forgetFlow, useResumable } from "../_lib/resume"
+import { stepBack, useStepHistory } from "../_lib/step-history"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
 import { SignInForm } from "../sign-in/sign-in-form"
 import { SignUpForm } from "../sign-up/sign-up-form"
@@ -41,6 +42,7 @@ export function AuthFlow({
   providers,
   abilities,
   password,
+  savedAccounts = 0,
 }: {
   afterAuthUrl: string
   resetHref: string
@@ -49,6 +51,8 @@ export function AuthFlow({
   providers: SsoProvider[]
   abilities: SignUpAbilities
   password: PasswordRules
+  /** How many saved-account cards to hold room for while they load. */
+  savedAccounts?: number
 }) {
   /*
    * ⚠ `null` UNTIL THE LOOKUP ANSWERS, AND THE ADDRESS IS THE STATE. Holding a
@@ -62,6 +66,15 @@ export function AuthFlow({
     "flow.new-account",
     null,
   )
+
+  // ⚠ BROWSER BACK FROM SIGN-UP RETURNS TO THE EMAIL BOX, like the in-page
+  // "sign in instead" link below. Forward cannot re-enter sign-up from here -
+  // the address it was for has to be looked up again - so it is treated as
+  // Back too. See _lib/step-history.ts.
+  const branch = newAccount === null ? "sign-in" : "sign-up"
+  useStepHistory("flow", branch, "sign-in", (to) => {
+    if (to === "sign-in") setNewAccount(null)
+  })
 
   /*
    * ⚠ THE SAME MOVEMENT THE STEPS INSIDE EACH FORM ALREADY USE. Both forms
@@ -98,7 +111,7 @@ export function AuthFlow({
           // keeps this state, so pressing it did nothing at all.
           onSignIn={() => {
             forgetFlow()
-            setNewAccount(null)
+            stepBack("flow", branch, () => setNewAccount(null))
           }}
         />
       ) : (
@@ -109,6 +122,7 @@ export function AuthFlow({
           redirectRaw={redirectRaw}
           providers={providers}
           onUnknownIdentifier={setNewAccount}
+          savedAccounts={savedAccounts}
         />
       )}
     </StepStage>

@@ -1,10 +1,12 @@
 import type { Metadata } from "next"
-import { headers } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { ssoProviders } from "../_lib/providers"
 import { passwordRules, signUpAbilities } from "../_lib/environment"
 import { afterAuthUrl } from "../_lib/redirect"
+import { SAVED_COUNT_COOKIE, savedCount } from "../_lib/remembered-cookie"
 import { AuthFlow } from "../_components/auth-flow"
 import { ResumeBoundary } from "../_components/resume-boundary"
+import { SignedInForward } from "../_components/signed-in-forward"
 
 export const metadata: Metadata = { title: "Sign in · i10" }
 
@@ -63,7 +65,7 @@ export default async function Page({
   ])
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-6 py-12">
+    <main className="flex min-h-dvh items-center justify-center px-6 pt-24 pb-12">
       <div className="w-full max-w-sm">
         {/*
          * ⚠ RESUMED FROM THIS TAB'S OWN MEMORY, NOT FROM THE URL. This page used
@@ -71,6 +73,7 @@ export default async function Page({
          * trip; now every step of both flows survives a reload the same way,
          * and the address bar only ever says /sign-in. See _lib/resume.tsx.
          */}
+        <SignedInForward afterAuthUrl={after} />
         <ResumeBoundary>
           <AuthFlow
             afterAuthUrl={after}
@@ -80,6 +83,9 @@ export default async function Page({
             providers={providers}
             abilities={abilities}
             password={password}
+            // Room for the saved-account cards before they load - see
+            // _lib/remembered-cookie.ts.
+            savedAccounts={savedCount((await cookies()).get(SAVED_COUNT_COOKIE)?.value)}
           />
         </ResumeBoundary>
       </div>

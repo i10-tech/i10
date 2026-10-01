@@ -401,7 +401,7 @@ export function SsoCallback({
     const named = offer.provider ? `your ${offer.provider} account` : "that account"
 
     return (
-      <main className="flex min-h-dvh items-center justify-center px-6 py-12">
+      <main className="flex min-h-dvh items-center justify-center px-6 pt-24 pb-12">
         <div className="w-full max-w-sm">
           <FieldGroup>
             <div className="flex flex-col items-center gap-2 text-center">

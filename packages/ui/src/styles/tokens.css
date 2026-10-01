@@ -831,38 +831,22 @@
 }
 
 /*
- * The code field's verdict, as one movement in two tones (#151).
- *
- * ⚠ SUCCESS AND FAILURE ARE THE SAME COMPONENT. A line under the six boxes
- * fills green from the left when the code is accepted; on a rejection it is
- * red and already full, and the boxes shake once. Two unrelated effects for
- * the two outcomes would read as two different features.
- *
- * ⚠ THE SHAKE IS SMALL AND DAMPED: 6px, three swings, 360ms. A wider or
- * longer one is a cartoon, and on a screen where the person is about to type
- * the code again it gets in the way of the boxes.
- *
- * Under reduced motion the blanket rule in `@layer base` cuts both to their end
- * frame: the line is simply full and the boxes do not move.
+ * The code field's accepted state - see components/otp-field.tsx. The row
+ * slides down 8px out of the boxes above it, and the check inside draws.
  */
-@keyframes verdict-fill {
+@keyframes code-accepted {
   from {
-    transform: scaleX(0);
+    opacity: 0;
+    transform: translateY(-8px);
   }
 }
 
-@keyframes verdict-shake {
-  20% {
-    transform: translateX(-6px);
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 1;
   }
-  45% {
-    transform: translateX(5px);
-  }
-  70% {
-    transform: translateX(-3px);
-  }
-  90% {
-    transform: translateX(1px);
+  to {
+    stroke-dashoffset: 0;
   }
 }
 

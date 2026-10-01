@@ -13,7 +13,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@repo/ui/components/sheet"
-import { Separator } from "@repo/ui/components/separator"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { AccountBar } from "@/components/account-bar"
 import { WorkspaceBar } from "@/components/workspace-bar"
@@ -70,10 +69,11 @@ export function MobileNav({
           </Button>
         </SheetTrigger>
         <SheetContent side="left" className="flex w-72 flex-col bg-sidebar p-0">
-          <SheetHeader className="h-14 justify-center border-b px-4">
-            <SheetTitle className="text-left">
-              <Wordmark />
-            </SheetTitle>
+          <SheetHeader className="h-14 justify-center border-b px-2">
+            {/* Named for screen readers; the drawer opens on the workspace,
+                like the desktop rail. */}
+            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
             {/*
              * ⚠ PRESENT BUT VISUALLY HIDDEN. Radix warns in the console when a
              * Dialog has no description, and more importantly a screen reader
@@ -84,10 +84,6 @@ export function MobileNav({
             </SheetDescription>
           </SheetHeader>
 
-          <div className="px-2 py-2">
-            <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
-          </div>
-          <Separator />
           {/*
            * ⚠ `flex-1` AND `min-h-0` SO THE ACCOUNT ROW CAN BE PINNED BELOW IT.
            * Without `min-h-0` a flex child with overflow refuses to shrink past

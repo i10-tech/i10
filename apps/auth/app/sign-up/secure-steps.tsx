@@ -13,8 +13,9 @@ import { CopyButton } from "@repo/ui/components/copy"
 import { Field, FieldGroup } from "@repo/ui/components/field"
 import { QrCode } from "@repo/ui/components/qr-code"
 import { Spinner } from "@repo/ui/components/spinner"
-import { OtpField, OTP_LENGTH } from "../_components/otp-field"
+import { OtpField, OTP_LENGTH } from "@repo/ui/components/otp-field"
 import { StepHeading } from "../_components/step-heading"
+import { holdSince } from "../_lib/finish"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { abortPendingWebAuthn } from "../_lib/webauthn"
@@ -312,6 +313,7 @@ export function TwoFactorScanStep({
        * that follows it, which is the moment worth filling.
        */
       setAccepted(true)
+      const shown = Date.now()
 
       /*
        * ⚠ THE BACKUP CODES ARE FETCHED HERE AND THEIR FAILURE IS NOT FATAL.
@@ -328,6 +330,8 @@ export function TwoFactorScanStep({
         codes = []
       }
 
+      // The green check lands before the screen moves on.
+      await holdSince(shown)
       onBusy(null)
       onVerified(codes)
     } catch {

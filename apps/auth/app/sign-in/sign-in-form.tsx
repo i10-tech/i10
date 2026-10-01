@@ -12,11 +12,13 @@ import { emailProblem } from "@repo/ui/checks"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepStage } from "@repo/ui/components/step-stage"
 import { PasswordInput } from "../_components/password-input"
-import { OAuthButtons } from "../_components/oauth-buttons"
+import { OAuthButtons, useSsoStart } from "../_components/oauth-buttons"
 import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
+import { stepBack, useStepHistory } from "../_lib/step-history"
 import { RememberedAccounts } from "../_components/remembered-accounts"
+import { useRememberedAccounts } from "../_lib/remembered"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { installAbortableWebAuthn } from "../_lib/webauthn"
 import { useResumable } from "../_lib/resume"
@@ -51,6 +53,7 @@ export function SignInForm({
   redirectRaw,
   providers,
   onUnknownIdentifier,
+  savedAccounts = 0,
 }: {
   afterAuthUrl: string
   resetHref: string
@@ -70,6 +73,8 @@ export function SignInForm({
    * was one box for both doors.
    */
   onUnknownIdentifier?: (identifier: string) => void
+  /** Saved-account cards to hold room for while they load. */
+  savedAccounts?: number
 }) {
   const router = useRouter()
   const { signIn } = useSignIn()
@@ -113,6 +118,12 @@ export function SignInForm({
   )
   const [identifier, setIdentifier] = useResumable("signin.identifier", "")
   const [direction, setDirection] = useState<"forward" | "back">("forward")
+  // Browser Back from the password step returns to the email box - see
+  // _lib/step-history.ts for why it did nothing before.
+  useStepHistory("signin", stage, "identifier", (to) => {
+    setDirection(to === "identifier" ? "back" : "forward")
+    setStage(to)
+  })
 
   /*
    * ⚠ READ IN AN EFFECT, NOT DURING RENDER. It comes from `localStorage`, which
@@ -120,7 +131,26 @@ export function SignInForm({
    * server and another in the browser, which React reports as a hydration
    * mismatch and resolves by discarding the markup.
    */
-  const lastUsed = useLastSignInMethod()
+  const lastMethod = useLastSignInMethod()
+  const remembered = useRememberedAccounts()
+  /*
+   * ⚠ ONE "LAST USED" ON THE PAGE, AND ONLY WHERE IT IS TRUE. When we know the
+   * account that last signed in here, its saved card carries the chip and
+   * nothing else does. Otherwise the method gets it - the provider or passkey
+   * button, or the email box for a password. Not knowing either, nothing.
+   * Two chips meant one of them was wrong.
+   */
+  const lastAccount = remembered.some((account) => account.last)
+  const lastUsed = lastAccount ? null : lastMethod
+
+  // Pressing a saved SSO account goes to that provider, the way it signed in.
+  const { start: startSso } = useSsoStart({
+    afterAuthUrl,
+    redirectRaw,
+    intent: "sign-in",
+    busy,
+    onBusyChange: setBusy,
+  })
 
   /**
    * Offer a saved passkey without anybody asking.
@@ -422,8 +452,10 @@ export function SignInForm({
 
   /** Back to the email step, keeping what was typed. */
   function changeIdentifier() {
-    setDirection("back")
-    setStage("identifier")
+    stepBack("signin", stage, () => {
+      setDirection("back")
+      setStage("identifier")
+    })
   }
 
   return (
@@ -457,13 +489,13 @@ export function SignInForm({
                * SUBTITLE WAS EXPLAINING THE MECHANISM. "We will sign you in, or
                * start a new account" describes what WE do with the address; the
                * person already knows what an email box is for, and a field
-               * labelled "Email address" under "Continue to i10" leaves nothing
+               * labelled "Email address" under "Log in or sign up" leaves nothing
                * ambiguous. It also meant the two halves of this page were
                * different heights, so the header moved when the lookup did.
                */}
               <div className="flex flex-col items-center gap-1 text-center">
                 <h1 className="text-2xl font-bold">
-                  {onUnknownIdentifier ? "Continue to i10" : "Login to your account"}
+                  {onUnknownIdentifier ? "Log in or sign up" : "Login to your account"}
                 </h1>
                 {!onUnknownIdentifier && (
                   <p className="text-sm text-balance text-muted-foreground">
@@ -478,29 +510,27 @@ export function SignInForm({
                * visit, so the page is unchanged for most people.
                */}
               <RememberedAccounts
+                expected={savedAccounts}
                 disabled={!signIn || locked}
-                onPick={(email) => {
-                  setIdentifier(email)
-                  void lookUp(email)
+                onPick={(account) => {
+                  const viaSso = providers.find((p) => p.strategy === account.method)
+                  if (viaSso) {
+                    void startSso(viaSso.strategy)
+                    return
+                  }
+                  setIdentifier(account.email)
+                  void lookUp(account.email)
                 }}
               />
 
               {/*
-               * ⚠ THE FIELD IS WRAPPED SO THE CHIP HAS SOMETHING TO ANCHOR TO,
-               * rather than `FloatingInput` growing a `badge` prop. This is the
-               * only field in the product that carries one, and a prop on the
-               * shared component would be an API every other call site has to
-               * ignore - see @repo/ui/components/floating-field, which is
-               * already carrying more geometry than it wants to.
-               *
-               * ⚠ AND IT IS ON THE EMAIL BOX, NOT ONLY ON THE BUTTON TWO STEPS
-               * LATER. Somebody who signed in with a password last time is
-               * looking at this field, deciding between it and the provider
-               * buttons above - which is the moment the hint is worth anything.
-               * By the password step they have already chosen.
+               * ⚠ "LAST USED" IS DRAWN INSIDE THE FIELD (as its trailing
+               * adornment) when a password was the last way in and no saved
+               * account already says so. On the email box rather than only on
+               * the button two steps later: this is where somebody decides
+               * between typing and the provider buttons below.
                */}
               <div className="relative">
-                {lastUsed === "password" && <LastUsedBadge placement="field" />}
                 <EmailInput
                   id="email"
                   name="email"
@@ -519,6 +549,10 @@ export function SignInForm({
                   autoComplete="email webauthn"
                   disabled={locked}
                   autoFocus
+                  // The chip sits INSIDE the field at its trailing end; the
+                  // padding keeps a long address from running under it.
+                  className={lastUsed === "password" ? "pe-28" : undefined}
+                  adornment={lastUsed === "password" ? <LastUsedBadge /> : undefined}
                 />
               </div>
 
@@ -552,6 +586,7 @@ export function SignInForm({
                   providers={providers}
                   busy={busy}
                   onBusyChange={setBusy}
+                  lastUsed={lastUsed}
                 />
 
                 {/*
@@ -594,7 +629,9 @@ export function SignInForm({
                        * who signs in with a passkey has no password to fall
                        * back on and most needs reminding which button it was.
                        */}
-                      {lastUsed === "passkey" && <LastUsedBadge />}
+                      {lastUsed === "passkey" && (
+                        <LastUsedBadge className="absolute end-4 top-1/2 -translate-y-1/2" />
+                      )}
                     </>
                   )}
                 </Button>

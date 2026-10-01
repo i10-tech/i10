@@ -1,17 +1,29 @@
 "use client"
 
 import type * as React from "react"
-import { Check } from "lucide-react"
-import { Field, FieldLabel } from "@repo/ui/components/field"
-import { fieldHintTone, type FieldState } from "@repo/ui/components/floating-field"
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@repo/ui/components/input-otp"
+import { Field, FieldLabel } from "./field"
+import { fieldHintTone, type FieldState } from "./floating-field"
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "./input-otp"
 import { cn } from "cn"
 
 /** Every code Clerk emails is six digits. */
 export const OTP_LENGTH = 6
 
 /**
- * The six-box code entry, shared by every flow that asks for one.
+ * How long the accepted state stays on screen before the page moves on.
+ *
+ * ⚠ THE WHOLE ANIMATION, AND NOT A FRAME MORE. The row slides down over
+ * 450ms and the check draws over 400ms starting 150ms in, so the last frame
+ * lands at 550ms; 600ms lets it be seen finished. It is counted from when the
+ * check appeared, and `finalize` runs during it, so on a normal connection
+ * this is the whole wait on our side. Keep it above the animation's end if
+ * either duration changes.
+ */
+export const ACCEPTED_HOLD_MS = 600
+
+/**
+ * The six-box code entry, shared by every flow that asks for one - in auth
+ * today, and in the console the moment it asks for a code of its own.
  *
  * ⚠ IT EXISTS BECAUSE THE PLAIN `<Input>` IT REPLACES CARRIED A REAL BUG, not
  * because three screens happened to look alike. Sign-up renders its two stages
@@ -101,30 +113,18 @@ export function OtpField({
         autoFocus={autoFocus}
         containerClassName="justify-center"
       >
-        {/*
-         * ⚠ A COLUMN SO THE VERDICT LINE IS EXACTLY AS WIDE AS THE BOXES. The
-         * container centres its children in a row; the line has to measure
-         * the group, not the field, or it overhangs the first and last box.
-         */}
-        <div
-          className={cn(
-            "flex flex-col gap-2",
-            /*
-             * ⚠ THE SHAKE REPLAYS ON EVERY REJECTION WITHOUT A `key`. Callers
-             * drop `invalid` on the first keystroke of the next attempt, so
-             * each rejection removes and re-adds the animation, and the
-             * browser starts it again from the first frame.
-             */
-            tone === "invalid" && "animate-[verdict-shake_360ms_var(--ease-quad-out)]",
-          )}
-        >
-          <InputOTPGroup>
-            {Array.from({ length: OTP_LENGTH }, (_, i) => (
-              <InputOTPSlot key={i} index={i} state={tone} />
-            ))}
-          </InputOTPGroup>
-          <VerdictLine tone={tone} />
-        </div>
+        <InputOTPGroup>
+          {Array.from({ length: OTP_LENGTH }, (_, i) => (
+            <InputOTPSlot
+              key={i}
+              index={i}
+              state={tone}
+              // The boxes turn green as slowly as the check below draws, so
+              // the whole field answers as one movement.
+              className={verified ? "duration-300" : undefined}
+            />
+          ))}
+        </InputOTPGroup>
       </InputOTP>
       {/*
        * ⚠ THE ROW IS ALWAYS RENDERED AND ALWAYS RESERVED, for the reason the
@@ -137,24 +137,24 @@ export function OtpField({
        * change; conditionally rendering it is why validation is silent for
        * anybody not looking at it.
        */}
+      {/*
+       * ⚠ THE ACCEPTED STATE IS OUT OF THE FLOW, PINNED IN THIS ROW. Drawn
+       * inline, a 16px icon inside a 16px line of text still moved the line
+       * box by about a pixel, and the card is centred vertically, so the
+       * boxes, the heading and everything above shifted with it. Absolutely
+       * positioned, the only pixels that change are its own.
+       */}
       <p
         aria-live="polite"
         className={cn(
-          "min-h-4 text-center text-2xs leading-4",
+          "relative min-h-4 text-center text-2xs leading-4",
           "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
           fieldHintTone(tone),
         )}
       >
         {verified ? (
-          /*
-           * ⚠ IT ENTERS RATHER THAN APPEARING, and the movement is the half
-           * that reads as confirmation. A word that is simply present on the
-           * next frame is indistinguishable from a word that was always there;
-           * one that arrives is an answer to something.
-           */
-          <span className="motion-surface inline-flex animate-[surface-enter_var(--duration-instant)_var(--ease-linear)] items-center gap-1">
-            <Check aria-hidden="true" className="size-3" />
-            Verified
+          <span className="absolute inset-x-0 top-0 flex h-4 justify-center">
+            <Accepted />
           </span>
         ) : (
           hint
@@ -165,32 +165,40 @@ export function OtpField({
 }
 
 /**
- * The line under the boxes that carries the verdict (#151).
+ * The accepted state: a green check that draws itself, sliding down into the
+ * row under the boxes, with the word beside it (#151).
  *
- * ⚠ IT IS ALWAYS IN THE LAYOUT AND ONLY ITS FILL CHANGES. Mounting it on the
- * verdict would push the hint row down by its height at the exact moment the
- * person is reading it.
+ * ⚠ IT MOVES DOWN, FROM THE BOXES, BECAUSE THAT IS WHERE THE ANSWER CAME
+ * FROM. The code was typed above; the confirmation arriving out of it reads as
+ * the boxes answering, where a fade in place reads as a label changing.
  *
- * ⚠ `aria-hidden`, because the hint row below already says "Verified" or the
- * rejection in words and is the live region. A line is the same news drawn,
- * and announcing it twice is noise.
+ * ⚠ THE CHECK IS DRAWN, NOT SHOWN. `pathLength="1"` normalises the stroke so
+ * one keyframe on `stroke-dashoffset` works at any size. Under reduced motion
+ * the blanket rule in tokens.css cuts both animations to their last frame: the
+ * check and the word are simply there.
  */
-function VerdictLine({ tone }: { tone: FieldState }) {
+function Accepted() {
   return (
-    <span
-      aria-hidden="true"
-      className="relative block h-0.5 w-full overflow-hidden rounded-pill"
-    >
-      <span
-        className={cn(
-          "absolute inset-0 origin-left rounded-pill",
-          tone === "valid" &&
-            "bg-success animate-[verdict-fill_var(--duration-exit)_var(--ease-quint-out)]",
-          // Already full: a rejection is not progress, it is an answer.
-          tone === "invalid" && "bg-danger",
-          tone !== "valid" && tone !== "invalid" && "bg-transparent",
-        )}
-      />
+    <span className="flex h-4 animate-[code-accepted_450ms_var(--ease-quint-out)] items-center gap-1.5 text-xs leading-4 font-medium text-success">
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        className="size-4 shrink-0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="8" cy="8" r="7" className="opacity-30" />
+        <path
+          d="M4.75 8.25 7 10.5l4.25-4.75"
+          pathLength="1"
+          strokeDasharray="1"
+          className="animate-[check-draw_400ms_var(--ease-quint-out)_150ms_both]"
+        />
+      </svg>
+      Verified
     </span>
   )
 }

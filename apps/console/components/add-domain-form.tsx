@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Check, ChevronDown, Network } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
@@ -756,7 +755,11 @@ function ModeCard({
       <span className="min-w-0 flex-1 space-y-1">
         <span className="flex items-center gap-2">
           <span className="text-sm font-medium">{title}</span>
-          {recommended && !disabled && <Badge variant="outline">Recommended</Badge>}
+          {recommended && !disabled && (
+            <span className="rounded-full border px-1.5 py-0.5 text-2xs text-muted-foreground">
+              Recommended
+            </span>
+          )}
         </span>
         <span className="block text-xs text-muted-foreground">{description}</span>
       </span>

@@ -8,7 +8,7 @@ import { Button } from "@repo/ui/components/button"
 import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
 import { EmailInput } from "@repo/ui/components/email-input"
 import { emailProblem } from "@repo/ui/checks"
-import { OtpField, OTP_LENGTH } from "../_components/otp-field"
+import { OtpField, OTP_LENGTH } from "@repo/ui/components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
@@ -92,6 +92,8 @@ export function ResetPasswordForm({
   /** Why the last code was refused, shown under the boxes until it is retyped. */
   const [rejected, setRejected] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  /** The code and new password were accepted, for the moment before leaving. */
+  const [accepted, setAccepted] = useState(false)
 
   async function onEmail(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -138,6 +140,7 @@ export function ResetPasswordForm({
      * red, the moment the caret leaves.
      */
     setPending(true)
+    let leaving = false
 
     try {
       const verified = await signIn.resetPasswordEmailCode.verifyCode({ code })
@@ -173,11 +176,21 @@ export function ResetPasswordForm({
         // see the sign-in form. `finalizeAndLeave` also replaces rather than
         // assigns, and navigates itself if Clerk's callback never runs: see
         // _lib/finish.ts for the phone-shaped bug both of those close.
+        setAccepted(true)
+        // ⚠ THE LOCK IS KEPT FROM HERE ON - the page is leaving for the
+        // dashboard, and releasing it in `finally` re-enabled the button for
+        // the second the next page takes to load.
+        leaving = true
         const result = await finalizeAndLeave(
           (params) => signIn.finalize(params),
           afterAuthUrl,
+          { holdAccepted: true },
         )
-        if (result.error) toast.error(messageFor(result.error))
+        if (result.error) {
+          leaving = false
+          setAccepted(false)
+          toast.error(messageFor(result.error))
+        }
         return
       }
 
@@ -189,7 +202,7 @@ export function ResetPasswordForm({
     } catch {
       toast.error(TRANSPORT_FAILURE)
     } finally {
-      setPending(false)
+      if (!leaving) setPending(false)
     }
   }
 
@@ -216,6 +229,7 @@ export function ResetPasswordForm({
             }}
             state={rejected ? "invalid" : "idle"}
             hint={rejected}
+            verified={accepted}
             autoFocus
           />
           <PasswordInput

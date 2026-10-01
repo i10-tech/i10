@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { ArrowLeft, Check, Network, Pencil } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
@@ -592,7 +591,11 @@ function Choice({
       <span className="min-w-0 flex-1 space-y-1">
         <span className="flex items-center gap-2">
           <span className="text-sm font-medium">{title}</span>
-          {recommended && <Badge variant="outline">Recommended</Badge>}
+          {recommended && (
+            <span className="rounded-pill border px-1.5 py-0.5 text-2xs text-muted-foreground">
+              Recommended
+            </span>
+          )}
         </span>
         <span className="block text-xs text-muted-foreground">{description}</span>
       </span>

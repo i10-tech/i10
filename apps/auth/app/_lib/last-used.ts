@@ -63,14 +63,17 @@ export function markSignInAttempt(method: SignInMethod): void {
  * failure of that omission is silent, because a missing badge looks exactly
  * like a first visit.
  */
-export function confirmSignIn(): void {
+export function confirmSignIn(): SignInMethod | null {
   try {
     const pending = window.sessionStorage.getItem(PENDING)
-    if (!pending) return
+    if (!pending) return null
     window.localStorage.setItem(CONFIRMED, pending)
     window.sessionStorage.removeItem(PENDING)
+    // Handed back so the remembered account can record HOW it signed in.
+    return pending
   } catch {
     // As above.
+    return null
   }
 }
 

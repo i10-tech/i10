@@ -10,7 +10,7 @@ import { TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoStrategy } from "../_lib/clerk-types"
 import type { SsoProvider } from "../_lib/providers"
 import { consentPromptFor } from "../_lib/oidc"
-import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
+import { markSignInAttempt } from "../_lib/last-used"
 import { LastUsedBadge } from "./last-used-badge"
 import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
 
@@ -50,7 +50,7 @@ import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
  * create the attempt with the provider strategy, then go to the URL that comes
  * back. One request, no second object to get stale, nothing to skip.
  */
-const LOCAL_ICONS: Record<
+export const LOCAL_ICONS: Record<
   string,
   (props: React.ComponentProps<"svg">) => React.ReactNode
 > = {
@@ -72,55 +72,30 @@ const LOCAL_ICONS: Record<
  */
 const HANDOFF_TIMEOUT_MS = 15_000
 
-export function OAuthButtons({
+/**
+ * Start an SSO sign-in: the provider buttons, and a saved account card that
+ * last signed in with that provider, both go through here.
+ *
+ * ⚠ ONE COPY OF THE HANDOFF LOGIC, NOT TWO. The timeout, the bfcache restore
+ * and the redirect all have their own reasons (see the notes on each); a card
+ * that started Google its own way would be a second implementation of all of
+ * them waiting to drift.
+ */
+export function useSsoStart({
   afterAuthUrl,
   redirectRaw,
-  verb,
   intent,
-  providers,
   busy,
   onBusyChange,
 }: {
   afterAuthUrl: string
-  /**
-   * The ORIGINAL `?redirect_url=`, forwarded to the callback page rather than
-   * the resolved destination - see sso-callback/page.tsx. A resolved URL
-   * travelling through a provider's redirect is an unvalidated URL again.
-   */
   redirectRaw?: string
-  /** "Continue" reads right on both pages; the prop exists so it need not. */
-  verb?: string
-  /**
-   * Which page these buttons are on.
-   *
-   * ⚠ IT CHANGES WHAT WE ASK GOOGLE FOR, not just the label - see _lib/oidc.ts.
-   * Signing up asks for consent so a refresh token comes back; signing in shows
-   * the account chooser only, so a returning customer is not made to re-consent
-   * every visit.
-   */
   intent: "sign-in" | "sign-up"
-  /**
-   * What Clerk says is configured, already filtered for this device - see
-   * _lib/providers.ts. An empty list renders nothing at all, which is the
-   * correct answer when the instance has no SSO connections.
-   */
-  providers: SsoProvider[]
-  /** The id of the one action allowed to be running, or null. */
   busy: string | null
   onBusyChange: (busy: string | null) => void
 }) {
   const clerk = useClerk()
   const handoff = useRef<number | null>(null)
-
-  /*
-   * ⚠ READ IN AN EFFECT RATHER THAN DURING RENDER, because it comes from
-   * `localStorage` and the server has no such thing. Reading it inline would
-   * render one thing on the server and another in the browser, which React
-   * reports as a hydration mismatch and resolves by throwing away the markup.
-   * `null` on the first paint means no badge for one frame, which is the
-   * correct trade for a hint.
-   */
-  const lastUsed = useLastSignInMethod()
 
   const clearHandoff = useCallback(() => {
     if (handoff.current === null) return
@@ -268,6 +243,43 @@ export function OAuthButtons({
     }
   }
 
+  return { start, ready: clerk.loaded }
+}
+
+export function OAuthButtons({
+  afterAuthUrl,
+  redirectRaw,
+  verb,
+  intent,
+  providers,
+  busy,
+  onBusyChange,
+  lastUsed = null,
+}: {
+  afterAuthUrl: string
+  redirectRaw?: string
+  /** "Continue" reads right on both pages; the prop exists so it need not. */
+  verb?: string
+  intent: "sign-in" | "sign-up"
+  providers: SsoProvider[]
+  /** The id of the one action allowed to be running, or null. */
+  busy: string | null
+  onBusyChange: (busy: string | null) => void
+  /**
+   * The strategy to mark "Last used", or null. Decided by the sign-in form,
+   * which is the only place that can see whether a saved account already
+   * carries the chip - see _components/last-used-badge.tsx.
+   */
+  lastUsed?: string | null
+}) {
+  const { start, ready } = useSsoStart({
+    afterAuthUrl,
+    redirectRaw,
+    intent,
+    busy,
+    onBusyChange,
+  })
+
   if (providers.length === 0) return null
 
   /*
@@ -303,7 +315,7 @@ export function OAuthButtons({
             // and a click before that point is a dead button rather than a slow
             // one. `busy` covers the rest of the page, including the password
             // form.
-            disabled={!clerk.loaded || busy !== null}
+            disabled={!ready || busy !== null}
             onClick={() => start(strategy)}
           >
             {/*
@@ -326,8 +338,8 @@ export function OAuthButtons({
              * an account they already have - which is either confusing or, if
              * they act on it, the thing the badge exists to prevent in reverse.
              */}
-            {intent === "sign-in" && lastUsed === strategy && !loading && (
-              <LastUsedBadge />
+            {lastUsed === strategy && !loading && (
+              <LastUsedBadge className="absolute end-4 top-1/2 -translate-y-1/2" />
             )}
           </Button>
         )

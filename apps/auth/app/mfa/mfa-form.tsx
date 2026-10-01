@@ -1,16 +1,17 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { useSignIn } from "@clerk/nextjs"
+import { useClerk, useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
+import { Spinner } from "@repo/ui/components/spinner"
 import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
-import { OtpField } from "../_components/otp-field"
+import { OtpField } from "@repo/ui/components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
-import { finalizeAndLeave } from "../_lib/finish"
+import { finalizeAndLeave, isLeaving, leaveFor } from "../_lib/finish"
 import { useResumable } from "../_lib/resume"
 
 /*
@@ -57,6 +58,37 @@ export function MfaForm({
   signInHref: string
 }) {
   const { signIn } = useSignIn()
+  const clerk = useClerk()
+  const router = useRouter()
+  /**
+   * The method whose code is being checked or was accepted, frozen from the
+   * moment it is submitted until it is rejected.
+   *
+   * ⚠ THIS IS WHAT STOPS "START AGAIN" FLASHING AFTER A CORRECT CODE. `finalize`
+   * creates the session and then RESETS Clerk's sign-in attempt, so the next
+   * render sees a blank attempt: no status, no second factors, and `ready`
+   * false. The page used to read that as an expired sign-in and drew its dead
+   * end in the gap before the dashboard arrived. Once a code is accepted, the
+   * attempt no longer decides what this screen shows.
+   */
+  const [doneWith, setDoneWith] = useState<Method | null>(null)
+  /**
+   * The other methods as they were when the code went out, for the same
+   * reason and over the same window as `doneWith`.
+   *
+   * ⚠ THIS IS WHAT STOPPED THE CARD JUMPING DOWN UNDER "Verifying…". When the
+   * code is accepted Clerk empties the attempt's second factors, so the "use
+   * another method" links vanished, the card got shorter, and because the
+   * page centres it vertically, everything moved down by half that height
+   * just before the check animated in.
+   */
+  const [frozenFactors, setFrozenFactors] = useState<Method[]>([])
+  /**
+   * The code was accepted but the session could not be made, even after a
+   * retry. The page stays (nothing to go back to: the code is spent) and the
+   * button finishes the same sign-in again instead of verifying.
+   */
+  const [stuck, setStuck] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
   // ⚠ REMEMBERED ACROSS A RELOAD, so somebody who switched to a backup code
   // is not dropped back on the authenticator app. See _lib/resume.tsx.
@@ -103,7 +135,7 @@ export function MfaForm({
     available[0] ??
     null
 
-  const active = method ?? preferred
+  const active = doneWith ?? method ?? preferred
 
   /*
    * ⚠ THE "ALREADY SENT" FACT HAS TO SURVIVE A RELOAD, AND A REF DOES NOT. This
@@ -194,11 +226,49 @@ export function MfaForm({
       .catch(() => toast.error(TRANSPORT_FAILURE))
   }, [signIn, ready, active, alreadySent, markSent])
 
+  /**
+   * Turn the accepted attempt into a session and leave. True when leaving.
+   *
+   * ⚠ ON FAILURE THE PAGE STAYS, FROZEN, WITH THE REASON UNDER THE BOXES.
+   * It used to undo its success state, which made the empty attempt look
+   * stranded and sent the person back to sign-in with no session - the
+   * flaky "correct code, back at the password" bug.
+   */
+  async function finish(): Promise<boolean> {
+    if (!signIn) return false
+    const result = await finalizeAndLeave(
+      (params) => signIn.finalize(params),
+      afterAuthUrl,
+      { holdAccepted: true },
+    )
+    if (!result.error) return true
+    setAccepted(false)
+    setStuck(true)
+    setRejected(
+      "Your code was right, but we could not finish signing you in. Try again.",
+    )
+    return false
+  }
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!signIn || !active || pending) return
 
+    if (stuck) {
+      // The code is spent; only the last step is repeated.
+      setPending(true)
+      setRejected(null)
+      setAccepted(true)
+      const left = await finish()
+      if (!left) setPending(false)
+      return
+    }
+
     setPending(true)
+    let leaving = false
+    // Frozen from the moment the code goes out - see `doneWith`.
+    setDoneWith(active)
+    setFrozenFactors(available)
 
     try {
       const { error } =
@@ -220,6 +290,7 @@ export function MfaForm({
          * until it is acted on, which is what the red border is for.
          */
         setRejected(messageFor(error))
+        setDoneWith(null)
         // ⚠ CLEARED ON FAILURE, for the code strategies only. A wrong six-digit
         // code is never salvaged by editing one box, and leaving it filled
         // means the next attempt starts by deleting six characters. A backup
@@ -232,50 +303,60 @@ export function MfaForm({
         // ⚠ BEFORE THE NAVIGATION, so the green lands while there is still a
         // screen to land on. See `verified` on OtpField.
         setAccepted(true)
-        // Cross-origin, and `decorateUrl` carries Safari's cookie refresh -
-        // see the sign-in form. `finalizeAndLeave` also replaces rather than
-        // assigns, and navigates itself if Clerk's callback never runs: see
-        // _lib/finish.ts for the phone-shaped bug both of those close.
-        const result = await finalizeAndLeave(
-          (params) => signIn.finalize(params),
-          afterAuthUrl,
-        )
-        if (result.error) toast.error(messageFor(result.error))
+        // ⚠ THE LOCK IS KEPT FROM HERE ON. The page is leaving for the
+        // dashboard; releasing it in `finally` re-enabled the button for the
+        // second the next page takes to load, inviting a second press.
+        leaving = await finish()
         return
       }
 
+      setDoneWith(null)
       toast.error("That worked, but the sign-in needs another step we cannot do yet.")
     } catch {
+      setDoneWith(null)
       toast.error(TRANSPORT_FAILURE)
     } finally {
-      setPending(false)
+      if (!leaving) setPending(false)
     }
   }
 
-  if (!signIn) {
-    return <p className="text-muted-foreground text-sm">Loading…</p>
-  }
+  /*
+   * ⚠ NO "START AGAIN" SCREEN. With no second-factor attempt in progress -
+   * it expired, it finished in another tab, or somebody opened /mfa directly -
+   * there is nothing this page can do, and telling them so only adds a click.
+   * Straight back to the sign-in box, replacing this entry so Back does not
+   * return here. An accepted code never reaches this: `doneWith` keeps the
+   * form on screen until the dashboard loads.
+   */
+  /*
+   * ⚠ NEVER WHILE A CODE IS IN FLIGHT OR JUST ACCEPTED. The instant
+   * `verifyTOTP` succeeds, Clerk flips the attempt to `complete` and that
+   * re-renders this form BEFORE `doneWith` lands - so `ready` read false for
+   * one render, this redirect fired, and /sign-in (still holding the password
+   * step in session storage) showed for a second, cutting the green check off
+   * until `leaveFor` won the race to the dashboard. `pending` covers the
+   * request, `doneWith` the hold after it, and `complete` the gap between.
+   */
+  const finishing = pending || doneWith !== null || signIn?.status === "complete"
+  const stranded = !finishing && (!ready || !active)
+  useEffect(() => {
+    if (!signIn || !stranded || isLeaving()) return
+    /*
+     * ⚠ SIGNED IN MEANS THE DASHBOARD, NEVER SIGN-IN. An empty attempt with a
+     * live session is a sign-in that already finished - in this tab after a
+     * remount, or in another one - and the only right place to send it is
+     * where it was going.
+     */
+    if (clerk.user) {
+      leaveFor(clerk.buildUrlWithAuth(afterAuthUrl))
+      return
+    }
+    router.replace(signInHref)
+  }, [signIn, stranded, router, signInHref, clerk, afterAuthUrl])
 
-  if (!ready || !active) {
-    return (
-      <FieldGroup>
-        <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-bold">Start again</h1>
-          <p className="text-sm text-balance text-muted-foreground">
-            This sign-in has expired or was finished somewhere else.
-          </p>
-        </div>
-        <Link
-          href={signInHref}
-          className="text-center text-sm underline underline-offset-4"
-        >
-          Back to sign in
-        </Link>
-      </FieldGroup>
-    )
-  }
+  if (!signIn || stranded || !active) return null
 
-  const others = available.filter((m) => m !== active)
+  const others = (doneWith ? frozenFactors : available).filter((m) => m !== active)
 
   return (
     <form ref={formRef} className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
@@ -331,8 +412,21 @@ export function MfaForm({
            * 36px this page showed a visibly smaller button than the sign-in
            * page it arrives from, one click apart.
            */}
-          <Button type="submit" size="xl" disabled={pending || code.length === 0}>
-            {pending ? "Verifying…" : "Verify"}
+          <Button
+            type="submit"
+            size="xl"
+            disabled={pending || (!stuck && code.length === 0)}
+          >
+            {pending ? (
+              <>
+                <Spinner aria-hidden="true" aria-label={undefined} />
+                Verifying…
+              </>
+            ) : stuck ? (
+              "Try again"
+            ) : (
+              "Verify"
+            )}
           </Button>
         </Field>
 
