@@ -3,10 +3,14 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowLeft, type LucideIcon } from "lucide-react"
+import { ArrowLeft, Search, type LucideIcon } from "lucide-react"
 import { motion, type Transition, type Variants } from "motion/react"
 import { cn } from "cn"
+import { Kbd } from "@repo/ui/components/kbd"
 import { StatusDot } from "@repo/ui/components/status"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { useRail } from "@/components/rail"
+import { OPEN_COMMAND_MENU } from "@/components/command-menu"
 import type { Attention } from "@/lib/types"
 import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
@@ -58,6 +62,7 @@ export function SidebarNav({
   attention?: Promise<Attention["domains"] | null>
 }) {
   const pathname = usePathname()
+  const { collapsed } = useRail()
 
   /*
    * ⚠ THE RAIL SWAPS RATHER THAN THE PAGE GROWING A SECOND COLUMN. Settings
@@ -81,7 +86,32 @@ export function SidebarNav({
     <nav
       className="flex flex-col gap-4 px-2 py-1"
       aria-label={settings ? "Settings" : "Primary"}
+      onKeyDown={moveFocus}
     >
+      {/*
+       * The way into ⌘K from the rail, for anybody who does not know the
+       * shortcut is there. It opens the same menu the shortcut does.
+       */}
+      {scope === "rail" && !settings && (
+        <RailItem collapsed={collapsed} label="Search" shortcut="⌘K">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event(OPEN_COMMAND_MENU))}
+            className={cn(
+              "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-sm",
+              "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
+              "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+              collapsed && "justify-center px-0",
+            )}
+          >
+            <Search className="size-4 shrink-0" />
+            <span className={cn("flex-1 truncate text-left", collapsed && "sr-only")}>
+              Search
+            </span>
+            {!collapsed && <Kbd>⌘K</Kbd>}
+          </button>
+        </RailItem>
+      )}
       {settings && (
         /*
          * ⚠ "Back to the dashboard" RATHER THAN A BARE ARROW. An arrow alone in a
@@ -106,9 +136,20 @@ export function SidebarNav({
       {shown.map((group, i) => (
         <div key={group.label ?? `group-${i}`} className="flex flex-col gap-0.5">
           {group.label && (
-            <h2 className="px-2 pt-1 pb-1 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
+            <h2
+              className={cn(
+                "px-2 pt-1 pb-1 text-2xs font-medium tracking-wide text-muted-foreground uppercase",
+                // ⚠ STILL THERE FOR A SCREEN READER WHEN COLLAPSED. The groups
+                // are the rail's structure; only the drawn word goes, and a
+                // hairline keeps the groups apart for the eye.
+                collapsed && "sr-only",
+              )}
+            >
               {group.label}
             </h2>
+          )}
+          {collapsed && group.label && (
+            <span aria-hidden className="mx-2 mb-1 h-px bg-sidebar-border" />
           )}
           {group.items
             .filter((item) => !item.hidden)
@@ -117,63 +158,67 @@ export function SidebarNav({
               const Icon = item.icon
 
               return (
-                <MotionLink
-                  key={item.href}
-                  href={item.href}
-                  // ⚠ `aria-current="page"` IS THE ACCESSIBLE HALF OF THE
-                  // HIGHLIGHT. The background fill tells a sighted person where
-                  // they are; without this a screen reader reads twelve
-                  // identical links.
-                  aria-current={active ? "page" : undefined}
-                  /*
-                   * ⚠ THE GESTURE STATE LIVES ON THE ROW, NOT ON THE ICON, AND
-                   * THAT IS WHAT MAKES THE WHOLE ROW THE TARGET. Motion
-                   * propagates a variant name down to any child that declares
-                   * the same variant, so hovering anywhere on the link - the
-                   * label, the padding, the far right edge - runs the icon's
-                   * animation. Putting `whileHover` on the icon itself would
-                   * mean it only fired on a 16px square.
-                   */
-                  initial={false}
-                  whileHover="hover"
-                  whileTap="tap"
-                  className={cn(
-                    // ⚠ `isolate` IS WHAT KEEPS THE TRAVELLING FILL BEHIND THE
-                    // LABEL AND IN FRONT OF THE RAIL. It gives the row its own
-                    // stacking context, so the highlight's `-z-10` puts it
-                    // under this row's text rather than under the sidebar
-                    // itself, where it would simply be invisible.
-                    // ⚠ 28px ROWS, NOT 32, SO THE RAIL FITS A LAPTOP WITHOUT
-                    // SCROLLING (decided 2026-09-29). Thirteen rows at 32px
-                    // overflowed a 700px-tall window by 40px; at 28 they fit
-                    // with room, and still clear the 24px minimum target.
-                    "group relative isolate flex h-7 items-center gap-2.5 rounded-md px-2 text-sm",
-                    // ⚠ COLOUR ONLY, SO `--ease-linear` IS CORRECT HERE. The
-                    // motion rules reserve eased curves for things that MOVE;
-                    // a linear ramp on a background is exactly what Base's
-                    // fifth timing row is for.
-                    "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
-                    active
-                      ? "font-medium text-sidebar-accent-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-                  )}
-                >
-                  {active && (
-                    <motion.span
-                      layoutId={`${scope}-active`}
-                      aria-hidden
-                      className="absolute inset-0 -z-10 rounded-md bg-sidebar-accent"
-                      transition={ACTIVE_SPRING}
-                    />
-                  )}
-                  <NavIcon icon={Icon} active={active} />
-                  <span className="truncate">{item.label}</span>
-                  {item.href === "/domains" && attention && (
-                    <React.Suspense fallback={null}>
-                      <AttentionMark attention={attention} />
-                    </React.Suspense>
-                  )}
-                </MotionLink>
+                <RailItem key={item.href} collapsed={collapsed} label={item.label}>
+                  <MotionLink
+                    href={item.href}
+                    // ⚠ `aria-current="page"` IS THE ACCESSIBLE HALF OF THE
+                    // HIGHLIGHT. The background fill tells a sighted person where
+                    // they are; without this a screen reader reads twelve
+                    // identical links.
+                    aria-current={active ? "page" : undefined}
+                    /*
+                     * ⚠ THE GESTURE STATE LIVES ON THE ROW, NOT ON THE ICON, AND
+                     * THAT IS WHAT MAKES THE WHOLE ROW THE TARGET. Motion
+                     * propagates a variant name down to any child that declares
+                     * the same variant, so hovering anywhere on the link - the
+                     * label, the padding, the far right edge - runs the icon's
+                     * animation. Putting `whileHover` on the icon itself would
+                     * mean it only fired on a 16px square.
+                     */
+                    initial={false}
+                    whileHover="hover"
+                    whileTap="tap"
+                    className={cn(
+                      // ⚠ `isolate` IS WHAT KEEPS THE TRAVELLING FILL BEHIND THE
+                      // LABEL AND IN FRONT OF THE RAIL. It gives the row its own
+                      // stacking context, so the highlight's `-z-10` puts it
+                      // under this row's text rather than under the sidebar
+                      // itself, where it would simply be invisible.
+                      // ⚠ 28px ROWS, NOT 32, SO THE RAIL FITS A LAPTOP WITHOUT
+                      // SCROLLING (decided 2026-09-29). Thirteen rows at 32px
+                      // overflowed a 700px-tall window by 40px; at 28 they fit
+                      // with room, and still clear the 24px minimum target.
+                      "group relative isolate flex h-7 items-center gap-2.5 rounded-md px-2 text-sm",
+                      collapsed && "justify-center px-0",
+                      // ⚠ COLOUR ONLY, SO `--ease-linear` IS CORRECT HERE. The
+                      // motion rules reserve eased curves for things that MOVE;
+                      // a linear ramp on a background is exactly what Base's
+                      // fifth timing row is for.
+                      "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
+                      active
+                        ? "font-medium text-sidebar-accent-foreground"
+                        : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                    )}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId={`${scope}-active`}
+                        aria-hidden
+                        className="absolute inset-0 -z-10 rounded-md bg-sidebar-accent"
+                        transition={ACTIVE_SPRING}
+                      />
+                    )}
+                    <NavIcon icon={Icon} active={active} />
+                    <span className={cn("truncate", collapsed && "sr-only")}>
+                      {item.label}
+                    </span>
+                    {item.href === "/domains" && attention && (
+                      <React.Suspense fallback={null}>
+                        <AttentionMark attention={attention} corner={collapsed} />
+                      </React.Suspense>
+                    )}
+                  </MotionLink>
+                </RailItem>
               )
             })}
         </div>
@@ -239,6 +284,61 @@ function NavIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) 
 }
 
 /**
+ * A rail row, with its label as a tooltip when the rail is icons only.
+ *
+ * ⚠ NO TOOLTIP WHEN EXPANDED. The label is already on screen, and a tooltip
+ * repeating it beside the pointer is noise on every pass down the rail.
+ */
+function RailItem({
+  collapsed,
+  label,
+  shortcut,
+  children,
+}: {
+  collapsed: boolean
+  label: string
+  shortcut?: string
+  children: React.ReactElement
+}) {
+  if (!collapsed) return children
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right">
+        {label}
+        {shortcut && <Kbd>{shortcut}</Kbd>}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * ↑ and ↓ move between the rail's rows, Home and End to the ends.
+ *
+ * ⚠ ON TOP OF TAB, NOT INSTEAD OF IT. Every row stays in the tab order, so
+ * nothing about the rail changes for somebody who tabs; the arrows are the
+ * faster path for somebody already in it, the way a menu behaves.
+ */
+function moveFocus(event: React.KeyboardEvent<HTMLElement>) {
+  const keys = ["ArrowDown", "ArrowUp", "Home", "End"]
+  if (!keys.includes(event.key) || event.altKey || event.metaKey || event.ctrlKey)
+    return
+  const rows = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>("a[href], button:not(:disabled)"),
+  )
+  const at = rows.indexOf(document.activeElement as HTMLElement)
+  if (at === -1) return
+  event.preventDefault()
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? rows.length - 1
+        : (at + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length
+  rows[next]?.focus()
+}
+
+/**
  * A dot on "Domains" while anything there needs somebody (#158 follow-up):
  * a domain not yet verified or whose proof went missing, an incoming transfer
  * offer, or a reputation finding or pause.
@@ -257,8 +357,11 @@ function NavIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) 
  */
 function AttentionMark({
   attention,
+  corner = false,
 }: {
   attention: Promise<Attention["domains"] | null>
+  /** Collapsed rail: a dot on the icon's corner, since there is no row end. */
+  corner?: boolean
 }) {
   const a = React.use(attention)
   if (!a || a.total === 0) return null
@@ -272,7 +375,13 @@ function AttentionMark({
     a.reputation === "at_risk" && "sending at risk",
   ].filter(Boolean)
   return (
-    <span className="ml-auto flex items-center" title={reasons.join(", ")}>
+    <span
+      className={cn(
+        "flex items-center",
+        corner ? "absolute top-0.5 right-3.5" : "ml-auto",
+      )}
+      title={reasons.join(", ")}
+    >
       <StatusDot
         tone={
           a.reputation === "paused" || a.reputation === "held" ? "danger" : "warning"
