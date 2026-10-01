@@ -155,12 +155,19 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   app.get("/domains/:id", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
-    const [domain, displaced] = await Promise.all([
+    const [domain, displaced, checks] = await Promise.all([
       d.domains.get(tenantId, c.req.param("id")),
       d.domains.displaced(tenantId),
+      // ⚠ CONSOLE ONLY, like `displaced_at`: the events strip's timestamps.
+      d.domains.checks(tenantId, c.req.param("id")),
     ])
     return domain
-      ? c.json({ ...domain, displaced_at: displaced[domain.id] ?? null })
+      ? c.json({
+          ...domain,
+          displaced_at: displaced[domain.id] ?? null,
+          verified_at: checks?.verified_at ?? null,
+          dns_checked_at: checks?.dns_checked_at ?? null,
+        })
       : c.json(notFound("No domain with that id."), 404)
   })
 

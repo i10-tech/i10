@@ -54,6 +54,10 @@ export function contactsStore(
           )
         }
 
+        if (opts.subscribed !== undefined) {
+          where.push(eq(contacts.unsubscribed, !opts.subscribed))
+        }
+
         if (opts.segmentId) {
           /*
            * ⚠ `EXISTS`, NOT A JOIN. A join to `segment_contacts` would multiply

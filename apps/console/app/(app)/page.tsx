@@ -12,12 +12,14 @@ import {
 } from "@repo/ui/components/page"
 import { Status } from "@/components/status"
 import { OverviewChart } from "@/components/overview-chart"
+import { ApiButton } from "@/components/list/api-button"
 import { RangePicker } from "@/components/range-picker"
 import { Stat, StatRow } from "@/components/stat"
 import { PanelError } from "@/components/panel-error"
 import { SendingHealthCard } from "@/components/sending-health"
 import { tryApi } from "@/lib/api"
 import { formatRate, formatRelative, bareAddress } from "@/lib/format"
+import { SNIPPETS } from "@/lib/snippets"
 import type { EmailRow, Overview, Page as ApiPage } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Overview" }
@@ -60,6 +62,7 @@ export default async function OverviewPage({
           <PageTitle>Overview</PageTitle>
           <PageActions>
             <RangePicker value={days} />
+            <ApiButton snippet={SNIPPETS.emails} />
           </PageActions>
         </PageHeaderRow>
       </PageHeader>
@@ -135,7 +138,7 @@ export default async function OverviewPage({
              */}
             <SendingHealthCard />
 
-            <section className="rounded-lg border p-4">
+            <section className="rounded-2xl border p-4">
               <h2 className="mb-3 text-sm font-medium">Delivery</h2>
               <OverviewChart series={overview.data.series} />
             </section>
@@ -143,7 +146,7 @@ export default async function OverviewPage({
         )}
 
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-          <section className="min-w-0 rounded-lg border">
+          <section className="min-w-0 rounded-2xl border">
             <header className="flex items-center justify-between border-b px-4 py-3">
               <h2 className="text-sm font-medium">Recent sends</h2>
               <Button variant="ghost" size="sm" asChild>
@@ -212,7 +215,7 @@ export default async function OverviewPage({
 
           <section className="space-y-3">
             {overview.ok && (
-              <div className="divide-y overflow-hidden rounded-lg border">
+              <div className="divide-y overflow-hidden rounded-2xl border">
                 <Stat
                   label="Domains"
                   value={`${overview.data.counts.verifiedDomains} / ${overview.data.counts.domains}`}
@@ -238,7 +241,7 @@ export default async function OverviewPage({
               </div>
             )}
 
-            <div className="rounded-lg border p-4">
+            <div className="rounded-2xl border p-4">
               <h2 className="text-sm font-medium">Set-up</h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 Add a domain, publish its records and send a test - the same flow you

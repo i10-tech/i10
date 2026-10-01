@@ -28,7 +28,12 @@ export const metadata: Metadata = { title: "Contacts" }
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; segment_id?: string; cursor?: string }>
+  searchParams: Promise<{
+    search?: string
+    segment_id?: string
+    status?: string
+    cursor?: string
+  }>
 }) {
   const params = await searchParams
 
@@ -37,6 +42,7 @@ export default async function ContactsPage({
       query: {
         search: params.search,
         segment_id: params.segment_id,
+        status: params.status,
         cursor: params.cursor,
         limit: 50,
       },

@@ -4,6 +4,7 @@ import * as React from "react"
 import { MoreHorizontal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
+import { rowMenuClass } from "@/components/list/table"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,7 +27,12 @@ export function SegmentActions({ id, name }: { id: string; name: string }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${name}`}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={rowMenuClass}
+            aria-label={`Actions for ${name}`}
+          >
             <MoreHorizontal />
           </Button>
         </DropdownMenuTrigger>

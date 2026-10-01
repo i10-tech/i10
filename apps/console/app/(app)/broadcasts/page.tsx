@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import Link from "next/link"
+import { Megaphone } from "lucide-react"
 import {
   Page,
   PageActions,
@@ -9,12 +9,11 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
-import { Status } from "@/components/status"
+import { BroadcastsList } from "@/components/marketing-lists"
 import { NewBroadcastButton } from "@/components/new-broadcast"
 import { EmptyState } from "@/components/empty-state"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
-import { formatNumber, formatRelative } from "@/lib/format"
 import type { BroadcastSummary } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Broadcasts" }
@@ -66,57 +65,13 @@ export default async function BroadcastsPage() {
           />
         ) : !hasRows ? (
           <EmptyState
+            icon={<Megaphone />}
             title="No broadcasts yet"
             description="Write one, point it at a segment, and send it. Drafts are safe to leave lying around."
+            secondary={<NewBroadcastButton />}
           />
         ) : (
-          <ul className="divide-y overflow-hidden rounded-lg border">
-            {result.data.data.map((broadcast) => (
-              <li key={broadcast.id}>
-                <Link
-                  href={`/broadcasts/${broadcast.id}`}
-                  className="flex items-center gap-4 px-4 py-3 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/30"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{broadcast.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {broadcast.subject || <em>No subject yet</em>}
-                      {broadcast.segment_name && ` · ${broadcast.segment_name}`}
-                    </p>
-                  </div>
-
-                  {broadcast.recipient_count !== null && (
-                    <span className="tabular hidden shrink-0 text-xs text-muted-foreground sm:block">
-                      {formatNumber(broadcast.recipient_count)} recipients
-                    </span>
-                  )}
-
-                  <Status
-                    status={
-                      broadcast.status === "draft"
-                        ? "queued"
-                        : broadcast.status === "canceled"
-                          ? "canceled"
-                          : broadcast.status === "sent"
-                            ? "delivered"
-                            : broadcast.status === "scheduled"
-                              ? "scheduled"
-                              : "sending"
-                    }
-                    label={broadcast.status}
-                    className="shrink-0"
-                  />
-
-                  <span
-                    className="shrink-0 text-xs whitespace-nowrap text-muted-foreground"
-                    title={broadcast.created_at}
-                  >
-                    {formatRelative(broadcast.sent_at ?? broadcast.created_at)}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <BroadcastsList broadcasts={result.data.data} />
         )}
       </PageBody>
     </Page>

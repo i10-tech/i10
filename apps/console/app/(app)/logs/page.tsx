@@ -1,16 +1,20 @@
 import type { Metadata } from "next"
 import {
   Page,
+  PageActions,
   PageBody,
   PageDescription,
   PageHeader,
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
+import { ApiButton } from "@/components/list/api-button"
 import { LogsTable } from "@/components/logs-table"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
-import type { Page as ApiPage, RequestRow } from "@/lib/types"
+import { rangeStart } from "@/lib/range"
+import { SNIPPETS } from "@/lib/snippets"
+import type { ApiKeyRow, Page as ApiPage, RequestRow } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Logs" }
 
@@ -31,21 +35,43 @@ export const metadata: Metadata = { title: "Logs" }
 export default async function LogsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; cursor?: string }>
+  searchParams: Promise<{
+    status?: string
+    search?: string
+    method?: string
+    api_key_id?: string
+    days?: string
+    cursor?: string
+  }>
 }) {
   const params = await searchParams
   const status =
     params.status === "error" || params.status === "ok" ? params.status : undefined
 
-  const result = await tryApi<ApiPage<RequestRow>>("/console/requests", {
-    query: { status, cursor: params.cursor, limit: 50 },
-  })
+  const [result, keys] = await Promise.all([
+    tryApi<ApiPage<RequestRow>>("/console/requests", {
+      query: {
+        status,
+        search: params.search,
+        method: params.method,
+        api_key_id: params.api_key_id,
+        from: rangeStart(params.days),
+        cursor: params.cursor,
+        limit: 50,
+      },
+    }),
+    // The key filter's choices; without them the log still loads.
+    tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
+  ])
 
   return (
     <Page>
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Logs</PageTitle>
+          <PageActions>
+            <ApiButton snippet={SNIPPETS.logs} />
+          </PageActions>
         </PageHeaderRow>
         <PageDescription>
           Requests your servers have made to the API, with what we answered. Bodies are
@@ -63,7 +89,9 @@ export default async function LogsPage({
           <LogsTable
             rows={result.data.data}
             nextCursor={result.data.nextCursor}
-            status={status}
+            apiKeys={
+              keys.ok ? keys.data.data.map((k) => ({ id: k.id, name: k.name })) : []
+            }
           />
         )}
       </PageBody>

@@ -666,6 +666,34 @@
       "when": 1790767593481,
       "tag": "0094_github_definers",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1790827114986,
+      "tag": "0095_template_folders",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1790827119142,
+      "tag": "0096_template_folders_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1790827129811,
+      "tag": "0097_templates_drop_folder_label",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1790827809441,
+      "tag": "0098_template_titles",
+      "breakpoints": true
     }
   ]
 }

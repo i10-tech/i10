@@ -272,7 +272,6 @@
           }
         },
         "required": [
-          "from",
           "to"
         ]
       },
@@ -485,7 +484,6 @@
             }
           },
           "required": [
-            "from",
             "to"
           ]
         },

@@ -1,21 +1,17 @@
 import type { Metadata } from "next"
-import Link from "next/link"
+import { BackButton } from "@/components/back-button"
 import { notFound } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/page"
+import { Megaphone } from "lucide-react"
+import { Page, PageBody, PageHeader } from "@repo/ui/components/page"
+import { DetailHero } from "@/components/detail-hero"
+import { Journey } from "@/components/journey"
 import { Status } from "@/components/status"
 import { BroadcastEditor } from "@/components/broadcast-editor"
 import { Stat, StatRow } from "@/components/stat"
 import { tryApi } from "@/lib/api"
 import { formatRate } from "@/lib/format"
+import { broadcastJourney } from "@/lib/journey"
+import { describeStatus } from "@/lib/status"
 import type { BroadcastDetail, DomainSummary, SegmentRow, TopicRow } from "@/lib/types"
 
 export async function generateMetadata({
@@ -58,45 +54,37 @@ export default async function BroadcastPage({
   }
 
   const sent = broadcast.data.status !== "draft"
+  // The broadcast's state, in the delivery log's vocabulary of colours.
+  const tone =
+    broadcast.data.status === "draft"
+      ? "queued"
+      : broadcast.data.status === "sent"
+        ? "delivered"
+        : broadcast.data.status === "canceled"
+          ? "canceled"
+          : broadcast.data.status === "scheduled"
+            ? "scheduled"
+            : "sending"
 
   return (
     <Page>
       <PageHeader>
-        <PageHeaderRow>
-          <div className="flex min-w-0 items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              asChild
-              aria-label="Back to broadcasts"
-            >
-              <Link href="/broadcasts">
-                <ArrowLeft />
-              </Link>
-            </Button>
-            <PageTitle className="truncate">{broadcast.data.name}</PageTitle>
-          </div>
-          <PageActions>
-            <Status
-              status={
-                broadcast.data.status === "draft"
-                  ? "queued"
-                  : broadcast.data.status === "sent"
-                    ? "delivered"
-                    : broadcast.data.status === "canceled"
-                      ? "canceled"
-                      : broadcast.data.status === "scheduled"
-                        ? "scheduled"
-                        : "sending"
-              }
-              label={broadcast.data.status}
-              variant="pill"
-            />
-          </PageActions>
-        </PageHeaderRow>
+        <DetailHero
+          back={<BackButton href="/broadcasts" label="Back to broadcasts" />}
+          icon={<Megaphone />}
+          tone={describeStatus(tone).tone}
+          eyebrow="Broadcast"
+          title={broadcast.data.name}
+          subtitle={broadcast.data.subject || undefined}
+          actions={
+            <Status status={tone} label={broadcast.data.status} variant="pill" />
+          }
+        />
       </PageHeader>
 
       <PageBody className="space-y-8">
+        <Journey title="Broadcast events" steps={broadcastJourney(broadcast.data)} />
+
         {sent && (
           <StatRow>
             <Stat label="Recipients" value={broadcast.data.stats.total} />

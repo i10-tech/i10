@@ -138,7 +138,7 @@ export function TemplatePreviewPanel({
         )}
       </aside>
 
-      <section className="min-w-0 overflow-hidden rounded-lg border">
+      <section className="min-w-0 overflow-hidden rounded-2xl border">
         <div className="border-b px-4 py-2.5">
           <p className="text-2xs text-muted-foreground">Subject</p>
           <p className="truncate text-sm">

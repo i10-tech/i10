@@ -46,12 +46,13 @@ export default function MailboxesPage() {
 
       <PageBody>
         <EmptyState
+          icon={<Inbox />}
           title="Not connected to the dashboard yet"
           description="Mailbox provisioning is live on the API and authenticated per person rather than per workspace, so who may see this list is still an open question. Until it is answered, this page deliberately shows nothing rather than guessing."
           action={{ label: "Read the routing decision", href: "/domains" }}
         />
 
-        <div className="mt-6 flex items-start gap-3 rounded-lg border px-4 py-3">
+        <div className="mt-6 flex items-start gap-3 rounded-2xl border px-4 py-3">
           <Inbox className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="space-y-1 text-sm">
             <p className="font-medium">What exists today</p>

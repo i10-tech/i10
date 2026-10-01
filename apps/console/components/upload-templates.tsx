@@ -67,6 +67,22 @@ export function UploadTemplatesButton() {
   )
 }
 
+/**
+ * The same dialog with no button of its own, opened from the templates
+ * page's New menu (Template, Folder, Upload files).
+ */
+export function UploadTemplatesDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <UploadDialog mode={{ kind: "folder" }} open={open} onOpenChange={onOpenChange} />
+  )
+}
+
 export function UploadVersionButton({
   templateId,
   name,
@@ -87,9 +103,21 @@ export function UploadVersionButton({
   )
 }
 
-function UploadDialog({ mode, trigger }: { mode: Mode; trigger: React.ReactNode }) {
+function UploadDialog({
+  mode,
+  trigger,
+  open: controlledOpen,
+  onOpenChange,
+}: {
+  mode: Mode
+  trigger?: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const router = useRouter()
-  const [open, setOpen] = React.useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
+  const open = controlledOpen ?? uncontrolledOpen
+  const setOpen = onOpenChange ?? setUncontrolledOpen
   const [picked, setPicked] = React.useState<Picked[]>([])
   const [entry, setEntry] = React.useState("")
   const [problems, setProblems] = React.useState<string[]>([])
@@ -157,7 +185,7 @@ function UploadDialog({ mode, trigger }: { mode: Mode; trigger: React.ReactNode 
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>

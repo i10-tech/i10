@@ -12,6 +12,8 @@ import type {
   Domain,
   PropertyRow,
   SegmentRow,
+  TemplateDetail,
+  TemplateFolder,
   TemplatePreview,
   TemplateRow,
   TemplateUploadOutcome,
@@ -894,25 +896,153 @@ export async function deleteBroadcast(id: string) {
 
 // ── Templates ───────────────────────────────────────────────────────────────
 
+/**
+ * ⚠ EVERY LIST THE CHANGE COULD SHOW ON. A folder's page is its own route,
+ * so revalidating `/templates` alone left a folder's view stale.
+ */
+const TEMPLATE_LISTS = ["/templates", "/templates/folder/[id]"]
+
+/**
+ * A new template. With no name it opens as "Untitled Template", the way
+ * Resend's New -> Template does; the editor is where it gets named.
+ */
 export async function createTemplate(input: {
-  name: string
-  folder?: string | null
+  name?: string
+  title?: string
+  folder_id?: string | null
   kind?: "html" | "visual"
 }) {
   return run(
     () => api<TemplateRow>("/console/templates", { method: "POST", body: input }),
-    ["/templates"],
+    TEMPLATE_LISTS,
+    { refreshCaller: false },
   )
 }
 
-export async function updateTemplate(id: string, patch: Record<string, unknown>) {
+export async function createTemplateFolder(name: string) {
+  return run(
+    () =>
+      api<TemplateFolder>("/console/template-folders", {
+        method: "POST",
+        body: { name },
+      }),
+    TEMPLATE_LISTS,
+  )
+}
+
+export async function renameTemplateFolder(id: string, name: string) {
+  return run(
+    () =>
+      api<TemplateFolder>(`/console/template-folders/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: { name },
+      }),
+    TEMPLATE_LISTS,
+  )
+}
+
+export async function deleteTemplateFolder(id: string) {
+  return run(
+    () =>
+      api<{ deleted: true }>(`/console/template-folders/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    TEMPLATE_LISTS,
+    { refreshCaller: false },
+  )
+}
+
+/** Files templates in a folder; `null` is the top level. */
+export async function moveTemplates(ids: string[], folderId: string | null) {
+  return run(
+    () =>
+      api<{ moved: number }>("/console/templates/move", {
+        method: "POST",
+        body: { ids, folder_id: folderId },
+      }),
+    TEMPLATE_LISTS,
+  )
+}
+
+export async function deleteTemplates(ids: string[]) {
+  return run(
+    () =>
+      api<{ deleted: string[] }>("/console/templates/delete", {
+        method: "POST",
+        body: { ids },
+      }),
+    TEMPLATE_LISTS,
+  )
+}
+
+export async function duplicateTemplate(id: string) {
+  return run(
+    () =>
+      api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}/duplicate`, {
+        method: "POST",
+      }),
+    TEMPLATE_LISTS,
+    { refreshCaller: false },
+  )
+}
+
+/** Sends the draft as a test email, through the ordinary send path. */
+export async function sendTemplateTest(
+  id: string,
+  input: { to: string[]; from?: string },
+) {
+  return run(
+    () =>
+      api<{ id: string | null }>(`/console/templates/${encodeURIComponent(id)}/test`, {
+        method: "POST",
+        body: input,
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * The template as stored now, with its history - for the editor, after a
+ * publish or a promote, without re-rendering the page under the cursor.
+ */
+export async function getTemplate(id: string) {
+  return run(
+    () => api<TemplateDetail>(`/console/templates/${encodeURIComponent(id)}`),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** The draft filled as a test would be: what a list thumbnail shows. */
+export async function templateDraftPreview(id: string) {
+  return run(
+    () =>
+      api<TemplatePreview>(
+        `/console/templates/${encodeURIComponent(id)}/draft-preview`,
+      ),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export async function updateTemplate(
+  id: string,
+  patch: Record<string, unknown>,
+  { quiet = false }: { quiet?: boolean } = {},
+) {
   return run(
     () =>
       api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: patch,
       }),
-    ["/templates", `/templates/${encodeURIComponent(id)}`],
+    [...TEMPLATE_LISTS, `/templates/${encodeURIComponent(id)}`],
+    // ⚠ THE EDITOR'S AUTOSAVE IS QUIET. It saves every pause in typing, and a
+    // re-render of the editor page per save would reset what is on screen
+    // under the cursor; the editor keeps its own state and only the lists
+    // need to know.
+    { refreshCaller: !quiet },
   )
 }
 
@@ -922,7 +1052,8 @@ export async function publishTemplate(id: string) {
       api<TemplateRow>(`/console/templates/${encodeURIComponent(id)}/publish`, {
         method: "POST",
       }),
-    ["/templates", `/templates/${encodeURIComponent(id)}`],
+    [...TEMPLATE_LISTS, `/templates/${encodeURIComponent(id)}`],
+    { refreshCaller: false },
   )
 }
 
@@ -932,7 +1063,7 @@ export async function deleteTemplate(id: string) {
       api<{ deleted: true }>(`/console/templates/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
-    ["/templates"],
+    TEMPLATE_LISTS,
     { refreshCaller: false },
   )
 }
@@ -1036,7 +1167,7 @@ export async function promoteTemplateVersion(id: string, number: number) {
         `/console/templates/${encodeURIComponent(id)}/versions/${number}/promote`,
         { method: "POST" },
       ),
-    ["/templates", `/templates/${encodeURIComponent(id)}`],
+    [...TEMPLATE_LISTS, `/templates/${encodeURIComponent(id)}`],
   )
 }
 
@@ -1057,12 +1188,25 @@ export async function restoreTemplateDraft(id: string, number: number) {
       method: "PATCH",
       body: {
         subject: version.subject,
-        html: version.display.html,
+        from: version.from,
+        reply_to: version.reply_to,
+        preview_text: version.preview_text,
+        // ⚠ WITHOUT THE PREVIEW LINE PUBLISHING WROTE INTO IT. The draft keeps
+        // the line in `preview_text`; left in the HTML too, the code view
+        // would show a block nobody wrote.
+        html:
+          version.display.html?.replace(
+            /<div data-i10-preview[^>]*>[\s\S]*?<\/div>/g,
+            "",
+          ) ?? null,
         text: version.display.text,
+        ...(version.kind === "visual" || version.kind === "html"
+          ? { kind: version.kind }
+          : {}),
         ...(version.kind === "visual" ? { design: version.design ?? null } : {}),
       },
     })
-  }, ["/templates", `/templates/${encodeURIComponent(id)}`])
+  }, [...TEMPLATE_LISTS, `/templates/${encodeURIComponent(id)}`])
 }
 
 /**

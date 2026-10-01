@@ -1,22 +1,20 @@
 import type { Metadata } from "next"
 import Link from "next/link"
+import { BackButton } from "@/components/back-button"
 import { notFound } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
 import { CopyField } from "@repo/ui/components/copy"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/page"
+import { Mail } from "lucide-react"
+import { Page, PageBody, PageHeader } from "@repo/ui/components/page"
+import { DetailHero, MetaGrid } from "@/components/detail-hero"
+import { Journey } from "@/components/journey"
 import { Status } from "@/components/status"
+import { Time } from "@/components/time"
 import { EmailBodyTabs } from "@/components/email-body-tabs"
 import { EventTimeline } from "@/components/event-timeline"
 import { tryApi } from "@/lib/api"
 import { formatBytes, formatExact } from "@/lib/format"
+import { emailJourney } from "@/lib/journey"
+import { describeStatus } from "@/lib/status"
 import type { EmailDetail } from "@/lib/types"
 
 export async function generateMetadata({
@@ -63,22 +61,39 @@ export default async function EmailDetailPage({
   return (
     <Page>
       <PageHeader>
-        <PageHeaderRow>
-          <div className="flex min-w-0 items-center gap-3">
-            <Button variant="ghost" size="icon-sm" asChild aria-label="Back to emails">
-              <Link href="/emails">
-                <ArrowLeft />
-              </Link>
-            </Button>
-            <PageTitle className="truncate">
-              {email.subject || <em className="text-muted-foreground">No subject</em>}
-            </PageTitle>
-          </div>
-          <PageActions>
-            <Status status={email.last_event} variant="pill" />
-          </PageActions>
-        </PageHeaderRow>
+        <DetailHero
+          back={<BackButton href="/emails" label="Back to emails" />}
+          icon={<Mail />}
+          tone={describeStatus(email.last_event).tone}
+          eyebrow="Email"
+          title={email.subject || <em className="text-muted-foreground">No subject</em>}
+        />
       </PageHeader>
+
+      <div className="mx-auto w-full max-w-7xl space-y-8 px-6 pt-6">
+        <MetaGrid
+          items={[
+            {
+              label: "From",
+              value: <span className="font-mono text-xs">{email.from}</span>,
+            },
+            {
+              label: email.to.length > 1 ? `To (${email.to.length})` : "To",
+              value: (
+                <span className="font-mono text-xs" title={email.to.join(", ")}>
+                  {email.to.join(", ")}
+                </span>
+              ),
+            },
+            {
+              label: "Status",
+              value: <Status status={email.last_event} variant="pill" />,
+            },
+            { label: "Created", value: <Time iso={email.created_at} /> },
+          ]}
+        />
+        <Journey title="Email events" steps={emailJourney(email)} />
+      </div>
 
       <PageBody className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         {/*
@@ -92,7 +107,7 @@ export default async function EmailDetailPage({
           <EmailBodyTabs html={email.html} text={email.text} headers={email.headers} />
 
           {email.attachments && email.attachments.length > 0 && (
-            <section className="rounded-lg border">
+            <section className="rounded-2xl border">
               <h2 className="border-b px-4 py-2.5 text-sm font-medium">Attachments</h2>
               <ul className="divide-y">
                 {email.attachments.map((attachment, index) => (
@@ -122,8 +137,8 @@ export default async function EmailDetailPage({
         </div>
 
         <aside className="min-w-0 space-y-6 lg:order-2">
-          <section className="rounded-lg border">
-            <h2 className="border-b px-4 py-2.5 text-sm font-medium">Timeline</h2>
+          <section className="rounded-2xl border">
+            <h2 className="border-b px-4 py-2.5 text-sm font-medium">Event log</h2>
             <div className="px-4 py-3">
               <EventTimeline
                 events={email.events}
@@ -133,7 +148,7 @@ export default async function EmailDetailPage({
             </div>
           </section>
 
-          <section className="rounded-lg border">
+          <section className="rounded-2xl border">
             <h2 className="border-b px-4 py-2.5 text-sm font-medium">Details</h2>
             <dl className="divide-y text-sm">
               <Field label="From" value={email.from} mono />
@@ -189,7 +204,7 @@ export default async function EmailDetailPage({
              * pastes into a support ticket or a search engine, and the log
              * table's one-line summary deliberately cuts it.
              */
-            <section className="rounded-lg border border-danger/25 bg-danger/5">
+            <section className="rounded-2xl border border-danger/25 bg-danger/5">
               <h2 className="border-b border-danger/25 px-4 py-2.5 text-sm font-medium text-danger">
                 Last error
               </h2>
@@ -200,7 +215,7 @@ export default async function EmailDetailPage({
           )}
 
           {email.tags && Object.keys(email.tags).length > 0 && (
-            <section className="rounded-lg border">
+            <section className="rounded-2xl border">
               <h2 className="border-b px-4 py-2.5 text-sm font-medium">Tags</h2>
               <dl className="divide-y text-sm">
                 {Object.entries(email.tags).map(([key, value]) => (

@@ -380,3 +380,43 @@ cluster) and `TEMPLATE_RENDERER_SECRET` (Doppler, `api` config), both or
 neither.
 Without them HTML templates work and `.tsx` uploads answer 501. The renderer
 being down stops uploads and nothing else.
+
+## Folders, template defaults and the editor (2026-10-01)
+
+Agreed with the user, modelled on Resend's templates.
+
+**Folders are rows** (`core.template_folders`), one level deep, with
+`templates.folder_id` set null when a folder is deleted, so deleting a folder
+never deletes a template. The old free-text `templates.folder` label was copied
+into folders by `0096_template_folders_backfill.sql` and then dropped. An
+upload's or a repository's directory (`transactional/auth`) becomes a folder
+of exactly that name, made on first use.
+
+**Templates carry Resend's defaults.** `from`, `reply_to` and `preview_text`
+live on the draft and are copied into each version. A send that names a
+template may leave out `from` (the contract allows it only with a template);
+the request's own `from`, `reply_to` and `subject` always win. The template's
+sender is checked by the send path's own rule twice: when it is saved (it must
+be on a domain this workspace has verified) and at send, where template
+resolution now runs before the key-scope and verified-domain checks so those
+judge the address that actually goes out.
+
+**Variables are declared** (`templates.variables`: name, string or number,
+fallback). At publish a declared fallback is copied onto the version's
+variable; a send that leaves that variable out gets the fallback, and one that
+leaves out a variable with no fallback is refused as before. A value of the
+wrong type is still refused; the fallback never stands in for it. This is pure
+substitution in `fill` and runs nowhere new.
+
+**Preview text** is written into the body at publish, as a hidden preheader
+block marked `data-i10-preview`, before placeholders are found (so it may use
+variables). It is idempotent, and the draft keeps the HTML as written.
+
+**The editor** is a page of its own (`/templates/:id/editor`, outside the
+sidebar): React Email's editor with its Inspector, bubble menus, slash
+commands, theming (basic or minimal, plus global CSS, both kept in the
+document) and image upload; a Code view (CodeMirror) beside a live preview.
+Variables are chips that export as plain `{{ name }}`, so the send path never
+learns they exist. Editing the HTML in the Code view makes the template an
+HTML one; going back to Writing rebuilds blocks from the HTML after a confirm.
+Uploaded and GitHub templates keep their own page.

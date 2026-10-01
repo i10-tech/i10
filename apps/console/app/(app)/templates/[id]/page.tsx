@@ -1,8 +1,6 @@
 import type { Metadata } from "next"
-import Link from "next/link"
-import { notFound } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { BackButton } from "@/components/back-button"
+import { notFound, redirect } from "next/navigation"
 import { CopyField } from "@repo/ui/components/copy"
 import {
   Page,
@@ -12,7 +10,6 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
-import { TemplateEditor } from "@/components/template-editor"
 import { TemplateFiles } from "@/components/template-files"
 import { TemplatePreviewPanel } from "@/components/template-preview"
 import { SourceBadge } from "@/components/template-source"
@@ -21,8 +18,8 @@ import { TemplateTabs } from "@/components/template-tabs"
 import { TemplateVersions } from "@/components/template-versions"
 import { Time } from "@/components/time"
 import { UploadVersionButton } from "@/components/upload-templates"
-import { VisualTemplateEditor } from "@/components/visual-template-editor"
 import { tryApi } from "@/lib/api"
+import { isEditable, titleOf } from "@/lib/templates"
 import type { TemplateDetail } from "@/lib/types"
 
 export async function generateMetadata({
@@ -34,7 +31,7 @@ export async function generateMetadata({
   const result = await tryApi<TemplateDetail>(
     `/console/templates/${encodeURIComponent(id)}`,
   )
-  return { title: result.ok ? result.data.name : "Template" }
+  return { title: result.ok ? titleOf(result.data) : "Template" }
 }
 
 /**
@@ -68,6 +65,10 @@ export default async function TemplatePage({
     throw new Error(result.error.message)
   }
   const template = result.data
+  // ⚠ ONE WRITTEN HERE OPENS IN THE EDITOR, which has its preview, versions
+  // and details built in; this page is for uploaded and GitHub templates.
+  if (isEditable(template))
+    redirect(`/templates/${encodeURIComponent(template.id)}/editor`)
   const live = template.history.find((v) => v.live)
 
   const preview = {
@@ -94,54 +95,41 @@ export default async function TemplatePage({
       />
     ),
   }
-  const tabs =
-    template.kind === "html" || template.kind === "visual"
+  const tabs = [
+    preview,
+    versions,
+    ...(live
       ? [
           {
-            value: "editor",
-            label: "Editor",
-            content:
-              template.kind === "visual" ? (
-                <VisualTemplateEditor template={template} />
-              ) : (
-                <TemplateEditor template={template} />
-              ),
+            value: "source",
+            label: "Source",
+            content: <TemplateFiles templateId={template.id} number={live.number} />,
           },
-          preview,
-          versions,
         ]
-      : [
-          preview,
-          versions,
-          ...(live
-            ? [
-                {
-                  value: "source",
-                  label: "Source",
-                  content: (
-                    <TemplateFiles templateId={template.id} number={live.number} />
-                  ),
-                },
-              ]
-            : []),
-        ]
+      : []),
+  ]
 
   return (
     <Page>
       <PageHeader>
         <PageHeaderRow>
           <div className="flex min-w-0 items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              asChild
-              aria-label="Back to templates"
-            >
-              <Link href="/templates">
-                <ArrowLeft />
-              </Link>
-            </Button>
-            <PageTitle className="truncate font-mono">{template.name}</PageTitle>
+            <BackButton
+              href={
+                template.folder_id
+                  ? `/templates/folder/${encodeURIComponent(template.folder_id)}`
+                  : "/templates"
+              }
+              label="Back to templates"
+            />
+            <div className="min-w-0">
+              <PageTitle className="truncate">{titleOf(template)}</PageTitle>
+              {template.title && (
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {template.name}
+                </p>
+              )}
+            </div>
             <SourceBadge source={template.source} />
           </div>
           {template.source === "upload" && (

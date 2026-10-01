@@ -2486,6 +2486,52 @@ export const templateSource = core.enum("template_source", [
 ])
 
 /**
+ * A folder a workspace keeps templates in, as Resend has them.
+ *
+ * ⚠ A ROW, NOT A LABEL ON EACH TEMPLATE. Folders used to be a text column on
+ * `templates`, which cannot hold an EMPTY folder - and making one before
+ * filling it is exactly how people organise. A row also gives a folder an id
+ * the URL can carry and a name that can change without touching its templates.
+ *
+ * ⚠ FLAT. One level, like Resend's; an upload's `transactional/auth` directory
+ * becomes a folder named exactly that.
+ */
+export const templateFolders = core.table(
+  "template_folders",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("template_folders_tenant_name_uq").on(t.tenantId, t.name),
+    // Inline rather than `tenantPolicy`, which is declared further down.
+    pgPolicy("template_folders_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * A variable a template declares in the editor, as Resend's "Create variable"
+ * makes one: its name, its type, and the value a send gets when it leaves the
+ * variable out. Without a fallback, leaving it out refuses the send.
+ */
+export interface DeclaredVariable {
+  name: string
+  type: "string" | "number"
+  fallback: string | null
+}
+
+/**
  * A reusable email, referenced by id or by name from a send (#160, #161).
  *
  * ⚠ THIS ROW IS THE TEMPLATE'S IDENTITY AND ITS DRAFT; WHAT A SEND USES IS A
@@ -2505,13 +2551,38 @@ export const templates = core.table(
 
     /** Unique in the workspace, and the alias a send may use instead of the id. */
     name: text("name").notNull(),
-    /** A path like `transactional/auth`. Flat storage, rendered as a tree. */
-    folder: text("folder"),
+    /**
+     * What people call it, as Resend shows a template: "Password reset" over
+     * the alias `password-reset`. Null shows the alias.
+     *
+     * ⚠ SEPARATE FROM `name` SO RENAMING NEVER BREAKS A SEND. Code sends by
+     * the alias; the title can change as often as anybody likes.
+     */
+    title: text("title"),
+    /**
+     * The folder it is filed in, or null for the top level.
+     *
+     * ⚠ SET NULL, NOT CASCADE. Deleting a folder must never delete templates
+     * production code is sending by id; they move to the top level.
+     */
+    folderId: uuid("folder_id").references(() => templateFolders.id, {
+      onDelete: "set null",
+    }),
     kind: templateKind("kind").notNull().default("html"),
     source: templateSource("source").notNull().default("managed"),
 
     /** The draft subject, with `{{ name }}` placeholders. Copied into each version. */
     subject: text("subject"),
+    /**
+     * The draft's default sender and reply-to, as Resend's templates have them.
+     * Copied into each version; a send's own `from` and `reply_to` win.
+     */
+    from: text("from"),
+    replyTo: text("reply_to").array(),
+    /** The inbox preview line. Copied into each version. */
+    previewText: text("preview_text"),
+    /** Variables declared in the editor, with their fallbacks. */
+    variables: jsonb("variables").$type<DeclaredVariable[]>(),
     /** The draft body of an `html` template. Unused by `tsx`, whose source is a version's. */
     html: text("html"),
     text: text("text"),
@@ -2597,14 +2668,25 @@ export const templateVersions = core.table(
     kind: templateKind("kind").notNull(),
 
     subject: text("subject"),
+    /**
+     * The sender and reply-to a send gets when it names none (Resend's
+     * template defaults). Null means the send must give its own.
+     */
+    from: text("from"),
+    replyTo: text("reply_to").array(),
+    /** The inbox preview line the version was published with, for reopening it. */
+    previewText: text("preview_text"),
     html: text("html"),
     text: text("text"),
     /** The markers' nonce. Random per version. */
     nonce: text("nonce").notNull(),
-    /** `[{ path, preview }]` - what a send must provide, in marker order. */
+    /**
+     * `[{ path, preview, fallback? }]` - what a send must provide, in marker
+     * order. A variable with a `fallback` may be left out of a send.
+     */
     variables: jsonb("variables")
       .notNull()
-      .$type<{ path: string; preview: string }[]>(),
+      .$type<{ path: string; preview: string; fallback?: string }[]>(),
 
     /**
      * The entry `.tsx`, kept per version (#161). The skeleton is what sends

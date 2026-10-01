@@ -1,7 +1,5 @@
 import type { Metadata } from "next"
-import Link from "next/link"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { BackButton } from "@/components/back-button"
 import {
   Page,
   PageBody,
@@ -26,11 +24,7 @@ export default function NewDomainPage() {
       <PageHeader>
         <PageHeaderRow>
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon-sm" asChild aria-label="Back to domains">
-              <Link href="/domains">
-                <ArrowLeft />
-              </Link>
-            </Button>
+            <BackButton href="/domains" label="Back to domains" />
             <PageTitle>Add a domain</PageTitle>
           </div>
         </PageHeaderRow>

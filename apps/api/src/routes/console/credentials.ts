@@ -3,7 +3,7 @@ import { cacheKeyFor } from "../../auth/api-key.js"
 import { domainScope, scopedDomains } from "../../auth/scope.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
-import { notFound, notWired, readJson, validation } from "./http.js"
+import { asId, notFound, notWired, readJson, validation } from "./http.js"
 
 /**
  * The two things a customer's own systems authenticate with: API keys, and the
@@ -359,7 +359,13 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     const q = c.req.query()
     return c.json(
       await d.queries.listDeliveries(tenantId, {
-        ...(q.endpoint_id ? { endpointId: q.endpoint_id } : {}),
+        ...(asId(q.endpoint_id) ? { endpointId: asId(q.endpoint_id)! } : {}),
+        ...(q.status === "pending" || q.status === "delivered" || q.status === "failed"
+          ? { status: q.status }
+          : {}),
+        ...(q.event_type && /^[a-z_.]{1,64}$/.test(q.event_type)
+          ? { eventType: q.event_type }
+          : {}),
         ...(q.cursor ? { cursor: q.cursor } : {}),
         ...(q.limit ? { limit: Number(q.limit) } : {}),
       }),

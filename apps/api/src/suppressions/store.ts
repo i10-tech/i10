@@ -23,7 +23,7 @@ import type { TenantSuppressions } from "./ses.js"
 export interface SuppressionStore {
   list(
     tenantId: string,
-    opts: { search?: string; cursor?: string; limit?: number },
+    opts: { search?: string; reason?: string; cursor?: string; limit?: number },
   ): Promise<Page<SuppressionRow>>
   add(tenantId: string, address: string): Promise<void>
   remove(
@@ -96,6 +96,7 @@ export function suppressionStore({
             sql`${suppressions.address} ilike ${`%${escapeLike(opts.search)}%`}`,
           )
         }
+        if (opts.reason) where.push(sql`${suppressions.reason}::text = ${opts.reason}`)
         if (cursor) {
           where.push(
             sql`(${suppressions.createdAt}, ${suppressions.address}) < (${cursor.at}::timestamptz, ${cursor.id})`,

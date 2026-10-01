@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
-import Link from "next/link"
+import { Mail, SearchX } from "lucide-react"
 import {
   Page,
+  PageActions,
   PageBody,
   PageDescription,
   PageHeader,
@@ -9,21 +10,26 @@ import {
   PageTitle,
 } from "@repo/ui/components/page"
 import { Status } from "@/components/status"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@repo/ui/components/table"
 import { EmailFilters } from "@/components/email-filters"
+import { ApiButton } from "@/components/list/api-button"
+import {
+  CellLink,
+  ListBody,
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListRow,
+  ListTable,
+} from "@/components/list/table"
+import { ListRegion, UrlList } from "@/components/list/url-state"
 import { LoadMore } from "@/components/load-more"
 import { PanelError } from "@/components/panel-error"
 import { EmptyState } from "@/components/empty-state"
 import { tryApi } from "@/lib/api"
 import { bareAddress, firstLine, formatRelative } from "@/lib/format"
-import type { EmailRow, Page as ApiPage } from "@/lib/types"
+import { rangeStart } from "@/lib/range"
+import { SNIPPETS } from "@/lib/snippets"
+import type { ApiKeyRow, DomainSummary, EmailRow, Page as ApiPage } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Emails" }
 
@@ -58,25 +64,35 @@ export default async function EmailsPage({
     domain_id?: string
     broadcast_id?: string
     search?: string
+    days?: string
+    api_key_id?: string
     cursor?: string
   }>
 }) {
   const params = await searchParams
 
-  const result = await tryApi<ApiPage<EmailRow>>("/console/emails", {
-    query: {
-      status: params.status,
-      domain_id: params.domain_id,
-      // ⚠ FORWARDED, WHICH IT WAS NOT. The broadcast page links here with this
-      // filter to answer "what did this broadcast actually send"; dropping it
-      // silently showed the whole account's log instead, which looks like the
-      // link working.
-      broadcast_id: params.broadcast_id,
-      search: params.search,
-      cursor: params.cursor,
-      limit: PAGE_SIZE,
-    },
-  })
+  // ⚠ THE FILTERS' CHOICES FAIL QUIETLY: without them the menus are shorter,
+  // and the log itself still loads.
+  const [result, domains, keys] = await Promise.all([
+    tryApi<ApiPage<EmailRow>>("/console/emails", {
+      query: {
+        status: params.status,
+        domain_id: params.domain_id,
+        // ⚠ FORWARDED, WHICH IT WAS NOT. The broadcast page links here with this
+        // filter to answer "what did this broadcast actually send"; dropping it
+        // silently showed the whole account's log instead, which looks like the
+        // link working.
+        broadcast_id: params.broadcast_id,
+        search: params.search,
+        from: rangeStart(params.days),
+        api_key_id: params.api_key_id,
+        cursor: params.cursor,
+        limit: PAGE_SIZE,
+      },
+    }),
+    tryApi<{ data: DomainSummary[] }>("/console/domains"),
+    tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
+  ])
 
   /*
    * ⚠ AN EMPTY PAGE WITH A CURSOR IS A REAL STATE, AND IT USED TO BE A DEAD END.
@@ -90,165 +106,177 @@ export default async function EmailsPage({
    */
   const rows = result.ok ? result.data.data : []
   const nextCursor = result.ok ? result.data.nextCursor : null
-  const filtered = Boolean(params.search || params.status || params.broadcast_id)
+  const filtered = Boolean(
+    params.search ||
+    params.status ||
+    params.broadcast_id ||
+    params.days ||
+    params.domain_id ||
+    params.api_key_id,
+  )
 
   return (
     <Page>
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Emails</PageTitle>
+          <PageActions>
+            <ApiButton snippet={SNIPPETS.emails} />
+          </PageActions>
         </PageHeaderRow>
         <PageDescription>
           Every message this workspace has sent, with what happened to it.
         </PageDescription>
       </PageHeader>
 
-      <PageBody width="full" className="space-y-4">
-        <EmailFilters />
-
-        {!result.ok ? (
-          <PanelError title="Could not load the log" message={result.error.message} />
-        ) : rows.length === 0 && nextCursor ? (
-          /*
-           * ⚠ NOT AN `EmptyState`, BECAUSE THE LIST IS NOT EMPTY - this page of
-           * it is. The distinction is the difference between "you have no
-           * bounces" and "no bounces in the last fifty messages", and only one
-           * of those is true here.
-           */
-          <div className="space-y-4 rounded-lg border px-4 py-8 text-center">
-            <div>
-              <p className="text-sm font-medium">Nothing on this page</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                None of the last {PAGE_SIZE} messages match. There is more log below.
-              </p>
-            </div>
-            <LoadMore cursor={nextCursor} />
-          </div>
-        ) : rows.length === 0 ? (
-          <EmptyState
-            title={filtered ? "Nothing matches those filters" : "No mail yet"}
-            description={
-              filtered
-                ? "Try a wider date range, or clear the filters."
-                : "Send your first email and it will appear here within a second of the API accepting it."
+      <PageBody width="full">
+        <UrlList className="space-y-4">
+          <EmailFilters
+            domains={
+              domains.ok
+                ? domains.data.data.map((d) => ({ id: d.id, name: d.name }))
+                : []
             }
-            action={
-              filtered
-                ? { label: "Clear filters", href: "/emails" }
-                : { label: "Set up sending", href: "/onboarding" }
+            apiKeys={
+              keys.ok ? keys.data.data.map((k) => ({ id: k.id, name: k.name })) : []
             }
           />
-        ) : (
-          <>
-            <div className="overflow-hidden rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-[9rem]">Status</TableHead>
-                    <TableHead className="w-[16rem]">To</TableHead>
-                    <TableHead>Subject</TableHead>
-                    <TableHead className="hidden w-[16rem] lg:table-cell">
-                      From
-                    </TableHead>
-                    <TableHead className="w-[9rem] text-right">Sent</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((email) => (
-                    <TableRow key={email.id} className="group">
-                      {/*
-                       * ⚠ THE LINK IS INSIDE EVERY CELL RATHER THAN WRAPPING
-                       * THE ROW, BECAUSE A <tr> CANNOT CONTAIN AN <a>. Making
-                       * the row clickable with an onClick handler would mean a
-                       * client component for the whole table, no middle-click
-                       * to open in a tab, and nothing for a keyboard. Repeating
-                       * the anchor is more markup and the only correct answer.
-                       */}
-                      <TableCell className="p-0">
-                        <Link
-                          href={`/emails/${email.id}`}
-                          className="block px-3 py-2.5"
-                        >
-                          <Status status={email.last_event} />
-                        </Link>
-                      </TableCell>
-                      <TableCell className="max-w-0 p-0">
-                        <Link
-                          href={`/emails/${email.id}`}
-                          className="block truncate px-3 py-2.5 font-mono text-xs"
-                          title={email.to.join(", ")}
-                        >
-                          {email.to[0] ? bareAddress(email.to[0]) : "-"}
-                          {email.to.length > 1 && (
-                            <span className="text-muted-foreground">
-                              {" "}
-                              +{email.to.length - 1}
-                            </span>
-                          )}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="max-w-0 p-0">
-                        {/*
-                         * ⚠ THE ERROR SITS UNDER THE SUBJECT, NOT AFTER IT. Both
-                         * used to share one truncating line, so a failed message
-                         * read "131871 is your verification code MessageRejected:
-                         * Email addr…" - the reason was cut off exactly where it
-                         * started to say something, and it ran into the subject
-                         * as though it were part of it. Two lines let each
-                         * truncate on its own, which is the only way both can be
-                         * readable in a fixed column.
-                         *
-                         * ⚠ AND THE `title` CARRIES BOTH, so the full reason is
-                         * one hover away without opening the message.
-                         */}
-                        <Link
-                          href={`/emails/${email.id}`}
-                          className="block px-3 py-2.5"
-                          title={
-                            email.last_error
-                              ? `${email.subject}\n\n${email.last_error}`
-                              : email.subject
-                          }
-                        >
-                          <span className="block truncate text-sm">
-                            {email.subject || (
-                              <em className="text-muted-foreground">No subject</em>
-                            )}
-                          </span>
-                          {email.last_error && (
-                            <span className="mt-0.5 block truncate text-xs text-danger">
-                              {firstLine(email.last_error, 120)}
-                            </span>
-                          )}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="hidden max-w-0 p-0 lg:table-cell">
-                        <Link
-                          href={`/emails/${email.id}`}
-                          className="block truncate px-3 py-2.5 font-mono text-xs text-muted-foreground"
-                          title={email.from}
-                        >
-                          {bareAddress(email.from)}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="p-0 text-right">
-                        <Link
-                          href={`/emails/${email.id}`}
-                          className="block px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground"
-                          title={email.created_at}
-                        >
-                          {formatRelative(email.created_at)}
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
 
-            <LoadMore cursor={nextCursor} />
-          </>
-        )}
+          <ListRegion>
+            {!result.ok ? (
+              <PanelError
+                title="Could not load the log"
+                message={result.error.message}
+              />
+            ) : rows.length === 0 && nextCursor ? (
+              /*
+               * ⚠ NOT AN `EmptyState`, BECAUSE THE LIST IS NOT EMPTY - this page
+               * of it is. The distinction is the difference between "you have no
+               * bounces" and "no bounces in the last fifty messages", and only
+               * one of those is true here.
+               */
+              <div className="space-y-4 rounded-2xl border px-4 py-8 text-center">
+                <div>
+                  <p className="text-sm font-medium">Nothing on this page</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    None of the last {PAGE_SIZE} messages match. There is more log
+                    below.
+                  </p>
+                </div>
+                <LoadMore cursor={nextCursor} />
+              </div>
+            ) : rows.length === 0 ? (
+              <EmptyState
+                icon={filtered ? <SearchX /> : <Mail />}
+                title={filtered ? "Nothing matches those filters" : "No mail yet"}
+                description={
+                  filtered
+                    ? "Try a wider date range, or clear the filters."
+                    : "Send your first email and it will appear here within a second of the API accepting it."
+                }
+                action={
+                  filtered
+                    ? { label: "Clear filters", href: "/emails" }
+                    : { label: "Set up sending", href: "/onboarding" }
+                }
+              />
+            ) : (
+              <div className="space-y-4">
+                <ListTable>
+                  <ListHeader>
+                    <ListHead className="w-[9rem]">Status</ListHead>
+                    <ListHead className="w-[16rem]">To</ListHead>
+                    <ListHead>Subject</ListHead>
+                    <ListHead className="hidden w-[16rem] lg:table-cell">From</ListHead>
+                    <ListHead className="w-[9rem] text-right">Sent</ListHead>
+                  </ListHeader>
+                  <ListBody>
+                    {rows.map((email) => {
+                      const href = `/emails/${email.id}`
+                      return (
+                        <ListRow key={email.id}>
+                          {/*
+                           * ⚠ THE LINK IS INSIDE EVERY CELL RATHER THAN WRAPPING
+                           * THE ROW, BECAUSE A <tr> CANNOT CONTAIN AN <a>. Making
+                           * the row clickable with an onClick handler would mean a
+                           * client component for the whole table, no middle-click
+                           * to open in a tab, and nothing for a keyboard.
+                           */}
+                          <ListCell className="p-0">
+                            <CellLink href={href} className="pl-4">
+                              <Status status={email.last_event} />
+                            </CellLink>
+                          </ListCell>
+                          <ListCell className="max-w-0 p-0">
+                            <CellLink
+                              href={href}
+                              className="truncate font-mono text-xs"
+                              title={email.to.join(", ")}
+                            >
+                              {email.to[0] ? bareAddress(email.to[0]) : "-"}
+                              {email.to.length > 1 && (
+                                <span className="text-muted-foreground">
+                                  {" "}
+                                  +{email.to.length - 1}
+                                </span>
+                              )}
+                            </CellLink>
+                          </ListCell>
+                          <ListCell className="max-w-0 p-0">
+                            {/*
+                             * ⚠ THE ERROR SITS UNDER THE SUBJECT, NOT AFTER IT, so
+                             * each truncates on its own, and the `title` carries
+                             * both - the full reason is one hover away.
+                             */}
+                            <CellLink
+                              href={href}
+                              title={
+                                email.last_error
+                                  ? `${email.subject}\n\n${email.last_error}`
+                                  : email.subject
+                              }
+                            >
+                              <span className="block truncate text-sm">
+                                {email.subject || (
+                                  <em className="text-muted-foreground">No subject</em>
+                                )}
+                              </span>
+                              {email.last_error && (
+                                <span className="mt-0.5 block truncate text-xs text-danger">
+                                  {firstLine(email.last_error, 120)}
+                                </span>
+                              )}
+                            </CellLink>
+                          </ListCell>
+                          <ListCell className="hidden max-w-0 p-0 lg:table-cell">
+                            <CellLink
+                              href={href}
+                              className="truncate font-mono text-xs text-muted-foreground"
+                              title={email.from}
+                            >
+                              {bareAddress(email.from)}
+                            </CellLink>
+                          </ListCell>
+                          <ListCell className="p-0 text-right">
+                            <CellLink
+                              href={href}
+                              className="pr-4 text-xs whitespace-nowrap text-muted-foreground"
+                              title={email.created_at}
+                            >
+                              {formatRelative(email.created_at)}
+                            </CellLink>
+                          </ListCell>
+                        </ListRow>
+                      )
+                    })}
+                  </ListBody>
+                </ListTable>
+
+                <LoadMore cursor={nextCursor} />
+              </div>
+            )}
+          </ListRegion>
+        </UrlList>
       </PageBody>
     </Page>
   )

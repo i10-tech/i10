@@ -9,6 +9,8 @@ import type { SesStatusStore } from "../../ses-status/store.js"
 import type { SuppressionStore } from "../../suppressions/store.js"
 import type { MarketingStore } from "../../console/marketing.js"
 import type { TemplateStore } from "../../templates/store.js"
+import type { SendEmail } from "@repo/contracts"
+import type { AcceptOutcome } from "../../send/accept.js"
 import type { Renderer } from "../../templates/renderer.js"
 import type { TemplateAssets } from "../../templates/assets.js"
 import type { GitHubApp } from "../../github/client.js"
@@ -93,6 +95,21 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * settings, uploads answer 501 and the editor takes image addresses only.
    */
   templateAssets?: TemplateAssets
+  /**
+   * Sends one email down the ordinary send path, as the workspace - what a
+   * template's "Test email" uses. Optional; without it the route answers 501.
+   *
+   * ⚠ THE SAME PATH AS AN API SEND, so a test is signed, logged, suppression-
+   * checked and metered exactly like the real thing, and refused for exactly
+   * the same reasons (an unverified sender, a paused workspace).
+   */
+  /**
+   * Which of these domains the workspace may send from - the send path's own
+   * answer, so a template's From is held to exactly the rule a send is.
+   * Optional; without it a From is checked for shape only.
+   */
+  sendableFrom?: (tenantId: string, domains: string[]) => Promise<Set<string>>
+  sendTest?: (tenantId: string, payload: SendEmail) => Promise<AcceptOutcome>
   /**
    * GitHub-connected templates (#235). Optional: without the GITHUB_APP_*
    * settings the routes answer 501 and nothing else changes.

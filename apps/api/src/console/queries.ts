@@ -184,6 +184,29 @@ export interface EmailFilters {
   search?: string
   from?: Date
   to?: Date
+  /** Only messages sent with this API key. */
+  apiKeyId?: string
+  cursor?: string
+  limit?: number
+}
+
+/** The delivery log's filters, all optional and combined with AND. */
+export interface DeliveryFilters {
+  endpointId?: string
+  status?: "pending" | "delivered" | "failed"
+  eventType?: string
+  cursor?: string
+  limit?: number
+}
+
+/** The request log's filters, all optional and combined with AND. */
+export interface RequestFilters {
+  status?: "ok" | "error"
+  /** A substring of the route pattern, e.g. `emails`. */
+  search?: string
+  method?: string
+  apiKeyId?: string
+  from?: Date
   cursor?: string
   limit?: number
 }
@@ -205,14 +228,8 @@ export interface ConsoleQueries {
   overview(tenantId: string, days: number): Promise<Overview>
   listEmails(tenantId: string, filters: EmailFilters): Promise<Page<EmailRow>>
   emailDetail(tenantId: string, id: string): Promise<EmailDetail | null>
-  listDeliveries(
-    tenantId: string,
-    opts: { endpointId?: string; cursor?: string; limit?: number },
-  ): Promise<Page<DeliveryRow>>
-  listRequests(
-    tenantId: string,
-    opts: { cursor?: string; limit?: number; status?: "ok" | "error" },
-  ): Promise<Page<RequestRow>>
+  listDeliveries(tenantId: string, opts: DeliveryFilters): Promise<Page<DeliveryRow>>
+  listRequests(tenantId: string, opts: RequestFilters): Promise<Page<RequestRow>>
   recordRequest(input: RequestRecord): Promise<void>
 }
 
@@ -383,6 +400,7 @@ export function consoleQueries(
           where.push(eq(messages.broadcastId, filters.broadcastId))
         if (filters.from) where.push(gte(messages.createdAt, filters.from))
         if (filters.to) where.push(lte(messages.createdAt, filters.to))
+        if (filters.apiKeyId) where.push(eq(messages.apiKeyId, filters.apiKeyId))
 
         if (filters.search) {
           /*
@@ -689,6 +707,11 @@ export function consoleQueries(
         const where: SQL[] = []
         if (opts.endpointId)
           where.push(eq(webhookDeliveries.endpointId, opts.endpointId))
+        if (opts.status) where.push(eq(webhookDeliveries.status, opts.status))
+        // ⚠ COMPARED AS TEXT: an event name the enum does not know is a filter
+        // that matches nothing, not a 500 from a failed cast.
+        if (opts.eventType)
+          where.push(sql`${webhookDeliveries.eventType}::text = ${opts.eventType}`)
         if (cursor) {
           where.push(
             sql`(${webhookDeliveries.createdAt}, ${webhookDeliveries.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`,
@@ -754,6 +777,11 @@ export function consoleQueries(
         const where: SQL[] = []
         if (opts.status === "error") where.push(gte(apiRequests.status, 400))
         if (opts.status === "ok") where.push(lt(apiRequests.status, 400))
+        if (opts.method) where.push(eq(apiRequests.method, opts.method.toUpperCase()))
+        if (opts.apiKeyId) where.push(eq(apiRequests.apiKeyId, opts.apiKeyId))
+        if (opts.from) where.push(gte(apiRequests.occurredAt, opts.from))
+        if (opts.search)
+          where.push(sql`${apiRequests.path} ilike ${`%${escapeLike(opts.search)}%`}`)
         if (cursor) {
           where.push(
             sql`(${apiRequests.occurredAt}, ${apiRequests.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`,

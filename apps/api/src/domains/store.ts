@@ -159,6 +159,14 @@ export interface DomainStore {
    * that surface says anything about. The console asks for it alongside.
    */
   displaced(tenantId: string): Promise<Record<string, string>>
+  /**
+   * When a domain was first verified and last looked up in DNS - console only,
+   * for its events strip. Null when there is no such domain.
+   */
+  checks(
+    tenantId: string,
+    id: string,
+  ): Promise<{ verified_at: string | null; dns_checked_at: string | null } | null>
 }
 
 /**
@@ -920,6 +928,24 @@ export function domainStore({
           r.displacedAt ? [[r.id, r.displacedAt.toISOString()]] : [],
         ),
       )
+    },
+
+    async checks(tenantId, id) {
+      const [row] = await withTenant(db, tenantId, async (tx) =>
+        tx
+          .select({
+            verifiedAt: domains.verifiedAt,
+            dnsCheckedAt: domains.dnsCheckedAt,
+          })
+          .from(domains)
+          .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id))),
+      )
+      return row
+        ? {
+            verified_at: row.verifiedAt?.toISOString() ?? null,
+            dns_checked_at: row.dnsCheckedAt?.toISOString() ?? null,
+          }
+        : null
     },
 
     async get(tenantId, id) {

@@ -114,4 +114,69 @@ describe("sending a template", () => {
     expect(written.payload.html).toBe("<b>x</b>")
     expect(written.templateVersionId).toBeNull()
   })
+
+  describe("the template's sender (Resend's template defaults)", () => {
+    function withSender(sendable: string[] = ["acme.test"]) {
+      const base = setup()
+      const lookup: TemplateLookup = {
+        versionIdFor: async (ref) => (ref.id === "welcome" ? "ver-7" : null),
+        version: async () => ({
+          ...version,
+          from: "Acme <hi@acme.test>",
+          replyTo: ["help@acme.test"],
+        }),
+      }
+      base.deps.templates = () => lookup
+      base.deps.sendableFrom = async (_t, domains) =>
+        new Set(domains.filter((d) => sendable.includes(d)))
+      return base
+    }
+    const noFrom: SendEmail = { ...send() }
+    delete noFrom.from
+
+    it("fills in a send that names none", async () => {
+      const { deps, persist } = withSender()
+      expect(await run(deps, [noFrom])).toEqual({ status: "accepted", ids: ["msg-0"] })
+      const written = persist.mock.calls[0]![0].messages[0]!
+      expect(written.payload.from).toBe("Acme <hi@acme.test>")
+      expect(written.payload.reply_to).toEqual(["help@acme.test"])
+    })
+
+    it("is checked against the key's scope and the verified domains like any sender", async () => {
+      const scoped = withSender()
+      const refused = await acceptSend(
+        {
+          tenantId: "t1",
+          apiKeyId: "k1",
+          scopes: ["domain:other.test"],
+          payloads: [noFrom],
+          endpoint: "single",
+        },
+        scoped.deps,
+      )
+      expect(refused).toMatchObject({ status: "forbidden" })
+
+      const unverified = withSender([])
+      expect(await run(unverified.deps, [noFrom])).toMatchObject({
+        status: "unverified_domain",
+      })
+      expect(unverified.persist).not.toHaveBeenCalled()
+    })
+
+    it("loses to the request's own", async () => {
+      const { deps, persist } = withSender()
+      await run(deps, [send({ from: "b@acme.test", reply_to: "c@acme.test" })])
+      const written = persist.mock.calls[0]![0].messages[0]!
+      expect(written.payload.from).toBe("b@acme.test")
+      expect(written.payload.reply_to).toBe("c@acme.test")
+    })
+
+    it("refuses a template send with no sender anywhere", async () => {
+      const { deps } = setup()
+      expect(await run(deps, [noFrom])).toMatchObject({
+        status: "invalid_template",
+        name: "validation_error",
+      })
+    })
+  })
 })

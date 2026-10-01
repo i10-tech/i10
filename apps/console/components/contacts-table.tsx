@@ -1,8 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Layers, Search, Trash2, X } from "lucide-react"
+import { Layers, SearchX, Trash2, Users } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "cn"
 import { Badge } from "@repo/ui/components/badge"
@@ -13,17 +12,33 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@repo/ui/components/dropdown-menu"
-import { Input } from "@repo/ui/components/input"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
+import { BulkBar } from "@/components/list/bulk-bar"
+import {
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListTable,
+  rowClass,
+} from "@/components/list/table"
+import {
+  ListToolbar,
+  UrlClearFilters,
+  UrlFilterSelect,
+  UrlSearchField,
+} from "@/components/list/toolbar"
+import { ListRegion, UrlList, useUrlList } from "@/components/list/url-state"
 import { LoadMore } from "@/components/load-more"
+import { StatusDot } from "@/components/status"
 import { addToSegment, deleteContacts } from "@/lib/actions"
 import type { ContactRow, SegmentRow } from "@/lib/types"
-import { useResetWhen, useRetained, useSyncedState } from "@/lib/react"
+import { useResetWhen } from "@/lib/react"
 import { Time } from "@/components/time"
+
+const FILTERS = ["search", "status", "segment_id"]
 
 /**
  * The contact list, with selection.
@@ -32,6 +47,9 @@ import { Time } from "@/components/time"
  * rows on screen, not the forty thousand behind the cursor - and a bulk delete
  * that silently meant the latter would be catastrophic and irreversible. The
  * count on the action bar is the honest number.
+ *
+ * ⚠ THE BAR FOR WHAT IS TICKED FLOATS OVER THE TABLE, so ticking a row never
+ * moves the rows under the pointer.
  *
  * ⚠ AND SELECTION IS CLEARED WHEN THE FILTER CHANGES. Keeping ids across a
  * filter change means the action bar says "12 selected" while showing a list
@@ -47,237 +65,170 @@ export function ContactsTable({
   nextCursor: string | null
   segments: SegmentRow[]
 }) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  return (
+    <UrlList className="space-y-4">
+      <ListToolbar>
+        <UrlSearchField placeholder="Search name or address" label="Search contacts" />
+        <UrlFilterSelect
+          param="status"
+          label="Subscription"
+          allLabel="All contacts"
+          options={[
+            {
+              value: "subscribed",
+              label: "Subscribed",
+              icon: <StatusDot tone="success" />,
+            },
+            {
+              value: "unsubscribed",
+              label: "Unsubscribed",
+              icon: <StatusDot tone="neutral" />,
+            },
+          ]}
+        />
+        {segments.length > 0 && (
+          <UrlFilterSelect
+            param="segment_id"
+            label="Segment"
+            allLabel="All segments"
+            options={segments.map((segment) => ({
+              value: segment.id,
+              label: segment.name,
+            }))}
+          />
+        )}
+        <UrlClearFilters params={FILTERS} />
+      </ListToolbar>
+      <ListRegion>
+        <ContactRows contacts={contacts} nextCursor={nextCursor} segments={segments} />
+      </ListRegion>
+    </UrlList>
+  )
+}
 
+function ContactRows({
+  contacts,
+  nextCursor,
+  segments,
+}: {
+  contacts: ContactRow[]
+  nextCursor: string | null
+  segments: SegmentRow[]
+}) {
+  const { params, commit } = useUrlList()
+  const filtered = FILTERS.some((f) => params.get(f))
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [deleting, setDeleting] = React.useState(false)
   const doneDeleting = React.useRef(false)
-  const shownCount = useRetained(selected.size || null) ?? 0
+  const [anchor, setAnchor] = React.useState<string | null>(null)
 
-  const urlSearch = searchParams.get("search") ?? ""
-  const segmentId = searchParams.get("segment_id")
+  // ⚠ SELECTION IS DROPPED WHENEVER THE FILTER MOVES, and when a new page of
+  // rows arrives: ids from the old list are not rows on screen.
+  useResetWhen(contacts, () => setSelected(new Set()))
 
-  // Local while typing, follows the URL when it changes elsewhere.
-  const [search, setSearch] = useSyncedState(urlSearch)
+  const clear = React.useCallback(() => setSelected(new Set()), [])
+  const ids = contacts.map((contact) => contact.id)
 
-  // ⚠ SELECTION IS DROPPED WHENEVER THE FILTER MOVES. See the block comment:
-  // keeping ids across a filter change means the action bar says "12 selected"
-  // over a list none of them are in, and the delete that follows removes twelve
-  // rows the person cannot see. The token is both filters joined, so either one
-  // changing clears it.
-  useResetWhen(`${urlSearch}\u0000${segmentId ?? ""}`, () => setSelected(new Set()))
-
-  React.useEffect(() => {
-    if (search === urlSearch) return
-    const timer = setTimeout(() => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (search) params.set("search", search)
-      else params.delete("search")
-      params.delete("cursor")
-      router.push(`${pathname}?${params.toString()}`, { scroll: false })
-    }, 350)
-    return () => clearTimeout(timer)
-  }, [search, urlSearch, pathname, router, searchParams])
-
-  const activeSegment = segments.find((segment) => segment.id === segmentId)
-
-  function toggle(id: string) {
+  function toggle(id: string, shiftKey: boolean) {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      const on = !prev.has(id)
+      if (shiftKey && anchor && ids.includes(anchor)) {
+        const a = ids.indexOf(anchor)
+        const b = ids.indexOf(id)
+        for (const x of ids.slice(Math.min(a, b), Math.max(a, b) + 1)) {
+          if (on) next.add(x)
+          else next.delete(x)
+        }
+      } else if (on) next.add(id)
+      else next.delete(id)
       return next
     })
+    setAnchor(id)
   }
 
   const allOnPageSelected =
     contacts.length > 0 && contacts.every((contact) => selected.has(contact.id))
+  const someSelected = selected.size > 0
 
   return (
     <div className="space-y-4">
-      {/*
-       * ⚠ THE FILTERS AND THE SELECTION BAR SHARE ONE GRID CELL, AND THE CELL
-       * NEVER CHANGES HEIGHT. The bar used to be a block of its own between
-       * the filters and the table, inserted on the first tick: measured, the
-       * table moved 66px in one frame, so the row somebody had just ticked
-       * left the cursor and the next click landed on its neighbour. Now both
-       * are always rendered in the same cell - which is therefore always as
-       * tall as the taller of them - and ticking a row crossfades one for the
-       * other with a 4px rise. The table does not move at all.
-       *
-       * ⚠ `inert` ON WHICHEVER IS HIDDEN, NOT ONLY `opacity-0`. An invisible
-       * search box that can still take focus and Tab stops is a trap; `inert`
-       * removes it from the keyboard and the accessibility tree together.
-       */}
-      <div className="grid">
-        <div
-          className={cn(
-            "col-start-1 row-start-1 flex flex-wrap items-center gap-2",
-            "transition-[opacity,translate] duration-(--duration-dismiss) ease-(--ease-quint-out)",
-            selected.size > 0 && "pointer-events-none -translate-y-1 opacity-0",
-          )}
-          inert={selected.size > 0}
-        >
-          <div className="relative min-w-0 flex-1 sm:max-w-xs">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name or address"
-              className="h-8 pl-8 text-sm"
-              aria-label="Search contacts"
-            />
-          </div>
-
-          {activeSegment && (
-            <Badge variant="secondary" className="gap-1">
-              <Layers className="size-3" />
-              {activeSegment.name}
-              <button
-                type="button"
-                aria-label="Clear segment filter"
-                className="cursor-pointer"
-                onClick={() => {
-                  const params = new URLSearchParams(searchParams.toString())
-                  params.delete("segment_id")
-                  params.delete("cursor")
-                  router.push(`${pathname}?${params.toString()}`, { scroll: false })
-                }}
-              >
-                <X className="size-3" />
-              </button>
-            </Badge>
-          )}
-        </div>
-
-        <div
-          className={cn(
-            "col-start-1 row-start-1 flex flex-wrap items-center gap-2 rounded-md bg-muted/60 px-3",
-            "transition-[opacity,translate] duration-(--duration-dismiss) ease-(--ease-quint-out)",
-            selected.size === 0 && "pointer-events-none translate-y-1 opacity-0",
-          )}
-          inert={selected.size === 0}
-        >
-          <span className="tabular text-sm">
-            {/* Holds its last count while fading out - see `useRetained`. */}
-            {shownCount} selected{" "}
-            <span className="text-muted-foreground">on this page</span>
-          </span>
-
-          <div className="ml-auto flex items-center gap-2">
-            {segments.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <Layers />
-                    Add to segment
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel>Add to</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {segments.map((segment) => (
-                    <DropdownMenuItem
-                      key={segment.id}
-                      onSelect={async () => {
-                        const result = await addToSegment(segment.id, [...selected])
-                        if (!result.ok) {
-                          toast.error("Could not add them", {
-                            description: result.error,
-                          })
-                          return
-                        }
-                        toast.success(
-                          `Added ${result.data.added} to ${segment.name}`,
-                          result.data.added < selected.size
-                            ? {
-                                description: `${selected.size - result.data.added} were already in it.`,
-                              }
-                            : undefined,
-                        )
-                        // No refresh: `addToSegment` re-renders this page in
-                        // its own response. See `run` in lib/actions.ts.
-                        setSelected(new Set())
-                      }}
-                    >
-                      {segment.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-
-            <Button variant="outline" size="sm" onClick={() => setDeleting(true)}>
-              <Trash2 />
-              Delete
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-              Clear
-            </Button>
-          </div>
-        </div>
-      </div>
-
       {contacts.length === 0 ? (
         <EmptyState
-          title={urlSearch || segmentId ? "No matching contacts" : "No contacts yet"}
+          icon={filtered ? <SearchX /> : <Users />}
+          title={filtered ? "No matching contacts" : "No contacts yet"}
           description={
-            urlSearch || segmentId
-              ? "Try a different search, or clear the segment filter."
+            filtered
+              ? "Try a different search, or clear the filters."
               : "Import a CSV or add someone by hand. Custom columns become merge fields you can use in a broadcast."
+          }
+          secondary={
+            filtered ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => commit((p) => FILTERS.forEach((f) => p.delete(f)))}
+              >
+                Clear filters
+              </Button>
+            ) : undefined
           }
         />
       ) : (
         <>
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/30 text-left">
-                  <th className="w-10 px-3 py-2">
-                    <Checkbox
-                      checked={allOnPageSelected}
-                      aria-label="Select all contacts on this page"
-                      onCheckedChange={(checked) =>
-                        setSelected(
-                          checked
-                            ? new Set(contacts.map((contact) => contact.id))
-                            : new Set(),
-                        )
-                      }
-                    />
-                  </th>
-                  <th className="px-3 py-2 text-xs font-medium text-muted-foreground">
-                    Email
-                  </th>
-                  <th className="hidden px-3 py-2 text-xs font-medium text-muted-foreground md:table-cell">
-                    Name
-                  </th>
-                  <th className="w-[9rem] px-3 py-2 text-xs font-medium text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="w-[9rem] px-3 py-2 text-right text-xs font-medium text-muted-foreground">
-                    Added
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {contacts.map((contact) => (
-                  <tr key={contact.id} className="hover:bg-muted/20">
-                    <td className="px-3 py-2.5">
+          <ListTable>
+            <ListHeader>
+              <th className="w-10 py-2.5 pl-4">
+                <Checkbox
+                  checked={
+                    allOnPageSelected ? true : someSelected ? "indeterminate" : false
+                  }
+                  aria-label="Select all contacts on this page"
+                  onCheckedChange={(checked) =>
+                    setSelected(checked === true ? new Set(ids) : new Set())
+                  }
+                />
+              </th>
+              <ListHead>Email</ListHead>
+              <ListHead className="hidden md:table-cell">Name</ListHead>
+              <ListHead className="w-[9rem]">Status</ListHead>
+              <ListHead className="w-[9rem] text-right">Added</ListHead>
+            </ListHeader>
+            <tbody className="divide-y">
+              {contacts.map((contact) => {
+                const ticked = selected.has(contact.id)
+                return (
+                  <tr
+                    key={contact.id}
+                    // A shift-click picks a range; without this it also selects text.
+                    onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("button, a, input"))
+                        return
+                      toggle(contact.id, event.shiftKey)
+                    }}
+                    className={cn(
+                      rowClass,
+                      "cursor-pointer animate-in fade-in-0 duration-300",
+                      ticked && "bg-primary/[0.05] hover:bg-primary/[0.08]",
+                    )}
+                  >
+                    <td className="w-10 py-3 pl-4">
                       <Checkbox
-                        checked={selected.has(contact.id)}
+                        checked={ticked}
                         aria-label={`Select ${contact.email}`}
-                        onCheckedChange={() => toggle(contact.id)}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          toggle(contact.id, event.shiftKey)
+                        }}
                       />
                     </td>
-                    <td className="max-w-0 px-3 py-2.5">
+                    <ListCell className="max-w-0">
                       <span className="block truncate font-mono text-xs">
                         {contact.email}
                       </span>
-                    </td>
-                    <td className="hidden max-w-0 px-3 py-2.5 md:table-cell">
+                    </ListCell>
+                    <ListCell className="hidden max-w-0 md:table-cell">
                       <span className="block truncate text-sm">
                         {[contact.first_name, contact.last_name]
                           .filter(Boolean)
@@ -285,26 +236,92 @@ export function ContactsTable({
                           <span className="text-muted-foreground">-</span>
                         )}
                       </span>
-                    </td>
-                    <td className="px-3 py-2.5">
+                    </ListCell>
+                    <ListCell>
                       {contact.unsubscribed ? (
                         <Badge variant="outline">Unsubscribed</Badge>
                       ) : (
                         <Badge variant="secondary">Subscribed</Badge>
                       )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-xs whitespace-nowrap text-muted-foreground">
+                    </ListCell>
+                    <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
                       <Time iso={contact.created_at} />
-                    </td>
+                    </ListCell>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                )
+              })}
+            </tbody>
+          </ListTable>
 
           <LoadMore cursor={nextCursor} />
         </>
       )}
+
+      {/*
+       * ⚠ SELECTION IS PER PAGE AND THE BAR SAYS SO: "select all" means the
+       * rows on screen, never the thousands behind the cursor.
+       */}
+      <BulkBar
+        count={selected.size}
+        onClear={clear}
+        label="Selected contacts"
+        note="on this page"
+      >
+        {segments.length > 0 && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="rounded-xl">
+                <Layers />
+                Add to segment
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="top"
+              align="center"
+              className="max-h-80 w-56 overflow-y-auto"
+            >
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Add to
+              </DropdownMenuLabel>
+              {segments.map((segment) => (
+                <DropdownMenuItem
+                  key={segment.id}
+                  onSelect={async () => {
+                    const picked = [...selected]
+                    const result = await addToSegment(segment.id, picked)
+                    if (!result.ok) {
+                      toast.error("Could not add them", { description: result.error })
+                      return
+                    }
+                    toast.success(
+                      `Added ${result.data.added} to ${segment.name}`,
+                      result.data.added < picked.length
+                        ? {
+                            description: `${picked.length - result.data.added} were already in it.`,
+                          }
+                        : undefined,
+                    )
+                    // No refresh: `addToSegment` re-renders this page in its
+                    // own response. See `run` in lib/actions.ts.
+                    setSelected(new Set())
+                  }}
+                >
+                  <span className="truncate">{segment.name}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => setDeleting(true)}
+        >
+          <Trash2 />
+          Delete
+        </Button>
+      </BulkBar>
 
       <ConfirmDialog
         open={deleting}
@@ -312,8 +329,7 @@ export function ContactsTable({
           setDeleting(open)
           // ⚠ THE SELECTION IS CLEARED WHEN THE DIALOG CLOSES, NOT WHEN THE
           // DELETE RETURNS. Clearing it inside `onConfirm` retitled the dialog
-          // "Delete 0 contacts?" under its own "Deleted" tick. The rows it
-          // named are already gone from the table behind it.
+          // "Delete 0 contacts?" under its own "Deleted" tick.
           if (!open && doneDeleting.current) {
             doneDeleting.current = false
             setSelected(new Set())

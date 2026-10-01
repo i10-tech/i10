@@ -57,7 +57,7 @@ export function OverviewChart({ series }: { series: DailyStat[] }) {
 
   if (empty) {
     return (
-      <div className="flex h-[260px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-center">
+      <div className="flex h-[260px] flex-col items-center justify-center gap-1 rounded-2xl border border-dashed text-center">
         <p className="text-sm font-medium">No mail in this window</p>
         <p className="text-xs text-muted-foreground">
           Delivery, bounces and complaints appear here once you start sending.

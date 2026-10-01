@@ -1,0 +1,304 @@
+/*
+ * The template editor's own styles (#162): the React Email editor's chrome in
+ * our tokens, and the email canvas.
+ *
+ * ⚠ THE `--re-*` MAPPING IS ON THE ROOT, NOT ON A WRAPPER. Bubble menus, the
+ * slash menu and the inspector's colour pickers are portalled to <body>, out
+ * of any wrapper's reach - and the package's own sheet switches its palette
+ * on `prefers-color-scheme`, which disagrees with the console whenever
+ * somebody picked a theme that is not their system's. `html:root` outranks
+ * both its `:root` and its `.dark`, and our tokens already follow `.dark`.
+ *
+ * ⚠ ONLY LOADED BY THE EDITOR, so none of this reaches another page.
+ */
+html:root,
+html.dark {
+  --re-bg: var(--popover);
+  --re-bg-active: var(--muted);
+  --re-border: var(--border);
+  --re-text: var(--popover-foreground);
+  --re-text-muted: var(--muted-foreground);
+  --re-hover: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --re-active: color-mix(in oklch, var(--foreground) 9%, transparent);
+  --re-pressed: color-mix(in oklch, var(--foreground) 10%, transparent);
+  --re-separator: var(--border);
+  --re-radius: 0.75rem;
+  --re-radius-sm: 0.5rem;
+  --re-danger: var(--destructive);
+  --re-danger-hover: color-mix(in oklch, var(--destructive) 12%, transparent);
+  --re-shadow:
+    0 12px 32px -8px rgb(0 0 0 / 0.25), 0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
+/* ── Floating menus: our popover, with an entrance. ───────────────────────── */
+
+[data-re-bubble-menu],
+[data-re-link-bm],
+[data-re-btn-bm],
+[data-re-img-bm],
+[data-re-slash-command],
+[data-re-node-selector-content] {
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  animation: i10-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  backdrop-filter: blur(12px);
+}
+
+[data-re-bubble-menu-item],
+[data-re-slash-command-item],
+[data-re-node-selector-item],
+[data-re-link-bm-item],
+[data-re-btn-bm-item],
+[data-re-img-bm-item],
+[data-re-inspector-toggle-item],
+[data-re-inspector-button],
+[data-re-inspector-icon-button] {
+  transition:
+    background-color 100ms linear,
+    color 100ms linear;
+}
+
+@keyframes i10-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── The inspector, in the editor's right panel. ──────────────────────────── */
+
+.i10-inspector {
+  font-size: 0.8125rem;
+  color: var(--foreground);
+}
+.i10-inspector [data-re-inspector-section] {
+  border-color: var(--border);
+}
+.i10-inspector [data-re-inspector-section-header] {
+  padding-block: 0.75rem;
+}
+.i10-inspector [data-re-inspector-label] {
+  color: var(--muted-foreground);
+}
+.i10-inspector [data-re-inspector-input],
+.i10-inspector [data-re-inspector-select],
+.i10-inspector [data-re-inspector-color-trigger],
+.i10-inspector [data-re-inspector-number] {
+  border-radius: 0.625rem;
+  border-color: var(--border);
+  background: color-mix(in oklch, var(--foreground) 3%, transparent);
+  color: var(--foreground);
+  transition:
+    border-color 100ms linear,
+    box-shadow 100ms linear;
+}
+.i10-inspector [data-re-inspector-input]:focus,
+.i10-inspector [data-re-inspector-select]:focus {
+  outline: none;
+  border-color: color-mix(in oklch, var(--foreground) 35%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 15%, transparent);
+}
+.i10-inspector [data-re-inspector-toggle-group] {
+  border-radius: 0.625rem;
+  background: color-mix(in oklch, var(--foreground) 4%, transparent);
+}
+.i10-inspector [data-re-inspector-toggle-item][data-active] {
+  background: var(--background);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+.i10-inspector [data-re-inspector-breadcrumb-button] {
+  color: var(--muted-foreground);
+  text-transform: capitalize;
+}
+.i10-inspector [data-re-inspector-breadcrumb-button]:hover {
+  color: var(--foreground);
+}
+
+/* ── The email canvas. ────────────────────────────────────────────────────── */
+
+/*
+ * ⚠ THE CANVAS IS WHITE IN BOTH THEMES, as Resend's is: it is the email, and
+ * emails are read on white. Text inside it is dark whatever the console is.
+ */
+.i10-canvas {
+  color: #0a0a0a;
+  color-scheme: light;
+}
+
+.i10-canvas .tiptap {
+  outline: none;
+  min-height: 24rem;
+  padding-bottom: 6rem;
+  caret-color: #0a0a0a;
+}
+
+.i10-canvas .tiptap ::selection {
+  background: rgb(59 130 246 / 0.22);
+}
+
+.i10-canvas .tiptap p.is-empty::before,
+.i10-canvas .tiptap h1.is-empty::before,
+.i10-canvas .tiptap h2.is-empty::before,
+.i10-canvas .tiptap h3.is-empty::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: #a3a3a3;
+}
+
+/* A node the inspector is looking at. */
+.i10-canvas .tiptap .ProseMirror-selectednode,
+.i10-canvas .tiptap [data-re-focused] {
+  outline: 2px solid rgb(59 130 246 / 0.6);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.i10-canvas .tiptap img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* A variable: a chip on screen, `{{ name }}` in the email. */
+.i10-variable {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0 0.375rem;
+  margin: 0 0.0625rem;
+  border-radius: 0.375rem;
+  background: rgb(59 130 246 / 0.1);
+  color: rgb(37 99 235);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.85em;
+  line-height: 1.6;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgb(59 130 246 / 0.25);
+  vertical-align: baseline;
+  cursor: default;
+  transition: background-color 100ms linear;
+}
+.i10-variable::before {
+  content: "{{";
+  opacity: 0.55;
+}
+.i10-variable::after {
+  content: "}}";
+  opacity: 0.55;
+}
+.i10-variable.ProseMirror-selectednode {
+  background: rgb(59 130 246 / 0.2);
+  outline: none;
+}
+
+/* ── CodeMirror, in our tokens. ───────────────────────────────────────────── */
+
+.i10-code .cm-editor {
+  height: 100%;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12.5px;
+}
+.i10-code .cm-editor.cm-focused {
+  outline: none;
+}
+.i10-code .cm-scroller {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  line-height: 1.65;
+}
+.i10-code .cm-gutters {
+  background: transparent;
+  border: none;
+  color: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+}
+.i10-code .cm-activeLine,
+.i10-code .cm-activeLineGutter {
+  background: color-mix(in oklch, var(--foreground) 4%, transparent);
+}
+.i10-code .cm-selectionBackground,
+.i10-code .cm-focused .cm-selectionBackground,
+.i10-code .cm-content ::selection {
+  background: color-mix(in oklch, var(--foreground) 14%, transparent) !important;
+}
+.i10-code .cm-cursor {
+  border-left-color: var(--foreground);
+}
+.i10-code .cm-matchingBracket {
+  background: color-mix(in oklch, var(--foreground) 12%, transparent);
+  outline: none;
+}
+.i10-code .cm-placeholder {
+  color: var(--muted-foreground);
+}
+.i10-code .cm-tooltip {
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  overflow: hidden;
+}
+.i10-code .cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+/* Syntax colours (`classHighlighter`), one set per theme. */
+.i10-code .tok-typeName,
+.i10-code .tok-tagName {
+  color: #b4234c;
+}
+.i10-code .tok-propertyName,
+.i10-code .tok-attributeName {
+  color: #7c3aed;
+}
+.i10-code .tok-string,
+.i10-code .tok-attributeValue {
+  color: #047857;
+}
+.i10-code .tok-comment {
+  color: #8a8a8a;
+  font-style: italic;
+}
+.i10-code .tok-keyword,
+.i10-code .tok-atom,
+.i10-code .tok-bool {
+  color: #1d4ed8;
+}
+.i10-code .tok-number {
+  color: #b45309;
+}
+.i10-code .tok-punctuation,
+.i10-code .tok-angleBracket {
+  color: #737373;
+}
+.dark .i10-code .tok-typeName,
+.dark .i10-code .tok-tagName {
+  color: #ff7b9c;
+}
+.dark .i10-code .tok-propertyName,
+.dark .i10-code .tok-attributeName {
+  color: #c4a5ff;
+}
+.dark .i10-code .tok-string,
+.dark .i10-code .tok-attributeValue {
+  color: #7ee2b8;
+}
+.dark .i10-code .tok-comment {
+  color: #7a7a7a;
+}
+.dark .i10-code .tok-keyword,
+.dark .i10-code .tok-atom,
+.dark .i10-code .tok-bool {
+  color: #8ab4ff;
+}
+.dark .i10-code .tok-number {
+  color: #fbbf72;
+}
+.dark .i10-code .tok-punctuation,
+.dark .i10-code .tok-angleBracket {
+  color: #8f8f8f;
+}

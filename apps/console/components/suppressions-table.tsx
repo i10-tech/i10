@@ -1,21 +1,33 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Search, Undo2 } from "lucide-react"
+import { SearchX, ShieldCheck, Undo2 } from "lucide-react"
 import { AnimatePresence, motion, type Transition } from "motion/react"
 import { toast } from "sonner"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { usePathname, useSearchParams } from "next/navigation"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import {
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListTable,
+  rowClass,
+} from "@/components/list/table"
+import {
+  ListToolbar,
+  UrlClearFilters,
+  UrlFilterSelect,
+  UrlSearchField,
+} from "@/components/list/toolbar"
+import { ListRegion, UrlList, useUrlList } from "@/components/list/url-state"
 import { EmptyState } from "@/components/empty-state"
 import { LoadMore } from "@/components/load-more"
 import { removeSuppression } from "@/lib/actions"
 import type { SuppressionRow } from "@/lib/types"
-import { useResetWhen, useRetained, useSyncedState } from "@/lib/react"
+import { useResetWhen, useRetained } from "@/lib/react"
 import { Time } from "@/components/time"
 
 /**
@@ -110,9 +122,40 @@ export function SuppressionsTable({
   rows: SuppressionRow[]
   nextCursor: string | null
 }) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  return (
+    <UrlList className="space-y-4">
+      <ListToolbar>
+        <UrlSearchField
+          placeholder="Search addresses"
+          label="Search suppressed addresses"
+        />
+        <UrlFilterSelect
+          param="reason"
+          label="Reason"
+          allLabel="All reasons"
+          options={Object.entries(REASON_COPY).map(([value, r]) => ({
+            value,
+            label: r.label,
+          }))}
+        />
+        <UrlClearFilters params={["search", "reason"]} />
+      </ListToolbar>
+      <ListRegion>
+        <SuppressionRows rows={rows} nextCursor={nextCursor} />
+      </ListRegion>
+    </UrlList>
+  )
+}
+
+function SuppressionRows({
+  rows,
+  nextCursor,
+}: {
+  rows: SuppressionRow[]
+  nextCursor: string | null
+}) {
+  const { params, commit } = useUrlList()
+  const filtered = Boolean(params.get("search") || params.get("reason"))
   const [removing, setRemoving] = React.useState<SuppressionRow | null>(null)
 
   /*
@@ -128,134 +171,123 @@ export function SuppressionsTable({
   const visibleRows =
     hidden.length === 0 ? rows : rows.filter((row) => !hidden.includes(row.address))
 
-  const urlSearch = searchParams.get("search") ?? ""
-  // Local while typing, but follows the URL when that changes elsewhere - see
-  // lib/react.ts on why this is not an effect.
-  const [search, setSearch] = useSyncedState(urlSearch)
-
-  React.useEffect(() => {
-    if (search === urlSearch) return
-    const timer = setTimeout(() => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (search) params.set("search", search)
-      else params.delete("search")
-      params.delete("cursor")
-      router.push(`${pathname}?${params.toString()}`, { scroll: false })
-    }, 350)
-    return () => clearTimeout(timer)
-  }, [search, urlSearch, pathname, router, searchParams])
-
   return (
     <div className="space-y-4">
-      <div className="relative max-w-xs">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search addresses"
-          className="h-8 pl-8 text-sm"
-          aria-label="Search suppressed addresses"
-        />
-      </div>
-
       {visibleRows.length === 0 ? (
         <EmptyState
-          title={urlSearch ? "No matching addresses" : "Nothing suppressed"}
+          icon={filtered ? <SearchX /> : <ShieldCheck />}
+          title={filtered ? "No matching addresses" : "Nothing suppressed"}
           description={
-            urlSearch
-              ? "Try a different search."
+            filtered
+              ? "Try a different search, or clear the filters."
               : "Addresses that hard-bounce or complain land here automatically. An empty list is a good sign."
+          }
+          secondary={
+            filtered ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  commit((p) => ["search", "reason"].forEach((f) => p.delete(f)))
+                }
+              >
+                Clear filters
+              </Button>
+            ) : undefined
           }
         />
       ) : (
         <>
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/30 text-left">
-                  <th className="px-3 py-2 text-xs font-medium text-muted-foreground">
-                    Address
-                  </th>
-                  <th className="w-[12rem] px-3 py-2 text-xs font-medium text-muted-foreground">
-                    Reason
-                  </th>
-                  <th className="hidden w-[9rem] px-3 py-2 text-xs font-medium text-muted-foreground md:table-cell">
-                    Message
-                  </th>
-                  <th className="w-[9rem] px-3 py-2 text-right text-xs font-medium text-muted-foreground">
-                    Added
-                  </th>
-                  <th className="w-12" />
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {/*
-                 * ⚠ `initial={false}` SO A PAGE OF ROWS DOES NOT FADE ITSELF IN.
-                 * The only animation wanted here is the one on the way OUT -
-                 * rows arriving from the server should already be there.
-                 */}
-                <AnimatePresence initial={false}>
-                  {visibleRows.map((row) => {
-                    const reason = REASON_COPY[row.reason] ?? {
-                      label: row.reason,
-                      detail: "",
-                    }
-                    return (
-                      <motion.tr
-                        key={row.address}
-                        /*
-                         * ⚠ `layout` ON THE ROW IS WHAT CLOSES THE GAP SMOOTHLY.
-                         * Without it the rows below snap up the instant this one
-                         * unmounts, which is a hard jump in the middle of an
-                         * animation whose whole purpose is to remove one.
-                         */
-                        layout
-                        exit={{ opacity: 0, transition: ROW_EXIT }}
-                        transition={ROW_LAYOUT}
-                        className="hover:bg-muted/20"
-                      >
-                        <td className="max-w-0 px-3 py-2.5">
-                          <span className="block truncate font-mono text-xs select-all">
-                            {row.address}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <Badge variant="outline" title={reason.detail}>
-                            {reason.label}
-                          </Badge>
-                        </td>
-                        <td className="hidden px-3 py-2.5 md:table-cell">
-                          {row.message_id ? (
-                            <Link
-                              href={`/emails/${row.message_id}`}
-                              className="font-mono text-xs text-muted-foreground underline-offset-4 hover:underline"
-                            >
-                              View
-                            </Link>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">-</span>
+          <ListTable>
+            <ListHeader>
+              <ListHead>Address</ListHead>
+              <ListHead className="w-[12rem]">Reason</ListHead>
+              <ListHead className="hidden w-[9rem] md:table-cell">Message</ListHead>
+              <ListHead className="w-[9rem] text-right">Added</ListHead>
+              <ListHead className="w-12">
+                <span className="sr-only">Actions</span>
+              </ListHead>
+            </ListHeader>
+            <tbody className="divide-y">
+              {/*
+               * ⚠ `initial={false}` SO A PAGE OF ROWS DOES NOT FADE ITSELF IN.
+               * The only animation wanted here is the one on the way OUT -
+               * rows arriving from the server should already be there.
+               */}
+              <AnimatePresence initial={false}>
+                {visibleRows.map((row) => {
+                  const reason = REASON_COPY[row.reason] ?? {
+                    label: row.reason,
+                    detail: "",
+                  }
+                  return (
+                    <motion.tr
+                      key={row.address}
+                      /*
+                       * ⚠ `layout` ON THE ROW IS WHAT CLOSES THE GAP SMOOTHLY.
+                       * Without it the rows below snap up the instant this one
+                       * unmounts, which is a hard jump in the middle of an
+                       * animation whose whole purpose is to remove one.
+                       */
+                      layout
+                      exit={{ opacity: 0, transition: ROW_EXIT }}
+                      transition={ROW_LAYOUT}
+                      className={rowClass}
+                    >
+                      <ListCell className="max-w-0">
+                        <span className="block truncate font-mono text-xs select-all">
+                          {row.address}
+                        </span>
+                      </ListCell>
+                      <ListCell>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant="outline" className="cursor-default">
+                              {reason.label}
+                            </Badge>
+                          </TooltipTrigger>
+                          {reason.detail && (
+                            <TooltipContent>{reason.detail}</TooltipContent>
                           )}
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-xs whitespace-nowrap text-muted-foreground">
-                          <Time iso={row.created_at} />
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`Remove ${row.address} from the suppression list`}
-                            onClick={() => setRemoving(row)}
+                        </Tooltip>
+                      </ListCell>
+                      <ListCell className="hidden md:table-cell">
+                        {row.message_id ? (
+                          <Link
+                            href={`/emails/${row.message_id}`}
+                            className="font-mono text-xs text-muted-foreground underline-offset-4 hover:underline"
                           >
-                            <Undo2 />
-                          </Button>
-                        </td>
-                      </motion.tr>
-                    )
-                  })}
-                </AnimatePresence>
-              </tbody>
-            </table>
-          </div>
+                            View
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </ListCell>
+                      <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
+                        <Time iso={row.created_at} />
+                      </ListCell>
+                      <ListCell className="py-1.5 text-right">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="size-7"
+                              aria-label={`Remove ${row.address} from the suppression list`}
+                              onClick={() => setRemoving(row)}
+                            >
+                              <Undo2 />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Remove from the list</TooltipContent>
+                        </Tooltip>
+                      </ListCell>
+                    </motion.tr>
+                  )
+                })}
+              </AnimatePresence>
+            </tbody>
+          </ListTable>
 
           <LoadMore cursor={nextCursor} />
         </>

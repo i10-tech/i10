@@ -23,6 +23,7 @@ import {
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
+import { acceptSend } from "./send/accept.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { nameClaims } from "./domains/claims.js"
 import { domainStore } from "./domains/store.js"
@@ -820,6 +821,19 @@ const suppressions = suppressionStore({
   log,
 })
 
+const sendPath = {
+  ...acceptDatabaseOps({
+    db,
+    // ⚠ ONE QUEUE PER CLASS, BOTH BUILT AT BOOT. Constructing them lazily at
+    // the first send would put a Redis connection on the latency path of
+    // somebody waiting for a password reset.
+    queues: sendQueues,
+  }),
+  templates: (tenantId: string) => templates.lookup(tenantId),
+  metering,
+  log,
+}
+
 const app = createApp({
   suppressions,
   trustedTemplates: risk.trustedTemplates,
@@ -870,18 +884,7 @@ const app = createApp({
     smtpPort: 465,
     organization: "i10",
   },
-  sendPath: {
-    ...acceptDatabaseOps({
-      db,
-      // ⚠ ONE QUEUE PER CLASS, BOTH BUILT AT BOOT. Constructing them lazily at
-      // the first send would put a Redis connection on the latency path of
-      // somebody waiting for a password reset.
-      queues: sendQueues,
-    }),
-    templates: (tenantId: string) => templates.lookup(tenantId),
-    metering,
-    log,
-  },
+  sendPath,
   emailLookup: emailLookup(db, contentStore),
   ...(env.METRICS_TOKEN
     ? {
@@ -1070,6 +1073,14 @@ const app = createApp({
     onboarding: onboardingStore(db, env.METERING_FREE_PLAN_ID),
     marketing: marketingStore(db),
     templates,
+    // A template's "Test email": one send down the ordinary path, as the
+    // workspace, with no key (it is the console's request, not an API call).
+    sendableFrom: (tenantId, domains) => sendPath.sendableFrom(tenantId, domains),
+    sendTest: (tenantId, payload) =>
+      acceptSend(
+        { tenantId, apiKeyId: null, endpoint: "single", payloads: [payload] },
+        sendPath,
+      ),
     ...(renderer ? { templateRenderer: renderer } : {}),
     ...(github
       ? {

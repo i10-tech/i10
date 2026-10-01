@@ -362,6 +362,19 @@ const CONTACTS = Array.from({ length: 24 }, (_, i) => ({
 }))
 
 /**
+ * The list filters the API applies, applied to the fixtures, so every toolbar
+ * can be tried in preview. Kept as loose as the API: a substring for `search`,
+ * equality for the rest, `from` as a lower bound on the row's time.
+ */
+function q(query: Query, name: string): string | undefined {
+  const v = query?.[name]
+  return v === undefined || v === null || v === "" ? undefined : String(v)
+}
+const has = (needle: string | undefined, ...values: (string | null | undefined)[]) =>
+  !needle || values.some((v) => v?.toLowerCase().includes(needle.toLowerCase()))
+const since = (from: string | undefined, at: string) => !from || at >= from
+
+/**
  * ⚠ THE ROUTE TABLE IS MATCHED IN ORDER AND LONGEST-FIRST, so `/console/emails/x`
  * cannot be swallowed by `/console/emails`. It mirrors the API's own paths
  * exactly - if a path here drifts from the real one, preview mode would keep
@@ -653,14 +666,52 @@ Receipt.PreviewProps = { order: { id: "A-1042", total: "$42.00" } }
     updated_days: 5,
     versions: [],
   },
+  {
+    // What New -> Template opens on in preview mode: nothing written yet.
+    id: "bf7a1c00-0000-4000-8000-00000000000a",
+    name: "untitled-template",
+    folder: "drafts",
+    kind: "visual",
+    source: "managed",
+    subject: null,
+    html: null,
+    text: null,
+    live: 0,
+    created_days: 0,
+    updated_days: 0,
+    versions: [],
+  },
 ]
+
+/** The fixture folders: one per distinct folder label above, plus an empty one. */
+const TEMPLATE_FOLDERS = [
+  ...new Set(TEMPLATES.map((t) => t.folder).filter((f): f is string => f !== null)),
+  "drafts",
+].map((name, i) => ({
+  id: `f01de700-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+  name,
+  templates: TEMPLATES.filter((t) => t.folder === name).length,
+  created_at: ago(30 - i),
+  updated_at: ago(30 - i),
+}))
+
+const folderIdOf = (name: string | null) =>
+  TEMPLATE_FOLDERS.find((f) => f.name === name)?.id ?? null
 
 function summary(full: (typeof TEMPLATES)[number]) {
   const live = full.versions.find((v) => v.number === full.live)
   return {
     id: full.id,
     name: full.name,
-    folder: full.folder,
+    title: full.name
+      .split("-")
+      .map((w, i) => (i === 0 ? w[0]!.toUpperCase() + w.slice(1) : w))
+      .join(" "),
+    folder_id: folderIdOf(full.folder),
+    from: full.source === "managed" ? "Acme <hello@acme.com>" : null,
+    reply_to: null,
+    preview_text: null,
+    variables: [],
     kind: full.kind,
     source: full.source,
     subject: full.subject,
@@ -686,6 +737,9 @@ function versionSummary(t: (typeof TEMPLATES)[number], v: FixtureVersion) {
       t.kind === "tsx" ? "react@19.2.8+react-dom@19.2.8+react-email@6.9.3" : null,
     path: v.path ?? null,
     commit_sha: v.commit_sha ?? null,
+    from: null,
+    reply_to: null,
+    preview_text: null,
     live: v.number === t.live,
     created_at: ago(v.days),
   }
@@ -981,7 +1035,24 @@ const ROUTES: [
     },
   ],
 
-  [/^\/console\/emails$/, () => ({ data: EMAILS, nextCursor: null })],
+  [
+    /^\/console\/emails$/,
+    (_m, query) => {
+      const statuses = q(query, "status")?.split(",")
+      return {
+        data: EMAILS.filter(
+          (e) =>
+            has(q(query, "search"), e.subject, e.from, ...e.to) &&
+            (!statuses || statuses.includes(e.last_event)) &&
+            since(q(query, "from"), e.created_at) &&
+            // Every fixture email went out with the first key.
+            (!q(query, "api_key_id") ||
+              q(query, "api_key_id") === "4f7a1c00-0000-4000-8000-000000000001"),
+        ),
+        nextCursor: null,
+      }
+    },
+  ],
 
   /*
    * ⚠ ABOVE `/domains/:id`, THE SAME ORDER THE API USES, or `check` is read as
@@ -1023,7 +1094,16 @@ const ROUTES: [
        * preview mode exists to avoid. In production the refresh writes the row
        * and the re-render reads it back, so the badge does turn over.
        */
-      return { ...domain, records: recordsFor(domain) }
+      return {
+        ...domain,
+        records: recordsFor(domain),
+        // The events strip's times: verified a few minutes after it was added.
+        verified_at:
+          domain.status === "verified"
+            ? new Date(new Date(domain.created_at).getTime() + 7 * 60_000).toISOString()
+            : null,
+        dns_checked_at: ago(0, 0.05),
+      }
     },
   ],
 
@@ -1193,7 +1273,7 @@ const ROUTES: [
 
   [
     /^\/console\/webhook-deliveries$/,
-    () => ({
+    (_m, query) => ({
       data: Array.from({ length: 16 }, (_, i) => ({
         id: `6f7a1c00-0000-4000-8000-${(i + 1).toString().padStart(12, "0")}`,
         endpoint_id: "5f7a1c00-0000-4000-8000-000000000001",
@@ -1206,7 +1286,12 @@ const ROUTES: [
         occurred_at: ago(0, i),
         delivered_at: i % 6 === 0 ? null : ago(0, i),
         created_at: ago(0, i),
-      })),
+      })).filter(
+        (d) =>
+          (!q(query, "status") || d.status === q(query, "status")) &&
+          (!q(query, "event_type") || d.event_type === q(query, "event_type")) &&
+          (!q(query, "endpoint_id") || d.endpoint_id === q(query, "endpoint_id")),
+      ),
       nextCursor: null,
     }),
   ],
@@ -1249,20 +1334,24 @@ const ROUTES: [
 
   [
     /^\/console\/suppressions$/,
-    () => ({
+    (_m, query) => ({
       data: Array.from({ length: 12 }, (_, i) => ({
         address: `bounced+${i}@example.com`,
         reason: ["hard_bounce", "hard_bounce", "complaint", "manual"][i % 4]!,
         message_id: i % 3 === 0 ? EMAILS[0]!.id : null,
         created_at: ago(i * 4),
-      })),
+      })).filter(
+        (r) =>
+          has(q(query, "search"), r.address) &&
+          (!q(query, "reason") || r.reason === q(query, "reason")),
+      ),
       nextCursor: null,
     }),
   ],
 
   [
     /^\/console\/requests$/,
-    () => ({
+    (_m, query) => ({
       data: Array.from({ length: 30 }, (_, i) => ({
         id: `7f7a1c00-0000-4000-8000-${(i + 1).toString().padStart(12, "0")}`,
         method: ["POST", "GET", "POST", "DELETE"][i % 4]!,
@@ -1273,7 +1362,15 @@ const ROUTES: [
         user_agent: i % 2 === 0 ? "i10-node/1.4.0" : "curl/8.4.0",
         api_key_id: "4f7a1c00-0000-4000-8000-000000000001",
         occurred_at: ago(0, i),
-      })),
+      })).filter(
+        (r) =>
+          has(q(query, "search"), r.path) &&
+          (!q(query, "method") || r.method === q(query, "method")) &&
+          (!q(query, "status") ||
+            (q(query, "status") === "error") === r.status >= 400) &&
+          (!q(query, "api_key_id") || r.api_key_id === q(query, "api_key_id")) &&
+          since(q(query, "from"), r.occurred_at),
+      ),
       nextCursor: null,
     }),
   ],
@@ -1412,7 +1509,22 @@ const ROUTES: [
     },
   ],
 
-  [/^\/console\/contacts$/, () => ({ data: CONTACTS, nextCursor: null })],
+  [
+    /^\/console\/contacts$/,
+    (_m, query) => ({
+      data: CONTACTS.filter(
+        (c) =>
+          has(q(query, "search"), c.email, c.first_name, c.last_name) &&
+          (!q(query, "status") ||
+            (q(query, "status") === "unsubscribed") === c.unsubscribed) &&
+          // The first segment holds every other contact.
+          (!q(query, "segment_id") ||
+            (q(query, "segment_id") === SEGMENTS[0]!.id &&
+              CONTACTS.indexOf(c) % 2 === 0)),
+      ),
+      nextCursor: null,
+    }),
+  ],
   [/^\/console\/segments$/, () => ({ data: SEGMENTS })],
 
   [
@@ -1560,6 +1672,31 @@ const ROUTES: [
     }),
   ],
   [/^\/console\/templates\/upload$/, () => ({ data: TEMPLATE_UPLOAD, problems: [] })],
+  [/^\/console\/templates\/move$/, () => ({ moved: 1 })],
+  [/^\/console\/templates\/delete$/, () => ({ deleted: [] })],
+  [/^\/console\/template-folders$/, () => TEMPLATE_FOLDERS[0]],
+  [
+    /^\/console\/template-folders\/([^/]+)$/,
+    (m) => TEMPLATE_FOLDERS.find((f) => f.id === m[1]) ?? PREVIEW_NOT_FOUND,
+  ],
+  [
+    /^\/console\/templates\/([^/]+)\/duplicate$/,
+    (m) => templateDetailFixture(m[1]!) ?? PREVIEW_NOT_FOUND,
+  ],
+  [/^\/console\/templates\/([^/]+)\/test$/, () => ({ id: "preview" })],
+  [
+    /^\/console\/templates\/([^/]+)\/draft-preview$/,
+    (m) => {
+      const t = TEMPLATES.find((x) => x.id === m[1])
+      if (!t) return PREVIEW_NOT_FOUND
+      const live = t.versions.find((v) => v.number === t.live)
+      return {
+        subject: t.subject,
+        html: live ? fillFixture(live.html, live.variables) : t.html,
+        text: null,
+      }
+    },
+  ],
 
   [
     /^\/console\/templates\/([^/]+)\/versions\/(\d+)\/preview$/,
@@ -1599,7 +1736,13 @@ const ROUTES: [
     (m) => templateDetailFixture(m[1]!) ?? PREVIEW_NOT_FOUND,
   ],
 
-  [/^\/console\/templates$/, () => ({ data: TEMPLATES.map((t) => summary(t)) })],
+  [
+    /^\/console\/templates$/,
+    (_m, _q, method) =>
+      method === "POST"
+        ? templateDetailFixture("bf7a1c00-0000-4000-8000-00000000000a")
+        : { data: TEMPLATES.map((t) => summary(t)), folders: TEMPLATE_FOLDERS },
+  ],
 ]
 
 /**

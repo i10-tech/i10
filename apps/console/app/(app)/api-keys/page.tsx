@@ -10,8 +10,10 @@ import {
 } from "@repo/ui/components/page"
 import { ApiKeysTable } from "@/components/api-keys-table"
 import { CreateApiKeyButton } from "@/components/create-api-key"
+import { ApiButton } from "@/components/list/api-button"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
+import { SNIPPETS } from "@/lib/snippets"
 import type { ApiKeyRow, DomainSummary } from "@/lib/types"
 
 export const metadata: Metadata = { title: "API keys" }
@@ -67,6 +69,7 @@ export default async function ApiKeysPage({
              * three of which want to say "create a key" and land somebody in
              * the form rather than next to it.
              */}
+            <ApiButton snippet={SNIPPETS.apiKeys} />
             <CreateApiKeyButton autoOpen={params.new === "1"} domains={scopeDomains} />
           </PageActions>
         </PageHeaderRow>

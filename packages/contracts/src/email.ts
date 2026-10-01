@@ -189,7 +189,12 @@ export const templateRefSchema = z.object({
 
 export const sendEmailSchema = z
   .object({
-    from: addressSchema,
+    /**
+     * ⚠ OPTIONAL ONLY WITH A TEMPLATE THAT HAS ONE, exactly like `subject`:
+     * a template may carry a default sender, and the request's wins (Resend's
+     * template defaults). Without a template it is required, as it always was.
+     */
+    from: addressSchema.optional(),
     to: addressListSchema,
     /**
      * ⚠ OPTIONAL ONLY WITH A TEMPLATE THAT HAS ONE. Without a template it is
@@ -268,6 +273,10 @@ export const sendEmailSchema = z
   .refine((v) => v.template !== undefined || v.subject !== undefined, {
     message: "`subject` is required.",
     path: ["subject"],
+  })
+  .refine((v) => v.template !== undefined || v.from !== undefined, {
+    message: "`from` is required.",
+    path: ["from"],
   })
 
 export const sendEmailResponseSchema = z.object({

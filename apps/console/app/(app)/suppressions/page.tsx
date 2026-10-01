@@ -11,9 +11,11 @@ import {
 import { Download } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { AddSuppressionButton } from "@/components/add-suppression"
+import { ApiButton } from "@/components/list/api-button"
 import { SuppressionsTable } from "@/components/suppressions-table"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
+import { SNIPPETS } from "@/lib/snippets"
 import type { Page as ApiPage, SuppressionRow } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Suppressions" }
@@ -37,12 +39,17 @@ export const metadata: Metadata = { title: "Suppressions" }
 export default async function SuppressionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; cursor?: string }>
+  searchParams: Promise<{ search?: string; reason?: string; cursor?: string }>
 }) {
   const params = await searchParams
 
   const result = await tryApi<ApiPage<SuppressionRow>>("/console/suppressions", {
-    query: { search: params.search, cursor: params.cursor, limit: 50 },
+    query: {
+      search: params.search,
+      reason: params.reason,
+      cursor: params.cursor,
+      limit: 50,
+    },
   })
 
   return (
@@ -55,6 +62,7 @@ export default async function SuppressionsPage({
         <PageHeaderRow className="flex-wrap gap-y-2">
           <PageTitle>Suppressions</PageTitle>
           <PageActions>
+            <ApiButton snippet={SNIPPETS.suppressions} />
             {/*
              * ⚠ A PLAIN ANCHOR, NOT A `Link`. The target is a file, and Next's
              * client router would try to render a CSV as a page.

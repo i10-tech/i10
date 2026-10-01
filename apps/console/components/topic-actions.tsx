@@ -4,6 +4,7 @@ import * as React from "react"
 import { MoreHorizontal, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
+import { rowMenuClass } from "@/components/list/table"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +32,7 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
           <Button
             variant="ghost"
             size="icon-sm"
+            className={rowMenuClass}
             aria-label={`Actions for ${topic.name}`}
           >
             <MoreHorizontal />

@@ -36,6 +36,13 @@ export interface StoredVersion {
   text: string | null
   nonce: string
   variables: Variable[]
+  /**
+   * The version's default sender and reply-to, used when a send gives none
+   * (Resend's template defaults). Absent on versions stored before they
+   * existed, which means the same as null.
+   */
+  from?: string | null
+  replyTo?: string[] | null
 }
 
 export interface TemplateRef {
@@ -59,6 +66,10 @@ export type SendResolution =
       html: string | null
       text: string | null
       subject: string
+      /** The request's `from`, else the template's. */
+      from: string
+      /** The request's `reply_to`, else the template's; null for none. */
+      replyTo: string | string[] | null
     }
   | {
       ok: false
@@ -73,6 +84,9 @@ export async function resolveTemplateSend(
     variables?: unknown
     /** The request's own subject, which wins over the template's, as in Resend. */
     subject?: string
+    /** The request's own sender and reply-to, which win the same way. */
+    from?: string
+    replyTo?: string | string[]
   },
   lookup: TemplateLookup,
 ): Promise<SendResolution> {
@@ -119,12 +133,28 @@ export async function resolveTemplateSend(
     }
   }
 
+  // ⚠ THE SAME RULE FOR THE SENDER AS FOR THE SUBJECT: the request wins, the
+  // template fills in, and neither means the request is refused.
+  const from = input.from ?? version.from ?? null
+  if (!from) {
+    return {
+      ok: false,
+      error: "invalid",
+      message: `Template \`${template.id}\` has no sender, so the request must give \`from\`.`,
+    }
+  }
+  const replyTo =
+    input.replyTo ??
+    (version.replyTo && version.replyTo.length > 0 ? version.replyTo : null)
+
   return {
     ok: true,
     versionId: version.id,
     html: filled.filled.html,
     text: filled.filled.text,
     subject,
+    from,
+    replyTo,
   }
 }
 
