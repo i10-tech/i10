@@ -7,7 +7,7 @@ import { useClerk, useSignUp } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { FieldDescription, FieldGroup } from "@repo/ui/components/field"
 import { FloatingInput } from "@repo/ui/components/floating-field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { EmailInput } from "@repo/ui/components/email-input"
 import { emailProblem } from "@repo/ui/checks"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepProgress } from "@repo/ui/components/step-progress"
@@ -680,16 +680,15 @@ export function SignUpForm({
               <StepHeading title="Your sign-in details">
                 The address is where account and delivery notices go.
               </StepHeading>
-              <ValidatedInput
+              <EmailInput
                 id="email"
                 name="email"
                 /*
-                 * ⚠ STILL `type="email"` THOUGH THE FORM IS `noValidate` AND WE
+                 * ⚠ `EmailInput` IS STILL `type="email"` THOUGH THE FORM IS `noValidate` AND WE
                  * CHECK IT OURSELVES. The type is what gives a phone keyboard an
                  * @ key and a dot, and what tells a password manager which field
                  * this is. Only the browser's own bubble is being suppressed.
                  */
-                type="email"
                 label="Email address"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}

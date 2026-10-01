@@ -3,7 +3,7 @@
 import * as React from "react"
 import { toast } from "sonner"
 import { emailProblem } from "@repo/ui/checks"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { EmailInput } from "@repo/ui/components/email-input"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { offerTransfer } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -106,10 +106,9 @@ export function TransferDomainDialog({
         return true
       }}
     >
-      <ValidatedInput
+      <EmailInput
         id="transfer-email"
         label="Email address"
-        type="email"
         value={email}
         onChange={(event) => setEmail(event.target.value)}
         autoComplete="off"

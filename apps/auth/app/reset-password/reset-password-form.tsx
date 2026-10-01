@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { useClerk, useSignIn } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { EmailInput } from "@repo/ui/components/email-input"
 import { emailProblem } from "@repo/ui/checks"
 import { OtpField, OTP_LENGTH } from "../_components/otp-field"
 import { ResendButton } from "../_components/resend-button"
@@ -283,12 +283,11 @@ export function ResetPasswordForm({
             Enter your email and we&apos;ll send you a code.
           </p>
         </div>
-        <ValidatedInput
+        <EmailInput
           id="email"
           // The only field on the step: it is what somebody came here to fill.
           autoFocus
           name="email"
-          type="email"
           label="Email address"
           value={email}
           onChange={(event) => setEmail(event.target.value)}

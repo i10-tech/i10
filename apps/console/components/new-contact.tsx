@@ -4,7 +4,7 @@ import * as React from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { EmailInput } from "@repo/ui/components/email-input"
 import { emailProblem, isEmailUsable } from "@repo/ui/checks"
 import { FormDialog } from "@/components/form-dialog"
 import { createContact } from "@/lib/actions"
@@ -63,10 +63,9 @@ export function NewContactButton() {
         })
       }
     >
-      <ValidatedInput
+      <EmailInput
         label="Email address"
         id="contact-email"
-        type="email"
         value={email}
         onChange={(event) => setEmail(event.target.value)}
         autoComplete="off"
