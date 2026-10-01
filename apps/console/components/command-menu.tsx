@@ -30,6 +30,12 @@ import { allDestinations } from "@/lib/nav"
  * stack a keydown handler on every client-side navigation and open several
  * dialogs on one press.
  */
+/**
+ * Opens the menu from anywhere without a shared store: the rail's Search row
+ * dispatches it on `window`, and the menu is mounted once per shell.
+ */
+export const OPEN_COMMAND_MENU = "i10:open-command-menu"
+
 export function CommandMenu() {
   const [open, setOpen] = React.useState(false)
   const router = useRouter()
@@ -54,8 +60,14 @@ export function CommandMenu() {
       }
     }
 
+    const onOpen = () => setOpen(true)
+
     document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
+    window.addEventListener(OPEN_COMMAND_MENU, onOpen)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener(OPEN_COMMAND_MENU, onOpen)
+    }
   }, [])
 
   const go = React.useCallback(

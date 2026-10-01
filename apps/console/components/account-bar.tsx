@@ -176,7 +176,7 @@ function AccountRow({
      * against 8px on the left; now it is ~15px, and the ring sits 15px from the
      * rail's edge, mirroring the avatar's 16px.
      */
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 group-data-[collapsed=true]/rail:flex-col">
       {/*
        * ⚠ `modal={false}`, LIKE THE USAGE POPOVER BESIDE IT. Radix menus are
        * modal by default: the rest of the page stops taking the pointer while
@@ -191,6 +191,13 @@ function AccountRow({
             "text-left transition-colors duration-(--duration-instant) ease-(--ease-linear)",
             "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar focus-visible:outline-none",
             "data-[state=open]:bg-sidebar-accent",
+            /*
+             * Icon-only rail (#153): the avatar alone, centred, with the ring
+             * stacked under it. The name and plan go, and the trigger's
+             * `aria-label` still says whose menu it is.
+             */
+            "group-data-[collapsed=true]/rail:w-8 group-data-[collapsed=true]/rail:flex-none group-data-[collapsed=true]/rail:justify-center group-data-[collapsed=true]/rail:px-0",
+            "group-data-[collapsed=true]/rail:[&>*:not(:first-child)]:hidden",
           )}
           aria-label={`Account menu for ${name}`}
         >

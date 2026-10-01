@@ -1,6 +1,7 @@
 "use client"
 
-import { OrganizationSwitcher } from "@clerk/nextjs"
+import { ClerkLoading, OrganizationSwitcher } from "@clerk/nextjs"
+import { Skeleton } from "@repo/ui/components/skeleton"
 import type { TenantProfile } from "@/lib/types"
 
 /**
@@ -51,7 +52,7 @@ export function WorkspaceBar({
    */
   if (!clerkEnabled) {
     return (
-      <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1">
+      <div className="flex h-9 items-center justify-between gap-2 rounded-md px-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {tenant?.name ?? "Workspace"}
         </span>
@@ -60,7 +61,19 @@ export function WorkspaceBar({
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md px-1 py-0.5">
+    /*
+     * ⚠ A FIXED 36px ROW, AND A SKELETON IN IT UNTIL CLERK HAS LOADED. The
+     * switcher is Clerk's and draws nothing until clerk-js arrives, so the
+     * row used to be 0px tall on first paint: the navigation rendered in its
+     * place and was shoved down by the height of the switcher a moment later,
+     * on every full load. The account bar at the foot already reserves its row
+     * the same way. The height is fixed rather than a min-height so whatever
+     * Clerk's trigger measures, nothing below it can move.
+     */
+    <div className="relative flex h-9 items-center justify-between gap-2 rounded-md px-1">
+      <ClerkLoading>
+        <Skeleton className="absolute inset-x-1 top-1/2 h-7 -translate-y-1/2 rounded-md" />
+      </ClerkLoading>
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <OrganizationSwitcher
           hidePersonal
