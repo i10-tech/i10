@@ -1,1 +1,1030 @@
 @import "@repo/ui/styles/tokens.css";
+@import "lenis/dist/lenis.css";
+
+/*
+ * The marketing site's design tokens.
+ *
+ * `@repo/ui` stays the foundation - every shadcn component the site borrows
+ * still reads its tokens - and this file layers the site's own system on top:
+ * the canvas and surface ramp, the text ramp, the brand accent, product hues,
+ * type styles and motion curves. Everything here is written to be lifted into
+ * packages/ui once the console adopts it; nothing below is page-specific.
+ *
+ * ⚠ DARK ONLY, AND THE ROOT CARRIES `.dark`. The ui tokens switch on that
+ * class, so a borrowed component renders its dark variant without this file
+ * restating any of its values.
+ *
+ * ⚠ THE ACCENT IS A PROPOSAL. packages/ui/src/styles/tokens.css deliberately
+ * leaves `--brand` unset "until the accent is chosen by a person". The person
+ * delegated it for this build; the choice lives here, in one token, so moving
+ * or reverting it is one line. See docs/landing/BRIEF.md section 5.
+ */
+
+:root {
+  /* The nav logo's height. */
+  --logo-h: 28px;
+  /* The nav bar's side padding: how far the logo and the button sit from the
+     screen edges. Whole pixels only: a logo between pixels renders soft. */
+  --nav-pad: 12px;
+  --nav-max: 1720px;
+  /* Where the nav logo ends, from the left edge of the screen: the footer
+     lines its first column up against it. 16px is the bar's inset (pl-4). */
+  --nav-logo-right: calc(max(0px, (100vw - var(--nav-max)) / 2) + var(--nav-pad) + 16px + var(--logo-h) * 155.4 / 100);
+  /* Canvas and surfaces - each step is small on purpose. Depth on this site
+     comes from hairlines and light, not from big value jumps. */
+  --canvas: #09090b;
+  --surface-1: #0e0e11;
+  --surface-2: #131316;
+  --surface-3: #1a1a1e;
+  --surface-4: #222227;
+
+  /* Hairlines are white at low alpha so they read the same on every surface. */
+  --line-faint: rgb(255 255 255 / 0.045);
+  --line: rgb(255 255 255 / 0.075);
+  --line-strong: rgb(255 255 255 / 0.12);
+  --line-bright: rgb(255 255 255 / 0.2);
+
+  /* Text ramp. */
+  --fg: #ededef;
+  --fg-2: #a3a3ab;
+  --fg-3: #74747d;
+  --fg-4: #4e4e56;
+
+  /* Post yellow - the colour of European mail, and i10 sends from Frankfurt. */
+  --brand: oklch(0.88 0.17 95);
+  --brand-soft: oklch(0.88 0.17 95 / 0.14);
+  --brand-ink: #0b0b0c;
+
+  /* Product hues, for icon tiles and illustrations only. Never for text on
+     the canvas and never for state; state has its own four below. */
+  --hue-send: oklch(0.72 0.15 252);
+  --hue-mail: oklch(0.72 0.16 295);
+  --hue-domain: oklch(0.78 0.15 155);
+  --hue-template: oklch(0.74 0.16 350);
+  --hue-hook: oklch(0.78 0.15 60);
+  --hue-deliver: oklch(0.8 0.12 205);
+
+  /* Delivery state. */
+  --state-delivered: oklch(0.78 0.16 152);
+  --state-bounced: oklch(0.68 0.19 25);
+  --state-complained: oklch(0.83 0.15 78);
+  --state-queued: oklch(0.74 0.13 248);
+
+  /* Motion. Curves are named for their shape; durations for their job. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-back: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+  --dur-hover: 120ms;
+  --dur-quick: 200ms;
+  --dur-base: 320ms;
+  --dur-move: 560ms;
+  --dur-slow: 900ms;
+
+  /* Layout. */
+  --container: 76rem; /* 1216 */
+  --gutter: 1.5rem;
+  --nav-h: 3.5rem;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --gutter: 1rem;
+  }
+}
+
+/*
+ * The shadcn names the borrowed components read, pointed at this palette so a
+ * Dialog or Tooltip lands on the same surfaces as everything else.
+ */
+.dark {
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--surface-2);
+  --popover: var(--surface-2);
+  --muted: var(--surface-3);
+  --muted-foreground: var(--fg-3);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--brand);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-line-faint: var(--line-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-bright: var(--line-bright);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-4: var(--fg-4);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-hue-send: var(--hue-send);
+  --color-hue-mail: var(--hue-mail);
+  --color-hue-domain: var(--hue-domain);
+  --color-hue-template: var(--hue-template);
+  --color-hue-hook: var(--hue-hook);
+  --color-hue-deliver: var(--hue-deliver);
+  --color-delivered: var(--state-delivered);
+  --color-bounced: var(--state-bounced);
+  --color-complained: var(--state-complained);
+  --color-queued: var(--state-queued);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument), "Times New Roman", serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --ease-out-expo: var(--ease-out-expo);
+  --ease-out-quint: var(--ease-out-quint);
+  --ease-in-out-quart: var(--ease-in-out-quart);
+}
+
+/*
+ * Type styles. Sizes clamp between a phone and a 1440 desktop; the display
+ * cuts set Inter's optical size to 32, which is Inter Display, and use
+ * Linear's two stylistic features (a flat-topped 1 and open digits).
+ */
+@utility type-display-xl {
+  font-family: var(--font-display);
+  font-size: clamp(2.625rem, 1rem + 4.3vw, 5rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+  font-weight: 580;
+  font-variation-settings: "opsz" 32;
+  text-wrap: balance;
+}
+@utility type-display-l {
+  font-family: var(--font-display);
+  font-size: clamp(2.375rem, 1.3rem + 4.2vw, 4.5rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-weight: 570;
+  font-variation-settings: "opsz" 32;
+  text-wrap: balance;
+}
+@utility type-display-m {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 1.25rem + 2.9vw, 3.5rem);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  font-weight: 560;
+  font-variation-settings: "opsz" 32;
+  text-wrap: balance;
+}
+@utility type-display-s {
+  font-family: var(--font-display);
+  font-size: clamp(1.625rem, 1.2rem + 1.5vw, 2.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  font-weight: 550;
+  font-variation-settings: "opsz" 32;
+  text-wrap: balance;
+}
+@utility type-title {
+  font-size: 1.25rem;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  font-weight: 540;
+}
+@utility type-lead {
+  font-size: clamp(1.0625rem, 0.98rem + 0.35vw, 1.25rem);
+  line-height: 1.55;
+  letter-spacing: -0.01em;
+  color: var(--fg-2);
+  text-wrap: pretty;
+}
+@utility type-body {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--fg-2);
+  text-wrap: pretty;
+}
+@utility type-label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+@utility type-accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  font-variation-settings: normal;
+}
+/* The nav bar's frame: wider than the page grid, so the logo and the button
+   sit out toward the screen edges (Cloudflare's bar). */
+@media (width >= 48rem) {
+  :root {
+    --nav-pad: 28px;
+  }
+}
+@media (width >= 80rem) {
+  :root {
+    --nav-pad: 30px;
+  }
+}
+@utility container-nav {
+  width: 100%;
+  max-width: var(--nav-max);
+  margin-inline: auto;
+  padding-inline: var(--nav-pad);
+}
+@utility container-site {
+  width: 100%;
+  max-width: calc(var(--container) + var(--gutter) * 2);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+@layer base {
+  html {
+    background: var(--canvas);
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scrollbar-color: var(--surface-4) var(--canvas);
+  }
+  body {
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv01", "ss03";
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    overflow-x: clip;
+  }
+  /* Opaque on purpose: a translucent highlight doubles up wherever two
+     line boxes overlap (display type sets its lines tighter than the font's
+     own ascent + descent), which reads as stripes of a darker yellow. */
+  ::selection {
+    background: var(--brand);
+    color: var(--brand-ink);
+  }
+  /* On yellow, a yellow box vanishes: there it is ink with yellow text. */
+  .selection-ink ::selection,
+  .selection-ink::selection {
+    background: var(--brand-ink);
+    color: var(--brand);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-feature-settings: normal;
+  }
+}
+
+/*
+ * Reveal states. `.js` is set on <html> before first paint by an inline
+ * script, so without JavaScript nothing is ever hidden. The animation code
+ * moves these from their start state; the start state lives here so the
+ * server-rendered paint already matches it and nothing flashes.
+ */
+.js [data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, 18px, 0);
+}
+.js [data-reveal="fade"] {
+  transform: none;
+}
+.js [data-reveal][data-revealed] {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .js [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+/*
+ * ⚠ A SAFETY NET, NOT A REVEAL. The start states above hide content until the
+ * bundle runs. If it is slow or never arrives, nothing may stay invisible:
+ * until RevealController marks <html data-hydrated>, a fade at 4s shows every
+ * hidden element. Once hydrated the selector stops matching, the animation is
+ * dropped, and GSAP owns every reveal from then on.
+ */
+html.js:not([data-hydrated]) [data-reveal] {
+  animation: reveal-fallback 0.6s var(--ease-out-expo) 4s forwards;
+}
+html.js:not([data-hydrated]) [data-split] {
+  animation: split-fallback 0s 4s forwards;
+}
+@keyframes reveal-fallback {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes split-fallback {
+  to {
+    visibility: visible;
+  }
+}
+
+/* Lenis: the library's own stylesheet is imported above; one addition keeps
+   nested scrollers (code blocks, tables) native under smooth scroll. */
+[data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+/*
+ * Pixel icons: dim at rest, lit on hover of the nearest `.group`, each pixel
+ * delayed by its diagonal (`--d`, set per rect) and popping past full size.
+ */
+.pixel-icon rect {
+  fill: currentColor;
+  opacity: 0.38;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity var(--dur-quick) linear;
+}
+.group:hover .pixel-icon rect,
+.group:focus-visible .pixel-icon rect,
+.pixel-icon[data-lit="true"] rect {
+  opacity: 1;
+  animation: pixel-pop 360ms var(--ease-back) both;
+  animation-delay: var(--d);
+}
+@keyframes pixel-pop {
+  0% {
+    opacity: 0.38;
+    transform: scale(0.55);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.22);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .pixel-icon rect,
+  .pixel-icon[data-lit="true"] rect {
+    animation: none;
+  }
+}
+
+/* Icon tiles: a hairline square tinted by its hue, brighter on hover. */
+.icon-tile {
+  background: color-mix(in oklch, var(--tile) 9%, var(--surface-3));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--tile) 18%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.05);
+  transition:
+    background var(--dur-base) var(--ease-out-quint),
+    box-shadow var(--dur-base) var(--ease-out-quint);
+}
+.group:hover .icon-tile {
+  background: color-mix(in oklch, var(--tile) 16%, var(--surface-3));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--tile) 34%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 0 24px -6px color-mix(in oklch, var(--tile) 45%, transparent);
+}
+
+/* Nav: transparent at the top of the page, a floating glass bar once scrolled. */
+.nav-bar--floating {
+  background: rgb(14 14 17 / 0.72);
+  backdrop-filter: blur(18px) saturate(1.5);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 16px 40px -16px rgb(0 0 0 / 0.7);
+}
+.nav-bar--on-brand {
+  background: rgb(255 255 255 / 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgb(11 11 12 / 0.12),
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    0 16px 40px -20px rgb(90 70 0 / 0.35);
+}
+.nav-bar--on-brand ul :is(a, button) {
+  color: rgb(11 11 12 / 0.68);
+}
+.nav-bar--on-brand ul :is(a, button):hover,
+.nav-bar--on-brand ul [aria-expanded="true"] {
+  color: var(--brand-ink);
+}
+.nav-bar--on-brand ul svg {
+  color: rgb(11 11 12 / 0.45);
+}
+.nav-bar--on-brand ul > span {
+  background: rgb(11 11 12 / 0.07);
+}
+.nav-viewport {
+  background: rgb(19 19 22 / 0.94);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 30px 80px -24px rgb(0 0 0 / 0.85);
+  transition:
+    width 380ms var(--ease-out-quint),
+    height 380ms var(--ease-out-quint),
+    transform 380ms var(--ease-out-quint),
+    opacity 180ms linear;
+}
+.nav-cta {
+  box-shadow:
+    inset 0 -1px 0 rgb(0 0 0 / 0.2),
+    0 0 0 1px rgb(255 255 255 / 0.1);
+}
+
+/* Status pill (after Resend): gradient wash at 10%, inset top light, a ring that breathes. */
+.status-pill {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+.status-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(to top, rgb(255 255 255 / 0.4), rgb(255 255 255 / 0.8));
+  opacity: 0.07;
+  transition: opacity var(--dur-base) var(--ease-out-quad);
+}
+.status-pill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.12);
+}
+.status-pill:hover::before {
+  opacity: 0.11;
+}
+.status-ping {
+  animation: status-ping 2.2s var(--ease-out-quad) infinite;
+}
+@keyframes status-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-ping {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/*
+ * Footer wordmark. The word is sized to the container, and the block is cut
+ * short so the hairline below slices the letters just under the x-height:
+ * the word reads as sunk into the page rather than printed on it.
+ */
+.footer-wordmark {
+  --mx: 50%;
+  --my: 50%;
+  display: grid;
+  height: calc(min(18.6vw, 229px) * 0.8);
+  overflow: hidden;
+}
+.footer-wordmark__text {
+  grid-area: 1 / 1;
+  font-family: var(--font-display);
+  font-size: min(18.6vw, 229px);
+  line-height: 1;
+  font-weight: 620;
+  letter-spacing: -0.055em;
+  font-variation-settings: "opsz" 32;
+  white-space: nowrap;
+  text-align: center;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.footer-wordmark__base {
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.085), rgb(255 255 255 / 0.025) 80%);
+}
+.footer-wordmark__glow {
+  background-image: radial-gradient(
+    260px circle at var(--mx) var(--my),
+    oklch(0.88 0.17 95 / 0.85),
+    rgb(255 255 255 / 0.28) 32%,
+    rgb(255 255 255 / 0) 70%
+  );
+  opacity: 0;
+  transition: opacity 600ms var(--ease-out-quad);
+}
+.footer-wordmark:hover .footer-wordmark__glow {
+  opacity: 1;
+}
+.footer-horizon {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-strong) 20%, var(--line-strong) 80%, transparent);
+  position: relative;
+}
+.footer-horizon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 1px;
+  width: min(900px, 90vw);
+  height: 180px;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse 50% 100% at 50% 0%, rgb(255 255 255 / 0.05), transparent 70%);
+  pointer-events: none;
+}
+
+/* Footer links draw an underline from the left on hover. */
+.footer-link__label {
+  background: linear-gradient(currentColor, currentColor) no-repeat 0 100% / 0 1px;
+  transition: background-size 380ms var(--ease-out-expo);
+  padding-bottom: 1px;
+}
+.footer-link:hover .footer-link__label {
+  background-size: 100% 1px;
+}
+
+/* The masked footer mark: solid post yellow at rest, a stream of mail on hover. */
+.footer-mark {
+  --px: 0;
+  --py: 0;
+  mask-size: 100% 100%;
+  -webkit-mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  overflow: hidden;
+  pointer-events: none;
+}
+.footer-mark__hit path {
+  pointer-events: fill;
+}
+.footer-mark__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--brand);
+  transition: opacity 500ms var(--ease-out-quad);
+}
+.footer-mark__stream {
+  position: absolute;
+  inset: -8%;
+  display: flex;
+  gap: 10px;
+  padding: 0 10px;
+  background: #0f0f12;
+  opacity: 0;
+  transform: translate3d(calc(var(--px) * -24px), calc(var(--py) * -24px), 0) rotate(-10deg) scale(1.15);
+  transition:
+    opacity 500ms var(--ease-out-quad),
+    transform 900ms var(--ease-out-expo);
+}
+.footer-mark:has(.footer-mark__hit path:hover) .footer-mark__fill {
+  opacity: 0;
+}
+.footer-mark:has(.footer-mark__hit path:hover) .footer-mark__stream {
+  opacity: 1;
+}
+.footer-mark__col {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  animation: footer-stream var(--dur) linear infinite;
+  animation-play-state: paused;
+}
+.footer-mark:has(.footer-mark__hit path:hover) .footer-mark__col {
+  animation-play-state: running;
+}
+@keyframes footer-stream {
+  to {
+    transform: translateY(-50%);
+  }
+}
+.footer-mark__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--c) 22%, #16161a);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--c) 40%, transparent);
+}
+.footer-mark__from {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--c);
+}
+.footer-mark__subject {
+  font-size: 13px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  line-height: 1.2;
+}
+.footer-mark__line {
+  height: 6px;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.12);
+}
+.footer-mark__line--short {
+  width: 60%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .footer-mark__col {
+    animation: none;
+  }
+}
+
+/* Split headlines stay hidden until SplitReveal has measured their lines. */
+.js [data-split] {
+  visibility: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .js [data-split] {
+    visibility: visible;
+  }
+}
+/* Split words: each word sits in its own mask with room for descenders and italics. */
+.sw {
+  display: inline-block;
+  overflow: clip;
+  vertical-align: top;
+  padding: 0 0.06em 0.14em;
+  margin: 0 -0.06em -0.14em;
+}
+.sw-i {
+  display: inline-block;
+  will-change: transform;
+}
+/* Scatter fades and blurs rather than rising, so its words are not masked. */
+[data-split="scatter"] .sw {
+  overflow: visible;
+}
+/*
+ * Once the reveal has played the words go back to plain inline text. Each
+ * inline-block is its own line box, so while they stay blocks a selection
+ * paints word by word at the font's own height, with the spaces between them
+ * as slivers at the parent's height (the "dots" above a selected line).
+ */
+[data-split-done] .sw,
+[data-split-done] .sw-i {
+  display: inline;
+  overflow: visible;
+  padding: 0;
+  margin: 0;
+  will-change: auto;
+}
+
+/* Manifesto icons (Dub's): the active one tips and lifts, and its glow tints
+   the words around it. White text x hue = hue; the dark canvas stays dark. */
+.mf-glow {
+  background: radial-gradient(closest-side, var(--glow), transparent);
+  mix-blend-mode: multiply;
+  opacity: 0;
+  transition: opacity 700ms var(--ease-out-quad);
+}
+.mf-icon[data-active] .mf-glow {
+  opacity: 1;
+}
+.mf-tile {
+  transform: translateY(-0.08em);
+  transition:
+    transform 550ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 400ms var(--ease-out-quad);
+}
+.mf-icon[data-active] .mf-tile {
+  transform: translateY(-0.28em) rotate(var(--tilt));
+  filter: drop-shadow(0 0.2em 0.3em rgb(0 0 0 / 0.55));
+}
+
+/* Hero backdrop: a blueprint grid fading out from the top, and a warm glow behind the mark. */
+.hero-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  background-position: center top;
+  mask-image: radial-gradient(ellipse 70% 60% at 60% 30%, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 60% 30%, black 20%, transparent 75%);
+}
+.hero-glow {
+  right: -10%;
+  top: 8%;
+  width: 60%;
+  aspect-ratio: 1;
+  background: radial-gradient(closest-side, oklch(0.88 0.17 95 / 0.09), transparent 70%);
+  filter: blur(20px);
+}
+.hero-orbit {
+  animation: orbit-spin 90s linear infinite;
+}
+/* ⚠ `rotate`, NOT `transform`. Tailwind's -translate-x/y-1/2 centring lives
+   in the separate `translate` property; a keyframe on `transform` stacked a
+   second, animated -50% on top of it, and the ring drifted off the mark. */
+@keyframes orbit-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-orbit {
+    animation: none;
+  }
+}
+
+/* Console teaser: a glass edge, a lit top rim, and a halo that sits under it. */
+.console-window {
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 50px 120px -40px rgb(0 0 0 / 0.9),
+    0 0 0 1px rgb(0 0 0 / 0.6);
+}
+.console-halo {
+  inset: -2% 6% auto;
+  height: 70%;
+  background: radial-gradient(ellipse 50% 60% at 50% 0%, oklch(0.88 0.17 95 / 0.07), transparent 70%);
+  filter: blur(30px);
+}
+
+.code-window {
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 30px 80px -40px rgb(0 0 0 / 0.8);
+}
+
+/* The drum's backdrop: WorkOS's vertical stripes, in the domain hue, masked to a disc. */
+.drum-stripes {
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--hue-domain) 30%, transparent) 0 1.5px,
+    transparent 1.5px 7px
+  );
+  mask-image: radial-gradient(circle at 50% 50%, black 0%, rgb(0 0 0 / 0.5) 30%, transparent 62%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, black 0%, rgb(0 0 0 / 0.5) 30%, transparent 62%);
+  opacity: 0.55;
+}
+
+/* Product rail panels. */
+.rail-panel {
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+.rail-grid {
+  background-image: radial-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 30%, transparent 80%);
+}
+
+/* Primitives: the orbit turns, and every node counter-turns so its mark stays upright. */
+.orbit-ring {
+  animation: orbit-ring 60s linear infinite;
+}
+.orbit-counter {
+  animation: orbit-ring 60s linear infinite reverse;
+}
+@keyframes orbit-ring {
+  to {
+    rotate: 360deg;
+  }
+}
+.pipeline-mask {
+  mask-image: linear-gradient(to bottom, transparent, black 22%, black 78%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 22%, black 78%, transparent);
+}
+.pipeline-track {
+  animation: pipeline 18s linear infinite;
+}
+@keyframes pipeline {
+  to {
+    transform: translateY(-50%);
+  }
+}
+.terminal-caret {
+  animation: caret 1.05s steps(1) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Framework cells (after Clerk): glyph lifts and takes its colour, name rises, dots bloom. */
+.fw-cell .fw-icon {
+  color: var(--fg-3);
+  transition:
+    color 450ms var(--ease-out-expo),
+    transform 450ms var(--ease-out-expo);
+}
+.fw-cell .fw-label {
+  bottom: 22%;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 300ms linear,
+    transform 450ms var(--ease-out-expo);
+}
+.fw-cell .fw-dots {
+  background-image: radial-gradient(color-mix(in oklch, var(--brand-c) 55%, transparent) 1px, transparent 1.3px);
+  background-size: 7px 7px;
+  mask-image: radial-gradient(circle at 50% 45%, black 10%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle at 50% 45%, black 10%, transparent 70%);
+  opacity: 0;
+  transform: scale(0.55);
+  transition:
+    opacity 450ms var(--ease-out-quad),
+    transform 700ms var(--ease-out-expo);
+}
+/* Works-with strip: the same hover as the SDK grid, minus the lift. */
+.ww-cell .ww-mark {
+  color: var(--fg-3);
+  transition: color 450ms var(--ease-out-expo);
+}
+@media (hover: hover) {
+  .ww-cell:hover .ww-mark {
+    color: var(--brand-c);
+  }
+  .ww-cell:hover .fw-dots {
+    opacity: 0.45;
+    transform: none;
+  }
+}
+/* Hover only where a pointer can hover: a tap on a phone would otherwise
+   leave the last cell stuck lit. Touch screens get the labels at rest. */
+@media (hover: hover) {
+  .fw-cell:hover {
+    background: rgb(255 255 255 / 0.015);
+  }
+  .fw-cell:hover .fw-icon {
+    color: var(--brand-c);
+    transform: translateY(-12px);
+  }
+  .fw-cell:hover .fw-label {
+    opacity: 1;
+    transform: none;
+  }
+  .fw-cell:hover .fw-dots {
+    opacity: 0.55;
+    transform: none;
+  }
+}
+@media (hover: none) {
+  .fw-cell .fw-icon {
+    color: var(--fg-2);
+    transform: translateY(-12px);
+  }
+  .fw-cell .fw-label {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-ring,
+  .orbit-counter,
+  .pipeline-track,
+  .terminal-caret {
+    animation: none;
+  }
+}
+
+/* Security card: faint ruled lines, like the paper a signature goes on. */
+.security-lines {
+  background-image: repeating-linear-gradient(to bottom, transparent 0 20px, rgb(255 255 255 / 0.025) 20px 21px);
+  mask-image: linear-gradient(to bottom, transparent, black 30%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 30%);
+}
+
+/* Closing card: Cloudflare's framed hero in post yellow, dotted and lit from below. */
+.closing-card {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.4),
+    inset 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.closing-dots {
+  background-image: radial-gradient(rgb(11 11 12 / 0.13) 1px, transparent 1.3px);
+  background-size: 9px 9px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, transparent 30%, black 90%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, transparent 30%, black 90%);
+}
+.closing-glow {
+  left: 50%;
+  bottom: -55%;
+  width: 90%;
+  aspect-ratio: 2;
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, rgb(255 255 255 / 0.55), transparent);
+  filter: blur(10px);
+}
+
+/*
+ * The pricing volume slider: a native range with our paint. The fill is a
+ * gradient stop at `--p` (0 to 1, set inline), so it tracks the thumb exactly
+ * without a second element to keep in sync.
+ */
+/*
+ * The pricing slider. The native input is the hit area only, invisible, with
+ * a 20px thumb so its pointer maths matches the painted thumb (whose centre
+ * runs 10px in from either end). Everything visible is painted beside it
+ * and positioned from --p, a spring (see VolumeSlider).
+ */
+.volume-range {
+  appearance: none;
+  margin: 0;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+.volume-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+}
+.volume-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+}
+.volume-thumb {
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.35),
+    0 2px 8px rgb(0 0 0 / 0.5);
+  transition:
+    scale 220ms var(--ease-back),
+    box-shadow 220ms var(--ease-out-quad);
+}
+/* The halo only while held: at rest a tinted ring on the dark canvas reads
+   as a muddy olive circle. */
+.volume[data-dragging] .volume-thumb {
+  scale: 1.12;
+  box-shadow:
+    0 0 0 6px rgb(251 213 48 / 0.16),
+    0 2px 10px rgb(0 0 0 / 0.55);
+}
+.volume:has(.volume-range:focus-visible) .volume-thumb {
+  box-shadow:
+    0 0 0 3px var(--canvas),
+    0 0 0 5px var(--brand);
+}
+
+/* 404: the bounce notice, stamped. */
+.bounce-card {
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 40px 80px -40px rgb(0 0 0 / 0.9);
+}
+.bounce-stamp {
+  opacity: 0.85;
+  transform: rotate(-14deg);
+  animation: stamp-in 700ms var(--ease-back) 400ms both;
+  mix-blend-mode: screen;
+}
+@keyframes stamp-in {
+  from {
+    opacity: 0;
+    transform: rotate(-30deg) scale(1.6);
+  }
+  to {
+    opacity: 0.85;
+    transform: rotate(-14deg) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bounce-stamp {
+    animation: none;
+  }
+}
+
+/* Brand page: the "busy ground" the mark must never sit on. */
+.brand-busy {
+  background:
+    radial-gradient(circle at 20% 30%, var(--hue-template) 0 18%, transparent 19%),
+    radial-gradient(circle at 75% 65%, var(--hue-send) 0 22%, transparent 23%),
+    repeating-linear-gradient(45deg, var(--hue-domain) 0 6px, var(--hue-mail) 6px 12px);
+}
