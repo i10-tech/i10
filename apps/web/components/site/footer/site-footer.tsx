@@ -41,9 +41,17 @@ export function SiteFooter() {
           height of the nav bar: at the bottom of the page the pinned logo
           and button sit in that row, clear of every link below. */}
       <div className="relative flex min-h-svh flex-col">
-        <div aria-hidden className="h-[64px] shrink-0" />
-        <div className="container-site relative grid grid-cols-2 gap-x-6 gap-y-12 pt-6 pb-12 md:grid-cols-5 xl:grid-cols-[1.35fr_repeat(5,1fr)]">
-          <div className="col-span-2 flex flex-col gap-6 md:col-span-5 md:flex-row md:items-start md:justify-between xl:col-span-1 xl:flex-col xl:justify-start">
+        {/* Below 1440 the page column starts left of where the nav logo ends,
+            so a row the height of the bar keeps them apart. From 1440 the
+            column clears the logo, and the tagline's first line sits right
+            beside it: 28px down puts its 20px line on the logo's centre (38px). */}
+        <div aria-hidden className="h-[64px] shrink-0 min-[1440px]:hidden" />
+        <div className="container-site relative grid grid-cols-2 gap-x-6 gap-y-12 pt-6 pb-12 min-[1440px]:pt-7 md:grid-cols-5 xl:grid-cols-[1.35fr_repeat(5,1fr)]">
+          {/* From 1440 this column steps out of the page grid to a fixed 28px
+            beside the nav logo, at any screen width: its left edge is the
+            logo's right edge (--nav-logo-right) plus the gap, minus where the
+            page column starts. */}
+        <div className="col-span-2 flex flex-col gap-6 md:col-span-5 md:flex-row md:items-start md:justify-between xl:col-span-1 xl:flex-col xl:justify-start min-[1440px]:ml-[calc(var(--nav-logo-right)+28px-max(var(--gutter),(100vw-var(--container))/2))]">
             <p className="max-w-[16rem] text-[13px] leading-5 text-fg-3">
               <span className="text-fg-2">i + 10 letters.</span> Email for developers
               and mailboxes for everyone else, sent from Frankfurt.
@@ -117,7 +125,7 @@ export function SiteFooter() {
                 ))}
               </ul>
             </div>
-            <p className="font-mono text-[11px] tracking-wide text-fg-4">
+            <p className="text-[12.5px] text-fg-4">
               © {new Date().getFullYear()} i10 · Made in the EU · Sent from{" "}
               <span className="whitespace-nowrap">eu-central-1</span>
             </p>

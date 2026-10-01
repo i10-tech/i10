@@ -22,7 +22,14 @@
 
 :root {
   /* The nav logo's height. */
-  --logo-h: 22px;
+  --logo-h: 28px;
+  /* The nav bar's side padding: how far the logo and the button sit from the
+     screen edges. Whole pixels only: a logo between pixels renders soft. */
+  --nav-pad: 12px;
+  --nav-max: 1720px;
+  /* Where the nav logo ends, from the left edge of the screen: the footer
+     lines its first column up against it. 16px is the bar's inset (pl-4). */
+  --nav-logo-right: calc(max(0px, (100vw - var(--nav-max)) / 2) + var(--nav-pad) + 16px + var(--logo-h) * 155.4 / 100);
   /* Canvas and surfaces - each step is small on purpose. Depth on this site
      comes from hairlines and light, not from big value jumps. */
   --canvas: #09090b;
@@ -218,19 +225,21 @@
 }
 /* The nav bar's frame: wider than the page grid, so the logo and the button
    sit out toward the screen edges (Cloudflare's bar). */
+@media (width >= 48rem) {
+  :root {
+    --nav-pad: 28px;
+  }
+}
+@media (width >= 80rem) {
+  :root {
+    --nav-pad: 30px;
+  }
+}
 @utility container-nav {
   width: 100%;
-  max-width: 1720px;
+  max-width: var(--nav-max);
   margin-inline: auto;
-  /* Whole pixels only: a vw padding put the logo on a fractional x, and a
-     mark between pixels renders soft. */
-  padding-inline: 12px;
-  @media (width >= 48rem) {
-    padding-inline: 28px;
-  }
-  @media (width >= 80rem) {
-    padding-inline: 40px;
-  }
+  padding-inline: var(--nav-pad);
 }
 @utility container-site {
   width: 100%;
@@ -567,6 +576,10 @@ html.js:not([data-hydrated]) [data-split] {
   mask-repeat: no-repeat;
   -webkit-mask-repeat: no-repeat;
   overflow: hidden;
+  pointer-events: none;
+}
+.footer-mark__hit path {
+  pointer-events: fill;
 }
 .footer-mark__fill {
   position: absolute;
@@ -587,10 +600,10 @@ html.js:not([data-hydrated]) [data-split] {
     opacity 500ms var(--ease-out-quad),
     transform 900ms var(--ease-out-expo);
 }
-.footer-mark:hover .footer-mark__fill {
+.footer-mark:has(.footer-mark__hit path:hover) .footer-mark__fill {
   opacity: 0;
 }
-.footer-mark:hover .footer-mark__stream {
+.footer-mark:has(.footer-mark__hit path:hover) .footer-mark__stream {
   opacity: 1;
 }
 .footer-mark__col {
@@ -601,7 +614,7 @@ html.js:not([data-hydrated]) [data-split] {
   animation: footer-stream var(--dur) linear infinite;
   animation-play-state: paused;
 }
-.footer-mark:hover .footer-mark__col {
+.footer-mark:has(.footer-mark__hit path:hover) .footer-mark__col {
   animation-play-state: running;
 }
 @keyframes footer-stream {
@@ -934,66 +947,47 @@ html.js:not([data-hydrated]) [data-split] {
  * gradient stop at `--p` (0 to 1, set inline), so it tracks the thumb exactly
  * without a second element to keep in sync.
  */
+/*
+ * The pricing slider. The native input is the hit area only, invisible, with
+ * a 20px thumb so its pointer maths matches the painted thumb (whose centre
+ * runs 10px in from either end). Everything visible is painted beside it
+ * and positioned from --p, a spring (see VolumeSlider).
+ */
 .volume-range {
-  --p: 0;
   appearance: none;
+  margin: 0;
   height: 20px;
   background: transparent;
   cursor: pointer;
-}
-.volume-range::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    var(--brand) 0 calc(10px + var(--p) * (100% - 20px)),
-    var(--surface-4) calc(10px + var(--p) * (100% - 20px)) 100%
-  );
-}
-.volume-range::-moz-range-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--surface-4);
-}
-.volume-range::-moz-range-progress {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--brand);
+  opacity: 0;
 }
 .volume-range::-webkit-slider-thumb {
   appearance: none;
   width: 20px;
   height: 20px;
-  margin-top: -8px;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow:
-    0 0 0 5px color-mix(in oklch, var(--brand) 22%, transparent),
-    0 2px 8px rgb(0 0 0 / 0.5);
-  transition:
-    transform 200ms var(--ease-back),
-    box-shadow 200ms var(--ease-out-quad);
 }
 .volume-range::-moz-range-thumb {
   width: 20px;
   height: 20px;
   border: 0;
-  border-radius: 999px;
-  background: #fff;
+}
+.volume-thumb {
   box-shadow:
-    0 0 0 5px color-mix(in oklch, var(--brand) 22%, transparent),
+    0 0 0 1px rgb(0 0 0 / 0.35),
     0 2px 8px rgb(0 0 0 / 0.5);
+  transition:
+    scale 220ms var(--ease-back),
+    box-shadow 220ms var(--ease-out-quad);
 }
-.volume-range:active::-webkit-slider-thumb {
-  transform: scale(1.12);
+/* The halo only while held: at rest a tinted ring on the dark canvas reads
+   as a muddy olive circle. */
+.volume[data-dragging] .volume-thumb {
+  scale: 1.12;
   box-shadow:
-    0 0 0 8px color-mix(in oklch, var(--brand) 26%, transparent),
-    0 2px 8px rgb(0 0 0 / 0.5);
+    0 0 0 6px rgb(251 213 48 / 0.16),
+    0 2px 10px rgb(0 0 0 / 0.55);
 }
-.volume-range:focus-visible {
-  outline: none;
-}
-.volume-range:focus-visible::-webkit-slider-thumb {
+.volume:has(.volume-range:focus-visible) .volume-thumb {
   box-shadow:
     0 0 0 3px var(--canvas),
     0 0 0 5px var(--brand);

@@ -26,40 +26,39 @@ export function Primitives() {
           stage={<Orbit />}
           name="Inbox reach."
           body="SPF and DKIM align from the first send, so Gmail, Outlook and iCloud see your domain, not ours."
-          href="/product/deliverability"
         />
         <Card
           stage={<Pipeline />}
           name="The send path."
           body="Accepted, signed and handed to Frankfurt in milliseconds, with every step written to the log."
-          href="/product/email-api"
         />
         <Card
           stage={<FileTree />}
           name="Templates in git."
           body="Connect a repository and a push to main makes the next version live. No deploy, no copy-paste."
-          href="/product/templates"
         />
+      </div>
+      {/* One action for the row: the three cards are one argument, so they
+          share one way in rather than three copies of the same two buttons. */}
+      <div data-reveal className="mt-12 flex flex-wrap items-center justify-center gap-3">
+        <ButtonLink href={hosts.signIn} size="lg" arrow>
+          Start sending
+        </ButtonLink>
+        <ButtonLink href="/product/email-api" size="lg" variant="secondary">
+          Learn more
+        </ButtonLink>
       </div>
     </Frame>
   )
 }
 
-function Card({ stage, name, body, href }: { stage: React.ReactNode; name: string; body: string; href: string }) {
+function Card({ stage, name, body }: { stage: React.ReactNode; name: string; body: string }) {
   return (
     <div data-reveal className="flex flex-col">
       <div className="relative h-[280px] overflow-hidden border border-line bg-canvas">{stage}</div>
       <p className="mt-6 text-[17px] leading-[26px] tracking-[-0.01em] text-fg-3">
         <span className="text-fg">{name}</span> {body}
       </p>
-      <div className="mt-5 flex items-center gap-4">
-        <ButtonLink href={hosts.signIn} size="sm">
-          Start now
-        </ButtonLink>
-        <ButtonLink href={href} variant="ghost" arrow>
-          Learn more
-        </ButtonLink>
-      </div>
     </div>
   )
 }

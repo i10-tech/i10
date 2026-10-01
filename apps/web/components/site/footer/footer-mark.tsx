@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, type CSSProperties, type PointerEvent } from "react"
-import { MARK_ASPECT, markMaskUrl } from "@/components/brand/mark"
+import { MARK_ASPECT, MARK_PATH, MARK_VIEWBOX, markMaskUrl } from "@/components/brand/mark"
 
 /*
  * The big mark in the footer corner, after Webflow's: a solid glyph bleeding
@@ -11,6 +11,11 @@ import { MARK_ASPECT, markMaskUrl } from "@/components/brand/mark"
  *
  * The glyph is a CSS mask built from the same path as the logo, so the window
  * and the mark are one shape by construction.
+ *
+ * ⚠ A MASK HIDES PIXELS, IT DOES NOT CHANGE HIT-TESTING: the whole bounding
+ * box answered to the pointer, counters and gaps included. So the box takes
+ * no pointer events, and an invisible copy of the path on top does, with
+ * `pointer-events: fill`: only the yellow pixels start the hover.
  */
 const SUBJECTS = [
   ["Welcome to Acme", "send"],
@@ -74,6 +79,9 @@ export function FooterMark({ className }: { className?: string }) {
         <Column offset={2} duration={38} reverse />
         <Column offset={6} duration={31} />
       </div>
+      <svg viewBox={MARK_VIEWBOX} preserveAspectRatio="none" className="footer-mark__hit absolute inset-0 size-full">
+        <path transform="skewX(-10)" fillRule="evenodd" d={MARK_PATH} fill="transparent" />
+      </svg>
     </div>
   )
 }

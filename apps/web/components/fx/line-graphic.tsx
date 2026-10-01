@@ -64,16 +64,23 @@ export function LineGraphic({ variant, accent = "var(--brand)", className }: { v
       return () => ro.disconnect()
     }
 
-    const io = new IntersectionObserver(([entry]) => {
-      if (entry?.isIntersecting && !running) {
-        running = true
-        start = performance.now() - 400
-        frame = requestAnimationFrame(loop)
-      } else if (!entry?.isIntersecting) {
-        running = false
-        cancelAnimationFrame(frame)
-      }
-    })
+    // Starts (from its first frame) once 40% of it is on screen, so a card
+    // sliding in from the edge draws itself in front of the reader instead
+    // of having already played; stops only when it is fully gone.
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        const ratio = entry?.intersectionRatio ?? 0
+        if (ratio >= 0.4 && !running) {
+          running = true
+          start = performance.now()
+          frame = requestAnimationFrame(loop)
+        } else if (ratio === 0 && running) {
+          running = false
+          cancelAnimationFrame(frame)
+        }
+      },
+      { threshold: [0, 0.4] },
+    )
     io.observe(canvas)
 
     return () => {

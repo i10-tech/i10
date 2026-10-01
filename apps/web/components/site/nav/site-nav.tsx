@@ -300,18 +300,8 @@ export function SiteNav() {
             <Link
               href="/"
               aria-label="i10 home"
-              className={cn(
-                "relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2 transition-[color,background-color,box-shadow,backdrop-filter] duration-500",
-                logoColor,
-                // Alone on the page while compact it gets a glass chip, so it
-                // never sits bare on body text; over yellow a faint ink wash.
-                // In the footer it goes bare, sitting in the footer's own top row.
-                shrunk &&
-                  !onFooter &&
-                  (tone === "brand"
-                    ? "bg-[rgb(11_11_12/0.07)] shadow-[inset_0_0_0_1px_rgb(11_11_12/0.14)]"
-                    : "bg-[rgb(14_14_17/0.62)] shadow-[inset_0_0_0_1px_var(--line)] backdrop-blur-lg"),
-              )}
+              // Bare in every state: no chip behind it, compact or not.
+              className={cn("relative z-10 -ml-2 flex h-10 items-center rounded-[12px] px-2 transition-colors duration-500", logoColor)}
               onMouseEnter={scheduleClose}
             >
               <Mark className="h-[var(--logo-h)] w-auto" shapeRendering="geometricPrecision" />
@@ -319,7 +309,7 @@ export function SiteNav() {
 
             <div
               className={cn(
-                "ml-6 hidden flex-1 items-center transition-[opacity,filter] duration-300 md:flex",
+                "ml-3 hidden flex-1 items-center transition-[opacity,filter] duration-300 md:flex",
                 shrunk ? "pointer-events-none opacity-0 blur-[2px]" : "opacity-100",
               )}
             >
