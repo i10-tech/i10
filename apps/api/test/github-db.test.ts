@@ -174,9 +174,11 @@ suite("github-connected templates", () => {
 
     const list = await templates.list(t)
     const w = list.find((x) => x.name === "welcome")!
+    const [auth] = await templates.folders(t)
+    expect(auth?.name).toBe("auth")
     expect(w).toMatchObject({
       source: "github",
-      folder: "auth",
+      folder_id: auth?.id,
       github: {
         repository: "acme/emails",
         directory: "emails",
@@ -206,7 +208,7 @@ suite("github-connected templates", () => {
 
     // The pushed version is what a send gets now.
     const sent = await resolveTemplateSend(
-      { template: { id: "reset" }, variables: { name: "Bo" } },
+      { from: "t@acme.test", template: { id: "reset" }, variables: { name: "Bo" } },
       templates.lookup(t),
     )
     expect(sent.ok && sent.html).toContain("Bo")

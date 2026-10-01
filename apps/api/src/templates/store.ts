@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { and, count, desc, eq, sql } from "drizzle-orm"
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm"
 import {
   buildProps,
   canonicalFileSet,
@@ -14,9 +14,16 @@ import {
   type StoredVersion,
   type TemplateLookup,
   type Variable,
+  withPreviewText,
 } from "@repo/templates"
 import { withTenant, type Database } from "../db/client.js"
-import { githubRepositories, templateVersions, templates } from "../db/core.js"
+import {
+  githubRepositories,
+  templateFolders,
+  templateVersions,
+  templates,
+  type DeclaredVariable,
+} from "../db/core.js"
 import { LIST_CAP } from "../console/marketing/shared.js"
 import { VersionCache } from "./version-cache.js"
 
@@ -36,10 +43,26 @@ export type TemplateKind = "html" | "tsx" | "visual"
 /** Where a template is maintained. See `templateSource` in db/core.ts. */
 export type TemplateSource = "managed" | "upload" | "github"
 
-export interface TemplateSummary {
+export type { DeclaredVariable }
+
+/** A folder of templates, as Resend has them. See `templateFolders`. */
+export interface TemplateFolder {
   id: string
   name: string
-  folder: string | null
+  /** How many templates are filed in it. */
+  templates: number
+  created_at: string
+  updated_at: string
+}
+
+export interface TemplateSummary {
+  id: string
+  /** The alias a send may use; unique in the workspace. */
+  name: string
+  /** What people call it; null shows the alias. */
+  title: string | null
+  /** The folder it is filed in; null for the top level. */
+  folder_id: string | null
   kind: TemplateKind
   source: TemplateSource
   subject: string | null
@@ -68,6 +91,13 @@ export interface TemplateRow extends TemplateSummary {
   text: string | null
   /** A `visual` template's draft, as the editor's TipTap JSON. */
   design: Record<string, unknown> | null
+  /** The draft's default sender; a send's own `from` wins. */
+  from: string | null
+  reply_to: string[] | null
+  /** The inbox preview line, written into the body at publish. */
+  preview_text: string | null
+  /** Variables declared in the editor, with their types and fallbacks. */
+  variables: DeclaredVariable[]
 }
 
 export interface VersionSummary {
@@ -81,6 +111,10 @@ export interface VersionSummary {
   path: string | null
   /** The commit a GitHub template's version came from. */
   commit_sha: string | null
+  /** The defaults a send gets when it gives none. */
+  from: string | null
+  reply_to: string[] | null
+  preview_text: string | null
   live: boolean
   created_at: string
 }
@@ -139,8 +173,48 @@ export interface Problems {
   problems: string[]
 }
 
+/** What a draft edit may change. */
+export interface TemplatePatch {
+  name?: string
+  title?: string | null
+  folderId?: string | null
+  /** Only between `html` and `visual`, and only for a template made here. */
+  kind?: "html" | "visual"
+  subject?: string | null
+  from?: string | null
+  replyTo?: string[] | null
+  previewText?: string | null
+  variables?: DeclaredVariable[]
+  html?: string | null
+  text?: string | null
+  design?: Record<string, unknown> | null
+}
+
 export interface TemplateStore {
   list(tenantId: string): Promise<TemplateSummary[]>
+  folders(tenantId: string): Promise<TemplateFolder[]>
+  createFolder(
+    tenantId: string,
+    name: string,
+  ): Promise<TemplateFolder | { conflict: true }>
+  renameFolder(
+    tenantId: string,
+    id: string,
+    name: string,
+  ): Promise<TemplateFolder | { conflict: true } | null>
+  /**
+   * Deletes a folder. Its templates move to the top level; none is deleted.
+   */
+  deleteFolder(tenantId: string, id: string): Promise<boolean>
+  /**
+   * Files templates in a folder, or at the top level for null. The number
+   * moved; null when the folder is not this workspace's.
+   */
+  move(tenantId: string, ids: string[], folderId: string | null): Promise<number | null>
+  /** A copy of the template's draft and live version, named `<name>-copy`. */
+  duplicate(tenantId: string, id: string): Promise<TemplateRow | null>
+  /** The ids actually deleted. */
+  deleteMany(tenantId: string, ids: string[]): Promise<string[]>
   get(
     tenantId: string,
     id: string,
@@ -148,8 +222,19 @@ export interface TemplateStore {
   create(
     tenantId: string,
     input: {
-      name: string
+      /**
+       * The alias. Absent makes one from the title - `untitled-template`,
+       * then `untitled-template-2` - as Resend's "New template" does.
+       */
+      name?: string
+      title?: string | null
+      /**
+       * A folder by NAME, made if there is none: how an upload's or a
+       * repository's directory files its templates.
+       */
       folder?: string | null
+      /** A folder by id, as the console files a new template. */
+      folderId?: string | null
       kind?: TemplateKind
       source?: TemplateSource
       /** A `github` template's repository and entry path (#235). */
@@ -161,15 +246,8 @@ export interface TemplateStore {
   update(
     tenantId: string,
     id: string,
-    patch: {
-      name?: string
-      folder?: string | null
-      subject?: string | null
-      html?: string | null
-      text?: string | null
-      design?: Record<string, unknown> | null
-    },
-  ): Promise<TemplateRow | { conflict: true } | null>
+    patch: TemplatePatch,
+  ): Promise<TemplateRow | { conflict: true } | { problem: string } | null>
   /**
    * Makes the draft a new live version. For `html`, the draft body; for `tsx`,
    * the latest version's rendering with the draft subject, so a subject edit
@@ -195,10 +273,30 @@ export interface TemplateStore {
     number: number,
     variables?: Record<string, unknown>,
   ): Promise<Preview | null>
+  /**
+   * The DRAFT as it would send now, every variable filled with its fallback
+   * or, without one, left as its `{{ name }}` - what a test email sends. For
+   * a `tsx` template, whose draft is its live version, that version.
+   */
+  draftEmail(
+    tenantId: string,
+    id: string,
+  ): Promise<
+    (Preview & { from: string | null; reply_to: string[] | null }) | Problems | null
+  >
   delete(tenantId: string, id: string): Promise<boolean>
   /** What the send path reads. See `resolveTemplateSend` in @repo/templates. */
   lookup(tenantId: string): TemplateLookup
 }
+
+/**
+ * How many templates a folder holds.
+ *
+ * ⚠ THE OUTER TABLE IS NAMED IN FULL. Drizzle writes a column of a one-table
+ * select unqualified, and an unqualified `"id"` inside this subquery is the
+ * TEMPLATE's id, so every folder counted zero.
+ */
+const FOLDER_COUNT = sql<number>`(select count(*)::int from "core"."templates" t where t.folder_id = "core"."template_folders"."id")`
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -237,13 +335,18 @@ export function templateStore(
     return {
       id: row.id,
       name: row.name,
-      folder: row.folder,
+      title: row.title,
+      folder_id: row.folderId,
       kind: row.kind,
       source: row.source,
       subject: row.subject,
       html: row.html,
       text: row.text,
       design: row.design,
+      from: row.from,
+      reply_to: row.replyTo,
+      preview_text: row.previewText,
+      variables: row.variables ?? [],
       version: live?.number ?? 0,
       published_at: live?.createdAt.toISOString() ?? null,
       versions: n,
@@ -261,6 +364,76 @@ export function templateStore(
   }
 
   /**
+   * The folder's id if it is this workspace's - row security hides the rest -
+   * or null.
+   *
+   * ⚠ LOOKED UP, NEVER TRUSTED. A foreign key ignores row security, so filing
+   * a template under another workspace's folder id would be accepted by the
+   * database without this.
+   */
+  const ownFolder = async (tx: Tx, id: string | null): Promise<string | null> => {
+    if (id === null || !UUID.test(id)) return null
+    const [row] = await tx
+      .select({ id: templateFolders.id })
+      .from(templateFolders)
+      .where(eq(templateFolders.id, id))
+    return row?.id ?? null
+  }
+
+  /** The folder of that name, made if there is none. Null for no name. */
+  const folderNamed = async (
+    tx: Tx,
+    tenantId: string,
+    name: string | null,
+  ): Promise<string | null> => {
+    const clean = name?.trim()
+    if (!clean) return null
+    await tx
+      .insert(templateFolders)
+      .values({ tenantId, name: clean })
+      .onConflictDoNothing({ target: [templateFolders.tenantId, templateFolders.name] })
+    const [row] = await tx
+      .select({ id: templateFolders.id })
+      .from(templateFolders)
+      .where(eq(templateFolders.name, clean))
+    return row?.id ?? null
+  }
+
+  /**
+   * `base`, or `base-2`, `base-3`… - the first alias nobody in the workspace
+   * has. Row security scopes the look to this workspace.
+   */
+  const freeName = async (tx: Tx, base: string): Promise<string> => {
+    const taken = new Set(
+      (
+        await tx
+          .select({ name: templates.name })
+          .from(templates)
+          .where(
+            sql`${templates.name} = ${base} or ${templates.name} like ${`${base}-%`}`,
+          )
+      ).map((r) => r.name),
+    )
+    let name = base
+    for (let n = 2; taken.has(name); n++) name = `${base}-${n}`
+    return name
+  }
+
+  const folderOf = async (tx: Tx, id: string): Promise<TemplateFolder | null> => {
+    const [row] = await tx
+      .select({
+        id: templateFolders.id,
+        name: templateFolders.name,
+        createdAt: templateFolders.createdAt,
+        updatedAt: templateFolders.updatedAt,
+        templates: FOLDER_COUNT,
+      })
+      .from(templateFolders)
+      .where(eq(templateFolders.id, id))
+    return row ? toFolder(row) : null
+  }
+
+  /**
    * Writes the next version and points `live_version_id` at it.
    *
    * ⚠ THE TEMPLATE ROW IS LOCKED FIRST, so two publishes at once number
@@ -274,6 +447,11 @@ export function templateStore(
     kind: TemplateKind,
     version: {
       subject: string | null
+      from?: string | null
+      replyTo?: string[] | null
+      previewText?: string | null
+      /** Declared variables, whose fallbacks the version keeps. */
+      declared?: readonly DeclaredVariable[] | null
       skeleton: Skeleton
       html: string | null
       text: string | null
@@ -302,10 +480,16 @@ export function templateStore(
         number: max + 1,
         kind,
         subject: version.subject,
+        from: version.from ?? null,
+        replyTo: version.replyTo && version.replyTo.length > 0 ? version.replyTo : null,
+        previewText: version.previewText ?? null,
         html: version.html,
         text: version.text,
         nonce: version.skeleton.nonce,
-        variables: withSubjectVariables(version.skeleton.variables, version.subject),
+        variables: withDeclared(
+          withSubjectVariables(version.skeleton.variables, version.subject),
+          version.declared ?? [],
+        ),
         source: version.source ?? null,
         files: version.files ?? null,
         path: version.path ?? null,
@@ -316,9 +500,13 @@ export function templateStore(
       })
       .returning()
 
+    // ⚠ STAMPED WITH THE VERSION'S OWN TIME, NOT A FRESH CLOCK READ. "Edited
+    // after it was published" is `updated_at > published_at`; a second
+    // reading of the clock here was always a little later, so every template
+    // read as having unpublished changes the moment it was published.
     await tx
       .update(templates)
-      .set({ liveVersionId: row!.id, updatedAt: new Date() })
+      .set({ liveVersionId: row!.id, updatedAt: row!.createdAt })
       .where(eq(templates.id, templateId))
     return row!
   }
@@ -331,7 +519,8 @@ export function templateStore(
           .select({
             id: templates.id,
             name: templates.name,
-            folder: templates.folder,
+            title: templates.title,
+            folderId: templates.folderId,
             kind: templates.kind,
             source: templates.source,
             subject: templates.subject,
@@ -351,13 +540,14 @@ export function templateStore(
             githubRepositories,
             eq(githubRepositories.id, templates.githubRepositoryId),
           )
-          .orderBy(templates.folder, templates.name)
+          .orderBy(templates.name)
           .limit(LIST_CAP)
 
         return rows.map((r) => ({
           id: r.id,
           name: r.name,
-          folder: r.folder,
+          title: r.title,
+          folder_id: r.folderId,
           kind: r.kind,
           source: r.source,
           subject: r.subject,
@@ -375,6 +565,152 @@ export function templateStore(
           created_at: r.createdAt.toISOString(),
           updated_at: r.updatedAt.toISOString(),
         }))
+      })
+    },
+
+    async folders(tenantId) {
+      return withTenant(db, tenantId, async (tx) => {
+        const rows = await tx
+          .select({
+            id: templateFolders.id,
+            name: templateFolders.name,
+            createdAt: templateFolders.createdAt,
+            updatedAt: templateFolders.updatedAt,
+            templates: FOLDER_COUNT,
+          })
+          .from(templateFolders)
+          .orderBy(templateFolders.name)
+          .limit(LIST_CAP)
+        return rows.map(toFolder)
+      })
+    },
+
+    async createFolder(tenantId, name) {
+      return withTenant(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .insert(templateFolders)
+          .values({ tenantId, name: name.trim() })
+          .onConflictDoNothing({
+            target: [templateFolders.tenantId, templateFolders.name],
+          })
+          .returning({ id: templateFolders.id })
+        return row ? (await folderOf(tx, row.id))! : { conflict: true as const }
+      })
+    },
+
+    async renameFolder(tenantId, id, name) {
+      if (!UUID.test(id)) return null
+      return withTenant(db, tenantId, async (tx) => {
+        try {
+          const [row] = await tx
+            .update(templateFolders)
+            .set({ name: name.trim(), updatedAt: new Date() })
+            .where(eq(templateFolders.id, id))
+            .returning({ id: templateFolders.id })
+          return row ? folderOf(tx, row.id) : null
+        } catch (error) {
+          if (isUniqueViolation(error)) return { conflict: true as const }
+          throw error
+        }
+      })
+    },
+
+    async deleteFolder(tenantId, id) {
+      if (!UUID.test(id)) return false
+      return withTenant(db, tenantId, async (tx) => {
+        // Its templates move to the top level by the foreign key's SET NULL.
+        const deleted = await tx
+          .delete(templateFolders)
+          .where(eq(templateFolders.id, id))
+          .returning({ id: templateFolders.id })
+        return deleted.length > 0
+      })
+    },
+
+    async move(tenantId, ids, folderId) {
+      const valid = ids.filter((id) => UUID.test(id))
+      return withTenant(db, tenantId, async (tx) => {
+        const target = await ownFolder(tx, folderId)
+        if (folderId !== null && target === null) return null
+        if (valid.length === 0) return 0
+        const moved = await tx
+          .update(templates)
+          .set({ folderId: target, updatedAt: new Date() })
+          .where(inArray(templates.id, valid))
+          .returning({ id: templates.id })
+        return moved.length
+      })
+    },
+
+    async duplicate(tenantId, id) {
+      if (!UUID.test(id)) return null
+      return withTenant(db, tenantId, async (tx) => {
+        const [source] = await tx
+          .select()
+          .from(templates)
+          .where(eq(templates.id, id))
+          .limit(1)
+        if (!source) return null
+
+        // ⚠ THE FIRST FREE NAME, because names are unique and a send may use
+        // one: `welcome-copy`, then `welcome-copy-2`.
+        const name = await freeName(tx, `${source.name}-copy`)
+
+        // ⚠ A COPY IS THIS WORKSPACE'S OWN. A GitHub template's copy is not
+        // in the repository, so it becomes an upload; it keeps the files.
+        const [row] = await tx
+          .insert(templates)
+          .values({
+            tenantId,
+            name,
+            title: source.title ? `${source.title} (copy)` : null,
+            folderId: source.folderId,
+            kind: source.kind,
+            source: source.source === "github" ? "upload" : source.source,
+            subject: source.subject,
+            from: source.from,
+            replyTo: source.replyTo,
+            previewText: source.previewText,
+            variables: source.variables,
+            html: source.html,
+            text: source.text,
+            design: source.design,
+          })
+          .returning({ id: templates.id })
+
+        // The live version comes too, as the copy's v1, so it sends at once.
+        if (source.liveVersionId) {
+          const [live] = await tx
+            .select()
+            .from(templateVersions)
+            .where(eq(templateVersions.id, source.liveVersionId))
+          if (live) {
+            const rest: Partial<typeof live> = { ...live }
+            delete rest.id
+            delete rest.createdAt
+            const [copy] = await tx
+              .insert(templateVersions)
+              .values({ ...(rest as typeof live), templateId: row!.id, number: 1 })
+              .returning({ id: templateVersions.id })
+            await tx
+              .update(templates)
+              .set({ liveVersionId: copy!.id })
+              .where(eq(templates.id, row!.id))
+          }
+        }
+        return rowOf(tx, row!.id)
+      })
+    },
+
+    async deleteMany(tenantId, ids) {
+      const valid = ids.filter((id) => UUID.test(id))
+      if (valid.length === 0) return []
+      return withTenant(db, tenantId, async (tx) => {
+        const deleted = await tx
+          .delete(templates)
+          .where(inArray(templates.id, valid))
+          .returning({ id: templates.id })
+        return deleted.map((d) => d.id)
       })
     },
 
@@ -402,12 +738,20 @@ export function templateStore(
 
     async create(tenantId, input) {
       return withTenant(db, tenantId, async (tx) => {
+        const folderId =
+          input.folderId !== undefined
+            ? await ownFolder(tx, input.folderId)
+            : await folderNamed(tx, tenantId, input.folder ?? null)
+        const name =
+          input.name?.trim() ||
+          (await freeName(tx, slugOf(input.title ?? "") || "untitled-template"))
         const [row] = await tx
           .insert(templates)
           .values({
             tenantId,
-            name: input.name.trim(),
-            folder: input.folder ?? null,
+            name,
+            title: input.title?.trim() || null,
+            folderId,
             kind: input.kind ?? "html",
             source: input.source ?? (input.kind === "tsx" ? "upload" : "managed"),
             githubRepositoryId: input.github?.repositoryId ?? null,
@@ -452,7 +796,30 @@ export function templateStore(
       return withTenant(db, tenantId, async (tx) => {
         const set: Record<string, unknown> = { updatedAt: new Date() }
         if (patch.name !== undefined) set.name = patch.name.trim()
-        if (patch.folder !== undefined) set.folder = patch.folder
+        if (patch.title !== undefined) set.title = patch.title?.trim() || null
+        if (patch.folderId !== undefined) {
+          const folderId = await ownFolder(tx, patch.folderId)
+          if (patch.folderId !== null && folderId === null) {
+            return { problem: "No folder with that id." }
+          }
+          set.folderId = folderId
+        }
+        if (patch.kind !== undefined) {
+          // ⚠ ONLY BETWEEN THE TWO THINGS THE EDITOR WRITES. A `tsx` template
+          // is made by its files; switching one to HTML would orphan them.
+          const [current] = await tx
+            .select({ kind: templates.kind, source: templates.source })
+            .from(templates)
+            .where(eq(templates.id, id))
+          if (current && (current.kind === "tsx" || current.source !== "managed")) {
+            return { problem: "Only a template written here can switch editors." }
+          }
+          set.kind = patch.kind
+        }
+        if (patch.from !== undefined) set.from = patch.from
+        if (patch.replyTo !== undefined) set.replyTo = patch.replyTo
+        if (patch.previewText !== undefined) set.previewText = patch.previewText
+        if (patch.variables !== undefined) set.variables = patch.variables
         if (patch.subject !== undefined) set.subject = patch.subject
         if (patch.html !== undefined) set.html = patch.html
         if (patch.text !== undefined) set.text = patch.text
@@ -490,14 +857,24 @@ export function templateStore(
           if (!draft.html && !draft.text) {
             return { problems: ["Write the email before publishing it."] }
           }
+          // ⚠ THE PREVIEW LINE IS WRITTEN INTO THE BODY HERE, before the
+          // placeholders are found, so a variable in it is filled like any
+          // other. The draft keeps the HTML exactly as written.
           const made = skeletonFromHtml({
-            html: draft.html,
+            html:
+              draft.html === null
+                ? null
+                : withPreviewText(draft.html, draft.previewText),
             text: draft.text,
             nonce: newNonce(),
           })
           if (!made.ok) return { problems: made.problems }
           await insertVersion(tx, tenantId, id, draft.kind, {
             subject: draft.subject,
+            from: draft.from,
+            replyTo: draft.replyTo,
+            previewText: draft.previewText,
+            declared: draft.variables,
             skeleton: made.skeleton,
             html: draft.html === null ? null : made.skeleton.html,
             text: draft.text === null ? null : made.skeleton.text,
@@ -516,6 +893,9 @@ export function templateStore(
         if (!latest) return { problems: ["Upload the template's .tsx file first."] }
         await insertVersion(tx, tenantId, id, "tsx", {
           subject: draft.subject,
+          from: draft.from,
+          replyTo: draft.replyTo,
+          declared: draft.variables,
           skeleton: {
             html: latest.html ?? "",
             text: latest.text ?? "",
@@ -544,6 +924,9 @@ export function templateStore(
         const [draft] = await tx
           .select({
             subject: templates.subject,
+            from: templates.from,
+            replyTo: templates.replyTo,
+            variables: templates.variables,
             kind: templates.kind,
             source: templates.source,
             live: templates.liveVersionId,
@@ -589,6 +972,9 @@ export function templateStore(
         )
         const row = await insertVersion(tx, tenantId, id, "tsx", {
           subject,
+          from: draft.from,
+          replyTo: draft.replyTo,
+          declared: draft.variables,
           skeleton: input.skeleton,
           html: input.skeleton.html,
           text: input.skeleton.text,
@@ -670,6 +1056,67 @@ export function templateStore(
       })
     },
 
+    async draftEmail(tenantId, id) {
+      if (!UUID.test(id)) return null
+      return withTenant(db, tenantId, async (tx) => {
+        const [draft] = await tx
+          .select()
+          .from(templates)
+          .where(eq(templates.id, id))
+          .limit(1)
+        if (!draft) return null
+        const defaults = { from: draft.from, reply_to: draft.replyTo }
+
+        if (draft.kind === "tsx") {
+          if (!draft.liveVersionId) {
+            return { problems: ["Upload the template's .tsx file first."] }
+          }
+          const [v] = await tx
+            .select()
+            .from(templateVersions)
+            .where(eq(templateVersions.id, draft.liveVersionId))
+          if (!v) return { problems: ["Upload the template's .tsx file first."] }
+          const samples = buildProps(
+            v.variables,
+            (x) => x.fallback ?? (x.preview || `{{ ${x.path} }}`),
+          )
+          const filled = fill({ ...v, subject: draft.subject ?? v.subject }, samples)
+          return filled.ok
+            ? { ...filled.filled, ...defaults }
+            : { problems: ["The template's variables could not be filled."] }
+        }
+
+        if (!draft.html && !draft.text) {
+          return { problems: ["Write the email before sending a test."] }
+        }
+        const made = skeletonFromHtml({
+          html:
+            draft.html === null ? null : withPreviewText(draft.html, draft.previewText),
+          text: draft.text,
+          nonce: newNonce(),
+        })
+        if (!made.ok) return { problems: made.problems }
+        const variables = withDeclared(
+          withSubjectVariables(made.skeleton.variables, draft.subject),
+          draft.variables ?? [],
+        )
+        const samples = buildProps(variables, (x) => x.fallback ?? `{{ ${x.path} }}`)
+        const filled = fill(
+          {
+            html: draft.html === null ? null : made.skeleton.html,
+            text: draft.text === null ? null : made.skeleton.text,
+            subject: draft.subject,
+            nonce: made.skeleton.nonce,
+            variables,
+          },
+          samples,
+        )
+        return filled.ok
+          ? { ...filled.filled, ...defaults }
+          : { problems: ["The template's variables could not be filled."] }
+      })
+    },
+
     async delete(tenantId, id) {
       if (!UUID.test(id)) return false
       return withTenant(db, tenantId, async (tx) => {
@@ -740,6 +1187,33 @@ export function templateStore(
   }
 }
 
+/** `Password reset!` as `password-reset`: an alias made from a title. */
+export function slugOf(title: string): string {
+  return title
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80)
+}
+
+function toFolder(row: {
+  id: string
+  name: string
+  templates: number
+  createdAt: Date
+  updatedAt: Date
+}): TemplateFolder {
+  return {
+    id: row.id,
+    name: row.name,
+    templates: row.templates,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  }
+}
+
 function toSummary(
   v: typeof templateVersions.$inferSelect,
   liveId: string | null,
@@ -753,6 +1227,9 @@ function toSummary(
     runtime: v.runtime,
     path: v.path,
     commit_sha: v.commitSha,
+    from: v.from,
+    reply_to: v.replyTo,
+    preview_text: v.previewText,
     live: v.id === liveId,
     created_at: v.createdAt.toISOString(),
   }
@@ -792,6 +1269,8 @@ function toStored(v: typeof templateVersions.$inferSelect): StoredVersion {
     text: v.text,
     nonce: v.nonce,
     variables: v.variables,
+    from: v.from,
+    replyTo: v.replyTo,
   }
 }
 
@@ -811,6 +1290,22 @@ function withSubjectVariables(
     if (!out.some((v) => v.path === path)) out.push({ path, preview: "" })
   }
   return out
+}
+
+/**
+ * The version's variables with what the editor declared about them: a
+ * declared fallback is kept on the variable, so a send may leave it out, and
+ * is its preview sample, so thumbnails and previews show it.
+ */
+function withDeclared(
+  variables: readonly Variable[],
+  declared: readonly DeclaredVariable[],
+): Variable[] {
+  return variables.map((v) => {
+    const d = declared.find((x) => x.name === v.path)
+    if (!d || d.fallback === null) return v
+    return { ...v, preview: v.preview || d.fallback, fallback: d.fallback }
+  })
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { Badge } from "@repo/ui/components/badge"
+import { Tag } from "lucide-react"
 import {
   Page,
   PageActions,
@@ -10,11 +10,10 @@ import {
   PageTitle,
 } from "@repo/ui/components/page"
 import { NewTopicButton } from "@/components/new-topic"
-import { TopicActions } from "@/components/topic-actions"
+import { TopicsList } from "@/components/marketing-lists"
 import { EmptyState } from "@/components/empty-state"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
-import { formatNumber } from "@/lib/format"
 import type { TopicRow } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Topics" }
@@ -68,44 +67,13 @@ export default async function TopicsPage() {
           <PanelError title="Could not load topics" message={result.error.message} />
         ) : !hasRows ? (
           <EmptyState
+            icon={<Tag />}
             title="No topics yet"
             description="Without topics, unsubscribing is all-or-nothing. A couple of topics lets somebody keep the receipts and drop the newsletter."
+            secondary={<NewTopicButton />}
           />
         ) : (
-          <ul className="space-y-3">
-            {result.data.data.map((topic) => (
-              <li
-                key={topic.id}
-                className="flex items-start justify-between gap-3 rounded-lg border px-4 py-3"
-              >
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium">{topic.name}</span>
-                    <Badge variant="outline">
-                      {topic.default_subscription === "opt_in"
-                        ? "Opt-out by default"
-                        : "Opt-in required"}
-                    </Badge>
-                    <Badge
-                      variant={topic.visibility === "public" ? "secondary" : "outline"}
-                    >
-                      {topic.visibility}
-                    </Badge>
-                  </div>
-                  {topic.description && (
-                    <p className="text-xs text-muted-foreground">{topic.description}</p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    <span className="tabular text-foreground">
-                      {formatNumber(topic.subscriber_count)}
-                    </span>{" "}
-                    {topic.subscriber_count === 1 ? "subscriber" : "subscribers"}
-                  </p>
-                </div>
-                <TopicActions topic={topic} />
-              </li>
-            ))}
-          </ul>
+          <TopicsList topics={result.data.data} />
         )}
       </PageBody>
     </Page>

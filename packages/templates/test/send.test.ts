@@ -33,7 +33,7 @@ describe("sending a template", () => {
   it("fills the live version, by id or by name", async () => {
     for (const id of ["tpl-1", "welcome"]) {
       const result = await resolveTemplateSend(
-        { template: { id }, variables: { name: "<Bo>" } },
+        { template: { id }, variables: { name: "<Bo>" }, from: "a@acme.test" },
         lookup,
       )
       expect(result).toEqual({
@@ -42,13 +42,20 @@ describe("sending a template", () => {
         html: "<p>&lt;Bo&gt;</p>",
         text: "<Bo>",
         subject: "Welcome, <Bo>",
+        from: "a@acme.test",
+        replyTo: null,
       })
     }
   })
 
   it("lets the request's subject win, taken literally", async () => {
     const result = await resolveTemplateSend(
-      { template: { id: "tpl-1" }, variables: { name: "a" }, subject: "Hi {{name}}" },
+      {
+        template: { id: "tpl-1" },
+        variables: { name: "a" },
+        subject: "Hi {{name}}",
+        from: "a@acme.test",
+      },
       lookup,
     )
     expect(result.ok && result.subject).toBe("Hi {{name}}")
@@ -66,5 +73,54 @@ describe("sending a template", () => {
     const result = await resolveTemplateSend({ template: { id: "tpl-1" } }, lookup)
     expect(result).toMatchObject({ ok: false, error: "invalid" })
     if (!result.ok) expect(result.message).toContain("missing `name`")
+  })
+
+  describe("the template's sender and reply-to (Resend's template defaults)", () => {
+    const withDefaults: TemplateLookup = {
+      ...lookup,
+      async version(id) {
+        return id === "ver-1"
+          ? { ...v1, from: "Acme <hi@acme.test>", replyTo: ["help@acme.test"] }
+          : null
+      },
+    }
+
+    it("fill in when the request gives none", async () => {
+      const result = await resolveTemplateSend(
+        { template: { id: "tpl-1" }, variables: { name: "a" } },
+        withDefaults,
+      )
+      expect(result).toMatchObject({
+        ok: true,
+        from: "Acme <hi@acme.test>",
+        replyTo: ["help@acme.test"],
+      })
+    })
+
+    it("lose to the request's own", async () => {
+      const result = await resolveTemplateSend(
+        {
+          template: { id: "tpl-1" },
+          variables: { name: "a" },
+          from: "b@acme.test",
+          replyTo: "c@acme.test",
+        },
+        withDefaults,
+      )
+      expect(result).toMatchObject({
+        ok: true,
+        from: "b@acme.test",
+        replyTo: "c@acme.test",
+      })
+    })
+
+    it("refuse a send with neither", async () => {
+      const result = await resolveTemplateSend(
+        { template: { id: "tpl-1" }, variables: { name: "a" } },
+        lookup,
+      )
+      expect(result).toMatchObject({ ok: false, error: "invalid" })
+      if (!result.ok) expect(result.message).toContain("must give `from`")
+    })
   })
 })

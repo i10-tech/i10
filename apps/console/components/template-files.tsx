@@ -77,7 +77,7 @@ export function TemplateFiles({
           </li>
         )}
       </ul>
-      <div className="min-w-0 overflow-hidden rounded-lg border">
+      <div className="min-w-0 overflow-hidden rounded-2xl border">
         <div className="flex items-center justify-between border-b px-3 py-1.5">
           <p className="truncate font-mono text-xs">{open}</p>
           <CopyButton value={text} label="Copy" />

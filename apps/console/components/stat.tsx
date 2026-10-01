@@ -84,7 +84,7 @@ export function StatRow({ children }: { children: React.ReactNode }) {
      * divider. See @repo/ui/components/pointer-glow: it sets two CSS variables
      * and never calls setState, so following the cursor costs no React renders.
      */
-    <PointerGlow className="overflow-hidden rounded-lg border">
+    <PointerGlow className="overflow-hidden rounded-2xl border">
       <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-3 lg:grid-cols-6">
         {children}
       </div>

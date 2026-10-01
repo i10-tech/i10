@@ -81,9 +81,12 @@ export function EventTimeline({
           },
         ]
       : []),
-    ...events.map((event) => ({
+    ...foldEngagement(events).map((event) => ({
       type: event.type,
-      label: describeStatus(event.type).label,
+      label:
+        event.count > 1
+          ? `${describeStatus(event.type).label} ${event.count} times`
+          : describeStatus(event.type).label,
       occurred_at: event.occurred_at,
       payload: event.payload,
       synthetic: false,
@@ -154,6 +157,48 @@ export function EventTimeline({
         )
       })}
     </ol>
+  )
+}
+
+/**
+ * Opens and clicks, one row per kind, at the first time it happened.
+ *
+ * ⚠ SES PUBLISHES AN OPEN FOR EVERY LOAD OF THE PIXEL - the recipient opening
+ * it twice, Gmail's image proxy, Apple Mail's privacy prefetch - so three opens
+ * on one email is normal and each is a real notification. Listing them as
+ * three identical rows reads as a duplication bug; one row that says "3 times"
+ * says what happened. The raw notifications are all kept, in the row's payload.
+ *
+ * ⚠ ONLY ENGAGEMENT IS FOLDED. Two `delivered` events mean two recipients got
+ * it, and that difference must stay visible.
+ */
+const FOLDED = new Set(["opened", "clicked"])
+function foldEngagement(
+  events: { type: string; occurred_at: string; payload: unknown }[],
+) {
+  const out: { type: string; occurred_at: string; payload: unknown; count: number }[] =
+    []
+  const first = new Map<string, (typeof out)[number]>()
+  for (const event of events) {
+    const seen = FOLDED.has(event.type) ? first.get(event.type) : undefined
+    if (seen) {
+      seen.count += 1
+      seen.payload = [...(seen.payload as unknown[]), event.payload]
+      continue
+    }
+    const row = {
+      ...event,
+      count: 1,
+      payload: FOLDED.has(event.type) ? [event.payload] : event.payload,
+    }
+    if (FOLDED.has(event.type)) first.set(event.type, row)
+    out.push(row)
+  }
+  // A single open shows its notification as itself, not as a list of one.
+  return out.map((row) =>
+    row.count === 1 && FOLDED.has(row.type)
+      ? { ...row, payload: (row.payload as unknown[])[0] }
+      : row,
   )
 }
 

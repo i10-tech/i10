@@ -8,12 +8,15 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/page"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
+import { TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
 import { CreateWebhookButton } from "@/components/create-webhook"
 import { DeliveriesTable } from "@/components/deliveries-table"
+import { ApiButton } from "@/components/list/api-button"
+import { UrlTabs } from "@/components/list/url-tabs"
 import { WebhookList } from "@/components/webhook-list"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
+import { SNIPPETS } from "@/lib/snippets"
 import type { DeliveryRow, Page as ApiPage, WebhookEndpoint } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Webhooks" }
@@ -35,14 +38,27 @@ export const metadata: Metadata = { title: "Webhooks" }
 export default async function WebhooksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ new?: string; tab?: string; cursor?: string }>
+  searchParams: Promise<{
+    new?: string
+    tab?: string
+    cursor?: string
+    status?: string
+    event_type?: string
+    endpoint_id?: string
+  }>
 }) {
   const params = await searchParams
 
   const [endpoints, deliveries] = await Promise.all([
     tryApi<{ data: WebhookEndpoint[] }>("/console/webhook-endpoints"),
     tryApi<ApiPage<DeliveryRow>>("/console/webhook-deliveries", {
-      query: { cursor: params.cursor, limit: 50 },
+      query: {
+        cursor: params.cursor,
+        status: params.status,
+        event_type: params.event_type,
+        endpoint_id: params.endpoint_id,
+        limit: 50,
+      },
     }),
   ])
 
@@ -52,6 +68,7 @@ export default async function WebhooksPage({
         <PageHeaderRow>
           <PageTitle>Webhooks</PageTitle>
           <PageActions>
+            <ApiButton snippet={SNIPPETS.webhooks} />
             <CreateWebhookButton autoOpen={params.new === "1"} />
           </PageActions>
         </PageHeaderRow>
@@ -61,8 +78,11 @@ export default async function WebhooksPage({
         </PageDescription>
       </PageHeader>
 
-      <PageBody width="full">
-        <Tabs defaultValue={params.tab === "deliveries" ? "deliveries" : "endpoints"}>
+      <PageBody>
+        <UrlTabs
+          value={params.tab === "deliveries" ? "deliveries" : undefined}
+          fallback="endpoints"
+        >
           <TabsList className="mb-4">
             <TabsTrigger value="endpoints">
               Endpoints
@@ -96,10 +116,11 @@ export default async function WebhooksPage({
               <DeliveriesTable
                 deliveries={deliveries.data.data}
                 nextCursor={deliveries.data.nextCursor}
+                endpoints={endpoints.ok ? endpoints.data.data : []}
               />
             )}
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </PageBody>
     </Page>
   )

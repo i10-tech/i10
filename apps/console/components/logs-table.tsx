@@ -1,14 +1,33 @@
 "use client"
 
 import * as React from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Button } from "@repo/ui/components/button"
+import { AnimatePresence, motion } from "motion/react"
+import { ChevronRight, ScrollText, SearchX } from "lucide-react"
+import { CopyButton } from "@repo/ui/components/copy"
 import { cn } from "cn"
 import { EmptyState } from "@/components/empty-state"
+import {
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListTable,
+  rowClass,
+} from "@/components/list/table"
+import {
+  ListToolbar,
+  UrlClearFilters,
+  UrlFilterSelect,
+  UrlRangeSelect,
+  UrlSearchField,
+} from "@/components/list/toolbar"
+import { ListRegion, UrlList, useUrlList } from "@/components/list/url-state"
 import { LoadMore } from "@/components/load-more"
+import { StatusDot } from "@/components/status"
 import { formatDuration } from "@/lib/format"
 import type { RequestRow } from "@/lib/types"
 import { Time } from "@/components/time"
+
+const FILTERS = ["search", "days", "status", "method", "api_key_id"]
 
 /**
  * The API request log.
@@ -18,152 +37,246 @@ import { Time } from "@/components/time"
  * key verification or a caller in another region. Per-request timings turn it
  * into a number somebody can argue with.
  *
- * ⚠ AND THE STATUS FILTER IS THREE STATES, NOT A DROPDOWN OF CODES. In practice
+ * ⚠ AND THE STATUS FILTER IS TWO STATES, NOT A DROPDOWN OF CODES. In practice
  * the question is "show me the failures"; filtering to a specific 429 is a
  * refinement almost nobody needs and every extra control costs a glance.
+ *
+ * ⚠ A ROW OPENS IN PLACE, NOT ON ANOTHER PAGE. There is no body to show (see
+ * the page), so what is left - the key, the whole user agent, the exact time
+ * - fits under the row.
  */
 export function LogsTable({
   rows,
   nextCursor,
-  status,
+  apiKeys,
 }: {
   rows: RequestRow[]
   nextCursor: string | null
-  status?: "ok" | "error"
+  apiKeys: { id: string; name: string }[]
 }) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  return (
+    <UrlList className="space-y-4">
+      <ListToolbar>
+        <UrlSearchField
+          placeholder="Search endpoints, e.g. /emails"
+          label="Search requests"
+        />
+        <UrlRangeSelect />
+        <UrlFilterSelect
+          param="status"
+          label="Status"
+          allLabel="All statuses"
+          options={[
+            { value: "ok", label: "Succeeded", icon: <StatusDot tone="success" /> },
+            { value: "error", label: "Failed", icon: <StatusDot tone="danger" /> },
+          ]}
+        />
+        <UrlFilterSelect
+          param="method"
+          label="Method"
+          allLabel="All methods"
+          className="w-36"
+          options={["GET", "POST", "PATCH", "DELETE"].map((m) => ({
+            value: m,
+            label: m,
+          }))}
+        />
+        {apiKeys.length > 0 && (
+          <UrlFilterSelect
+            param="api_key_id"
+            label="API key"
+            allLabel="All API keys"
+            options={apiKeys.map((k) => ({ value: k.id, label: k.name }))}
+          />
+        )}
+        <UrlClearFilters params={FILTERS} />
+      </ListToolbar>
 
-  function filter(next?: "ok" | "error") {
-    const params = new URLSearchParams(searchParams.toString())
-    if (next) params.set("status", next)
-    else params.delete("status")
-    // ⚠ THE CURSOR IS DROPPED. It points into the previous result set; carrying
-    // it would start the filtered list part-way down and look like missing rows.
-    params.delete("cursor")
-    router.push(`${pathname}?${params.toString()}`, { scroll: false })
+      <ListRegion>
+        <Rows rows={rows} nextCursor={nextCursor} apiKeys={apiKeys} />
+      </ListRegion>
+    </UrlList>
+  )
+}
+
+function Rows({
+  rows,
+  nextCursor,
+  apiKeys,
+}: {
+  rows: RequestRow[]
+  nextCursor: string | null
+  apiKeys: { id: string; name: string }[]
+}) {
+  const { params, commit } = useUrlList()
+  const [open, setOpen] = React.useState<string | null>(null)
+  const filtered = FILTERS.some((f) => params.get(f))
+  const keyName = (id: string | null) => apiKeys.find((k) => k.id === id)?.name ?? null
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={filtered ? <SearchX /> : <ScrollText />}
+        title={filtered ? "Nothing matches those filters" : "No requests yet"}
+        description={
+          filtered
+            ? "Try a wider date range, or clear the filters."
+            : "Calls your servers make to the API appear here, with the status and timing we answered with."
+        }
+        secondary={
+          filtered ? (
+            <button
+              type="button"
+              onClick={() => commit((p) => FILTERS.forEach((f) => p.delete(f)))}
+              className="h-8 cursor-pointer rounded-lg border px-3 text-sm transition-colors hover:bg-muted"
+            >
+              Clear filters
+            </button>
+          ) : undefined
+        }
+      />
+    )
   }
 
   return (
     <div className="space-y-4">
-      <div className="inline-flex items-center gap-0.5 rounded-md border p-0.5">
-        {[
-          { label: "All", value: undefined },
-          { label: "Successes", value: "ok" as const },
-          { label: "Errors", value: "error" as const },
-        ].map((option) => (
-          <button
-            key={option.label}
-            type="button"
-            onClick={() => filter(option.value)}
-            aria-pressed={status === option.value}
-            className={cn(
-              "cursor-pointer rounded-sm px-2 py-1 text-xs font-medium transition-colors",
-              "duration-(--duration-instant) ease-(--ease-linear)",
-              status === option.value
-                ? "bg-secondary text-secondary-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      {rows.length === 0 ? (
-        <EmptyState
-          title={status ? "Nothing matches that filter" : "No requests yet"}
-          description={
-            status
-              ? "Try clearing the filter."
-              : "Calls your servers make to the API appear here, with the status and timing we answered with."
-          }
-          secondary={
-            status ? (
-              <Button variant="outline" size="sm" onClick={() => filter(undefined)}>
-                Clear filter
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <>
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/30 text-left">
-                  <th className="w-[5rem] px-3 py-2 text-xs font-medium text-muted-foreground">
-                    Method
-                  </th>
-                  <th className="px-3 py-2 text-xs font-medium text-muted-foreground">
-                    Path
-                  </th>
-                  <th className="w-[5rem] px-3 py-2 text-xs font-medium text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="w-[6rem] px-3 py-2 text-right text-xs font-medium text-muted-foreground">
-                    Duration
-                  </th>
-                  <th className="hidden px-3 py-2 text-xs font-medium text-muted-foreground lg:table-cell">
-                    Client
-                  </th>
-                  <th className="w-[9rem] px-3 py-2 text-right text-xs font-medium text-muted-foreground">
-                    When
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {rows.map((row) => (
-                  <tr key={row.id} className="hover:bg-muted/20">
-                    <td className="px-3 py-2">
-                      <span className="font-mono text-2xs font-medium text-muted-foreground">
-                        {row.method}
-                      </span>
-                    </td>
-                    <td className="max-w-0 px-3 py-2">
-                      <span className="block truncate font-mono text-xs">
-                        {row.path}
-                      </span>
-                      {row.error_name && (
-                        <span className="text-2xs text-danger">{row.error_name}</span>
+      <ListTable>
+        <ListHeader>
+          <ListHead className="w-8 pr-0" />
+          <ListHead className="w-[5rem]">Method</ListHead>
+          <ListHead>Endpoint</ListHead>
+          <ListHead className="w-[5rem]">Status</ListHead>
+          <ListHead className="w-[6rem] text-right">Duration</ListHead>
+          <ListHead className="hidden lg:table-cell">Client</ListHead>
+          <ListHead className="w-[9rem] text-right">When</ListHead>
+        </ListHeader>
+        {/* No `divide-y`: the folded detail rows would each draw a second line. */}
+        <tbody>
+          {rows.map((row) => {
+            const expanded = open === row.id
+            return (
+              <React.Fragment key={row.id}>
+                <tr
+                  className={cn(
+                    rowClass,
+                    "cursor-pointer border-t animate-in fade-in-0 duration-300 first:border-t-0",
+                    expanded && "bg-muted/40",
+                  )}
+                  onClick={() => setOpen(expanded ? null : row.id)}
+                  aria-expanded={expanded}
+                >
+                  <ListCell className="pr-0">
+                    <ChevronRight
+                      className={cn(
+                        "size-3.5 text-muted-foreground transition-transform duration-200",
+                        expanded && "rotate-90",
                       )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={cn(
-                          "tabular font-mono text-xs",
-                          row.status >= 500 && "text-danger",
-                          row.status >= 400 && row.status < 500 && "text-warning",
-                          row.status < 300 && "text-success",
-                        )}
-                      >
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-xs text-muted-foreground">
-                      {formatDuration(row.duration_ms)}
-                    </td>
-                    <td className="hidden max-w-0 px-3 py-2 lg:table-cell">
-                      <span
-                        className="block truncate text-xs text-muted-foreground"
-                        title={row.user_agent ?? undefined}
-                      >
-                        {row.user_agent ?? "-"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right text-xs whitespace-nowrap text-muted-foreground">
-                      <Time iso={row.occurred_at} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    />
+                  </ListCell>
+                  <ListCell>
+                    <span className="font-mono text-2xs font-medium text-muted-foreground">
+                      {row.method}
+                    </span>
+                  </ListCell>
+                  <ListCell className="max-w-0">
+                    <span className="block truncate font-mono text-xs">{row.path}</span>
+                    {row.error_name && (
+                      <span className="text-2xs text-danger">{row.error_name}</span>
+                    )}
+                  </ListCell>
+                  <ListCell>
+                    <span
+                      className={cn(
+                        "tabular font-mono text-xs",
+                        row.status >= 500 && "text-danger",
+                        row.status >= 400 && row.status < 500 && "text-warning",
+                        row.status < 300 && "text-success",
+                      )}
+                    >
+                      {row.status}
+                    </span>
+                  </ListCell>
+                  <ListCell className="tabular text-right text-xs text-muted-foreground">
+                    {formatDuration(row.duration_ms)}
+                  </ListCell>
+                  <ListCell className="hidden max-w-0 lg:table-cell">
+                    <span
+                      className="block truncate text-xs text-muted-foreground"
+                      title={row.user_agent ?? undefined}
+                    >
+                      {row.user_agent ?? "-"}
+                    </span>
+                  </ListCell>
+                  <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
+                    <Time iso={row.occurred_at} />
+                  </ListCell>
+                </tr>
+                <tr>
+                  <td colSpan={7} className="p-0">
+                    <AnimatePresence initial={false}>
+                      {expanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                          className="overflow-hidden bg-muted/20"
+                        >
+                          <dl className="grid gap-3 px-4 py-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                            <Detail label="Request ID">
+                              <span className="flex items-center gap-1">
+                                <span className="truncate font-mono">{row.id}</span>
+                                <CopyButton
+                                  value={row.id}
+                                  label="Copy request ID"
+                                  className="size-6"
+                                />
+                              </span>
+                            </Detail>
+                            <Detail label="API key">
+                              {row.api_key_id
+                                ? (keyName(row.api_key_id) ?? (
+                                    <span className="font-mono">{row.api_key_id}</span>
+                                  ))
+                                : "None (refused before a key resolved)"}
+                            </Detail>
+                            <Detail label="Time">
+                              <span className="font-mono">
+                                <Time iso={row.occurred_at} mode="exact" />
+                              </span>
+                            </Detail>
+                            <Detail label="Answered in">
+                              {formatDuration(row.duration_ms)}
+                            </Detail>
+                            <div className="sm:col-span-2 lg:col-span-4">
+                              <Detail label="Client">
+                                <span className="font-mono break-all">
+                                  {row.user_agent ?? "Not sent"}
+                                </span>
+                              </Detail>
+                            </div>
+                          </dl>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </td>
+                </tr>
+              </React.Fragment>
+            )
+          })}
+        </tbody>
+      </ListTable>
 
-          <LoadMore cursor={nextCursor} />
-        </>
-      )}
+      <LoadMore cursor={nextCursor} />
+    </div>
+  )
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5">{children}</dd>
     </div>
   )
 }

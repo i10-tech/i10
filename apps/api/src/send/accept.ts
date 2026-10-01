@@ -136,8 +136,10 @@ function canonical(value: unknown): string {
  * A send with its body settled: a template reference has become `html`,
  * `text` and `subject`, so everything after `acceptSend` sees one shape.
  */
-export type ResolvedEmail = Omit<SendEmail, "template" | "subject"> & {
+export type ResolvedEmail = Omit<SendEmail, "template" | "subject" | "from"> & {
   subject: string
+  /** The request's `from`, or the template's default when it gave none. */
+  from: string
 }
 
 /** One message as it will be written, after suppression filtering. */
@@ -343,7 +345,7 @@ export interface Logger {
  */
 function refusedDomain(
   scopes: readonly string[],
-  payloads: SendEmail[],
+  payloads: readonly { from: string }[],
 ): string | null {
   for (const payload of payloads) {
     const domain = domainOf(payload.from)
@@ -375,6 +377,26 @@ export async function acceptSend(
   const queue = classFor(input.endpoint)
 
   /*
+   * ⚠ FIRST, BECAUSE A TEMPLATE CAN SUPPLY THE SENDER. A send naming a template
+   * may leave out `from` and get the template's (Resend's template defaults),
+   * so the scope and domain checks below can only judge the address that will
+   * actually go out once templates are resolved. It reads, never writes: a
+   * send naming a missing template or leaving out a variable still costs
+   * nothing. All-or-nothing for a batch, like the scope check: one bad
+   * element refuses the request rather than writing the rest.
+   *
+   * ⚠ NO TEMPLATE CODE RUNS HERE. A version was rendered once when it was
+   * created; this fills its stored skeleton. See docs/decisions/templates.md.
+   */
+  const resolved = await resolveTemplates(
+    input.tenantId,
+    input.payloads,
+    deps.templates,
+  )
+  if (!resolved.ok) return resolved.outcome
+  const resolvedPayloads = resolved.payloads.map((p) => p.payload)
+
+  /*
    * ⚠ BEFORE THE QUOTA CHECK AND BEFORE ANYTHING IS WRITTEN. A refusal that
    * has already spent a quota unit, or already persisted a message, is a
    * refusal that cost the customer something - and on a batch it would leave
@@ -385,7 +407,7 @@ export async function acceptSend(
    * legitimate messages and one from the production domain is exactly the case
    * this exists to stop, and it is the one a first-element check misses.
    */
-  const refused = input.scopes ? refusedDomain(input.scopes, input.payloads) : null
+  const refused = input.scopes ? refusedDomain(input.scopes, resolvedPayloads) : null
   if (refused) {
     return {
       status: "forbidden",
@@ -411,7 +433,7 @@ export async function acceptSend(
    * accepting a message that SES will reject for a different reason later.
    */
   const wanted = [
-    ...new Set(input.payloads.map((p) => domainOf(p.from)?.toLowerCase() ?? "")),
+    ...new Set(resolvedPayloads.map((p) => domainOf(p.from)?.toLowerCase() ?? "")),
   ]
   const sendable = await deps.sendableFrom(
     input.tenantId,
@@ -451,21 +473,6 @@ export async function acceptSend(
         "workspace owner, or contact support, to speed that up.",
     }
   }
-
-  /*
-   * ⚠ BEFORE THE QUOTA, SO A SEND THAT NAMES A MISSING TEMPLATE OR LEAVES OUT A
-   * VARIABLE COSTS NOTHING. And all-or-nothing for a batch, like the scope
-   * check: one bad element refuses the request rather than writing the rest.
-   *
-   * ⚠ NO TEMPLATE CODE RUNS HERE. A version was rendered once when it was
-   * created; this fills its stored skeleton. See docs/decisions/templates.md.
-   */
-  const resolved = await resolveTemplates(
-    input.tenantId,
-    input.payloads,
-    deps.templates,
-  )
-  if (!resolved.ok) return resolved.outcome
 
   // ⚠ FIRST, AND CHEAPLY. Rejecting an over-quota tenant before writing
   // anything is the difference between a 429 in milliseconds and a database
@@ -601,11 +608,12 @@ async function resolveTemplates(
   const out: { payload: ResolvedEmail; templateVersionId: string | null }[] = []
 
   for (const payload of payloads) {
-    const { template, subject, ...rest } = payload
+    const { template, subject, from, ...rest } = payload
     if (!template) {
-      // The contract requires a subject whenever there is no template.
+      // The contract requires a subject and a sender whenever there is no
+      // template.
       out.push({
-        payload: { ...rest, subject: subject ?? "" },
+        payload: { ...rest, subject: subject ?? "", from: from ?? "" },
         templateVersionId: null,
       })
       continue
@@ -626,6 +634,8 @@ async function resolveTemplates(
         template: { id: template.id, version: template.version },
         variables: template.variables,
         subject,
+        ...(from !== undefined ? { from } : {}),
+        ...(rest.reply_to !== undefined ? { replyTo: rest.reply_to } : {}),
       },
       lookup,
     )
@@ -643,6 +653,8 @@ async function resolveTemplates(
       payload: {
         ...rest,
         subject: result.subject,
+        from: result.from,
+        ...(result.replyTo !== null ? { reply_to: result.replyTo } : {}),
         ...(result.html !== null ? { html: result.html } : {}),
         ...(result.text !== null ? { text: result.text } : {}),
       },

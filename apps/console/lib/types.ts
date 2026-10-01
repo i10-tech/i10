@@ -176,6 +176,9 @@ export interface DomainSummary {
 
 export interface Domain extends DomainSummary {
   records: DnsRecord[]
+  /** Console only: when it was first verified, and last looked up in DNS. */
+  verified_at?: string | null
+  dns_checked_at?: string | null
   /** Open and click tracking (#154). Off unless the owner turned it on. */
   open_tracking: boolean
   click_tracking: boolean
@@ -440,7 +443,7 @@ export interface BroadcastRow {
 export type BroadcastSummary = Omit<BroadcastRow, "html" | "text">
 
 /** A template in a list: the same row without its body, for the same reason. */
-export type TemplateSummary = Omit<TemplateRow, "html" | "text">
+export type TemplateSummary = Omit<TemplateRow, "html" | "text" | "design">
 
 export interface BroadcastDetail extends BroadcastRow {
   stats: {
@@ -455,10 +458,37 @@ export interface BroadcastDetail extends BroadcastRow {
 /** Where a template is maintained (#234). See `templateSource` in the API's db/core.ts. */
 export type TemplateSource = "managed" | "upload" | "github"
 
-export interface TemplateRow {
+/** A folder of templates (Resend-style, flat). */
+export interface TemplateFolder {
   id: string
   name: string
-  folder: string | null
+  /** How many templates are filed in it. */
+  templates: number
+  created_at: string
+  updated_at: string
+}
+
+/** A variable declared in the editor: a send may leave it out when it has a fallback. */
+export interface DeclaredVariable {
+  name: string
+  type: "string" | "number"
+  fallback: string | null
+}
+
+export interface TemplateRow {
+  id: string
+  /** The alias a send may use; unique in the workspace. */
+  name: string
+  /** What people call it; null shows the alias. */
+  title: string | null
+  /** The folder it is filed in; null for the top level. */
+  folder_id: string | null
+  /** The draft's default sender, reply-to and inbox preview line. */
+  from: string | null
+  reply_to: string[] | null
+  preview_text: string | null
+  /** Variables declared in the editor. */
+  variables: DeclaredVariable[]
   /**
    * `html` is written here as HTML; `visual` in the React Email editor (#243);
    * `tsx` is a React Email component, uploaded or pushed (#160).
@@ -534,6 +564,8 @@ export interface GithubState {
 export interface TemplateVariable {
   path: string
   preview: string
+  /** What a send that leaves it out gets; absent means it is required. */
+  fallback?: string
 }
 
 /** A version in a template's history. Versions are immutable (#160). */
@@ -549,6 +581,9 @@ export interface TemplateVersionSummary {
   path: string | null
   /** The commit a GitHub template's version came from. */
   commit_sha: string | null
+  from: string | null
+  reply_to: string[] | null
+  preview_text: string | null
   live: boolean
   created_at: string
 }

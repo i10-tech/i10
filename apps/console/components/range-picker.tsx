@@ -1,6 +1,8 @@
 "use client"
 
+import { useTransition } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { motion } from "motion/react"
 import { cn } from "cn"
 
 /**
@@ -24,6 +26,7 @@ export function RangePicker({ value }: { value: number }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const [pending, start] = useTransition()
 
   function select(days: number) {
     const next = new URLSearchParams(searchParams.toString())
@@ -38,14 +41,18 @@ export function RangePicker({ value }: { value: number }) {
     // ⚠ `scroll: false`, because this is a filter and not a navigation. Jumping
     // to the top of the page when somebody changes the range moves the chart
     // they were looking at out from under the cursor.
-    router.push(`${pathname}?${next.toString()}`, { scroll: false })
+    start(() => router.push(`${pathname}?${next.toString()}`, { scroll: false }))
   }
 
   return (
     <div
-      className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
+      className={cn(
+        "inline-flex h-9 items-center gap-0.5 rounded-xl border p-0.5 transition-opacity",
+        pending && "opacity-70",
+      )}
       role="group"
       aria-label="Date range"
+      aria-busy={pending || undefined}
     >
       {OPTIONS.map((days) => (
         <button
@@ -54,14 +61,20 @@ export function RangePicker({ value }: { value: number }) {
           onClick={() => select(days)}
           aria-pressed={days === value}
           className={cn(
-            "cursor-pointer rounded-sm px-2 py-1 text-xs font-medium transition-colors",
-            "duration-(--duration-instant) ease-(--ease-linear)",
+            "relative h-8 cursor-pointer rounded-lg px-2.5 text-xs font-medium transition-colors",
             days === value
-              ? "bg-secondary text-secondary-foreground"
+              ? "text-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {days}d
+          {days === value && (
+            <motion.span
+              layoutId="range-picker-active"
+              className="absolute inset-0 rounded-lg bg-muted shadow-xs ring-1 ring-border"
+              transition={{ type: "spring", stiffness: 500, damping: 38 }}
+            />
+          )}
+          <span className="relative">{days}d</span>
         </button>
       ))}
     </div>

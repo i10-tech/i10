@@ -2,6 +2,7 @@ import type { Hono } from "hono"
 import { PROPERTY_KEY } from "../../console/marketing.js"
 import type { ConsoleDeps } from "./deps.js"
 import {
+  asId,
   asIdArray,
   asNullableString,
   isRecord,
@@ -34,7 +35,10 @@ export function mountAudience(app: Hono, d: ConsoleDeps): void {
     return c.json(
       await d.marketing.listContacts(tenantId, {
         ...(q.search ? { search: q.search.slice(0, 200) } : {}),
-        ...(q.segment_id ? { segmentId: q.segment_id } : {}),
+        ...(asId(q.segment_id) ? { segmentId: asId(q.segment_id)! } : {}),
+        ...(q.status === "subscribed" || q.status === "unsubscribed"
+          ? { subscribed: q.status === "subscribed" }
+          : {}),
         ...(q.cursor ? { cursor: q.cursor } : {}),
         ...(q.limit ? { limit: Number(q.limit) } : {}),
       }),

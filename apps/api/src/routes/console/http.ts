@@ -65,6 +65,14 @@ export function asIdArray(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === "string" && uuid.test(v))
 }
 
+/**
+ * One id from a query string, or nothing when it is not a uuid - so a junk
+ * filter matches nothing instead of failing the statement with a cast error.
+ */
+export function asId(raw: string | undefined): string | undefined {
+  return raw && asIdArray([raw]).length === 1 ? raw : undefined
+}
+
 export function clampInt(
   raw: string | undefined,
   min: number,

@@ -62,7 +62,7 @@ export function EmailBodyTabs({
   )
 
   return (
-    <section className="overflow-hidden rounded-lg border">
+    <section className="overflow-hidden rounded-2xl border">
       <Tabs value={tab} onValueChange={setTab}>
         <div className="flex items-center justify-between gap-2 border-b px-2 py-1.5">
           <TabsList className="bg-transparent p-0">

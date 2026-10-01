@@ -97,7 +97,7 @@ export function GithubPanel({ state }: { state: GithubState }) {
       )}
 
       {state.repositories.length > 0 && (
-        <ul className="divide-y overflow-hidden rounded-lg border">
+        <ul className="divide-y overflow-hidden rounded-2xl border">
           {state.repositories.map((r) => (
             <RepositoryRow key={r.id} repo={r} />
           ))}

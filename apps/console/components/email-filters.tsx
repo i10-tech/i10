@@ -1,24 +1,18 @@
 "use client"
 
-import * as React from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Search, X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { StatusDot, describeStatus } from "@/components/status"
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { cn } from "cn"
-import { useSyncedState } from "@/lib/react"
+  ListToolbar,
+  UrlClearFilters,
+  UrlFilterMulti,
+  UrlFilterSelect,
+  UrlRangeSelect,
+  UrlSearchField,
+} from "@/components/list/toolbar"
+import { StatusDot, describeStatus } from "@/components/status"
 
 /**
- * Filtering the delivery log.
+ * Filtering the delivery log: search, date range, status, domain and API key,
+ * Resend's row of controls.
  *
  * ⚠ EVERY CONTROL WRITES TO THE URL AND NOTHING IS HELD IN REACT STATE EXCEPT
  * THE SEARCH BOX'S UNCOMMITTED TEXT. The page is a server component that reads
@@ -65,131 +59,50 @@ const STATUSES = [
   "canceled",
 ] as const
 
-export function EmailFilters() {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-
-  const activeStatuses = React.useMemo(
-    () => new Set((searchParams.get("status") ?? "").split(",").filter(Boolean)),
-    [searchParams],
-  )
-
-  const urlSearch = searchParams.get("search") ?? ""
-
-  /*
-   * ⚠ LOCAL, BUT IT FOLLOWS THE URL WHEN THAT CHANGES FROM SOMEWHERE ELSE -
-   * pressing back, or the "clear filters" button in the empty state. Without
-   * that the input keeps showing the old text after the results have changed
-   * underneath it, which reads as the filter having stuck. Adjusted during
-   * render rather than in an effect; see lib/react.ts.
-   */
-  const [search, setSearch] = useSyncedState(urlSearch)
-
-  const commit = React.useCallback(
-    (mutate: (params: URLSearchParams) => void) => {
-      const params = new URLSearchParams(searchParams.toString())
-      mutate(params)
-      /*
-       * ⚠ THE CURSOR IS ALWAYS DROPPED WHEN A FILTER CHANGES. A cursor points
-       * at a position in the PREVIOUS result set; carrying it across a filter
-       * change starts the new list part-way down, so the first page of a fresh
-       * search silently begins in the middle and looks like missing rows.
-       */
-      params.delete("cursor")
-      router.push(`${pathname}?${params.toString()}`, { scroll: false })
-    },
-    [pathname, router, searchParams],
-  )
-
-  React.useEffect(() => {
-    if (search === urlSearch) return
-    const timer = setTimeout(() => {
-      commit((params) => {
-        if (search) params.set("search", search)
-        else params.delete("search")
-      })
-    }, 350)
-    return () => clearTimeout(timer)
-  }, [search, urlSearch, commit])
-
-  function toggleStatus(status: string) {
-    commit((params) => {
-      const next = new Set(activeStatuses)
-      if (next.has(status)) next.delete(status)
-      else next.add(status)
-      if (next.size === 0) params.delete("status")
-      else params.set("status", [...next].join(","))
-    })
-  }
-
-  const hasFilters = activeStatuses.size > 0 || urlSearch.length > 0
-
+export function EmailFilters({
+  domains,
+  apiKeys,
+}: {
+  domains: { id: string; name: string }[]
+  apiKeys: { id: string; name: string }[]
+}) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="relative min-w-0 flex-1 sm:max-w-xs">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search subject or recipient"
-          className="h-8 pl-8 text-sm"
-          aria-label="Search emails"
-        />
-      </div>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1.5">
-            Status
-            {activeStatuses.size > 0 && (
-              <span className="tabular rounded-sm bg-secondary px-1 text-2xs">
-                {activeStatuses.size}
-              </span>
-            )}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuLabel>Delivery state</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {STATUSES.map((status) => {
-            const described = describeStatus(status)
-            return (
-              <DropdownMenuCheckboxItem
-                key={status}
-                checked={activeStatuses.has(status)}
-                // ⚠ `onSelect` IS PREVENTED SO THE MENU STAYS OPEN. Choosing
-                // three states out of nine would otherwise mean reopening the
-                // menu three times.
-                onSelect={(event) => event.preventDefault()}
-                onCheckedChange={() => toggleStatus(status)}
-              >
-                <span className="flex items-center gap-2">
-                  <StatusDot tone={described.tone} />
-                  {described.label}
-                </span>
-              </DropdownMenuCheckboxItem>
-            )
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {hasFilters && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() =>
-            commit((params) => {
-              params.delete("status")
-              params.delete("search")
-            })
+    <ListToolbar>
+      <UrlSearchField placeholder="Search subject or address" label="Search emails" />
+      <UrlRangeSelect />
+      <UrlFilterMulti
+        param="status"
+        label="Delivery state"
+        allLabel="All statuses"
+        noun="statuses"
+        options={STATUSES.map((status) => {
+          const described = describeStatus(status)
+          return {
+            value: status,
+            label: described.label,
+            icon: <StatusDot tone={described.tone} />,
           }
-          className={cn("text-muted-foreground")}
-        >
-          <X />
-          Clear
-        </Button>
+        })}
+      />
+      {domains.length > 1 && (
+        <UrlFilterSelect
+          param="domain_id"
+          label="Domain"
+          allLabel="All domains"
+          options={domains.map((d) => ({ value: d.id, label: d.name }))}
+        />
       )}
-    </div>
+      {apiKeys.length > 0 && (
+        <UrlFilterSelect
+          param="api_key_id"
+          label="API key"
+          allLabel="All API keys"
+          options={apiKeys.map((k) => ({ value: k.id, label: k.name }))}
+        />
+      )}
+      <UrlClearFilters
+        params={["search", "days", "status", "domain_id", "api_key_id", "broadcast_id"]}
+      />
+    </ListToolbar>
   )
 }

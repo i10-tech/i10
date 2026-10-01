@@ -18,6 +18,14 @@ export interface Variable {
   path: string
   /** The template's own sample value, from `PreviewProps`. Empty when it has none. */
   preview: string
+  /**
+   * What a send that leaves the variable out gets instead, as Resend's
+   * template variables have it. Absent means leaving it out refuses the send.
+   *
+   * ⚠ A VALUE OF THE WRONG TYPE IS STILL REFUSED. The fallback stands in for
+   * a variable that is not there, never for one that is there and unusable.
+   */
+  fallback?: string
 }
 
 const KEY = /^[A-Za-z_][A-Za-z0-9_]*$/

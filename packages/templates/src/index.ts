@@ -29,6 +29,7 @@ export {
   type Filled,
 } from "./substitute.js"
 export { skeletonFromHtml } from "./html.js"
+export { withPreviewText } from "./preheader.js"
 export { displaySkeleton } from "./display.js"
 export {
   CODE_EXTENSIONS,

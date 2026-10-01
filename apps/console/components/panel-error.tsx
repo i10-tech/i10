@@ -32,7 +32,7 @@ export function PanelError({
       role="status"
       className={cn(
         "flex items-start gap-3 px-4 py-6",
-        !bare && "rounded-lg border border-dashed",
+        !bare && "rounded-2xl border border-dashed",
         className,
       )}
     >

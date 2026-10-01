@@ -3,6 +3,7 @@ import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
 import { removalRefusal, suppressionsCsv } from "../../suppressions/store.js"
 import {
+  asId,
   clampInt,
   notFound,
   notWired,
@@ -94,6 +95,7 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
       ...(q.search ? { search: q.search.slice(0, 200) } : {}),
       ...(parseDate(q.from) ? { from: parseDate(q.from)! } : {}),
       ...(parseDate(q.to) ? { to: parseDate(q.to)! } : {}),
+      ...(asId(q.api_key_id) ? { apiKeyId: asId(q.api_key_id)! } : {}),
       ...(q.cursor ? { cursor: q.cursor } : {}),
       ...(q.limit ? { limit: Number(q.limit) } : {}),
     })
@@ -119,6 +121,7 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
     return c.json(
       await store.list(tenantId, {
         ...(q.search ? { search: q.search.slice(0, 200) } : {}),
+        ...(q.reason && SUPPRESSION_REASONS.has(q.reason) ? { reason: q.reason } : {}),
         ...(q.cursor ? { cursor: q.cursor } : {}),
         ...(q.limit ? { limit: Number(q.limit) } : {}),
       }),
@@ -186,12 +189,24 @@ export function mountSending(app: Hono, d: ConsoleDeps): void {
     return c.json(
       await d.queries.listRequests(tenantId, {
         ...(q.status === "ok" || q.status === "error" ? { status: q.status } : {}),
+        ...(q.search ? { search: q.search.slice(0, 200) } : {}),
+        ...(q.method && /^[A-Za-z]{3,7}$/.test(q.method) ? { method: q.method } : {}),
+        ...(asId(q.api_key_id) ? { apiKeyId: asId(q.api_key_id)! } : {}),
+        ...(parseDate(q.from) ? { from: parseDate(q.from)! } : {}),
         ...(q.cursor ? { cursor: q.cursor } : {}),
         ...(q.limit ? { limit: Number(q.limit) } : {}),
       }),
     )
   })
 }
+
+/** The reasons a suppression can carry; anything else filters to nothing. */
+const SUPPRESSION_REASONS = new Set([
+  "hard_bounce",
+  "complaint",
+  "manual",
+  "unsubscribe",
+])
 
 /**
  * `paused` when SES stopped the workspace, `at_risk` while any reputation

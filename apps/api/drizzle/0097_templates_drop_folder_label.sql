@@ -1,0 +1,1 @@
+ALTER TABLE "core"."templates" DROP COLUMN "folder";

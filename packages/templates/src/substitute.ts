@@ -41,7 +41,9 @@ export function fill(version: Fillable, values: unknown): FillResult {
   for (const variable of version.variables) {
     const got = lookup(values, variable.path)
     if (got.found) resolved.push(got.value)
-    else {
+    else if (got.reason === "missing" && variable.fallback !== undefined) {
+      resolved.push(variable.fallback)
+    } else {
       resolved.push("")
       ;(got.reason === "missing" ? missing : invalid).push(variable.path)
     }
@@ -51,8 +53,11 @@ export function fill(version: Fillable, values: unknown): FillResult {
   const subjectValues = new Map<string, string>()
   for (const path of subjectPaths) {
     const got = lookup(values, path)
+    const declared = version.variables.find((v) => v.path === path)
     if (got.found) subjectValues.set(path, got.value)
-    else if (!version.variables.some((v) => v.path === path)) {
+    else if (got.reason === "missing" && declared?.fallback !== undefined) {
+      subjectValues.set(path, declared.fallback)
+    } else if (!declared) {
       ;(got.reason === "missing" ? missing : invalid).push(path)
     }
   }

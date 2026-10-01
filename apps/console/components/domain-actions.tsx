@@ -1,15 +1,19 @@
 "use client"
 
 import * as React from "react"
-import { MoreHorizontal, Trash2 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Copy, MoreHorizontal, SquareArrowOutUpRight, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@repo/ui/components/dropdown-menu"
 import { DeleteDomainDialog } from "@/components/delete-domain-dialog"
+import { rowMenuClass } from "@/components/list/table"
 
 /**
  * Deleting a domain without opening it first.
@@ -41,6 +45,7 @@ export function DomainActions({
   /** The live keys that can ONLY send from this domain. Filtered by the page. */
   scopedKeys?: { id: string; name: string }[]
 }) {
+  const router = useRouter()
   const [confirming, setConfirming] = React.useState(false)
 
   return (
@@ -52,11 +57,32 @@ export function DomainActions({
            * row and "Actions" repeated nine times tells a screen reader
            * nothing about which row it is on.
            */}
-          <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${name}`}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={rowMenuClass}
+            aria-label={`Actions for ${name}`}
+          >
             <MoreHorizontal />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onSelect={() => router.push(`/domains/${id}`)}>
+            <SquareArrowOutUpRight />
+            Open
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              void navigator.clipboard.writeText(id).then(
+                () => toast.success("Domain ID copied"),
+                () => toast.error("Could not copy the ID"),
+              )
+            }
+          >
+            <Copy />
+            Copy ID
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
             <Trash2 />
             Delete domain

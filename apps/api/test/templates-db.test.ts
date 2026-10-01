@@ -68,10 +68,18 @@ suite("templates", () => {
 
     const published = await store.publish(t, created.id)
     expect(published && "version" in published && published.version).toBe(1)
+    // Just published: the draft is not ahead of what is live.
+    if (published && "version" in published) {
+      expect(published.updated_at).toBe(published.published_at!)
+    }
 
     for (const id of [created.id, "welcome"]) {
       const sent = await resolveTemplateSend(
-        { template: { id }, variables: { name: "<Ada>", url: "javascript:alert(1)" } },
+        {
+          from: "t@acme.test",
+          template: { id },
+          variables: { name: "<Ada>", url: "javascript:alert(1)" },
+        },
         store.lookup(t),
       )
       expect(sent).toMatchObject({
@@ -91,18 +99,18 @@ suite("templates", () => {
     await store.update(t, created.id, { html: "<p>two</p>" })
 
     const live = await resolveTemplateSend(
-      { template: { id: "receipt" } },
+      { from: "t@acme.test", template: { id: "receipt" } },
       store.lookup(t),
     )
     expect(live.ok && live.html).toBe("<p>one</p>")
 
     await store.publish(t, created.id)
     const pinned = await resolveTemplateSend(
-      { template: { id: "receipt", version: 1 } },
+      { from: "t@acme.test", template: { id: "receipt", version: 1 } },
       store.lookup(t),
     )
     const latest = await resolveTemplateSend(
-      { template: { id: "receipt" } },
+      { from: "t@acme.test", template: { id: "receipt" } },
       store.lookup(t),
     )
     expect(pinned.ok && pinned.html).toBe("<p>one</p>")
@@ -111,7 +119,7 @@ suite("templates", () => {
     // Rolling back is promoting the older version.
     await store.promote(t, created.id, 1)
     const back = await resolveTemplateSend(
-      { template: { id: "receipt" } },
+      { from: "t@acme.test", template: { id: "receipt" } },
       store.lookup(t),
     )
     expect(back.ok && back.html).toBe("<p>one</p>")
@@ -142,7 +150,7 @@ suite("templates", () => {
 
     // v2 no longer needs `team`, which only the old subject used.
     const sent = await resolveTemplateSend(
-      { template: { id: "invite" }, variables: { name: "Bo" } },
+      { from: "t@acme.test", template: { id: "invite" }, variables: { name: "Bo" } },
       store.lookup(t),
     )
     expect(sent).toMatchObject({ ok: true, html: "<p>Bo</p>", subject: "Welcome" })
@@ -161,7 +169,10 @@ suite("templates", () => {
 
     expect(await store.get(theirs, created.id)).toBeNull()
     for (const id of [created.id, "secret"]) {
-      const sent = await resolveTemplateSend({ template: { id } }, store.lookup(theirs))
+      const sent = await resolveTemplateSend(
+        { from: "t@acme.test", template: { id } },
+        store.lookup(theirs),
+      )
       expect(sent).toMatchObject({ ok: false, error: "not_found" })
     }
   })
@@ -270,6 +281,9 @@ suite("templates", () => {
       problems: ["`./missing`, imported by `broken/orphan.tsx`, is not in the files."],
     })
     expect(compiled.sort()).toEqual(["auth/reset.tsx", "auth/welcome.tsx"])
+    // The upload's directory became a folder, once, holding both.
+    const folders = await store.folders(t)
+    expect(folders.map((f) => [f.name, f.templates])).toEqual([["auth", 2]])
 
     // The same folder again renders nothing; a changed layout versions both.
     compiled.length = 0
@@ -329,7 +343,11 @@ suite("templates", () => {
 
       const send = (version?: number) =>
         resolveTemplateSend(
-          { template: { id: "cached", version }, variables: { name: "A" } },
+          {
+            from: "t@acme.test",
+            template: { id: "cached", version },
+            variables: { name: "A" },
+          },
           cached.lookup(t),
         )
 
@@ -383,7 +401,11 @@ suite("templates", () => {
       display: { html: '<p>Hi {{ name }}</p><a href="{{ url }}">go</a>' },
     })
     const sent = await resolveTemplateSend(
-      { template: { id: "visual" }, variables: { name: "<A>", url: "javascript:x" } },
+      {
+        from: "t@acme.test",
+        template: { id: "visual" },
+        variables: { name: "<A>", url: "javascript:x" },
+      },
       store.lookup(t),
     )
     expect(sent).toMatchObject({
@@ -443,6 +465,173 @@ suite("templates", () => {
     ).toBe(false)
     expect(bucket.objects.size).toBe(1)
     expect(await assets.sweepDeleted()).toBe(0)
+  })
+})
+
+suite("template folders, defaults and fallbacks", () => {
+  beforeAll(() => {
+    owner = postgres(URL!, { max: 2, onnotice: () => {} })
+    app = postgres(API_URL!, { max: 4, onnotice: () => {} })
+    store = templateStore(drizzle(app, { schema }) as unknown as Database)
+  })
+  afterAll(async () => {
+    if (tenants.length) await owner`delete from core.tenants where id = any(${tenants})`
+    await owner.end()
+    await app.end()
+  })
+
+  it("files templates in folders, moves them, and keeps them when a folder goes", async () => {
+    const t = await workspace()
+    const folder = await store.createFolder(t, "Onboarding")
+    if ("conflict" in folder) throw new Error("conflict")
+    expect(folder).toMatchObject({ name: "Onboarding", templates: 0 })
+    expect(await store.createFolder(t, "Onboarding")).toEqual({ conflict: true })
+
+    const a = await store.create(t, { name: "a", folderId: folder.id })
+    const b = await store.create(t, { name: "b" })
+    if ("conflict" in a || "conflict" in b) throw new Error("conflict")
+    expect(a.folder_id).toBe(folder.id)
+    expect(b.folder_id).toBeNull()
+
+    expect(await store.move(t, [b.id], folder.id)).toBe(1)
+    expect((await store.folders(t))[0]).toMatchObject({ templates: 2 })
+    expect(await store.move(t, [a.id], null)).toBe(1)
+
+    const renamed = await store.renameFolder(t, folder.id, "Welcome")
+    expect(renamed && "name" in renamed && renamed.name).toBe("Welcome")
+
+    expect(await store.deleteFolder(t, folder.id)).toBe(true)
+    const left = await store.list(t)
+    expect(left.map((x) => [x.name, x.folder_id])).toEqual([
+      ["a", null],
+      ["b", null],
+    ])
+  })
+
+  it("never files a template under another workspace's folder", async () => {
+    const mine = await workspace()
+    const theirs = await workspace()
+    const foreign = await store.createFolder(theirs, "Private")
+    if ("conflict" in foreign) throw new Error("conflict")
+    const t = await store.create(mine, { name: "x" })
+    if ("conflict" in t) throw new Error("conflict")
+
+    expect(await store.move(mine, [t.id], foreign.id)).toBeNull()
+    expect(await store.update(mine, t.id, { folderId: foreign.id })).toEqual({
+      problem: "No folder with that id.",
+    })
+    expect(await store.deleteFolder(mine, foreign.id)).toBe(false)
+  })
+
+  it("duplicates the draft and the live version under the first free name", async () => {
+    const t = await workspace()
+    const src = await store.create(t, { name: "welcome", kind: "visual" })
+    if ("conflict" in src) throw new Error("conflict")
+    await store.update(t, src.id, {
+      subject: "Hi",
+      from: "Acme <hi@acme.test>",
+      html: "<p>v1</p>",
+      design: { type: "doc" },
+    })
+    await store.publish(t, src.id)
+
+    const one = await store.duplicate(t, src.id)
+    const two = await store.duplicate(t, src.id)
+    expect(one).toMatchObject({
+      name: "welcome-copy",
+      version: 1,
+      kind: "visual",
+      from: "Acme <hi@acme.test>",
+    })
+    expect(two?.name).toBe("welcome-copy-2")
+    const sent = await resolveTemplateSend(
+      { template: { id: "welcome-copy" } },
+      store.lookup(t),
+    )
+    expect(sent).toMatchObject({
+      ok: true,
+      html: "<p>v1</p>",
+      from: "Acme <hi@acme.test>",
+    })
+  })
+
+  it("publishes the sender, reply-to, preview line and fallbacks, and a send uses them", async () => {
+    const t = await workspace()
+    const created = await store.create(t, { name: "invite" })
+    if ("conflict" in created) throw new Error("conflict")
+    await store.update(t, created.id, {
+      subject: "Join {{ team }}",
+      from: "Acme <hi@acme.test>",
+      replyTo: ["help@acme.test"],
+      previewText: "You are invited, {{ name }}",
+      variables: [
+        { name: "name", type: "string", fallback: "there" },
+        { name: "team", type: "string", fallback: null },
+      ],
+      html: "<html><body><p>Hello {{ name }}</p></body></html>",
+    })
+    const published = await store.publish(t, created.id)
+    expect(published && "version" in published && published.version).toBe(1)
+
+    // `name` has a fallback; `team` has none, so leaving it out refuses.
+    const refused = await resolveTemplateSend(
+      { template: { id: "invite" } },
+      store.lookup(t),
+    )
+    expect(refused).toMatchObject({ ok: false, error: "invalid" })
+
+    const sent = await resolveTemplateSend(
+      { template: { id: "invite" }, variables: { team: "Ops" } },
+      store.lookup(t),
+    )
+    expect(sent).toMatchObject({
+      ok: true,
+      subject: "Join Ops",
+      from: "Acme <hi@acme.test>",
+      replyTo: ["help@acme.test"],
+    })
+    expect(sent.ok && sent.html).toContain("You are invited, there")
+    expect(sent.ok && sent.html).toContain("<p>Hello there</p>")
+
+    // The draft keeps the HTML as written; only the version carries the line.
+    const draft = await store.get(t, created.id)
+    expect(draft?.html).toBe("<html><body><p>Hello {{ name }}</p></body></html>")
+    expect(draft?.history[0]).toMatchObject({
+      preview_text: "You are invited, {{ name }}",
+    })
+  })
+
+  it("fills a test email from the draft: fallbacks, else the placeholder", async () => {
+    const t = await workspace()
+    const created = await store.create(t, { name: "t" })
+    if ("conflict" in created) throw new Error("conflict")
+    expect(await store.draftEmail(t, created.id)).toEqual({
+      problems: ["Write the email before sending a test."],
+    })
+    await store.update(t, created.id, {
+      subject: "For {{ who }}",
+      variables: [{ name: "who", type: "string", fallback: "you" }],
+      html: "<p>{{ who }} and {{ other }}</p>",
+    })
+    const email = await store.draftEmail(t, created.id)
+    expect(email).toMatchObject({
+      subject: "For you",
+      html: "<p>you and {{ other }}</p>",
+    })
+  })
+
+  it("lets only an editor template switch between the visual editor and HTML", async () => {
+    const t = await workspace()
+    const created = await store.create(t, { name: "k", kind: "visual" })
+    if ("conflict" in created) throw new Error("conflict")
+    const switched = await store.update(t, created.id, { kind: "html" })
+    expect(switched && "kind" in switched && switched.kind).toBe("html")
+
+    const uploaded = await store.create(t, { name: "u", kind: "tsx" })
+    if ("conflict" in uploaded) throw new Error("conflict")
+    expect(await store.update(t, uploaded.id, { kind: "html" })).toEqual({
+      problem: "Only a template written here can switch editors.",
+    })
   })
 })
 

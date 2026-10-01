@@ -1,21 +1,22 @@
 import type { Metadata } from "next"
-import Link from "next/link"
+import { BackButton } from "@/components/back-button"
 import { notFound } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Globe } from "lucide-react"
 import {
   Page,
-  PageActions,
   PageBody,
   PageHeader,
-  PageHeaderRow,
-  PageTitle,
   Section,
   SectionContent,
   SectionDescription,
   SectionTitle,
 } from "@repo/ui/components/page"
+import { DetailHero, MetaGrid } from "@/components/detail-hero"
+import { Journey } from "@/components/journey"
+import { ApiButton } from "@/components/list/api-button"
+import { ProviderMark } from "@/components/provider-mark"
 import { Status } from "@/components/status"
+import { Time } from "@/components/time"
 import { DnsRecords } from "@/components/dns-records"
 import { DomainDangerZone } from "@/components/domain-danger-zone"
 import { DomainTracking } from "@/components/domain-tracking"
@@ -25,6 +26,10 @@ import { VerificationWatch } from "@/components/verification-watch"
 import { VerifyButton } from "@/components/verify-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
+import { domainJourney } from "@/lib/journey"
+import { regionName } from "@/lib/regions"
+import { SNIPPETS } from "@/lib/snippets"
+import { describeStatus } from "@/lib/status"
 import type {
   ApiKeyRow,
   ConnectableProvider,
@@ -154,38 +159,81 @@ export default async function DomainDetailPage({
   return (
     <Page>
       <PageHeader>
-        <PageHeaderRow>
-          <div className="flex min-w-0 items-center gap-3">
-            <Button variant="ghost" size="icon-sm" asChild aria-label="Back to domains">
-              <Link href="/domains">
-                <ArrowLeft />
-              </Link>
-            </Button>
-            <PageTitle className="truncate font-mono">{domain.name}</PageTitle>
-            <Status status={domain.status} variant="pill" />
-          </div>
-          <PageActions>
-            {/*
-             * ⚠ ONLY WHERE WE CAN ACTUALLY DO IT. The button appears when the
-             * domain's DNS is hosted somewhere we have an adapter for; anywhere
-             * else the records table is still the answer, and offering a
-             * shortcut that cannot work is worse than not offering one.
-             */}
-            {connectable && domain.status !== "verified" && (
-              <PublishRecords
-                domainId={domain.id}
-                domainName={domain.name}
-                connection={connection}
-                providerSlug={connectable.slug}
-                providerName={connectable.name}
-              />
-            )}
-            <VerifyButton id={domain.id} status={domain.status} />
-          </PageActions>
-        </PageHeaderRow>
+        <DetailHero
+          back={<BackButton href="/domains" label="Back to domains" />}
+          icon={<Globe />}
+          tone={domain.displaced_at ? "danger" : describeStatus(domain.status).tone}
+          eyebrow="Domain"
+          title={<span className="font-mono">{domain.name}</span>}
+          actions={
+            <>
+              <ApiButton snippet={SNIPPETS.domains} />
+              {/*
+               * ⚠ ONLY WHERE WE CAN ACTUALLY DO IT. The button appears when the
+               * domain's DNS is hosted somewhere we have an adapter for; anywhere
+               * else the records table is still the answer, and offering a
+               * shortcut that cannot work is worse than not offering one.
+               */}
+              {connectable && domain.status !== "verified" && (
+                <PublishRecords
+                  domainId={domain.id}
+                  domainName={domain.name}
+                  connection={connection}
+                  providerSlug={connectable.slug}
+                  providerName={connectable.name}
+                />
+              )}
+              <VerifyButton id={domain.id} status={domain.status} />
+            </>
+          }
+        />
       </PageHeader>
 
       <PageBody className="space-y-8">
+        <MetaGrid
+          items={[
+            { label: "Created", value: <Time iso={domain.created_at} /> },
+            {
+              label: "Status",
+              value: (
+                <Status
+                  status={domain.status}
+                  label={domain.displaced_at ? "Verified elsewhere" : undefined}
+                  variant="pill"
+                />
+              ),
+            },
+            {
+              label: "DNS provider",
+              value:
+                inspection.ok && inspection.data.provider ? (
+                  <span className="flex items-center gap-2">
+                    <ProviderMark
+                      slug={inspection.data.provider.slug}
+                      name={inspection.data.provider.name}
+                      className="size-5"
+                    />
+                    {inspection.data.provider.name}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Not detected</span>
+                ),
+            },
+            {
+              label: "Region",
+              value: (
+                <span>
+                  {regionName(domain.region)}{" "}
+                  <span className="font-mono text-xs text-muted-foreground">
+                    ({domain.region})
+                  </span>
+                </span>
+              ),
+            },
+          ]}
+        />
+        <Journey title="Domain events" steps={domainJourney(domain)} />
+
         {/*
          * ⚠ THE EXPLANATION OF WHAT EACH STATUS MEANS IS INLINE, NOT IN A
          * TOOLTIP. `temporary_failure` in particular is not a synonym for

@@ -67,7 +67,7 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="hidden overflow-hidden rounded-lg border md:block">
+      <div className="hidden overflow-hidden rounded-2xl border md:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/30 text-left">

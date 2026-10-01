@@ -1,0 +1,1 @@
+ALTER TABLE "core"."templates" ADD COLUMN "title" text;

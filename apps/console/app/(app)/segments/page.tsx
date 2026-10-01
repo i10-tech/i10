@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import Link from "next/link"
+import { Layers } from "lucide-react"
 import {
   Page,
   PageActions,
@@ -10,11 +10,10 @@ import {
   PageTitle,
 } from "@repo/ui/components/page"
 import { NewSegmentButton } from "@/components/new-segment"
-import { SegmentActions } from "@/components/segment-actions"
+import { SegmentsList } from "@/components/marketing-lists"
 import { EmptyState } from "@/components/empty-state"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
-import { formatNumber, formatRelative } from "@/lib/format"
 import type { SegmentRow } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Segments" }
@@ -69,37 +68,13 @@ export default async function SegmentsPage() {
           <PanelError title="Could not load segments" message={result.error.message} />
         ) : !hasRows ? (
           <EmptyState
+            icon={<Layers />}
             title="No segments yet"
             description="Create one, add contacts to it, and point a broadcast at it."
+            secondary={<NewSegmentButton />}
           />
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {result.data.data.map((segment) => (
-              <li key={segment.id} className="rounded-lg border">
-                <div className="flex items-start justify-between gap-2 px-4 py-3">
-                  <Link
-                    href={`/contacts?segment_id=${segment.id}`}
-                    className="min-w-0 flex-1"
-                  >
-                    <p className="truncate text-sm font-medium">{segment.name}</p>
-                    {segment.description && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {segment.description}
-                      </p>
-                    )}
-                    <p className="tabular mt-2 text-2xl font-semibold tracking-tight">
-                      {formatNumber(segment.contact_count)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {segment.contact_count === 1 ? "contact" : "contacts"} · created{" "}
-                      {formatRelative(segment.created_at)}
-                    </p>
-                  </Link>
-                  <SegmentActions id={segment.id} name={segment.name} />
-                </div>
-              </li>
-            ))}
-          </ul>
+          <SegmentsList segments={result.data.data} />
         )}
       </PageBody>
     </Page>

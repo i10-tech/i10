@@ -69,7 +69,7 @@ export function TemplateVersions({
 
   return (
     <div className="space-y-10">
-      <ul className="divide-y overflow-hidden rounded-lg border">
+      <ul className="divide-y overflow-hidden rounded-2xl border">
         {history.map((v) => (
           <li key={v.id} className="flex items-center gap-3 px-4 py-3">
             <span className="tabular w-10 shrink-0 font-mono text-xs font-medium">
@@ -289,7 +289,7 @@ function VersionDiff({
               { n: from, p: pair.pa },
               { n: to, p: pair.pb },
             ].map(({ n, p }) => (
-              <figure key={n} className="overflow-hidden rounded-lg border">
+              <figure key={n} className="overflow-hidden rounded-2xl border">
                 <figcaption className="border-b px-3 py-2 font-mono text-xs">
                   v{n}
                 </figcaption>
@@ -385,7 +385,7 @@ function FileDiff({ path, changes }: { path: string; changes: Change[] }) {
   })
 
   return (
-    <div className="overflow-hidden rounded-lg border">
+    <div className="overflow-hidden rounded-2xl border">
       <p className="border-b bg-muted/30 px-3 py-1.5 font-mono text-xs">{path}</p>
       <div className="max-h-[32rem] overflow-auto">
         <table className="w-full border-collapse font-mono text-xs leading-5">

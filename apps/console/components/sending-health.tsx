@@ -58,7 +58,7 @@ export async function SendingHealthCard() {
   const h = result.data
 
   return (
-    <section className="overflow-hidden rounded-lg border">
+    <section className="overflow-hidden rounded-2xl border">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <h2 className="text-sm font-medium">Sending health</h2>
         <Status status={h.health} variant="pill" />

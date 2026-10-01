@@ -124,7 +124,14 @@ export interface BroadcastInput {
 export interface MarketingStore {
   listContacts(
     tenantId: string,
-    opts: { search?: string; segmentId?: string; cursor?: string; limit?: number },
+    opts: {
+      search?: string
+      segmentId?: string
+      /** true for subscribed only, false for unsubscribed only. */
+      subscribed?: boolean
+      cursor?: string
+      limit?: number
+    },
   ): Promise<Page<ContactRow>>
   getContact(
     tenantId: string,
