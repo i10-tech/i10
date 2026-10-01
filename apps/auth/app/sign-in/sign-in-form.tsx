@@ -16,6 +16,7 @@ import { OAuthButtons } from "../_components/oauth-buttons"
 import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
+import { RememberedAccounts } from "../_components/remembered-accounts"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { installAbortableWebAuthn } from "../_lib/webauthn"
 import { useResumable } from "../_lib/resume"
@@ -210,7 +211,19 @@ export function SignInForm({
      * on, the `check` on the field has to go or learn about it - see
      * _lib/environment.ts.
      */
-    const value = identifier.trim()
+    await lookUp(identifier.trim())
+  }
+
+  /**
+   * Ask Clerk which account an address is, and move to its next step.
+   *
+   * ⚠ SPLIT OUT OF THE SUBMIT SO A REMEMBERED-ACCOUNT CARD TAKES THE SAME
+   * PATH as the email box, unknown-address branch included. A card for an
+   * account deleted since is just an address with no account behind it, and
+   * it should do exactly what typing that address would.
+   */
+  async function lookUp(value: string) {
+    if (!signIn || busy) return
 
     setBusy("identifier")
     try {
@@ -458,6 +471,19 @@ export function SignInForm({
                   </p>
                 )}
               </div>
+
+              {/*
+               * Accounts this device has signed in to before - see
+               * _components/remembered-accounts.tsx. Nothing at all on a first
+               * visit, so the page is unchanged for most people.
+               */}
+              <RememberedAccounts
+                disabled={!signIn || locked}
+                onPick={(email) => {
+                  setIdentifier(email)
+                  void lookUp(email)
+                }}
+              />
 
               {/*
                * ⚠ THE FIELD IS WRAPPED SO THE CHIP HAS SOMETHING TO ANCHOR TO,
