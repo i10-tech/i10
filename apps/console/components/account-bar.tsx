@@ -16,6 +16,7 @@ import {
 import { useTheme } from "next-themes"
 import { useClerk, useUser } from "@clerk/nextjs"
 import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar"
+import { Badge } from "@repo/ui/components/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -176,7 +177,7 @@ function AccountRow({
      * against 8px on the left; now it is ~15px, and the ring sits 15px from the
      * rail's edge, mirroring the avatar's 16px.
      */
-    <div className="flex items-center gap-1 group-data-[collapsed=true]/rail:flex-col">
+    <div className="flex items-center gap-1">
       {/*
        * ⚠ `modal={false}`, LIKE THE USAGE POPOVER BESIDE IT. Radix menus are
        * modal by default: the rest of the page stops taking the pointer while
@@ -191,13 +192,6 @@ function AccountRow({
             "text-left transition-colors duration-(--duration-instant) ease-(--ease-linear)",
             "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar focus-visible:outline-none",
             "data-[state=open]:bg-sidebar-accent",
-            /*
-             * Icon-only rail (#153): the avatar alone, centred, with the ring
-             * stacked under it. The name and plan go, and the trigger's
-             * `aria-label` still says whose menu it is.
-             */
-            "group-data-[collapsed=true]/rail:w-8 group-data-[collapsed=true]/rail:flex-none group-data-[collapsed=true]/rail:justify-center group-data-[collapsed=true]/rail:px-0",
-            "group-data-[collapsed=true]/rail:[&>*:not(:first-child)]:hidden",
           )}
           aria-label={`Account menu for ${name}`}
         >
@@ -218,18 +212,17 @@ function AccountRow({
              * which read as a gap in the row; at the edge the badge and the
              * ring sit together, the two halves of "your plan, your usage".
              */
-            /*
-             * ⚠ A PLAIN WORD, NOT A CHIP (#145). The plan used to sit in a
-             * filled pill, which beside the usage ring read as an upsell
-             * badge. It is a fact about the workspace, the same weight as the
-             * name next to it, only quieter.
-             */
-            <span
-              className="ms-auto shrink-0 text-2xs text-muted-foreground"
+            <Badge
+              variant="secondary"
+              // ⚠ `bg-track`, NOT `secondary`: secondary is 0.97 on a
+              // near-white rail and 0.20 on a black one, so the badge had no
+              // visible ground in either theme. The track's translucent wash
+              // reads on both, the same as the empty ring beside it.
+              className="ms-auto shrink-0 bg-track px-1.5 py-0 text-2xs text-foreground/80"
               title={`${plan.name} plan`}
             >
               {plan.name}
-            </span>
+            </Badge>
           )}
         </DropdownMenuTrigger>
 

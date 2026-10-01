@@ -12,12 +12,12 @@ import { emailProblem } from "@repo/ui/checks"
 import { Spinner } from "@repo/ui/components/spinner"
 import { StepProgress } from "@repo/ui/components/step-progress"
 import { StepStage } from "@repo/ui/components/step-stage"
-import { OtpField, OTP_LENGTH } from "../_components/otp-field"
+import { OtpField, OTP_LENGTH } from "@repo/ui/components/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
-import { finalizeWithoutLeaving, leaveFor } from "../_lib/finish"
+import { finalizeWithoutLeaving, holdSince, leaveFor } from "../_lib/finish"
 import { markSignInAttempt } from "../_lib/last-used"
 import { useResumable, useResumeLive } from "../_lib/resume"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
@@ -333,6 +333,9 @@ export function SignUpForm({
   }
 
   function finish() {
+    // Every control stays disabled and the page shows it is working until the
+    // dashboard replaces it - the same rule as every other way out.
+    setBusy("leaving")
     const leave = leaveRef.current
     if (leave) {
       leave()
@@ -451,7 +454,8 @@ export function SignUpForm({
       }
 
       if (signUp.status === "complete") {
-        await createSession()
+        setAccepted(true)
+        await createSession({ holdAccepted: true })
         return
       }
 
@@ -473,9 +477,10 @@ export function SignUpForm({
    * after this one - so holding the lock would grey out the passkey button the
    * person is about to be shown.
    */
-  async function createSession() {
+  async function createSession({ holdAccepted = false } = {}) {
     if (!signUp) return
 
+    const shown = Date.now()
     const { result, leave } = await finalizeWithoutLeaving(
       (params) => signUp.finalize(params),
       afterAuthUrl,
@@ -503,14 +508,18 @@ export function SignUpForm({
     markSignInAttempt("password")
 
     leaveRef.current = leave
-    setBusy(null)
+    // The green check under the code boxes lands before the screen moves on.
+    if (holdAccepted) await holdSince(shown)
 
     const next = optional[0]
     setDirection("forward")
     if (next) {
+      setBusy(null)
       setStage(next)
       return
     }
+    // ⚠ STILL LOCKED: nothing comes after this but the dashboard, and a
+    // released button would be pressable while it loads.
     leave()
   }
 

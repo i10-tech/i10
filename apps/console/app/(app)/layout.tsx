@@ -1,12 +1,9 @@
-import Link from "next/link"
-import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
 import { Rail } from "@/components/rail"
-import { RailToggle } from "@/components/rail-toggle"
 import { SendingStatusBanner } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
 import { SidebarNav } from "@/components/sidebar-nav"
@@ -16,9 +13,7 @@ import { UsageRail } from "@/components/usage-rail"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { AccountBar } from "@/components/account-bar"
 import { TenantNotReady } from "@/components/tenant-not-ready"
-import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
-import { RAIL_COOKIE } from "@/lib/rail-cookie"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
 import type { Attention, Me } from "@/lib/types"
 
@@ -93,8 +88,6 @@ export default async function AppLayout({
   // See WorkspaceBar: Clerk's hooks throw outside a provider, and the provider
   // is only mounted when a key exists.
   const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
-  // The rail's remembered width, read here so the first paint is already right.
-  const railCollapsed = (await cookies()).get(RAIL_COOKIE)?.value === "collapsed"
 
   // ⚠ NOT AWAITED. The rail renders now and the mark on "Domains" streams in -
   // see AttentionMark. A failed read is null, which draws no mark.
@@ -127,29 +120,21 @@ export default async function AppLayout({
        * declared `h-dvh` a second time would be two numbers that have to agree
        * - and they stop agreeing the first time the shell grows a header.
        */}
-      <Rail
-        defaultCollapsed={railCollapsed}
-        className="hidden h-full shrink-0 flex-col border-r bg-sidebar lg:flex"
-      >
+      <Rail className="hidden h-full w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
         {/*
-         * Collapsed, the header is only the toggle: the 56px rail has room for
-         * one 32px control, and the way back out matters more than the logo.
+         * ⚠ THE RAIL STARTS WITH THE WORKSPACE, NOT A LOGO (decided
+         * 2026-10-01). Which workspace you are in is the first thing worth
+         * knowing in here; the mark said only which product, which nobody in
+         * the dashboard needs told. It keeps the 56px header row so the line
+         * under it meets the page header's line.
          */}
-        <div className="flex h-14 items-center justify-between gap-2 px-4 group-data-[collapsed=true]/rail:justify-center group-data-[collapsed=true]/rail:px-0">
-          <Link
-            href="/"
-            className="flex items-center gap-2 rounded-md outline-none group-data-[collapsed=true]/rail:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <Wordmark />
-          </Link>
-          <RailToggle />
+        <div className="flex h-14 items-center px-2">
+          <div className="min-w-0 flex-1">
+            <WorkspaceBar tenant={me.data.tenant} clerkEnabled={clerkEnabled} />
+          </div>
         </div>
 
         <Separator />
-
-        <div className="px-2 py-2 group-data-[collapsed=true]/rail:hidden">
-          <WorkspaceBar tenant={me.data.tenant} clerkEnabled={clerkEnabled} />
-        </div>
 
         {/*
          * ⚠ THE RAIL FITS; IT DOES NOT SCROLL. With Settings moved into the

@@ -1,22 +1,16 @@
-import { HIDE_WHILE_RESUMING } from "../_lib/resume-keys"
 import { ResumeRemount } from "../_lib/resume"
 
 /**
  * Wraps one flow so its steps can come back after a reload.
  *
- * ⚠ A SERVER COMPONENT, BECAUSE OF THE SCRIPT. React refuses a `<script>`
- * rendered by a client component - it will never run on a client render, and
- * React says so in the console. Rendered here it is plain server HTML, parsed
- * and run before the form below it paints. See _lib/resume.tsx for the rest.
+ * ⚠ THE "HIDE WHILE RESUMING" SCRIPT IS NOT HERE ANY MORE; IT IS IN THE ROOT
+ * LAYOUT. Rendered from this page-level component it was fine on a full page
+ * load, but the sign-in form reaches /mfa with a CLIENT navigation, and then
+ * React renders the page's payload in the browser - where a `<script>` never
+ * runs, and Next reports "Encountered a script tag while rendering React
+ * component". The root layout is rendered once, with the document, which is
+ * the only time the script has anything to do. See _lib/resume.tsx.
  */
 export function ResumeBoundary({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <script
-        // eslint-disable-next-line react/no-danger -- a constant of ours, no input reaches it
-        dangerouslySetInnerHTML={{ __html: HIDE_WHILE_RESUMING }}
-      />
-      <ResumeRemount>{children}</ResumeRemount>
-    </>
-  )
+  return <ResumeRemount>{children}</ResumeRemount>
 }

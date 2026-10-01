@@ -28,7 +28,7 @@ export default async function Page({
     typeof raw === "string" ? `?redirect_url=${encodeURIComponent(raw)}` : ""
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-6 py-12">
+    <main className="flex min-h-dvh items-center justify-center px-6 pt-24 pb-12">
       <div className="w-full max-w-sm">
         <ResumeBoundary>
           <MfaForm afterAuthUrl={after} signInHref={`/sign-in${carry}`} />

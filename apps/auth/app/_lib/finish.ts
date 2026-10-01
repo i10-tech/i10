@@ -1,5 +1,6 @@
 "use client"
 
+import { ACCEPTED_HOLD_MS } from "@repo/ui/components/otp-field"
 import type { SignInFlow } from "./clerk-types"
 import { confirmSignIn } from "./last-used"
 import { rememberSignedInAccount } from "./remembered"
@@ -18,7 +19,22 @@ import { forgetFlow } from "./resume"
  * that entry re-renders a sign-up form for somebody already signed in.
  * Replacing leaves nothing to go back to.
  */
+/**
+ * Whether this document is already on its way out to the destination.
+ *
+ * ⚠ MODULE STATE, NOT REACT STATE, ON PURPOSE. It has to survive a component
+ * being re-created mid-exit: the MFA page's "go back to sign-in" fallback was
+ * guarded by component state, a remount reset it, and its soft navigation to
+ * /sign-in cancelled the `location.replace` to the dashboard - so a correct
+ * code sometimes ended on the sign-in page. Nothing that navigates within
+ * this app may run once this is true.
+ */
+let leaving = false
+export const isLeaving = () => leaving
+
 export function leaveFor(url: string) {
+  if (leaving) return
+  leaving = true
   /*
    * ⚠ THE "LAST USED" MARKER IS PROMOTED HERE, BECAUSE THIS IS THE ONE PLACE
    * EVERY SUCCESSFUL FLOW PASSES THROUGH. Password, SSO callback, passkey, MFA
@@ -28,13 +44,44 @@ export function leaveFor(url: string) {
    * exactly like a first visit. See _lib/last-used.ts for why it is promoted on
    * success rather than written on click.
    */
-  confirmSignIn()
+  const method = confirmSignIn()
   // The card on the sign-in page for next time - see _lib/remembered.ts.
-  rememberSignedInAccount()
+  rememberSignedInAccount(method)
   // ⚠ AND THE STORED STEPS GO WITH IT - a finished flow must not come back as
   // a half-finished one the next time this tab opens the auth app.
   forgetFlow()
-  window.location.replace(url)
+  window.location.replace(carrySession(url))
+}
+
+/**
+ * Make sure the destination can find the session we just made.
+ *
+ * ⚠ THIS IS THE "CORRECT CODE, BACK AT SIGN-IN, WORKS THE SECOND TIME" BUG.
+ * On a development instance every origin has its own Clerk "dev browser",
+ * and a session only crosses to another subdomain inside the URL, as
+ * `__clerk_db_jwt`. We relied on `decorateUrl` for that - but read clerk-js
+ * 6.36: `decorateUrl` only rewrites the URL when
+ * `client.isEligibleForTouch()`, which is Safari's ITP workaround. In Chrome
+ * it hands the URL back untouched. So the dashboard checked ITS OWN dev
+ * browser, found no session, and bounced to sign-in with its id - the auth
+ * app adopted that id, and the second sign-in landed on the shared one and
+ * worked. Proved on auth.i10.localhost 2026-10-01: touch-eligible false,
+ * `buildUrlWithAuth` adds the token.
+ *
+ * ⚠ `buildUrlWithAuth` IS A NO-OP IN PRODUCTION (it returns the URL as is),
+ * where the session is a cookie on the shared parent domain. A URL that
+ * already carries the token (Safari's touch URL) is left alone.
+ */
+function carrySession(url: string): string {
+  if (url.includes("__clerk_db_jwt")) return url
+  const clerk = (window as { Clerk?: { buildUrlWithAuth?: (to: string) => string } })
+    .Clerk
+  try {
+    return clerk?.buildUrlWithAuth?.(url) ?? url
+  } catch {
+    // "Missing dev browser": nothing to carry, so go as we are.
+    return url
+  }
 }
 
 /** The shape both `signIn.finalize` and `signUp.finalize` accept. */
@@ -82,12 +129,31 @@ type Navigate = NonNullable<FinalizeParams["navigate"]>
 export async function finalizeAndLeave<R extends { error: unknown }>(
   finalize: (params: { navigate: Navigate }) => Promise<R>,
   afterAuthUrl: string,
+  { holdAccepted = false }: { holdAccepted?: boolean } = {},
 ): Promise<R> {
+  const shown = Date.now()
   const { result, leave } = await finalizeWithoutLeaving(finalize, afterAuthUrl)
   if (result.error) return result
 
+  // A code screen showing its green check waits for it to land first.
+  if (holdAccepted) await holdSince(shown)
   leave()
   return result
+}
+
+/**
+ * Wait until the code field's accepted state has been on screen for
+ * `ACCEPTED_HOLD_MS`, counting from when it appeared.
+ *
+ * ⚠ FROM WHEN IT APPEARED, NOT A FIXED PAUSE AFTER THE NETWORK. `finalize` is
+ * usually most of the hold already; adding a full pause on top would make a
+ * slow connection slower for no reason.
+ */
+export function holdSince(shown: number): Promise<void> {
+  const left = ACCEPTED_HOLD_MS - (Date.now() - shown)
+  return left > 0
+    ? new Promise((resolve) => setTimeout(resolve, left))
+    : Promise.resolve()
 }
 
 /**
@@ -120,12 +186,36 @@ export async function finalizeWithoutLeaving<R extends { error: unknown }>(
   afterAuthUrl: string,
 ): Promise<{ result: R; leave: () => void }> {
   let target: string | null = null
+  const attempt = async (): Promise<R> => {
+    try {
+      return await finalize({
+        navigate: ({ decorateUrl }) => {
+          target = decorateUrl(afterAuthUrl)
+        },
+      })
+    } catch (error) {
+      // A throw is the same outcome as a returned error to every caller.
+      return { error } as R
+    }
+  }
 
-  const result = await finalize({
-    navigate: ({ decorateUrl }) => {
-      target = decorateUrl(afterAuthUrl)
-    },
-  })
+  /*
+   * ⚠ ONE RETRY, BECAUSE THE CODE IS ALREADY SPENT. By here the person has
+   * proved everything; what failed is turning the finished attempt into a
+   * session, which is a single request to Clerk and is safe to repeat. A
+   * one-off failure used to undo the whole sign-in and send them back to the
+   * password, with no session behind them.
+   *
+   * ⚠ AND IT IS LOGGED. The dev servers forward the browser console, so the
+   * next flaky failure arrives with Clerk's own reason attached.
+   */
+  let result = await attempt()
+  if (result.error) {
+    console.error("[auth] finalize failed, retrying once", result.error)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    result = await attempt()
+    if (result.error) console.error("[auth] finalize failed again", result.error)
+  }
 
   return { result, leave: () => leaveFor(target ?? afterAuthUrl) }
 }

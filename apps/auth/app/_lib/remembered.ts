@@ -1,6 +1,7 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
+import { SAVED_COUNT_COOKIE, SAVED_LIMIT } from "./remembered-cookie"
 
 /**
  * The accounts this device has signed in to, for the cards on the sign-in page
@@ -11,11 +12,12 @@ import { useSyncExternalStore } from "react"
  * accounts that are signed OUT - the session expired or they pressed sign out -
  * which Clerk forgets entirely. There is nothing to ask it for.
  *
- * ⚠ ONLY WHAT THE CARD DRAWS: the address and a display name. Never a token,
+ * ⚠ ONLY WHAT THE CARD DRAWS: the address, a display name and the URL of
+ * their profile photo. Never a token,
  * a session id or a user id, so this list is worth nothing to anybody who
  * reads it out of the browser except the fact it is honest about - which
- * accounts have used this device. That fact is why it can be switched off
- * (`stopRemembering`) and each entry forgotten on its own.
+ * accounts have used this device. That fact is why each entry can be
+ * forgotten on its own.
  *
  * ⚠ `localStorage` ON THE AUTH ORIGIN, unlike the resumable flow state in
  * ./resume.tsx, which is per-tab `sessionStorage`. A remembered account is
@@ -25,17 +27,32 @@ import { useSyncExternalStore } from "react"
 export interface RememberedAccount {
   email: string
   name: string | null
+  /** Their uploaded profile photo, or null for the letter. Older entries lack it. */
+  imageUrl?: string | null
+  /**
+   * How this account last signed in on this device: `password`, `passkey`, or
+   * an SSO strategy like `oauth_google`. Decides the card's icon (a provider's
+   * logo, or the profile photo) and what pressing the card does.
+   */
+  method?: string | null
+  /**
+   * ⚠ THE ACCOUNT THAT SIGNED IN MOST RECENTLY, AND AT MOST ONE ENTRY HAS IT.
+   * A flag rather than "the first card", because forgetting the first card
+   * must not promote the second to "Last used" - it was not.
+   */
+  last?: boolean
 }
 
 const KEY = "i10_remembered_accounts"
-const OFF = "i10_remember_accounts_off"
 /** Enough to cover a person with a work and a personal account and a spare. */
-const LIMIT = 4
+const LIMIT = SAVED_LIMIT
 /** Same-tab writes do not fire `storage`, so this tells our own hook. */
 const CHANGED = "i10:remembered-accounts"
 
 interface ClerkUserLike {
   fullName?: string | null
+  imageUrl?: string
+  hasImage?: boolean
   primaryEmailAddress?: { emailAddress: string } | null
 }
 
@@ -69,15 +86,27 @@ function save(accounts: RememberedAccount[]): void {
   } catch {
     // Storage is blocked: the cards are a convenience, the sign-in is not.
   }
+  /*
+   * ⚠ THE COUNT ALSO GOES IN A COOKIE, AND ONLY THE COUNT. The server cannot
+   * read localStorage, so the page it renders had no room for the cards and
+   * everything under them jumped down when they appeared after hydration. The
+   * sign-in page reads this and renders that many skeleton cards in their
+   * place. A number, never an address: the cookie rides along with every
+   * request to this origin.
+   */
+  writeSavedCount(accounts.length)
   window.dispatchEvent(new Event(CHANGED))
 }
 
-function off(): boolean {
-  try {
-    return window.localStorage.getItem(OFF) === "1"
-  } catch {
-    return true
-  }
+/**
+ * Keep the cookie's count in step with storage. Exported for the one-time
+ * sync on a device that saved accounts before the cookie existed.
+ */
+export function writeSavedCount(count: number): void {
+  document.cookie =
+    count > 0
+      ? `${SAVED_COUNT_COOKIE}=${count}; path=/; max-age=31536000; samesite=lax`
+      : `${SAVED_COUNT_COOKIE}=; path=/; max-age=0; samesite=lax`
 }
 
 /**
@@ -89,30 +118,37 @@ function off(): boolean {
  * clerk-js has the user loaded and the address is read from it rather than
  * from whatever was typed - which, after an SSO round trip, was nothing.
  */
-export function rememberSignedInAccount(): void {
-  if (off()) return
+export function rememberSignedInAccount(method: string | null): void {
   const user = (window as { Clerk?: { user?: ClerkUserLike | null } }).Clerk?.user
   const email = user?.primaryEmailAddress?.emailAddress
   if (!email) return
-  const rest = parse(readRaw()).filter(
-    (account) => account.email.toLowerCase() !== email.toLowerCase(),
+  const all = parse(readRaw())
+  const before = all.find(
+    (account) => account.email.toLowerCase() === email.toLowerCase(),
   )
-  save([{ email, name: user?.fullName?.trim() || null }, ...rest].slice(0, LIMIT))
+  const rest = all
+    .filter((account) => account !== before)
+    .map((account) => ({ ...account, last: false }))
+  save(
+    [
+      {
+        email,
+        name: user?.fullName?.trim() || null,
+        // ⚠ ONLY A PHOTO THEY UPLOADED. Without one Clerk's `imageUrl` is a
+        // generated placeholder, and the letter says more than that does.
+        imageUrl: user?.hasImage ? (user.imageUrl ?? null) : null,
+        // A resumed flow with no recorded attempt keeps what we knew before.
+        method: method ?? before?.method ?? null,
+        last: true,
+      },
+      ...rest,
+    ].slice(0, LIMIT),
+  )
 }
 
 /** "Forget this account": one card, nothing else. */
 export function forgetAccount(email: string): void {
   save(parse(readRaw()).filter((account) => account.email !== email))
-}
-
-/** The opt-out: forget every account and stop remembering new ones. */
-export function stopRemembering(): void {
-  try {
-    window.localStorage.setItem(OFF, "1")
-  } catch {
-    // Nothing stored means nothing to show, which is the point anyway.
-  }
-  save([])
 }
 
 /*

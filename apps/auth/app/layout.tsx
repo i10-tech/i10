@@ -6,6 +6,8 @@ import { MotionProvider } from "@repo/ui/components/motion-provider"
 import { Theme } from "@repo/ui/components/theme"
 import { TooltipProvider } from "@repo/ui/components/tooltip"
 import { NoCacheInvalidation } from "./_components/no-cache-invalidation"
+import { AuthMark } from "./_components/auth-mark"
+import { HIDE_WHILE_RESUMING } from "./_lib/resume-keys"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -100,6 +102,17 @@ export default function RootLayout({
     >
       <html lang="en" suppressHydrationWarning>
         <body>
+          {/*
+           * ⚠ BEFORE ANYTHING ELSE IN THE BODY, so it runs before a resumable
+           * flow paints: it hides the flow while its stored step is restored
+           * (see _lib/resume.tsx). In the root layout because this renders
+           * once, with the document - a page-level script is re-rendered on
+           * client navigations, where scripts never run and React warns.
+           */}
+          <script
+            // eslint-disable-next-line react/no-danger -- a constant of ours, no input reaches it
+            dangerouslySetInnerHTML={{ __html: HIDE_WHILE_RESUMING }}
+          />
           <NoCacheInvalidation />
           {/*
            * ⚠ `preconnect` FOR THE FONT ORIGIN, AND `crossOrigin` IS NOT OPTIONAL
@@ -139,6 +152,8 @@ export default function RootLayout({
              * because its tooltips sit in dense tables where a delay is what
              * stops the screen flickering as the pointer crosses it.
              */}
+            {/* Where i10.tech's nav draws it - see _components/auth-mark.tsx. */}
+            <AuthMark />
             <TooltipProvider>
               <MotionProvider>{children}</MotionProvider>
             </TooltipProvider>
