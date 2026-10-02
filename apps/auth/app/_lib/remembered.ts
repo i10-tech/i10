@@ -1,6 +1,7 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
+import { forgetDevice } from "./devices"
 import { SAVED_COUNT_COOKIE, SAVED_LIMIT } from "./remembered-cookie"
 
 /**
@@ -18,6 +19,10 @@ import { SAVED_COUNT_COOKIE, SAVED_LIMIT } from "./remembered-cookie"
  * reads it out of the browser except the fact it is honest about - which
  * accounts have used this device. That fact is why each entry can be
  * forgotten on its own.
+ *
+ * ⚠ WHAT LETS A CARD SIGN STRAIGHT BACK IN IS NOT HERE. That is a secret in
+ * an httpOnly cookie no script can read - see ./devices-server.ts. This list
+ * only draws the cards; the cookie decides what pressing one does.
  *
  * ⚠ `localStorage` ON THE AUTH ORIGIN, unlike the resumable flow state in
  * ./resume.tsx, which is per-tab `sessionStorage`. A remembered account is
@@ -149,6 +154,8 @@ export function rememberSignedInAccount(method: string | null): void {
 /** "Forget this account": one card, nothing else. */
 export function forgetAccount(email: string): void {
   save(parse(readRaw()).filter((account) => account.email !== email))
+  // ⚠ AND THE CREDENTIAL BEHIND THE CARD, or the × would only hide it (#192).
+  forgetDevice(email)
 }
 
 /*

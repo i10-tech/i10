@@ -79,6 +79,9 @@ import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { offlineTenantSuppressions, sesTenantSuppressions } from "./suppressions/ses.js"
 import { suppressionStore } from "./suppressions/store.js"
+import { deviceStore } from "./devices/store.js"
+import { clerkResume } from "./devices/resume.js"
+import { clerkAuthAppIdentity } from "./routes/devices.js"
 
 const log = pino({ name: "i10-api" })
 const env = loadEnv()
@@ -617,9 +620,13 @@ const activeOrg = clerkActiveOrg(clerk, {
  * a differently-configured client would let a token be good enough to act and
  * not good enough to check, or the reverse.
  */
+const devices = deviceStore(db)
 const freshAuth = clerkFreshAuth(clerk, {
   authorizedParties: env.CONSOLE_ORIGINS,
   log,
+  // ⚠ A SESSION A SAVED ACCOUNT MINTED IS NOT "JUST PROVED" (#192). See
+  // `core.device_resumes`.
+  resumedNear: devices.resumedNear,
 })
 
 /**
@@ -847,6 +854,23 @@ const app = createApp({
     ttlSeconds: env.API_KEY_CACHE_TTL_SECONDS,
   },
   apiKeys: { store: keyStore(db), cache: redisKeyCache(cache), log },
+  /*
+   * Saved accounts (#192). `identify` only with an auth origin to check `azp`
+   * against - see AUTH_ORIGINS in env.ts.
+   */
+  devices: {
+    store: devices,
+    clerk: clerkResume(clerk),
+    ...(env.AUTH_ORIGINS.length
+      ? {
+          identify: clerkAuthAppIdentity(clerk, {
+            authorizedParties: env.AUTH_ORIGINS,
+            log,
+          }),
+        }
+      : {}),
+    log,
+  },
   clerkWebhooks: {
     db,
     signingSecret: env.CLERK_WEBHOOK_SECRET,

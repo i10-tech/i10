@@ -76,6 +76,11 @@ spec:
           env:
             - name: HOSTNAME
               value: "0.0.0.0"
+            # Saved accounts (#192): app/api/devices/* forwards the device
+            # cookie to the API. In-cluster, like the console's - see
+            # console.yaml for why not the public hostname.
+            - name: API_BASE_URL
+              value: "http://i10-api.i10-prod.svc.cluster.local"
           envFrom:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-auth }

@@ -18,7 +18,8 @@ import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
 import { stepBack, useStepHistory } from "../_lib/step-history"
 import { RememberedAccounts } from "../_components/remembered-accounts"
-import { useRememberedAccounts } from "../_lib/remembered"
+import { useRememberedAccounts, type RememberedAccount } from "../_lib/remembered"
+import { resumeDevice } from "../_lib/devices"
 import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
 import { installAbortableWebAuthn } from "../_lib/webauthn"
 import { useResumable } from "../_lib/resume"
@@ -142,6 +143,11 @@ export function SignInForm({
    */
   const lastAccount = remembered.some((account) => account.last)
   const lastUsed = lastAccount ? null : lastMethod
+
+  // The account the email step identified can sign in with a passkey.
+  const accountHasPasskey = Boolean(
+    signIn?.supportedFirstFactors?.some((factor) => factor.strategy === "passkey"),
+  )
 
   // Pressing a saved SSO account goes to that provider, the way it signed in.
   const { start: startSso } = useSsoStart({
@@ -276,6 +282,15 @@ export function SignInForm({
         return
       }
 
+      /*
+       * ⚠ A PASSKEY FIRST, WHEN THE ACCOUNT HAS ONE. It is one tap where the
+       * password is typing plus, for an account with 2FA, a code as well -
+       * Clerk takes a passkey as both factors. Declining it, or a browser
+       * that cannot offer it, lands on the password step as before, which
+       * keeps its own "Use your passkey" button.
+       */
+      if (await passkeyFirst()) return
+
       setDirection("forward")
       setStage("password")
       setBusy(null)
@@ -283,6 +298,104 @@ export function SignInForm({
       toast.error(TRANSPORT_FAILURE)
       setBusy(null)
     }
+  }
+
+  /**
+   * Prompt for the passkey of the account `signIn.create` just identified.
+   * True when it signed in and the page is leaving; false to carry on.
+   *
+   * ⚠ NO FLOW ARGUMENT, so it is THIS account's passkey - Clerk prepares the
+   * challenge for the identified user. `discoverable` would offer every
+   * passkey on the device and could sign in as somebody else.
+   *
+   * ⚠ EVERY FAILURE IS SILENT. Nobody pressed a passkey button; the prompt
+   * was our suggestion. Safari also refuses it outright when the click that
+   * started this is too long ago, which is not worth a toast either.
+   */
+  async function passkeyFirst(loud = false): Promise<boolean> {
+    // ⚠ READ LIVE, NOT FROM `accountHasPasskey`. Called straight after
+    // `signIn.create`, before any re-render: the render-time value still
+    // describes the attempt from before the lookup.
+    if (
+      !signIn?.supportedFirstFactors?.some((factor) => factor.strategy === "passkey")
+    ) {
+      return false
+    }
+    setBusy("passkey")
+    try {
+      const { error } = await signIn.passkey()
+      if (error || signIn.status !== "complete") {
+        // Pressed on purpose (the password step's button): say why, unless
+        // they cancelled - see _lib/passkey.ts.
+        const reason = loud && error ? passkeyFailure(error, "use") : null
+        if (reason) toast.error(reason, { description: passkeyReference(error) })
+        setBusy(null)
+        return false
+      }
+      markSignInAttempt("passkey")
+      const result = await finalizeAndLeave(
+        (params) => signIn.finalize(params),
+        afterAuthUrl,
+      )
+      if (result.error) setBusy(null)
+      return !result.error
+    } catch (error) {
+      const reason = loud ? passkeyFailure(error, "use") : null
+      if (reason) toast.error(reason, { description: passkeyReference(error) })
+      setBusy(null)
+      return false
+    }
+  }
+
+  /**
+   * A saved account's card (#192).
+   *
+   * ⚠ THE SERVER DECIDES, FROM A COOKIE THIS SCRIPT CANNOT READ. An expired
+   * session comes back as a single-use ticket: straight in, whatever way the
+   * account first signed in - Google and GitHub included, without the trip.
+   * A signed-out one comes back as "passkey" or as the ordinary flow. See
+   * apps/api/src/devices/resume.ts for the rules.
+   */
+  async function pickAccount(account: RememberedAccount) {
+    if (!signIn || busy) return
+    setBusy("identifier")
+
+    const answer = await resumeDevice(account.email)
+
+    if (answer.outcome === "ticket") {
+      try {
+        const { error } = await signIn.ticket({ ticket: answer.ticket })
+        if (!error && signIn.status === "complete") {
+          const result = await finalizeAndLeave(
+            (params) => signIn.finalize(params),
+            afterAuthUrl,
+          )
+          if (!result.error) return
+        } else if (
+          !error &&
+          (signIn.status === "needs_second_factor" ||
+            signIn.status === "needs_client_trust")
+        ) {
+          // ⚠ 2FA WITH NO PASSKEY: the code is the one thing still asked for.
+          router.push(mfaHref)
+          return
+        }
+      } catch {
+        // Fall through to the ordinary flow.
+      }
+    }
+
+    setBusy(null)
+
+    if (answer.outcome !== "passkey") {
+      const viaSso = providers.find((p) => p.strategy === account.method)
+      if (viaSso) {
+        void startSso(viaSso.strategy)
+        return
+      }
+    }
+    setIdentifier(account.email)
+    await lookUp(account.email)
   }
 
   /**
@@ -512,15 +625,7 @@ export function SignInForm({
               <RememberedAccounts
                 expected={savedAccounts}
                 disabled={!signIn || locked}
-                onPick={(account) => {
-                  const viaSso = providers.find((p) => p.strategy === account.method)
-                  if (viaSso) {
-                    void startSso(viaSso.strategy)
-                    return
-                  }
-                  setIdentifier(account.email)
-                  void lookUp(account.email)
-                }}
+                onPick={(account) => void pickAccount(account)}
               />
 
               {/*
@@ -736,6 +841,25 @@ export function SignInForm({
                   "Login"
                 )}
               </Button>
+
+              {/*
+               * ⚠ THE PASSKEY STAYS ONE PRESS AWAY ON THIS STEP. The email step
+               * already offered it once; somebody who dismissed that, or whose
+               * browser refused it, should not have to type a password they
+               * set up a passkey to avoid.
+               */}
+              {accountHasPasskey && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xl"
+                  onClick={() => void passkeyFirst(true)}
+                  disabled={!signIn || locked}
+                >
+                  <PasskeyIcon aria-hidden="true" />
+                  Use your passkey
+                </Button>
+              )}
             </FieldGroup>
           </form>
         )}

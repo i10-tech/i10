@@ -154,6 +154,25 @@ const schema = z.object({
   CLERK_PUBLISHABLE_KEY: z.string().optional(),
 
   /**
+   * The auth app's origin(s), e.g. `https://auth.i10.tech`. Allowed to present
+   * a session to `/devices/remember` (#192).
+   *
+   * ⚠ ITS OWN LIST, NOT `CONSOLE_ORIGINS`. Adding the auth app there would let
+   * a token minted on the sign-in page call every console route. Empty means
+   * saved accounts are never remembered - `remember` answers 501 - rather than
+   * accepting a token from any app on the Clerk instance.
+   */
+  AUTH_ORIGINS: z
+    .string()
+    .optional()
+    .transform((v) =>
+      (v ?? "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean),
+    ),
+
+  /**
    * Origins allowed to present a Clerk session to `/mailboxes`.
    *
    * ⚠ THIS IS THE `azp` CHECK, AND LEAVING IT EMPTY DISABLES IT. One Clerk
