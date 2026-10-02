@@ -139,6 +139,19 @@
     // restored cache hit would skip the regeneration and pass unconditionally,
     // turning the check that protects the committed spec into a no-op.
     "openapi": { "dependsOn": ["^build"], "cache": false },
-    "dev": { "cache": false, "persistent": true }
+    "dev": { "cache": false, "persistent": true },
+    // ⚠ @i10/next's DTS build RESOLVES `@i10/node` THROUGH ITS dist/ (it is
+    // external, not bundled), and on a fresh checkout that folder does not exist
+    // until the SDK has built. Both watchers used to start together, so next's
+    // first DTS pass raced node's and lost with TS7016 - transient, but it left
+    // next's types stale until the next save. A one-shot `build` first makes it
+    // deterministic; `@i10/node#dev` cannot be the dependency, because a
+    // persistent task never finishes. The watcher no longer cleans (see
+    // packages/node/tsup.config.ts), so it cannot pull the .d.ts back out.
+    "@i10/next#dev": {
+      "dependsOn": ["@i10/node#build"],
+      "cache": false,
+      "persistent": true
+    }
   }
 }
