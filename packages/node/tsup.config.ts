@@ -11,12 +11,19 @@ import { defineConfig } from "tsup"
 // resolution - it never appears at runtime, and it must never become a real
 // dependency, because it is a private workspace package that would not resolve
 // for anyone outside this repo.
-export default defineConfig({
+//
+// ⚠ NO `clean` UNDER `--watch`. tsup's clean deletes dist/ - index.d.ts
+// included - before the first rebuild, and `turbo run dev` starts this watcher
+// beside its consumers: @i10/next's DTS step then resolves `@i10/node` against
+// an empty folder and dies with TS7016, and the console's dev server loses the
+// module mid-reload. A watch rebuild overwrites every file in place, so there
+// is nothing stale for clean to remove; `bun run build` still cleans.
+export default defineConfig((options) => ({
   entry: ["src/index.ts"],
   format: ["esm", "cjs"],
   dts: { resolve: ["@repo/contracts"] },
-  clean: true,
+  clean: !options.watch,
   sourcemap: true,
   treeshake: true,
   target: "node20",
-})
+}))
