@@ -280,7 +280,19 @@ export type FreshAuthReader = (request: Request) => Promise<FreshAuthOutcome>
  */
 export function clerkFreshAuth(
   clerk: ClerkClient,
-  options: ClerkSessionOptions = {},
+  options: ClerkSessionOptions & {
+    /**
+     * Whether a saved account minted a session for this user near `at` (#192).
+     *
+     * ⚠ A SIGN-IN TOKEN COUNTS AS A FIRST FACTOR PROVED "JUST NOW" - probed on
+     * the dev instance, the session reads `fva: [0, -1]`. For an account with
+     * no second factor `strict` then falls back to that first factor, so a
+     * card pressed ten seconds ago would be fresh enough to delete a domain.
+     * When the first factor's time matches a resume, the session is stale
+     * until the person proves something for real.
+     */
+    resumedNear?: (userId: string, at: Date) => Promise<boolean>
+  } = {},
 ): FreshAuthReader {
   const authorizedParties = options.authorizedParties?.length
     ? [...options.authorizedParties]
@@ -306,9 +318,28 @@ export function clerkFreshAuth(
        * client uses to decide whether to show the prompt, so the two sides
        * cannot disagree about what "fresh" means.
        */
-      return state.toAuth().has({ reverification: FRESHNESS })
-        ? { status: "fresh" }
-        : { status: "stale" }
+      const auth = state.toAuth()
+      if (!auth.has({ reverification: FRESHNESS })) return { status: "stale" }
+
+      /*
+       * ⚠ ONLY WHEN NO SECOND FACTOR WAS EVER USED. A resumed session that went
+       * on to pass TOTP proved something real, and `has()` already judged
+       * that factor's age. This adds a refusal; it can never add a pass.
+       */
+      const fva = (auth.sessionClaims as { fva?: unknown } | null)?.fva
+      if (
+        options.resumedNear &&
+        auth.userId &&
+        Array.isArray(fva) &&
+        typeof fva[0] === "number" &&
+        fva[1] === -1
+      ) {
+        const firstFactorAt = new Date(Date.now() - fva[0] * 60_000)
+        if (await options.resumedNear(auth.userId, firstFactorAt))
+          return { status: "stale" }
+      }
+
+      return { status: "fresh" }
     } catch (error) {
       options.log?.error(
         { err: String(error) },

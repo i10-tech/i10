@@ -2,6 +2,7 @@
 
 import { ACCEPTED_HOLD_MS } from "@repo/ui/components/otp-field"
 import type { SignInFlow } from "./clerk-types"
+import { rememberDevice } from "./devices"
 import { confirmSignIn } from "./last-used"
 import { rememberSignedInAccount } from "./remembered"
 import { forgetFlow } from "./resume"
@@ -50,7 +51,13 @@ export function leaveFor(url: string) {
   // ⚠ AND THE STORED STEPS GO WITH IT - a finished flow must not come back as
   // a half-finished one the next time this tab opens the auth app.
   forgetFlow()
-  window.location.replace(carrySession(url))
+  /*
+   * ⚠ THE DEVICE IS REMEMBERED BEFORE LEAVING, NOT AFTER (#192). It needs this
+   * page's Clerk session to prove who signed in, and the cookie it sets lives
+   * on this origin - neither exists once the browser is on the dashboard. It
+   * is bounded, so a slow API delays leaving by at most a second and a half.
+   */
+  void rememberDevice().then(() => window.location.replace(carrySession(url)))
 }
 
 /**

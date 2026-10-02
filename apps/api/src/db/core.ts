@@ -3833,3 +3833,98 @@ export const trustedTemplateEvents = core.table(
     tenantPolicy("trusted_template_events_tenant", t.tenantId),
   ],
 )
+
+/**
+ * A browser that may put a saved account straight back in (#192).
+ *
+ * One row per account per browser. The browser holds the id and a secret in an
+ * httpOnly cookie on the auth origin; this holds only the secret's hash. When
+ * the person presses their card on the sign-in page, a matching secret buys a
+ * single-use Clerk sign-in token - see src/devices/store.ts for the rules.
+ *
+ * ⚠ THE SECRET IS A CREDENTIAL WORTH A PASSWORD, SO IT ROTATES ON EVERY USE.
+ * Each resume replaces it and keeps the old hash in `previous_secret_hash`;
+ * the old one coming back later means the cookie was copied, and the row is
+ * revoked rather than trusted.
+ *
+ * ⚠ NO TENANT AND NO RLS, ON PURPOSE. This belongs to a person, not to a
+ * workspace, and it is read before anybody is signed in - there is no
+ * `app.tenant_id` to scope it by. Only routes/devices.ts touches it.
+ */
+export const rememberedDevices = core.table(
+  "remembered_devices",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    /** Clerk's `user_…`. */
+    userId: text("user_id").notNull(),
+    /** SHA-256 of the current secret, hex. The plaintext is never stored. */
+    secretHash: text("secret_hash").notNull().unique(),
+    /** The secret it replaced. Seen again after the grace period = a copy. */
+    previousSecretHash: text("previous_secret_hash"),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    /**
+     * The Clerk session this browser last held for the account.
+     *
+     * ⚠ ITS STATUS IS HOW "EXPIRED" IS TOLD APART FROM "SIGNED OUT". Clerk
+     * keeps the session and reports `expired` when it timed out, `ended`,
+     * `removed` or `revoked` when somebody ended it. Only the first lets the
+     * card skip every factor.
+     */
+    sessionId: text("session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Slides forward on every sign-in and resume. Unused for this long, gone. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("remembered_devices_user_idx").on(t.userId),
+    /*
+     * ⚠ RLS LIKE EVERY OTHER TABLE IN core, SCOPED BY WHAT THE REQUEST HOLDS.
+     * There is no tenant here, so a transaction names the device it presented
+     * (`app.device_id`, from the cookie) or the user it verified
+     * (`app.user_id`, from a session) - see `scoped` in devices/store.ts.
+     * Neither set, nothing is visible: unset settings read as NULL or ''.
+     */
+    pgPolicy("remembered_devices_scope", {
+      for: "all",
+      using: sql`${t.id}::text = current_setting('app.device_id', true) or ${t.userId} = current_setting('app.user_id', true)`,
+      withCheck: sql`${t.id}::text = current_setting('app.device_id', true) or ${t.userId} = current_setting('app.user_id', true)`,
+    }),
+  ],
+)
+
+/**
+ * Every session a remembered device minted, by when (#192).
+ *
+ * ⚠ IT EXISTS FOR STEP-UP, NOT FOR AUDIT. A sign-in token counts as a first
+ * factor proved "just now", so for an account without 2FA Clerk's `strict`
+ * check would wave a resumed session through deleting a domain. The API's
+ * fresh-auth check refuses a session whose first factor was proved at one of
+ * these moments - see `clerkFreshAuth` in middleware/session.ts.
+ */
+export const deviceResumes = core.table(
+  "device_resumes",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    userId: text("user_id").notNull(),
+    deviceId: uuid("device_id")
+      .notNull()
+      .references(() => rememberedDevices.id, { onDelete: "cascade" }),
+    resumedAt: timestamp("resumed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("device_resumes_user_idx").on(t.userId, t.resumedAt),
+    pgPolicy("device_resumes_scope", {
+      for: "all",
+      using: sql`${t.userId} = current_setting('app.user_id', true)`,
+      withCheck: sql`${t.userId} = current_setting('app.user_id', true)`,
+    }),
+  ],
+)

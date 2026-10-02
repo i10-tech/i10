@@ -31,6 +31,7 @@ import { domains } from "./routes/domains.js"
 import { mailboxes } from "./routes/mailboxes.js"
 import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
+import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
@@ -55,6 +56,8 @@ const { version: API_VERSION } = pkg
 
 export interface AppDeps {
   clerkWebhooks?: ClerkWebhookDeps
+  /** Saved accounts on the sign-in page (#192). Absent: the routes answer 501. */
+  devices?: DeviceRouteDeps
   /** Mail-client provisioning. See routes/autoconfig.ts. */
   autoconfig?: AutoconfigDeps
   /**
@@ -443,6 +446,9 @@ export function createApp(deps: AppDeps = {}) {
   // contract, not ours. Publishing it would invite customers to call it, and it
   // would show up in every generated SDK.
   app.route("/webhooks", createClerkWebhooks(deps.clerkWebhooks))
+
+  // The auth app's saved accounts. Not in the OpenAPI document - see routes/devices.ts.
+  app.route("/devices", createDeviceRoutes(deps.devices))
 
   // SES delivery events, over SNS. Same router prefix, same exclusion from the
   // document, and the same rule: nothing reaches the database before the
