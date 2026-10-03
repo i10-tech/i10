@@ -74,3 +74,59 @@ export function forgetDevice(email: string): void {
     keepalive: true,
   }).catch(() => undefined)
 }
+
+/**
+ * Right after sign-up: swap the session for one Clerk counts as verified.
+ *
+ * ⚠ A SIGN-UP SESSION READS `fva: [99999, -1]`, so Clerk asks somebody who set
+ * their password seconds ago to type it again before adding a passkey. A
+ * sign-in token gives a session at `[0, -1]`. See the API's
+ * `freshAfterSignUp`.
+ *
+ * ⚠ THE OLD SESSION IS ENDED FIRST, BECAUSE CLERK WILL NOT SIGN AN ACCOUNT IN
+ * TWICE: with one of its sessions live, a ticket for the same user is refused.
+ * If anything fails after that, the person is signed out of an account that
+ * exists and works - they sign in normally. Everything before it fails safe:
+ * no ticket, no swap, and the prompt simply appears as it did before.
+ *
+ * Never throws. `fresh` when the new session is active, `unchanged` when the
+ * sign-up session is still in place, `signed-out` in the one case between.
+ */
+export async function freshenAfterSignUp(signIn: {
+  ticket: (params: { ticket: string }) => Promise<{ error: unknown }>
+  finalize: (params: { navigate: () => void }) => Promise<{ error: unknown }>
+  status: string | null
+}): Promise<"fresh" | "unchanged" | "signed-out"> {
+  let ended = false
+  try {
+    const session = (
+      window as {
+        Clerk?: {
+          session?: {
+            getToken: () => Promise<string | null>
+            end: () => Promise<unknown>
+          } | null
+        }
+      }
+    ).Clerk?.session
+    const token = await session?.getToken()
+    if (!session || !token) return "unchanged"
+
+    const response = await fetch("/api/devices/fresh", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const answer = (await response.json()) as { outcome: string; ticket?: string }
+    if (answer.outcome !== "ticket" || !answer.ticket) return "unchanged"
+
+    await session.end()
+    ended = true
+    const { error } = await signIn.ticket({ ticket: answer.ticket })
+    if (error || signIn.status !== "complete") return "signed-out"
+    // ⚠ `navigate` IS A NO-OP: the page stays for the steps after sign-up.
+    const done = await signIn.finalize({ navigate: () => {} })
+    return done.error ? "signed-out" : "fresh"
+  } catch {
+    return ended ? "signed-out" : "unchanged"
+  }
+}

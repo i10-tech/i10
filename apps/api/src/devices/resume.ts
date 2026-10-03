@@ -43,6 +43,11 @@ export interface ResumeClerk {
   /** `null` when Clerk has no such session any more. */
   sessionStatus(sessionId: string): Promise<string | null>
   signInToken(userId: string): Promise<string>
+  /** When the user and the session were created, in ms. `null` if either is gone. */
+  ages(
+    userId: string,
+    sessionId: string,
+  ): Promise<{ user: number; session: number } | null>
 }
 
 /** Session states that mean "it ran out", not "somebody ended it". */
@@ -139,6 +144,20 @@ export function clerkResume(clerk: ClerkClient): ResumeClerk {
       }
     },
 
+    async ages(userId, sessionId) {
+      try {
+        const [user, session] = await Promise.all([
+          clerk.users.getUser(userId),
+          clerk.sessions.getSession(sessionId),
+        ])
+        if (session.userId !== userId) return null
+        return { user: user.createdAt, session: session.createdAt }
+      } catch (error) {
+        if (isNotFound(error)) return null
+        throw error
+      }
+    },
+
     async signInToken(userId) {
       const token = await clerk.signInTokens.createSignInToken({
         userId,
@@ -147,4 +166,39 @@ export function clerkResume(clerk: ClerkClient): ResumeClerk {
       return token.token
     },
   }
+}
+
+/**
+ * How long after sign-up the account may swap its session for a fresh one.
+ *
+ * ⚠ WHY THIS EXISTS AT ALL: A SESSION MADE BY SIGN-UP IS NEVER "RECENTLY
+ * VERIFIED". Probed on the dev instance 2026-10-03: it reads `fva: [99999, -1]`
+ * seconds after the password was set, so Clerk asks somebody who JUST made the
+ * account to re-enter that password before it will add their passkey. A
+ * sign-in token gives a session with `fva: [0, -1]` instead.
+ *
+ * ⚠ FIFTEEN MINUTES, AND BOTH THE ACCOUNT AND THE SESSION MUST BE THAT YOUNG.
+ * Anybody holding such a session already owns an account nobody else has
+ * touched yet; what it buys is skipping a prompt on a minutes-old account,
+ * never on an established one.
+ */
+export const FRESH_AFTER_SIGN_UP_MS = 15 * 60 * 1000
+
+export type FreshOutcome =
+  { outcome: "ticket"; ticket: string } | { outcome: "refused" }
+
+export async function freshAfterSignUp(
+  who: { userId: string; sessionId: string },
+  deps: { clerk: ResumeClerk; now?: () => number },
+): Promise<FreshOutcome> {
+  const now = deps.now?.() ?? Date.now()
+  const ages = await deps.clerk.ages(who.userId, who.sessionId)
+  if (
+    !ages ||
+    now - ages.user > FRESH_AFTER_SIGN_UP_MS ||
+    now - ages.session > FRESH_AFTER_SIGN_UP_MS
+  ) {
+    return { outcome: "refused" }
+  }
+  return { outcome: "ticket", ticket: await deps.clerk.signInToken(who.userId) }
 }

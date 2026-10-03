@@ -18,6 +18,57 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["--filter", "@i10/template-renderer", "dev"],
       "port": 8787
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "doppler",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "i10",
+        "--config",
+        "dev",
+        "--",
+        "bun",
+        "--filter",
+        "@i10/api",
+        "dev"
+      ],
+      "port": 3001
+    },
+    {
+      "name": "auth",
+      "runtimeExecutable": "doppler",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "i10",
+        "--config",
+        "dev",
+        "--",
+        "bun",
+        "--filter",
+        "@i10/auth",
+        "dev"
+      ],
+      "port": 3004
+    },
+    {
+      "name": "console",
+      "runtimeExecutable": "doppler",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "i10",
+        "--config",
+        "dev",
+        "--",
+        "bun",
+        "--filter",
+        "@i10/console",
+        "dev"
+      ],
+      "port": 3000
     }
   ]
 }

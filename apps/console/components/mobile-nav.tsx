@@ -3,10 +3,11 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Menu, Search } from "lucide-react"
+import { Menu, Search, X } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
@@ -68,12 +69,33 @@ export function MobileNav({
             <Menu />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="flex w-72 flex-col bg-sidebar p-0">
-          <SheetHeader className="h-14 justify-center border-b px-2">
+        <SheetContent
+          side="left"
+          // ⚠ OUR OWN CLOSE BUTTON, IN THE HEADER ROW. The sheet's built-in ×
+          // is absolutely placed in the top-right corner, which is exactly
+          // where the workspace switcher's up/down chevron sits - on a phone
+          // the two drew on top of each other as one crossed-out glyph, and a
+          // tap there could open either.
+          showCloseButton={false}
+          className="flex w-72 flex-col bg-sidebar p-0"
+        >
+          <SheetHeader className="h-14 flex-row items-center gap-1 border-b px-2">
             {/* Named for screen readers; the drawer opens on the workspace,
                 like the desktop rail. */}
             <SheetTitle className="sr-only">Navigation</SheetTitle>
-            <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
+            <div className="min-w-0 flex-1">
+              <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
+            </div>
+            <SheetClose asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Close navigation"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <X />
+              </Button>
+            </SheetClose>
             {/*
              * ⚠ PRESENT BUT VISUALLY HIDDEN. Radix warns in the console when a
              * Dialog has no description, and more importantly a screen reader

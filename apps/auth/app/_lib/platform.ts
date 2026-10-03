@@ -21,6 +21,11 @@ export interface PasskeyEnvironment {
   placement: PromptPlacement
   /** Named in the copy, so the sentence matches what the person is looking at. */
   hint: string
+  /**
+   * The icon on the passkey screen: Face ID on phones, a fingerprint on
+   * everything else (Touch ID, Windows Hello, a security key's sensor).
+   */
+  biometric: "face" | "fingerprint"
 }
 
 /**
@@ -32,7 +37,8 @@ export interface PasskeyEnvironment {
  */
 export const NEUTRAL_ENVIRONMENT: PasskeyEnvironment = {
   placement: "center",
-  hint: "Look for your browser's prompt.",
+  hint: "Your browser will open a prompt in the middle of the window.",
+  biometric: "fingerprint",
 }
 
 /** Memoised for the same identity reason. The platform cannot change mid-visit. */
@@ -58,6 +64,7 @@ function computeEnvironment(): PasskeyEnvironment {
     return {
       placement: "bottom",
       hint: "Your device will slide a prompt up from the bottom of the screen.",
+      biometric: "face",
     }
   }
 
@@ -66,6 +73,7 @@ function computeEnvironment(): PasskeyEnvironment {
     return {
       placement: "top",
       hint: "Safari shows the prompt just below the address bar.",
+      biometric: "fingerprint",
     }
   }
 
@@ -73,11 +81,9 @@ function computeEnvironment(): PasskeyEnvironment {
     return {
       placement: "center",
       hint: "Windows will open a system window in the middle of the screen.",
+      biometric: "fingerprint",
     }
   }
 
-  return {
-    placement: "center",
-    hint: "Your browser will open a prompt in the middle of the window.",
-  }
+  return NEUTRAL_ENVIRONMENT
 }

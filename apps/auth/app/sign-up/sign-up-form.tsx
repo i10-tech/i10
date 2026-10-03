@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ArrowLeftIcon } from "lucide-react"
 import { toast } from "sonner"
-import { useClerk, useSignUp } from "@clerk/nextjs"
+import { useClerk, useSignIn, useSignUp } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button"
 import { FieldDescription, FieldGroup } from "@repo/ui/components/field"
 import { FloatingInput } from "@repo/ui/components/floating-field"
@@ -17,6 +17,8 @@ import { ResendButton } from "../_components/resend-button"
 import { PasswordInput } from "../_components/password-input"
 import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { freshenAfterSignUp } from "../_lib/devices"
+import { PasskeyCue } from "../_components/passkey-cue"
 import { finalizeWithoutLeaving, holdSince, leaveFor } from "../_lib/finish"
 import { markSignInAttempt } from "../_lib/last-used"
 import { useResumable, useResumeLive } from "../_lib/resume"
@@ -139,6 +141,8 @@ export function SignUpForm({
   initialEmail?: string
 }) {
   const { signUp } = useSignUp()
+  // Only for swapping the sign-up session for a fresh one - see `createSession`.
+  const { signIn } = useSignIn()
   const clerk = useClerk()
 
   /*
@@ -512,6 +516,23 @@ export function SignUpForm({
     if (holdAccepted) await holdSince(shown)
 
     const next = optional[0]
+
+    /*
+     * ⚠ A FRESH SESSION BEFORE THE STEPS THAT ADD THINGS TO THE ACCOUNT. Clerk
+     * counts a sign-up session as never verified, so the passkey step asked
+     * for the password the person set seconds ago. See `freshenAfterSignUp`.
+     * Only when there are steps: going straight to the dashboard needs none.
+     */
+    if (next && signIn) {
+      const swapped = await freshenAfterSignUp(signIn)
+      if (swapped === "signed-out") {
+        // The account exists and works; only this session is gone.
+        toast.error("Your account is ready. Sign in to finish setting it up.")
+        window.location.replace("/sign-in")
+        return
+      }
+    }
+
     setDirection("forward")
     if (next) {
       setBusy(null)
@@ -606,6 +627,13 @@ export function SignUpForm({
          */}
         <div aria-hidden className="size-8 shrink-0" />
       </div>
+
+      {/*
+       * ⚠ THE SAME SCREEN AS SIGNING IN WITH ONE, while the operating system
+       * is asked to MAKE the passkey. Outside the stage so the step swap cannot
+       * unmount it mid-prompt - see _components/passkey-cue.tsx.
+       */}
+      {busy === "passkey" ? <PasskeyCue mode="create" /> : null}
 
       <StepStage step={stage} direction={direction}>
         {stage === "name" ? (

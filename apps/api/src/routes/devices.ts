@@ -1,6 +1,6 @@
 import type { ClerkClient } from "@clerk/backend"
 import { Hono } from "hono"
-import { resume, type ResumeClerk } from "../devices/resume.js"
+import { freshAfterSignUp, resume, type ResumeClerk } from "../devices/resume.js"
 import {
   isPresentable,
   type DeviceStore,
@@ -16,6 +16,8 @@ import {
  *   POST /devices/remember  after a real sign-in. Session required.
  *   POST /devices/resume    a card was pressed. The secret is the credential.
  *   POST /devices/forget    the card's × was pressed. The secret is the proof.
+ *   POST /devices/fresh     just signed up: a fresh session, so adding a
+ *                           passkey does not ask for the password just set.
  *
  * ⚠ OUTSIDE THE OPENAPI DOCUMENT. This is how our own sign-in page works, not
  * part of the product's API.
@@ -141,6 +143,36 @@ export function createDeviceRoutes(deps?: DeviceRouteDeps) {
       return c.json(device, 200)
     } catch (error) {
       log?.error({ err: String(error) }, "could not remember a device")
+      return c.json(unavailable, 503)
+    }
+  })
+
+  app.post("/fresh", async (c) => {
+    const { clerk, identify, log } = deps!
+    if (!identify) {
+      return c.json(
+        {
+          statusCode: 501,
+          name: "internal_server_error",
+          message: "AUTH_ORIGINS is not set.",
+        },
+        501,
+      )
+    }
+
+    const who = await identify(c.req.raw)
+    if (who.status === "signed-out") {
+      return c.json(
+        { statusCode: 401, name: "invalid_access", message: "Not signed in." },
+        401,
+      )
+    }
+    if (who.status === "unavailable") return c.json(unavailable, 503)
+
+    try {
+      return c.json(await freshAfterSignUp(who, { clerk }), 200)
+    } catch (error) {
+      log?.warn({ err: String(error) }, "could not refresh a sign-up session")
       return c.json(unavailable, 503)
     }
   })
