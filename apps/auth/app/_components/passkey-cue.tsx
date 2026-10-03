@@ -2,8 +2,18 @@
 
 import { useSyncExternalStore } from "react"
 import { Spinner } from "@repo/ui/components/spinner"
-import { NEUTRAL_ENVIRONMENT, passkeyEnvironment } from "../_lib/platform"
-import { FaceIdIcon, TouchIdIcon } from "./provider-icons"
+import {
+  NEUTRAL_ENVIRONMENT,
+  passkeyEnvironment,
+  type Biometric,
+} from "../_lib/platform"
+import {
+  AndroidFingerprintIcon,
+  FaceIdIcon,
+  PasskeyIcon,
+  TouchIdIcon,
+  WindowsHelloIcon,
+} from "./provider-icons"
 
 /**
  * The screen behind the operating system's passkey prompt.
@@ -27,9 +37,10 @@ import { FaceIdIcon, TouchIdIcon } from "./provider-icons"
  * platform - see _lib/platform.ts - and the content is placed on the far side
  * of the screen from it.
  *
- * ⚠ THE ICON IS A GUESS AT THE SENSOR, NOT A CLAIM. Face ID on a phone, a
- * fingerprint elsewhere. A passkey on a security key or another phone works
- * the same either way; the icon only says "this is the biometric step".
+ * ⚠ THE ICON IS A GUESS AT THE SENSOR, NOT A CLAIM. Each platform gets its
+ * own glyph - see `Biometric` in _lib/platform.ts - and Apple's only ever
+ * appear on Apple devices. A passkey on a security key or another phone works
+ * the same whatever is drawn; the icon only says "this is the biometric step".
  */
 export function PasskeyCue({
   mode = "use",
@@ -49,7 +60,8 @@ export function PasskeyCue({
     passkeyEnvironment,
     () => NEUTRAL_ENVIRONMENT,
   )
-  const Icon = env.biometric === "face" ? FaceIdIcon : TouchIdIcon
+  const Icon = ICONS[env.biometric]
+  const phone = env.placement === "bottom"
 
   /*
    * ⚠ NEVER WHERE THE PROMPT IS. On a laptop every prompt lives in the top two
@@ -59,11 +71,15 @@ export function PasskeyCue({
    * its own. Centred text sat under all of them, so it goes to the bottom. A
    * phone is the reverse - its sheet rises from the bottom - so there it goes
    * to the top, the same distance from that edge - a mirror image.
+   *
+   * ⚠ AND ON A LAPTOP IT IS A ROW, NOT A STACK. Stacked, the block was about
+   * 260px tall and its top - the icon - ran up under the macOS sheet on any
+   * window shorter than a full screen. Icon beside the text is half the height
+   * and fits in the strip the prompts leave free.
    */
-  const align =
-    env.placement === "bottom"
-      ? "justify-start pt-[calc(7vh+env(safe-area-inset-top))]"
-      : "justify-end pb-[calc(7vh+env(safe-area-inset-bottom))]"
+  const align = phone
+    ? "justify-start pt-[calc(7vh+env(safe-area-inset-top))]"
+    : "justify-end pb-[calc(11vh+env(safe-area-inset-bottom))]"
 
   return (
     <div
@@ -76,13 +92,20 @@ export function PasskeyCue({
     >
       <div
         role="status"
-        className="flex w-full max-w-sm flex-col items-center gap-6 text-center"
+        className={
+          phone
+            ? "flex w-full max-w-sm flex-col items-center gap-6 text-center"
+            : "flex max-w-xl items-center gap-5 text-left"
+        }
         style={{
           ["--surface-y" as string]: "8px",
           animation: "surface-enter var(--duration-slow) var(--ease-quint-out)",
         }}
       >
-        <div aria-hidden="true" className="relative grid size-20 place-items-center">
+        <div
+          aria-hidden="true"
+          className="relative grid size-20 shrink-0 place-items-center"
+        >
           {[0, 1].map((ring) => (
             <span
               key={ring}
@@ -105,18 +128,33 @@ export function PasskeyCue({
           </span>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold">
-            {mode === "create" ? "Save your passkey" : "Authenticate your passkey"}
-          </h1>
-          <p className="text-sm text-balance text-muted-foreground">{env.hint}</p>
-        </div>
+        <div
+          className={phone ? "flex flex-col items-center gap-6" : "flex flex-col gap-2"}
+        >
+          <div className={phone ? "flex flex-col gap-2" : "flex flex-col gap-1"}>
+            <h1 className={phone ? "text-2xl font-bold" : "text-xl font-bold"}>
+              {mode === "create" ? "Save your passkey" : "Authenticate your passkey"}
+            </h1>
+            <p className="text-sm text-balance text-muted-foreground">{env.hint}</p>
+          </div>
 
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Spinner aria-hidden="true" aria-label={undefined} className="size-3.5" />
-          Waiting for your device…
-        </p>
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Spinner aria-hidden="true" aria-label={undefined} className="size-3.5" />
+            Waiting for your device…
+          </p>
+        </div>
       </div>
     </div>
   )
+}
+
+const ICONS: Record<
+  Biometric,
+  (props: React.ComponentProps<"svg">) => React.ReactNode
+> = {
+  "face-id": FaceIdIcon,
+  "touch-id": TouchIdIcon,
+  android: AndroidFingerprintIcon,
+  windows: WindowsHelloIcon,
+  passkey: PasskeyIcon,
 }
