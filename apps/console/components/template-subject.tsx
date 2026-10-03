@@ -51,7 +51,7 @@ export function TemplateSubject({ template }: { template: TemplateRow }) {
         hint={
           template.source === "github"
             ? "Kept in the repository when the file exports `subject`; set here, it lasts until a push changes it."
-            : "Use {{ name }} for variables. Or export `subject` from the file."
+            : "Use {{{ name }}} for variables. Or export `subject` from the file."
         }
       />
       <ActionButton

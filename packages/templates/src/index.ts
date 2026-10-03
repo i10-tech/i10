@@ -20,6 +20,7 @@ export {
 export { verifyRenders, type Render, type Skeleton, type Verified } from "./verify.js"
 export {
   SUBJECT_PLACEHOLDER,
+  placeholderPath,
   escapeHtml,
   fill,
   placeholders,

@@ -779,10 +779,14 @@ function fillFixture(
   variables: { path: string; preview: string }[],
 ): string | null {
   if (text === null) return null
-  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
-    const v = variables.find((x) => x.path === path)
-    return (v?.preview || path).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
-  })
+  return text.replace(
+    /\{\{\{\s*([\w.]+)\s*\}\}\}|\{\{\s*([\w.]+)\s*\}\}/g,
+    (_, a?: string, b?: string) => {
+      const path = (a ?? b)!
+      const v = variables.find((x) => x.path === path)
+      return (v?.preview || path).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+    },
+  )
 }
 
 const GITHUB_STATE = {

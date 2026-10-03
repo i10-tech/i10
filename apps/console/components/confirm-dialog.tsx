@@ -86,7 +86,7 @@ function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void })
  * against a red or a near-black button - and `[&_svg]` rules inside `Button`
  * reach the icons too.
  */
-const KBD_ON_BUTTON = {
+export const KBD_ON_BUTTON = {
   destructive: "bg-black/20 text-white [&_svg]:text-white",
   default:
     "bg-primary-foreground/15 text-primary-foreground [&_svg]:text-primary-foreground",

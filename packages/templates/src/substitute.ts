@@ -78,15 +78,27 @@ export function fill(version: Fillable, values: unknown): FillResult {
       return prefix.startsWith("I") ? value.toUpperCase() : value
     }) ?? null
   const subject =
-    version.subject?.replace(SUBJECT_PLACEHOLDER, (_w, path: string) =>
-      oneLine(subjectValues.get(path) ?? ""),
+    version.subject?.replace(
+      SUBJECT_PLACEHOLDER,
+      (_w, triple?: string, double?: string) =>
+        oneLine(subjectValues.get(placeholderPath(triple, double)) ?? ""),
     ) ?? null
 
   return { ok: true, filled: { html, text, subject } }
 }
 
 /**
- * `{{ path }}` in a subject line.
+ * `{{{ path }}}` - or the older `{{ path }}` - in a subject line, and in
+ * hand-written HTML and text.
+ *
+ * ⚠ THREE BRACES ARE THE SPELLING THE EDITOR WRITES; TWO STILL WORK, because
+ * every template published before the switch uses them. Only BALANCED pairs
+ * match, so `{{ a }}}` does not swallow a literal brace. The name is in group
+ * 1 or group 2 - read it with `placeholderPath`.
+ *
+ * ⚠ THREE BRACES ARE NOT "UNESCAPED" HERE, as they are in Handlebars. Every
+ * value is escaped for where it lands, however many braces surround it; a
+ * template author cannot opt a caller's input out of escaping.
  *
  * ⚠ A SUBJECT IS A HEADER, SO A VALUE FILLED INTO IT LOSES ITS LINE BREAKS. A
  * CR or LF there is header injection - a caller's variable adding a `Bcc:` to
@@ -94,11 +106,21 @@ export function fill(version: Fillable, values: unknown): FillResult {
  * to lean on for a security property (#189).
  */
 export const SUBJECT_PLACEHOLDER =
-  /\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}/g
+  /\{\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}\}|\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}/g
+
+/** The variable a `SUBJECT_PLACEHOLDER` match names, whichever spelling it used. */
+export function placeholderPath(
+  triple: string | undefined,
+  double: string | undefined,
+): string {
+  return (triple ?? double)!
+}
 
 export function placeholders(s: string | null): string[] {
   if (!s) return []
-  return unique([...s.matchAll(SUBJECT_PLACEHOLDER)].map((m) => m[1]!))
+  return unique(
+    [...s.matchAll(SUBJECT_PLACEHOLDER)].map((m) => placeholderPath(m[1], m[2])),
+  )
 }
 
 function oneLine(value: string): string {

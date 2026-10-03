@@ -28,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/too
 import { cn } from "cn"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { BulkBar } from "@/components/list/bulk-bar"
+import { MarqueeBox, useMarquee } from "@/components/list/marquee"
 import { rowMenuClass } from "@/components/list/table"
 import {
   FilterSelect,
@@ -39,12 +40,14 @@ import {
 import {
   DRAG_TYPE,
   FolderCard,
+  RenameIcon,
   TemplateCard,
   TemplateMenu,
   type TemplateAction,
 } from "@/components/templates/cards"
 import { TemplateDetailsDialog } from "@/components/templates/details-dialog"
 import { FolderArt } from "@/components/templates/folder-art"
+import { TemplateThumbnail } from "@/components/template-thumbnail"
 import { NameDialog } from "@/components/templates/name-dialog"
 import { NewFolderDialog, NewTemplateMenu } from "@/components/templates/new-menu"
 import {
@@ -74,7 +77,7 @@ type StatusFilter = "all" | TemplateStatus
 type Dialog =
   | { kind: "details"; template: TemplateSummary }
   | { kind: "rename"; template: TemplateSummary }
-  | { kind: "delete"; ids: string[] }
+  | { kind: "delete"; ids: string[]; folderIds?: string[] }
   | { kind: "new-folder"; moveIds: string[] }
   | { kind: "rename-folder"; folder: TemplateFolder }
   | { kind: "delete-folder"; folder: TemplateFolder }
@@ -164,16 +167,29 @@ export function TemplateLibrary({
         )
 
   // Selection only ever holds what is on screen.
-  const visibleIds = shownTemplates.map((t) => t.id)
+  //
+  // ⚠ FOLDERS ARE IN IT TOO, AS `folder:<id>`, so a range, ⌘A and the
+  // select-all box cover both, in the order they are shown. What acts on
+  // templates alone - moving, dragging - takes `pickedTemplates`.
+  const visibleIds = [
+    ...shownFolders.map((f) => folderKey(f.id)),
+    ...shownTemplates.map((t) => t.id),
+  ]
   const picked = visibleIds.filter((id) => selected.has(id))
+  const pickedTemplates = picked.filter((id) => !isFolderKey(id))
+  const pickedFolderIds = picked.filter(isFolderKey).map(folderOfKey)
   const selecting = picked.length > 0
   // Where every ticked template already is, if they share one place; that
   // place is not offered as somewhere to move them.
   const pickedFolders = new Set(
-    picked.map((id) => all.find((t) => t.id === id)?.folder_id ?? null),
+    pickedTemplates.map((id) => all.find((t) => t.id === id)?.folder_id ?? null),
   )
   const pickedIn: string | null | undefined =
     pickedFolders.size === 1 ? [...pickedFolders][0] : undefined
+  // Drag a box over empty space to select, as on a desktop.
+  const area = React.useRef<HTMLDivElement>(null)
+  const band = useMarquee({ root: area, selected, onChange: setSelected })
+
   const clearSelection = React.useCallback(() => {
     setSelected(new Set())
     setAnchor(null)
@@ -212,7 +228,7 @@ export function TemplateLibrary({
         picked.length > 0
       ) {
         event.preventDefault()
-        setDialog({ kind: "delete", ids: picked })
+        setDialog({ kind: "delete", ids: pickedTemplates, folderIds: pickedFolderIds })
       }
     }
     window.addEventListener("keydown", onKey)
@@ -269,7 +285,7 @@ export function TemplateLibrary({
 
   // ── Dragging ───────────────────────────────────────────────────────────
   function startDrag(id: string, event: React.DragEvent) {
-    const ids = selected.has(id) ? picked : [id]
+    const ids = selected.has(id) ? pickedTemplates : [id]
     setDragIds(ids)
     event.dataTransfer.effectAllowed = "move"
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids))
@@ -402,9 +418,9 @@ export function TemplateLibrary({
                         <TooltipTrigger asChild>
                           <DropdownMenuTrigger asChild>
                             <Button
-                              variant="ghost"
+                              variant="secondary"
                               size="icon-sm"
-                              className="size-6"
+                              className="size-7 rounded-lg bg-background/90 shadow-sm backdrop-blur hover:bg-background"
                               aria-label="Folder actions"
                             >
                               <MoreHorizontal />
@@ -417,12 +433,15 @@ export function TemplateLibrary({
                         <DropdownMenuItem
                           onSelect={() => setDialog({ kind: "rename-folder", folder })}
                         >
+                          <RenameIcon />
                           Rename folder
                         </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           variant="destructive"
                           onSelect={() => setDialog({ kind: "delete-folder", folder })}
                         >
+                          <Trash2 />
                           Delete folder
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -448,8 +467,8 @@ export function TemplateLibrary({
         )}
       </AnimatePresence>
 
-      {/* What is here */}
-      <div className="pt-6 pb-24">
+      {/* What is here - and the space a selection box is drawn in. */}
+      <div ref={area} className="min-h-[60vh] pt-6 pb-24">
         {empty ? (
           <EmptyLibrary />
         ) : nothingShown ? (
@@ -471,9 +490,12 @@ export function TemplateLibrary({
             <ul className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               <AnimatePresence mode="popLayout" initial={false}>
                 {shownFolders.map((f) => (
-                  <li key={`f-${f.id}`}>
+                  <li key={`f-${f.id}`} data-select-key={folderKey(f.id)}>
                     <FolderCard
                       folder={f}
+                      selected={selected.has(folderKey(f.id))}
+                      selecting={selecting}
+                      onSelect={(e) => select(folderKey(f.id), e)}
                       {...dropTarget(f.id, f.id)}
                       onRename={() => setDialog({ kind: "rename-folder", folder: f })}
                       onDelete={() => setDialog({ kind: "delete-folder", folder: f })}
@@ -481,7 +503,7 @@ export function TemplateLibrary({
                   </li>
                 ))}
                 {shownTemplates.map((t) => (
-                  <li key={t.id}>
+                  <li key={t.id} data-select-key={t.id}>
                     <TemplateCard
                       template={t}
                       folders={liveFolders}
@@ -506,6 +528,7 @@ export function TemplateLibrary({
           <TemplateTable
             folders={shownFolders}
             allFolders={liveFolders}
+            imagesFrom={imagesFrom}
             templates={shownTemplates}
             selected={selected}
             selecting={selecting}
@@ -527,55 +550,64 @@ export function TemplateLibrary({
       </div>
 
       {/* The bar for what is ticked */}
-      <BulkBar
-        count={picked.length}
-        onClear={clearSelection}
-        label="Selected templates"
-      >
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="rounded-xl">
-              <FolderInput />
-              Move
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side="top"
-            align="center"
-            className="max-h-80 w-52 overflow-y-auto"
-          >
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Move to
-            </DropdownMenuLabel>
-            <DropdownMenuItem
-              disabled={pickedIn === null}
-              onSelect={() => void move(picked, null)}
+      <MarqueeBox box={band} />
+
+      <BulkBar count={picked.length} onClear={clearSelection} label="Selected">
+        {/* Folders do not nest, so only templates move. */}
+        {pickedTemplates.length > 0 && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="rounded-xl">
+                <FolderInput />
+                Move
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="top"
+              align="center"
+              className="max-h-80 w-52 overflow-y-auto"
             >
-              All templates
-            </DropdownMenuItem>
-            {liveFolders.map((f) => (
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Move to
+              </DropdownMenuLabel>
               <DropdownMenuItem
-                key={f.id}
-                disabled={pickedIn === f.id}
-                onSelect={() => void move(picked, f.id)}
+                disabled={pickedIn === null}
+                onSelect={() => void move(pickedTemplates, null)}
               >
-                <span className="truncate">{f.name}</span>
+                All templates
               </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => setDialog({ kind: "new-folder", moveIds: picked })}
-            >
-              <FolderPlus />
-              New folder…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {liveFolders.map((f) => (
+                <DropdownMenuItem
+                  key={f.id}
+                  disabled={pickedIn === f.id}
+                  onSelect={() => void move(pickedTemplates, f.id)}
+                >
+                  <span className="truncate">{f.name}</span>
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() =>
+                  setDialog({ kind: "new-folder", moveIds: pickedTemplates })
+                }
+              >
+                <FolderPlus />
+                New folder…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <Button
           variant="ghost"
           size="sm"
           className="rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => setDialog({ kind: "delete", ids: picked })}
+          onClick={() =>
+            setDialog({
+              kind: "delete",
+              ids: pickedTemplates,
+              folderIds: pickedFolderIds,
+            })
+          }
         >
           <Trash2 />
           Delete
@@ -594,6 +626,7 @@ export function TemplateLibrary({
         }}
         onMoveInto={(ids, to) => void move(ids, to)}
         onFolderDeleted={(f) => {
+          clearSelection()
           setGone((prev) => new Set([...prev, f.id]))
           setMoved((prev) => {
             const next = new Map(prev)
@@ -656,6 +689,7 @@ function EmptyFolder({ folderId }: { folderId: string }) {
 
 /** The same library as rows: denser, for many templates. */
 function TemplateTable({
+  imagesFrom,
   folders,
   allFolders,
   templates,
@@ -672,6 +706,7 @@ function TemplateTable({
 }: {
   folders: TemplateFolder[]
   allFolders: TemplateFolder[]
+  imagesFrom: string | null
   templates: TemplateSummary[]
   selected: Set<string>
   selecting: boolean
@@ -693,7 +728,11 @@ function TemplateTable({
   onFolderDelete: (f: TemplateFolder) => void
 }) {
   const router = useRouter()
-  const allTicked = templates.length > 0 && templates.every((t) => selected.has(t.id))
+  const allTicked =
+    templates.length + folders.length > 0 &&
+    templates.every((t) => selected.has(t.id)) &&
+    folders.every((f) => selected.has(folderKey(f.id)))
+  const [hoverFolder, setHoverFolder] = React.useState<string | null>(null)
   return (
     <div className="overflow-hidden rounded-2xl border">
       <table className="w-full text-sm">
@@ -720,6 +759,7 @@ function TemplateTable({
               return (
                 <motion.tr
                   key={`f-${f.id}`}
+                  data-select-key={folderKey(f.id)}
                   layout
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -727,24 +767,56 @@ function TemplateTable({
                   onDragOver={drop.onDragOver}
                   onDragLeave={drop.onDragLeave}
                   onDrop={drop.onDrop}
-                  onClick={() =>
-                    router.push(`/templates/folder/${encodeURIComponent(f.id)}`)
-                  }
+                  onClick={(e) => {
+                    // While picking, a click ticks rather than opens.
+                    if (selecting)
+                      onSelect(folderKey(f.id), {
+                        shiftKey: e.shiftKey,
+                        checked: !selected.has(folderKey(f.id)),
+                      })
+                    else router.push(`/templates/folder/${encodeURIComponent(f.id)}`)
+                  }}
+                  onPointerEnter={() => setHoverFolder(f.id)}
+                  onPointerLeave={() => setHoverFolder((h) => (h === f.id ? null : h))}
                   className={cn(
                     "group cursor-pointer transition-colors hover:bg-muted/40",
+                    selected.has(folderKey(f.id)) &&
+                      "bg-primary/[0.05] hover:bg-primary/[0.08]",
                     drop.over &&
                       "bg-primary/[0.06] outline-2 -outline-offset-2 outline-primary/60",
                   )}
                 >
-                  <td className="py-3 pl-4" />
+                  <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selected.has(folderKey(f.id))}
+                      onClick={(e) =>
+                        onSelect(folderKey(f.id), {
+                          shiftKey: e.shiftKey,
+                          checked: !selected.has(folderKey(f.id)),
+                        })
+                      }
+                      aria-label={`Select ${f.name}`}
+                    />
+                  </td>
                   <td className="py-3">
                     <div className="flex items-center gap-3">
-                      <FolderArt
-                        count={Math.min(f.templates, 2)}
-                        raised={drop.over}
-                        over={drop.over}
-                        className="w-8"
-                      />
+                      {/* The grid's folder, small: papers for what is inside,
+                          lifting on hover and when a template is dragged on. */}
+                      {/* ⚠ THE GRID'S FOLDER, DRAWN AT ITS FULL 160px AND SCALED
+                          DOWN - not drawn small. Its edges, highlight, shadows
+                          and corners are fixed sizes, so a folder drawn at 44px
+                          wore them four times as heavy; scaled, every part
+                          shrinks together and it is the same picture. */}
+                      <div className="relative h-[35px] w-[44px] shrink-0">
+                        <div className="absolute top-0 left-0 w-[160px] origin-top-left scale-[0.275]">
+                          <FolderArt
+                            count={f.templates}
+                            raised={hoverFolder === f.id || drop.over}
+                            over={drop.over}
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
                       <div className="min-w-0">
                         <p className="truncate font-medium">{f.name}</p>
                         <p className="text-xs text-muted-foreground">
@@ -774,12 +846,15 @@ function TemplateTable({
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onSelect={() => onFolderRename(f)}>
+                          <RenameIcon />
                           Rename folder
                         </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           variant="destructive"
                           onSelect={() => onFolderDelete(f)}
                         >
+                          <Trash2 />
                           Delete folder
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -794,6 +869,7 @@ function TemplateTable({
               return (
                 <motion.tr
                   key={t.id}
+                  data-select-key={t.id}
                   layout
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -826,13 +902,25 @@ function TemplateTable({
                   <td className="py-3">
                     <Link
                       href={hrefOf(t)}
-                      className="block min-w-0 outline-none"
+                      className="flex min-w-0 items-center gap-3 outline-none"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <p className="truncate font-medium">{titleOf(t)}</p>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        {t.name}
-                      </p>
+                      <RowTile>
+                        <div className="absolute inset-x-[14%] top-[18%] -bottom-1 overflow-hidden rounded-t-[3px] shadow-[0_0_0_1px_rgb(0_0_0/0.06)]">
+                          <TemplateThumbnail
+                            templateId={t.id}
+                            stamp={t.updated_at}
+                            imagesFrom={imagesFrom}
+                            label={`${titleOf(t)} preview`}
+                          />
+                        </div>
+                      </RowTile>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{titleOf(t)}</p>
+                        <p className="truncate font-mono text-xs text-muted-foreground">
+                          {t.name}
+                        </p>
+                      </div>
                     </Link>
                   </td>
                   <td className="hidden md:table-cell">
@@ -906,7 +994,29 @@ function LibraryDialogs({
 
   const deleting =
     d?.kind === "delete" ? templates.filter((t) => d.ids.includes(t.id)) : []
-  const one = deleting.length === 1 ? deleting[0]! : null
+  const deletingFolders =
+    d?.kind === "delete" ? folders.filter((f) => d.folderIds?.includes(f.id)) : []
+  const one =
+    deleting.length === 1 && deletingFolders.length === 0 ? deleting[0]! : null
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
+  const what = [
+    deletingFolders.length === 1 && deleting.length === 0
+      ? `the folder ${deletingFolders[0]!.name}`
+      : deletingFolders.length > 0
+        ? plural(deletingFolders.length, "folder")
+        : null,
+    deleting.length > 0 && !one ? plural(deleting.length, "template") : null,
+  ]
+    .filter(Boolean)
+    .join(" and ")
+  // Templates in a deleted folder that are not themselves being deleted.
+  const rehomed = templates.filter(
+    (t) =>
+      t.folder_id &&
+      d?.kind === "delete" &&
+      d.folderIds?.includes(t.folder_id) &&
+      !d.ids.includes(t.id),
+  ).length
 
   return (
     <>
@@ -968,6 +1078,7 @@ function LibraryDialogs({
         }
         confirmLabel="Delete folder"
         doneLabel="Deleted"
+        confirmWord={d?.kind === "delete-folder" ? d.folder.name : undefined}
         onConfirm={async () => {
           if (d?.kind !== "delete-folder") return false
           const result = await deleteTemplateFolder(d.folder.id)
@@ -982,29 +1093,85 @@ function LibraryDialogs({
       <ConfirmDialog
         open={dialog?.kind === "delete"}
         onOpenChange={close}
-        title={one ? `Delete ${titleOf(one)}?` : `Delete ${deleting.length} templates?`}
-        description={
+        title={one ? `Delete ${titleOf(one)}?` : `Delete ${what}?`}
+        description={[
           one
             ? `Any send naming ${one.name} or its id will start failing. Check your code first.`
-            : `Any send naming one of them will start failing: ${deleting.map((t) => t.name).join(", ")}.`
-        }
-        confirmLabel={one ? "Delete template" : `Delete ${deleting.length} templates`}
+            : deleting.length > 0
+              ? `Any send naming one of these templates will start failing: ${deleting.map((t) => t.name).join(", ")}.`
+              : null,
+          // ⚠ A FOLDER IS DELETED, ITS TEMPLATES ARE NOT - they move to All
+          // templates, as when one folder is deleted on its own.
+          rehomed > 0
+            ? `${plural(rehomed, "template")} in ${deletingFolders.length === 1 ? "that folder moves" : "those folders move"} to All templates.`
+            : deletingFolders.length > 0 && deleting.length === 0
+              ? `${deletingFolders.length === 1 ? "It is" : "They are"} empty.`
+              : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        confirmLabel={one ? "Delete template" : `Delete ${what}`}
         doneLabel="Deleted"
-        confirmWord={one ? one.name : undefined}
+        // ⚠ ONE THING: TYPE ITS NAME. SEVERAL: TYPE "Delete". The name is what
+        // proves you are on the right one; for a batch there is no single
+        // name, but there is still a deliberate word between a stray ⌫ and
+        // losing them.
+        confirmWord={
+          one
+            ? one.name
+            : deleting.length === 0 && deletingFolders.length === 1
+              ? deletingFolders[0]!.name
+              : "Delete"
+        }
         onConfirm={async () => {
           const ids = deleting.map((t) => t.id)
-          const result =
-            ids.length === 1
-              ? await deleteTemplate(ids[0]!)
-              : await deleteTemplates(ids)
-          if (!result.ok) {
-            toastFailure(result)
-            return false
+          if (ids.length > 0) {
+            const result =
+              ids.length === 1
+                ? await deleteTemplate(ids[0]!)
+                : await deleteTemplates(ids)
+            if (!result.ok) {
+              toastFailure(result)
+              return false
+            }
+            onDeleted(ids)
           }
-          onDeleted(ids)
+          // One at a time: there is no bulk folder delete, and a handful is
+          // all a person ticks. A failure stops there and says which.
+          for (const f of deletingFolders) {
+            const result = await deleteTemplateFolder(f.id)
+            if (!result.ok) {
+              toastFailure(result)
+              return false
+            }
+            onFolderDeleted(f)
+          }
           return true
         }}
       />
     </>
   )
+}
+
+/**
+ * The picture at the start of a row: the same tile for a folder and a
+ * template, so every name in the list starts at the same place.
+ */
+function RowTile({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted ring-1 ring-border/60 ring-inset">
+      {children}
+    </div>
+  )
+}
+
+/** A folder's place in the selection, beside template ids. */
+function folderKey(id: string): string {
+  return `folder:${id}`
+}
+function isFolderKey(key: string): boolean {
+  return key.startsWith("folder:")
+}
+function folderOfKey(key: string): string {
+  return key.slice("folder:".length)
 }

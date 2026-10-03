@@ -12,7 +12,7 @@ import { useResetOnOpen } from "@/lib/react"
  * path - so it is signed, logged and checked like any send.
  *
  * ⚠ THE DRAFT, NOT WHAT IS LIVE: a test is how somebody checks what they are
- * about to publish. Variables get their fallbacks, or show as `{{ name }}`.
+ * about to publish. Variables get their fallbacks, or show as `{{{ name }}}`.
  *
  * ⚠ IT SAVES FIRST. A test of the draft as it was a second ago is a test of
  * the wrong email.

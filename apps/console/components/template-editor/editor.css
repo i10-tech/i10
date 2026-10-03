@@ -18,16 +18,19 @@ html.dark {
   --re-border: var(--border);
   --re-text: var(--popover-foreground);
   --re-text-muted: var(--muted-foreground);
-  --re-hover: color-mix(in oklch, var(--foreground) 6%, transparent);
+  /* ⚠ HOVER IS HALF A STEP, PRESSED A FULL ONE. At 6% and 10% a hovered
+     button read as a second selected one: "left and centre aligned". */
+  --re-hover: color-mix(in oklch, var(--foreground) 4%, transparent);
   --re-active: color-mix(in oklch, var(--foreground) 9%, transparent);
-  --re-pressed: color-mix(in oklch, var(--foreground) 10%, transparent);
+  --re-pressed: color-mix(in oklch, var(--foreground) 16%, transparent);
   --re-separator: var(--border);
   --re-radius: 0.75rem;
   --re-radius-sm: 0.5rem;
   --re-danger: var(--destructive);
   --re-danger-hover: color-mix(in oklch, var(--destructive) 12%, transparent);
   --re-shadow:
-    0 12px 32px -8px rgb(0 0 0 / 0.25), 0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent);
+    0 12px 32px -8px rgb(0 0 0 / 0.25),
+    0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent);
 }
 
 /* ── Floating menus: our popover, with an entrance. ───────────────────────── */
@@ -150,12 +153,23 @@ html.dark {
   color: #a3a3a3;
 }
 
-/* A node the inspector is looking at. */
-.i10-canvas .tiptap .ProseMirror-selectednode,
-.i10-canvas .tiptap [data-re-focused] {
+/*
+ * A selected node: an image, a divider, a button - a box that is its own
+ * content. A selected text block is ringed by `SelectionRing` around its
+ * words instead, and marked `data-i10-ringed` so it gets no outline here.
+ */
+.i10-canvas .tiptap .ProseMirror-selectednode {
   outline: 2px solid rgb(59 130 246 / 0.6);
   outline-offset: 2px;
   border-radius: 4px;
+}
+.i10-canvas .tiptap [data-i10-ringed].ProseMirror-selectednode {
+  outline: none;
+}
+/* A line selected whole: no leftover highlight from the text selection
+   before it - the ring is the selection. */
+.i10-canvas .tiptap:has([data-i10-ringed]) ::selection {
+  background: transparent;
 }
 
 .i10-canvas .tiptap img {
@@ -163,19 +177,19 @@ html.dark {
   height: auto;
 }
 
-/* A variable: a chip on screen, `{{ name }}` in the email. */
+/* A variable: a chip on screen, `{{{ name }}}` in the email. */
 .i10-variable {
   display: inline-flex;
   align-items: center;
   gap: 0.125rem;
-  padding: 0 0.375rem;
+  padding: 0 0.3rem;
   margin: 0 0.0625rem;
-  border-radius: 0.375rem;
+  border-radius: 0.3125rem;
   background: rgb(59 130 246 / 0.1);
   color: rgb(37 99 235);
   font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 0.85em;
-  line-height: 1.6;
+  font-size: 0.82em;
+  line-height: 1.45;
   white-space: nowrap;
   box-shadow: inset 0 0 0 1px rgb(59 130 246 / 0.25);
   vertical-align: baseline;
@@ -183,14 +197,15 @@ html.dark {
   transition: background-color 100ms linear;
 }
 .i10-variable::before {
-  content: "{{";
+  content: "{{{";
   opacity: 0.55;
 }
 .i10-variable::after {
-  content: "}}";
+  content: "}}}";
   opacity: 0.55;
 }
-.i10-variable.ProseMirror-selectednode {
+/* Selected, a chip darkens; it is too small to carry the block ring too. */
+.i10-canvas .tiptap .i10-variable.ProseMirror-selectednode {
   background: rgb(59 130 246 / 0.2);
   outline: none;
 }
@@ -301,4 +316,54 @@ html.dark {
 .dark .i10-code .tok-punctuation,
 .dark .i10-code .tok-angleBracket {
   color: #8f8f8f;
+}
+
+/*
+ * Where a dragged block or component will land - drawn by `BlockHandle`, in
+ * the gap the drop goes into, as wide as the rows it sits between.
+ *
+ * ⚠ IT GLIDES BETWEEN GAPS INSTEAD OF JUMPING, and fades and widens in when
+ * it first appears. A slightly richer blue than React Email's #61a8f8, with
+ * a soft glow so it reads over images and coloured sections.
+ */
+.i10-drop-line {
+  position: fixed;
+  z-index: 40;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 9999px;
+  background: #2f7ff5;
+  box-shadow: 0 0 0 3px rgb(47 127 245 / 0.18);
+  pointer-events: none;
+  opacity: 0;
+  transform: scaleX(0.6);
+  transition:
+    top 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    left 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms linear,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.i10-drop-line[data-on] {
+  opacity: 1;
+  transform: none;
+}
+
+/* A variable's drop point is ProseMirror's caret, in the same blue. */
+.prosemirror-dropcursor-inline,
+.prosemirror-dropcursor-block {
+  background-color: #2f7ff5 !important;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 3px rgb(47 127 245 / 0.18);
+}
+
+/*
+ * The menu over selected text moves to its new place - after an alignment
+ * change, say - instead of jumping there. `TextBubbleMenu` clears its
+ * position when it hides, so it only ever glides while it stays open.
+ */
+[data-re-bubble-menu] {
+  transition:
+    left 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }

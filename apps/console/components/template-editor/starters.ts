@@ -26,7 +26,7 @@ export const STARTERS: Starter[] = [
     id: "welcome",
     name: "Welcome",
     description: "Greet a new user and point them at the first step.",
-    subject: "Welcome to Acme, {{ name }}",
+    subject: "Welcome to Acme, {{{ name }}}",
     previewText: "Your account is ready. Here is where to start.",
     variables: [
       { name: "name", type: "string", fallback: "there" },
@@ -34,7 +34,7 @@ export const STARTERS: Starter[] = [
     ],
     html: `<h1>Welcome aboard, ${v("name")}</h1>
 <p>Your account is ready. We built Acme so you can get from idea to inbox in minutes, and the first step takes about two.</p>
-${button("Get started", "{{ url }}")}
+${button("Get started", "{{{ url }}}")}
 <p>If you have questions, reply to this email. A real person reads every one.</p>
 <hr>
 <p>The Acme team</p>`,
@@ -51,7 +51,7 @@ ${button("Get started", "{{ url }}")}
     ],
     html: `<h2>Reset your password</h2>
 <p>Hi ${v("name")}, somebody asked to reset the password for your account. If it was you, choose a new one below.</p>
-${button("Choose a new password", "{{ reset_url }}")}
+${button("Choose a new password", "{{{ reset_url }}}")}
 <p>This link expires in an hour. If you did not ask for this, you can ignore this email; your password stays the same.</p>`,
   },
   {
@@ -68,7 +68,7 @@ ${button("Choose a new password", "{{ reset_url }}")}
     html: `<h2>Thanks for your payment</h2>
 <p>We received ${v("amount")} for the ${v("plan")} plan.</p>
 <blockquote><p>Keep this email for your records. The full invoice, with your billing details, is one click away.</p></blockquote>
-${button("View invoice", "{{ invoice_url }}")}
+${button("View invoice", "{{{ invoice_url }}}")}
 <p>Questions about a charge? Reply and we will sort it out.</p>`,
   },
   {

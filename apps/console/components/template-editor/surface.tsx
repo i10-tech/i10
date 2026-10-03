@@ -3,10 +3,33 @@
 import * as React from "react"
 import type { Editor } from "@tiptap/core"
 import { motion } from "motion/react"
-import { Braces, ImageIcon, Link2, Puzzle, Type, Upload } from "lucide-react"
+import {
+  ArrowDown,
+  ArrowUp,
+  Braces,
+  GripVertical,
+  ImageIcon,
+  Link2,
+  Plus,
+  Puzzle,
+  Trash2,
+  Type,
+  Upload,
+} from "lucide-react"
+import {
+  NodeSelection,
+  PluginKey,
+  type EditorState,
+  type Transaction,
+} from "@tiptap/pm/state"
+import { useCurrentEditor, useEditorState } from "@tiptap/react"
 import {
   BULLET_LIST,
+  AlignCenterIcon,
+  AlignLeftIcon,
+  AlignRightIcon,
   BUTTON,
+  BubbleMenu,
   CODE,
   DIVIDER,
   EditorFocusScope,
@@ -31,8 +54,17 @@ import {
 import { Button } from "@repo/ui/components/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@repo/ui/components/popover"
 import { Textarea } from "@repo/ui/components/textarea"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
 import { cn } from "cn"
+import {
+  blockMoves,
+  deleteBlock,
+  endComponentDrag,
+  MOVED_META,
+  moveBlock,
+  selectedTextRow,
+  startComponentDrag,
+  startVariableDrag,
+} from "@/components/template-editor/block-drag"
 import type { DeclaredVariable } from "@/lib/types"
 
 export const TEXT_BLOCKS: SlashCommandItem[] = [
@@ -70,12 +102,16 @@ export function BlockToolbar({
   variables,
   onUploadImage,
   onOpenVariables,
+  onCreateVariable,
 }: {
   editor: Editor
   variables: DeclaredVariable[]
   onUploadImage: () => void
   onOpenVariables: () => void
+  /** Create a variable and, once made, put it in at the caret. */
+  onCreateVariable: () => void
 }) {
+  const menus = useHoverMenus()
   return (
     <motion.div
       initial={{ opacity: 0, x: -8 }}
@@ -86,12 +122,17 @@ export function BlockToolbar({
       aria-label="Insert"
       aria-orientation="vertical"
     >
-      <ToolMenu label="Text" icon={<Type />}>
-        {(close) => (
-          <ItemList items={TEXT_BLOCKS} onPick={(i) => (run(editor, i), close())} />
+      <ToolMenu menus={menus} label="Text" icon={<Type />}>
+        {(close, drag) => (
+          <ItemList
+            editor={editor}
+            items={TEXT_BLOCKS}
+            onPick={(i) => (run(editor, i), close())}
+            onDrag={drag}
+          />
         )}
       </ToolMenu>
-      <ToolMenu label="Image" icon={<ImageIcon />}>
+      <ToolMenu menus={menus} label="Image" icon={<ImageIcon />}>
         {(close) => (
           <ImageMenu
             onUpload={() => {
@@ -105,16 +146,18 @@ export function BlockToolbar({
           />
         )}
       </ToolMenu>
-      <ToolMenu label="Components" icon={<Puzzle />}>
-        {(close) => (
+      <ToolMenu menus={menus} label="Components" icon={<Puzzle />}>
+        {(close, drag) => (
           <ItemList
+            editor={editor}
             items={COMPONENT_BLOCKS}
             onPick={(i) => (run(editor, i), close())}
+            onDrag={drag}
           />
         )}
       </ToolMenu>
-      <ToolMenu label="Variables" icon={<Braces />}>
-        {(close) => (
+      <ToolMenu menus={menus} label="Variables" icon={<Braces />}>
+        {(close, drag) => (
           <div className="w-60">
             <p className="px-2 pt-1 pb-1.5 text-[11px] font-medium text-muted-foreground">
               Insert a variable
@@ -129,15 +172,28 @@ export function BlockToolbar({
                   <button
                     key={v.name}
                     type="button"
+                    draggable
                     onClick={() => {
                       editor.chain().focus().insertVariable(v.name).run()
                       close()
                     }}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left font-mono text-xs transition-colors hover:bg-accent"
+                    onDragStart={(event) => {
+                      startVariableDrag(editor, v.name, event)
+                      drag(true)
+                    }}
+                    onDragEnd={() => {
+                      endComponentDrag(editor)
+                      drag(false)
+                    }}
+                    className="group/item flex w-full cursor-grab items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left font-mono text-xs transition-colors hover:bg-accent active:cursor-grabbing"
                   >
-                    <span className="truncate">{`{{ ${v.name} }}`}</span>
-                    <span className="shrink-0 font-sans text-[10px] text-muted-foreground">
+                    <span className="truncate">{`{{{${v.name}}}}`}</span>
+                    <span className="flex shrink-0 items-center gap-1.5 font-sans text-[10px] text-muted-foreground">
                       {v.fallback !== null ? "has fallback" : "required"}
+                      <GripVertical
+                        aria-hidden
+                        className="size-3.5 opacity-0 transition-opacity group-hover/item:opacity-100"
+                      />
                     </span>
                   </button>
                 ))}
@@ -148,9 +204,20 @@ export function BlockToolbar({
                 type="button"
                 onClick={() => {
                   close()
+                  onCreateVariable()
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+              >
+                <Plus className="size-3.5 text-muted-foreground" />
+                Create variable
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  close()
                   onOpenVariables()
                 }}
-                className="w-full rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 Manage variables…
               </button>
@@ -162,52 +229,143 @@ export function BlockToolbar({
   )
 }
 
+/**
+ * Which toolbar menu is open, opened by hovering its button - Resend's way.
+ *
+ * ⚠ ONE STATE FOR ALL FOUR, so moving from one button to the next swaps the
+ * menu at once instead of two overlapping while the first one's leave delay
+ * runs out.
+ *
+ * ⚠ A MENU STAYS OPEN while an item is being dragged out of it (closing it
+ * would cancel the drag) and while something in it has focus, like the image
+ * URL field.
+ */
+function useHoverMenus() {
+  const [open, setOpen] = React.useState<string | null>(null)
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dragging = React.useRef(false)
+  return React.useMemo(() => {
+    const cancel = () => {
+      if (timer.current) clearTimeout(timer.current)
+    }
+    return {
+      open,
+      setOpen: (label: string | null) => {
+        cancel()
+        setOpen(label)
+      },
+      enter: (label: string) => {
+        cancel()
+        setOpen(label)
+      },
+      leave: () => {
+        cancel()
+        timer.current = setTimeout(() => {
+          if (dragging.current) return
+          const menu = document.querySelector("[data-i10-tool-menu]")
+          if (menu?.contains(document.activeElement)) return
+          setOpen(null)
+        }, 160)
+      },
+      dragStart: () => {
+        dragging.current = true
+      },
+      dragEnd: () => {
+        dragging.current = false
+      },
+    }
+  }, [open])
+}
+
 function ToolMenu({
+  menus,
   label,
   icon,
   children,
 }: {
+  menus: ReturnType<typeof useHoverMenus>
   label: string
   icon: React.ReactNode
-  children: (close: () => void) => React.ReactNode
+  /** `drag` says an item is being dragged out of the menu, or no longer. */
+  children: (close: () => void, drag: (dragging: boolean) => void) => React.ReactNode
 }) {
-  const [open, setOpen] = React.useState(false)
+  const open = menus.open === label
+  const close = () => menus.setOpen(null)
+  // ⚠ HIDDEN, NOT CLOSED, WHILE AN ITEM IS DRAGGED OUT: unmounting the
+  // element a drag started from cancels the drag in Chrome.
+  const [dragging, setDragging] = React.useState(false)
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={label}
-              className={cn("size-9 rounded-xl", open && "bg-accent")}
-            >
-              {icon}
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="right">{label}</TooltipContent>
-      </Tooltip>
+    <Popover open={open} onOpenChange={(o) => menus.setOpen(o ? label : null)}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          onPointerEnter={(e) => e.pointerType === "mouse" && menus.enter(label)}
+          onPointerLeave={(e) => e.pointerType === "mouse" && menus.leave()}
+          // ⚠ NO FOCUS ON PRESS: the editor keeps its caret visible, and an
+          // item goes in where it blinks.
+          onMouseDown={(e) => e.preventDefault()}
+          className={cn("size-9 rounded-xl", open && "bg-accent")}
+        >
+          {icon}
+        </Button>
+      </PopoverTrigger>
       <PopoverContent
         side="right"
         align="start"
         sideOffset={10}
-        className="w-auto p-1.5"
+        data-i10-tool-menu
+        onPointerEnter={() => menus.enter(label)}
+        onPointerLeave={() => menus.leave()}
+        // Opening on hover must not pull focus out of the editor either.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        className={cn(
+          "w-auto p-1.5 transition-opacity",
+          dragging && "pointer-events-none opacity-0",
+        )}
       >
         {/* Focus inside the menu still counts as the editor's. */}
-        <EditorFocusScope>{children(() => setOpen(false))}</EditorFocusScope>
+        <EditorFocusScope>
+          {children(close, (d) => {
+            if (d) {
+              menus.dragStart()
+              // ⚠ A TICK LATER: Chrome cancels a drag whose source changes
+              // inside its own dragstart, which closed the menu at once.
+              setTimeout(() => setDragging(true), 0)
+              // The drop may land where the item's own dragend never fires.
+              const done = () => {
+                menus.dragEnd()
+                setDragging(false)
+                close()
+                window.removeEventListener("drop", done, true)
+                window.removeEventListener("dragend", done, true)
+              }
+              window.addEventListener("drop", done, true)
+              window.addEventListener("dragend", done, true)
+            } else {
+              menus.dragEnd()
+              setDragging(false)
+              close()
+            }
+          })}
+        </EditorFocusScope>
       </PopoverContent>
     </Popover>
   )
 }
 
 function ItemList({
+  editor,
   items,
   onPick,
+  onDrag,
 }: {
+  editor: Editor
   items: SlashCommandItem[]
   onPick: (item: SlashCommandItem) => void
+  onDrag: (dragging: boolean) => void
 }) {
   return (
     <div className="w-64">
@@ -215,8 +373,17 @@ function ItemList({
         <button
           key={item.title}
           type="button"
+          draggable
           onClick={() => onPick(item)}
-          className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent"
+          onDragStart={(event) => {
+            startComponentDrag(editor, item, event)
+            onDrag(true)
+          }}
+          onDragEnd={() => {
+            endComponentDrag(editor)
+            onDrag(false)
+          }}
+          className="group/item flex w-full cursor-grab items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent active:cursor-grabbing"
         >
           <span className="grid size-8 shrink-0 place-items-center rounded-lg border bg-background text-muted-foreground [&_svg]:size-4">
             {item.icon}
@@ -227,6 +394,10 @@ function ItemList({
               {item.description}
             </span>
           </span>
+          <GripVertical
+            aria-hidden
+            className="ml-auto size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100"
+          />
         </button>
       ))}
     </div>
@@ -345,10 +516,216 @@ export function InspectorPanel({ editor }: { editor: Editor }) {
         <Inspector.Document>
           {() => <ThemeSettings editor={editor} />}
         </Inspector.Document>
-        <Inspector.Node />
-        <Inspector.Text />
+        <Inspector.Node>
+          {(context) => <NodeSettings editor={editor} context={context} />}
+        </Inspector.Node>
+        <Inspector.Text>
+          {(context) => <TextSettings editor={editor} context={context} />}
+        </Inspector.Text>
       </div>
     </Inspector.Root>
+  )
+}
+
+/**
+ * Text settings: React Email's own sections, with Size and Line height
+ * filled in when the block does not set them.
+ *
+ * ⚠ REACT EMAIL READS ONLY WHAT THE BLOCK SETS, plus the theme's colour,
+ * weight and padding - never its font size or line height. Under the Basic
+ * theme those come from the theme, so the two fields sat empty beside text
+ * that plainly had a size. What the email actually renders is read from the
+ * block instead; typing a value still sets it on the block, as before.
+ */
+function TextSettings({
+  editor,
+  context,
+}: {
+  editor: Editor
+  context: Parameters<
+    NonNullable<React.ComponentProps<typeof Inspector.Text>["children"]>
+  >[0]
+}) {
+  const rendered = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const { $from } = e.state.selection
+      for (let d = $from.depth; d > 0; d--) {
+        if (!$from.node(d).isTextblock) continue
+        return renderedStyle(e.view.nodeDOM($from.before(d)))
+      }
+      return null
+    },
+  })
+  const full = {
+    ...context,
+    getStyle: withRendered(
+      context.getStyle as (prop: string) => string | number | undefined,
+      rendered,
+    ) as typeof context.getStyle,
+  }
+  return (
+    <>
+      <Inspector.Typography {...full} />
+      {full.isLinkActive && <Inspector.Link {...full} />}
+    </>
+  )
+}
+
+/**
+ * What a block actually renders with - for the fields React Email leaves
+ * blank when the block itself sets nothing.
+ */
+function renderedStyle(node: Node | null): Rendered | null {
+  if (!(node instanceof HTMLElement)) return null
+  const dom = textHolder(node)
+  const style = getComputedStyle(dom)
+  const size = parseFloat(style.fontSize)
+  const line = parseFloat(style.lineHeight)
+  // The colour behind it: its own, or the first one painted under it.
+  let backgroundColor: string | undefined
+  for (let el: HTMLElement | null = dom; el; el = el.parentElement) {
+    const hex = toHex(getComputedStyle(el).backgroundColor)
+    if (hex) {
+      backgroundColor = hex
+      break
+    }
+    if (el.classList.contains("i10-canvas")) break
+  }
+  return {
+    fontSize: Number.isFinite(size) ? Math.round(size) : undefined,
+    // "normal" has no number; the field is a percentage of the size.
+    lineHeight:
+      Number.isFinite(line) && size > 0 ? Math.round((line / size) * 100) : undefined,
+    backgroundColor,
+  }
+}
+
+/**
+ * The element a block's text is set in.
+ *
+ * ⚠ NOT THE BLOCK'S OUTER ELEMENT. A heading is drawn through a wrapper that
+ * keeps the default 16px; its 36px is on the h1 inside, so the outer element
+ * reported 16 for every heading. The text's own parent is what renders it.
+ */
+function textHolder(dom: HTMLElement): HTMLElement {
+  const walker = document.createTreeWalker(dom, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const parent = n.parentElement
+    // A variable chip is drawn smaller than the text around it: not it.
+    if (n.textContent?.trim() && parent && !parent.closest('[contenteditable="false"]'))
+      return parent
+  }
+  // Empty: the innermost text-level element there is.
+  return (
+    dom.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6, p, a, li, blockquote") ??
+    dom
+  )
+}
+
+type Rendered = {
+  fontSize: number | undefined
+  lineHeight: number | undefined
+  backgroundColor: string | undefined
+}
+
+/** `rgb(255, 255, 255)` as `#ffffff`; nothing for a see-through colour. */
+function toHex(color: string): string | undefined {
+  const m = color.match(
+    /rgba?\(([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/,
+  )
+  if (!m) return undefined
+  if (m[4] !== undefined && Number(m[4]) === 0) return undefined
+  return `#${[m[1], m[2], m[3]].map((n) => Math.round(Number(n)).toString(16).padStart(2, "0")).join("")}`
+}
+
+/** A blank value is one the block does not set. */
+function withRendered(
+  own: (prop: string) => string | number | undefined,
+  rendered: Rendered | null,
+) {
+  return (prop: string) => {
+    const value = own(prop)
+    if (value !== undefined && value !== "") return value
+    if (prop === "fontSize") return rendered?.fontSize
+    if (prop === "lineHeight") return rendered?.lineHeight
+    if (prop === "backgroundColor") return rendered?.backgroundColor
+    return value
+  }
+}
+
+/** React Email's sections per block - its own layout, which it does not export. */
+function layoutOf(nodeType: string): string[] {
+  switch (nodeType) {
+    case "image":
+      return ["attributes", "size", "padding", "border"]
+    case "button":
+      return ["typography", "size", "padding", "border", "background"]
+    case "section":
+    case "div":
+      return ["background", "padding", "border"]
+    case "codeBlock":
+      return ["attributes", "padding", "border"]
+    case "footer":
+      return ["typography", "padding", "background"]
+    case "twoColumns":
+    case "threeColumns":
+    case "fourColumns":
+      return ["columnSpacing", "typography", "padding", "background", "border"]
+    default:
+      return ["typography", "padding", "background", "border"]
+  }
+}
+
+/**
+ * A block's settings: React Email's sections in its order, with Size, Line
+ * height and Background showing what the block renders when it sets none -
+ * see `TextSettings`. A background is the colour behind the block: its own,
+ * or the container's it shows through.
+ */
+function NodeSettings({
+  editor,
+  context,
+}: {
+  editor: Editor
+  context: Parameters<
+    NonNullable<React.ComponentProps<typeof Inspector.Node>["children"]>
+  >[0]
+}) {
+  const rendered = useEditorState({
+    editor,
+    selector: ({ editor: e }) => renderedStyle(e.view.nodeDOM(context.nodePos.pos)),
+  })
+  const full = {
+    ...context,
+    getStyle: withRendered(
+      context.getStyle as (prop: string) => string | number | undefined,
+      rendered,
+    ) as typeof context.getStyle,
+  }
+  return (
+    <>
+      {layoutOf(context.nodeType).map((section) => {
+        switch (section) {
+          case "attributes":
+            return <Inspector.Attributes key={section} {...full} />
+          case "size":
+            return <Inspector.Size key={section} {...full} />
+          case "typography":
+            return <Inspector.Typography key={section} {...full} />
+          case "padding":
+            return <Inspector.Padding key={section} {...full} />
+          case "columnSpacing":
+            return <Inspector.ColumnSpacing key={section} {...full} />
+          case "background":
+            return <Inspector.Background key={section} {...full} />
+          case "border":
+            return <Inspector.Border key={section} {...full} />
+          default:
+            return null
+        }
+      })}
+    </>
   )
 }
 
@@ -423,5 +800,257 @@ function ThemeSettings({ editor }: { editor: Editor }) {
         </p>
       </div>
     </div>
+  )
+}
+
+/**
+ * The menu over selected text: React Email's own, plus a group that acts on
+ * the whole block the text is in - move it up, move it down, delete it.
+ *
+ * ⚠ THE DEFAULT, REBUILT FROM ITS PARTS. React Email's menu takes no extra
+ * items; passing children swaps it for exactly these, so its four groups are
+ * listed here in its order and stay as they were.
+ */
+const TEXT_MENU = new PluginKey("i10TextBubbleMenu")
+
+/**
+ * What the text menu sits under when a line is selected whole: the fitted
+ * ring around its text, not the line's full-width box.
+ *
+ * ⚠ SO IT GLIDES WITH AN ALIGNMENT CHANGE. Anchored to the box - which does
+ * not move when the text inside it does - the menu stayed centred while the
+ * text went right; anchored to the ring, it follows the text there, as it
+ * does for a hand-made selection. Nothing for a text selection: TipTap's own
+ * anchor (the selected text) is already right.
+ */
+function anchorToRing() {
+  const ring = document.querySelector<HTMLElement>("[data-i10-selection-ring]")
+  if (!ring || ring.style.display !== "block") return null
+  return {
+    getBoundingClientRect: () => ring.getBoundingClientRect(),
+    getClientRects: () => [ring.getBoundingClientRect()],
+  }
+}
+
+/** Where the text menu never shows: these have menus of their own. */
+const OWN_MENUS = new Set(["button", "image", "horizontalRule", "variable"])
+
+/**
+ * When the text menu shows: a text line selected whole (empty or not), or a
+ * text selection that is not inside a button, image, divider or link.
+ *
+ * ⚠ OURS, NOT REACT EMAIL'S. Its rule asked whether a variable was "active",
+ * which a line selected whole with a chip in it answered yes - so the menu
+ * hid after the first edit made from it.
+ */
+function showTextMenu({
+  editor,
+  state,
+}: {
+  editor: Editor
+  state: EditorState
+}): boolean {
+  const { selection } = state
+  if (selection instanceof NodeSelection) return selection.node.isTextblock
+  if (selection.empty) return false
+  const { $from } = selection
+  for (let d = $from.depth; d > 0; d--)
+    if (OWN_MENUS.has($from.node(d).type.name)) return false
+  if (editor.isActive("link")) return false
+  // Only a chip selected, nothing else: the chip is not text to format.
+  const content = selection.content().content
+  if (content.childCount === 1 && content.firstChild?.type.name === "variable")
+    return false
+  return true
+}
+
+export function TextBubbleMenu() {
+  const { editor } = useCurrentEditor()
+  const [nodeOpen, setNodeOpen] = React.useState(false)
+  const [linkOpen, setLinkOpen] = React.useState(false)
+  const code = useEditorState({
+    editor,
+    selector: ({ editor: e }) => e?.isActive("code") ?? false,
+  })
+  const moves = useEditorState({
+    editor,
+    selector: ({ editor: e }) => (e ? blockMoves(e) : { up: false, down: false }),
+  })
+  const element = React.useRef<HTMLDivElement | null>(null)
+
+  // ⚠ ALIGNMENT IS THE SELECTED LINE'S, HOWEVER IT IS SELECTED. React Email's
+  // buttons read the alignment from a text selection; a line selected whole
+  // - an empty one, picked by its grip - has none inside it, so they always
+  // said "left". This reads and sets the line's own `alignment`.
+  const alignment = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const row = e ? selectedTextRow(e.state) : null
+      return String(row?.node.attrs.alignment ?? "left")
+    },
+  })
+  const align = (value: "left" | "center" | "right") => {
+    if (!editor) return
+    const row = selectedTextRow(editor.state)
+    if (!row) return
+    editor
+      .chain()
+      .focus()
+      .command(({ tr }) => {
+        tr.setNodeMarkup(row.pos, undefined, { ...row.node.attrs, alignment: value })
+        // A line selected whole stays selected whole.
+        if (editor.state.selection instanceof NodeSelection)
+          tr.setSelection(NodeSelection.create(tr.doc, row.pos))
+        return true
+      })
+      .run()
+  }
+
+  // ⚠ IT STAYS UP THROUGH ITS OWN EDITS. After a change - an alignment, a
+  // move - with text still selected and the editor still focused, it is told
+  // to show and re-measure, so an edit made from the menu never leaves the
+  // menu gone.
+  React.useEffect(() => {
+    if (!editor) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // React Email takes no ref, so the element is found while it is shown;
+    // hidden, it is out of the document.
+    const find = () => {
+      element.current ??= document.querySelector<HTMLDivElement>("[data-i10-text-menu]")
+      // It appears 250ms after the selection does.
+      if (!element.current)
+        setTimeout(() => {
+          element.current ??=
+            document.querySelector<HTMLDivElement>("[data-i10-text-menu]")
+        }, 320)
+    }
+    // ⚠ THE GLIDE STARTS WITH THE EDIT, NOT AFTER IT. TipTap re-measures the
+    // menu 250ms after a change, so the text snapped to its new alignment,
+    // the menu sat still for a quarter second, then glided after it. Asked to
+    // re-measure at once, it moves together with the text. A block move
+    // carries the menu itself (`carryTextMenu`), so it is left out here.
+    const follow = ({ transaction }: { transaction: Transaction }) => {
+      if (transaction.getMeta(MOVED_META)) return
+      const menu = element.current
+      if (!menu?.isConnected || menu.style.visibility === "hidden") return
+      queueMicrotask(() => {
+        if (editor.isDestroyed) return
+        editor.view.dispatch(editor.state.tr.setMeta(TEXT_MENU, "updatePosition"))
+      })
+    }
+    const keep = () => {
+      find()
+      clearTimeout(timer)
+      // After TipTap's own 250ms debounce has had its say.
+      timer = setTimeout(() => {
+        if (editor.isDestroyed || !editor.view.hasFocus()) return
+        if (editor.state.selection.empty) return
+        editor.view.dispatch(editor.state.tr.setMeta(TEXT_MENU, "show"))
+      }, 300)
+    }
+    editor.on("update", keep)
+    editor.on("update", follow)
+    editor.on("selectionUpdate", find)
+    return () => {
+      clearTimeout(timer)
+      editor.off("update", keep)
+      editor.off("update", follow)
+      editor.off("selectionUpdate", find)
+    }
+  }, [editor])
+
+  if (!editor) return null
+  return (
+    <BubbleMenu
+      data-i10-text-menu=""
+      pluginKey={TEXT_MENU}
+      trigger={showTextMenu}
+      // React Email passes unlisted props on to TipTap's menu, which takes
+      // this one; its own types just do not name it.
+      {...({ getReferencedVirtualElement: anchorToRing } as object)}
+      onHide={() => {
+        setNodeOpen(false)
+        setLinkOpen(false)
+        // Forget where it was, so it appears in place next time instead of
+        // gliding over from here (see editor.css).
+        element.current?.style.removeProperty("left")
+        element.current?.style.removeProperty("top")
+      }}
+    >
+      <BubbleMenu.NodeSelector
+        open={nodeOpen}
+        onOpenChange={(open) => {
+          setNodeOpen(open)
+          if (open) setLinkOpen(false)
+        }}
+      />
+      {code ? (
+        <BubbleMenu.Code />
+      ) : (
+        <>
+          <BubbleMenu.LinkSelector
+            open={linkOpen}
+            onOpenChange={(open) => {
+              setLinkOpen(open)
+              if (open) setNodeOpen(false)
+            }}
+          />
+          <BubbleMenu.ItemGroup>
+            <BubbleMenu.Bold />
+            <BubbleMenu.Italic />
+            <BubbleMenu.Underline />
+            <BubbleMenu.Strike />
+            <BubbleMenu.Code />
+            <BubbleMenu.Uppercase />
+          </BubbleMenu.ItemGroup>
+          <BubbleMenu.ItemGroup>
+            {(
+              [
+                ["left", <AlignLeftIcon key="l" />],
+                ["center", <AlignCenterIcon key="c" />],
+                ["right", <AlignRightIcon key="r" />],
+              ] as const
+            ).map(([value, icon]) => (
+              <BubbleMenu.Item
+                key={value}
+                name={`align-${value}`}
+                isActive={alignment === value}
+                onCommand={() => align(value)}
+              >
+                {icon}
+              </BubbleMenu.Item>
+            ))}
+          </BubbleMenu.ItemGroup>
+        </>
+      )}
+      <BubbleMenu.ItemGroup>
+        <BubbleMenu.Item
+          name="move-up"
+          isActive={false}
+          disabled={!moves?.up}
+          title="Move up"
+          onCommand={() => moveBlock(editor, -1)}
+        >
+          <ArrowUp className="size-4" />
+        </BubbleMenu.Item>
+        <BubbleMenu.Item
+          name="move-down"
+          isActive={false}
+          disabled={!moves?.down}
+          title="Move down"
+          onCommand={() => moveBlock(editor, 1)}
+        >
+          <ArrowDown className="size-4" />
+        </BubbleMenu.Item>
+        <BubbleMenu.Item
+          name="delete"
+          isActive={false}
+          title="Delete"
+          onCommand={() => deleteBlock(editor)}
+        >
+          <Trash2 className="size-4" />
+        </BubbleMenu.Item>
+      </BubbleMenu.ItemGroup>
+    </BubbleMenu>
   )
 }

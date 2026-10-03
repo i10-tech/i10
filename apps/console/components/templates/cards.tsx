@@ -11,7 +11,7 @@ import {
   Info,
   MoreHorizontal,
   Pencil,
-  PencilLine,
+  TextCursorInput,
   SquareArrowOutUpRight,
   Trash2,
 } from "lucide-react"
@@ -35,6 +35,17 @@ import { TemplateThumbnail } from "@/components/template-thumbnail"
 import { formatRelative } from "@/lib/format"
 import { STATUS_LABEL, hrefOf, isEditable, statusOf, titleOf } from "@/lib/templates"
 import type { TemplateFolder, TemplateSummary } from "@/lib/types"
+
+/**
+ * The rename icon, in the menu's grey.
+ *
+ * ⚠ COLOURED HERE BECAUSE THE MENU'S RULE MISSES IT. Menu items grey every
+ * icon whose class does not contain `text-` - and lucide names this one
+ * `lucide-text-cursor-input`, so it was left white beside grey neighbours.
+ */
+export function RenameIcon() {
+  return <TextCursorInput className="text-muted-foreground" />
+}
 
 /** The MIME type a dragged template travels as. */
 export const DRAG_TYPE = "application/x-i10-templates"
@@ -247,7 +258,7 @@ export function TemplateMenu({
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onAction("rename")}>
-          <PencilLine />
+          <RenameIcon />
           Rename template
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onAction("duplicate")}>
@@ -295,6 +306,9 @@ export function TemplateMenu({
  */
 export function FolderCard({
   folder,
+  selected,
+  selecting,
+  onSelect,
   over,
   onDragOver,
   onDragLeave,
@@ -303,6 +317,10 @@ export function FolderCard({
   onDelete,
 }: {
   folder: TemplateFolder
+  selected: boolean
+  /** Something is ticked, so every checkbox shows and a click ticks. */
+  selecting: boolean
+  onSelect: (event: { shiftKey: boolean; checked: boolean }) => void
   over: boolean
   onDragOver: (event: React.DragEvent) => void
   onDragLeave: () => void
@@ -320,6 +338,7 @@ export function FolderCard({
       exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.15 } }}
       transition={SPRING}
       className="group/card relative"
+      data-selected={selected || undefined}
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
     >
@@ -330,15 +349,31 @@ export function FolderCard({
         onDrop={onDrop}
         onFocus={() => setHover(true)}
         onBlur={() => setHover(false)}
+        onClick={(event) => {
+          // While picking, a click ticks rather than opens, as on a template.
+          if (selecting) {
+            event.preventDefault()
+            onSelect({ shiftKey: event.shiftKey, checked: !selected })
+          }
+        }}
         className={cn(
           "block rounded-2xl p-1.5 outline-none",
           "transition-[background-color,box-shadow] duration-(--duration-dismiss) ease-(--ease-quad-out)",
           "hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
+          selected &&
+            "bg-primary/[0.06] ring-2 ring-primary/70 hover:bg-primary/[0.08]",
           over && "bg-primary/[0.06] ring-2 ring-primary/70",
         )}
       >
-        <div className="grid aspect-[4/3] place-items-center rounded-xl">
-          <FolderArt count={folder.templates} raised={hover || menu} over={over} />
+        {/* The same tile a template sits in, so a row of folders and
+            templates lines up - name under name. */}
+        <div className="grid aspect-[4/3] place-items-center rounded-xl bg-muted/50 ring-1 ring-border/50 ring-inset">
+          <FolderArt
+            count={folder.templates}
+            raised={hover || menu}
+            over={over}
+            className="translate-y-[4%]"
+          />
         </div>
         <div className="px-1.5 pt-2.5 pb-1">
           <p className="truncate text-sm font-medium" title={folder.name}>
@@ -351,6 +386,25 @@ export function FolderCard({
           </p>
         </div>
       </Link>
+      {/* Tick, top left - as on a template. */}
+      <div
+        className={cn(
+          "absolute top-4 left-4 z-10 transition-opacity duration-(--duration-instant)",
+          selected || selecting || menu
+            ? "opacity-100"
+            : "opacity-0 group-hover/card:opacity-100 group-focus-within/card:opacity-100",
+        )}
+      >
+        <Checkbox
+          checked={selected}
+          aria-label={`Select ${folder.name}`}
+          className="size-5 rounded-md bg-background/90 shadow-sm backdrop-blur"
+          onClick={(event) => {
+            event.stopPropagation()
+            onSelect({ shiftKey: event.shiftKey, checked: !selected })
+          }}
+        />
+      </div>
       <div
         className={cn(
           "absolute top-3 right-3 z-10 transition-opacity duration-(--duration-instant)",
@@ -383,7 +437,7 @@ export function FolderCard({
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onRename}>
-              <PencilLine />
+              <RenameIcon />
               Rename folder
             </DropdownMenuItem>
             <DropdownMenuSeparator />

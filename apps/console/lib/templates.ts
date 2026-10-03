@@ -58,3 +58,28 @@ export function matches(t: TemplateSummary, query: string): boolean {
     s.toLowerCase().includes(q),
   )
 }
+
+/** `Password reset!` as `password-reset` - the API's rule for an alias made from a title. */
+export function slugOf(title: string): string {
+  return (
+    title
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "untitled-template"
+  )
+}
+
+/**
+ * Whether the alias is still the one its title made (with the `-2` that
+ * freed it), so renaming the template moves it too - as the API does.
+ */
+export function followsTitle(name: string, title: string | null): boolean {
+  const base = slugOf(title ?? "")
+  return (
+    name === base ||
+    (name.startsWith(`${base}-`) && /^\d+$/.test(name.slice(base.length + 1)))
+  )
+}

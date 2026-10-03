@@ -65,7 +65,7 @@ export function NewTemplateMenu({ folderId = null }: { folderId?: string | null 
           <DropdownMenuItem onSelect={() => setFolderOpen(true)}>
             <Folder />
             Folder
-            <DropdownMenuShortcut>F</DropdownMenuShortcut>
+            <DropdownMenuShortcut>⌘⇧N</DropdownMenuShortcut>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setUploadOpen(true)}>
@@ -86,8 +86,13 @@ export function NewTemplateMenu({ folderId = null }: { folderId?: string | null 
 }
 
 /**
- * `T` for a new template, `F` for a new folder, as the menu says - only when
- * nothing is being typed into and no dialog is open.
+ * `T` for a new template; `⌘⇧N` (Ctrl+Shift+N elsewhere) or `F` for a new
+ * folder - only when no dialog is open, and the bare letters only when
+ * nothing is being typed into.
+ *
+ * ⚠ ⌘⇧N IS "NEW INCOGNITO / PRIVATE WINDOW" IN CHROME AND SAFARI, which
+ * may keep it for themselves and never hand it to the page. It works where the browser lets
+ * it through (Firefox, the desktop app); `F` is the one that always works.
  */
 function NewShortcuts({
   onTemplate,
@@ -98,7 +103,18 @@ function NewShortcuts({
 }) {
   React.useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
+      if (event.repeat || event.altKey) return
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "n"
+      ) {
+        if (document.querySelector("[role=dialog]")) return
+        event.preventDefault()
+        onFolder()
+        return
+      }
+      if (event.metaKey || event.ctrlKey) return
       const target = event.target as HTMLElement | null
       if (
         target?.closest(
