@@ -78,7 +78,7 @@ export function RememberedAccounts({
     <ul aria-label="Accounts used on this device" className="flex flex-col gap-2">
       {accounts.map((account) => (
         <li key={account.email} className="group relative">
-          <div className="flex h-14 items-center rounded-2xl border transition-colors duration-(--duration-instant) ease-(--ease-linear) focus-within:border-ring hover:bg-accent dark:bg-input/25 dark:hover:bg-input/50">
+          <div className="flex h-14 items-center rounded-2xl border transition-colors duration-(--duration-instant) ease-(--ease-linear) focus-within:border-ring hover:bg-accent">
             <button
               type="button"
               disabled={disabled}

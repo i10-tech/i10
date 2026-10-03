@@ -30,6 +30,7 @@ import {
 } from "@react-email/editor/plugins"
 import { Button } from "@repo/ui/components/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@repo/ui/components/popover"
+import { Textarea } from "@repo/ui/components/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
 import { cn } from "cn"
 import type { DeclaredVariable } from "@/lib/types"
@@ -406,15 +407,14 @@ function ThemeSettings({ editor }: { editor: Editor }) {
       </div>
       <div className="space-y-2">
         <p className="text-xs font-medium">Global CSS</p>
-        <textarea
+        <Textarea
           value={css}
           onChange={(e) => setCss(e.target.value)}
           spellCheck={false}
-          rows={6}
           placeholder={
             "/* Added to the email's <head> */\n@media (max-width: 600px) {\n  h1 { font-size: 24px; }\n}"
           }
-          className="w-full resize-y rounded-xl border bg-foreground/[0.03] p-2.5 font-mono text-[11px] leading-relaxed outline-none transition-colors focus:border-foreground/30"
+          className="min-h-28 p-2.5 font-mono text-[11px] leading-relaxed md:text-[11px]"
           aria-label="Global CSS"
         />
         <p className="text-[11px] text-muted-foreground">

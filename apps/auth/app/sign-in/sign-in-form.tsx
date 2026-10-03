@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -20,8 +20,12 @@ import { stepBack, useStepHistory } from "../_lib/step-history"
 import { RememberedAccounts } from "../_components/remembered-accounts"
 import { useRememberedAccounts, type RememberedAccount } from "../_lib/remembered"
 import { resumeDevice } from "../_lib/devices"
-import { markSignInAttempt, useLastSignInMethod } from "../_lib/last-used"
-import { installAbortableWebAuthn } from "../_lib/webauthn"
+import {
+  lastSignInMethod,
+  markSignInAttempt,
+  useLastSignInMethod,
+} from "../_lib/last-used"
+import { installAbortableWebAuthn, onConditionalArmed } from "../_lib/webauthn"
 import { useResumable } from "../_lib/resume"
 import { LastUsedBadge } from "../_components/last-used-badge"
 import { PasskeyCue } from "../_components/passkey-cue"
@@ -47,6 +51,9 @@ import type { SsoProvider } from "../_lib/providers"
  * every other control disabled by construction rather than by remembering to
  * disable it.
  */
+/** How long iOS needs after a conditional passkey request before AutoFill counts it. */
+const ARM_SETTLE_MS = 600
+
 export function SignInForm({
   afterAuthUrl,
   resetHref,
@@ -181,6 +188,39 @@ export function SignInForm({
    * "Login" during the redirect that is already happening.
    */
   const armed = useRef(false)
+  // Read inside the effect below, which must not re-run when these change.
+  const savedCards = useRef(remembered.length)
+  savedCards.current = remembered.length
+
+  /**
+   * Where the passkey question stands, which decides when the email box may
+   * take focus.
+   *
+   *   `pending`  not asked yet, or a prompt is open - nothing is focused
+   *   `silent`   the conditional request is live; the browser offers the passkey
+   *              itself, in the field's menu or (iOS) its own sheet
+   *   `closed`   asked and answered no, or there was nothing to ask - focus
+   */
+  const [question, setQuestion] = useState<"pending" | "silent" | "closed">("pending")
+
+  /*
+   * ⚠ THE EMAIL BOX IS READ-ONLY ON A PHONE UNTIL THE PASSKEY HAS HAD ITS TURN.
+   * Seen on the iOS 26 simulator: on some loads Safari focuses the box BY
+   * ITSELF, ~80ms in, with no `focus()` from the page and no `autofocus` in the
+   * markup - and a focused box brings up the saved-password bar underneath the
+   * passkey sheet, both at once. A read-only box takes no AutoFill. A real tap
+   * releases it immediately, so nobody is ever kept out of the field.
+   */
+  /*
+   * ⚠ `null` UNTIL HYDRATED, AND HELD WHILE IT IS. The server cannot know the
+   * device, and Safari's own focus can land before React runs - on a slow load,
+   * like the one after signing out, it did, and the password sheet came up
+   * first. So the markup arrives read-only and a laptop is released the moment
+   * the page hydrates.
+   */
+  const touch = useSyncExternalStore(noSubscribe, isTouch, unknownOnServer)
+  const [tapped, setTapped] = useState(false)
+  const held = touch !== false && question === "pending" && !tapped
 
   useEffect(() => {
     if (!isLoaded || !signIn || armed.current) return
@@ -197,29 +237,158 @@ export function SignInForm({
      * ⚠ AND THE ARM IS SKIPPED IF THE INSTALL DID NOT LAND, rather than done
      * anyway. Autofill is a convenience nobody asked for; a passkey somebody
      * pressed a button for is not, and trading the second for the first is the
-     * wrong way round.
+     * wrong way round. The box is still focused - there is nothing to wait for.
      */
-    if (!installAbortableWebAuthn()) return
-    armed.current = true
+    /*
+     * ⚠ ONE TICK LATE, SO THE THROWAWAY MOUNT NEVER ASKS. `ResumeRemount`
+     * mounts this form, then remounts it under a new key before the first paint
+     * (see _lib/resume.tsx), and each mount armed its own request: two passkey
+     * sheets on iOS, the second appearing as the first was dismissed. The first
+     * mount's cleanup cancels its timer before it fires.
+     */
+    const start = window.setTimeout(() => {
+      if (armed.current) return
+      ask()
+    }, 0)
+    return () => window.clearTimeout(start)
 
-    void signIn
-      .passkey({ flow: "autofill" })
-      .then(async ({ error }) => {
-        if (error || signIn.status !== "complete") return
-        setBusy("passkey")
+    function ask() {
+      if (!signIn) return
+      if (!installAbortableWebAuthn()) {
+        setQuestion("closed")
+        return
+      }
+      armed.current = true
 
-        // ⚠ RELEASED IF THE FINALIZE FAILS, or the page stays greyed out for
-        // something the person never asked for. Everything before this point
-        // fails silently by design; a lock is the one failure they can see, so
-        // it is the one that has to be undone.
-        const result = await finalizeAndLeave(
-          (params) => signIn.finalize(params),
-          afterAuthUrl,
-        )
-        if (result.error) setBusy(null)
-      })
-      .catch(() => setBusy(null))
+      /** Resolves `true` only once a passkey has signed them in. */
+      const arm = () =>
+        signIn
+          .passkey({ flow: "autofill" })
+          .then(async ({ error }) => {
+            if (error || signIn.status !== "complete") return false
+            setBusy("passkey")
+
+            // ⚠ RELEASED IF THE FINALIZE FAILS, or the page stays greyed out for
+            // something the person never asked for. Everything before this point
+            // fails silently by design; a lock is the one failure they can see,
+            // so it is the one that has to be undone.
+            const result = await finalizeAndLeave(
+              (params) => signIn.finalize(params),
+              afterAuthUrl,
+            )
+            if (result.error) setBusy(null)
+            return !result.error
+          })
+          .catch(() => {
+            setBusy(null)
+            return false
+          })
+
+      void (async () => {
+        /*
+         * ⚠ CLERK DOES NOT ALWAYS DO WHAT `autofill` SAYS. It asks the browser
+         * whether conditional mediation is available, and where it is not it
+         * sends the same request as a FULL passkey prompt instead. Seen on the
+         * iOS 26 simulator: the "Use Passkey" sheet at load is that prompt
+         * (`mediation: "optional"`), not a silent request. The same check is
+         * made here so this page knows which of the two it is about to get.
+         */
+        const silent = await conditionalMediationAvailable()
+
+        if (!silent) {
+          // ⚠ THE ARM IS THE PASSKEY QUESTION ITSELF HERE, and unlike a silent
+          // request it answers: X rejects it, and that is when the box - and the
+          // password AutoFill that comes with focusing it - may have its turn.
+          if (!(await arm())) setQuestion("closed")
+          return
+        }
+
+        /*
+         * ⚠ ONE QUESTION AT A TIME, AND THE PASSKEY FIRST WHEN WE KNOW THERE IS
+         * ONE. A silent request puts the passkey and every saved password in the
+         * same menu at once. A page cannot ask the browser whether it holds a
+         * passkey - that is deliberate, so sites cannot fingerprint people - but
+         * it can remember that the last sign-in on THIS device was a passkey.
+         * Then the prompt opens on its own and the box waits; cancelled, the
+         * silent request is armed and the box focused, as if there were none.
+         *
+         * ⚠ NOT WHEN SAVED ACCOUNTS ARE SHOWING. Pressing a card already asks for
+         * that account's passkey first; a prompt at load would ask before they
+         * had chosen which account.
+         */
+        if (savedCards.current === 0 && lastSignInMethod() === "passkey") {
+          if (await provePasskey(false)) return
+        }
+        setQuestion("silent")
+        void arm()
+      })()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, like the arm itself
   }, [isLoaded, signIn, afterAuthUrl])
+
+  /**
+   * Focus the email box once the passkey has had its turn.
+   *
+   * ⚠ NOT `autoFocus`, AND THE ORDER IS THE WHOLE POINT. Focusing the box is
+   * what opens the browser's password AutoFill, so it waits for `question`:
+   * nothing while a passkey prompt is open, at once when it closes or there
+   * was nothing to ask.
+   */
+  useEffect(() => {
+    // ⚠ NOT WHILE A PASSKEY PROMPT IS OPEN: focusing would open autofill
+    // underneath it. Re-runs when the prompt closes.
+    if (stage !== "identifier" || busy || question === "pending") return
+
+    let done = false
+    const focus = () => {
+      if (done) return
+      done = true
+      const email = document.getElementById("email")
+      const active = document.activeElement
+      // ⚠ SAFARI'S OWN FOCUS (see `held`) LEFT IT FOCUSED BUT READ-ONLY, which
+      // offers nothing. Focusing it again is what asks for AutoFill now.
+      if (active === email) email?.blur()
+      else if (active && active !== document.body) return
+      email?.focus()
+    }
+
+    if (question === "closed") {
+      focus()
+      return () => {
+        done = true
+      }
+    }
+
+    /*
+     * ⚠ A LIVE SILENT REQUEST ON A TOUCH DEVICE: NEVER. Seen on the iOS 26
+     * simulator: with nothing focused, Safari opens the "Use Passkey" sheet by
+     * itself the moment the conditional request is live, with the password
+     * under More Options. Focusing the box was the ONLY thing that produced
+     * the password sheet first, at any delay. A laptop has no such sheet:
+     * Chrome and Safari list passkeys in the field's dropdown, which needs
+     * focus.
+     */
+    if (navigator.maxTouchPoints > 1) return
+
+    /*
+     * ⚠ A BEAT AFTER THE REQUEST, NOT THE SAME TICK. WebKit registers a
+     * conditional request asynchronously; focused in the same tick, the menu
+     * is built without the passkey. And a 2s way out, so a request that never
+     * arms (Clerk slow, the install refused) cannot leave the box unfocused.
+     */
+    let settle = 0
+    const off = onConditionalArmed(() => {
+      settle = window.setTimeout(focus, ARM_SETTLE_MS)
+    })
+    const timer = window.setTimeout(focus, 2000)
+
+    return () => {
+      done = true
+      off()
+      window.clearTimeout(timer)
+      window.clearTimeout(settle)
+    }
+  }, [stage, busy, question])
 
   /**
    * ⚠ THE FIRST STEP CREATES THE SIGN-IN RATHER THAN JUST REMEMBERING THE
@@ -420,8 +589,13 @@ export function SignInForm({
    * opens on demand because somebody pressed a button, and the two must not be
    * confused: `autofill` from a click does nothing at all.
    */
-  async function provePasskey() {
-    if (!signIn || busy) return
+  /**
+   * @param loud `false` for the prompt the page opens by itself: nobody asked,
+   * so no failure is reported - the caller falls back to autofill instead.
+   * @returns whether it signed them in.
+   */
+  async function provePasskey(loud = true): Promise<boolean> {
+    if (!signIn || busy) return false
     setBusy("passkey")
 
     try {
@@ -440,12 +614,12 @@ export function SignInForm({
          * dismissing the prompt is a decision, not a fault, and the interface
          * has nothing to add to it.
          */
-        const reason = passkeyFailure(error, "use")
+        const reason = loud ? passkeyFailure(error, "use") : null
         // The code, for the report that would otherwise arrive as "it did not
         // work". See _lib/passkey.ts.
         if (reason) toast.error(reason, { description: passkeyReference(error) })
         setBusy(null)
-        return
+        return false
       }
 
       if (signIn.status === "complete") {
@@ -460,12 +634,14 @@ export function SignInForm({
         if (result.error) {
           toast.error(messageFor(result.error))
           setBusy(null)
+          return false
         }
-        return
+        return true
       }
 
       toast.error("That passkey worked, but the sign-in needs another step.")
       setBusy(null)
+      return false
     } catch (error) {
       /*
        * ⚠ THE CATCH IS LOAD-BEARING HERE, UNLIKE ON THE PASSWORD FORM. A passkey
@@ -478,9 +654,10 @@ export function SignInForm({
        * say "We could not reach the server", which is the one thing this almost
        * never is: the rejection happened in the browser, before any request.
        */
-      const reason = passkeyFailure(error, "use")
+      const reason = loud ? passkeyFailure(error, "use") : null
       if (reason) toast.error(reason, { description: passkeyReference(error) })
       setBusy(null)
+      return false
     }
   }
 
@@ -644,6 +821,8 @@ export function SignInForm({
               <div className="relative">
                 <EmailInput
                   id="email"
+                  readOnly={held}
+                  onPointerDown={() => setTapped(true)}
                   name="email"
                   label="Email address"
                   value={identifier}
@@ -659,7 +838,6 @@ export function SignInForm({
                   // passkey, and the effect silently does nothing.
                   autoComplete="email webauthn"
                   disabled={locked}
-                  autoFocus
                   // The chip sits INSIDE the field at its trailing end; the
                   // padding keeps a long address from running under it.
                   className={lastUsed === "password" ? "pe-28" : undefined}
@@ -719,7 +897,7 @@ export function SignInForm({
                   // oauth-buttons, which carries the same class for the same
                   // reason.
                   className="relative"
-                  onClick={provePasskey}
+                  onClick={() => void provePasskey()}
                   disabled={!signIn || locked}
                 >
                   {busy === "passkey" ? (
@@ -887,3 +1065,25 @@ export function SignInForm({
     </div>
   )
 }
+
+/**
+ * The check clerk-js makes before it sends `autofill` as a silent request -
+ * see the arm effect in `SignInForm`. Mirrored so the page knows which of the
+ * two it is about to get.
+ */
+async function conditionalMediationAvailable(): Promise<boolean> {
+  try {
+    return Boolean(
+      await window.PublicKeyCredential?.isConditionalMediationAvailable?.(),
+    )
+  } catch {
+    return false
+  }
+}
+
+// The device for `held` in `SignInForm`: `null` on the server and through
+// hydration, then the real answer. A device does not change mid-visit, so
+// there is nothing to subscribe to.
+const noSubscribe = () => () => {}
+const isTouch = () => navigator.maxTouchPoints > 1
+const unknownOnServer = () => null

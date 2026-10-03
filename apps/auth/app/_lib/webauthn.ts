@@ -43,6 +43,29 @@
 let pending: AbortController | null = null
 
 /**
+ * Whether the silent (conditional) passkey request is live, and when it goes live.
+ *
+ * ⚠ THE EMAIL FIELD MUST NOT BE FOCUSED BEFORE THIS. Focusing it is what makes
+ * iOS open its AutoFill sheet, and the sheet is built from what is pending AT
+ * THAT MOMENT: focused too early, with no passkey request yet, it offers the
+ * saved PASSWORD - then the request lands and the sheet flips to "Use Passkey".
+ * Focused after, the browser does the one check a page cannot do itself (is
+ * there a passkey for this site on this device?) and offers the passkey first,
+ * the password under More Options, or the password alone if there is none.
+ */
+const ARMED = "i10:conditional-passkey-armed"
+let armed = false
+
+export function onConditionalArmed(callback: () => void): () => void {
+  if (armed) {
+    callback()
+    return () => {}
+  }
+  window.addEventListener(ARMED, callback, { once: true })
+  return () => window.removeEventListener(ARMED, callback)
+}
+
+/**
  * ⚠ THERE IS NO `installed` FLAG, AND THE FIRST VERSION OF THIS FILE HAD ONE.
  * It latched on the first CALL rather than on the first SUCCESS, and the first
  * call happens before clerk-js has attached `window.Clerk` - so it installed on
@@ -100,11 +123,18 @@ async function getPublicCredentials({
   pending = controller
 
   try {
-    const credential = await navigator.credentials.get({
+    const request = navigator.credentials.get({
       publicKey: publicKeyOptions,
       mediation: conditionalUI ? "conditional" : "optional",
       signal: controller.signal,
     })
+    // ⚠ ANNOUNCED THE MOMENT THE BROWSER HAS THE REQUEST - see `onConditionalArmed`.
+    // Guarded: there is no `window` where this runs under test.
+    if (conditionalUI) {
+      armed = true
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(ARMED))
+    }
+    const credential = await request
 
     return credential
       ? { publicKeyCredential: credential, error: null }

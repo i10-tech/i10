@@ -127,7 +127,7 @@ export function ApiKeyScopeField({
         <ul className="space-y-2">
           {domains.map((domain) => (
             <li key={domain.id}>
-              <label className="flex h-14 cursor-pointer items-center gap-3 rounded-pill border border-input px-6 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/30 dark:bg-input/25">
+              <label className="flex h-14 cursor-pointer items-center gap-3 rounded-pill border border-input px-6 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/30">
                 <Checkbox
                   checked={chosen.has(domain.name)}
                   onCheckedChange={(on) => toggle(domain.name, on === true)}
