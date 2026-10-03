@@ -17,15 +17,18 @@
  */
 export type PromptPlacement = "top" | "center" | "bottom"
 
+export type Biometric = "face-id" | "touch-id" | "android" | "windows" | "passkey"
+
 export interface PasskeyEnvironment {
   placement: PromptPlacement
   /** Named in the copy, so the sentence matches what the person is looking at. */
   hint: string
   /**
-   * The icon on the passkey screen: Face ID on phones, a fingerprint on
-   * everything else (Touch ID, Windows Hello, a security key's sensor).
+   * The icon on the passkey screen, matched to the platform's own glyph:
+   * Apple's Face ID and Touch ID only on Apple devices, Android's fingerprint,
+   * Windows Hello, and the plain passkey icon for anything else.
    */
-  biometric: "face" | "fingerprint"
+  biometric: Biometric
 }
 
 /**
@@ -38,7 +41,7 @@ export interface PasskeyEnvironment {
 export const NEUTRAL_ENVIRONMENT: PasskeyEnvironment = {
   placement: "center",
   hint: "Your browser will open a prompt in the middle of the window.",
-  biometric: "fingerprint",
+  biometric: "passkey",
 }
 
 /** Memoised for the same identity reason. The platform cannot change mid-visit. */
@@ -48,7 +51,8 @@ export function passkeyEnvironment(): PasskeyEnvironment {
   return (cached ??= computeEnvironment())
 }
 
-function computeEnvironment(): PasskeyEnvironment {
+/** Exported for the tests; everything else reads the memoised `passkeyEnvironment`. */
+export function computeEnvironment(): PasskeyEnvironment {
   // ⚠ GUARDED, BECAUSE THIS FILE IS IMPORTED BY A COMPONENT THAT SERVER-RENDERS.
   // Touching `navigator` during SSR throws; returning the neutral answer means
   // the first paint is centred and the effect corrects it after mount.
@@ -59,12 +63,15 @@ function computeEnvironment(): PasskeyEnvironment {
   // device that shows a bottom sheet from one that shows a window, and it gets
   // an iPad - which reports a desktop UA - right.
   const touch = navigator.maxTouchPoints > 1
+  // An iPad reports a Mac UA, so touch is what tells it from a laptop.
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && touch)
+  const mac = /Macintosh/.test(ua) && !touch
 
   if (touch) {
     return {
       placement: "bottom",
       hint: "Your device will slide a prompt up from the bottom of the screen.",
-      biometric: "face",
+      biometric: /Android/.test(ua) ? "android" : ios ? "face-id" : "passkey",
     }
   }
 
@@ -73,7 +80,7 @@ function computeEnvironment(): PasskeyEnvironment {
     return {
       placement: "top",
       hint: "Safari shows the prompt just below the address bar.",
-      biometric: "fingerprint",
+      biometric: mac ? "touch-id" : "passkey",
     }
   }
 
@@ -81,9 +88,16 @@ function computeEnvironment(): PasskeyEnvironment {
     return {
       placement: "center",
       hint: "Windows will open a system window in the middle of the screen.",
-      biometric: "fingerprint",
+      biometric: "windows",
     }
   }
 
-  return NEUTRAL_ENVIRONMENT
+  // Chrome, Edge, Firefox and the rest: the neutral copy, the platform's icon.
+  return mac ? MAC_BROWSER : NEUTRAL_ENVIRONMENT
+}
+
+/** A non-Safari browser on a Mac: macOS still runs the prompt, with Touch ID. */
+const MAC_BROWSER: PasskeyEnvironment = {
+  ...NEUTRAL_ENVIRONMENT,
+  biometric: "touch-id",
 }
