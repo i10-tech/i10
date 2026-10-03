@@ -129,9 +129,10 @@ async function getPublicCredentials({
       signal: controller.signal,
     })
     // ⚠ ANNOUNCED THE MOMENT THE BROWSER HAS THE REQUEST - see `onConditionalArmed`.
+    // Guarded: there is no `window` where this runs under test.
     if (conditionalUI) {
       armed = true
-      window.dispatchEvent(new Event(ARMED))
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(ARMED))
     }
     const credential = await request
 
