@@ -291,6 +291,13 @@ export function SignInForm({
        */
       if (await passkeyFirst()) return
 
+      // ⚠ SET HERE, NOT BY THE CALLER. A saved-account card passes its address
+      // straight in, and writing it into the email box first flashed the
+      // address into a field the person never typed in - then, more often
+      // than not, the passkey signed them in and the page left anyway. The
+      // password step needs it (its chip and `onSubmit`), so it is set as the
+      // page moves there.
+      setIdentifier(value)
       setDirection("forward")
       setStage("password")
       setBusy(null)
@@ -394,7 +401,6 @@ export function SignInForm({
         return
       }
     }
-    setIdentifier(account.email)
     await lookUp(account.email)
   }
 

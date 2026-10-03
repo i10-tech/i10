@@ -1,6 +1,12 @@
 import { describe, expect, it } from "bun:test"
 import { createApp } from "../src/app.js"
-import { resume, type ResumeClerk, type ResumeUser } from "../src/devices/resume.js"
+import {
+  FRESH_AFTER_SIGN_UP_MS,
+  freshAfterSignUp,
+  resume,
+  type ResumeClerk,
+  type ResumeUser,
+} from "../src/devices/resume.js"
 import type { DeviceRow, DeviceStore, Found } from "../src/devices/store.js"
 import { isPresentable } from "../src/devices/store.js"
 import { clerkFreshAuth } from "../src/middleware/session.js"
@@ -54,6 +60,7 @@ function harness(opts: {
   const clerk: ResumeClerk = {
     user: async () => (opts.user === undefined ? PLAIN : opts.user),
     sessionStatus: async () => (opts.session === undefined ? "expired" : opts.session),
+    ages: async () => null,
     signInToken: async () => {
       if (opts.ticketFails) throw new Error("clerk down")
       calls.tickets += 1
@@ -252,5 +259,48 @@ describe("step-up after a resume", () => {
       },
     })
     expect(await read(request)).toEqual({ status: "unknown" })
+  })
+})
+
+describe("a fresh session right after sign-up", () => {
+  const NOW = 1_800_000_000_000
+  const WHO = { userId: "user_1", sessionId: "sess_1" }
+  const clerkAged = (user: number, session: number | null = user) =>
+    ({
+      ...harness({}).clerk,
+      ages: async () =>
+        session === null ? null : { user: NOW - user, session: NOW - session },
+    }) as ResumeClerk
+
+  it("gives a minutes-old account a ticket", async () => {
+    const out = await freshAfterSignUp(WHO, {
+      clerk: clerkAged(60_000),
+      now: () => NOW,
+    })
+    expect(out).toEqual({ outcome: "ticket", ticket: "ticket_1" })
+  })
+
+  it("refuses an established account", async () => {
+    const out = await freshAfterSignUp(WHO, {
+      clerk: clerkAged(FRESH_AFTER_SIGN_UP_MS + 1, 1_000),
+      now: () => NOW,
+    })
+    expect(out).toEqual({ outcome: "refused" })
+  })
+
+  it("refuses an old session on a new account", async () => {
+    const out = await freshAfterSignUp(WHO, {
+      clerk: clerkAged(1_000, FRESH_AFTER_SIGN_UP_MS + 1),
+      now: () => NOW,
+    })
+    expect(out).toEqual({ outcome: "refused" })
+  })
+
+  it("refuses when the session is not this user's", async () => {
+    const out = await freshAfterSignUp(WHO, {
+      clerk: clerkAged(1_000, null),
+      now: () => NOW,
+    })
+    expect(out).toEqual({ outcome: "refused" })
   })
 })

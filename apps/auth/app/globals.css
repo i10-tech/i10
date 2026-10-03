@@ -17,3 +17,39 @@ html[data-auth-resuming] [data-resume-boundary] {
     visibility: visible;
   }
 }
+
+/*
+ * The passkey screen's pulse - see _components/passkey-cue.tsx. Two rings leave
+ * the icon and fade, staggered, so something is always moving while the
+ * operating system's prompt is open. The blanket reduced-motion rule in
+ * tokens.css stops it, which leaves the icon still: nothing is lost.
+ */
+@keyframes passkey-ring {
+  from {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+/*
+ * The passkey screen's icon tile and its rings - see _components/passkey-cue.tsx.
+ *
+ * ⚠ A SQUIRCLE WHERE THE BROWSER CAN DRAW ONE. `corner-shape: squircle` is the
+ * continuous curve Apple's icons use; a plain radius is the fallback, and the
+ * radius is larger under the squircle because that curve starts later and
+ * would otherwise look too square.
+ */
+.passkey-tile {
+  border-radius: 22px;
+}
+
+@supports (corner-shape: squircle) {
+  .passkey-tile {
+    border-radius: 32px;
+    corner-shape: squircle;
+  }
+}
