@@ -63,7 +63,7 @@ export function HtmlEditor({
           // every attribute makes a template unreadable, and none of the red
           // squiggles are about anything the author can fix.
           spellCheck={false}
-          className="min-h-[24rem] resize-y rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
+          className="max-h-[48rem] min-h-[24rem] rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
         />
       </TabsContent>
 
@@ -73,7 +73,7 @@ export function HtmlEditor({
           onChange={(event) => onTextChange(event.target.value)}
           disabled={disabled}
           placeholder={"Hello {{first_name}},\n\n…"}
-          className="min-h-[24rem] resize-y rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
+          className="max-h-[48rem] min-h-[24rem] rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
         />
         <p className="border-t px-3 py-2 text-xs text-muted-foreground">
           {/*

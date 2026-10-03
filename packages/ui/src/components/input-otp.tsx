@@ -110,9 +110,9 @@ function InputOTPSlot({
         // ⚠ 18px. The digits are the content of the screen, and the 14px the
         // default shipped is smaller than the sentence explaining them.
         "text-lg font-medium tabular-nums",
-        // The same translucent fill every other control carries in dark mode,
-        // so a row of these sits at the same depth as the inputs above them.
-        "bg-transparent dark:bg-input/25",
+        // No fill, like every other field: the page colour, so a row of these
+        // sits at the same depth as the inputs above them.
+        "bg-transparent",
         /*
          * ⚠ THE TRANSITION IS EXPLICIT AND SHORT. `transition-all` was picking
          * up the layout properties too, so a slot that gained a digit animated
