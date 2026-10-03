@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { AlertTriangle, Plus } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { CopyField } from "@repo/ui/components/copy"
 import {
@@ -30,6 +29,7 @@ import {
 } from "@/components/api-key-scope"
 import { createApiKey } from "@/lib/actions"
 import type { CreatedApiKey } from "@/lib/types"
+import { toastError } from "@/lib/toast"
 
 /**
  * Minting a key, and the one chance to copy it.
@@ -87,7 +87,7 @@ export function CreateApiKeyButton({
     setPending(false)
 
     if (!result.ok) {
-      toast.error("Could not create the key", { description: result.error })
+      toastError("Could not create the key", { description: result.error })
       return
     }
 

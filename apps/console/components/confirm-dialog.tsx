@@ -79,6 +79,13 @@ function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void })
 }
 
 /**
+ * The word every bulk delete asks for. Several things have no single name to
+ * type, but there is still a deliberate word between a stray click and losing
+ * them - and it is the same word on every list, so nobody has to read which.
+ */
+export const BULK_CONFIRM_WORD = "DELETE"
+
+/**
  * A keyboard chip sitting ON a filled button, per button variant.
  *
  * ⚠ THE ICON COLOUR HAS TO BE FORCED. `Kbd` paints its contents

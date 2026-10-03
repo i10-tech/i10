@@ -1,16 +1,7 @@
 "use client"
 
 import * as React from "react"
-import {
-  Copy,
-  Globe,
-  KeyRound,
-  MoreHorizontal,
-  RefreshCw,
-  SearchX,
-  Trash2,
-} from "lucide-react"
-import { toast } from "sonner"
+import { Copy, Globe, KeyRound, RefreshCw, SearchX, Trash2 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { CopyField } from "@repo/ui/components/copy"
@@ -23,20 +14,11 @@ import {
   DialogTitle,
 } from "@repo/ui/components/dialog"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@repo/ui/components/dropdown-menu"
 import { MotionBody, MotionRow } from "@/components/list/motion"
-import {
-  ListCell,
-  ListHead,
-  ListHeader,
-  ListTable,
-  rowMenuClass,
-} from "@/components/list/table"
+import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
 import {
   FilterSelect,
   ListToolbar,
@@ -51,6 +33,8 @@ import { revokeApiKey, rotateApiKey } from "@/lib/actions"
 import { useRetained } from "@/lib/react"
 import type { ApiKeyRow, CreatedApiKey } from "@/lib/types"
 import { Time } from "@/components/time"
+import { toastDone, toastError } from "@/lib/toast"
+import { RowMenu } from "@/components/list/row-menu"
 
 /**
  * The key list.
@@ -251,48 +235,36 @@ export function ApiKeysTable({
                     </ListCell>
                     <ListCell className="py-1.5 text-right">
                       {!revoked && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className={rowMenuClass}
-                              aria-label={`Actions for ${key.name}`}
-                            >
-                              <MoreHorizontal />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44">
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                void navigator.clipboard.writeText(key.id).then(
-                                  () => toast.success("Key ID copied"),
-                                  () => toast.error("Could not copy the ID"),
-                                )
-                              }
-                            >
-                              <Copy />
-                              Copy ID
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onSelect={() => setScoping(key)}>
-                              <Globe />
-                              Change scope
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => setRotating(key)}>
-                              <RefreshCw />
-                              Rotate
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onSelect={() => setRevoking(key)}
-                            >
-                              <Trash2 />
-                              Revoke
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <RowMenu label={key.name}>
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              void navigator.clipboard.writeText(key.id).then(
+                                () => toastDone("Key ID copied"),
+                                () => toastError("Could not copy the ID"),
+                              )
+                            }
+                          >
+                            <Copy />
+                            Copy ID
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => setScoping(key)}>
+                            <Globe />
+                            Change scope
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setRotating(key)}>
+                            <RefreshCw />
+                            Rotate
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setRevoking(key)}
+                          >
+                            <Trash2 />
+                            Revoke
+                          </DropdownMenuItem>
+                        </RowMenu>
                       )}
                     </ListCell>
                   </MotionRow>
@@ -330,7 +302,7 @@ export function ApiKeysTable({
 
           const result = await revokeApiKey(revoking.id)
           if (!result.ok) {
-            toast.error("Could not revoke the key", { description: result.error })
+            toastError("Could not revoke the key", { description: result.error })
             return false
           }
           return true
@@ -358,7 +330,7 @@ export function ApiKeysTable({
           if (!rotating) return false
           const result = await rotateApiKey(rotating.id)
           if (!result.ok) {
-            toast.error("Could not rotate the key", { description: result.error })
+            toastError("Could not rotate the key", { description: result.error })
             return false
           }
           issued.current = result.data

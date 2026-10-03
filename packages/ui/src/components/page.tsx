@@ -21,26 +21,35 @@ export function Page({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="page"
-      className={cn("flex min-h-0 flex-1 flex-col", className)}
+      className={cn("group/page flex min-h-0 flex-1 flex-col", className)}
       {...props}
     />
   )
 }
 
 /**
- * The sticky header: title, description, and the actions for the whole screen.
+ * The page's own title block: title, description, and the actions for the
+ * whole screen.
  *
- * ⚠ STICKY, AND THE BACKGROUND IS OPAQUE RATHER THAN BLURRED. A blurred
- * translucent header over a scrolling table smears the rows underneath it into
- * a grey band, and on the one surface where a person is scanning for a single
- * row that is actively hostile. The border below it is the whole affordance.
+ * ⚠ PART OF THE CONTENT, NOT A BAR ACROSS THE TOP (decided 2026-10-03). It was
+ * a sticky band with an edge-to-edge rule that met the line under the rail's
+ * workspace row, which read as a second piece of chrome next to the sidebar.
+ * The sidebar is the only chrome now; a page opens with what it is, the way
+ * Linear, Resend and Clerk do, and scrolls away with the rest of it.
+ *
+ * ⚠ IT TAKES THE BODY'S WIDTH WITHOUT BEING TOLD IT. `PageBody` carries the
+ * width variant and marks itself with `data-page-width`; the header reads that
+ * through `:has()` on the page, so a title always starts on the same line as
+ * the content under it and no call site passes the width twice.
  */
 export function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
   return (
     <header
       data-slot="page-header"
       className={cn(
-        "sticky top-0 z-20 flex flex-col gap-1 border-b bg-background px-6 pt-5 pb-4",
+        "mx-auto flex w-full max-w-7xl flex-col gap-1 px-6 pt-8 pb-2",
+        "group-has-[[data-page-width=full]]/page:max-w-none",
+        "group-has-[[data-page-width=prose]]/page:max-w-3xl",
         className,
       )}
       {...props}
@@ -68,7 +77,7 @@ export function PageTitle({ className, ...props }: React.ComponentProps<"h1">) {
        * renders exactly as it did - and the day it is published, every page
        * title in the console changes with it and nothing else does.
        */
-      className={cn("font-display text-xl font-semibold tracking-tight", className)}
+      className={cn("font-display text-2xl font-semibold tracking-tight", className)}
       {...props}
     />
   )
@@ -109,8 +118,9 @@ export function PageBody({
   return (
     <div
       data-slot="page-body"
+      data-page-width={width}
       className={cn(
-        "flex-1 px-6 py-6",
+        "flex-1 px-6 pt-6 pb-10",
         width === "wide" && "mx-auto w-full max-w-7xl",
         width === "prose" && "mx-auto w-full max-w-3xl",
         className,

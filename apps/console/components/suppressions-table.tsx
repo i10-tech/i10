@@ -4,7 +4,6 @@ import * as React from "react"
 import Link from "next/link"
 import { SearchX, ShieldCheck, Undo2 } from "lucide-react"
 import { AnimatePresence, motion, type Transition } from "motion/react"
-import { toast } from "sonner"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
@@ -29,6 +28,7 @@ import { removeSuppression } from "@/lib/actions"
 import type { SuppressionRow } from "@/lib/types"
 import { useResetWhen, useRetained } from "@/lib/react"
 import { Time } from "@/components/time"
+import { toastError } from "@/lib/toast"
 
 /**
  * The suppression list.
@@ -332,7 +332,7 @@ function SuppressionRows({
               // can confirm two removals in the time one round trip takes, and
               // clearing would resurrect the other one too.
               setHidden((current) => current.filter((a) => a !== address))
-              toast.error("Could not remove it", { description: result.error })
+              toastError("Could not remove it", { description: result.error })
               return
             }
 

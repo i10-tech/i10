@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { FileUp, Upload } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -18,6 +17,7 @@ import { cn } from "cn"
 import { importContacts } from "@/lib/actions"
 import { formatNumber } from "@/lib/format"
 import { useResetOnOpen } from "@/lib/react"
+import { toastError } from "@/lib/toast"
 
 const MAX_BYTES = 20 * 1024 * 1024
 
@@ -67,7 +67,7 @@ export function ImportContactsButton() {
   function accept(next: File | null | undefined) {
     if (!next) return
     if (next.size > MAX_BYTES) {
-      toast.error("That file is too large", {
+      toastError("That file is too large", {
         description: "The limit is 20 MB. Split it and import in parts.",
       })
       return
@@ -94,7 +94,7 @@ export function ImportContactsButton() {
     setPending(false)
 
     if (!outcome.ok) {
-      toast.error("Import failed", { description: outcome.error })
+      toastError("Import failed", { description: outcome.error })
       return
     }
 

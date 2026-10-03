@@ -1,12 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
 import { Checkbox } from "@repo/ui/components/checkbox"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { BULK_CONFIRM_WORD, ConfirmDialog } from "@/components/confirm-dialog"
 import { deleteDomain, revokeApiKey } from "@/lib/actions"
 import { OUTCOME_HOLD_MS } from "@/lib/outcome"
+import { useResetOnOpen } from "@/lib/react"
 import { useStepUp } from "@/lib/step-up"
+import { toastError } from "@/lib/toast"
 
 /**
  * The one delete-a-domain conversation, wherever it is started from.
@@ -45,16 +46,42 @@ export function DeleteDomainDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   /**
-   * Where the caller goes once the domain is gone.
-   *
-   * ⚠ THE DIFFERENCE BETWEEN THE TWO CALLERS, AND THE ONLY ONE. The page has
-   * to leave - it is a page about a domain that no longer exists - and the
-   * list only has to re-read itself.
-   */
-  /**
    * Called once the "Deleted" tick has been seen - see lib/outcome.ts. A list
    * page passes nothing: the row is already gone behind the dialog.
    */
+  onDeleted?: () => void
+}) {
+  return (
+    <DeleteDomainsDialog
+      domains={[{ id, name, scopedKeys }]}
+      open={open}
+      onOpenChange={onOpenChange}
+      onDeleted={onDeleted}
+    />
+  )
+}
+
+/**
+ * The same conversation for several domains at once - the list's bulk delete.
+ *
+ * ⚠ ONE COMPONENT, NOT A SECOND COPY. A single delete is this with one domain
+ * in it; the step-up, the revoke-first ordering and the keys question are the
+ * same code either way, which is the whole reason this file exists.
+ *
+ * ⚠ THE DOMAINS GO ONE AT A TIME, AND A FAILURE STOPS THERE. There is no bulk
+ * endpoint, and a handful is all anybody ticks. What already went is
+ * remembered, so pressing the button again after a failure carries on from
+ * the domain that failed instead of re-deleting the ones that are gone.
+ */
+export function DeleteDomainsDialog({
+  domains,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  domains: { id: string; name: string; scopedKeys?: { id: string; name: string }[] }[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
   onDeleted?: () => void
 }) {
   const stepUp = useStepUp()
@@ -66,64 +93,75 @@ export function DeleteDomainDialog({
    * re-add can untick it, and the label says exactly what it will do.
    */
   const [alsoRevoke, setAlsoRevoke] = React.useState(true)
+  const done = React.useRef(new Set<string>())
+  useResetOnOpen(open, () => {
+    done.current = new Set()
+  })
+
+  const one = domains.length === 1 ? domains[0]! : null
+  const scopedKeys = domains.flatMap((d) => d.scopedKeys ?? [])
 
   return (
     <ConfirmDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`Delete ${name}?`}
-      description="Mail can no longer be sent from this domain, and its DNS records stop being served if it was delegated. Messages already sent keep their history."
-      confirmLabel="Delete domain"
+      title={one ? `Delete ${one.name}?` : `Delete ${domains.length} domains?`}
+      description={
+        one
+          ? "Mail can no longer be sent from this domain, and its DNS records stop being served if it was delegated. Messages already sent keep their history."
+          : `Mail can no longer be sent from ${domains.map((d) => d.name).join(", ")}, and their DNS records stop being served where they were delegated. Messages already sent keep their history.`
+      }
+      confirmLabel={one ? "Delete domain" : `Delete ${domains.length} domains`}
       doneLabel="Deleted"
       /*
        * ⚠ DELETING A DOMAIN STOPS ITS MAIL, SO IT ASKS FOR THE NAME. This is
        * not ceremony: typing it is the difference between losing a staging
        * domain and losing production, and it is the only confirmation that
-       * requires reading which domain you are actually on. It matters more
-       * from the list than it ever did from the page - on the page you had at
-       * least arrived at that domain deliberately.
+       * requires reading which domain you are actually on. Several at once
+       * have no single name, so they take the word every bulk delete takes.
        */
-      confirmWord={name}
+      confirmWord={one ? one.name : BULK_CONFIRM_WORD}
       onConfirm={async () => {
         /*
          * ⚠ PROVED ONCE, BEFORE ANY OF IT, RATHER THAN PER CALL. The prompt
-         * works by replaying the request it refused, and this flow is up to
-         * three requests - replaying it half-done would try to revoke keys
-         * that are already revoked and report a failure for work that
-         * succeeded. `stepUp` asks against a route that does nothing, so
-         * retrying it costs nothing. See lib/step-up.ts - and note the API
-         * refuses the delete on its own, so this is the prompt rather than the
-         * protection.
+         * works by replaying the request it refused, and this flow is several
+         * requests - replaying it half-done would try to revoke keys that are
+         * already revoked and report a failure for work that succeeded.
+         * `stepUp` asks against a route that does nothing, so retrying it
+         * costs nothing. See lib/step-up.ts - and note the API refuses the
+         * delete on its own, so this is the prompt rather than the protection.
          *
          * ⚠ AND `false` LEAVES THE DIALOG OPEN WITH NOTHING DESTROYED, which
          * is the right answer to somebody closing the verification prompt.
          */
         if (!(await stepUp())) return false
 
-        /*
-         * ⚠ THE KEYS GO FIRST, AND THE ORDER IS THE SAFE ONE RATHER THAN THE
-         * TIDY ONE. If the domain delete fails after the keys are revoked,
-         * somebody has a working domain and some dead keys - annoying, and
-         * fixable by creating new ones. The other order risks a deleted domain
-         * and live keys still pointing at it, which is the exact state this is
-         * here to prevent.
-         */
-        if (alsoRevoke) {
-          for (const key of scopedKeys) {
-            const revoked = await revokeApiKey(key.id)
-            if (!revoked.ok) {
-              toast.error(`Could not revoke ${key.name}`, {
-                description: revoked.error,
-              })
-              return false
+        for (const domain of domains) {
+          if (done.current.has(domain.id)) continue
+          /*
+           * ⚠ THE KEYS GO FIRST, AND THE ORDER IS THE SAFE ONE RATHER THAN THE
+           * TIDY ONE. If the domain delete fails after the keys are revoked,
+           * somebody has a working domain and some dead keys - annoying, and
+           * fixable by creating new ones. The other order risks a deleted
+           * domain and live keys still pointing at it, which is the exact
+           * state this is here to prevent.
+           */
+          if (alsoRevoke) {
+            for (const key of domain.scopedKeys ?? []) {
+              const revoked = await revokeApiKey(key.id)
+              if (!revoked.ok) {
+                toastError(`Could not revoke ${key.name}`, revoked.error)
+                return false
+              }
             }
           }
-        }
 
-        const result = await deleteDomain(id)
-        if (!result.ok) {
-          toast.error("Could not delete the domain", { description: result.error })
-          return false
+          const result = await deleteDomain(domain.id)
+          if (!result.ok) {
+            toastError(`Could not delete ${domain.name}`, result.error)
+            return false
+          }
+          done.current.add(domain.id)
         }
 
         // ⚠ AFTER THE HOLD, SO THE TICK IS SEEN BEFORE THE PAGE GOES. The
@@ -135,17 +173,15 @@ export function DeleteDomainDialog({
     >
       {/*
        * ⚠ IT ASKS ABOUT THE KEYS THAT ONLY WORKED HERE, BECAUSE NOTHING ELSE
-       * EVER WILL. A key restricted to this domain becomes, the moment the
-       * domain goes, a live credential that can send from nothing - it does
-       * not fail, it does not warn, it simply sits in somebody's environment
-       * being valid. The person deleting the domain is the only one who will
-       * ever be in a position to connect the two, and this is the only moment
-       * they are in it.
+       * EVER WILL. A key restricted to a deleted domain becomes a live
+       * credential that can send from nothing - it does not fail, it does not
+       * warn, it simply sits in somebody's environment being valid. The person
+       * deleting the domain is the only one who will ever be in a position to
+       * connect the two, and this is the only moment they are in it.
        *
        * ⚠ AN UNRESTRICTED KEY IS NOT MENTIONED, DELIBERATELY. It works
        * perfectly well for every other domain, so offering to revoke it would
-       * be offering to break something unrelated - and a prompt that appears
-       * whether or not it is relevant is a prompt people stop reading.
+       * be offering to break something unrelated.
        */}
       {scopedKeys.length > 0 && (
         <label className="flex cursor-pointer items-start gap-3 rounded-md border border-warning/25 bg-warning/5 p-3">
@@ -157,15 +193,14 @@ export function DeleteDomainDialog({
           <span className="space-y-1">
             <span className="block text-sm font-medium">
               {scopedKeys.length === 1
-                ? "Also revoke the key that only sends from this domain"
-                : `Also revoke the ${scopedKeys.length} keys that only send from this domain`}
+                ? `Also revoke the key that only sends from ${one ? "this domain" : "these domains"}`
+                : `Also revoke the ${scopedKeys.length} keys that only send from ${one ? "this domain" : "these domains"}`}
             </span>
             <span className="block text-xs text-muted-foreground">
               {/*
                * ⚠ THE KEYS ARE NAMED. "One key" is an abstraction somebody has
                * to go and resolve in another tab before they can answer;
-               * "production-api" is the thing they recognise, and naming it is
-               * what makes the checkbox answerable without leaving.
+               * "production-api" is the thing they recognise.
                */}
               {scopedKeys.map((key) => key.name).join(", ")} - leaving{" "}
               {scopedKeys.length === 1 ? "it" : "them"} means a live key that can send

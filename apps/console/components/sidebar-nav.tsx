@@ -234,14 +234,14 @@ const ICON_SPRING: Transition = { type: "spring", stiffness: 500, damping: 30 }
 const ACTIVE_SPRING: Transition = { type: "spring", stiffness: 380, damping: 34 }
 
 /**
- * ⚠ SCALE AND A SINGLE PIXEL OF LIFT - NO ROTATION, AND THAT IS DELIBERATE.
- * A rotate reads beautifully on a gear and absurdly on an envelope, and this
- * list has eighteen different glyphs. The only transform that is flattering to
- * all of them is the one that does not imply a direction.
+ * ⚠ NOTHING ON HOVER, A PRESS ON TAP (2026-10-03). The icon used to grow and
+ * lift a pixel under the pointer; the row's fill already answers a hover, and
+ * an icon that hops on every pass down the rail is motion without meaning. The
+ * small press on tap stays - it is the confirmation that the click landed.
  */
 const ICON_VARIANTS: Variants = {
-  hover: { scale: 1.12, y: -1 },
-  tap: { scale: 0.92, y: 0 },
+  hover: { scale: 1 },
+  tap: { scale: 0.92 },
 }
 
 function NavIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {

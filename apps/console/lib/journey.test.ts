@@ -116,9 +116,35 @@ describe("domainJourney", () => {
     expect(labels(steps)).toEqual([
       "Created:done",
       "2 of 3 records found:current",
-      "Verified:pending",
+      "Verifying domain:pending",
     ])
     expect(steps[1]).toMatchObject({ at: at(3), note: "Last checked" })
+  })
+
+  it("is checking DNS, not idle, before any record is found", () => {
+    const steps = domainJourney({
+      status: "not_started",
+      created_at: at(0),
+      records: records("pending", "pending"),
+    })
+    expect(labels(steps)).toEqual([
+      "Created:done",
+      "Checking DNS:current",
+      "Verifying domain:pending",
+    ])
+  })
+
+  it("moves the step in progress to verifying once every record is found", () => {
+    const steps = domainJourney({
+      status: "pending",
+      created_at: at(0),
+      records: records("verified", "verified"),
+    })
+    expect(labels(steps)).toEqual([
+      "Created:done",
+      "Records validated:done",
+      "Verifying domain:current",
+    ])
   })
 
   it("names a failure and a displaced domain", () => {

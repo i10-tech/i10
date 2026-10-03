@@ -1,13 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
 import { emailProblem } from "@repo/ui/checks"
 import { EmailInput } from "@repo/ui/components/email-input"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { offerTransfer } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
 import { useStepUp } from "@/lib/step-up"
+import { toastDone, toastError } from "@/lib/toast"
 
 /** A key and what its scope becomes once the domain leaves. */
 export interface KeyImpact {
@@ -92,11 +92,11 @@ export function TransferDomainDialog({
 
         const result = await offerTransfer(id, email.trim())
         if (!result.ok) {
-          toast.error("Could not offer the domain", { description: result.error })
+          toastError("Could not offer the domain", { description: result.error })
           return false
         }
 
-        toast.success(`Offer sent to ${result.data.recipient_email}`, {
+        toastDone(`Offer sent to ${result.data.recipient_email}`, {
           description: result.data.emailed
             ? "It stays here until they accept. You can withdraw it until then."
             : "We could not email them, so they will only see it if they already have an i10 account - on their Domains page.",

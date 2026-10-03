@@ -1,4 +1,9 @@
-import { publishDnsRecords, refreshDomain, verifyDomain } from "@/lib/actions"
+import {
+  publishDnsRecords,
+  refreshDomain,
+  verifyDomain,
+  verifyDomainQuietly,
+} from "@/lib/actions"
 import type { ConflictingRecord, Domain } from "@/lib/types"
 
 /**
@@ -148,6 +153,24 @@ export async function activateDomain({
 const SCHEDULE_MS = [2_000, 3_000, 5_000, 8_000, 12_000, 15_000, 15_000]
 
 /**
+ * The domain page's watch: the same front-loaded start, then every 30 seconds
+ * for about half an hour (2026-10-03).
+ *
+ * ⚠ LONGER THAN THE FORMS' MINUTE, BECAUSE THIS IS THE PAGE PEOPLE WAIT ON.
+ * Somebody who pressed "I've added the records" or came back from connecting
+ * their provider sits here while DNS propagates, and the page has to move by
+ * itself when it does - a minute of watching followed by silence made them
+ * reload to find out. Each tick while the domain is unregistered is a verify,
+ * which registers it with SES the moment ownership is proved; after that it is
+ * a read. Hidden tabs do not tick (see `untilVisible`), so an open tab in the
+ * background costs nothing.
+ */
+export const PAGE_WATCH_MS: readonly number[] = [
+  ...SCHEDULE_MS,
+  ...Array.from({ length: 58 }, () => 30_000),
+]
+
+/**
  * Keep asking until the provider agrees, or until the budget runs out.
  *
  * ⚠ IT RESOLVES RATHER THAN REJECTING WHEN IT RUNS OUT, because running out is
@@ -165,8 +188,14 @@ export async function watchUntilVerified({
   signal,
   onTick,
   schedule = SCHEDULE_MS,
+  quiet = false,
 }: {
   domainId: string
+  /**
+   * Verify without re-rendering the page - for a caller that applies each
+   * answer itself through `onTick`. See `verifyDomainQuietly`.
+   */
+  quiet?: boolean
   signal?: AbortSignal
   /** Called with each answer, so a caller can show progress without polling too. */
   onTick?: (domain: Domain) => void
@@ -179,6 +208,9 @@ export async function watchUntilVerified({
 
     const waited = await sleep(delay, signal)
     if (!waited) return { verified: false, domain: last }
+    // ⚠ NOT WHILE NOBODY IS LOOKING. A background tab waits here until it is
+    // shown again, then asks at once - so coming back to it is an answer.
+    if (!(await untilVisible(signal))) return { verified: false, domain: last }
 
     /*
      * ⚠ RE-PROVE WHILE THERE IS NO IDENTITY, REFRESH ONCE THERE IS - AND THIS
@@ -211,7 +243,7 @@ export async function watchUntilVerified({
      * circular inference rather than as the design smell it is.
      */
     const answered: { ok: boolean; data?: Domain } = unregistered
-      ? await verifyDomain(domainId)
+      ? await (quiet ? verifyDomainQuietly : verifyDomain)(domainId)
       : await refreshDomain(domainId)
     const result = answered
     /*
@@ -228,6 +260,8 @@ export async function watchUntilVerified({
     onTick?.(result.data)
     if (result.data.status === "verified")
       return { verified: true, domain: result.data }
+    // Failed is final until somebody changes their DNS and presses Verify.
+    if (result.data.status === "failed") return { verified: false, domain: result.data }
   }
 
   return { verified: false, domain: last }
@@ -248,6 +282,30 @@ function sleep(ms: number, signal?: AbortSignal): Promise<boolean> {
       resolve(false)
     }
 
+    signal?.addEventListener("abort", stop, { once: true })
+  })
+}
+
+/** Resolves once the document is visible (at once if it is), false if aborted. */
+function untilVisible(signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve(false)
+    if (typeof document === "undefined" || !document.hidden) return resolve(true)
+
+    function shown() {
+      if (document.hidden) return
+      done(true)
+    }
+    function stop() {
+      done(false)
+    }
+    function done(value: boolean) {
+      document.removeEventListener("visibilitychange", shown)
+      signal?.removeEventListener("abort", stop)
+      resolve(value)
+    }
+
+    document.addEventListener("visibilitychange", shown)
     signal?.addEventListener("abort", stop, { once: true })
   })
 }

@@ -10,7 +10,7 @@ import { cancelTransfer } from "@/lib/actions"
 import { formatExact } from "@/lib/format"
 import type { TransferOffer } from "@/lib/types"
 import type { KeyImpact } from "@/components/transfer-domain-dialog"
-import { toast } from "sonner"
+import { toastDone, toastError } from "@/lib/toast"
 
 /**
  * ⚠ IT IS A ZONE AT THE FOOT OF THE PAGE, NOT A ✕✕✕ MENU IN THE HEADER, AND
@@ -62,10 +62,10 @@ export function DomainDangerZone({
     const result = await cancelTransfer(id)
     setWithdrawing(false)
     if (!result.ok) {
-      toast.error("Could not withdraw the offer", { description: result.error })
+      toastError("Could not withdraw the offer", { description: result.error })
       return
     }
-    toast.success("Offer withdrawn")
+    toastDone("Offer withdrawn")
     router.refresh()
   }
 

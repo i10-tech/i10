@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { Save } from "lucide-react"
-import { toast } from "sonner"
 import { ActionButton } from "@repo/ui/components/action-button"
 import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
@@ -19,6 +18,7 @@ import { HtmlEditor } from "@/components/html-editor"
 import { updateBroadcast } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import type { BroadcastDetail, DomainSummary, SegmentRow, TopicRow } from "@/lib/types"
+import { toastError } from "@/lib/toast"
 
 /**
  * Writing a broadcast.
@@ -100,7 +100,7 @@ export function BroadcastEditor({
       })
 
       if (!result.ok) {
-        toast.error("Could not save", { description: result.error })
+        toastError("Could not save", { description: result.error })
         return false
       }
       return true

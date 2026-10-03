@@ -58,7 +58,7 @@ export function StepVerify({
    * `not_started` in that table, with no SES identity, until somebody presses
    * Verify or the minutely prover gets round to it. So a domain added through
    * the Cloudflare hand-off reached SES a minute or more late, while the same
-   * domain added from /domains/new - whose page runs `VerificationWatch` -
+   * domain added from /domains/new - whose page runs `DomainLiveProvider` -
    * reached it within seconds. Now both ask the same way: `verify` while a
    * domain is unregistered, `refresh` once SES has it. See
    * `watchUntilVerified` for the rule, and lib/actions.ts for why neither needs

@@ -1,12 +1,14 @@
 "use client"
 
 import * as React from "react"
-import { Download } from "lucide-react"
+import { Check, Copy, Download } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { CopyButton, useCopy } from "@repo/ui/components/copy"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { cn } from "cn"
 import { Status } from "@/components/status"
-import { toast } from "sonner"
 import type { DnsRecord } from "@/lib/types"
+import { toastDone } from "@/lib/toast"
 
 /**
  * The records a customer has to publish.
@@ -26,56 +28,213 @@ import type { DnsRecord } from "@/lib/types"
 export function DnsRecords({ records }: { records: DnsRecord[] }) {
   const { copy } = useCopy()
 
-  if (records.length === 0) {
-    return (
-      <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-        No records have been issued for this domain yet.
-      </p>
-    )
-  }
-
-  /*
-   * ⚠ THE ZONE-FILE EXPORT IS PLAIN TEXT, NOT A DOWNLOAD OF A .zone FILE.
-   * Almost every provider's bulk importer accepts pasted BIND syntax, and the
-   * people who reach for this are the ones with a terminal open. A file would
-   * add a download, a filename and a MIME type to solve a problem that a
-   * clipboard already solves.
-   */
-  function copyZoneFile() {
-    const lines = records.map((record) => {
-      const value =
-        record.type === "TXT"
-          ? // ⚠ QUOTED, AND LONG VALUES SPLIT INTO 255-BYTE STRINGS. A TXT
-            // record longer than 255 bytes is invalid as a single string - the
-            // wire format transmits it in chunks that the resolver rejoins -
-            // and a DKIM key is always longer than that. Every zone file that
-            // gets this wrong fails to load with a message about a string being
-            // too long.
-            chunk(record.value)
-              .map((part) => `"${part}"`)
-              .join(" ")
-          : record.value
-
-      const priority = record.priority === undefined ? "" : `${record.priority} `
-      return `${record.name}.\t${record.ttl}\tIN\t${record.type}\t${priority}${value}`
-    })
-
-    void copy(lines.join("\n")).then((ok) => {
-      if (ok) toast.success("Zone file copied")
-    })
-  }
+  if (records.length === 0) return <NoRecords />
 
   return (
     <div className="space-y-3">
-      <div className="hidden overflow-hidden rounded-2xl border md:block">
+      <RecordsTable records={records} framed />
+      <div className="flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            void copy(zoneFile(records)).then(
+              (ok) => ok && toastDone("Zone file copied"),
+            )
+          }
+        >
+          <Download />
+          Copy as zone file
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The records as Resend's domain page lays them out (2026-10-03): one card,
+ * "DNS Records" and its actions across the top, then a section per job -
+ * verifying the domain, sending from it, DMARC - each with its own table.
+ *
+ * ⚠ GROUPED BY WHAT THE RECORD IS FOR, NOT BY TYPE. Somebody setting up DNS
+ * thinks "the DKIM one" and "the SPF ones"; a TXT and an MX that both serve
+ * SPF belong under one heading, which a sort by type would split.
+ */
+const GROUPS: { record: string; title: string; note?: string }[] = [
+  { record: "DKIM", title: "Domain verification" },
+  { record: "SPF", title: "Enable sending" },
+  { record: "DMARC", title: "DMARC", note: "Recommended" },
+]
+
+/**
+ * What a record is for, which is what it is grouped by.
+ *
+ * ⚠ A DELEGATED DOMAIN'S NS RECORDS ARE SORTED BY THE NAME THEY DELEGATE
+ * (2026-10-03). Every one of them is `record: "NS"`, so they all landed in one
+ * "Delegation" list of six rows and the page took a different shape from a
+ * manual domain's. Each delegated name does one job - `_domainkey` carries
+ * DKIM, `_dmarc` carries DMARC, the return path (`send`, or a custom one)
+ * carries SPF - so the same three sections fit both kinds of domain.
+ */
+function purposeOf(record: DnsRecord): string {
+  if (record.record !== "NS") return record.record
+  const name = record.name.toLowerCase()
+  if (name.startsWith("_domainkey.") || name.includes("._domainkey.")) return "DKIM"
+  if (name.startsWith("_dmarc.")) return "DMARC"
+  return "SPF"
+}
+
+export function DnsRecordsCard({
+  records,
+  actions,
+}: {
+  records: DnsRecord[]
+  /** Connect or publish, beside the title. */
+  actions?: React.ReactNode
+}) {
+  const { copy } = useCopy()
+
+  return (
+    <section className="rounded-3xl border p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-xl font-semibold tracking-tight">
+          DNS Records
+        </h2>
+        <div className="flex items-center gap-2">
+          {actions}
+          {records.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="rounded-full"
+                  aria-label="Copy as zone file"
+                  onClick={() =>
+                    void copy(zoneFile(records)).then(
+                      (ok) => ok && toastDone("Zone file copied"),
+                    )
+                  }
+                >
+                  <Download />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Copy as zone file</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      {records.length === 0 ? (
+        <div className="mt-6">
+          <NoRecords />
+        </div>
+      ) : (
+        <DnsRecordGroups records={records} className="mt-2" />
+      )}
+    </section>
+  )
+}
+
+/**
+ * The card's sections without the card - the add flow's last step shows the
+ * same groups under its own heading.
+ */
+export function DnsRecordGroups({
+  records,
+  status = true,
+  className,
+}: {
+  records: DnsRecord[]
+  /** Each record's status. Off before anything has been checked. */
+  status?: boolean
+  className?: string
+}) {
+  const known = new Set(GROUPS.map((g) => g.record))
+  const sorted = records.map((r) => ({ r, purpose: purposeOf(r) }))
+  const groups = [
+    ...GROUPS.map((g) => ({
+      ...g,
+      rows: sorted.filter((x) => x.purpose === g.record).map((x) => x.r),
+    })),
+    {
+      record: "other",
+      title: "Other records",
+      note: undefined,
+      rows: sorted.filter((x) => !known.has(x.purpose)).map((x) => x.r),
+    },
+  ].filter((g) => g.rows.length > 0)
+
+  return (
+    <div className={cn("divide-y", className)}>
+      {groups.map((group) => (
+        <div key={group.record} className="py-6 last:pb-0">
+          <h3 className="flex items-center gap-2 font-semibold">
+            {group.title}
+            {group.note && (
+              <span className="rounded-md bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                {group.note}
+              </span>
+            )}
+          </h3>
+          {group.record !== "other" && group.record !== group.title && (
+            <p className="mt-3 text-sm font-semibold">{group.record}</p>
+          )}
+          <div className="mt-3">
+            <RecordsTable records={group.rows} status={status} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function NoRecords() {
+  return (
+    <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+      No records have been issued for this domain yet.
+    </p>
+  )
+}
+
+/**
+ * ⚠ THE VALUE COLUMN IS MONOSPACE, SELECTABLE, AND NEVER TRUNCATED WITH AN
+ * ELLIPSIS THAT WOULD BE COPIED - see the note at the top of the file.
+ */
+function RecordsTable({
+  records,
+  framed = false,
+  status = true,
+}: {
+  records: DnsRecord[]
+  status?: boolean
+  /** A bordered table (onboarding) rather than the card's open one. */
+  framed?: boolean
+}) {
+  return (
+    <div className="space-y-3">
+      <div
+        className={cn(
+          "hidden md:block",
+          framed ? "overflow-hidden rounded-2xl border" : "",
+        )}
+      >
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b bg-muted/30 text-left">
+            <tr
+              className={cn(
+                "text-left",
+                framed
+                  ? "border-b bg-muted/30"
+                  : // Resend's band: a rounded strip, no frame round the rows.
+                    "bg-muted/50 [&>th:first-child]:rounded-l-xl [&>th:last-child]:rounded-r-xl",
+              )}
+            >
               <Th className="w-[5.5rem]">Type</Th>
               <Th className="w-[14rem]">Name</Th>
               <Th>Value</Th>
               <Th className="w-[5rem]">TTL</Th>
-              <Th className="w-[9rem]">Status</Th>
+              {status && <Th className="w-[9rem]">Status</Th>}
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -93,19 +252,17 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
                  */}
                 <Td>
                   <span className="font-mono text-xs font-medium">{record.type}</span>
-                  {record.record !== record.type && (
+                  {/* In the card the group heading already names it. */}
+                  {framed && record.record !== record.type && (
                     <span className="mt-0.5 block text-2xs text-muted-foreground">
                       {record.record}
                     </span>
                   )}
                 </Td>
                 <Td>
-                  <div className="flex items-center gap-1">
-                    <span className="min-w-0 truncate font-mono text-xs select-all">
-                      {record.name}
-                    </span>
-                    <CopyButton value={record.name} size="icon-xs" label="Copy name" />
-                  </div>
+                  <CopyValue value={record.name} label="name">
+                    <span className="min-w-0 truncate">{record.name}</span>
+                  </CopyValue>
                 </Td>
                 <Td>
                   {/*
@@ -119,14 +276,15 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
                    * value and lets a long DKIM key still push it to the edge,
                    * which is the one case where the old layout looked right.
                    */}
-                  <div className="flex items-center justify-start gap-1">
+                  <CopyValue value={record.value} label="value">
                     {/*
                      * ⚠ `overflow-x-auto` ON THE VALUE, NOT `truncate`. An
                      * ellipsis in a DKIM key is invisible to somebody
                      * triple-clicking to select it, and they paste 60
-                     * characters of a 220-character key.
+                     * characters of a 220-character key. A click copies the
+                     * whole value whatever is visible.
                      */}
-                    <span className="min-w-0 overflow-x-auto font-mono text-xs whitespace-nowrap select-all">
+                    <span className="min-w-0 overflow-x-auto whitespace-nowrap">
                       {record.priority !== undefined && (
                         <span className="text-muted-foreground">
                           {record.priority}{" "}
@@ -134,22 +292,21 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
                       )}
                       {record.value}
                     </span>
-                    <CopyButton
-                      value={record.value}
-                      size="icon-xs"
-                      label="Copy value"
-                      className="shrink-0"
-                    />
-                  </div>
+                  </CopyValue>
                 </Td>
                 <Td>
                   <span className="font-mono text-xs text-muted-foreground">
                     {record.ttl}
                   </span>
                 </Td>
-                <Td>
-                  <Status status={record.status} />
-                </Td>
+                {status && (
+                  <Td>
+                    <Status
+                      status={record.status}
+                      variant={framed ? undefined : "pill"}
+                    />
+                  </Td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -173,7 +330,7 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
                   </span>
                 )}
               </span>
-              <Status status={record.status} />
+              {status && <Status status={record.status} />}
             </div>
 
             <Row label="Name" value={record.name} />
@@ -189,14 +346,73 @@ export function DnsRecords({ records }: { records: DnsRecord[] }) {
           </li>
         ))}
       </ul>
-
-      <div className="flex justify-end">
-        <Button variant="ghost" size="sm" onClick={copyZoneFile}>
-          <Download />
-          Copy as zone file
-        </Button>
-      </div>
     </div>
+  )
+}
+
+/*
+ * ⚠ THE ZONE-FILE EXPORT IS PLAIN TEXT, NOT A DOWNLOAD OF A .zone FILE.
+ * Almost every provider's bulk importer accepts pasted BIND syntax, and the
+ * people who reach for this are the ones with a terminal open. A file would
+ * add a download, a filename and a MIME type to solve a problem that a
+ * clipboard already solves.
+ */
+function zoneFile(records: DnsRecord[]): string {
+  const lines = records.map((record) => {
+    const value =
+      record.type === "TXT"
+        ? // ⚠ QUOTED, AND LONG VALUES SPLIT INTO 255-BYTE STRINGS. A TXT
+          // record longer than 255 bytes is invalid as a single string - the
+          // wire format transmits it in chunks that the resolver rejoins -
+          // and a DKIM key is always longer than that. Every zone file that
+          // gets this wrong fails to load with a message about a string being
+          // too long.
+          chunk(record.value)
+            .map((part) => `"${part}"`)
+            .join(" ")
+        : record.value
+
+    const priority = record.priority === undefined ? "" : `${record.priority} `
+    return `${record.name}.\t${record.ttl}\tIN\t${record.type}\t${priority}${value}`
+  })
+
+  return lines.join("\n")
+}
+
+/**
+ * A name or value that copies itself when pressed (2026-10-03), as Resend's
+ * do: the text is the target, not a 16px button beside it. The icon after it
+ * appears on hover and turns into a tick once copied, so the press is
+ * confirmed where it happened rather than in a toast across the screen.
+ */
+function CopyValue({
+  value,
+  label,
+  children,
+}: {
+  value: string
+  label: string
+  children: React.ReactNode
+}) {
+  const { copied, copy } = useCopy()
+  return (
+    <button
+      type="button"
+      onClick={() => void copy(value)}
+      aria-label={copied ? "Copied" : `Copy ${label}`}
+      title={`Copy ${label}`}
+      className="group/copy -mx-1 flex max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1 py-0.5 text-left font-mono text-xs transition-colors duration-(--duration-instant) ease-(--ease-linear) outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {children}
+      {copied ? (
+        <Check aria-hidden className="size-3 shrink-0 text-success" />
+      ) : (
+        <Copy
+          aria-hidden
+          className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/copy:opacity-100 group-focus-visible/copy:opacity-100"
+        />
+      )}
+    </button>
   )
 }
 

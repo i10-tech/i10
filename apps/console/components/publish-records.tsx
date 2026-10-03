@@ -1,15 +1,15 @@
 "use client"
 
 import * as React from "react"
-import { CloudUpload } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
+import { ProviderMark } from "@/components/provider-mark"
 import { publishDnsRecords } from "@/lib/actions"
 import { useRetained } from "@/lib/react"
 import type { ConflictingRecord, DnsConnection } from "@/lib/types"
+import { toastDone, toastError } from "@/lib/toast"
 
 /**
  * "Publish these for me."
@@ -76,7 +76,7 @@ export function PublishRecords({
         return false
       }
 
-      toast.error("Could not publish the records", { description: result.error })
+      toastError("Could not publish the records", { description: result.error })
       return false
     }
 
@@ -84,7 +84,7 @@ export function PublishRecords({
 
     const created = result.data.created.length
     const removed = result.data.removed.length
-    toast.success(
+    toastDone(
       created === 0
         ? "Everything was already published"
         : `Published ${created} records`,
@@ -101,14 +101,37 @@ export function PublishRecords({
   }
 
   if (!connection) {
-    return <ConnectProviderButton slug={providerSlug} providerName={providerName} />
+    return (
+      <ConnectProviderButton
+        slug={providerSlug}
+        providerName={providerName}
+        // ⚠ "CONNECT" UNTIL IT IS CONNECTED, THEN "PUBLISH RECORDS"
+        // (2026-10-03) - the same two words as the add-domain flow.
+        className="rounded-full"
+      />
+    )
   }
 
   return (
     <>
-      <Button size="sm" onClick={() => publish(false)} disabled={pending}>
-        {pending ? <Spinner /> : <CloudUpload />}
-        Publish these for me
+      {/*
+       * ⚠ "PUBLISH RECORDS", WITH THE PROVIDER'S MARK (2026-10-03). The
+       * provider is connected, so this writes the records now; the mark says
+       * where they will go.
+       */}
+      <Button
+        variant="outline"
+        size="sm"
+        className="rounded-full"
+        onClick={() => publish(false)}
+        disabled={pending}
+      >
+        {pending ? (
+          <Spinner />
+        ) : (
+          <ProviderMark slug={providerSlug} name={providerName} />
+        )}
+        Publish records
       </Button>
 
       {/*

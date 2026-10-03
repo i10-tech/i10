@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { Plus } from "lucide-react"
-import { toast } from "sonner"
 import { ActionButton } from "@repo/ui/components/action-button"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -18,6 +17,7 @@ import { emailProblem } from "@repo/ui/checks"
 import { addSuppression } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
+import { toastError } from "@/lib/toast"
 
 /**
  * ⚠ ADDING BY HAND IS FOR THE ADDRESS THAT KEEPS BOUNCING SOFTLY, OR THE ONE
@@ -51,7 +51,7 @@ export function AddSuppressionButton() {
       async () => {
         const result = await addSuppression(address.trim())
         if (!result.ok) {
-          toast.error("Could not suppress that address", { description: result.error })
+          toastError("Could not suppress that address", { description: result.error })
           return false
         }
         return true

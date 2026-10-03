@@ -1,18 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { MoreHorizontal, Trash2 } from "lucide-react"
-import { toast } from "sonner"
-import { Button } from "@repo/ui/components/button"
-import { rowMenuClass } from "@/components/list/table"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
+import { Trash2 } from "lucide-react"
+import { DropdownMenuItem } from "@repo/ui/components/dropdown-menu"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { deleteSegment } from "@/lib/actions"
+import { toastError } from "@/lib/toast"
+import { RowMenu } from "@/components/list/row-menu"
 
 /**
  * ⚠ DELETING A SEGMENT DELETES THE GROUPING, NOT THE PEOPLE. The dialog says so
@@ -25,24 +19,12 @@ export function SegmentActions({ id, name }: { id: string; name: string }) {
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className={rowMenuClass}
-            aria-label={`Actions for ${name}`}
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
-            <Trash2 />
-            Delete segment
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <RowMenu label={name}>
+        <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
+          <Trash2 />
+          Delete segment
+        </DropdownMenuItem>
+      </RowMenu>
 
       <ConfirmDialog
         open={confirming}
@@ -55,7 +37,7 @@ export function SegmentActions({ id, name }: { id: string; name: string }) {
         onConfirm={async () => {
           const result = await deleteSegment(id)
           if (!result.ok) {
-            toast.error("Could not delete the segment", { description: result.error })
+            toastError("Could not delete the segment", { description: result.error })
             return false
           }
           return true

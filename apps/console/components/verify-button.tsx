@@ -2,10 +2,10 @@
 
 import * as React from "react"
 import { RefreshCw } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { verifyDomain } from "@/lib/actions"
+import { toastDone, toastError, toastPending, toastNote } from "@/lib/toast"
 
 /**
  * "Check my records now."
@@ -40,7 +40,6 @@ import { verifyDomain } from "@/lib/actions"
  */
 export function VerifyButton({ id, status }: { id: string; status: string }) {
   const [pending, setPending] = React.useState(false)
-
   async function run() {
     if (pending) return
     setPending(true)
@@ -54,14 +53,14 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
        * moment - the message says to press again, which settles it.
        */
       if (result.name === "domain_already_claimed") {
-        toast.error("Verified elsewhere at the same moment", {
+        toastError("Verified elsewhere at the same moment", {
           description: result.error,
           duration: 10_000,
         })
         return
       }
 
-      toast.error("Could not check the records", { description: result.error })
+      toastError("Could not check the records", { description: result.error })
       return
     }
 
@@ -85,7 +84,7 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
          * published - the same distinction the API keeps between `absent` and
          * `unreachable`, carried all the way to the sentence.
          */
-        toast("We could not reach your nameservers", {
+        toastNote("We could not reach your nameservers", {
           description:
             "The lookup timed out, so we have not been able to read your records yet - this says nothing about whether they are right. Try again in a moment.",
           duration: 8000,
@@ -105,13 +104,13 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
          * in place beside the new ones is the state they are already in, so a
          * message that only says "add these" changes nothing.
          */
-        toast("Your records point at an earlier setup", {
+        toastNote("Your records point at an earlier setup", {
           description:
             "These nameserver records are ours, but they name a previous version of this domain - adding a domain again issues new ones. Replace the existing rows with the records shown on this page, then check again.",
           duration: 12_000,
         })
       } else {
-        toast("We cannot see the records yet", {
+        toastNote("We cannot see the records yet", {
           description:
             "We asked your nameservers and the records are not there yet. If you have just added them, propagation is usually minutes. If it has been longer, check the host of each row - many providers append the domain for you.",
           duration: 8000,
@@ -129,7 +128,7 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
     const leftover = result.data.leftover_records ?? []
     if (leftover.length > 0) {
       const names = [...new Set(leftover.map((r) => r.name))]
-      toast.warning("Remove the previous workspace's records", {
+      toastPending("Remove the previous workspace's records", {
         description: `This domain is now in this workspace, but another workspace's ${
           leftover[0]!.type === "TXT" ? "DKIM record" : "nameserver records"
         } still resolve at ${names.join(", ")}${
@@ -144,7 +143,7 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
 
     switch (result.data.status) {
       case "verified":
-        toast.success("Verified", { description: "This domain can send now." })
+        toastDone("Verified", { description: "This domain can send now." })
         break
       /*
        * ⚠ THE DNS HALF IS DONE HERE, AND SAYING SO IS THE POINT. Reaching this
@@ -154,20 +153,20 @@ export function VerifyButton({ id, status }: { id: string; status: string }) {
        * the one person who had finished that they had not.
        */
       case "pending":
-        toast("Records found, waiting on Amazon", {
+        toastNote("Records found, waiting on Amazon", {
           description:
             "We can see your DNS and it is correct. Amazon re-checks on its own schedule, usually within minutes - nothing else is needed from you.",
           duration: 8000,
         })
         break
       case "temporary_failure":
-        toast("Lookup failed, retrying", {
+        toastNote("Lookup failed, retrying", {
           description:
             "The DNS lookup itself failed - this does not mean your records are wrong. We will keep checking.",
         })
         break
       default:
-        toast.error("Records not found", {
+        toastError("Records not found", {
           description:
             "Check each row against what your DNS provider shows. A trailing dot or a quoted value is the usual cause.",
         })

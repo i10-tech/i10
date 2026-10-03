@@ -197,6 +197,23 @@ export async function verifyDomain(id: string) {
 }
 
 /**
+ * The same verify, without re-rendering the page (2026-10-03).
+ *
+ * ⚠ FOR THE DOMAIN PAGE, WHICH UPDATES ITSELF FROM THE ANSWER. `verifyDomain`
+ * revalidates and re-renders the caller, which re-ran every read on the page
+ * - the lookup, the keys, the delegation report - for a badge. The domain page
+ * holds the domain in client state (components/domain-live.tsx) and puts this
+ * answer straight into it, so only what changed changes.
+ */
+export async function verifyDomainQuietly(id: string) {
+  return run(() =>
+    api<VerifiedDomain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
+      method: "POST",
+    }),
+  )
+}
+
+/**
  * The cheap re-check, for watching rather than acting.
  *
  * ⚠ NOT `verifyDomain` IN A LOOP. Every verify re-asserts the DKIM key at SES

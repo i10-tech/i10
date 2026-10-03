@@ -1,12 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
 import { ActionButton } from "@repo/ui/components/action-button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { cn } from "cn"
 import { renameWorkspace, updateOnboarding } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
+import { toastError } from "@/lib/toast"
 
 /**
  * ⚠ THE USE CASE IS PRODUCT RESEARCH AND NEVER LOGIC. Nothing branches on it,
@@ -61,7 +61,7 @@ export function StepWorkspace({
       if (renaming) {
         const renamed = await renameWorkspace(value.trim())
         if (!renamed.ok) {
-          toast.error("Could not save the name", { description: renamed.error })
+          toastError("Could not save the name", { description: renamed.error })
           return false
         }
       }

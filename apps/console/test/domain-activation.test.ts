@@ -19,6 +19,7 @@ const reply = (kind: "verify" | "refresh") => {
 
 mock.module("@/lib/actions", () => ({
   verifyDomain: () => reply("verify"),
+  verifyDomainQuietly: () => reply("verify"),
   refreshDomain: () => reply("refresh"),
   publishDnsRecords: () => Promise.resolve({ ok: true, data: { created: [] } }),
 }))

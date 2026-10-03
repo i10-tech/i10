@@ -1,3 +1,4 @@
+import type { JourneyNotice } from "@/components/journey"
 /**
  * The steps of a resource's trip - an email from accepted to clicked, a domain
  * from added to verified, a broadcast from draft to sent - as the horizontal
@@ -235,13 +236,22 @@ export function domainJourney(domain: {
         }
       : {
           key: "records",
+          /*
+           * ⚠ "CHECKING DNS" AND SPINNING WHILE WE LOOK, NOT A GREY STEP
+           * (2026-10-03). `not_started` used to draw this as pending, under a
+           * notice that said we were looking for the records - the strip and
+           * the sentence above it disagreed about whether anything was
+           * happening. While the domain is unfinished we ARE looking (see
+           * DomainLiveProvider and the nightly re-check), so this is the step in
+           * progress; only a domain that has failed outright stops here.
+           */
           label:
             found > 0
               ? `${found} of ${domain.records.length} records found`
-              : "Records validated",
+              : "Checking DNS",
           icon: "records",
-          tone: found > 0 ? "warning" : "neutral",
-          state: domain.status === "not_started" ? "pending" : "current",
+          tone: domain.status === "failed" ? "danger" : "warning",
+          state: domain.status === "failed" ? "done" : "current",
           ...(checked
             ? { at: checked, note: "Last checked" }
             : { note: "Waiting for DNS" }),
@@ -276,10 +286,17 @@ export function domainJourney(domain: {
           }
         : {
             key: "verified",
-            label: "Verified",
+            label: "Verifying domain",
             icon: "verified",
-            tone: "success",
-            state: "pending",
+            /*
+             * ⚠ ONCE EVERY RECORD IS FOUND, THIS IS WHAT WE ARE WAITING ON. Our
+             * DNS check is done and Amazon's has not answered; the step that
+             * spins has to move here, or the strip shows a finished trip with
+             * nothing in progress while the domain still cannot send.
+             */
+            tone: all ? "warning" : "success",
+            state: all ? "current" : "pending",
+            ...(all ? { note: "Waiting on Amazon" } : {}),
           }
 
   return [created, records, final]
@@ -351,4 +368,48 @@ export function broadcastJourney(broadcast: {
     ...(broadcast.sent_at ? { at: broadcast.sent_at } : {}),
   })
   return steps
+}
+
+/**
+ * What each unfinished status means, said inside the events strip.
+ *
+ * ⚠ THE EXPLANATION IS INLINE, NOT IN A TOOLTIP. `temporary_failure` in
+ * particular is not a synonym for `failed` - SES uses it for a DNS lookup that
+ * failed in a way worth retrying - and a customer who reads it as "failed"
+ * goes and changes records that were correct.
+ */
+export function domainNotice(status: string, delegated: boolean): JourneyNotice | null {
+  switch (status) {
+    case "not_started":
+      return {
+        tone: "neutral",
+        title: "Waiting for your records",
+        body: delegated
+          ? "Publish the NS records below, then press Verify. We keep checking on our own."
+          : "Publish the records below, then press Verify. We keep checking on our own.",
+        busy: true,
+      }
+    case "pending":
+      return {
+        tone: "warning",
+        title: "Looking for DNS records",
+        body: "Propagation is usually minutes and can take up to 72 hours - nothing is wrong yet. This page updates itself.",
+        busy: true,
+      }
+    case "temporary_failure":
+      return {
+        tone: "warning",
+        title: "Temporary lookup failure",
+        body: "A DNS lookup failed in a way worth retrying - this is not the same as your records being wrong. We keep checking; press Verify to check now.",
+        busy: true,
+      }
+    case "failed":
+      return {
+        tone: "danger",
+        title: "Verification failed",
+        body: "We could not find the records within 72 hours. Check each row below against what your DNS provider shows - a trailing dot, a quoted value or a wrong host is the usual cause.",
+      }
+    default:
+      return null
+  }
 }

@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { AlertTriangle, KeyRound } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { CopyButton, CopyField } from "@repo/ui/components/copy"
 import { ActionButton } from "@repo/ui/components/action-button"
@@ -12,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/ta
 import { createApiKey } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import type { CreatedApiKey, DomainSummary } from "@/lib/types"
+import { toastError } from "@/lib/toast"
 
 /**
  * Sending the first email.
@@ -91,7 +91,7 @@ export function StepSend({
           domains: [],
         })
         if (!result.ok) {
-          toast.error("Could not create a key", { description: result.error })
+          toastError("Could not create a key", { description: result.error })
           return false
         }
         created = result.data

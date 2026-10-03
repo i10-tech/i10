@@ -2,24 +2,46 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Check, ChevronDown, Network } from "lucide-react"
-import { toast } from "sonner"
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react"
+import { Check, ChevronDown, CircleCheck, Globe, Network } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
 import { Reveal } from "@repo/ui/components/reveal"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
-import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { DetectionPanel } from "@/components/detection-panel"
-import { checkDomain, createDomain, dnsConnections, lookupDns } from "@/lib/actions"
+import { DnsRecordGroups } from "@/components/dns-records"
+import { ProviderMark } from "@/components/provider-mark"
+import {
+  checkDomain,
+  createDomain,
+  dnsConnections,
+  lookupDns,
+  startDnsConnect,
+  verifyDomain,
+} from "@/lib/actions"
 import { activateDomain } from "@/lib/domain-activation"
 import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
-import { toastFailure } from "@/lib/toast"
-import type { DnsConnection, DnsInspection } from "@/lib/types"
+import { toastDone, toastError, toastFailure, toastPending } from "@/lib/toast"
+import {
+  draftStillSet,
+  rememberDraft,
+  type AddDomainDraft,
+} from "@/lib/add-domain-draft"
+import type { DnsConnection, DnsInspection, Domain } from "@/lib/types"
 
 /**
- * Adding a domain.
+ * Adding a domain, as steps (2026-10-03): the name, then how the records
+ * should exist and get there, then - only for somebody adding them by hand -
+ * the records themselves. Each answered step folds into a card above the next,
+ * and the email preview beside the first shows what the name will look like in
+ * an inbox while it is typed.
+ *
+ * ⚠ THE DOMAIN IS CREATED AT THE SECOND STEP, NOT THE FIRST. Whether it is
+ * delegated is decided there and the API takes it at creation only; creating
+ * on the first step would mean guessing it. Until then the first step can be
+ * changed freely; after it, the row exists and the flow only moves forward.
  *
  * ⚠ THE DNS LOOKUP HAPPENS *BEFORE* THE DOMAIN IS CREATED, WHICH IS WHY IT
  * TAKES A NAME RATHER THAN AN ID. The whole value of it is telling somebody who
@@ -50,14 +72,44 @@ import type { DnsConnection, DnsInspection } from "@/lib/types"
 
 type Mode = "delegate" | "manual"
 
-/** How the records reach the customer's zone. Independent of `Mode`. */
-type Delivery = "automatic" | "manual"
+type Step = "domain" | "records" | "publish"
 
-export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void }) {
+/**
+ * Where a reload left off - see lib/add-domain-draft.ts. The page reads the
+ * cookie, re-reads the created domain and re-runs the lookup on the server, so
+ * the first paint is already the step they were on.
+ */
+export interface RestoredDraft extends AddDomainDraft {
+  created: Domain | null
+  inspection: DnsInspection | null
+}
+
+export function AddDomainForm({
+  tenantId,
+  restored: handed = null,
+}: {
+  tenantId: string
+  restored?: RestoredDraft | null
+}) {
+  /*
+   * ⚠ A DRAFT IS ONLY USED IF ITS COOKIE STILL EXISTS. On a reload the server
+   * has just read it, so this is always true while hydrating and the two
+   * renders agree. On a back/forward replay of a cached render it can be gone
+   * - leaving forgot it - and that render must start fresh, not resume.
+   */
+  const [restored] = React.useState(() =>
+    handed && typeof document !== "undefined" && !draftStillSet() ? null : handed,
+  )
   const router = useRouter()
+  const reduce = useReducedMotion() ?? false
 
-  const [name, setName] = React.useState("")
-  const [chosenMode, setChosenMode] = React.useState<Mode>("delegate")
+  const [step, setStep] = React.useState<Step>(restored?.step ?? "domain")
+  /** The row, once the second step has made it. The flow cannot go back after. */
+  const [created, setCreated] = React.useState<Domain | null>(restored?.created ?? null)
+  const [checking, setChecking] = React.useState(false)
+
+  const [name, setName] = React.useState(restored?.name ?? "")
+  const [chosenMode, setChosenMode] = React.useState<Mode>(restored?.mode ?? "delegate")
   /*
    * ⚠ FETCHED ONCE AND ALLOWED TO FAIL. Whether this workspace has already
    * connected the provider changes only what the automatic option SAYS, never
@@ -66,7 +118,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * does not need.
    */
   const [connections, setConnections] = React.useState<DnsConnection[]>([])
-  const [returnPath, setReturnPath] = React.useState("")
+  const [returnPath, setReturnPath] = React.useState(restored?.returnPath ?? "")
   /*
    * ⚠ THE ANSWER IS STORED WITH THE QUESTION IT ANSWERS, AND THAT IS THE WHOLE
    * REASON THIS IS A PAIR RATHER THAN A `DnsInspection | null`. "Which domain
@@ -86,7 +138,17 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
      * box goes red once they stop typing rather than once they press Add.
      */
     refusal: string | null
-  } | null>(null)
+  } | null>(
+    // ⚠ THE SERVER'S LOOKUP FOR A RESTORED NAME, so the second step does not
+    // render without its provider and then grow one when the client's lands.
+    restored && restored.name
+      ? {
+          domain: restored.name.trim().toLowerCase(),
+          inspection: restored.inspection,
+          refusal: null,
+        }
+      : null,
+  )
   const [submitting, setSubmitting] = React.useState(false)
   /**
    * A name the server refused, and what it said.
@@ -111,7 +173,7 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const [refused, setRefused] = React.useState<{ name: string; reason: string } | null>(
     null,
   )
-  const [advanced, setAdvanced] = React.useState(false)
+  const [advanced, setAdvanced] = React.useState(restored?.advanced ?? false)
 
   /*
    * ⚠ THE SAME RULES THE SIGN-IN PAGE'S EMAIL BOX FOLLOWS, FROM THE SAME HOOK.
@@ -216,28 +278,6 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
   const current = answeredHere && !refusedHere ? answeredHere.inspection : null
   const provider = current?.provider ?? null
 
-  /*
-   * ⚠ WHAT THE PANEL DRAWS WHILE IT IS COLLAPSING, WHICH IS NOT WHAT THE FORM
-   * ACTS ON. `current` goes null the instant a character is typed, and a block
-   * that is animating its height to zero still has to render every frame of
-   * that - so binding the panel's CONTENT to `current` would blank it before it
-   * finished leaving. The last answer we received is the right thing to show on
-   * the way out, and `show` above stays bound to `current` so it is on the way
-   * out at all.
-   */
-  const panel = current ?? answered?.inspection ?? null
-
-  /**
-   * The provider the delivery question is ABOUT, which outlives the answer for
-   * the same reason the panel's does.
-   *
-   * ⚠ IT MUST NOT BE USED FOR ANY DECISION. `provider` is what the form acts
-   * on - which options exist, what gets submitted - and it is null the moment
-   * the typed name stops matching what we looked up. This one exists only so
-   * the fieldset has a name to print while it collapses.
-   */
-  const leavingProvider = provider ?? panel?.provider ?? null
-
   // ⚠ DELEGATION IS DISABLED, NOT HIDDEN, WHERE THE PROVIDER'S EDITOR HAS NO NS
   // ROW. Hiding it would leave somebody wondering why the recommended option
   // vanished; disabling it with the reason attached answers the question before
@@ -262,448 +302,662 @@ export function AddDomainForm({ onCreated }: { onCreated?: (id: string) => void 
    * has the preference they picked.
    */
   const canAutomate = provider?.canConnect === true
-  /*
-   * ⚠ NO LONGER A STORED ANSWER, BECAUSE IT IS NO LONGER A QUESTION. This was
-   * a two-card fieldset - "Add them for me at Cloudflare" against "I'll add
-   * them myself" - and the cards are gone: connecting is simply the offer,
-   * and declining it is a link under the button. So the intent is whatever
-   * the provider makes possible, and the control that gets pressed decides
-   * the rest. See the footer, and `submit`'s `override`.
-   */
-  const delivery: Delivery = canAutomate ? "automatic" : "manual"
   const connected =
     provider !== null && connections.some((c) => c.provider === provider.slug)
 
   /*
-   * ⚠ ONLY ONCE THE LOOKUP HAS ANSWERED. `canAutomate` comes from the detected
-   * provider, so before it lands this is false and the button says "Add
-   * domain" - which is correct rather than merely safe: a domain whose DNS we
-   * cannot write to never shows a connect button at all.
+   * ⚠ EVERY ANSWER IS WRITTEN AS IT CHANGES, SO A RELOAD AT ANY MOMENT COMES
+   * BACK TO IT. An effect that writes a cookie and sets no state - the reverse
+   * direction, reading it, happens on the server. See lib/add-domain-draft.ts.
+   *
+   * ⚠ AND `left` STOPS IT REWRITING WHAT AN EXIT HAS JUST CLEARED. Leaving
+   * forgets the draft and then navigates; without this the next render on the
+   * way out would put it straight back, and the next visit to /domains/new
+   * would open on a domain that already exists.
    */
-  const needsConnection = canAutomate && !connected
+  const left = React.useRef(false)
+  React.useEffect(() => {
+    if (left.current) return
+    rememberDraft(tenantId, {
+      name,
+      returnPath,
+      mode: chosenMode,
+      advanced,
+      step,
+      ...(created ? { id: created.id } : {}),
+    })
+  }, [tenantId, name, returnPath, chosenMode, advanced, step, created])
+
+  function forget() {
+    left.current = true
+    rememberDraft(tenantId, null)
+  }
+
+  /** Step one's Continue: nothing is created, the answer is just held. */
+  function confirmName(event: React.FormEvent) {
+    event.preventDefault()
+    if (looking || refusedHere !== undefined || candidate === "") return
+    setStep("records")
+  }
 
   /**
-   * @param override how the records get there, when a control other than the
-   *   form's own submit decides it.
+   * Makes the row. Every way out of the second step starts here.
    *
-   * ⚠ AN ARGUMENT RATHER THAN A `setState` BEFORE SUBMITTING. "I'll add them
-   * myself" is one press that both answers the question and creates the
-   * domain, and a state write would not be visible to the submit that runs in
-   * the same tick - so the domain would be created as `automatic` and the
-   * person would be sent to connect the provider they just declined.
+   * ⚠ A REFUSAL OF THE NAME SENDS THEM BACK TO THE NAME, with the reason under
+   * the box - ours (422), or already held here or elsewhere (409). The rest -
+   * the plan is full, the API is down - are not answered by looking at the box
+   * again, which is why they keep the toast and the plan limit keeps its button.
    */
-  async function submit(event?: React.FormEvent, override?: Delivery) {
-    event?.preventDefault()
-    if (submitting) return
-
-    const howTheyGetThere = override ?? delivery
-
-    /*
-     * ⚠ NOTHING GUARDS THE SHAPE HERE ANY MORE. The field refuses its own
-     * form's submit before this is reached - reddening itself, releasing the
-     * caret so the red can be seen, and leaving an empty box alone because
-     * emptiness is not a mistake until somebody says they are finished. That
-     * was twenty lines in this file and four more in the sign-in form, both
-     * hand-written from the same rules. See
-     * @repo/ui/components/validated-field.
-     */
-    setSubmitting(true)
-
+  async function create(): Promise<Domain | null> {
     const result = await createDomain({
-      name: name.trim().toLowerCase(),
+      name: candidate,
       delegated: mode === "delegate",
       ...(returnPath.trim() ? { custom_return_path: returnPath.trim() } : {}),
     })
+    if (result.ok) return result.data
 
-    /*
-     * ⚠ STILL SUBMITTING. This used to clear here, the moment the domain row
-     * existed - and then went on to publish the records and navigate, which
-     * takes seconds. So the button un-spun and became pressable again while
-     * the work it started was still running, and a second press created a
-     * second domain. It reads as the press not having registered, which is
-     * exactly what invites the second press.
-     *
-     * ⚠ AND EVERY SUCCESSFUL PATH BELOW LEAVES THE PAGE, so nothing clears it
-     * again: the form unmounts on `router.push`, and `onCreated` swaps the
-     * onboarding step out. Only the failures come back to a live form, and
-     * each of them clears it as it returns.
-     */
-    if (!result.ok) {
-      setSubmitting(false)
-      /*
-       * ⚠ A PLAN LIMIT GETS A BUTTON, NOT JUST A MESSAGE. It is the one refusal
-       * on this surface that the person can resolve in ten seconds, and leaving
-       * them to find the billing page themselves turns a sale into a support
-       * ticket. This used to be a red panel under the form with the button
-       * inside it; the toast carries the same action.
-       */
-      /*
-       * ⚠ A REFUSAL OF THE NAME GOES UNDER THE NAME - ours (422), or already
-       * held here or elsewhere (409). The rest - the plan is full, the API is
-       * down - are not answered by looking at the box again, which is why they
-       * keep the toast and the plan limit keeps its button.
-       */
-      if (refusesTheName(result.name)) {
-        setRefused({ name: name.trim(), reason: result.error })
-        return
-      }
-
-      toastFailure(result, {
-        ...(result.name === "plan_limit_exceeded"
-          ? {
-              action: {
-                label: "See plans",
-                onClick: () => router.push("/settings/billing"),
-              },
-            }
-          : {}),
-      })
-      return
+    if (refusesTheName(result.name)) {
+      setRefused({ name: candidate, reason: result.error })
+      setStep("domain")
+      return null
     }
-
-    const created = result.data
-
-    /*
-     * ⚠ THE AUTOMATIC CHOICE HAS TO ACTUALLY DO SOMETHING HERE, OR IT IS A
-     * PREFERENCE NOBODY ACTED ON. Publishing on the next screen instead would
-     * make this a question whose answer changes only the wording, which is the
-     * worst kind of setting.
-     *
-     * ⚠ AND THE CONFLICT CASE IS HANDED ON RATHER THAN DUPLICATED. A zone with
-     * an existing DMARC record answers 409 with what stands in the way, and the
-     * dialog that explains and confirms that already exists on the domain page.
-     * Rebuilding it here would be two copies of the one flow that deletes a
-     * customer's records.
-     */
-    if (howTheyGetThere === "automatic" && connected && provider) {
-      /*
-       * ⚠ THE SHARED SEQUENCE, NOT THIS FORM'S OWN. Publishing and then
-       * checking is the same job the onboarding flow and the OAuth callback
-       * do, and all three used to do it with their own idea of what each
-       * outcome meant. See lib/domain-activation.ts.
-       */
-      const outcome = await activateDomain({
-        domainId: created.id,
-        provider: provider.slug,
-      })
-
-      switch (outcome.kind) {
-        case "verified":
-          toast.success(`${created.name} is verified`, {
-            description: "The records are published and this domain can send now.",
-          })
-          break
-        /*
-         * ⚠ THIS IS SUCCESS, AND WORDING IT AS A CAVEAT WAS THE OLD MISTAKE.
-         * The records are written and we have proved the domain; what is left
-         * is Amazon's own check, which nobody here can hurry. The domain page
-         * this navigates to keeps watching and turns the badge green by
-         * itself, so there is nothing for the person to come back and do.
-         */
-        case "published":
-          /*
-           * ⚠ THE CHECK IS ONLY CLAIMED WHEN IT ANSWERED. Reporting "we are
-           * checking now" after a verify that returned 500 is how a broken
-           * check stayed invisible: the sentence was reassuring, so nobody
-           * looked, and the only way to find out was to press Verify by hand.
-           */
-          if (outcome.checked) {
-            toast.success(`${created.name} added and published`, {
-              description:
-                outcome.written === 0
-                  ? `Every record was already in place at ${provider.name}. We are checking now - nothing else is needed from you.`
-                  : `${outcome.written} records written to ${provider.name}. We are checking now - nothing else is needed from you.`,
-            })
-          } else {
-            toast.warning(`${created.name} added and published`, {
-              description: `The records are in place at ${provider.name}, but the check that follows them did not answer. Open the domain and press Verify.`,
-            })
+    toastFailure(result, {
+      ...(result.name === "plan_limit_exceeded"
+        ? {
+            action: {
+              label: "See plans",
+              onClick: () => router.push("/settings/billing"),
+            },
           }
-          break
-        case "conflicts":
-          toast.warning(`${created.name} added`, {
-            description: "Some existing records are in the way. Review them to finish.",
-          })
-          break
-        default:
-          toast.warning(`${created.name} added`, {
-            description: `We could not publish the records: ${outcome.reason}`,
-          })
-      }
-
-      if (onCreated) onCreated(created.id)
-      else router.push(`/domains/${created.id}`)
-      return
-    }
-
-    toast.success(`${created.name} added`, {
-      description:
-        howTheyGetThere === "automatic"
-          ? `Connect ${provider?.name ?? "your DNS provider"} to finish.`
-          : mode === "delegate"
-            ? "Publish the NS records to finish."
-            : "Publish the records to finish.",
+        : {}),
     })
-
-    if (onCreated) onCreated(created.id)
-    else router.push(`/domains/${created.id}`)
+    return null
   }
 
-  return (
+  /**
+   * "Connect {provider}". Connected: publish and check now, then the domain page.
+   * Not yet: create the row, then connect - the callback publishes every
+   * unverified domain and comes back to `returnTo`, so it lands on this one's
+   * page with the records already written. See dns/callback.
+   *
+   * ⚠ STILL SUBMITTING ON EVERY PATH THAT LEAVES. A button that un-spins while
+   * the publish it started is still running invites the second press that
+   * creates a second domain; only failures come back to a live form.
+   */
+  async function autoConfigure() {
+    if (submitting || !provider) return
+    setSubmitting(true)
+    const domain = await create()
+    if (!domain) return setSubmitting(false)
+
+    if (!connected) {
+      const start = await startDnsConnect(provider.slug, `/domains/${domain.id}`)
+      if (!start.ok) {
+        // The row exists; its page offers the same button.
+        toastError(`Could not connect ${provider.name}`, start.error)
+        forget()
+        router.push(`/domains/${domain.id}`)
+        return
+      }
+      forget()
+      window.location.assign(start.data.url)
+      return
+    }
+
     /*
-     * ⚠ `noValidate`, BECAUSE THE BROWSER'S OWN BUBBLE IS NOT OUR INTERFACE.
-     * The field is still `required` - that is what it is, and screen readers
-     * read it - but without this the empty submit raised a native "Please fill
-     * out this field." tooltip in the operating system's styling, positioned by
-     * the browser, which then swallowed the message this form writes itself.
-     * The same reason every form in the auth app carries it.
+     * ⚠ THE SHARED SEQUENCE, NOT THIS FORM'S OWN. Publishing and then checking
+     * is the same job the onboarding flow and the OAuth callback do. See
+     * lib/domain-activation.ts.
      */
-    <form onSubmit={submit} className="space-y-6" noValidate>
+    const outcome = await activateDomain({
+      domainId: domain.id,
+      provider: provider.slug,
+    })
+    switch (outcome.kind) {
+      case "verified":
+        toastDone(
+          `${domain.name} is verified`,
+          "The records are published and this domain can send now.",
+        )
+        break
+      case "published":
+        if (outcome.checked)
+          toastDone(
+            `${domain.name} added and published`,
+            outcome.written === 0
+              ? `Every record was already in place at ${provider.name}. We are checking now - nothing else is needed from you.`
+              : `${outcome.written} records written to ${provider.name}. We are checking now - nothing else is needed from you.`,
+          )
+        else
+          toastPending(
+            `${domain.name} added and published`,
+            `The records are in place at ${provider.name}, but the check that follows them did not answer. Open the domain and press Verify.`,
+          )
+        break
+      case "conflicts":
+        toastPending(
+          `${domain.name} added`,
+          "Some existing records are in the way. Review them to finish.",
+        )
+        break
+      default:
+        toastPending(
+          `${domain.name} added`,
+          `We could not publish the records: ${outcome.reason}`,
+        )
+    }
+    forget()
+    router.push(`/domains/${domain.id}`)
+  }
+
+  /** "Manual setup": make the row and show its records here, as a third step. */
+  async function manualSetup() {
+    if (submitting) return
+    setSubmitting(true)
+    const domain = await create()
+    setSubmitting(false)
+    if (!domain) return
+    setCreated(domain)
+    setStep("publish")
+  }
+
+  /**
+   * "I've added the records": one check now, then the domain page, which
+   * keeps looking by itself - see DomainLiveProvider. The check's verdict is
+   * the page's to show, so it is not toasted here.
+   */
+  async function addedThem() {
+    if (!created || checking) return
+    setChecking(true)
+    await verifyDomain(created.id)
+    forget()
+    router.push(`/domains/${created.id}`)
+  }
+
+  const order: Step[] = created
+    ? ["domain", "records", "publish"]
+    : ["domain", "records"]
+  const at = order.indexOf(step)
+  const stateOf = (s: Step) => {
+    const i = order.indexOf(s)
+    return i < at ? "done" : i === at ? "current" : "next"
+  }
+  const busy = submitting || checking
+
+  return (
+    <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+      <LayoutGroup>
+        <ol className={cn("min-w-0", step !== "domain" && "lg:col-span-2")}>
+          {/* ── 1. Domain ── */}
+          <StepItem
+            state={stateOf("domain")}
+            last={false}
+            title="Domain"
+            description="The domain you send from, and the subdomain bounces return to."
+            reduce={reduce}
+            summary={
+              <div className="flex items-center gap-2">
+                <span className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-emerald-500/20 bg-background/40 px-3 py-2 font-mono text-sm">
+                  <Globe
+                    aria-hidden
+                    className="size-4 shrink-0 text-muted-foreground"
+                  />
+                  <span className="truncate">{candidate}</span>
+                  {returnPath.trim() && (
+                    <span className="truncate text-xs text-muted-foreground">
+                      return path {returnPath.trim()}
+                    </span>
+                  )}
+                </span>
+                {/* Before the row exists the name can still change. */}
+                {!created && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setStep("domain")}
+                  >
+                    Change
+                  </Button>
+                )}
+              </div>
+            }
+          >
+            {/*
+             * ⚠ `noValidate`, BECAUSE THE BROWSER'S OWN BUBBLE IS NOT OUR
+             * INTERFACE. The field refuses its own form's submit itself - see
+             * @repo/ui/components/validated-field.
+             */}
+            <form onSubmit={confirmName} className="space-y-5" noValidate>
+              {/*
+               * ⚠ THE FIELD GOES AMBER WHILE THE NAMESERVER LOOKUP IS IN FLIGHT,
+               * which is the same fact the disabled Continue is acting on.
+               */}
+              <ValidatedInput
+                id="domain"
+                autoFocus
+                label="Domain"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                // ⚠ `url` WOULD BE WRONG HERE: browsers autofill whole URLs, and
+                // `https://acme.com` creates a domain that can never verify.
+                inputMode="url"
+                className="font-mono"
+                check={domainProblem}
+                refused={refusedHere}
+                required="Enter the domain you send from."
+                busy={looking}
+                adornment={looking ? <Spinner className="size-3.5" /> : undefined}
+                hint={
+                  <>
+                    The apex, or a subdomain you send from - a subdomain like{" "}
+                    <code className="font-mono">mail.example.com</code> keeps your
+                    sending reputation separate.
+                  </>
+                }
+              />
+
+              {/*
+               * ⚠ A BUTTON AND A `Reveal`, NOT `Collapsible`. Radix's collapsible
+               * toggles `data-state` and expects a stylesheet to carry the
+               * height, so it snapped; this springs with everything around it.
+               */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setAdvanced((open) => !open)}
+                  aria-expanded={advanced}
+                  className="flex cursor-pointer items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronDown
+                    className={cn(
+                      "size-3.5 transition-transform duration-(--duration-spring) ease-(--ease-spring)",
+                      !advanced && "-rotate-90",
+                    )}
+                  />
+                  Advanced options
+                </button>
+                <Reveal show={advanced} spacing="pt-3">
+                  <FloatingInput
+                    id="return-path"
+                    label="Return-Path subdomain"
+                    value={returnPath}
+                    onChange={(event) => setReturnPath(event.target.value)}
+                    className="font-mono"
+                    containerClassName="max-w-xs"
+                    autoComplete="off"
+                    spellCheck={false}
+                    hint={
+                      <>
+                        The envelope address every message uses, whichever way it
+                        leaves. Defaults to <code className="font-mono">send</code>.
+                        Changing it later means re-publishing records.
+                      </>
+                    }
+                  />
+                </Reveal>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/*
+                 * ⚠ DISABLED WHILE THE LOOKUP IS IN FLIGHT, BECAUSE THE NEXT STEP
+                 * IS BUILT FROM IT: whether delegation is possible and whether we
+                 * can write the records both come from the detected provider.
+                 * The wait is bounded - a failed lookup still answers.
+                 */}
+                <Button
+                  type="submit"
+                  className="rounded-full"
+                  disabled={looking || refusedHere !== undefined || candidate === ""}
+                >
+                  Continue
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="rounded-full"
+                  onClick={() => {
+                    forget()
+                    router.back()
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </StepItem>
+
+          {/* ── 2. Records ── */}
+          <StepItem
+            state={stateOf("records")}
+            last={!created}
+            title="DNS Records"
+            description={
+              canAutomate && connected
+                ? `Choose which records should exist. ${provider?.name} is already connected, so we can publish them for you - or add them yourself.`
+                : canAutomate
+                  ? `Choose which records should exist. Sign in to ${provider?.name} and we write them for you, or add them yourself.`
+                  : "Choose which records should exist, then add them at your DNS provider."
+            }
+            reduce={reduce}
+            summary={
+              <p className="text-sm text-muted-foreground">
+                {mode === "delegate" ? "Delegated to i10" : "Records kept in your zone"}{" "}
+                - added by hand.
+              </p>
+            }
+          >
+            <div className="space-y-5">
+              {/* What we found about where its DNS lives. */}
+              {current && <DetectionPanel inspection={current} connected={connected} />}
+
+              <fieldset className="space-y-2">
+                <legend className="mb-2 text-sm font-medium">
+                  Which records should exist?
+                </legend>
+                <ModeCard
+                  selected={mode === "delegate"}
+                  disabled={delegationBlocked}
+                  onSelect={() => setChosenMode("delegate")}
+                  icon={<Network className="size-4" />}
+                  title="Delegate to i10"
+                  recommended
+                  description={
+                    delegationBlocked
+                      ? `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`
+                      : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever - including when they change."
+                  }
+                />
+                <ModeCard
+                  selected={mode === "manual"}
+                  onSelect={() => setChosenMode("manual")}
+                  icon={<Check className="size-4" />}
+                  title="Keep the records in my zone"
+                  description="Four ordinary records - the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
+                />
+              </fieldset>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/*
+                 * ⚠ ONLY WHERE WE CAN WRITE THE RECORDS. Twenty-two of the forty
+                 * providers have no usable per-customer API; for those, adding
+                 * them by hand is the only path and it is the primary button.
+                 */}
+                {canAutomate && provider && (
+                  <Button
+                    type="button"
+                    className="rounded-full border-neutral-200 bg-white text-neutral-950 hover:bg-neutral-100 dark:border-neutral-200 dark:bg-white dark:hover:bg-neutral-100"
+                    disabled={busy}
+                    onClick={() => void autoConfigure()}
+                  >
+                    {submitting ? (
+                      <Spinner />
+                    ) : (
+                      <ProviderMark slug={provider.slug} name={provider.name} />
+                    )}
+                    {/*
+                     * ⚠ "CONNECT" UNTIL IT IS CONNECTED, THEN "PUBLISH RECORDS"
+                     * (2026-10-03). The step offers two things - our way or by
+                     * hand - and once the workspace holds a connection, this
+                     * press writes the records now, so the word says so. The
+                     * panel above says the provider is already connected.
+                     */}
+                    {connected ? "Publish records" : `Connect ${provider.name}`}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant={canAutomate ? "outline" : "default"}
+                  className="rounded-full"
+                  disabled={busy}
+                  onClick={() => void manualSetup()}
+                >
+                  {submitting && !canAutomate && <Spinner />}
+                  Manual setup
+                </Button>
+              </div>
+            </div>
+          </StepItem>
+
+          {/* ── 3. Publish, only for somebody adding them by hand ── */}
+          {created && (
+            <StepItem
+              state={stateOf("publish")}
+              last
+              title="Fill in your DNS records"
+              description={`Add these at ${provider?.name ?? "your DNS provider"}. When they are in, tell us and we start looking for them.`}
+              reduce={reduce}
+            >
+              <div className="space-y-6">
+                {/* Exactly as the domain page lays them out, status column and all. */}
+                <DnsRecordGroups records={created.records} />
+                <div className="flex flex-wrap items-center gap-2">
+                  {/*
+                   * ⚠ ONLY THIS BUTTON (2026-10-03). This step exists because
+                   * they chose Manual setup over connecting; offering the
+                   * provider again here, beside it, asks a question they have
+                   * just answered.
+                   */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={checking}
+                    onClick={() => void addedThem()}
+                  >
+                    {checking ? <Spinner /> : <CircleCheck />}
+                    I&rsquo;ve added the records
+                  </Button>
+                </div>
+              </div>
+            </StepItem>
+          )}
+        </ol>
+      </LayoutGroup>
+
       {/*
-       * ⚠ THE FIELD GOES AMBER WHILE THE NAMESERVER LOOKUP IS IN FLIGHT, which
-       * is the same fact the disabled submit button below is already acting on
-       * - it just was not visible anywhere. `looking` is derived from what has
-       * been typed against what has been answered, so it cannot latch on.
+       * ⚠ ONLY BESIDE THE FIRST STEP, AS RESEND DOES. It answers "what will this
+       * look like" while the name is being chosen; after that the records want
+       * the whole width, and a preview of a name already decided is decoration.
        */}
-      <ValidatedInput
-        id="domain"
-        // ⚠ THE ONE FIELD THIS PAGE EXISTS FOR, so it has the caret on arrival
-        // and on a reload - everything else on the form follows from it.
-        autoFocus
-        label="Domain"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        autoComplete="off"
-        autoCapitalize="none"
-        spellCheck={false}
-        // ⚠ `url` WOULD BE WRONG HERE. It offers a keyboard with a "/" key
-        // and browsers autofill it with whole URLs - and `https://acme.com`
-        // creates a domain that can never verify.
-        inputMode="url"
-        className="font-mono"
-        check={domainProblem}
-        // The server's refusal of exactly this name - see `refused` above. It
-        // clears itself because `refusedHere` stops matching once they edit.
-        refused={refusedHere}
-        required="Enter the domain you send from."
-        /*
-         * ⚠ THE LOOKUP OUTRANKS THE VERDICT, AND THEY CANNOT BOTH BE TRUE. A
-         * name is only looked up once it is well formed, so `busy` implies the
-         * verdict is `idle` - the order is what it reads like, not a tie being
-         * broken.
-         */
-        busy={looking}
-        adornment={looking ? <Spinner className="size-3.5" /> : undefined}
-        /*
-         * ⚠ THE COMPLAINT REPLACES THE EXPLANATION RATHER THAN JOINING IT. Both
-         * at once is two sentences in two colours under one box, and the one
-         * that matters is the one about what is wrong right now - the guidance
-         * comes back the moment the value does. The field does that swap
-         * itself now.
-         */
-        hint={
-          <>
-            The apex, or a subdomain you send from - a subdomain like{" "}
-            <code className="font-mono">mail.example.com</code> keeps your sending
-            reputation separate.
-          </>
-        }
+      <AnimatePresence initial={false}>
+        {step === "domain" && (
+          <motion.aside
+            key="preview"
+            aria-hidden
+            className="hidden lg:block"
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.12 } }}
+          >
+            <EmailPreview domain={candidate} />
+          </motion.aside>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+const EASE = [0.22, 1, 0.36, 1] as const
+
+/**
+ * One step on the rail: its dot, the line down to the next, and either its
+ * question (current), its answer folded into a card (done), or its title
+ * dimmed (not reached).
+ *
+ * ⚠ THE LINE BETWEEN TWO STEPS IS GREEN ONCE THE UPPER ONE IS DONE, which is
+ * the progress: it fills down the rail as the steps are answered.
+ */
+function StepItem({
+  state,
+  last,
+  title,
+  description,
+  summary,
+  reduce,
+  children,
+}: {
+  state: "done" | "current" | "next"
+  last: boolean
+  title: string
+  description: string
+  /** What the answered step folds down to. */
+  summary?: React.ReactNode
+  reduce: boolean
+  children: React.ReactNode
+}) {
+  const done = state === "done"
+  return (
+    <motion.li
+      layout={reduce ? false : "position"}
+      transition={{ duration: 0.35, ease: EASE }}
+      className="relative pb-6 pl-10 last:pb-0"
+    >
+      {/*
+       * ⚠ THE LINE RUNS FROM THIS DOT INTO THE NEXT ONE, NOT TO THE BOTTOM OF
+       * THIS STEP (2026-10-03). It used to stop where the step ended, and the
+       * next dot sits 28px into its own step, so every joint was a gap. Every
+       * dot is at the same height now (see the frame below), so the line can
+       * reach the next one: it runs 3px INTO both rings (40px, not the ring's
+       * 43px bottom; 31px, not 28) with square ends. The rings are drawn after
+       * it with a filled centre, so the overlap is hidden and the joint has no
+       * gap - a line that stopped exactly at the edge, with round caps, read
+       * as detached.
+       */}
+      {!last && (
+        <span
+          aria-hidden
+          className={cn(
+            "absolute top-[40px] -bottom-[31px] left-[6.5px] w-0.5 transition-colors duration-500",
+            // ⚠ THE RINGS' OWN INK, NOT A FADED ONE. At 60% the 2px line read
+            // as thinner than the 2px ring it leaves; same colour, same weight.
+            done ? "bg-emerald-500" : "bg-muted-foreground/40",
+          )}
+        />
+      )}
+      <span
+        aria-hidden
+        className={cn(
+          "absolute top-7 left-0 size-[15px] rounded-full border-2 bg-background transition-colors duration-300",
+          done && "border-emerald-500",
+          state === "current" && "border-foreground",
+          state === "next" && "border-muted-foreground/40",
+        )}
       />
 
       {/*
-       * ⚠ IT GROWS IN RATHER THAN APPEARING. This panel is the form answering a
-       * question somebody asked by typing, and when it mounted outright it put
-       * ninety pixels on screen in one frame and pushed the two fieldsets and
-       * both buttons down by ninety pixels in the same frame. The content was
-       * right and the delivery read as the page reloading.
-       *
-       * ⚠ IT IS STILL BOUND TO THE ANSWER FOR WHAT IS CURRENTLY TYPED, NOT TO
-       * THE LAST ANSWER WE GOT. Holding the previous inspection open while a
-       * new lookup is in flight would keep the panel from collapsing when
-       * somebody edits a finished domain - smoother, and it would be showing
-       * one domain's nameservers under another domain's name. The collapse is
-       * the truthful thing to do, and now it is a movement rather than a cut.
+       * ⚠ THE SAME FRAME IN EVERY STATE, ONLY ITS BORDER AND TINT CHANGE. The
+       * card used to appear around a step as it was answered, adding 20px of
+       * padding at that moment - the title jumped down and the dot had to move
+       * to follow it. With the padding always there, answering a step only
+       * colours the box it is already in.
        */}
-      <Reveal show={current !== null}>
-        {panel && <DetectionPanel inspection={panel} connected={connected} />}
-      </Reveal>
-
-      <fieldset className="space-y-2">
-        <legend className="mb-2 text-sm font-medium">
-          Which records should exist?
-        </legend>
-
-        <ModeCard
-          selected={mode === "delegate"}
-          disabled={delegationBlocked}
-          onSelect={() => setChosenMode("delegate")}
-          icon={<Network className="size-4" />}
-          title="Delegate to i10"
-          recommended
-          description={
-            delegationBlocked
-              ? `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`
-              : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever - including when they change."
-          }
-        />
-
-        <ModeCard
-          selected={mode === "manual"}
-          onSelect={() => setChosenMode("manual")}
-          icon={<Check className="size-4" />}
-          title="Keep the records in my zone"
-          description="Four ordinary records - the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
-        />
-      </fieldset>
-
-      {/*
-       * ⚠ A BUTTON AND A `Reveal`, NOT `Collapsible`. Radix's collapsible is
-       * correct and does nothing at all on its own: it toggles `data-state` and
-       * expects a stylesheet to carry the height, and ours never did - so this
-       * disclosure snapped open on a screen where the panel above it springs.
-       * Wiring CSS keyframes to it would have fixed the snap and left this one
-       * element moving to a different curve from everything around it.
-       *
-       * ⚠ AND THE CHEVRON TURNS ON THE SAME SPRING TOKEN THE REST OF THE FORM
-       * USES, rather than the bare `transition-transform` it had, which took
-       * the browser's default 150ms ease while the block under it took 420ms.
-       * Two halves of one control disagreeing about how long the gesture lasts
-       * is exactly the thing that reads as unfinished.
-       */}
-      <div>
-        <button
-          type="button"
-          onClick={() => setAdvanced((open) => !open)}
-          aria-expanded={advanced}
-          className="group flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          <ChevronDown
-            className={cn(
-              "size-3 transition-transform duration-(--duration-spring) ease-(--ease-spring)",
-              advanced && "rotate-180",
-            )}
-          />
-          Advanced
-        </button>
-        <Reveal show={advanced} spacing="pt-3">
-          <FloatingInput
-            id="return-path"
-            label="Return-Path subdomain"
-            value={returnPath}
-            onChange={(event) => setReturnPath(event.target.value)}
-            className="font-mono"
-            containerClassName="max-w-xs"
-            autoComplete="off"
-            spellCheck={false}
-            hint={
-              <>
-                The envelope address every message uses, whichever way it leaves.
-                Defaults to <code className="font-mono">send</code>. Changing it later
-                means re-publishing records.
-              </>
-            }
-          />
-        </Reveal>
-      </div>
-
-      {/*
-       * ⚠ ONE PRIMARY CONTROL THAT DOES NOT CHANGE ITS MIND MID-FORM. This was
-       * a `StepStage` that morphed "Add domain" into "Connect Cloudflare" as
-       * the second fieldset was answered - and the morph was the defect: the
-       * two buttons are different widths and different colours, so the swap
-       * played as a smear between two shapes every time somebody changed their
-       * answer. The fieldset is gone and so is the swap. Where we can write
-       * the records, connecting IS the offer; where we cannot, adding is.
-       *
-       * ⚠ AND DECLINING IS A LINK UNDER IT, EXACTLY AS IN ONBOARDING. Giving
-       * "I'll add them myself" the weight of a card made it a decision between
-       * equals, twenty seconds after somebody typed their domain, when one of
-       * the two options is the one we recommend and the other is an afternoon
-       * of DNS. Same shape, same words, same hierarchy as the onboarding
-       * screen - see onboarding/domain-setup.tsx.
-       *
-       * ⚠ IT IS NOT A MODE TOGGLE. Pressing it creates the domain manually
-       * there and then, rather than re-arming the button it sits under, so
-       * there is never a moment where the form is showing one intent and the
-       * button another.
-       */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          {/*
-           * ⚠ DISABLED WHILE THE LOOKUP IS IN FLIGHT, BECAUSE `mode` IS NOT
-           * DECIDED UNTIL IT LANDS. `delegationBlocked` comes from the
-           * detected provider, so submitting during the debounce sends
-           * `delegated: true` for a Wix or Shopify domain whose DNS editor has
-           * no NS row - a domain created in a configuration that can never
-           * verify, and one this form refuses to create a second later. The
-           * wait is bounded: a failed lookup still answers, so this cannot
-           * latch.
-           *
-           * ⚠ WHAT WAS TYPED IS NOT CARRIED ACROSS THE CONNECT, DELIBERATELY.
-           * It could be - session storage survives the round trip - but
-           * restoring it means writing React state from an effect on mount,
-           * which is a cascading render the compiler is right to refuse, and a
-           * lazy initialiser reading storage produces a hydration mismatch on
-           * a controlled input. The prize is not retyping one domain name ONCE
-           * EVER: a connection is per workspace, so every domain after the
-           * first never leaves the page at all.
-           */}
-          {needsConnection && leavingProvider ? (
-            <ConnectProviderButton
-              slug={leavingProvider.slug}
-              providerName={leavingProvider.name}
-              size="default"
-              brand
-            />
-          ) : (
-            <Button
-              type="submit"
-              /*
-               * ⚠ DISABLED WHILE EMPTY, THE SAME AS THE SIGN-IN PAGE'S
-               * CONTINUE. It is the half of "empty is not a mistake" that the
-               * verdict alone cannot express: a button somebody can press with
-               * nothing typed has to say SOMETHING when they do, and the only
-               * honest thing to say is a complaint about a box they had not
-               * got to yet.
-               */
-              disabled={
-                submitting ||
-                looking ||
-                refusedHere !== undefined ||
-                name.trim().length === 0
-              }
-            >
-              {submitting && <Spinner />}
-              Add domain
-            </Button>
+      <div
+        className={cn(
+          "-ml-4 rounded-3xl border p-5 pl-4 transition-[background-color,border-color] duration-300",
+          done
+            ? "border-emerald-500/30 bg-linear-to-br from-emerald-500/12 via-emerald-500/4 to-transparent"
+            : "border-transparent",
+        )}
+      >
+        <h2
+          className={cn(
+            "flex items-center gap-2 font-display text-xl font-semibold tracking-tight transition-colors",
+            state === "next" && "text-muted-foreground/50",
           )}
-          <Button type="button" variant="ghost" onClick={() => router.back()}>
-            Cancel
-          </Button>
-        </div>
+        >
+          {title}
+          {done && <Check aria-hidden className="size-4 text-emerald-500" />}
+        </h2>
+        {/* Answered, the card says the answer; the question has done its job. */}
+        {state === "current" && (
+          <p className="mt-1 max-w-xl text-sm text-muted-foreground">{description}</p>
+        )}
 
-        {/*
-         * ⚠ REVEALED RATHER THAN SWITCHED IN, so it arrives on the same spring
-         * as the detection panel above it instead of appearing between two
-         * frames under a button that has just changed.
-         */}
-        <Reveal show={needsConnection}>
-          <button
-            type="button"
-            onClick={() => void submit(undefined, "manual")}
-            disabled={
-              submitting ||
-              looking ||
-              refusedHere !== undefined ||
-              name.trim().length === 0
-            }
-            className="cursor-pointer text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            I&rsquo;ll add them myself
-          </button>
-        </Reveal>
+        <AnimatePresence initial={false} mode="wait">
+          {state === "current" && (
+            <motion.div
+              key="body"
+              initial={reduce ? false : { opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{
+                opacity: 0,
+                height: 0,
+                transition: { duration: 0.2, ease: EASE },
+              }}
+              transition={{ duration: 0.35, ease: EASE }}
+              // ⚠ `overflow-hidden` FOR THE HEIGHT ANIMATION, AND A 4px BLEED SO
+              // IT DOES NOT CLIP THE FIELDS' FOCUS RINGS.
+              className="-m-1 overflow-hidden p-1"
+            >
+              <div className="pt-5">{children}</div>
+            </motion.div>
+          )}
+          {done && summary && (
+            <motion.div
+              key="summary"
+              initial={reduce ? false : { opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{
+                opacity: 0,
+                height: 0,
+                transition: { duration: 0.2, ease: EASE },
+              }}
+              transition={{ duration: 0.35, ease: EASE }}
+              className="overflow-hidden"
+            >
+              <div className="pt-3">{summary}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </form>
+    </motion.li>
+  )
+}
+
+/**
+ * What a message from this domain looks like in an inbox: the sender line
+ * with the domain filled in as it is typed, over a body sketched in bars.
+ *
+ * ⚠ THE DOMAIN SLOT IS A BAR UNTIL THERE IS SOMETHING IN IT, the same grey as
+ * the body's lines, so the empty preview reads as a sketch rather than as an
+ * address with a hole in it.
+ */
+function EmailPreview({ domain }: { domain: string }) {
+  return (
+    <div className="sticky top-8 rounded-tl-3xl border-t border-l p-6 [mask-image:linear-gradient(to_right,#000_70%,transparent),linear-gradient(to_bottom,#000_70%,transparent)] [mask-composite:intersect]">
+      <div className="flex items-start gap-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-muted text-sm text-muted-foreground">
+          Y
+        </span>
+        <div className="min-w-0 pt-0.5">
+          <p className="flex min-w-0 items-center text-sm whitespace-nowrap">
+            <span className="font-semibold">Your Name</span>
+            <span className="ml-1.5 flex min-w-0 items-center text-muted-foreground">
+              &lt;youremail@
+              {domain ? (
+                <span className="truncate text-foreground">{domain}</span>
+              ) : (
+                <span className="inline-block h-3 w-24 rounded-full bg-muted" />
+              )}
+              &gt;
+            </span>
+          </p>
+          <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
+            to me <ChevronDown aria-hidden className="size-3" />
+          </p>
+        </div>
+      </div>
+      <div className="mt-5 space-y-3 border-t pt-5">
+        <div className="h-3 w-3/5 rounded-full bg-muted" />
+        <div className="h-3 w-4/5 rounded-full bg-muted" />
+        <div className="h-3 w-2/3 rounded-full bg-muted" />
+      </div>
+    </div>
   )
 }
 

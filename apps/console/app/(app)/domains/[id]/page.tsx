@@ -11,25 +11,27 @@ import {
   SectionDescription,
   SectionTitle,
 } from "@repo/ui/components/page"
-import { DetailHero, MetaGrid } from "@/components/detail-hero"
-import { Journey } from "@/components/journey"
+import { MetaGrid } from "@/components/detail-hero"
+import {
+  DomainLiveProvider,
+  LiveDomainHero,
+  LiveDomainJourney,
+  LiveDomainRecords,
+  LiveDomainStatus,
+  WhileUnverified,
+} from "@/components/domain-live"
 import { ApiButton } from "@/components/list/api-button"
 import { ProviderMark } from "@/components/provider-mark"
-import { Status } from "@/components/status"
 import { Time } from "@/components/time"
-import { DnsRecords } from "@/components/dns-records"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
 import { DomainDangerZone } from "@/components/domain-danger-zone"
 import { DomainTracking } from "@/components/domain-tracking"
 import { DelegationNote } from "@/components/delegation-note"
 import { PublishRecords } from "@/components/publish-records"
-import { VerificationWatch } from "@/components/verification-watch"
-import { VerifyButton } from "@/components/verify-button"
 import { tryApi } from "@/lib/api"
 import { formatExact } from "@/lib/format"
-import { domainJourney } from "@/lib/journey"
 import { regionName } from "@/lib/regions"
 import { SNIPPETS } from "@/lib/snippets"
-import { describeStatus } from "@/lib/status"
 import type {
   ApiKeyRow,
   ConnectableProvider,
@@ -157,212 +159,208 @@ export default async function DomainDetailPage({
       : null
 
   return (
-    <Page>
-      <PageHeader>
-        <DetailHero
-          back={<BackButton href="/domains" label="Back to domains" />}
-          icon={<Globe />}
-          tone={domain.displaced_at ? "danger" : describeStatus(domain.status).tone}
-          eyebrow="Domain"
-          title={<span className="font-mono">{domain.name}</span>}
-          actions={
-            <>
-              <ApiButton snippet={SNIPPETS.domains} />
-              {/*
-               * ⚠ ONLY WHERE WE CAN ACTUALLY DO IT. The button appears when the
-               * domain's DNS is hosted somewhere we have an adapter for; anywhere
-               * else the records table is still the answer, and offering a
-               * shortcut that cannot work is worse than not offering one.
-               */}
-              {connectable && domain.status !== "verified" && (
-                <PublishRecords
+    /*
+     * ⚠ THE PAGE UPDATES IN PLACE. What changes while somebody waits on DNS -
+     * the tile, the status, the events, the records - reads the domain from
+     * the provider, which the watch and the Verify button keep current. See
+     * components/domain-live.tsx.
+     */
+    <DomainLiveProvider initial={domain}>
+      <Page>
+        <PageHeader>
+          <LiveDomainHero
+            back={<BackButton href="/domains" label="Back to domains" />}
+            icon={<Globe />}
+            eyebrow="Domain"
+            title={<span className="font-mono">{domain.name}</span>}
+            // ⚠ NO ••• MENU (2026-10-03). Resend's holds only Delete, which
+            // lives with Transfer in the Configuration tab's danger zone; verify
+            // and auto-configure sit on the records card they act on.
+            actions={<ApiButton snippet={SNIPPETS.domains} />}
+          />
+        </PageHeader>
+
+        <PageBody className="space-y-8">
+          <MetaGrid
+            items={[
+              { label: "Created", value: <Time iso={domain.created_at} /> },
+              {
+                label: "Status",
+                value: <LiveDomainStatus />,
+              },
+              {
+                label: "DNS provider",
+                value:
+                  inspection.ok && inspection.data.provider ? (
+                    <span className="flex items-center gap-2">
+                      <ProviderMark
+                        slug={inspection.data.provider.slug}
+                        name={inspection.data.provider.name}
+                        className="size-5"
+                      />
+                      {inspection.data.provider.name}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Not detected</span>
+                  ),
+              },
+              {
+                label: "Region",
+                value: (
+                  <span>
+                    {regionName(domain.region)}{" "}
+                    <span className="font-mono text-xs text-muted-foreground">
+                      ({domain.region})
+                    </span>
+                  </span>
+                ),
+              },
+            ]}
+          />
+          <LiveDomainJourney
+            // ⚠ SUPPRESSED WHEN THERE IS A REAL DIAGNOSIS TO SHOW. The generic
+            // "propagation can take 72 hours" note and a specific "your records
+            // point somewhere else" note contradict each other, and the generic
+            // one is the reassuring half - so shown together, it is the one people
+            // believe. A displaced domain gets its own note below instead.
+            quiet={delegation?.ok === true || Boolean(domain.displaced_at)}
+          />
+
+          {/*
+           * ⚠ IN PLACE OF THE STRIP'S STATUS NOTICE, NOT BESIDE IT. A displaced domain is
+           * `failed`, and "we could not find the records" is the wrong story -
+           * the records were found, in another workspace's setup. Shown together,
+           * the failure note sends somebody to check DNS that has nothing wrong.
+           */}
+          {domain.displaced_at && (
+            <DisplacedNote name={domain.name} at={domain.displaced_at} />
+          )}
+
+          {/*
+           * ⚠ RECORDS FIRST, EVERYTHING ELSE UNDER CONFIGURATION (2026-10-03),
+           * as Resend splits it. The records are what somebody came for; the
+           * details, tracking and the danger zone are settings, visited rarely.
+           */}
+          {/*
+           * ⚠ THE TAB IT OPENS ON FOLLOWS THE DOMAIN (2026-10-03). Until it is
+           * verified the records need attention, so they come first; once it is,
+           * there is nothing left to publish and the settings are what somebody
+           * returns for.
+           *
+           * ⚠ NOT IN THE URL (2026-10-03). The tab is where you are looking, not
+           * a page of its own; switching never writes `?tab=`, and so never
+           * costs a navigation either.
+           */}
+          <Tabs
+            defaultValue={domain.status === "verified" ? "configuration" : "records"}
+          >
+            <TabsList variant="pill" className="mb-6">
+              <TabsTrigger value="records">Records</TabsTrigger>
+              <TabsTrigger value="configuration">Configuration</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="records" className="m-0 space-y-6">
+              {delegation?.ok && (
+                <DelegationNote
                   domainId={domain.id}
-                  domainName={domain.name}
-                  connection={connection}
-                  providerSlug={connectable.slug}
-                  providerName={connectable.name}
+                  report={delegation.data}
+                  status={domain.status}
                 />
               )}
-              <VerifyButton id={domain.id} status={domain.status} />
-            </>
-          }
-        />
-      </PageHeader>
 
-      <PageBody className="space-y-8">
-        <MetaGrid
-          items={[
-            { label: "Created", value: <Time iso={domain.created_at} /> },
-            {
-              label: "Status",
-              value: (
-                <Status
-                  status={domain.status}
-                  label={domain.displaced_at ? "Verified elsewhere" : undefined}
-                  variant="pill"
-                />
-              ),
-            },
-            {
-              label: "DNS provider",
-              value:
-                inspection.ok && inspection.data.provider ? (
-                  <span className="flex items-center gap-2">
-                    <ProviderMark
-                      slug={inspection.data.provider.slug}
-                      name={inspection.data.provider.name}
-                      className="size-5"
-                    />
-                    {inspection.data.provider.name}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Not detected</span>
-                ),
-            },
-            {
-              label: "Region",
-              value: (
-                <span>
-                  {regionName(domain.region)}{" "}
-                  <span className="font-mono text-xs text-muted-foreground">
-                    ({domain.region})
-                  </span>
-                </span>
-              ),
-            },
-          ]}
-        />
-        <Journey title="Domain events" steps={domainJourney(domain)} />
+              {domain.delegated && (
+                <p className="max-w-2xl text-sm text-muted-foreground">
+                  {/*
+                   * ⚠ THE COUNT IS COUNTED, NOT WRITTEN DOWN. `MAIL_NAMESERVERS`
+                   * is configuration and can change; a number typed here cannot.
+                   */}
+                  Publish {domain.records.length} NS records at your DNS provider - the{" "}
+                  {new Set(domain.records.map((record) => record.name)).size} names
+                  below, each pointing at every one of our nameservers. Once they
+                  resolve, i10 serves those subdomains, so SPF, DKIM, DMARC and MX stay
+                  correct without you touching them again.
+                </p>
+              )}
 
-        {/*
-         * ⚠ THE EXPLANATION OF WHAT EACH STATUS MEANS IS INLINE, NOT IN A
-         * TOOLTIP. `temporary_failure` in particular is not a synonym for
-         * `failed` - SES uses it for a DNS lookup that failed in a way worth
-         * retrying - and a customer who reads it as "failed" goes and changes
-         * records that were correct.
-         */}
-        {/*
-         * ⚠ IN PLACE OF THE STATUS NOTE, NOT BESIDE IT. A displaced domain is
-         * `failed`, and "we could not find the records" is the wrong story -
-         * the records were found, in another workspace's setup. Shown together,
-         * the failure note sends somebody to check DNS that has nothing wrong.
-         */}
-        {domain.displaced_at && (
-          <DisplacedNote name={domain.name} at={domain.displaced_at} />
-        )}
-
-        <StatusNote
-          status={domain.status}
-          delegated={domain.delegated}
-          // ⚠ SUPPRESSED WHEN THERE IS A REAL DIAGNOSIS TO SHOW. The generic
-          // "propagation can take 72 hours" note and a specific "your records
-          // point somewhere else" note contradict each other, and the generic
-          // one is the reassuring half - so shown together, it is the one people
-          // believe.
-          quiet={delegation?.ok === true || Boolean(domain.displaced_at)}
-        />
-
-        {/*
-         * ⚠ IT WATCHES RATHER THAN WAITING TO BE ASKED. Everything above this
-         * line is a snapshot the server rendered; this is the one part of the
-         * page that notices the domain finishing and re-renders the rest. See
-         * the note on the component for why the last manual step in the whole
-         * flow was somebody pressing refresh.
-         */}
-        <VerificationWatch id={domain.id} status={domain.status} />
-
-        {delegation?.ok && (
-          <DelegationNote
-            domainId={domain.id}
-            report={delegation.data}
-            status={domain.status}
-          />
-        )}
-
-        <Section className="border-b-0 pt-0">
-          <SectionTitle>
-            {domain.delegated ? "Delegation records" : "DNS records"}
-          </SectionTitle>
-          <SectionDescription>
-            {domain.delegated ? (
-              <>
-                {/*
-                 * ⚠ THE COUNT IS COUNTED, NOT WRITTEN DOWN. This said "three NS
-                 * records" while the table below listed six - three delegated
-                 * names times two nameservers - so the first thing the page did
-                 * was contradict itself, and the second was make somebody
-                 * wonder which three of the six they needed. `MAIL_NAMESERVERS`
-                 * is configuration and can change; a number typed here cannot.
-                 */}
-                Publish {domain.records.length} NS records at your DNS provider - the{" "}
-                {new Set(domain.records.map((record) => record.name)).size} names below,
-                each pointing at every one of our nameservers. Once they resolve, i10
-                serves those subdomains, so SPF, DKIM, DMARC and MX stay correct without
-                you touching them again.
-              </>
-            ) : (
-              <>
-                Publish all of these at your DNS provider. We re-check them every time
-                you press Verify, and continuously for the first 72 hours.
-              </>
-            )}
-          </SectionDescription>
-          <SectionContent>
-            <DnsRecords records={domain.records} />
-          </SectionContent>
-        </Section>
-
-        <Section>
-          <SectionTitle>Details</SectionTitle>
-          <SectionContent>
-            <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Detail label="Region" value={domain.region} mono />
-              <Detail
-                label="Setup"
-                value={domain.delegated ? "Delegated to i10" : "Manual records"}
+              <LiveDomainRecords
+                actions={
+                  <>
+                    {/*
+                     * ⚠ ONLY WHERE WE CAN ACTUALLY DO IT. The button appears when
+                     * the domain's DNS is hosted somewhere we have an adapter for;
+                     * anywhere else the records are still the answer, and offering
+                     * a shortcut that cannot work is worse than not offering one.
+                     */}
+                    {connectable && (
+                      <WhileUnverified>
+                        <PublishRecords
+                          domainId={domain.id}
+                          domainName={domain.name}
+                          connection={connection}
+                          providerSlug={connectable.slug}
+                          providerName={connectable.name}
+                        />
+                      </WhileUnverified>
+                    )}
+                  </>
+                }
               />
-              <Detail label="Added" value={formatExact(domain.created_at)} />
-              <Detail label="Domain ID" value={domain.id} mono />
-            </dl>
-          </SectionContent>
-        </Section>
+            </TabsContent>
 
-        <Section>
-          <SectionTitle>Tracking</SectionTitle>
-          <SectionDescription>
-            Off by default. Turn these on only if you have a basis to track the people
-            you send to. Changes apply to the next message sent.
-          </SectionDescription>
-          <SectionContent>
-            <DomainTracking
-              id={domain.id}
-              openTracking={domain.open_tracking}
-              clickTracking={domain.click_tracking}
-            />
-          </SectionContent>
-        </Section>
+            <TabsContent value="configuration" className="m-0">
+              <Section className="pt-0">
+                <SectionTitle>Details</SectionTitle>
+                <SectionContent>
+                  <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <Detail label="Region" value={domain.region} mono />
+                    <Detail
+                      label="Setup"
+                      value={domain.delegated ? "Delegated to i10" : "Manual records"}
+                    />
+                    <Detail label="Added" value={formatExact(domain.created_at)} />
+                    <Detail label="Domain ID" value={domain.id} mono />
+                  </dl>
+                </SectionContent>
+              </Section>
 
-        {/*
-         * ⚠ LAST, AND THAT IS THE POINT. Deleting a domain stops its mail, and
-         * it used to sit behind a ✕✕✕ in the header an inch from "Verify" -
-         * an unlabelled menu whose only contents were destructive. Reaching it
-         * now means scrolling past everything the page is actually for.
-         */}
-        <Section>
-          <SectionTitle className="text-destructive">Danger zone</SectionTitle>
-          <SectionContent>
-            <DomainDangerZone
-              id={domain.id}
-              name={domain.name}
-              scopedKeys={scopedKeys}
-              keyImpact={keyImpact}
-              ownEmails={me.ok ? me.data.user.verified_emails : []}
-              offer={transfer.ok ? transfer.data.data : null}
-            />
-          </SectionContent>
-        </Section>
-      </PageBody>
-    </Page>
+              <Section>
+                <SectionTitle>Tracking</SectionTitle>
+                <SectionDescription>
+                  Off by default. Turn these on only if you have a basis to track the
+                  people you send to. Changes apply to the next message sent.
+                </SectionDescription>
+                <SectionContent>
+                  <DomainTracking
+                    id={domain.id}
+                    openTracking={domain.open_tracking}
+                    clickTracking={domain.click_tracking}
+                  />
+                </SectionContent>
+              </Section>
+
+              {/*
+               * ⚠ LAST, AND THAT IS THE POINT. Deleting a domain stops its mail;
+               * reaching it means choosing this tab and scrolling past everything
+               * the page is actually for.
+               */}
+              <Section>
+                <SectionTitle className="text-destructive">Danger zone</SectionTitle>
+                <SectionContent>
+                  <DomainDangerZone
+                    id={domain.id}
+                    name={domain.name}
+                    scopedKeys={scopedKeys}
+                    keyImpact={keyImpact}
+                    ownEmails={me.ok ? me.data.user.verified_emails : []}
+                    offer={transfer.ok ? transfer.data.data : null}
+                  />
+                </SectionContent>
+              </Section>
+            </TabsContent>
+          </Tabs>
+        </PageBody>
+      </Page>
+    </DomainLiveProvider>
   )
 }
 
@@ -384,54 +382,6 @@ function DisplacedNote({ name, at }: { name: string; at: string }) {
         make sure the records below are published at your DNS provider and press Verify
         - proving it again moves it back to this workspace.
       </p>
-    </div>
-  )
-}
-
-function StatusNote({
-  status,
-  delegated,
-  quiet = false,
-}: {
-  status: string
-  delegated: boolean
-  quiet?: boolean
-}) {
-  if (status === "verified") return null
-  if (quiet) return null
-
-  const copy: Record<string, { title: string; body: string; tone: string }> = {
-    not_started: {
-      title: "Not started",
-      body: delegated
-        ? "Publish the NS records below, then press Verify."
-        : "Publish the records below, then press Verify.",
-      tone: "border-border bg-muted/30",
-    },
-    pending: {
-      title: "Waiting for DNS",
-      body: "The records have been issued and we are watching for them. DNS propagation is usually minutes and can be up to 72 hours - nothing is wrong yet.",
-      tone: "border-warning/25 bg-warning/5",
-    },
-    temporary_failure: {
-      title: "Temporary lookup failure",
-      body: "A DNS lookup failed in a way worth retrying - this is not the same as your records being wrong. We keep checking; press Verify to check now.",
-      tone: "border-warning/25 bg-warning/5",
-    },
-    failed: {
-      title: "Verification failed",
-      body: "We could not find the records within 72 hours. Check each row below against what your DNS provider actually shows - a trailing dot, a quoted value or a wrong host is the usual cause.",
-      tone: "border-danger/25 bg-danger/5",
-    },
-  }
-
-  const note = copy[status]
-  if (!note) return null
-
-  return (
-    <div className={`rounded-lg border px-4 py-3 ${note.tone}`}>
-      <p className="text-sm font-medium">{note.title}</p>
-      <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">{note.body}</p>
     </div>
   )
 }

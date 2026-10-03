@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { AlertTriangle, Plus } from "lucide-react"
-import { toast } from "sonner"
 import { ActionButton } from "@repo/ui/components/action-button"
 import { Button } from "@repo/ui/components/button"
 import { Checkbox } from "@repo/ui/components/checkbox"
@@ -24,6 +23,7 @@ import { WEBHOOK_EVENTS } from "@/components/webhook-events"
 import { useOutcome } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
 import type { WebhookEndpoint } from "@/lib/types"
+import { toastError } from "@/lib/toast"
 
 /**
  * Adding an endpoint.
@@ -68,7 +68,7 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
     if (outcome.state !== "idle") return
 
     if (events.length === 0) {
-      toast.error("Choose at least one event", {
+      toastError("Choose at least one event", {
         description: "An endpoint subscribed to nothing never receives anything.",
       })
       return
@@ -89,7 +89,7 @@ export function CreateWebhookButton({ autoOpen = false }: { autoOpen?: boolean }
           ...(description.trim() ? { description: description.trim() } : {}),
         })
         if (!result.ok) {
-          toast.error("Could not create the endpoint", { description: result.error })
+          toastError("Could not create the endpoint", { description: result.error })
           return false
         }
         endpoint = result.data

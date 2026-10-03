@@ -131,11 +131,7 @@ export function TemplateCard({
         }}
       >
         <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-muted ring-1 ring-border/60 ring-inset">
-          <motion.div
-            className="absolute inset-x-[13%] top-[16%] -bottom-2 overflow-hidden rounded-t-lg shadow-[0_0_0_1px_rgb(0_0_0/0.06),0_8px_24px_-12px_rgb(0_0_0/0.25)]"
-            whileHover={{ y: -3 }}
-            transition={SPRING}
-          >
+          <motion.div className="absolute inset-x-[13%] top-[16%] -bottom-2 overflow-hidden rounded-t-lg shadow-[0_0_0_1px_rgb(0_0_0/0.06),0_8px_24px_-12px_rgb(0_0_0/0.25)]">
             <TemplateThumbnail
               templateId={t.id}
               stamp={t.updated_at}

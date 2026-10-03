@@ -1,12 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { ProviderMark } from "@/components/provider-mark"
 import { startDnsConnect } from "@/lib/actions"
+import { toastError } from "@/lib/toast"
 
 /**
  * "Connect my DNS provider."
@@ -98,7 +98,7 @@ export function ConnectProviderButton({
        * fix and will never clear on its own - so it must not be phrased as
        * "try again".
        */
-      toast.error(`Could not connect ${providerName}`, { description: result.error })
+      toastError(`Could not connect ${providerName}`, { description: result.error })
       return
     }
 

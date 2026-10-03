@@ -908,7 +908,7 @@ const TEMPLATE_UPLOAD = [
 
 const ROUTES: [
   RegExp,
-  (match: RegExpMatchArray, query: Query, method: string) => unknown,
+  (match: RegExpMatchArray, query: Query, method: string, body?: unknown) => unknown,
 ][] = [
   /*
    * ⚠ BILLING IS THE ONE PLACE A PREVIEW MUST NOT PRETEND TO SUCCEED. Every
@@ -1172,16 +1172,24 @@ const ROUTES: [
    */
   [
     /^\/console\/domains$/,
-    (_m, _q, method) =>
-      method === "POST"
-        ? {
-            ...DOMAINS[0]!,
-            id: "prv_new",
-            name: "acme.com",
-            status: "pending",
-            records: recordsFor(DOMAINS[0]!),
-          }
-        : { data: DOMAINS },
+    (_m, _q, method, body) => {
+      if (method !== "POST") return { data: DOMAINS }
+      /*
+       * ⚠ THE CREATED DOMAIN FOLLOWS WHAT WAS ASKED FOR. It was always the
+       * delegated fixture, so the add flow's records step showed three NS rows
+       * whichever setup was chosen, and the grouped DKIM/SPF/DMARC layout was
+       * unreachable in review.
+       */
+      const input = (body ?? {}) as { name?: string; delegated?: boolean }
+      const domain = {
+        ...DOMAINS[0]!,
+        id: "prv_new",
+        name: input.name ?? "acme.com",
+        status: "not_started",
+        delegated: input.delegated !== false,
+      }
+      return { ...domain, records: recordsFor(domain) }
+    },
   ],
 
   /*
@@ -1763,10 +1771,15 @@ const ROUTES: [
  */
 const refreshes = new Map<string, number>()
 
-export function previewFor(path: string, query?: Query, method = "GET"): unknown {
+export function previewFor(
+  path: string,
+  query?: Query,
+  method = "GET",
+  body?: unknown,
+): unknown {
   for (const [pattern, build] of ROUTES) {
     const match = path.match(pattern)
-    if (match) return build(match, query, method)
+    if (match) return build(match, query, method, body)
   }
   return undefined
 }

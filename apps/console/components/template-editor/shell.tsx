@@ -45,7 +45,6 @@ import {
   Trash2,
   Upload,
 } from "lucide-react"
-import { toast } from "sonner"
 import { ActionButton } from "@repo/ui/components/action-button"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
@@ -116,7 +115,7 @@ import {
 import { htmlToText } from "@/lib/html-text"
 import { useOutcome } from "@/lib/outcome"
 import { STATUS_LABEL, titleOf, type TemplateStatus } from "@/lib/templates"
-import { toastFailure } from "@/lib/toast"
+import { toastDone, toastError, toastFailure } from "@/lib/toast"
 import type { DeclaredVariable, TemplateDetail, TemplateFolder } from "@/lib/types"
 
 type View = "write" | "code"
@@ -554,7 +553,7 @@ export function TemplateEditorApp({
   async function publish() {
     if (publishing.state !== "idle") return
     if (fromError) {
-      toast.error("Fix the sender first", { description: fromError })
+      toastError("Fix the sender first", { description: fromError })
       return
     }
     await publishing.run(async () => {
@@ -604,7 +603,7 @@ export function TemplateEditorApp({
       if (mod && event.key.toLowerCase() === "s") {
         event.preventDefault()
         dirty.current = true
-        void flush().then((ok) => ok && toast.success("Draft saved"))
+        void flush().then((ok) => ok && toastDone("Draft saved"))
       } else if (mod && event.key === "Enter" && canPublish) {
         event.preventDefault()
         void publish()
@@ -803,7 +802,7 @@ export function TemplateEditorApp({
                     await flush()
                     const copy = await duplicateTemplate(tpl.id)
                     if (!copy.ok) return toastFailure(copy)
-                    toast.success(`Duplicated as "${titleOf(copy.data)}"`)
+                    toastDone(`Duplicated as "${titleOf(copy.data)}"`)
                     router.push(`/templates/${encodeURIComponent(copy.data.id)}/editor`)
                   }}
                 >
@@ -1174,7 +1173,7 @@ export function TemplateEditorApp({
             e.target.value = ""
             if (!file) return
             if (file.size > 2 * 1024 * 1024)
-              return void toast.error("That file is over 2 MB")
+              return void toastError("That file is over 2 MB")
             setDialog({ importHtml: await file.text(), name: file.name })
           }}
         />

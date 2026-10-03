@@ -57,8 +57,10 @@ export function ListCard({
   const body = <div className="flex h-full flex-col gap-3 p-4">{children}</div>
   const surface = cn(
     "block h-full rounded-2xl border bg-background outline-none",
-    "transition-[border-color,box-shadow,transform] duration-200 ease-out",
-    "hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-[0_8px_24px_-12px_rgb(0_0_0/0.18)]",
+    // ⚠ NO LIFT ON HOVER (2026-10-03). The border and shadow answer the
+    // pointer; a card that jumps up under it is the movement nobody asked for.
+    "transition-[border-color,box-shadow] duration-200 ease-out",
+    "hover:border-foreground/15 hover:shadow-[0_8px_24px_-12px_rgb(0_0_0/0.18)]",
     "focus-visible:ring-2 focus-visible:ring-ring",
     muted && "opacity-60",
   )

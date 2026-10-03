@@ -1,19 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { MoreHorizontal, Trash2 } from "lucide-react"
-import { toast } from "sonner"
-import { Button } from "@repo/ui/components/button"
-import { rowMenuClass } from "@/components/list/table"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
+import { Trash2 } from "lucide-react"
+import { DropdownMenuItem } from "@repo/ui/components/dropdown-menu"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { deleteTopic } from "@/lib/actions"
 import type { TopicRow } from "@/lib/types"
+import { toastError } from "@/lib/toast"
+import { RowMenu } from "@/components/list/row-menu"
 
 /**
  * ⚠ DELETING A TOPIC DESTROYS EVERY PREFERENCE RECORDED AGAINST IT, AND THAT IS
@@ -27,24 +21,12 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className={rowMenuClass}
-            aria-label={`Actions for ${topic.name}`}
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
-            <Trash2 />
-            Delete topic
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <RowMenu label={topic.name}>
+        <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
+          <Trash2 />
+          Delete topic
+        </DropdownMenuItem>
+      </RowMenu>
 
       <ConfirmDialog
         open={confirming}
@@ -57,7 +39,7 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
         onConfirm={async () => {
           const result = await deleteTopic(topic.id)
           if (!result.ok) {
-            toast.error("Could not delete the topic", { description: result.error })
+            toastError("Could not delete the topic", { description: result.error })
             return false
           }
           return true

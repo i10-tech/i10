@@ -3,12 +3,12 @@
 import * as React from "react"
 import { useOrganization } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
 import { ActionButton } from "@repo/ui/components/action-button"
 import { Input } from "@repo/ui/components/input"
 import { renameWorkspace } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import { useSyncedState } from "@/lib/react"
+import { toastError } from "@/lib/toast"
 
 /**
  * Renaming the workspace, and updating the one thing on screen that shows it.
@@ -96,7 +96,7 @@ export function RenameWorkspace({
       const result = await renameWorkspace(name.trim())
 
       if (!result.ok) {
-        toast.error("Could not rename the workspace", { description: result.error })
+        toastError("Could not rename the workspace", { description: result.error })
         return false
       }
 

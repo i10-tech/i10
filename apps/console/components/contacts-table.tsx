@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { Layers, SearchX, Trash2, Users } from "lucide-react"
-import { toast } from "sonner"
 import { cn } from "cn"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
@@ -14,7 +13,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@repo/ui/components/dropdown-menu"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { BULK_CONFIRM_WORD, ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import { BulkBar } from "@/components/list/bulk-bar"
 import {
@@ -37,6 +36,7 @@ import { addToSegment, deleteContacts } from "@/lib/actions"
 import type { ContactRow, SegmentRow } from "@/lib/types"
 import { useResetWhen } from "@/lib/react"
 import { Time } from "@/components/time"
+import { toastDone, toastError } from "@/lib/toast"
 
 const FILTERS = ["search", "status", "segment_id"]
 
@@ -290,10 +290,10 @@ function ContactRows({
                     const picked = [...selected]
                     const result = await addToSegment(segment.id, picked)
                     if (!result.ok) {
-                      toast.error("Could not add them", { description: result.error })
+                      toastError("Could not add them", { description: result.error })
                       return
                     }
-                    toast.success(
+                    toastDone(
                       `Added ${result.data.added} to ${segment.name}`,
                       result.data.added < picked.length
                         ? {
@@ -341,11 +341,11 @@ function ContactRows({
         doneLabel="Deleted"
         // ⚠ `DELETE` FOR EVERY BULK DELETE. There is no single name to type, and
         // the count is already in the title where it is read.
-        confirmWord="DELETE"
+        confirmWord={BULK_CONFIRM_WORD}
         onConfirm={async () => {
           const result = await deleteContacts([...selected])
           if (!result.ok) {
-            toast.error("Could not delete them", { description: result.error })
+            toastError("Could not delete them", { description: result.error })
             return false
           }
           doneDeleting.current = true

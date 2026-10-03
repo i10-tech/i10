@@ -29,14 +29,17 @@ export function DetailHero({
   eyebrow,
   title,
   subtitle,
+  description,
   actions,
 }: {
   back?: React.ReactNode
   icon: React.ReactNode
   tone?: HeroTone
-  eyebrow: string
+  eyebrow?: string
   title: React.ReactNode
   subtitle?: React.ReactNode
+  /** A sentence under the title, at reading size - "Add domain" uses it. */
+  description?: React.ReactNode
   actions?: React.ReactNode
 }) {
   return (
@@ -45,8 +48,8 @@ export function DetailHero({
         {back}
         <div
           className={cn(
-            "grid size-12 shrink-0 place-items-center rounded-2xl bg-linear-to-b shadow-sm ring-1 ring-inset",
-            "animate-in fade-in-0 zoom-in-95 duration-300 [&_svg]:size-6",
+            "grid size-14 shrink-0 place-items-center rounded-2xl bg-linear-to-b shadow-sm ring-1 ring-inset",
+            "animate-in fade-in-0 zoom-in-95 duration-300 [&_svg]:size-7",
             TILE[tone],
           )}
           aria-hidden
@@ -54,12 +57,15 @@ export function DetailHero({
           {icon}
         </div>
         <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{eyebrow}</p>
-          <h1 className="truncate font-display text-xl font-semibold tracking-tight">
+          {eyebrow && <p className="text-xs text-muted-foreground">{eyebrow}</p>}
+          <h1 className="truncate font-display text-2xl font-semibold tracking-tight">
             {title}
           </h1>
           {subtitle && (
             <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+          )}
+          {description && (
+            <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
           )}
         </div>
       </div>
