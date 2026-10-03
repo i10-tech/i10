@@ -220,6 +220,9 @@ export function SignInForm({
    */
   const touch = useSyncExternalStore(noSubscribe, isTouch, unknownOnServer)
   const [tapped, setTapped] = useState(false)
+  // The same, readable in the same event: state lands a render too late for
+  // the focus that follows the tap that set it.
+  const tappedRef = useRef(false)
   const held = touch !== false && question === "pending" && !tapped
 
   useEffect(() => {
@@ -332,12 +335,29 @@ export function SignInForm({
    * ⚠ NOT `autoFocus`, AND THE ORDER IS THE WHOLE POINT. Focusing the box is
    * what opens the browser's password AutoFill, so it waits for `question`:
    * nothing while a passkey prompt is open, at once when it closes or there
-   * was nothing to ask.
+   * was nothing to ask. On a laptop only - see the phone branch below.
    */
   useEffect(() => {
     // ⚠ NOT WHILE A PASSKEY PROMPT IS OPEN: focusing would open autofill
     // underneath it. Re-runs when the prompt closes.
-    if (stage !== "identifier" || busy || question === "pending") return
+    if (stage !== "identifier" || busy) return
+
+    /*
+     * ⚠ ON A PHONE, NEVER FOCUSED FROM HERE - AND UN-FOCUSED IF SAFARI DID IT.
+     * iOS opens the keyboard only for a focus that comes from a touch on the
+     * page. Dismissing the passkey sheet is a touch on the SYSTEM's sheet, so
+     * a focus after it, like Safari's own at load, gave a box that looked
+     * pressed with no keyboard - and tapping it changed nothing, because it
+     * was already focused. Left unfocused, one tap brings the keyboard and the
+     * saved-password bar together.
+     */
+    if (touch) {
+      const email = document.getElementById("email")
+      if (!tappedRef.current && document.activeElement === email) email?.blur()
+      return
+    }
+
+    if (question === "pending") return
 
     let done = false
     const focus = () => {
@@ -345,8 +365,8 @@ export function SignInForm({
       done = true
       const email = document.getElementById("email")
       const active = document.activeElement
-      // ⚠ SAFARI'S OWN FOCUS (see `held`) LEFT IT FOCUSED BUT READ-ONLY, which
-      // offers nothing. Focusing it again is what asks for AutoFill now.
+      // ⚠ A FOCUS FROM BEFORE HYDRATION LEFT IT FOCUSED BUT READ-ONLY (see
+      // `held`), which offers nothing. Focusing it again asks for AutoFill.
       if (active === email) email?.blur()
       else if (active && active !== document.body) return
       email?.focus()
@@ -358,17 +378,6 @@ export function SignInForm({
         done = true
       }
     }
-
-    /*
-     * ⚠ A LIVE SILENT REQUEST ON A TOUCH DEVICE: NEVER. Seen on the iOS 26
-     * simulator: with nothing focused, Safari opens the "Use Passkey" sheet by
-     * itself the moment the conditional request is live, with the password
-     * under More Options. Focusing the box was the ONLY thing that produced
-     * the password sheet first, at any delay. A laptop has no such sheet:
-     * Chrome and Safari list passkeys in the field's dropdown, which needs
-     * focus.
-     */
-    if (navigator.maxTouchPoints > 1) return
 
     /*
      * ⚠ A BEAT AFTER THE REQUEST, NOT THE SAME TICK. WebKit registers a
@@ -388,7 +397,7 @@ export function SignInForm({
       window.clearTimeout(timer)
       window.clearTimeout(settle)
     }
-  }, [stage, busy, question])
+  }, [stage, busy, question, touch])
 
   /**
    * ⚠ THE FIRST STEP CREATES THE SIGN-IN RATHER THAN JUST REMEMBERING THE
@@ -822,7 +831,30 @@ export function SignInForm({
                 <EmailInput
                   id="email"
                   readOnly={held}
-                  onPointerDown={() => setTapped(true)}
+                  /*
+                   * ⚠ A TAP HAS TO BE THE THING THAT FOCUSES THE BOX, OR iOS
+                   * SHOWS NO KEYBOARD. iOS opens the keyboard only for focus
+                   * that comes from a touch on the page; focus from script, or
+                   * from Safari itself at load, leaves the box looking active
+                   * with no keyboard - and a tap on a box that is already
+                   * focused changes nothing, so it stayed that way until
+                   * somebody tapped elsewhere and back. So the touch makes the
+                   * box writable and drops any focus it did not give, at
+                   * pointerdown, before the tap's own focus lands.
+                   */
+                  onPointerDown={(event) => {
+                    const box = event.currentTarget
+                    tappedRef.current = true
+                    box.readOnly = false
+                    if (document.activeElement === box) box.blur()
+                    setTapped(true)
+                  }}
+                  // ⚠ SAFARI'S OWN FOCUS AT LOAD IS UNDONE while the passkey
+                  // has its turn - it brings no keyboard, only a box that looks
+                  // pressed. See `held`.
+                  onFocus={(event) => {
+                    if (held && !tappedRef.current) event.currentTarget.blur()
+                  }}
                   name="email"
                   label="Email address"
                   value={identifier}
