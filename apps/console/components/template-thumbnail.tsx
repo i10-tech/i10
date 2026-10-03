@@ -13,7 +13,7 @@ import { templateDraftPreview } from "@/lib/actions"
  * ⚠ THE DRAFT, NOT ONLY WHAT IS LIVE. A card is how somebody finds the
  * template they were editing; showing last week's published version of it
  * would show them the wrong email. Variables show their fallbacks, or their
- * `{{ name }}`, exactly as a test email fills them.
+ * `{{{ name }}}`, exactly as a test email fills them.
  *
  * ⚠ THE REAL EMAIL, NOT A PICTURE OF IT, in the same sandboxed, CSP-locked
  * frame as every preview, drawn at an email's width and scaled down.
@@ -24,8 +24,14 @@ import { templateDraftPreview } from "@/lib/actions"
  */
 const cache = new Map<string, Promise<string | null>>()
 
-/** An email's usual width; the frame is drawn at this and scaled to fit. */
-const EMAIL_WIDTH = 600
+/**
+ * The width the email is drawn at, then scaled to fit.
+ *
+ * ⚠ WIDER THAN THE EMAIL. An email is a 600px column, and the editor shows it
+ * as one with white space either side; drawn in a 600px frame, it filled the
+ * sheet edge to edge and its text looked bigger than in the editor.
+ */
+const EMAIL_WIDTH = 760
 
 export function TemplateThumbnail({
   templateId,
@@ -79,6 +85,8 @@ export function TemplateThumbnail({
     }
   }, [templateId, stamp])
 
+  const shown = React.useMemo(() => (html ? asInEditor(html) : html), [html])
+
   return (
     <div
       ref={box}
@@ -93,7 +101,7 @@ export function TemplateThumbnail({
         >
           <EmailFrame
             inert
-            html={html}
+            html={shown!}
             title={label}
             imagesFrom={imagesFrom}
             className="absolute top-0 left-0 origin-top-left"
@@ -113,3 +121,54 @@ export function TemplateThumbnail({
     </div>
   )
 }
+
+/**
+ * Variables left unfilled, drawn as the editor's chip: `{{{name}}}` in blue
+ * monospace with its braces dimmed - not raw braces in the body text.
+ *
+ * ⚠ TEXT ONLY. A variable in a link's address stays as written; only what a
+ * reader would see is restyled, and only for this picture.
+ */
+function asInEditor(html: string): string {
+  if (typeof DOMParser === "undefined" || !/\{\{/.test(html)) return html
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+  const texts: Text[] = []
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const parent = n.parentElement?.tagName
+    if (parent === "STYLE" || parent === "SCRIPT" || parent === "TITLE") continue
+    if (VARIABLE.test(n.textContent ?? "")) texts.push(n as Text)
+    VARIABLE.lastIndex = 0
+  }
+  for (const node of texts) {
+    const value = node.textContent ?? ""
+    const parts = doc.createDocumentFragment()
+    let at = 0
+    for (const m of value.matchAll(VARIABLE)) {
+      parts.append(value.slice(at, m.index))
+      const chip = doc.createElement("span")
+      chip.setAttribute("style", CHIP)
+      const brace = (t: string) => {
+        const b = doc.createElement("span")
+        b.setAttribute("style", "opacity:.55")
+        b.textContent = t
+        return b
+      }
+      chip.append(brace("{{{"), (m[1] ?? m[2])!, brace("}}}"))
+      parts.append(chip)
+      at = m.index + m[0].length
+    }
+    parts.append(value.slice(at))
+    node.replaceWith(parts)
+  }
+  return "<!doctype html>" + doc.documentElement.outerHTML
+}
+
+const VARIABLE = /\{\{\{\s*([A-Za-z_][\w.]*)\s*\}\}\}|\{\{\s*([A-Za-z_][\w.]*)\s*\}\}/g
+
+/** The editor's chip (editor.css `.i10-variable`), as inline style. */
+const CHIP =
+  "display:inline-block;padding:0 .3em;margin:0 .06em;border-radius:5px;" +
+  "background:rgba(59,130,246,.1);box-shadow:inset 0 0 0 1px rgba(59,130,246,.25);" +
+  "color:#2563eb;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;" +
+  "font-size:.82em;line-height:1.45;white-space:nowrap"

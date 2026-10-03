@@ -8,7 +8,7 @@ import { FormDialog } from "@/components/form-dialog"
 import { Time } from "@/components/time"
 import { updateTemplate } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
-import { STATUS_LABEL, statusOf } from "@/lib/templates"
+import { STATUS_LABEL, followsTitle, slugOf, statusOf } from "@/lib/templates"
 import type { DeclaredVariable, TemplateFolder, TemplateSummary } from "@/lib/types"
 
 /** What an alias may be; the API holds the same rule. */
@@ -39,10 +39,16 @@ export function TemplateDetailsDialog({
 }) {
   const [title, setTitle] = React.useState(template.title ?? "")
   const [alias, setAlias] = React.useState(template.name)
+  // ⚠ THE ALIAS FOLLOWS THE NAME until it is typed into, and the API picks
+  // the free one (`welcome-2`) - so a followed alias is never sent.
+  const following = followsTitle(template.name, template.title)
+  const [touched, setTouched] = React.useState(false)
   useResetOnOpen(open, () => {
     setTitle(template.title ?? "")
     setAlias(template.name)
+    setTouched(false)
   })
+  const follows = following && !touched
 
   const aliasProblem = (value: string) =>
     !ALIAS.test(value) || UUID_SHAPE.test(value)
@@ -83,10 +89,10 @@ export function TemplateDetailsDialog({
       onSubmit={async () => {
         const patch = {
           title: title.trim() || null,
-          ...(alias.trim() !== template.name ? { name: alias.trim() } : {}),
+          ...(!follows && alias.trim() !== template.name ? { name: alias.trim() } : {}),
         }
         const result = await updateTemplate(template.id, patch)
-        if (result.ok) onSaved?.({ title: patch.title, name: alias.trim() })
+        if (result.ok) onSaved?.({ title: patch.title, name: result.data.name })
         return result
       }}
     >
@@ -94,7 +100,15 @@ export function TemplateDetailsDialog({
         label="Name"
         id="details-title"
         value={title}
-        onChange={(event) => setTitle(event.target.value)}
+        onChange={(event) => {
+          setTitle(event.target.value)
+          if (follows)
+            setAlias(
+              event.target.value.trim() === (template.title ?? "").trim()
+                ? template.name
+                : slugOf(event.target.value),
+            )
+        }}
         autoComplete="off"
         hint="What the team calls it. Change it any time."
       />
@@ -102,7 +116,10 @@ export function TemplateDetailsDialog({
         label="Alias"
         id="details-alias"
         value={alias}
-        onChange={(event) => setAlias(event.target.value)}
+        onChange={(event) => {
+          setTouched(true)
+          setAlias(event.target.value)
+        }}
         autoComplete="off"
         className="font-mono text-xs"
         required="The alias cannot be empty."
@@ -110,7 +127,9 @@ export function TemplateDetailsDialog({
         hint={
           alias.trim() !== template.name
             ? "Code sending by the old alias will stop finding this template."
-            : "Sends may name the template by this instead of its id."
+            : follows
+              ? "Follows the name until you change it here."
+              : "Sends may name the template by this instead of its id."
         }
       />
 

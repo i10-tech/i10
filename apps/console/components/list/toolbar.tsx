@@ -25,6 +25,11 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@repo/ui/components/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
 import { cn } from "cn"
+import {
+  useServerViews,
+  viewCookie,
+  type View,
+} from "@/components/list/remembered-views"
 import { useUrlList, useUrlParam, useUrlSearch } from "@/components/list/url-state"
 import { RANGES } from "@/lib/range"
 
@@ -122,7 +127,7 @@ export function SearchField({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.7 }}
               transition={{ duration: 0.12 }}
-              className="pointer-events-auto"
+              className="pointer-events-auto flex"
             >
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -150,6 +155,10 @@ export function SearchField({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
+              // ⚠ FLEX, so there is no line box: a block around an inline
+              // badge is taller than it by the descender, and the badge sat
+              // off the field's centre line by that much.
+              className="flex"
             >
               <Kbd className="hidden sm:inline-flex">/</Kbd>
             </motion.div>
@@ -403,7 +412,7 @@ export function UrlClearFilters({ params }: { params: string[] }) {
 
 // ── View ───────────────────────────────────────────────────────────────────
 
-export type View = "grid" | "table"
+export type { View }
 
 /** Grid or table, as the templates page offers it. */
 export function ViewToggle({
@@ -413,6 +422,8 @@ export function ViewToggle({
   value: View
   onChange: (view: View) => void
 }) {
+  // One pill per toggle on the page, so two toggles never trade it.
+  const layoutId = React.useId()
   return (
     <ToggleGroup
       type="single"
@@ -421,26 +432,42 @@ export function ViewToggle({
       className="h-9 rounded-xl border p-0.5"
       aria-label="Layout"
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <ToggleGroupItem value="grid" aria-label="Grid" className="size-8 rounded-lg">
-            <LayoutGrid />
-          </ToggleGroupItem>
-        </TooltipTrigger>
-        <TooltipContent>Grid</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <ToggleGroupItem
-            value="table"
-            aria-label="Table"
-            className="size-8 rounded-lg"
-          >
-            <Table2 />
-          </ToggleGroupItem>
-        </TooltipTrigger>
-        <TooltipContent>Table</TooltipContent>
-      </Tooltip>
+      {(
+        [
+          { v: "grid", label: "Grid", icon: <LayoutGrid /> },
+          { v: "table", label: "Table", icon: <Table2 /> },
+        ] as const
+      ).map(({ v, label, icon }) => (
+        <Tooltip key={v}>
+          <TooltipTrigger asChild>
+            <ToggleGroupItem
+              value={v}
+              aria-label={label}
+              // The chosen one is raised, on a pill that slides between them.
+              // ⚠ BY `value`, NOT `data-state`: the tooltip around it sets
+              // its own `data-state="closed"` over the toggle's "on", which
+              // is why the chosen view never looked chosen.
+              className={cn(
+                "relative size-8 rounded-lg hover:bg-transparent data-[state=on]:bg-transparent",
+                value === v
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {value === v && (
+                <motion.span
+                  layoutId={`${layoutId}-view`}
+                  aria-hidden
+                  className="absolute inset-0 rounded-lg bg-foreground/[0.09] shadow-sm ring-1 ring-foreground/[0.06] ring-inset"
+                  transition={{ type: "spring", stiffness: 500, damping: 38 }}
+                />
+              )}
+              <span className="relative">{icon}</span>
+            </ToggleGroupItem>
+          </TooltipTrigger>
+          <TooltipContent>{label}</TooltipContent>
+        </Tooltip>
+      ))}
     </ToggleGroup>
   )
 }
@@ -456,6 +483,8 @@ export function useRememberedView(
   key: string,
   fallback: View = "table",
 ): [View, (view: View) => void] {
+  // What the server rendered with: the cookie, else the page's default.
+  const fromServer = useServerViews()[key] ?? fallback
   const view = React.useSyncExternalStore(
     (notify) => {
       viewListeners.add(notify)
@@ -468,13 +497,18 @@ export function useRememberedView(
     () => {
       try {
         const stored = localStorage.getItem(`i10.${key}.view`)
-        return stored === "grid" || stored === "table" ? stored : fallback
+        return stored === "grid" || stored === "table" ? stored : fromServer
       } catch {
-        return fallback
+        return fromServer
       }
     },
-    () => fallback,
+    () => fromServer,
   )
+  // A choice made before views were kept in a cookie: write it now, so the
+  // next load renders it from the start.
+  React.useEffect(() => {
+    if (view !== fromServer) writeViewCookie(key, view)
+  }, [key, view, fromServer])
   const choose = React.useCallback(
     (next: View) => {
       try {
@@ -482,11 +516,16 @@ export function useRememberedView(
       } catch {
         // Remembering is a convenience.
       }
+      writeViewCookie(key, next)
       for (const notify of viewListeners) notify()
     },
     [key],
   )
   return [view, choose]
+}
+
+function writeViewCookie(key: string, view: View) {
+  document.cookie = `${viewCookie(key)}=${view}; path=/; max-age=31536000; samesite=lax`
 }
 
 // ── Results ────────────────────────────────────────────────────────────────

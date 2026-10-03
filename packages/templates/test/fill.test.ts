@@ -131,6 +131,32 @@ describe("PreviewProps", () => {
   it("finds subject placeholders once each", () => {
     expect(placeholders("{{a}} {{ a }} {{b.c}}")).toEqual(["a", "b.c"])
   })
+
+  it("reads three braces as the same variable as two, and only balanced pairs", () => {
+    expect(placeholders("{{{a}}} {{ a }} {{{ b.c }}}")).toEqual(["a", "b.c"])
+    // An unbalanced brace is left as text, not swallowed into the variable.
+    const subject = fill(
+      { html: "", text: "", nonce, variables: [], subject: "{{name}}} and {{{name}}" },
+      { name: "Ada" },
+    )
+    expect(subject.ok && subject.filled.subject).toBe("Ada} and {Ada")
+  })
+
+  it("fills and still escapes three braces, in HTML, text and the subject", () => {
+    const result = skeletonFromHtml({
+      html: '<a href="{{{ url }}}">{{{name}}}</a>',
+      text: "{{{name}}}: {{{url}}}",
+      nonce,
+    })
+    if (!result.ok) throw new Error(result.problems.join())
+    const filled = fill(
+      { ...result.skeleton, subject: "Hi {{{ name }}}" },
+      { name: "<b>", url: "javascript:x" },
+    )
+    expect(filled.ok && filled.filled.html).toBe('<a href="#">&lt;b&gt;</a>')
+    expect(filled.ok && filled.filled.text).toBe("<b>: javascript:x")
+    expect(filled.ok && filled.filled.subject).toBe("Hi <b>")
+  })
 })
 
 describe("withPreviewText", () => {

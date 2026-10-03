@@ -1,11 +1,11 @@
 import { marker } from "./markers.js"
 import { positionAt } from "./context.js"
-import { SUBJECT_PLACEHOLDER } from "./substitute.js"
+import { SUBJECT_PLACEHOLDER, placeholderPath } from "./substitute.js"
 import type { Skeleton } from "./verify.js"
 import type { Variable } from "./variables.js"
 
 /**
- * A version from HTML somebody wrote by hand, with `{{ name }}` placeholders.
+ * A version from HTML somebody wrote by hand, with `{{{ name }}}` (or `{{ name }}`) placeholders.
  *
  * ⚠ THE SAME SKELETON AND THE SAME FILL AS A RENDERED TSX VERSION. Nothing is
  * executed here - the placeholders are found by pattern - so an HTML template
@@ -32,11 +32,12 @@ export function skeletonFromHtml(input: {
   const lower = html.toLowerCase()
   const outHtml = html.replace(
     SUBJECT_PLACEHOLDER,
-    (whole, path: string, at: number) => {
+    (whole, triple: string | undefined, double: string | undefined, at: number) => {
+      const path = placeholderPath(triple, double)
       const position = positionAt(html, lower, at)
       if (position.kind === "forbidden") {
         problems.push(
-          `\`{{ ${path} }}\` is inside ${position.where}, where a value cannot be made safe.`,
+          `\`{{{ ${path} }}}\` is inside ${position.where}, where a value cannot be made safe.`,
         )
         return whole
       }
@@ -47,8 +48,10 @@ export function skeletonFromHtml(input: {
       )
     },
   )
-  const outText = (input.text ?? "").replace(SUBJECT_PLACEHOLDER, (_w, path: string) =>
-    marker(input.nonce, indexOf(path)),
+  const outText = (input.text ?? "").replace(
+    SUBJECT_PLACEHOLDER,
+    (_w, triple?: string, double?: string) =>
+      marker(input.nonce, indexOf(placeholderPath(triple, double))),
   )
 
   if (problems.length > 0) return { ok: false, problems: [...new Set(problems)] }

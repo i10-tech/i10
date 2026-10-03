@@ -153,7 +153,7 @@ export function EnvelopeFields({
           value={value.subject}
           onChange={(e) => onChange({ subject: e.target.value })}
           disabled={disabled}
-          placeholder="Welcome to Acme, {{ name }}"
+          placeholder="Welcome to Acme, {{{ name }}}"
           className="w-full bg-transparent outline-none placeholder:text-neutral-400"
           aria-label="Subject"
         />

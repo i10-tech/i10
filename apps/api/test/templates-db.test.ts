@@ -7,6 +7,7 @@ import * as schema from "../src/db/schema.js"
 import type { Renderer } from "../src/templates/renderer.js"
 import {
   fileSetHash,
+  followsTitle,
   templateStore,
   type TemplateStore,
 } from "../src/templates/store.js"
@@ -219,7 +220,7 @@ suite("templates", () => {
       path: "auth/welcome.tsx",
       files: { "components/layout.tsx": "layout" },
       subject: "Welcome, {{ name }}",
-      display: { html: "<p>{{ name }}</p>" },
+      display: { html: "<p>{{{ name }}}</p>" },
     })
     // The exported subject became the draft's.
     expect((await store.get(t, created.id))?.subject).toBe("Welcome, {{ name }}")
@@ -398,7 +399,8 @@ suite("templates", () => {
     expect(v1).toMatchObject({
       kind: "visual",
       design,
-      display: { html: '<p>Hi {{ name }}</p><a href="{{ url }}">go</a>' },
+      // Shown in the editor's spelling, whichever the template was written in.
+      display: { html: '<p>Hi {{{ name }}}</p><a href="{{{ url }}}">go</a>' },
     })
     const sent = await resolveTemplateSend(
       {
@@ -555,6 +557,29 @@ suite("template folders, defaults and fallbacks", () => {
     })
   })
 
+  it("moves the alias with the name while it still is the name, to the first free one", async () => {
+    const t = await workspace()
+    const taken = await store.create(t, { title: "Onboarding" })
+    const tpl = await store.create(t, { title: "Untitled Template" })
+    if ("conflict" in taken || "conflict" in tpl) throw new Error("conflict")
+    expect(taken.name).toBe("onboarding")
+    expect(tpl.name).toBe("untitled-template")
+
+    // `onboarding` is someone else's, so this one is the next free.
+    const renamed = await store.update(t, tpl.id, { title: "Onboarding" })
+    expect(renamed && "name" in renamed && renamed.name).toBe("onboarding-2")
+    // Saving the same name again changes nothing.
+    const again = await store.update(t, tpl.id, { title: "Onboarding", subject: "Hi" })
+    expect(again && "name" in again && again.name).toBe("onboarding-2")
+    const moved = await store.update(t, tpl.id, { title: "Password reset!" })
+    expect(moved && "name" in moved && moved.name).toBe("password-reset")
+
+    // An alias chosen by hand stays put.
+    await store.update(t, tpl.id, { name: "reset-v1" })
+    const kept = await store.update(t, tpl.id, { title: "Reset" })
+    expect(kept && "name" in kept && kept.name).toBe("reset-v1")
+  })
+
   it("publishes the sender, reply-to, preview line and fallbacks, and a send uses them", async () => {
     const t = await workspace()
     const created = await store.create(t, { name: "invite" })
@@ -616,7 +641,8 @@ suite("template folders, defaults and fallbacks", () => {
     const email = await store.draftEmail(t, created.id)
     expect(email).toMatchObject({
       subject: "For you",
-      html: "<p>you and {{ other }}</p>",
+      // A variable with no fallback is left in the editor's spelling.
+      html: "<p>you and {{{ other }}}</p>",
     })
   })
 
@@ -644,3 +670,14 @@ function skeleton() {
     variables: [{ path: "name", preview: "Ada" }],
   }
 }
+
+describe("followsTitle", () => {
+  it("knows an alias made from a title, with or without the suffix that freed it", () => {
+    expect(followsTitle("welcome", "Welcome")).toBe(true)
+    expect(followsTitle("welcome-3", "Welcome")).toBe(true)
+    expect(followsTitle("untitled-template", null)).toBe(true)
+    expect(followsTitle("welcome-copy", "Welcome")).toBe(false)
+    expect(followsTitle("welcome-v2", "Welcome")).toBe(false)
+    expect(followsTitle("hello", "Welcome")).toBe(false)
+  })
+})

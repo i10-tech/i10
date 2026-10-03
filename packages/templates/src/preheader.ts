@@ -9,7 +9,7 @@ import { escapeHtml } from "./substitute.js"
  * draft restored from a published version already carries one, and
  * publishing it again must not show two.
  *
- * ⚠ `{{ name }}` SURVIVES ESCAPING, so a preview line can use a variable and
+ * ⚠ `{{{ name }}}` SURVIVES ESCAPING, so a preview line can use a variable and
  * the version's skeleton finds it like any other.
  */
 const MARK = "data-i10-preview"

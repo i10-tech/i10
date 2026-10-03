@@ -192,7 +192,7 @@ describe("displaySkeleton", () => {
     const one = `<a href="${marker("aaaaaaaaaaaa", 1, true)}">${marker("aaaaaaaaaaaa", 0)}</a>`
     const two = `<a href="${marker("bbbbbbbbbbbb", 1, true)}">${marker("bbbbbbbbbbbb", 0)}</a>`
     expect(displaySkeleton(one, "aaaaaaaaaaaa", vars)).toBe(
-      '<a href="{{ url }}">{{ name }}</a>',
+      '<a href="{{{ url }}}">{{{ name }}}</a>',
     )
     expect(displaySkeleton(two, "bbbbbbbbbbbb", vars)).toBe(
       displaySkeleton(one, "aaaaaaaaaaaa", vars),

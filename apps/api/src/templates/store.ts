@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { and, count, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, count, desc, eq, inArray, ne, sql } from "drizzle-orm"
 import {
   buildProps,
   canonicalFileSet,
@@ -127,7 +127,7 @@ export interface VersionDetail extends VersionSummary {
   /** A `visual` version's TipTap JSON: what reopening it in the editor loads. */
   design: Record<string, unknown> | null
   /**
-   * The skeleton with its markers written as `{{ path }}`: what a person
+   * The skeleton with its markers written as `{{{ path }}}`: what a person
    * reads, and what two versions are diffed by. Never what is sent.
    */
   display: { html: string | null; text: string | null }
@@ -275,7 +275,7 @@ export interface TemplateStore {
   ): Promise<Preview | null>
   /**
    * The DRAFT as it would send now, every variable filled with its fallback
-   * or, without one, left as its `{{ name }}` - what a test email sends. For
+   * or, without one, left as its `{{{ name }}}` - what a test email sends. For
    * a `tsx` template, whose draft is its live version, that version.
    */
   draftEmail(
@@ -401,16 +401,20 @@ export function templateStore(
 
   /**
    * `base`, or `base-2`, `base-3`… - the first alias nobody in the workspace
-   * has. Row security scopes the look to this workspace.
+   * has. Row security scopes the look to this workspace. `except` is a
+   * template whose own alias does not count, for one being renamed.
    */
-  const freeName = async (tx: Tx, base: string): Promise<string> => {
+  const freeName = async (tx: Tx, base: string, except?: string): Promise<string> => {
     const taken = new Set(
       (
         await tx
           .select({ name: templates.name })
           .from(templates)
           .where(
-            sql`${templates.name} = ${base} or ${templates.name} like ${`${base}-%`}`,
+            and(
+              sql`${templates.name} = ${base} or ${templates.name} like ${`${base}-%`}`,
+              except ? ne(templates.id, except) : undefined,
+            ),
           )
       ).map((r) => r.name),
     )
@@ -797,6 +801,31 @@ export function templateStore(
         const set: Record<string, unknown> = { updatedAt: new Date() }
         if (patch.name !== undefined) set.name = patch.name.trim()
         if (patch.title !== undefined) set.title = patch.title?.trim() || null
+        if (patch.title !== undefined && patch.name === undefined) {
+          // ⚠ THE ALIAS FOLLOWS THE NAME, BUT ONLY WHILE IT STILL IS THE NAME.
+          // `welcome` (or `welcome-2`) under "Welcome" becomes `onboarding`
+          // when it is renamed "Onboarding"; an alias someone typed for
+          // themselves, or one a repository owns, is never touched.
+          const [current] = await tx
+            .select({
+              name: templates.name,
+              title: templates.title,
+              source: templates.source,
+            })
+            .from(templates)
+            .where(eq(templates.id, id))
+          const next = (set.title as string | null) ?? null
+          if (
+            current &&
+            current.source !== "github" &&
+            (current.title ?? null) !== next &&
+            followsTitle(current.name, current.title)
+          ) {
+            const base = slugOf(next ?? "") || "untitled-template"
+            if (!followsTitle(current.name, next))
+              set.name = await freeName(tx, base, id)
+          }
+        }
         if (patch.folderId !== undefined) {
           const folderId = await ownFolder(tx, patch.folderId)
           if (patch.folderId !== null && folderId === null) {
@@ -1078,7 +1107,7 @@ export function templateStore(
           if (!v) return { problems: ["Upload the template's .tsx file first."] }
           const samples = buildProps(
             v.variables,
-            (x) => x.fallback ?? (x.preview || `{{ ${x.path} }}`),
+            (x) => x.fallback ?? (x.preview || `{{{ ${x.path} }}}`),
           )
           const filled = fill({ ...v, subject: draft.subject ?? v.subject }, samples)
           return filled.ok
@@ -1100,7 +1129,7 @@ export function templateStore(
           withSubjectVariables(made.skeleton.variables, draft.subject),
           draft.variables ?? [],
         )
-        const samples = buildProps(variables, (x) => x.fallback ?? `{{ ${x.path} }}`)
+        const samples = buildProps(variables, (x) => x.fallback ?? `{{{ ${x.path} }}}`)
         const filled = fill(
           {
             html: draft.html === null ? null : made.skeleton.html,
@@ -1185,6 +1214,18 @@ export function templateStore(
       }
     },
   }
+}
+
+/**
+ * Whether `name` is the alias `title` would have been given: its slug, or
+ * its slug with the `-2`, `-3`... that made it free.
+ */
+export function followsTitle(name: string, title: string | null): boolean {
+  const base = slugOf(title ?? "") || "untitled-template"
+  return (
+    name === base ||
+    (name.startsWith(`${base}-`) && /^\d+$/.test(name.slice(base.length + 1)))
+  )
 }
 
 /** `Password reset!` as `password-reset`: an alias made from a title. */

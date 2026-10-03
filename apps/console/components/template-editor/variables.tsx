@@ -29,6 +29,10 @@ import type { DeclaredVariable } from "@/lib/types"
 export const MAX_VARIABLES = 50
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+/** The braces drawn around the name while it is being written. */
+const OPEN = "{{{"
+const CLOSE = "}}}"
+
 /**
  * Creating or editing one variable: its name, its type, and the fallback a
  * send gets when it leaves the variable out - Resend's "Create variable".
@@ -65,6 +69,12 @@ export function VariableDialog({
     setFallback(editing?.fallback ?? "")
   })
 
+  // ⚠ THE BRACES ARE DRAWN AROUND THE NAME, NOT TYPED: the value is the
+  // name alone, so the field behaves like every other one. They come in once
+  // the label has risen (100ms), and only while the field is in use.
+  const [focused, setFocused] = React.useState(false)
+  const braces = focused || name !== ""
+
   const n = name.trim()
   const nameProblem = !n
     ? null
@@ -100,17 +110,63 @@ export function VariableDialog({
         label="Name"
         id="variable-name"
         value={name}
-        onChange={(e) => setName(e.target.value.replace(/\s/g, "_"))}
+        onChange={(e) =>
+          setName(e.target.value.replace(/[{}]/g, "").replace(/\s/g, "_"))
+        }
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         autoComplete="off"
+        spellCheck={false}
         autoFocus
-        className="font-mono text-sm"
-        adornment={
-          <span className="font-mono text-xs text-muted-foreground">{"{{ }}"}</span>
+        className="font-mono text-sm transition-[padding] duration-(--duration-dismiss) ease-(--ease-quad-out)"
+        // The name starts after `{{{ `; `ch` is this monospace face's width.
+        style={braces ? { paddingInlineStart: "calc(1.5rem + 3.5ch)" } : undefined}
+        underlay={
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 start-6 flex items-center font-mono text-sm whitespace-pre text-muted-foreground"
+          >
+            <AnimatePresence>
+              {braces && (
+                <motion.span
+                  key="open"
+                  initial={{ opacity: 0, x: 4 }}
+                  animate={{
+                    opacity: 1,
+                    x: 0,
+                    transition: { delay: 0.1, duration: 0.18 },
+                  }}
+                  exit={{ opacity: 0, x: 4, transition: { duration: 0.1 } }}
+                >
+                  {OPEN}
+                </motion.span>
+              )}
+            </AnimatePresence>
+            {/* As wide as the name, so the closing braces follow it. */}
+            <span className="invisible ms-[0.5ch]">{name}</span>
+            <AnimatePresence>
+              {braces && (
+                <motion.span
+                  key="close"
+                  className="ms-[0.5ch]"
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{
+                    opacity: 1,
+                    x: 0,
+                    transition: { delay: 0.1, duration: 0.18 },
+                  }}
+                  exit={{ opacity: 0, x: -4, transition: { duration: 0.1 } }}
+                >
+                  {CLOSE}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </span>
         }
         state={nameProblem ? "invalid" : undefined}
         hint={
           nameProblem ??
-          "Used as {{ NAME }} in the subject, the body and links, e.g. PRODUCT_NAME."
+          "Used as {{{ NAME }}} in the subject, the body and links, e.g. PRODUCT_NAME."
         }
       />
       <div className="space-y-1.5">
@@ -249,7 +305,7 @@ export function VariablesPanel({
                       title={canInsert ? "Insert at the cursor" : undefined}
                     >
                       <span className="truncate font-mono text-xs text-foreground">
-                        {`{{ ${v.name} }}`}
+                        {`{{{ ${v.name} }}}`}
                       </span>
                       <span className="truncate text-[11px] text-muted-foreground">
                         {v.type === "number" ? "Number" : "String"}
@@ -325,7 +381,7 @@ export function VariablesPanel({
                   "flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/70",
                 )}
               >
-                <span className="truncate font-mono text-xs">{`{{ ${name} }}`}</span>
+                <span className="truncate font-mono text-xs">{`{{{ ${name} }}}`}</span>
                 <Button variant="ghost" size="xs" onClick={() => onDeclare(name)}>
                   Declare
                 </Button>

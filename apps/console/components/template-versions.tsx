@@ -180,7 +180,7 @@ export function TemplateVersions({
 /**
  * Two versions compared: what changed in the source, then how each looks.
  *
- * ⚠ THE HTML COMPARED IS THE READABLE FORM, `{{ name }}` WHERE VARIABLES GO.
+ * ⚠ THE HTML COMPARED IS THE READABLE FORM, `{{{ name }}}` WHERE VARIABLES GO.
  * Each version's markers carry its own random nonce, so the stored skeletons
  * differ at every variable even when nothing changed; the API writes them
  * back as placeholders so the diff shows only what the template changed.

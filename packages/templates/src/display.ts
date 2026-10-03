@@ -2,7 +2,7 @@ import { markerPattern } from "./markers.js"
 import type { Variable } from "./variables.js"
 
 /**
- * A skeleton as a person reads it: every marker shown as `{{ path }}`.
+ * A skeleton as a person reads it: every marker shown as `{{{ path }}}`.
  *
  * ⚠ FOR DIFFS AND DISPLAY, NEVER FOR SENDING. Each version has its own nonce,
  * so two versions of an unchanged template differ at every variable when
@@ -18,6 +18,6 @@ export function displaySkeleton(
   if (text === null) return null
   return text.replace(markerPattern(nonce), (whole, _prefix: string, index: string) => {
     const variable = variables[Number(index)]
-    return variable ? `{{ ${variable.path} }}` : whole
+    return variable ? `{{{ ${variable.path} }}}` : whole
   })
 }

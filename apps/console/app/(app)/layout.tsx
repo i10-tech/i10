@@ -1,8 +1,10 @@
+import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
+import { RememberedViewsProvider, type View } from "@/components/list/remembered-views"
 import { Rail } from "@/components/rail"
 import { SendingStatusBanner } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
@@ -84,6 +86,18 @@ export default async function AppLayout({
   ) {
     redirect("/onboarding")
   }
+
+  // The grid or table each list page was left in, so it renders that way from
+  // the first byte instead of switching once the browser has loaded.
+  const views = Object.fromEntries(
+    (await cookies())
+      .getAll()
+      .filter(
+        (c) =>
+          c.name.startsWith("i10-view-") && (c.value === "grid" || c.value === "table"),
+      )
+      .map((c) => [c.name.slice("i10-view-".length), c.value as View]),
+  )
 
   // See WorkspaceBar: Clerk's hooks throw outside a provider, and the provider
   // is only mounted when a key exists.
@@ -215,7 +229,9 @@ export default async function AppLayout({
           <SendingStatusBanner />
         </Suspense>
         <ClientContext />
-        <PageFrame>{children}</PageFrame>
+        <PageFrame>
+          <RememberedViewsProvider views={views}>{children}</RememberedViewsProvider>
+        </PageFrame>
       </div>
 
       {/*
