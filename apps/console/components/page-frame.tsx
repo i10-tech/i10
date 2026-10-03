@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation"
 import { useEffect, useRef } from "react"
 import { PageTransition } from "@repo/ui/components/page-transition"
+import { forgetDraft } from "@/lib/add-domain-draft"
 
 /**
  * The console's pages, arriving rather than appearing - and the only thing on
@@ -45,6 +46,16 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     pane.current?.scrollTo({ top: 0, behavior: "instant" })
+  }, [pathname])
+
+  /*
+   * ⚠ ARRIVING ANYWHERE BUT THE ADD-DOMAIN FLOW ENDS IT. Its draft survives a
+   * reload and nothing else - see lib/add-domain-draft.ts. Here rather than in
+   * the form because this runs the moment the route changes, not when the
+   * leaving page's exit animation finally lets it unmount.
+   */
+  useEffect(() => {
+    if (pathname !== "/domains/new") forgetDraft()
   }, [pathname])
 
   return (

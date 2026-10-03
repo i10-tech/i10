@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
+import { Suspense } from "react"
 import { ArrowUpRight } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -17,6 +18,7 @@ import { RangePicker } from "@/components/range-picker"
 import { Stat, StatRow } from "@/components/stat"
 import { PanelError } from "@/components/panel-error"
 import { SendingHealthCard } from "@/components/sending-health"
+import { SendingStatusBanner } from "@/components/sending-status-banner"
 import { tryApi } from "@/lib/api"
 import { formatRate, formatRelative, bareAddress } from "@/lib/format"
 import { SNIPPETS } from "@/lib/snippets"
@@ -68,6 +70,11 @@ export default async function OverviewPage({
       </PageHeader>
 
       <PageBody className="space-y-6">
+        {/* What the rail's sending notice links to. Nothing when healthy. */}
+        <Suspense fallback={null}>
+          <SendingStatusBanner />
+        </Suspense>
+
         {!overview.ok ? (
           <PanelError
             title="Could not load your metrics"

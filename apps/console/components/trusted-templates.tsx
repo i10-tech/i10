@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
 import { ShieldCheck, Undo2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
@@ -10,6 +9,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import { FormDialog } from "@/components/form-dialog"
 import { submitTrustedTemplate, withdrawTrustedTemplate } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
+import { toastError } from "@/lib/toast"
 
 /** Every `{{name}}` in the bodies, in order, once each. */
 function placeholders(...bodies: string[]): string[] {
@@ -163,7 +163,7 @@ export function WithdrawTrustedTemplate({ id, name }: { id: string; name: string
         onConfirm={async () => {
           const result = await withdrawTrustedTemplate(id)
           if (!result.ok) {
-            toast.error("Could not withdraw the template", {
+            toastError("Could not withdraw the template", {
               description: result.error,
             })
             return false

@@ -75,7 +75,7 @@ export function DelegationNote({
     if (status === "not_started") {
       /*
        * ⚠ AND IT NO LONGER ASKS FOR THE BUTTON STRAIGHT AWAY. The domain page
-       * presses Verify itself on a schedule (see `VerificationWatch`), so
+       * presses Verify itself on a schedule (see `DomainLiveProvider`), so
        * "press Verify" was an instruction for work already in flight. It is
        * the right thing to say only once that has had time to finish and has
        * not - which is when this falls back to it.

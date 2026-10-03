@@ -1,8 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Copy, KeyRound, MoreHorizontal, SearchX, Trash2, Webhook } from "lucide-react"
-import { toast } from "sonner"
+import { Copy, KeyRound, SearchX, Trash2, Webhook } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { CopyField } from "@repo/ui/components/copy"
@@ -15,21 +14,12 @@ import {
   DialogTitle,
 } from "@repo/ui/components/dialog"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@repo/ui/components/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
 import { ListCard, ListGrid, MotionBody, MotionRow } from "@/components/list/motion"
-import {
-  ListCell,
-  ListHead,
-  ListHeader,
-  ListTable,
-  rowMenuClass,
-} from "@/components/list/table"
+import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
 import {
   FilterSelect,
   ListToolbar,
@@ -45,6 +35,8 @@ import { deleteWebhook, rotateWebhookSecret } from "@/lib/actions"
 import { useRetained } from "@/lib/react"
 import type { WebhookEndpoint } from "@/lib/types"
 import { Time } from "@/components/time"
+import { toastDone, toastError } from "@/lib/toast"
+import { RowMenu } from "@/components/list/row-menu"
 
 /**
  * The endpoints, as cards rather than a table.
@@ -93,51 +85,39 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
   }
 
   const menu = (endpoint: WebhookEndpoint) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className={rowMenuClass}
-          aria-label={`Actions for ${endpoint.url}`}
-        >
-          <MoreHorizontal />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuItem
-          onSelect={() =>
-            void navigator.clipboard.writeText(endpoint.id).then(
-              () => toast.success("Endpoint ID copied"),
-              () => toast.error("Could not copy the ID"),
-            )
+    <RowMenu label={endpoint.url}>
+      <DropdownMenuItem
+        onSelect={() =>
+          void navigator.clipboard.writeText(endpoint.id).then(
+            () => toastDone("Endpoint ID copied"),
+            () => toastError("Could not copy the ID"),
+          )
+        }
+      >
+        <Copy />
+        Copy ID
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onSelect={async () => {
+          const result = await rotateWebhookSecret(endpoint.id)
+          if (!result.ok) {
+            toastError("Could not rotate the secret", { description: result.error })
+            return
           }
-        >
-          <Copy />
-          Copy ID
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={async () => {
-            const result = await rotateWebhookSecret(endpoint.id)
-            if (!result.ok) {
-              toast.error("Could not rotate the secret", { description: result.error })
-              return
-            }
-            // No refresh: `rotateWebhookSecret` re-renders this page in its own
-            // response. See `run` in lib/actions.ts.
-            setRotated(result.data)
-          }}
-        >
-          <KeyRound />
-          Rotate signing secret
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(endpoint)}>
-          <Trash2 />
-          Delete endpoint
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          // No refresh: `rotateWebhookSecret` re-renders this page in its own
+          // response. See `run` in lib/actions.ts.
+          setRotated(result.data)
+        }}
+      >
+        <KeyRound />
+        Rotate signing secret
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(endpoint)}>
+        <Trash2 />
+        Delete endpoint
+      </DropdownMenuItem>
+    </RowMenu>
   )
 
   return (
@@ -271,7 +251,7 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
           if (!deleting) return false
           const result = await deleteWebhook(deleting.id)
           if (!result.ok) {
-            toast.error("Could not delete the endpoint", { description: result.error })
+            toastError("Could not delete the endpoint", { description: result.error })
             return false
           }
           return true

@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { useOrganizationList } from "@clerk/nextjs"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import {
   Select,
@@ -15,6 +14,7 @@ import {
 import { Spinner } from "@repo/ui/components/spinner"
 import { acceptTransfer, declineTransfer } from "@/lib/actions"
 import type { IncomingTransfer } from "@/lib/types"
+import { toastDone, toastError, toastNote } from "@/lib/toast"
 
 /**
  * Answering an offer: which workspace it lands in, then yes or no.
@@ -51,10 +51,10 @@ export function AcceptTransfer({
     const result = await acceptTransfer(offer.id, chosen.id)
     if (!result.ok) {
       setBusy(null)
-      toast.error("Could not accept the domain", { description: result.error })
+      toastError("Could not accept the domain", { description: result.error })
       return
     }
-    toast.success(`${offer.domain_name} is now in ${chosen.name}`)
+    toastDone(`${offer.domain_name} is now in ${chosen.name}`)
     if (chosen.current || !clerkEnabled) {
       router.push(`/domains/${result.data.domain_id}`)
     } else {
@@ -68,10 +68,10 @@ export function AcceptTransfer({
     const result = await declineTransfer(offer.id)
     if (!result.ok) {
       setBusy(null)
-      toast.error("Could not decline", { description: result.error })
+      toastError("Could not decline", { description: result.error })
       return
     }
-    toast("Declined", { description: `${offer.domain_name} stays where it is.` })
+    toastNote("Declined", { description: `${offer.domain_name} stays where it is.` })
     router.push("/domains")
   }
 

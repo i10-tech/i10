@@ -51,6 +51,35 @@ export function ListBody({ className, ...props }: React.ComponentProps<"tbody">)
 /** Hover, and the entrance every new page of rows gets. */
 export const rowClass = "group transition-colors duration-150 hover:bg-muted/40"
 
+/** A ticked row, the same faint wash on every list that has checkboxes. */
+export const selectedRowClass = "bg-primary/[0.05] hover:bg-primary/[0.08]"
+
+/**
+ * The picture at the start of a row - an icon in a quiet tile, the shape the
+ * templates table gives its thumbnails - so every name in every list starts
+ * at the same place.
+ */
+export function ListTile({
+  className,
+  children,
+}: {
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border/60 ring-inset",
+        "transition-colors duration-150 group-hover:text-foreground",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
 export function ListRow({ className, ...props }: React.ComponentProps<"tr">) {
   return (
     <tr

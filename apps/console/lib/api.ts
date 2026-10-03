@@ -137,7 +137,12 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
    * behaviour for a mode with no database.
    */
   if (PREVIEW) {
-    const fixture = previewFor(path, options.query, options.method ?? "GET")
+    const fixture = previewFor(
+      path,
+      options.query,
+      options.method ?? "GET",
+      options.body,
+    )
 
     /*
      * ⚠ "THE ROW IS NOT HERE" IS A 404, NOT A MISSING FIXTURE. Without this the

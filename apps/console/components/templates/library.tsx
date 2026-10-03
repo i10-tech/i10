@@ -11,7 +11,6 @@ import {
   MoreHorizontal,
   Trash2,
 } from "lucide-react"
-import { toast } from "sonner"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { Checkbox } from "@repo/ui/components/checkbox"
@@ -26,7 +25,7 @@ import {
 import { Kbd } from "@repo/ui/components/kbd"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
 import { cn } from "cn"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { BULK_CONFIRM_WORD, ConfirmDialog } from "@/components/confirm-dialog"
 import { BulkBar } from "@/components/list/bulk-bar"
 import { MarqueeBox, useMarquee } from "@/components/list/marquee"
 import { rowMenuClass } from "@/components/list/table"
@@ -69,8 +68,9 @@ import {
   titleOf,
   type TemplateStatus,
 } from "@/lib/templates"
-import { toastFailure } from "@/lib/toast"
+import { toastDone, toastFailure } from "@/lib/toast"
 import type { TemplateFolder, TemplateSummary } from "@/lib/types"
+import { RowMenu } from "@/components/list/row-menu"
 
 type StatusFilter = "all" | TemplateStatus
 
@@ -262,7 +262,7 @@ export function TemplateLibrary({
     const where = to
       ? `"${liveFolders.find((f) => f.id === to)?.name ?? "folder"}"`
       : "All templates"
-    toast.success(
+    toastDone(
       real.length === 1
         ? `Template moved to ${where}`
         : `${real.length} templates moved to ${where}`,
@@ -342,7 +342,7 @@ export function TemplateLibrary({
       case "duplicate": {
         const result = await duplicateTemplate(template.id)
         if (!result.ok) return toastFailure(result)
-        toast.success(`Duplicated as "${titleOf(result.data)}"`, {
+        toastDone(`Duplicated as "${titleOf(result.data)}"`, {
           action: { label: "Open", onClick: () => router.push(hrefOf(result.data)) },
         })
         router.refresh()
@@ -833,32 +833,20 @@ function TemplateTable({
                     {formatRelative(f.updated_at)}
                   </td>
                   <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu modal={false}>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className={rowMenuClass}
-                          aria-label={`Actions for ${f.name}`}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => onFolderRename(f)}>
-                          <RenameIcon />
-                          Rename folder
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => onFolderDelete(f)}
-                        >
-                          <Trash2 />
-                          Delete folder
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <RowMenu label={f.name}>
+                      <DropdownMenuItem onSelect={() => onFolderRename(f)}>
+                        <RenameIcon />
+                        Rename folder
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() => onFolderDelete(f)}
+                      >
+                        <Trash2 />
+                        Delete folder
+                      </DropdownMenuItem>
+                    </RowMenu>
                   </td>
                 </motion.tr>
               )
@@ -1112,7 +1100,7 @@ function LibraryDialogs({
           .join(" ")}
         confirmLabel={one ? "Delete template" : `Delete ${what}`}
         doneLabel="Deleted"
-        // ⚠ ONE THING: TYPE ITS NAME. SEVERAL: TYPE "Delete". The name is what
+        // ⚠ ONE THING: TYPE ITS NAME. SEVERAL: TYPE THE BULK WORD. The name is what
         // proves you are on the right one; for a batch there is no single
         // name, but there is still a deliberate word between a stray ⌫ and
         // losing them.
@@ -1121,7 +1109,7 @@ function LibraryDialogs({
             ? one.name
             : deleting.length === 0 && deletingFolders.length === 1
               ? deletingFolders[0]!.name
-              : "Delete"
+              : BULK_CONFIRM_WORD
         }
         onConfirm={async () => {
           const ids = deleting.map((t) => t.id)

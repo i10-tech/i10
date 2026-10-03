@@ -1,6 +1,6 @@
 "use client"
 
-import { toast } from "sonner"
+import { toast, type ExternalToast } from "sonner"
 
 /**
  * Every failure the console shows a person, said the same way.
@@ -73,8 +73,31 @@ export function toastFailure(
   })
 }
 
-export function toastDone(message: string, description?: string): void {
-  toast.success(message, description ? { description } : undefined)
+/**
+ * ⚠ THE FOUR VOICES EVERY TOAST IN THE CONSOLE SPEAKS IN, AND NOTHING CALLS
+ * SONNER DIRECTLY (2026-10-03). Thirty-odd files each picking `toast(...)`,
+ * `toast.success(...)` or `toast.error(...)` with their own durations is how
+ * one failure stayed up four seconds and its neighbour eight. These are the
+ * only entry points; the look lives in packages/ui's Toaster.
+ *
+ * The second argument is the description as a string, or sonner's options
+ * when a toast needs an action, an id or a longer stay.
+ */
+type Detail = string | Pick<ExternalToast, "description" | "action" | "id" | "duration">
+
+function options(detail: Detail | undefined): ExternalToast | undefined {
+  if (detail === undefined) return undefined
+  return typeof detail === "string" ? { description: detail } : detail
+}
+
+/** It worked. */
+export function toastDone(title: string, detail?: Detail): void {
+  toast.success(title, options(detail))
+}
+
+/** It did not, said by the caller. Stays up as long as `toastFailure`. */
+export function toastError(title: string, detail?: Detail): void {
+  toast.error(title, { duration: ERROR_MS, ...options(detail) })
 }
 
 /**
@@ -83,6 +106,11 @@ export function toastDone(message: string, description?: string): void {
  * on a webhook - is not a failure, and colouring it red teaches people to read
  * red as "probably fine". Yellow means "not yet"; red means "no".
  */
-export function toastPending(message: string, description?: string): void {
-  toast.warning(message, description ? { description } : undefined)
+export function toastPending(title: string, detail?: Detail): void {
+  toast.warning(title, options(detail))
+}
+
+/** Neither good nor bad news: something to know. */
+export function toastNote(title: string, detail?: Detail): void {
+  toast.info(title, options(detail))
 }

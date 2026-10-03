@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
 import {
   AlertCircle,
   CheckCircle2,
@@ -36,6 +35,7 @@ import {
 } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
 import type { GithubRepository, GithubState } from "@/lib/types"
+import { toastError } from "@/lib/toast"
 
 /**
  * Repositories whose templates live in GitHub (#235).
@@ -119,7 +119,7 @@ function InstallButton({ installed }: { installed: boolean }) {
         const result = await githubInstallUrl()
         if (!result.ok) {
           setPending(false)
-          toast.error("Could not start connecting GitHub", {
+          toastError("Could not start connecting GitHub", {
             description: result.error,
           })
           return
@@ -225,7 +225,7 @@ function RepositoryRow({ repo }: { repo: GithubRepository }) {
               const result = await syncGithubRepository(repo.id)
               setSyncing(false)
               if (!result.ok)
-                toast.error("Could not sync", { description: result.error })
+                toastError("Could not sync", { description: result.error })
               else router.refresh()
             }}
           >
@@ -271,7 +271,7 @@ function RepositoryRow({ repo }: { repo: GithubRepository }) {
         onConfirm={async () => {
           const result = await disconnectGithubRepository(repo.id)
           if (!result.ok) {
-            toast.error("Could not disconnect", { description: result.error })
+            toastError("Could not disconnect", { description: result.error })
             return false
           }
           return true
@@ -362,7 +362,7 @@ function ConnectRepositoryButton({ state }: { state: GithubState }) {
     void githubRepositoriesOf(installation).then((result) => {
       if (!current) return
       if (!result.ok) {
-        toast.error("Could not list repositories", { description: result.error })
+        toastError("Could not list repositories", { description: result.error })
       }
       setLoaded({ installation, list: result.ok ? result.data.data : [] })
     })

@@ -2,12 +2,12 @@
 
 import * as React from "react"
 import { Send } from "lucide-react"
-import { toast } from "sonner"
 import { ActionButton } from "@repo/ui/components/action-button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { publishTemplate, updateTemplate } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import type { TemplateRow } from "@/lib/types"
+import { toastError } from "@/lib/toast"
 
 /**
  * The subject of a React Email template, which the file may not carry.
@@ -28,12 +28,12 @@ export function TemplateSubject({ template }: { template: TemplateRow }) {
     await publishing.run(async () => {
       const saved = await updateTemplate(template.id, { subject: subject || null })
       if (!saved.ok) {
-        toast.error("Could not save the subject", { description: saved.error })
+        toastError("Could not save the subject", { description: saved.error })
         return false
       }
       const published = await publishTemplate(template.id)
       if (!published.ok) {
-        toast.error("Could not publish", { description: published.error })
+        toastError("Could not publish", { description: published.error })
         return false
       }
       return true

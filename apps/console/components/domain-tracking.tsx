@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
 import {
   Field,
   FieldContent,
@@ -11,6 +10,7 @@ import {
 } from "@repo/ui/components/field"
 import { Switch } from "@repo/ui/components/switch"
 import { updateDomainTracking } from "@/lib/actions"
+import { toastError } from "@/lib/toast"
 
 type Setting = "open_tracking" | "click_tracking"
 
@@ -49,7 +49,7 @@ export function DomainTracking({
     setSaving(null)
     if (!result.ok) {
       setValues((v) => ({ ...v, [setting]: previous }))
-      toast.error("Could not save the tracking setting", { description: result.error })
+      toastError("Could not save the tracking setting", { description: result.error })
     }
   }
 

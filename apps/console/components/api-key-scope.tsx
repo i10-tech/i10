@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import {
   Dialog,
@@ -25,6 +24,7 @@ import { Reveal } from "@repo/ui/components/reveal"
 import { Spinner } from "@repo/ui/components/spinner"
 import { updateApiKeyScope } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
+import { toastDone, toastError } from "@/lib/toast"
 
 /**
  * Which domains a key may send from.
@@ -218,11 +218,11 @@ export function ApiKeyScopeDialog({
     setPending(false)
 
     if (!result.ok) {
-      toast.error("Could not change the scope", { description: result.error })
+      toastError("Could not change the scope", { description: result.error })
       return
     }
 
-    toast.success(
+    toastDone(
       scope
         ? `${apiKey.name} can now only send from ${scope.join(", ")}`
         : `${apiKey.name} can send from any domain`,

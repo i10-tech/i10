@@ -1,12 +1,11 @@
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
-import { Separator } from "@repo/ui/components/separator"
 import { Skeleton } from "@repo/ui/components/skeleton"
 import { PageFrame } from "@/components/page-frame"
 import { RememberedViewsProvider, type View } from "@/components/list/remembered-views"
 import { Rail } from "@/components/rail"
-import { SendingStatusBanner } from "@/components/sending-status-banner"
+import { SendingStatusNotice } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { CommandMenu } from "@/components/command-menu"
@@ -139,16 +138,18 @@ export default async function AppLayout({
          * ⚠ THE RAIL STARTS WITH THE WORKSPACE, NOT A LOGO (decided
          * 2026-10-01). Which workspace you are in is the first thing worth
          * knowing in here; the mark said only which product, which nobody in
-         * the dashboard needs told. It keeps the 56px header row so the line
-         * under it meets the page header's line.
+         * the dashboard needs told.
+         *
+         * ⚠ NO RULE UNDER IT (2026-10-03). It used to line up with a bordered
+         * page header and the two drew one bar across the whole screen; the
+         * page header is part of the content now, so the rule would be a line
+         * to nowhere.
          */}
-        <div className="flex h-14 items-center px-2">
+        <div className="flex items-center px-2 pt-2 pb-1">
           <div className="min-w-0 flex-1">
             <WorkspaceBar tenant={me.data.tenant} clerkEnabled={clerkEnabled} />
           </div>
         </div>
-
-        <Separator />
 
         {/*
          * ⚠ THE RAIL FITS; IT DOES NOT SCROLL. With Settings moved into the
@@ -179,6 +180,16 @@ export default async function AppLayout({
          * ⚠ NO SENDING-HEALTH PILL HERE (#153). Trouble reaches every page
          * through the banner above the content.
          */}
+        {/*
+         * ⚠ THE SENDING NOTICE LIVES HERE, NOT AS A BAND ACROSS THE PAGE
+         * (2026-10-03). It still shows on every screen while sending is in
+         * trouble - that rule from #157 stands - but as one line in the rail
+         * that leads to the overview, where the full explanation is.
+         */}
+        <Suspense fallback={null}>
+          <SendingStatusNotice className="mx-2 mb-2" />
+        </Suspense>
+
         <div className="mt-auto border-t p-2">
           <AccountBar
             clerkEnabled={clerkEnabled}
@@ -221,12 +232,12 @@ export default async function AppLayout({
          * most of the screen does not go anywhere.
          */}
         {/*
-         * ⚠ ITS OWN BOUNDARY WITH NO FALLBACK. The banner is absent for almost
-         * everybody, so a skeleton would flash a box that then vanishes; the
-         * page renders at once and the banner, if any, arrives above it.
+         * ⚠ BELOW THE LARGE BREAKPOINT THERE IS NO RAIL, so the same one-line
+         * notice sits under the mobile header instead. Its own boundary with
+         * no fallback: it is absent for almost everybody.
          */}
         <Suspense fallback={null}>
-          <SendingStatusBanner />
+          <SendingStatusNotice className="mx-4 mt-3 lg:hidden" />
         </Suspense>
         <ClientContext />
         <PageFrame>

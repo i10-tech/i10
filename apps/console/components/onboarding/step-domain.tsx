@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
-import { toast } from "sonner"
 import { Spinner } from "@repo/ui/components/spinner"
 import { acceptTransfer } from "@/lib/actions"
 import { Status } from "@/components/status"
@@ -12,6 +11,7 @@ import { AutoHeight } from "@repo/ui/components/auto-height"
 import { Button } from "@repo/ui/components/button"
 import { StepStage } from "@repo/ui/components/step-stage"
 import type { DomainSummary, TransferOffer } from "@/lib/types"
+import { toastDone, toastError } from "@/lib/toast"
 
 /**
  * ⚠ THIS USED TO MOUNT THE FULL ADD-DOMAIN FORM, and the comment here defended
@@ -123,10 +123,10 @@ function OfferedDomains({
     const result = await acceptTransfer(offer.id)
     setBusy(null)
     if (!result.ok) {
-      toast.error("Could not accept the domain", { description: result.error })
+      toastError("Could not accept the domain", { description: result.error })
       return
     }
-    toast.success(`${offer.domain_name} is yours`, {
+    toastDone(`${offer.domain_name} is yours`, {
       description: "It arrived with its records and verification.",
     })
     onAccepted()

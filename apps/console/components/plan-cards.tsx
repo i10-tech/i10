@@ -4,7 +4,6 @@ import * as React from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Check } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
@@ -14,6 +13,7 @@ import { hasLiveSubscription, onPaidPlan } from "@/lib/billing"
 import { formatBytes, formatExact, formatNumber } from "@/lib/format"
 import type { BillingState, PlanSummary } from "@/lib/types"
 import { ARRIVAL, setArrival } from "@/lib/arrival"
+import { toastDone, toastError, toastNote } from "@/lib/toast"
 
 /**
  * The plan picker.
@@ -333,12 +333,12 @@ export function PlanCards({
     setPending(null)
 
     if (!result.ok) {
-      toast.error("Could not keep your subscription", { description: result.error })
+      toastError("Could not keep your subscription", { description: result.error })
       return
     }
 
     setEndsLocally(false)
-    toast.success("Your subscription will continue")
+    toastDone("Your subscription will continue")
     onResumed?.()
   }
 
@@ -358,12 +358,12 @@ export function PlanCards({
       setPending(null)
 
       if (!result.ok) {
-        toast.error("Could not change your plan", { description: result.error })
+        toastError("Could not change your plan", { description: result.error })
         return
       }
 
       if (result.data.status === "unchanged") {
-        toast("You are already on that plan")
+        toastNote("You are already on that plan")
         return
       }
 
@@ -379,7 +379,7 @@ export function PlanCards({
        */
       if (leavingPaidPlan(plan)) {
         setEndsLocally(true)
-        toast.success("Subscription ending", {
+        toastDone("Subscription ending", {
           description:
             "You keep your current plan until the end of the period you have " +
             "paid for, then move to the free allowance.",
@@ -388,7 +388,7 @@ export function PlanCards({
         return
       }
 
-      toast.success("Plan change requested", {
+      toastDone("Plan change requested", {
         description: "Your allowances move as soon as the payment clears.",
       })
       /*
@@ -425,7 +425,7 @@ export function PlanCards({
 
     if (!result.ok) {
       setPending(null)
-      toast.error("Could not start checkout", { description: result.error })
+      toastError("Could not start checkout", { description: result.error })
       return
     }
 
@@ -438,7 +438,7 @@ export function PlanCards({
      */
     if (result.data.id && !(await untilCheckoutReadable(result.data.id))) {
       setPending(null)
-      toast.error("Checkout is taking a moment to open", {
+      toastError("Checkout is taking a moment to open", {
         description:
           "Our payment provider has not finished preparing it. Nothing was " +
           "charged - try again in a minute.",
@@ -490,7 +490,7 @@ export function PlanCards({
            * for a payment was gone before they could read it. It has to
            * outlive the refresh it triggers.
            */
-          toast.success("Payment received", {
+          toastDone("Payment received", {
             description: "Setting up your plan - it appears here in a moment.",
           })
           setSubscribed(plan.id)

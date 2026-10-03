@@ -4,10 +4,10 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { CreditCard } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@repo/ui/components/button"
 import { Spinner } from "@repo/ui/components/spinner"
 import { paymentMethodSession } from "@/lib/actions"
+import { toastDone, toastError } from "@/lib/toast"
 
 /**
  * Adding or replacing the card on file.
@@ -88,7 +88,7 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
       if (!result) return
 
       if (result.status === "succeeded") {
-        toast.success("Card saved")
+        toastDone("Card saved")
         router.refresh()
         return
       }
@@ -96,7 +96,7 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
       // ⚠ THE BANK REFUSED, NOT US. There is nothing to retry automatically
       // and no detail to show - Polar does not pass one back - so this says
       // what happened and leaves the button where it was.
-      toast.error("That card was not saved", {
+      toastError("That card was not saved", {
         description: "Your bank did not approve it. Try again or use another card.",
       })
     })()
@@ -109,7 +109,7 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
     const session = await paymentMethodSession()
     if (!session.ok) {
       setPending(false)
-      toast.error("Could not open the card form", { description: session.error })
+      toastError("Could not open the card form", { description: session.error })
       return
     }
 
@@ -131,12 +131,12 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
       setPending(false)
 
       embed.addEventListener("success", () => {
-        toast.success("Card saved")
+        toastDone("Card saved")
         router.refresh()
       })
     } catch {
       setPending(false)
-      toast.error("Could not open the card form", {
+      toastError("Could not open the card form", {
         description: "Check your connection and try again.",
       })
     }

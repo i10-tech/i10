@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import { Tabs } from "@repo/ui/components/tabs"
 
 /**
@@ -23,7 +23,6 @@ export function UrlTabs({
   keep?: string[]
   children: React.ReactNode
 }) {
-  const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [tab, setTab] = React.useState(value ?? fallback)
@@ -44,7 +43,14 @@ export function UrlTabs({
         }
         if (next !== fallback) params.set("tab", next)
         const query = params.toString()
-        router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+        /*
+         * ⚠ `history.replaceState`, NOT `router.replace` (2026-10-03). Both
+         * tabs are already rendered; asking the server for the page again on
+         * every switch re-ran every read the page makes and repainted it, which
+         * is a reload wearing a tab's clothes. Next keeps `useSearchParams` in
+         * step with a native replaceState, so the URL still says which tab.
+         */
+        window.history.replaceState(null, "", query ? `${pathname}?${query}` : pathname)
       }}
     >
       {children}

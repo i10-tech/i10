@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
 import { diffLines, type Change } from "diff"
 import { ArrowRight, PenLine, Undo2 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge"
@@ -29,6 +28,7 @@ import type {
   TemplateVersionDetail,
   TemplateVersionSummary,
 } from "@/lib/types"
+import { toastError } from "@/lib/toast"
 
 /**
  * A template's versions: which one is live, what made each, and going back.
@@ -140,7 +140,7 @@ export function TemplateVersions({
           if (!restoring) return false
           const result = await restoreTemplateDraft(templateId, restoring.number)
           if (!result.ok) {
-            toast.error("Could not copy it into the draft", {
+            toastError("Could not copy it into the draft", {
               description: result.error,
             })
             return false
@@ -166,7 +166,7 @@ export function TemplateVersions({
           if (!promoting) return false
           const result = await promoteTemplateVersion(templateId, promoting.number)
           if (!result.ok) {
-            toast.error("Could not make it live", { description: result.error })
+            toastError("Could not make it live", { description: result.error })
             return false
           }
           router.refresh()
