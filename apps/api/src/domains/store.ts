@@ -1,4 +1,4 @@
-import { eq, and, desc, isNotNull, sql } from "drizzle-orm"
+import { eq, and, desc, isNotNull, isNull, sql } from "drizzle-orm"
 import type {
   CreateDomain,
   Domain,
@@ -334,6 +334,8 @@ export interface DomainStoreDeps {
 
 /** The slice of the logger this module uses. Structurally satisfied by pino. */
 export interface Logger {
+  /** Optional so a caller with only `warn` still fits. See `noteVerified`. */
+  info?: (o: object, m: string) => void
   warn: (o: object, m: string) => void
   /**
    * ⚠ OPTIONAL, AND ADDED BECAUSE ONE OF THESE TIDIES IS NOT A TIDY. A zone we
@@ -374,6 +376,8 @@ interface Row {
   delegationToken: string
   /** Set when another workspace proved the name and took it. See the column. */
   displacedAt: Date | null
+  /** When SES was first told about it. See the column. */
+  identityRegisteredAt: Date | null
   openTracking: boolean
   clickTracking: boolean
 }
@@ -401,6 +405,7 @@ const COLUMNS = {
   createdAt: domains.createdAt,
   delegationToken: domains.delegationToken,
   displacedAt: domains.displacedAt,
+  identityRegisteredAt: domains.identityRegisteredAt,
   openTracking: domains.openTracking,
   clickTracking: domains.clickTracking,
 }
@@ -631,6 +636,26 @@ export function domainStore({
       privateKey: secrets.open(sealed),
     })
 
+    /*
+     * ⚠ THE FIRST REGISTRATION ONLY. A later verify re-runs `create`, which
+     * changes nothing at SES when the key is already ours, and moving the stamp
+     * would make Amazon look faster than it was.
+     */
+    if (!row.identityRegisteredAt) {
+      await withTenant(db, tenantId, async (tx) =>
+        tx
+          .update(domains)
+          .set({ identityRegisteredAt: now() })
+          .where(
+            and(
+              eq(domains.tenantId, tenantId),
+              eq(domains.id, id),
+              isNull(domains.identityRegisteredAt),
+            ),
+          ),
+      )
+    }
+
     // ⚠ FORCED, because this is where ownership changes hands: a transferred
     // domain's identity may still sit in the previous workspace's SES tenant,
     // and only the attach can take it out. Never fails the verify - see
@@ -638,6 +663,29 @@ export function domainStore({
     await ensureSesTenant({ db, identity, log }, tenantId, id, { force: true })
 
     return true
+  }
+
+  /**
+   * One line when a domain first turns verified, saying where the time went.
+   *
+   * ⚠ TWO NUMBERS, BECAUSE "VERIFICATION IS SLOW" HAS TWO OWNERS. `ses_seconds`
+   * runs from the moment we handed SES a proved domain, so it is Amazon's DKIM
+   * check plus however long it took us to look again; `total_seconds` runs
+   * from the add and also holds DNS propagation and the customer. A small
+   * first number with a large second one is not something SES can fix.
+   */
+  function noteVerified(row: Row, at: Date): void {
+    const since = (from: Date | null) =>
+      from ? Math.round((at.getTime() - from.getTime()) / 1000) : null
+    log?.info?.(
+      {
+        domain: row.name,
+        delegated: row.delegated,
+        ses_seconds: since(row.identityRegisteredAt),
+        total_seconds: since(row.createdAt),
+      },
+      "domain verified",
+    )
   }
 
   /**
@@ -1313,6 +1361,7 @@ export function domainStore({
       let row: Row | undefined
       try {
         ;[row] = (await write(seen.status, verifiedAt)) as Row[]
+        if (row && verifiedAt) noteVerified(row, verifiedAt)
       } catch (error) {
         /*
          * ⚠ THE VERIFIED-NAME INDEX, AND THIS IS NOT THE PLACE TO CONTEST IT.
@@ -1485,6 +1534,7 @@ export function domainStore({
 
       try {
         const [row] = await write(seen.status, verifiedAt)
+        if (row && verifiedAt) noteVerified(row as Row, verifiedAt)
         return done(row)
       } catch (error) {
         /*

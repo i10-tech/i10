@@ -1,0 +1,1 @@
+ALTER TABLE "core"."domains" ADD COLUMN "identity_registered_at" timestamp with time zone;

@@ -142,39 +142,46 @@ export async function activateDomain({
 }
 
 /**
- * ⚠ BACKED OFF RATHER THAN FIXED, AND THE SHAPE IS CHOSEN FOR THE FIRST TEN
- * SECONDS. Cloudflare serves a written record within a second or two and our
- * own proof reads their nameservers directly, so the common case resolves
- * almost immediately - front-loading the attempts is what turns "verified in
- * about a minute" into "verified before the success screen finishes animating".
- * What follows is spaced out because everything after the first few seconds is
- * waiting on Amazon, and asking faster does not make Amazon answer sooner.
+ * ⚠ FRONT-LOADED, THEN EVERY FIVE SECONDS FOR TWO MINUTES. Cloudflare serves a
+ * written record within a second or two and our own proof reads their
+ * nameservers directly, so the first ticks come quickly. After that the only
+ * thing outstanding is Amazon's DKIM check, which usually lands one to three
+ * minutes after we register the identity. Asking faster does not make Amazon
+ * answer sooner, but it does let us SEE the answer sooner: the old 8/12/15s
+ * spacing could sit on a green answer for up to a quarter of a minute, and it
+ * gave up at the one-minute mark, before Amazon usually answers. Once the
+ * identity exists, each tick is one `GetEmailIdentity`.
  */
-const SCHEDULE_MS = [2_000, 3_000, 5_000, 8_000, 12_000, 15_000, 15_000]
+const SCHEDULE_MS = [2_000, 3_000, ...Array.from({ length: 23 }, () => 5_000)]
 
 /**
- * The domain page's watch: the same front-loaded start, then every 30 seconds
- * for about half an hour (2026-10-03).
+ * The domain page's watch: the forms' two minutes, three more at the same
+ * pace, then every 30 seconds until about half an hour (2026-10-04).
  *
- * ⚠ LONGER THAN THE FORMS' MINUTE, BECAUSE THIS IS THE PAGE PEOPLE WAIT ON.
+ * ⚠ LONGER THAN THE FORMS' WATCH, BECAUSE THIS IS THE PAGE PEOPLE WAIT ON.
  * Somebody who pressed "I've added the records" or came back from connecting
  * their provider sits here while DNS propagates, and the page has to move by
- * itself when it does - a minute of watching followed by silence made them
- * reload to find out. Each tick while the domain is unregistered is a verify,
+ * itself when it does. Each tick while the domain is unregistered is a verify,
  * which registers it with SES the moment ownership is proved; after that it is
  * a read. Hidden tabs do not tick (see `untilVisible`), so an open tab in the
  * background costs nothing.
+ *
+ * ⚠ FIVE MINUTES AT FIVE SECONDS, BECAUSE THAT IS WHERE AMAZON ANSWERS. The
+ * 30-second tail used to start at one minute, so a domain SES verified at
+ * 70 seconds showed as pending until nearly 90 seconds, or until the
+ * once-a-minute catch-up job got to it.
  */
 export const PAGE_WATCH_MS: readonly number[] = [
   ...SCHEDULE_MS,
-  ...Array.from({ length: 58 }, () => 30_000),
+  ...Array.from({ length: 36 }, () => 5_000),
+  ...Array.from({ length: 50 }, () => 30_000),
 ]
 
 /**
  * Keep asking until the provider agrees, or until the budget runs out.
  *
  * ⚠ IT RESOLVES RATHER THAN REJECTING WHEN IT RUNS OUT, because running out is
- * not an error. A domain that is still pending after a minute is in exactly the
+ * not an error. A domain that is still pending when it stops is in exactly the
  * state the nightly re-check exists for; the console simply stops watching and
  * says so, and the badge turns green on the next page load.
  *

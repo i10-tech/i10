@@ -492,3 +492,59 @@ describe("adding a domain that belongs to us", () => {
     expect(reason).toContain("your own mail comes from")
   })
 })
+
+describe("timing a verification", () => {
+  // ⚠ THE LINE THAT SPLITS "SLOW" BETWEEN AMAZON AND US. `ses_seconds` runs
+  // from registration, `total_seconds` from the add; see `noteVerified`.
+  it("logs how long SES took when a refresh first sees verified", async () => {
+    const lines: { o: object; m: string }[] = []
+    const registered = new Date(NOW.getTime() - 75_000)
+    const created = new Date(NOW.getTime() - 120_000)
+    const store = domainStore({
+      db: fakeDb({
+        select: () => [row({ createdAt: created, identityRegisteredAt: registered })],
+        update: () => [
+          row({
+            status: "verified",
+            createdAt: created,
+            identityRegisteredAt: registered,
+          }),
+        ],
+      }),
+      identity: identity({ status: async () => ({ status: "verified" }) }),
+      capacity: roomFor("ok"),
+      ...deps,
+      log: { info: (o, m) => lines.push({ o, m }), warn: () => {} },
+      now: () => NOW,
+    })
+
+    expect((await store.refresh(TENANT, "dom")).status).toBe("ok")
+    expect(lines).toEqual([
+      {
+        m: "domain verified",
+        o: {
+          domain: "example.com",
+          delegated: false,
+          ses_seconds: 75,
+          total_seconds: 120,
+        },
+      },
+    ])
+  })
+
+  it("says nothing on a refresh of a domain that was already verified", async () => {
+    const lines: string[] = []
+    const verified = row({ status: "verified" })
+    const store = domainStore({
+      db: fakeDb({ select: () => [verified], update: () => [verified] }),
+      identity: identity({ status: async () => ({ status: "verified" }) }),
+      capacity: roomFor("ok"),
+      ...deps,
+      log: { info: (_o, m) => lines.push(m), warn: () => {} },
+      now: () => NOW,
+    })
+
+    await store.refresh(TENANT, "dom")
+    expect(lines).toEqual([])
+  })
+})
