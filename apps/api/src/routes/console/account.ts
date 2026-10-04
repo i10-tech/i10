@@ -482,14 +482,26 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       return c.json(validation(`${to} is not an email address.`), 422)
     }
 
+    /*
+     * ⚠ THE WELCOME TEMPLATE, THE SAME ONE THE STEP'S SNIPPET SENDS (2026-10-04).
+     * Every workspace has it from the start (templates/shared.ts), so the
+     * first send is also the first look at templates - and a press of this
+     * button proves the template path as well as the send path. A variable
+     * we do not know is left out and its fallback fills it.
+     */
+    const profile = await Promise.resolve()
+      .then(() => d.profile.get(tenantId))
+      .catch(() => null)
+    const first = person?.name?.split(" ")[0] ?? ""
+    const variables: Record<string, string> = {}
+    if (first && !first.includes("@") && first !== "Someone") variables.name = first
+    if (profile?.name) variables.company = profile.name
     const outcome = await d.sendTest(
       tenantId,
       {
         from: `i10 <hello@${domain}>`,
         to: [to],
-        subject: "Your first email from i10",
-        html: `<p>It works. This message left <strong>${domain}</strong> through i10 - signed, logged and delivered like every send from here on.</p>`,
-        text: `It works. This message left ${domain} through i10 - signed, logged and delivered like every send from here on.`,
+        template: { id: "welcome", variables },
         tags: [{ name: "onboarding_test", value: "true" }],
       },
       { idempotencyKey: `onboarding-test-email:${tenantId}` },

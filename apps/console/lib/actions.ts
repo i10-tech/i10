@@ -648,10 +648,18 @@ export async function sendFirstEmail(domain: string, to?: string) {
 /**
  * Where one message has got to - set-up watches its first send until it is
  * delivered, to say so. A read: nothing is revalidated.
+ *
+ * ⚠ `last_event`, NOT `status`. `status` is our own queue state and stops at
+ * `sent` - the moment SES accepts it - so a watch on it never sees
+ * "delivered" and the button spun for the full minute while the email was
+ * already in the inbox. Delivery, bounces and opens live in the event log,
+ * which `last_event` summarises.
  */
 export async function emailStatus(id: string) {
   return run(() =>
-    api<{ id: string; status: string }>(`/console/emails/${encodeURIComponent(id)}`),
+    api<{ id: string; last_event: string }>(
+      `/console/emails/${encodeURIComponent(id)}`,
+    ),
   )
 }
 

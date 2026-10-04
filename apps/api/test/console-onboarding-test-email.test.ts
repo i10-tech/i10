@@ -39,6 +39,7 @@ function deps(over: Partial<ConsoleDeps> = {}, hasKey = true, verified = true) {
     },
     people: {
       get: mock(async () => ({
+        name: "Ada Lovelace",
         primaryEmail: "me@acme.com",
         verifiedEmails: verified ? ["me@acme.com"] : [],
       })),
@@ -47,6 +48,7 @@ function deps(over: Partial<ConsoleDeps> = {}, hasKey = true, verified = true) {
       async (_t: string, names: string[]) =>
         new Set(names.filter((n) => n === "acme.com")),
     ),
+    profile: { get: mock(async () => ({ name: "Acme" })) },
     sendTest: mock(async () => ({ status: "accepted", ids: ["msg_1"] })),
     ...over,
   } as unknown as Partial<ConsoleDeps>
@@ -67,6 +69,21 @@ describe("POST /console/onboarding/test-email", () => {
     expect(call[0]).toBe("ten-1")
     expect(call[1]).toMatchObject({ from: "i10 <hello@acme.com>", to: ["me@acme.com"] })
     expect(call[2]).toEqual({ idempotencyKey: "onboarding-test-email:ten-1" })
+  })
+
+  /*
+   * ⚠ THE SHARED WELCOME TEMPLATE, the same one the step's snippet names,
+   * filled with the person's first name and the workspace's name.
+   */
+  it("sends the welcome template, not a body of its own", async () => {
+    const d = deps()
+    await send(appWith(d), { domain: "acme.com" })
+    const call = (d.sendTest as ReturnType<typeof mock>).mock.calls[0] as unknown[]
+    expect(call[1]).toMatchObject({
+      template: { id: "welcome", variables: { name: "Ada", company: "Acme" } },
+    })
+    expect(call[1]).not.toHaveProperty("html")
+    expect(call[1]).not.toHaveProperty("subject")
   })
 
   /*

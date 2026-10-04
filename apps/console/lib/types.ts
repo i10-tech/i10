@@ -515,6 +515,12 @@ export interface TemplateRow {
     /** The last push no longer had the file; the template still sends. */
     removed: boolean
   } | null
+  /**
+   * One of the templates every workspace starts with, kept once for all of
+   * them. The first edit makes the workspace its own copy under the same
+   * alias, which replaces it; deleting it hides it from this workspace only.
+   */
+  shared?: boolean
   created_at: string
   updated_at: string
 }

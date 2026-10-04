@@ -120,7 +120,7 @@ export function SendFirstEmail({
       if (stopped) return
       const result = await emailStatus(id)
       if (stopped) return
-      const status = result.ok ? result.data.status : null
+      const status = result.ok ? result.data.last_event : null
       if (status === "delivered" || status === "opened" || status === "clicked") {
         setDelivery({ phase: "delivered", to: sentTo, at: new Date() })
         return
@@ -187,8 +187,10 @@ const i10 = new I10("${secret}")
 await i10.emails.send({
   from: "${sender}",
   to: ["${to}"],
-  subject: "Your first email from i10",
-  html: "<p>It works.</p>",
+  template: {
+    id: "welcome",
+    variables: { name: "Ada" },
+  },
 })`,
     },
     {
@@ -201,8 +203,10 @@ client = i10.Client(api_key="${secret}")
 client.emails.send({
     "from": "${sender}",
     "to": ["${to}"],
-    "subject": "Your first email from i10",
-    "html": "<p>It works.</p>",
+    "template": {
+        "id": "welcome",
+        "variables": {"name": "Ada"},
+    },
 })`,
     },
     {
@@ -214,8 +218,10 @@ client.emails.send({
   -d '{
     "from": "${sender}",
     "to": ["${to}"],
-    "subject": "Your first email from i10",
-    "html": "<p>It works.</p>"
+    "template": {
+      "id": "welcome",
+      "variables": { "name": "Ada" }
+    }
   }'`,
     },
   ]
