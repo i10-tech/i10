@@ -461,6 +461,17 @@ export const domains = core.table(
     dnsCheckedAt: timestamp("dns_checked_at", { withTimezone: true }),
 
     /**
+     * When we first handed this domain to SES, after proving ownership.
+     *
+     * ⚠ IT EXISTS TO MEASURE AMAZON, NOT TO DECIDE ANYTHING. Ownership is proved
+     * before SES is told, so the gap between this and `verified_at` is SES's
+     * own DKIM check and nothing of ours. Without it "verification is slow"
+     * could not be split into our wait and theirs. Nothing reads it to gate a
+     * send or a status.
+     */
+    identityRegisteredAt: timestamp("identity_registered_at", { withTimezone: true }),
+
+    /**
      * When another workspace proved this name and took it from this row.
      *
      * ⚠ THE LATEST PROOF WINS, SO THIS IS HOW THE LOSER FINDS OUT. A workspace
