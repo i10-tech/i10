@@ -116,6 +116,31 @@ export async function openPolarCheckout(
   const opening = PolarEmbedCheckout.create(url, { theme })
 
   /*
+   * ⚠ OUR PAGE BEHIND THE CHECKOUT, NOT A GREY SHEET (2026-10-03). The frame
+   * covers the screen, and the browser paints a frame's canvas OPAQUE when the
+   * frame element's colour scheme and the embedded document's differ - our
+   * root is `color-scheme: dark`, Polar's document declares none (light), so
+   * Chrome filled the whole overlay with its dark canvas grey and hid the
+   * console. Giving the frame the scheme its document uses keeps the canvas
+   * transparent, and only Polar's card is drawn over our background.
+   */
+  const origin = new URL(url).origin
+  const clearFrames = () => {
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>("iframe")) {
+      if (!frame.src.startsWith(origin)) continue
+      frame.style.colorScheme = "light"
+      frame.style.background = "transparent"
+    }
+  }
+  clearFrames()
+  const watcher = new MutationObserver(clearFrames)
+  watcher.observe(document.body, { childList: true, subtree: true })
+  void opening.finally(() => {
+    clearFrames()
+    watcher.disconnect()
+  })
+
+  /*
    * ⚠ EVERY TEARDOWN PATH GOES THROUGH ONE FUNCTION, AND IT IS IDEMPOTENT.
    * There are four ways out of here - our button, Escape, Polar's `success`,
    * and the caller - and three of them can happen in any order. Removing a
@@ -168,7 +193,6 @@ export async function openPolarCheckout(
       return
     }
 
-    const origin = new URL(url).origin
     for (const frame of document.querySelectorAll("iframe")) {
       if (frame.src.startsWith(origin)) frame.remove()
     }

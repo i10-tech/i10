@@ -126,30 +126,6 @@ export function StepPlan({
       />
 
       {/*
-       * ⚠ THE HEADING ASKS FOR A DECISION NOW, RATHER THAN NARRATING ONE
-       * ALREADY MADE. This said "You are on Free" over a meter panel and a
-       * "Change plan" heading, which framed the last step of set-up as a
-       * receipt with an afterthought attached - so the cards read as optional
-       * detail and the only live control was "Finish set-up" at the bottom.
-       */}
-      {/*
-       * ⚠ `done`, NOT "A CHECKOUT ID EXISTS". Keyed on the id, this said "Your
-       * plan is active" after a checkout that was closed, never loaded, or -
-       * via the browser-scoped cookie - belonged to a different account. It
-       * now waits for the same facts that reveal "Continue to dashboard".
-       */}
-      <div className="text-center">
-        <h1 className="text-xl font-semibold tracking-tight">
-          {done ? "You're all set" : "Pick a plan"}
-        </h1>
-        <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-          {done
-            ? "Your plan is active. Carry on, or change it here - you can do either at any time."
-            : "Start free and change it whenever. Allowances move the moment a payment clears."}
-        </p>
-      </div>
-
-      {/*
        * ⚠ THE METER PANEL IS GONE, AND WITH IT THE ONLY REASON THIS STEP HAD
        * TO BE TALL. It listed the current plan's allowances as five meters at
        * zero used - the numbers are on the plan cards a few inches below, in
@@ -163,14 +139,11 @@ export function StepPlan({
        */}
       {plans.length > 1 && (
         /*
-         * ⚠ WIDER THAN THE FLOW IT SITS IN, DELIBERATELY. Every other step is
-         * a form at `max-w-2xl`, which is the right measure for reading and
-         * the wrong one for three cards side by side - at that width they
-         * stack into a column of tall boxes and the comparison, which is the
-         * entire job of this step, has to be done by scrolling. This breaks
-         * out to the middle of the viewport and stops at `max-w-4xl`.
+         * ⚠ THE WHOLE WIDTH OF THE RAIL (2026-10-03). Set-up gives this step
+         * the screen - the preview beside the other steps steps aside for it -
+         * so the cards sit side by side without breaking out of anything.
          */
-        <div className="relative left-1/2 w-[calc(100vw-3rem)] max-w-4xl -translate-x-1/2">
+        <div>
           <PlanCards
             plans={plans}
             billing={billing}
@@ -211,14 +184,14 @@ export function StepPlan({
        * out to remove.
        */}
       <Reveal show={done} spacing="pt-2">
-        <div className="flex justify-center">
+        <div className="flex">
           {/*
            * ⚠ `xl`, THE SAME SIZE AS "Continue" ON THE SIGN-IN PAGE. It is
            * the same kind of control - the one thing to press on a screen
            * that has finished asking - and for a new customer the two are
            * three minutes apart.
            */}
-          <Button size="xl" onClick={onDone}>
+          <Button size="xl" className="rounded-full" onClick={onDone}>
             Continue to dashboard
             <ArrowRight />
           </Button>

@@ -3,7 +3,14 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react"
-import { Check, ChevronDown, CircleCheck, Globe, Network } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  CircleCheck,
+  Globe,
+  ListChecks,
+  Network,
+} from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { FloatingInput } from "@repo/ui/components/floating-field"
 import { ValidatedInput } from "@repo/ui/components/validated-field"
@@ -11,6 +18,8 @@ import { Reveal } from "@repo/ui/components/reveal"
 import { Spinner } from "@repo/ui/components/spinner"
 import { cn } from "cn"
 import { DetectionPanel } from "@/components/detection-panel"
+import { EmailPreview } from "@/components/email-preview"
+import { StepItem, StepRail } from "@/components/steps"
 import { DnsRecordGroups } from "@/components/dns-records"
 import { ProviderMark } from "@/components/provider-mark"
 import {
@@ -28,6 +37,7 @@ import {
   draftStillSet,
   rememberDraft,
   type AddDomainDraft,
+  type DraftScope,
 } from "@/lib/add-domain-draft"
 import type { DnsConnection, DnsInspection, Domain } from "@/lib/types"
 
@@ -84,12 +94,65 @@ export interface RestoredDraft extends AddDomainDraft {
   inspection: DnsInspection | null
 }
 
-export function AddDomainForm({
+/**
+ * Where the domain steps send somebody once they are finished with them.
+ *
+ * ⚠ THE ONLY THINGS THAT DIFFER BETWEEN /domains/new AND SET-UP. Everything
+ * else - the lookup, the refusals, creating the row, connecting and publishing,
+ * the records - is this one component, so the two cannot do it differently.
+ */
+export interface AddDomainExits {
+  /** Where the provider's sign-in comes back to, for the domain just made. */
+  returnTo: (domainId: string) => string
+  /** The domain is made and its records are published or in their hands. */
+  onFinish: (domain: Domain) => void
+  /** Leaving from the first step; absent, there is no Cancel. */
+  onCancel?: () => void
+}
+
+/**
+ * The domain steps as rail items, for whichever rail they sit in.
+ *
+ * ⚠ IT RENDERS `StepItem`s AND NOTHING AROUND THEM. /domains/new puts them in
+ * a rail of their own beside the inbox preview; set-up puts them between its
+ * workspace step and its verify step, in its rail. `onPreview` tells the
+ * owner what the preview should show, since the owner draws it.
+ */
+export function AddDomainSteps({
   tenantId,
   restored: handed = null,
+  draft = "page",
+  phase = "active",
+  trailing = false,
+  icons = false,
+  exits,
+  onPreview,
+  onOpen,
 }: {
   tenantId: string
   restored?: RestoredDraft | null
+  /** Which cookie remembers the answers across a reload - see lib/add-domain-draft. */
+  draft?: DraftScope
+  /**
+   * Where these steps sit in the owner's flow (set-up): before the step the
+   * person is on (all upcoming), on it, or past it (all answered).
+   *
+   * ⚠ THE STEPS STAY MOUNTED IN EVERY PHASE, AND THAT IS THE POINT
+   * (2026-10-04). Set-up used to render them only while its domain step was
+   * current, so going back to name the workspace threw away everything here -
+   * the typed name, the choice, the records step - while the domain itself had
+   * already been made, and re-adding it was refused as a duplicate. Mounted
+   * throughout, only how they are drawn changes.
+   */
+  phase?: "before" | "active" | "after"
+  /** More steps follow on the rail, so none of these is the last. */
+  trailing?: boolean
+  /** Give each step a glyph, as set-up's rail does. */
+  icons?: boolean
+  exits: AddDomainExits
+  onPreview?: (preview: { name: string; naming: boolean }) => void
+  /** One of these steps asked to be open - set-up makes its domain step current. */
+  onOpen?: () => void
 }) {
   /*
    * ⚠ A DRAFT IS ONLY USED IF ITS COOKIE STILL EXISTS. On a reload the server
@@ -98,7 +161,7 @@ export function AddDomainForm({
    * - leaving forgot it - and that render must start fresh, not resume.
    */
   const [restored] = React.useState(() =>
-    handed && typeof document !== "undefined" && !draftStillSet() ? null : handed,
+    handed && typeof document !== "undefined" && !draftStillSet(draft) ? null : handed,
   )
   const router = useRouter()
   const reduce = useReducedMotion() ?? false
@@ -318,19 +381,28 @@ export function AddDomainForm({
   const left = React.useRef(false)
   React.useEffect(() => {
     if (left.current) return
-    rememberDraft(tenantId, {
-      name,
-      returnPath,
-      mode: chosenMode,
-      advanced,
-      step,
-      ...(created ? { id: created.id } : {}),
-    })
-  }, [tenantId, name, returnPath, chosenMode, advanced, step, created])
+    rememberDraft(
+      tenantId,
+      {
+        name,
+        returnPath,
+        mode: chosenMode,
+        advanced,
+        step,
+        ...(created ? { id: created.id } : {}),
+      },
+      draft,
+    )
+  }, [tenantId, name, returnPath, chosenMode, advanced, step, created, draft])
 
   function forget() {
     left.current = true
-    rememberDraft(tenantId, null)
+    rememberDraft(tenantId, null, draft)
+  }
+
+  function finish(domain: Domain) {
+    forget()
+    exits.onFinish(domain)
   }
 
   /** Step one's Continue: nothing is created, the answer is just held. */
@@ -391,12 +463,11 @@ export function AddDomainForm({
     if (!domain) return setSubmitting(false)
 
     if (!connected) {
-      const start = await startDnsConnect(provider.slug, `/domains/${domain.id}`)
+      const start = await startDnsConnect(provider.slug, exits.returnTo(domain.id))
       if (!start.ok) {
-        // The row exists; its page offers the same button.
+        // The row exists; where it is finished offers the same button.
         toastError(`Could not connect ${provider.name}`, start.error)
-        forget()
-        router.push(`/domains/${domain.id}`)
+        finish(domain)
         return
       }
       forget()
@@ -446,19 +517,30 @@ export function AddDomainForm({
           `We could not publish the records: ${outcome.reason}`,
         )
     }
-    forget()
-    router.push(`/domains/${domain.id}`)
+    finish(domain)
   }
 
   /** "Manual setup": make the row and show its records here, as a third step. */
+  /**
+   * "Manual setup": straight to the records step, then make the row behind it.
+   *
+   * ⚠ THE STEP MOVES FIRST AND THE ROW CATCHES UP (2026-10-03). Creating a
+   * domain is almost never refused here - the name was checked as it was typed
+   * - so the person is not made to watch a spinner for it. The records step
+   * opens with placeholder rows that fill in when the row exists; a refusal
+   * puts them back on the choice, or on the name if it was the name.
+   */
   async function manualSetup() {
     if (submitting) return
     setSubmitting(true)
+    setStep("publish")
     const domain = await create()
     setSubmitting(false)
-    if (!domain) return
+    if (!domain) {
+      setStep((now) => (now === "publish" ? "records" : now))
+      return
+    }
     setCreated(domain)
-    setStep("publish")
   }
 
   /**
@@ -470,293 +552,363 @@ export function AddDomainForm({
     if (!created || checking) return
     setChecking(true)
     await verifyDomain(created.id)
-    forget()
-    router.push(`/domains/${created.id}`)
+    finish(created)
   }
 
-  const order: Step[] = created
-    ? ["domain", "records", "publish"]
-    : ["domain", "records"]
+  const order: Step[] =
+    created || step === "publish"
+      ? ["domain", "records", "publish"]
+      : ["domain", "records"]
   const at = order.indexOf(step)
+  /*
+   * ⚠ PAST, BUT NOT FINISHED, IS "SKIPPED". When the owner's flow has moved on
+   * from these steps, the ones never reached in here are drawn answered - in
+   * amber, saying so - rather than green.
+   */
+  const unreached = (s: Step) => phase === "after" && order.indexOf(s) >= at
   const stateOf = (s: Step) => {
+    if (phase === "before") return "next"
+    if (phase === "after") return "done"
     const i = order.indexOf(s)
     return i < at ? "done" : i === at ? "current" : "next"
   }
   const busy = submitting || checking
 
+  // The owner draws the preview; tell it what to show.
+  React.useEffect(() => {
+    onPreview?.({ name: candidate, naming: step === "domain" })
+  }, [onPreview, candidate, step])
+
   return (
-    <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
-      <LayoutGroup>
-        <ol className={cn("min-w-0", step !== "domain" && "lg:col-span-2")}>
-          {/* ── 1. Domain ── */}
-          <StepItem
-            state={stateOf("domain")}
-            last={false}
-            title="Domain"
-            description="The domain you send from, and the subdomain bounces return to."
-            reduce={reduce}
-            summary={
-              <div className="flex items-center gap-2">
-                <span className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-emerald-500/20 bg-background/40 px-3 py-2 font-mono text-sm">
-                  <Globe
-                    aria-hidden
-                    className="size-4 shrink-0 text-muted-foreground"
-                  />
-                  <span className="truncate">{candidate}</span>
-                  {returnPath.trim() && (
-                    <span className="truncate text-xs text-muted-foreground">
-                      return path {returnPath.trim()}
-                    </span>
-                  )}
+    <>
+      {/* ── 1. Domain ── */}
+      <StepItem
+        state={stateOf("domain")}
+        last={false}
+        title="Domain"
+        tone={unreached("domain") ? "warning" : "success"}
+        badge={unreached("domain") ? "Skipped" : undefined}
+        icon={icons ? <Globe /> : undefined}
+        description="The domain you send from, and the subdomain bounces return to."
+        reduce={reduce}
+        summary={
+          <div className="flex items-center gap-2">
+            <span className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-emerald-500/20 bg-background/40 px-3 py-2 font-mono text-sm">
+              <Globe aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{candidate}</span>
+              {returnPath.trim() && (
+                <span className="truncate text-xs text-muted-foreground">
+                  return path {returnPath.trim()}
                 </span>
-                {/* Before the row exists the name can still change. */}
-                {!created && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => setStep("domain")}
-                  >
-                    Change
-                  </Button>
-                )}
-              </div>
+              )}
+            </span>
+            {/* Before the row exists the name can still change. */}
+            {!created && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  setStep("domain")
+                  // Opening a step here opens these steps in the owner's flow.
+                  onOpen?.()
+                }}
+              >
+                Change
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {/*
+         * ⚠ `noValidate`, BECAUSE THE BROWSER'S OWN BUBBLE IS NOT OUR
+         * INTERFACE. The field refuses its own form's submit itself - see
+         * @repo/ui/components/validated-field.
+         */}
+        <form onSubmit={confirmName} className="space-y-5" noValidate>
+          {/*
+           * ⚠ THE FIELD GOES AMBER WHILE THE NAMESERVER LOOKUP IS IN FLIGHT,
+           * which is the same fact the disabled Continue is acting on.
+           */}
+          <ValidatedInput
+            id="domain"
+            autoFocus
+            label="Domain"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            // ⚠ `url` WOULD BE WRONG HERE: browsers autofill whole URLs, and
+            // `https://acme.com` creates a domain that can never verify.
+            inputMode="url"
+            className="font-mono"
+            check={domainProblem}
+            refused={refusedHere}
+            required="Enter the domain you send from."
+            busy={looking}
+            adornment={looking ? <Spinner className="size-3.5" /> : undefined}
+            hint={
+              <>
+                The apex, or a subdomain you send from - a subdomain like{" "}
+                <code className="font-mono">mail.example.com</code> keeps your sending
+                reputation separate.
+              </>
             }
-          >
-            {/*
-             * ⚠ `noValidate`, BECAUSE THE BROWSER'S OWN BUBBLE IS NOT OUR
-             * INTERFACE. The field refuses its own form's submit itself - see
-             * @repo/ui/components/validated-field.
-             */}
-            <form onSubmit={confirmName} className="space-y-5" noValidate>
-              {/*
-               * ⚠ THE FIELD GOES AMBER WHILE THE NAMESERVER LOOKUP IS IN FLIGHT,
-               * which is the same fact the disabled Continue is acting on.
-               */}
-              <ValidatedInput
-                id="domain"
-                autoFocus
-                label="Domain"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                // ⚠ `url` WOULD BE WRONG HERE: browsers autofill whole URLs, and
-                // `https://acme.com` creates a domain that can never verify.
-                inputMode="url"
+          />
+
+          {/*
+           * ⚠ A BUTTON AND A `Reveal`, NOT `Collapsible`. Radix's collapsible
+           * toggles `data-state` and expects a stylesheet to carry the
+           * height, so it snapped; this springs with everything around it.
+           */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setAdvanced((open) => !open)}
+              aria-expanded={advanced}
+              className="flex cursor-pointer items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ChevronDown
+                className={cn(
+                  "size-3.5 transition-transform duration-(--duration-spring) ease-(--ease-spring)",
+                  !advanced && "-rotate-90",
+                )}
+              />
+              Advanced options
+            </button>
+            <Reveal show={advanced} spacing="pt-3">
+              <FloatingInput
+                id="return-path"
+                label="Return-Path subdomain"
+                value={returnPath}
+                onChange={(event) => setReturnPath(event.target.value)}
                 className="font-mono"
-                check={domainProblem}
-                refused={refusedHere}
-                required="Enter the domain you send from."
-                busy={looking}
-                adornment={looking ? <Spinner className="size-3.5" /> : undefined}
+                containerClassName="max-w-xs"
+                autoComplete="off"
+                spellCheck={false}
                 hint={
                   <>
-                    The apex, or a subdomain you send from - a subdomain like{" "}
-                    <code className="font-mono">mail.example.com</code> keeps your
-                    sending reputation separate.
+                    The envelope address every message uses, whichever way it leaves.
+                    Defaults to <code className="font-mono">send</code>. Changing it
+                    later means re-publishing records.
                   </>
                 }
               />
+            </Reveal>
+          </div>
 
-              {/*
-               * ⚠ A BUTTON AND A `Reveal`, NOT `Collapsible`. Radix's collapsible
-               * toggles `data-state` and expects a stylesheet to carry the
-               * height, so it snapped; this springs with everything around it.
-               */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setAdvanced((open) => !open)}
-                  aria-expanded={advanced}
-                  className="flex cursor-pointer items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-                >
-                  <ChevronDown
-                    className={cn(
-                      "size-3.5 transition-transform duration-(--duration-spring) ease-(--ease-spring)",
-                      !advanced && "-rotate-90",
-                    )}
-                  />
-                  Advanced options
-                </button>
-                <Reveal show={advanced} spacing="pt-3">
-                  <FloatingInput
-                    id="return-path"
-                    label="Return-Path subdomain"
-                    value={returnPath}
-                    onChange={(event) => setReturnPath(event.target.value)}
-                    className="font-mono"
-                    containerClassName="max-w-xs"
-                    autoComplete="off"
-                    spellCheck={false}
-                    hint={
-                      <>
-                        The envelope address every message uses, whichever way it
-                        leaves. Defaults to <code className="font-mono">send</code>.
-                        Changing it later means re-publishing records.
-                      </>
-                    }
-                  />
-                </Reveal>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/*
-                 * ⚠ DISABLED WHILE THE LOOKUP IS IN FLIGHT, BECAUSE THE NEXT STEP
-                 * IS BUILT FROM IT: whether delegation is possible and whether we
-                 * can write the records both come from the detected provider.
-                 * The wait is bounded - a failed lookup still answers.
-                 */}
-                <Button
-                  type="submit"
-                  className="rounded-full"
-                  disabled={looking || refusedHere !== undefined || candidate === ""}
-                >
-                  Continue
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="rounded-full"
-                  onClick={() => {
-                    forget()
-                    router.back()
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </StepItem>
-
-          {/* ── 2. Records ── */}
-          <StepItem
-            state={stateOf("records")}
-            last={!created}
-            title="DNS Records"
-            description={
-              canAutomate && connected
-                ? `Choose which records should exist. ${provider?.name} is already connected, so we can publish them for you - or add them yourself.`
-                : canAutomate
-                  ? `Choose which records should exist. Sign in to ${provider?.name} and we write them for you, or add them yourself.`
-                  : "Choose which records should exist, then add them at your DNS provider."
-            }
-            reduce={reduce}
-            summary={
-              <p className="text-sm text-muted-foreground">
-                {mode === "delegate" ? "Delegated to i10" : "Records kept in your zone"}{" "}
-                - added by hand.
-              </p>
-            }
-          >
-            <div className="space-y-5">
-              {/* What we found about where its DNS lives. */}
-              {current && <DetectionPanel inspection={current} connected={connected} />}
-
-              <fieldset className="space-y-2">
-                <legend className="mb-2 text-sm font-medium">
-                  Which records should exist?
-                </legend>
-                <ModeCard
-                  selected={mode === "delegate"}
-                  disabled={delegationBlocked}
-                  onSelect={() => setChosenMode("delegate")}
-                  icon={<Network className="size-4" />}
-                  title="Delegate to i10"
-                  recommended
-                  description={
-                    delegationBlocked
-                      ? `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`
-                      : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever - including when they change."
-                  }
-                />
-                <ModeCard
-                  selected={mode === "manual"}
-                  onSelect={() => setChosenMode("manual")}
-                  icon={<Check className="size-4" />}
-                  title="Keep the records in my zone"
-                  description="Four ordinary records - the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
-                />
-              </fieldset>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {/*
-                 * ⚠ ONLY WHERE WE CAN WRITE THE RECORDS. Twenty-two of the forty
-                 * providers have no usable per-customer API; for those, adding
-                 * them by hand is the only path and it is the primary button.
-                 */}
-                {canAutomate && provider && (
-                  <Button
-                    type="button"
-                    className="rounded-full border-neutral-200 bg-white text-neutral-950 hover:bg-neutral-100 dark:border-neutral-200 dark:bg-white dark:hover:bg-neutral-100"
-                    disabled={busy}
-                    onClick={() => void autoConfigure()}
-                  >
-                    {submitting ? (
-                      <Spinner />
-                    ) : (
-                      <ProviderMark slug={provider.slug} name={provider.name} />
-                    )}
-                    {/*
-                     * ⚠ "CONNECT" UNTIL IT IS CONNECTED, THEN "PUBLISH RECORDS"
-                     * (2026-10-03). The step offers two things - our way or by
-                     * hand - and once the workspace holds a connection, this
-                     * press writes the records now, so the word says so. The
-                     * panel above says the provider is already connected.
-                     */}
-                    {connected ? "Publish records" : `Connect ${provider.name}`}
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant={canAutomate ? "outline" : "default"}
-                  className="rounded-full"
-                  disabled={busy}
-                  onClick={() => void manualSetup()}
-                >
-                  {submitting && !canAutomate && <Spinner />}
-                  Manual setup
-                </Button>
-              </div>
-            </div>
-          </StepItem>
-
-          {/* ── 3. Publish, only for somebody adding them by hand ── */}
-          {created && (
-            <StepItem
-              state={stateOf("publish")}
-              last
-              title="Fill in your DNS records"
-              description={`Add these at ${provider?.name ?? "your DNS provider"}. When they are in, tell us and we start looking for them.`}
-              reduce={reduce}
+          <div className="flex items-center gap-2">
+            {/*
+             * ⚠ DISABLED WHILE THE LOOKUP IS IN FLIGHT, BECAUSE THE NEXT STEP
+             * IS BUILT FROM IT: whether delegation is possible and whether we
+             * can write the records both come from the detected provider.
+             * The wait is bounded - a failed lookup still answers.
+             */}
+            <Button
+              type="submit"
+              className="rounded-full"
+              disabled={looking || refusedHere !== undefined || candidate === ""}
             >
-              <div className="space-y-6">
-                {/* Exactly as the domain page lays them out, status column and all. */}
-                <DnsRecordGroups records={created.records} />
-                <div className="flex flex-wrap items-center gap-2">
-                  {/*
-                   * ⚠ ONLY THIS BUTTON (2026-10-03). This step exists because
-                   * they chose Manual setup over connecting; offering the
-                   * provider again here, beside it, asks a question they have
-                   * just answered.
-                   */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-full"
-                    disabled={checking}
-                    onClick={() => void addedThem()}
-                  >
-                    {checking ? <Spinner /> : <CircleCheck />}
-                    I&rsquo;ve added the records
-                  </Button>
-                </div>
-              </div>
-            </StepItem>
-          )}
-        </ol>
+              Continue
+            </Button>
+            {exits.onCancel && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="rounded-full"
+                onClick={() => {
+                  forget()
+                  exits.onCancel?.()
+                }}
+              >
+                Cancel
+              </Button>
+            )}
+          </div>
+        </form>
+      </StepItem>
+
+      {/* ── 2. Records ── */}
+      <StepItem
+        state={stateOf("records")}
+        last={order.length === 2 && !trailing}
+        title="DNS Records"
+        tone={unreached("records") ? "warning" : "success"}
+        badge={unreached("records") ? "Skipped" : undefined}
+        icon={icons ? <Network /> : undefined}
+        description={
+          canAutomate && connected
+            ? `Choose which records should exist. ${provider?.name} is already connected, so we can publish them for you - or add them yourself.`
+            : canAutomate
+              ? `Choose which records should exist. Sign in to ${provider?.name} and we write them for you, or add them yourself.`
+              : "Choose which records should exist, then add them at your DNS provider."
+        }
+        reduce={reduce}
+        summary={
+          <p className="text-sm text-muted-foreground">
+            {/* ⚠ A STEP NEVER ANSWERED SAYS SO, rather than reporting the default
+                choice as if somebody had made it. */}
+            {unreached("records")
+              ? "Not chosen yet."
+              : `${mode === "delegate" ? "Delegated to i10" : "Records kept in your zone"} - added by hand.`}
+          </p>
+        }
+      >
+        <div className="space-y-5">
+          {/* What we found about where its DNS lives. */}
+          {current && <DetectionPanel inspection={current} connected={connected} />}
+
+          <fieldset className="space-y-2">
+            <legend className="mb-2 text-sm font-medium">
+              Which records should exist?
+            </legend>
+            <ModeCard
+              selected={mode === "delegate"}
+              disabled={delegationBlocked}
+              onSelect={() => setChosenMode("delegate")}
+              icon={<Network className="size-4" />}
+              title="Delegate to i10"
+              recommended
+              description={
+                delegationBlocked
+                  ? `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`
+                  : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever - including when they change."
+              }
+            />
+            <ModeCard
+              selected={mode === "manual"}
+              onSelect={() => setChosenMode("manual")}
+              icon={<Check className="size-4" />}
+              title="Keep the records in my zone"
+              description="Four ordinary records - the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
+            />
+          </fieldset>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/*
+             * ⚠ ONLY WHERE WE CAN WRITE THE RECORDS. Twenty-two of the forty
+             * providers have no usable per-customer API; for those, adding
+             * them by hand is the only path and it is the primary button.
+             */}
+            {canAutomate && provider && (
+              <Button
+                type="button"
+                className="rounded-full border-neutral-200 bg-white text-neutral-950 hover:bg-neutral-100 dark:border-neutral-200 dark:bg-white dark:hover:bg-neutral-100"
+                disabled={busy}
+                onClick={() => void autoConfigure()}
+              >
+                {submitting ? (
+                  <Spinner />
+                ) : (
+                  <ProviderMark slug={provider.slug} name={provider.name} />
+                )}
+                {/*
+                 * ⚠ "CONNECT" UNTIL IT IS CONNECTED, THEN "PUBLISH RECORDS"
+                 * (2026-10-03). The step offers two things - our way or by
+                 * hand - and once the workspace holds a connection, this
+                 * press writes the records now, so the word says so. The
+                 * panel above says the provider is already connected.
+                 */}
+                {connected ? "Publish records" : `Connect ${provider.name}`}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant={canAutomate ? "outline" : "default"}
+              className="rounded-full"
+              disabled={busy}
+              onClick={() => void manualSetup()}
+            >
+              {submitting && !canAutomate && <Spinner />}
+              Manual setup
+            </Button>
+          </div>
+        </div>
+      </StepItem>
+
+      {/* ── 3. Publish, only for somebody adding them by hand ── */}
+      {order.length === 3 && (
+        <StepItem
+          state={stateOf("publish")}
+          last={!trailing}
+          title="Fill in your DNS records"
+          tone={unreached("publish") ? "warning" : "success"}
+          badge={unreached("publish") ? "Skipped" : undefined}
+          icon={icons ? <ListChecks /> : undefined}
+          description={`Add these at ${provider?.name ?? "your DNS provider"}. When they are in, tell us and we start looking for them.`}
+          reduce={reduce}
+        >
+          <div className="space-y-6">
+            {/* Exactly as the domain page lays them out, status column and all. */}
+            {created ? (
+              <DnsRecordGroups records={created.records} />
+            ) : (
+              <RecordsPlaceholder />
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {/*
+               * ⚠ ONLY THIS BUTTON (2026-10-03). This step exists because
+               * they chose Manual setup over connecting; offering the
+               * provider again here, beside it, asks a question they have
+               * just answered.
+               */}
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-full"
+                disabled={checking || !created}
+                onClick={() => void addedThem()}
+              >
+                {checking ? <Spinner /> : <CircleCheck />}
+                I&rsquo;ve added the records
+              </Button>
+            </div>
+          </div>
+        </StepItem>
+      )}
+    </>
+  )
+}
+
+/**
+ * /domains/new: the domain steps in a rail of their own, with the inbox
+ * preview beside the first.
+ */
+export function AddDomainForm({
+  tenantId,
+  restored = null,
+}: {
+  tenantId: string
+  restored?: RestoredDraft | null
+}) {
+  const router = useRouter()
+  const reduce = useReducedMotion() ?? false
+  const [preview, setPreview] = React.useState({
+    name: restored?.name ?? "",
+    naming: (restored?.step ?? "domain") === "domain",
+  })
+  const exits = React.useMemo<AddDomainExits>(
+    () => ({
+      returnTo: (id) => `/domains/${id}`,
+      onFinish: (domain) => router.push(`/domains/${domain.id}`),
+      onCancel: () => router.back(),
+    }),
+    [router],
+  )
+
+  return (
+    <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+      <LayoutGroup>
+        <StepRail follow className={cn(!preview.naming && "lg:col-span-2")}>
+          <AddDomainSteps
+            tenantId={tenantId}
+            restored={restored}
+            exits={exits}
+            onPreview={setPreview}
+          />
+        </StepRail>
       </LayoutGroup>
 
       {/*
@@ -765,7 +917,7 @@ export function AddDomainForm({
        * the whole width, and a preview of a name already decided is decoration.
        */}
       <AnimatePresence initial={false}>
-        {step === "domain" && (
+        {preview.naming && (
           <motion.aside
             key="preview"
             aria-hidden
@@ -774,7 +926,7 @@ export function AddDomainForm({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.12 } }}
           >
-            <EmailPreview domain={candidate} />
+            <EmailPreview domain={preview.name.trim().toLowerCase()} />
           </motion.aside>
         )}
       </AnimatePresence>
@@ -782,181 +934,22 @@ export function AddDomainForm({
   )
 }
 
-const EASE = [0.22, 1, 0.36, 1] as const
-
 /**
- * One step on the rail: its dot, the line down to the next, and either its
- * question (current), its answer folded into a card (done), or its title
- * dimmed (not reached).
- *
- * ⚠ THE LINE BETWEEN TWO STEPS IS GREEN ONCE THE UPPER ONE IS DONE, which is
- * the progress: it fills down the rail as the steps are answered.
+ * The records step's rows before the row exists - same shape as the real
+ * groups, so filling in is a fade and not a jump.
  */
-function StepItem({
-  state,
-  last,
-  title,
-  description,
-  summary,
-  reduce,
-  children,
-}: {
-  state: "done" | "current" | "next"
-  last: boolean
-  title: string
-  description: string
-  /** What the answered step folds down to. */
-  summary?: React.ReactNode
-  reduce: boolean
-  children: React.ReactNode
-}) {
-  const done = state === "done"
+function RecordsPlaceholder() {
   return (
-    <motion.li
-      layout={reduce ? false : "position"}
-      transition={{ duration: 0.35, ease: EASE }}
-      className="relative pb-6 pl-10 last:pb-0"
-    >
-      {/*
-       * ⚠ THE LINE RUNS FROM THIS DOT INTO THE NEXT ONE, NOT TO THE BOTTOM OF
-       * THIS STEP (2026-10-03). It used to stop where the step ended, and the
-       * next dot sits 28px into its own step, so every joint was a gap. Every
-       * dot is at the same height now (see the frame below), so the line can
-       * reach the next one: it runs 3px INTO both rings (40px, not the ring's
-       * 43px bottom; 31px, not 28) with square ends. The rings are drawn after
-       * it with a filled centre, so the overlap is hidden and the joint has no
-       * gap - a line that stopped exactly at the edge, with round caps, read
-       * as detached.
-       */}
-      {!last && (
-        <span
-          aria-hidden
-          className={cn(
-            "absolute top-[40px] -bottom-[31px] left-[6.5px] w-0.5 transition-colors duration-500",
-            // ⚠ THE RINGS' OWN INK, NOT A FADED ONE. At 60% the 2px line read
-            // as thinner than the 2px ring it leaves; same colour, same weight.
-            done ? "bg-emerald-500" : "bg-muted-foreground/40",
-          )}
-        />
-      )}
-      <span
-        aria-hidden
-        className={cn(
-          "absolute top-7 left-0 size-[15px] rounded-full border-2 bg-background transition-colors duration-300",
-          done && "border-emerald-500",
-          state === "current" && "border-foreground",
-          state === "next" && "border-muted-foreground/40",
-        )}
-      />
-
-      {/*
-       * ⚠ THE SAME FRAME IN EVERY STATE, ONLY ITS BORDER AND TINT CHANGE. The
-       * card used to appear around a step as it was answered, adding 20px of
-       * padding at that moment - the title jumped down and the dot had to move
-       * to follow it. With the padding always there, answering a step only
-       * colours the box it is already in.
-       */}
-      <div
-        className={cn(
-          "-ml-4 rounded-3xl border p-5 pl-4 transition-[background-color,border-color] duration-300",
-          done
-            ? "border-emerald-500/30 bg-linear-to-br from-emerald-500/12 via-emerald-500/4 to-transparent"
-            : "border-transparent",
-        )}
-      >
-        <h2
-          className={cn(
-            "flex items-center gap-2 font-display text-xl font-semibold tracking-tight transition-colors",
-            state === "next" && "text-muted-foreground/50",
-          )}
-        >
-          {title}
-          {done && <Check aria-hidden className="size-4 text-emerald-500" />}
-        </h2>
-        {/* Answered, the card says the answer; the question has done its job. */}
-        {state === "current" && (
-          <p className="mt-1 max-w-xl text-sm text-muted-foreground">{description}</p>
-        )}
-
-        <AnimatePresence initial={false} mode="wait">
-          {state === "current" && (
-            <motion.div
-              key="body"
-              initial={reduce ? false : { opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{
-                opacity: 0,
-                height: 0,
-                transition: { duration: 0.2, ease: EASE },
-              }}
-              transition={{ duration: 0.35, ease: EASE }}
-              // ⚠ `overflow-hidden` FOR THE HEIGHT ANIMATION, AND A 4px BLEED SO
-              // IT DOES NOT CLIP THE FIELDS' FOCUS RINGS.
-              className="-m-1 overflow-hidden p-1"
-            >
-              <div className="pt-5">{children}</div>
-            </motion.div>
-          )}
-          {done && summary && (
-            <motion.div
-              key="summary"
-              initial={reduce ? false : { opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{
-                opacity: 0,
-                height: 0,
-                transition: { duration: 0.2, ease: EASE },
-              }}
-              transition={{ duration: 0.35, ease: EASE }}
-              className="overflow-hidden"
-            >
-              <div className="pt-3">{summary}</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </motion.li>
-  )
-}
-
-/**
- * What a message from this domain looks like in an inbox: the sender line
- * with the domain filled in as it is typed, over a body sketched in bars.
- *
- * ⚠ THE DOMAIN SLOT IS A BAR UNTIL THERE IS SOMETHING IN IT, the same grey as
- * the body's lines, so the empty preview reads as a sketch rather than as an
- * address with a hole in it.
- */
-function EmailPreview({ domain }: { domain: string }) {
-  return (
-    <div className="sticky top-8 rounded-tl-3xl border-t border-l p-6 [mask-image:linear-gradient(to_right,#000_70%,transparent),linear-gradient(to_bottom,#000_70%,transparent)] [mask-composite:intersect]">
-      <div className="flex items-start gap-3">
-        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-muted text-sm text-muted-foreground">
-          Y
-        </span>
-        <div className="min-w-0 pt-0.5">
-          <p className="flex min-w-0 items-center text-sm whitespace-nowrap">
-            <span className="font-semibold">Your Name</span>
-            <span className="ml-1.5 flex min-w-0 items-center text-muted-foreground">
-              &lt;youremail@
-              {domain ? (
-                <span className="truncate text-foreground">{domain}</span>
-              ) : (
-                <span className="inline-block h-3 w-24 rounded-full bg-muted" />
-              )}
-              &gt;
-            </span>
-          </p>
-          <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-            to me <ChevronDown aria-hidden className="size-3" />
-          </p>
+    <div aria-hidden className="space-y-6 py-2">
+      {[2, 1].map((rows, group) => (
+        <div key={group} className="space-y-3">
+          <div className="h-4 w-36 animate-pulse rounded-full bg-muted" />
+          <div className="h-9 rounded-xl bg-muted/50" />
+          {Array.from({ length: rows }, (_, i) => (
+            <div key={i} className="h-8 animate-pulse rounded-lg bg-muted/30" />
+          ))}
         </div>
-      </div>
-      <div className="mt-5 space-y-3 border-t pt-5">
-        <div className="h-3 w-3/5 rounded-full bg-muted" />
-        <div className="h-3 w-4/5 rounded-full bg-muted" />
-        <div className="h-3 w-2/3 rounded-full bg-muted" />
-      </div>
+      ))}
     </div>
   )
 }
@@ -992,16 +985,37 @@ function ModeCard({
        */
       aria-pressed={selected}
       className={cn(
-        "flex w-full cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-        "duration-(--duration-instant) ease-(--ease-linear)",
-        selected ? "border-foreground/40 bg-muted/40" : "hover:bg-muted/30",
+        "group relative flex w-full cursor-pointer items-start gap-3 overflow-hidden rounded-2xl border p-4 text-left transition-[background-color,border-color,box-shadow] duration-300",
+        /*
+         * ⚠ THE RECOMMENDED CARD IS THE SHINY ONE, ON PURPOSE (2026-10-03).
+         * Delegating is the setup we want people on - records that cannot drift
+         * - so it carries a quiet green-to-blue wash and a light across its top
+         * edge whether or not it is picked; picked, the wash deepens.
+         */
+        recommended && !disabled
+          ? selected
+            ? "border-emerald-500/50 bg-linear-to-br from-emerald-500/16 via-sky-500/8 to-violet-500/10 shadow-[0_0_0_1px_rgb(16_185_129/0.15),0_12px_32px_-16px_rgb(16_185_129/0.45)]"
+            : "border-emerald-500/25 bg-linear-to-br from-emerald-500/8 via-sky-500/4 to-violet-500/6 hover:border-emerald-500/40"
+          : selected
+            ? "border-foreground/40 bg-muted/40"
+            : "hover:bg-muted/30",
         disabled && "cursor-not-allowed opacity-50",
       )}
     >
+      {recommended && !disabled && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-6 top-0 h-px bg-linear-to-r from-transparent via-emerald-300/70 to-transparent"
+        />
+      )}
       <span
         className={cn(
           "mt-0.5 shrink-0",
-          selected ? "text-foreground" : "text-muted-foreground",
+          recommended && !disabled
+            ? "text-emerald-500"
+            : selected
+              ? "text-foreground"
+              : "text-muted-foreground",
         )}
       >
         {icon}
@@ -1010,7 +1024,7 @@ function ModeCard({
         <span className="flex items-center gap-2">
           <span className="text-sm font-medium">{title}</span>
           {recommended && !disabled && (
-            <span className="rounded-full border px-1.5 py-0.5 text-2xs text-muted-foreground">
+            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-2xs font-medium text-emerald-700 dark:text-emerald-300">
               Recommended
             </span>
           )}

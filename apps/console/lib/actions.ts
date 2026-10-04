@@ -627,6 +627,34 @@ export async function removeSuppression(
 
 // ── Onboarding ──────────────────────────────────────────────────────────────
 
+/**
+ * Set-up's "Send email": one real send from `domain` to the signed-in person,
+ * once per workspace - a second call replays the first (2026-10-03). See
+ * `POST /console/onboarding/test-email`.
+ *
+ * ⚠ NOTHING IS REVALIDATED. The step shows the answer itself; re-rendering
+ * set-up for it would reset the step's code tabs under the person reading
+ * them.
+ */
+export async function sendFirstEmail(domain: string, to?: string) {
+  return run(() =>
+    api<{ id: string | null; to: string; replayed: boolean }>(
+      "/console/onboarding/test-email",
+      { method: "POST", body: to ? { domain, to } : { domain } },
+    ),
+  )
+}
+
+/**
+ * Where one message has got to - set-up watches its first send until it is
+ * delivered, to say so. A read: nothing is revalidated.
+ */
+export async function emailStatus(id: string) {
+  return run(() =>
+    api<{ id: string; status: string }>(`/console/emails/${encodeURIComponent(id)}`),
+  )
+}
+
 export async function updateOnboarding(input: {
   step?: string
   use_case?: string

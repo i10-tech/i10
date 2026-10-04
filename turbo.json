@@ -108,6 +108,43 @@
     "RISK_FARM_TRIPWIRE",
     "RISK_MODEL_DIR",
     "RISK_TEST_API_DATABASE_URL",
+    // ⚠ ADDED 2026-10-04, THE SAME DRIFT AGAIN: these were declared by the
+    // API's schema but stripped here, so locally the Cloudflare "Connect"
+    // button said "not configured" with the app sitting in Doppler, and R2
+    // bodies, the GitHub app and template assets were silently off.
+    //
+    // ⚠ `DNS_OAUTH_*` IS A WILDCARD ON PURPOSE. Each provider brings its own
+    // DNS_OAUTH_<SLUG>_CLIENT_ID / _CLIENT_SECRET / _SCOPES (see
+    // apps/api/src/env.ts `collectOAuthApps`), so a list of names would go
+    // stale the day a second provider is registered. It also covers
+    // DNS_OAUTH_REDIRECT_BASE and the broker's URL and secret.
+    "DNS_OAUTH_*",
+    "AWS_ACCOUNT_ID",
+    "CONTENT_BODY_CACHE_MB",
+    "CONTENT_KEYS",
+    "CONTENT_OBJECT_GRACE_HOURS",
+    "CONTENT_PACK_MAX_WAIT_HOURS",
+    "CONTENT_PACK_TARGET_BYTES",
+    "CONTENT_STORE_ACCESS_KEY_ID",
+    "CONTENT_STORE_BATCH",
+    "CONTENT_STORE_BUCKET",
+    "CONTENT_STORE_ENDPOINT",
+    "CONTENT_STORE_SECRET_ACCESS_KEY",
+    "CONTENT_TEMPLATE_STALE_DAYS",
+    "DOMAIN_ORPHANS_REMOVE",
+    "GITHUB_APP_CLIENT_ID",
+    "GITHUB_APP_CLIENT_SECRET",
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_APP_SLUG",
+    "GITHUB_APP_WEBHOOK_SECRET",
+    "RETENTION_BATCH",
+    "TEMPLATE_ASSETS_ACCESS_KEY_ID",
+    "TEMPLATE_ASSETS_BUCKET",
+    "TEMPLATE_ASSETS_ENDPOINT",
+    "TEMPLATE_ASSETS_PUBLIC_URL",
+    "TEMPLATE_ASSETS_SECRET_ACCESS_KEY",
+    "WEBRISK_DAILY_LIMIT",
     "RISK_TEST_DATABASE_URL",
     "STORAGE_TEST_API_DATABASE_URL",
     "STORAGE_TEST_DATABASE_URL",

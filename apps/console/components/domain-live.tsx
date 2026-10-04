@@ -45,16 +45,26 @@ function useLive(): Live {
   return live
 }
 
-/** What the page shows, as one string: the status and every record's. */
-function stateKey(domain: Domain): string {
-  return `${domain.status}:${domain.records.map((r) => r.status).join(",")}`
+/** What the page shows, as one string: which domain, its status and every record's. */
+function stateKey(domain: Domain | null): string {
+  if (!domain) return ""
+  return `${domain.id}:${domain.status}:${domain.records.map((r) => r.status).join(",")}`
 }
 
+/**
+ * ⚠ `initial` MAY BE NULL, AND THE PROVIDER IS RENDERED EITHER WAY. Set-up has
+ * no domain until somebody adds one; wrapping its tree in this provider only
+ * once a domain existed changed the tree's shape at that moment, and React
+ * remounted everything inside - the add-domain steps lost the step they were
+ * on and set-up forgot it was adding, the moment the new domain arrived.
+ * Rendered always and never keyed, the tree stays put and only the value
+ * changes.
+ */
 export function DomainLiveProvider({
   initial,
   children,
 }: {
-  initial: Domain
+  initial: Domain | null
   children: React.ReactNode
 }) {
   const [domain, setDomain] = React.useState(initial)
@@ -65,6 +75,7 @@ export function DomainLiveProvider({
       setDomain((current) => (stateKey(current) === stateKey(next) ? current : next)),
     [],
   )
+  const id = domain?.id ?? null
 
   /*
    * ⚠ IT WATCHES RATHER THAN WAITING TO BE ASKED, UNTIL IT IS VERIFIED OR HAS
@@ -76,21 +87,25 @@ export function DomainLiveProvider({
    * answers land in state, and a watch that restarted for each one would go
    * back to its fastest schedule forever.
    */
-  const watching = domain.status !== "verified" && domain.status !== "failed"
+  const watching =
+    domain !== null && domain.status !== "verified" && domain.status !== "failed"
   React.useEffect(() => {
-    if (!watching) return
+    if (!watching || !id) return
     const controller = new AbortController()
     void watchUntilVerified({
-      domainId: initial.id,
+      domainId: id,
       signal: controller.signal,
       schedule: PAGE_WATCH_MS,
       quiet: true,
       onTick: update,
     })
     return () => controller.abort()
-  }, [initial.id, watching, update])
+  }, [id, watching, update])
 
-  const value = React.useMemo(() => ({ domain, update }), [domain, update])
+  const value = React.useMemo(
+    () => (domain ? { domain, update } : null),
+    [domain, update],
+  )
   return <LiveDomain.Provider value={value}>{children}</LiveDomain.Provider>
 }
 

@@ -388,7 +388,12 @@ export function TemplateLibrary({
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden"
+            // ⚠ A 4px BLEED ROUND THE CLIPPING BOX (2026-10-04). It clips for the
+            // height animation, and the drop target's ring sits 2px outside
+            // "All templates" - so dragging a template onto it drew the ring
+            // with its left edge cut off. Pulled out and padded back by the
+            // same amount, nothing moves and the ring has room.
+            className="-mx-1 overflow-hidden px-1 pb-1"
           >
             <ol className="flex items-center gap-1.5 pt-5 text-sm">
               <li>

@@ -1100,9 +1100,17 @@ const app = createApp({
     // A template's "Test email": one send down the ordinary path, as the
     // workspace, with no key (it is the console's request, not an API call).
     sendableFrom: (tenantId, domains) => sendPath.sendableFrom(tenantId, domains),
-    sendTest: (tenantId, payload) =>
+    sendTest: (tenantId, payload, options) =>
       acceptSend(
-        { tenantId, apiKeyId: null, endpoint: "single", payloads: [payload] },
+        {
+          tenantId,
+          apiKeyId: null,
+          endpoint: "single",
+          payloads: [payload],
+          ...(options?.idempotencyKey
+            ? { idempotencyKey: options.idempotencyKey }
+            : {}),
+        },
         sendPath,
       ),
     ...(renderer ? { templateRenderer: renderer } : {}),

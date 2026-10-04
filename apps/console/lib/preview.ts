@@ -186,14 +186,23 @@ const DKIM_KEY =
 
 function recordsFor(domain: (typeof DOMAINS)[number]) {
   if (domain.delegated) {
-    return ["send", "_domainkey", "_dmarc"].map((label) => ({
-      record: "NS",
-      name: `${label}.${domain.name}`,
-      type: "NS" as const,
-      ttl: "60",
-      status: domain.status,
-      value: "ns1.i10.tech",
-    }))
+    /*
+     * ⚠ SHAPED LIKE PRODUCTION'S: each name delegated to BOTH nameservers, and
+     * each nameserver behind a long per-claim label (2026-10-04). The short
+     * `ns1.i10.tech` this used to return hid how the records table copes with
+     * a 45-character value in a narrow column - which is where it overlapped.
+     */
+    const claim = "af716735bd944894a6d64b77c369ea1b"
+    return ["send", "_domainkey", "_dmarc"].flatMap((label) =>
+      ["ns1", "ns2"].map((ns) => ({
+        record: "NS",
+        name: `${label}.${domain.name}`,
+        type: "NS" as const,
+        ttl: "60",
+        status: domain.status,
+        value: `${claim}.${ns}.i10.tech`,
+      })),
+    )
   }
 
   return [
@@ -962,6 +971,9 @@ const ROUTES: [
   [
     /^\/console\/emails\/([^/]+)$/,
     (m) => {
+      // Set-up's one-press send, delivered a moment after it is sent.
+      if (m[1] === "prv_first_email")
+        return { id: "prv_first_email", status: "delivered" }
       const email = EMAILS.find((e) => e.id === m[1])
       // ⚠ NOT A FALLBACK TO THE FIRST ROW - see `PREVIEW_NOT_FOUND`.
       if (!email) return PREVIEW_NOT_FOUND
@@ -1170,6 +1182,12 @@ const ROUTES: [
    * The onboarding flow crashed at the step after the one being reviewed, which
    * is the failure this mode exists to prevent rather than cause.
    */
+  // Set-up's one-press send: always "sent", to the preview's own address.
+  [
+    /^\/console\/onboarding\/test-email$/,
+    () => ({ id: "prv_first_email", to: "you@acme.com", replayed: false }),
+  ],
+
   [
     /^\/console\/domains$/,
     (_m, _q, method, body) => {

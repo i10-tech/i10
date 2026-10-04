@@ -29,6 +29,22 @@
 
 export const ADD_DOMAIN_DRAFT_COOKIE = "i10_add_domain"
 
+/**
+ * The two places the domain steps run, each with its own draft (2026-10-04).
+ *
+ * ⚠ SET-UP REMEMBERS ITS DOMAIN STEPS TOO, IN A COOKIE OF ITS OWN. They are the
+ * same steps as /domains/new, and losing them on a reload - a domain already
+ * made, the person back at an empty name box, re-adding refused as a
+ * duplicate - is the same failure. Separate names and paths, so neither page
+ * ever resumes the other's half-finished domain.
+ */
+export type DraftScope = "page" | "onboarding"
+
+export const DRAFT_COOKIES: Record<DraftScope, { name: string; path: string }> = {
+  page: { name: ADD_DOMAIN_DRAFT_COOKIE, path: "/domains/new" },
+  onboarding: { name: "i10_onboarding_domain", path: "/onboarding" },
+}
+
 export type DraftStep = "domain" | "records" | "publish"
 
 export interface AddDomainDraft {
@@ -82,13 +98,18 @@ export function draftFor(
 }
 
 /** Browser only: remembers the draft, or forgets it with `null`. */
-export function rememberDraft(tenantId: string, draft: AddDomainDraft | null): void {
-  const path = "; path=/domains/new; samesite=lax"
+export function rememberDraft(
+  tenantId: string,
+  draft: AddDomainDraft | null,
+  scope: DraftScope = "page",
+): void {
+  const { name: cookie, path: where } = DRAFT_COOKIES[scope]
+  const path = `; path=${where}; samesite=lax`
   const secure = window.location.protocol === "https:" ? "; secure" : ""
   document.cookie =
     draft === null || !tenantId
-      ? `${ADD_DOMAIN_DRAFT_COOKIE}=${path}; max-age=0${secure}`
-      : `${ADD_DOMAIN_DRAFT_COOKIE}=${encodeURIComponent(
+      ? `${cookie}=${path}; max-age=0${secure}`
+      : `${cookie}=${encodeURIComponent(
           JSON.stringify({ t: tenantId, ...draft }),
         )}${path}${secure}`
 }
@@ -100,14 +121,11 @@ export function rememberDraft(tenantId: string, draft: AddDomainDraft | null): v
  * render from the client cache, draft and all, after leaving has forgotten
  * it; the form checks this before trusting what it was handed.
  */
-export function draftStillSet(): boolean {
+export function draftStillSet(scope: DraftScope = "page"): boolean {
+  const cookie = DRAFT_COOKIES[scope].name
   return document.cookie
     .split("; ")
-    .some(
-      (c) =>
-        c.startsWith(`${ADD_DOMAIN_DRAFT_COOKIE}=`) &&
-        c.length > ADD_DOMAIN_DRAFT_COOKIE.length + 1,
-    )
+    .some((c) => c.startsWith(`${cookie}=`) && c.length > cookie.length + 1)
 }
 
 /** Browser only: forgets any draft, whichever workspace it belongs to. */

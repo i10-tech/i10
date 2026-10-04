@@ -109,7 +109,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * Optional; without it a From is checked for shape only.
    */
   sendableFrom?: (tenantId: string, domains: string[]) => Promise<Set<string>>
-  sendTest?: (tenantId: string, payload: SendEmail) => Promise<AcceptOutcome>
+  sendTest?: (
+    tenantId: string,
+    payload: SendEmail,
+    /** A key that makes a second identical request replay the first (onboarding). */
+    options?: { idempotencyKey?: string },
+  ) => Promise<AcceptOutcome>
   /**
    * GitHub-connected templates (#235). Optional: without the GITHUB_APP_*
    * settings the routes answer 501 and nothing else changes.

@@ -420,6 +420,91 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     const billing = await d.usage.billing(tenantId)
     return c.json(await d.onboarding.get(tenantId, billing.plan?.id ?? null))
   })
+
+  /**
+   * Set-up's "Send email": one real message from a verified domain to the
+   * person at the keyboard, so the first send is a press rather than a curl
+   * pasted into a terminal (2026-10-03).
+   *
+   * ⚠ THE ORDINARY SEND PATH, the same one a template's test uses - signed,
+   * logged, suppression-checked and metered like any API send, and refused for
+   * the same reasons. It is the proof that sending works, so it must not take a
+   * shortcut the real thing would not.
+   *
+   * ⚠ ONLY ONCE PER WORKSPACE. The idempotency key is fixed, so a second press
+   * - a double click, a reload, another tab - replays the first send instead of
+   * sending again. It answers 200 with the same id rather than an error.
+   *
+   * ⚠ ONLY FROM A DOMAIN THE WORKSPACE CAN SEND FROM, ONLY TO THE SIGNED-IN
+   * PERSON, AND ONLY ONCE THEY HAVE A KEY. The address is read from the
+   * identity provider, never the body, so this cannot be pointed at a stranger;
+   * the key requirement is set-up's order - the button belongs to the step
+   * after "Add an API key".
+   */
+  app.post("/onboarding/test-email", async (c) => {
+    if (!d.sendTest || !d.sendableFrom || !d.people)
+      return c.json(notWired("Test emails"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const body = await readJson(c)
+
+    const domain =
+      typeof body?.domain === "string" ? body.domain.trim().toLowerCase() : ""
+    if (!domain) return c.json(validation("Which domain should it come from?"), 422)
+    const sendable = await d.sendableFrom(tenantId, [domain])
+    if (!sendable.has(domain)) {
+      return c.json(validation(`${domain} is not verified for sending yet.`), 422)
+    }
+
+    const billing = await d.usage.billing(tenantId)
+    const state = await d.onboarding.get(tenantId, billing.plan?.id ?? null)
+    if (!state.facts.has_api_key) {
+      return c.json(validation("Create an API key first."), 422)
+    }
+
+    /*
+     * ⚠ THE PERSON'S OWN VERIFIED ADDRESS WHEN THEY HAVE ONE, AND THE BODY'S
+     * `to` IS THEN IGNORED. Only somebody with no verified address may name
+     * one - set-up asks them for it - and that send is still once per
+     * workspace, from their own verified domain, after they hold a key that
+     * could send anywhere anyway.
+     */
+    const person = await d.people.get(userId).catch(() => null)
+    const verified = person?.verifiedEmails ?? []
+    const own =
+      person?.primaryEmail && verified.includes(person.primaryEmail)
+        ? person.primaryEmail
+        : (verified[0] ?? null)
+    const typed = typeof body?.to === "string" ? body.to.trim() : ""
+    const to = own ?? typed
+    if (!to) return c.json(validation("Who should it go to?"), 422)
+    if (!own && !EMAIL.test(to)) {
+      return c.json(validation(`${to} is not an email address.`), 422)
+    }
+
+    const outcome = await d.sendTest(
+      tenantId,
+      {
+        from: `i10 <hello@${domain}>`,
+        to: [to],
+        subject: "Your first email from i10",
+        html: `<p>It works. This message left <strong>${domain}</strong> through i10 - signed, logged and delivered like every send from here on.</p>`,
+        text: `It works. This message left ${domain} through i10 - signed, logged and delivered like every send from here on.`,
+        tags: [{ name: "onboarding_test", value: "true" }],
+      },
+      { idempotencyKey: `onboarding-test-email:${tenantId}` },
+    )
+    if (outcome.status === "accepted")
+      return c.json({ id: outcome.ids[0] ?? null, to, replayed: false }, 201)
+    if (outcome.status === "replayed")
+      return c.json({ id: outcome.ids[0] ?? null, to, replayed: true }, 200)
+    return c.json(
+      validation(
+        "message" in outcome ? outcome.message : "The email could not be sent.",
+      ),
+      422,
+    )
+  })
 }
 
 /**
@@ -456,3 +541,6 @@ function returnTo(
     return configured
   }
 }
+
+/** A plain address, for the one recipient a person may type in set-up. */
+const EMAIL = /^[^\s@<>,;"]+@[^\s@<>.,;"]+(?:\.[^\s@<>.,;"]+)*\.[A-Za-z]{2,}$/
