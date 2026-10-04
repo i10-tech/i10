@@ -215,6 +215,9 @@ function RecordsTable({
     <div className="space-y-3">
       <div
         className={cn(
+          // ⚠ EVERY COLUMN, AT EVERY WIDTH (2026-10-04): Type, Name, Value,
+          // TTL, Status. A narrow table shortens the VALUE (see `Shortened`)
+          // rather than dropping a column.
           "hidden md:block",
           framed ? "overflow-hidden rounded-2xl border" : "",
         )}
@@ -230,11 +233,11 @@ function RecordsTable({
                     "bg-muted/50 [&>th:first-child]:rounded-l-xl [&>th:last-child]:rounded-r-xl",
               )}
             >
-              <Th className="w-[5.5rem]">Type</Th>
-              <Th className="w-[14rem]">Name</Th>
+              <Th className="w-[4rem]">Type</Th>
+              <Th className="w-[24%]">Name</Th>
               <Th>Value</Th>
-              <Th className="w-[5rem]">TTL</Th>
-              {status && <Th className="w-[9rem]">Status</Th>}
+              <Th className="w-[3rem]">TTL</Th>
+              {status && <Th className="w-[7.5rem]">Status</Th>}
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -261,7 +264,7 @@ function RecordsTable({
                 </Td>
                 <Td>
                   <CopyValue value={record.name} label="name">
-                    <span className="min-w-0 truncate">{record.name}</span>
+                    <Shortened value={record.name} />
                   </CopyValue>
                 </Td>
                 <Td>
@@ -278,19 +281,27 @@ function RecordsTable({
                    */}
                   <CopyValue value={record.value} label="value">
                     {/*
-                     * ⚠ `overflow-x-auto` ON THE VALUE, NOT `truncate`. An
-                     * ellipsis in a DKIM key is invisible to somebody
-                     * triple-clicking to select it, and they paste 60
-                     * characters of a 220-character key. A click copies the
-                     * whole value whatever is visible.
+                     * ⚠ SHORTENED IN THE MIDDLE, NEVER AT THE END, AND NEVER
+                     * WHAT IS COPIED (2026-10-04). A click copies the whole
+                     * value whatever is shown; the `[...]` is drawn muted and
+                     * boxed so it cannot be mistaken for part of the record,
+                     * and the full value is the cell's tooltip. See `shorten`.
                      */}
-                    <span className="min-w-0 overflow-x-auto whitespace-nowrap">
+                    {/*
+                     * ⚠ CLIPPED TO ITS OWN COLUMN (2026-10-04). Without
+                     * `truncate` a value wider than the column ran on over the
+                     * TTL, and the copy icon wrapped onto a line of its own
+                     * under the record - in set-up's narrower column it always
+                     * was. Shortened in the middle first, cut at the end only
+                     * if it still does not fit; the icon never shrinks.
+                     */}
+                    <span className="flex min-w-0 items-baseline whitespace-nowrap">
                       {record.priority !== undefined && (
-                        <span className="text-muted-foreground">
-                          {record.priority}{" "}
+                        <span className="shrink-0 pr-1 text-muted-foreground">
+                          {record.priority}
                         </span>
                       )}
-                      {record.value}
+                      <Shortened value={record.value} />
                     </span>
                   </CopyValue>
                 </Td>
@@ -380,6 +391,140 @@ function zoneFile(records: DnsRecord[]): string {
 }
 
 /**
+ * How a long record is shown: the start and the end, with `[...]` between -
+ * Resend's way, so the parts somebody compares by eye survive.
+ *
+ * ⚠ A HOSTNAME KEEPS EVERYTHING BUT ITS ONE LONG LABEL. In
+ * `8bee581b1cab454596b1e5f58b3cbca5.ns1.i10.tech` the random label is what is
+ * long and `ns1.i10.tech` is what tells somebody which nameserver it is, so
+ * only the label is cut: `8bee58[...]ca5.ns1.i10.tech`. Anything else over 60
+ * characters keeps its first 14 and last 13; a DKIM record keeps its tags and
+ * the first 8 characters of its key, `v=DKIM1; k=rsa; p=MIIBIjAN[...]QIDAQAB`.
+ */
+export function shorten(value: string, tight = false): [string, string] | null {
+  const hostname = /^[A-Za-z0-9_.-]+$/.test(value) && value.includes(".")
+  if (hostname) {
+    const labels = value.split(".")
+    const longest = labels.reduce(
+      (a, l, i) => (l.length > labels[a]!.length ? i : a),
+      0,
+    )
+    const label = labels[longest]!
+    if (label.length <= 16) return null
+    const before = labels.slice(0, longest).join(".")
+    const after = labels.slice(longest + 1).join(".")
+    /*
+     * ⚠ TIGHT DROPS THE LABEL'S TAIL, NEVER THE NAME AFTER IT (2026-10-04):
+     * `af7[...].ns2.i10.tech`. Which nameserver it is matters more than the
+     * last three characters of a random label.
+     */
+    return tight
+      ? [(before ? `${before}.` : "") + label.slice(0, 3), after ? `.${after}` : ""]
+      : [
+          (before ? `${before}.` : "") + label.slice(0, 6),
+          label.slice(-3) + (after ? `.${after}` : ""),
+        ]
+  }
+  if (value.length <= (tight ? 24 : 60)) return null
+  /*
+   * ⚠ A DKIM RECORD KEEPS ITS TAGS AND THE START OF THE KEY. "v=DKIM1; k=rsa"
+   * is the same in every record; the key after `p=` is what tells two apart.
+   */
+  const key = value.indexOf("p=")
+  if (tight) {
+    return key >= 0 && key < 40
+      ? [value.slice(key, key + 2 + 6), value.slice(-6)]
+      : [value.slice(0, 8), value.slice(-6)]
+  }
+  const head = key >= 0 && key < 40 ? key + 2 + 8 : 14
+  return [value.slice(0, head), value.slice(-13)]
+}
+
+function Marked({ value, parts }: { value: string; parts: [string, string] | null }) {
+  if (!parts) return <>{value}</>
+  return (
+    <>
+      {parts[0]}
+      <span aria-hidden className="text-muted-foreground/60">
+        [&hellip;]
+      </span>
+      <span className="sr-only">
+        {value.slice(parts[0].length, value.length - parts[1].length)}
+      </span>
+      {parts[1]}
+    </>
+  )
+}
+
+/**
+ * The record as wide as its column allows: the usual shortening when it fits,
+ * the tight one when it does not (2026-10-04).
+ *
+ * ⚠ MEASURED, NOT GUESSED FROM THE VIEWPORT. The same table sits in the domain
+ * page's wide card and in set-up's narrow column, so a breakpoint would be
+ * right in one and wrong in the other. An invisible copy of the usual form is
+ * measured against the space there is, and the tight form is used only when
+ * the usual one would not fit.
+ */
+function Shortened({ value }: { value: string }) {
+  const root = React.useRef<HTMLSpanElement>(null)
+  const probe = React.useRef<HTMLSpanElement>(null)
+  const [tight, setTight] = React.useState(false)
+
+  React.useLayoutEffect(() => {
+    const box = root.current
+    const ruler = probe.current
+    if (!box || !ruler) return
+    /*
+     * ⚠ MEASURED AGAINST THE CELL, NOT AGAINST THIS SPAN (2026-10-04). The
+     * span is sized by what it holds, so once the tight form showed, the span
+     * was tight-form-sized and the usual form never "fitted" again - every
+     * page showed `af7[...]` for good. The cell's own width is the room there
+     * really is: less its padding, the copy icon after the text, and anything
+     * before it in the row (an MX record's priority).
+     */
+    const cell = (box.closest("td") ?? box.parentElement) as HTMLElement | null
+    const button = box.closest("button") as HTMLElement | null
+    if (!cell) return
+    const fit = () => {
+      const style = getComputedStyle(cell)
+      const content =
+        cell.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight)
+      /*
+       * ⚠ EVERYTHING ELSE ON THE LINE, MEASURED RATHER THAN ASSUMED: the copy
+       * icon, its gap, an MX priority - whatever the button holds besides this
+       * text. A fixed allowance was right in one browser and 16px short in
+       * another, which cut the end off `ns1.i10.tech`.
+       */
+      const others = button ? button.offsetWidth - box.offsetWidth : 0
+      setTight(ruler.offsetWidth > content - others)
+    }
+    fit()
+    // The cell for room, the ruler for the text: a web font landing after the
+    // first measure changes the text's width without touching the cell's.
+    const watch = new ResizeObserver(fit)
+    watch.observe(cell)
+    watch.observe(ruler)
+    return () => watch.disconnect()
+  }, [value])
+
+  return (
+    <span ref={root} title={value} className="relative block min-w-0 truncate">
+      <Marked value={value} parts={shorten(value, tight)} />
+      <span
+        ref={probe}
+        aria-hidden
+        className="pointer-events-none invisible absolute top-0 left-0 w-max whitespace-nowrap"
+      >
+        <Marked value={value} parts={shorten(value)} />
+      </span>
+    </span>
+  )
+}
+
+/**
  * A name or value that copies itself when pressed (2026-10-03), as Resend's
  * do: the text is the target, not a 16px button beside it. The icon after it
  * appears on hover and turns into a tick once copied, so the press is
@@ -401,7 +546,13 @@ function CopyValue({
       onClick={() => void copy(value)}
       aria-label={copied ? "Copied" : `Copy ${label}`}
       title={`Copy ${label}`}
-      className="group/copy -mx-1 flex max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1 py-0.5 text-left font-mono text-xs transition-colors duration-(--duration-instant) ease-(--ease-linear) outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+      /*
+       * ⚠ THE ICON SITS BESIDE THE TEXT, IN ITS OWN SLOT, NEVER OVER IT
+       * (2026-10-04). Its room is part of what `Shortened` measures - it takes
+       * the button's width less its own - so the text is shortened to leave
+       * room for the icon rather than run under it.
+       */
+      className="group/copy -mx-1 flex max-w-full min-w-0 cursor-pointer flex-nowrap items-center gap-1.5 overflow-hidden rounded-md px-1 py-0.5 text-left font-mono text-xs transition-colors duration-(--duration-instant) ease-(--ease-linear) outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
     >
       {children}
       {copied ? (
@@ -446,8 +597,14 @@ function Th({
   )
 }
 
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="max-w-0 px-3 py-2.5 align-top">{children}</td>
+function Td({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return <td className={cn("max-w-0 px-3 py-2.5 align-top", className)}>{children}</td>
 }
 
 /** Splits a long TXT value into the 255-byte strings the wire format requires. */

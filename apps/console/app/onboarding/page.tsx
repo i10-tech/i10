@@ -5,9 +5,12 @@ import { Button } from "@repo/ui/components/button"
 import { Onboarding } from "@/components/onboarding/onboarding"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
+import { DRAFT_COOKIES, draftFor } from "@/lib/add-domain-draft"
+import { restoreDraft } from "@/lib/add-domain-restore"
 import { ONBOARDING_STEP_COOKIE, stepFor } from "@/lib/onboarding-step"
 import type {
   BillingState,
+  Domain,
   DomainSummary,
   Me,
   PlanSummary,
@@ -54,7 +57,7 @@ export default async function OnboardingPage({
   // ⚠ AND `published` IS THE CONFIRMATION THE DNS CALLBACK NO LONGER STOPS TO
   // SHOW. It used to paint its own green tick and then navigate here a moment
   // later, which read as a glitch; the news now arrives with the step that
-  // follows it. See the callback handler and `StepVerify`.
+  // follows it. See the callback handler and `VerifyStep` in components/onboarding/onboarding.tsx.
   searchParams: Promise<{ checkout_id?: string; published?: string }>
 }) {
   const query = await searchParams
@@ -98,9 +101,39 @@ export default async function OnboardingPage({
 
   const billing: BillingState = me.data.billing
 
+  /*
+   * ⚠ THE DOMAIN THE VERIFY AND SEND STEPS ARE ABOUT, READ IN FULL so they can
+   * show its records and events live (2026-10-03): the newest one still being
+   * verified, or else the first verified one. A failed read leaves those steps
+   * without it rather than taking the page down.
+   */
+  const list = domains.ok ? domains.data.data : []
+  const pending = list
+    .filter((d) => d.status !== "verified")
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const focusSummary = pending[0] ?? list.find((d) => d.status === "verified") ?? null
+  const focus = focusSummary
+    ? await tryApi<Domain>(`/console/domains/${encodeURIComponent(focusSummary.id)}`)
+    : null
+
+  /*
+   * ⚠ THE DOMAIN STEPS AS A RELOAD LEFT THEM (2026-10-04), from set-up's own
+   * draft cookie and rebuilt the way /domains/new rebuilds its own - the
+   * created domain read again, the lookup run here. See lib/add-domain-draft.
+   */
+  const jar = await cookies()
+  const domainDraft = await restoreDraft(
+    draftFor(jar.get(DRAFT_COOKIES.onboarding.name)?.value, me.data.tenant?.id ?? ""),
+  )
+
   return (
-    <main className="min-h-dvh">
-      <header className="flex h-14 items-center justify-between border-b px-6">
+    /*
+     * ⚠ EXACTLY ONE SCREEN TALL, AND IT DOES NOT SCROLL (2026-10-03). The steps
+     * scroll inside their own column and the stage beside them stays put -
+     * an overscroll at either end no longer drags the stage or the header.
+     */
+    <main className="flex h-dvh flex-col overflow-hidden">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b px-6">
         <Link href="/" className="flex items-center">
           <Wordmark />
         </Link>
@@ -139,7 +172,9 @@ export default async function OnboardingPage({
         state={me.data.onboarding}
         workspaceName={me.data.tenant?.name ?? ""}
         tenantId={me.data.tenant?.id ?? ""}
-        domains={domains.ok ? domains.data.data : []}
+        domains={list}
+        focus={focus?.ok ? focus.data : null}
+        domainDraft={domainDraft}
         offers={offers.ok ? offers.data.data : []}
         userEmail={me.data.user.email}
         plans={plans.ok ? plans.data.data : []}

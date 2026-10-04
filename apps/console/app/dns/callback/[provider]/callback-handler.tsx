@@ -166,7 +166,7 @@ export function CallbackHandler({
        *
        * ⚠ THE CONFIRMATION IS NOT LOST, IT IS MOVED. `published` rides back in
        * a cookie and the step it lands on says it there - one screen, arrived at
-       * once, already carrying the news. See `StepVerify`.
+       * once, already carrying the news. See `VerifyStep` in components/onboarding/onboarding.tsx.
        */
       const returnTo = connected.data.return_to
       if (returnTo && inTheWay.length === 0 && notChecked.length === 0) {

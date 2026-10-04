@@ -77,7 +77,12 @@ export function NewContactButton() {
         autoFocus
         hint="e.g. person@example.com"
       />
-      <div className="grid grid-cols-2 gap-3">
+      {/*
+       * ⚠ ROOM FOR THE HINT ABOVE AND THE LABEL BELOW (2026-10-04). The email's
+       * hint hangs under its box and "First name" floats a few pixels above
+       * its own, so the dialog's 16px gap put the two lines through each other.
+       */}
+      <div className="grid grid-cols-2 gap-3 pt-4">
         <FloatingInput
           label="First name"
           id="contact-first"
