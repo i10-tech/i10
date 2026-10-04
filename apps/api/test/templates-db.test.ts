@@ -503,7 +503,8 @@ suite("template folders, defaults and fallbacks", () => {
     expect(renamed && "name" in renamed && renamed.name).toBe("Welcome")
 
     expect(await store.deleteFolder(t, folder.id)).toBe(true)
-    const left = await store.list(t)
+    // The shared welcome template is listed beside the workspace's own.
+    const left = (await store.list(t)).filter((x) => !x.shared)
     expect(left.map((x) => [x.name, x.folder_id])).toEqual([
       ["a", null],
       ["b", null],

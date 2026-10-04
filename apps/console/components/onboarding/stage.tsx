@@ -283,10 +283,10 @@ function InboxPreview({ sent, from, to }: { sent: boolean; from: string; to: str
                       now
                     </span>
                   </p>
-                  <p className="truncate text-sm">Your first email from i10</p>
+                  <p className="truncate text-sm">Welcome</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    It works. This message left through i10 - signed, logged and
-                    delivered.
+                    You can start exploring right away, set up your workspace, and
+                    invite your team.
                   </p>
                 </div>
               </div>

@@ -2728,6 +2728,40 @@ export const templateVersions = core.table(
 )
 
 /**
+ * A shared template (templates/shared.ts) a workspace deleted from its own
+ * list (2026-10-04).
+ *
+ * ⚠ ONLY THE ALIAS, NEVER THE TEMPLATE. The shared template is kept once, in
+ * code, for every workspace; deleting it from one dashboard writes this row
+ * and nothing else, so it disappears for that workspace alone - from its list
+ * and from its sends - while ours and everybody else's stay exactly as they
+ * were. Row security keeps one workspace's dismissals invisible to the rest.
+ *
+ * ⚠ DELETING THE WORKSPACE'S OWN COPY WRITES ONE TOO. A copy carries the
+ * shared alias, and without this the shared original would step back in
+ * behind the deleted copy - "deleted" would undo itself.
+ */
+export const sharedTemplateDismissals = core.table(
+  "shared_template_dismissals",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The shared template's alias, e.g. `welcome`. */
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.name] }),
+    pgPolicy("shared_template_dismissals_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
  * A GitHub App installation a workspace connected (#235).
  *
  * ⚠ ONE WORKSPACE PER INSTALLATION, and only after proof. The setup redirect's

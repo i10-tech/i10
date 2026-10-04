@@ -467,6 +467,16 @@ export function TemplateEditorApp({
         toastFailure(result)
         return false
       }
+      // ⚠ THE FIRST SAVE OF THE SHARED TEMPLATE COMES BACK UNDER A NEW ID: the
+      // workspace's own copy. The address follows without a navigation, so
+      // a reload opens the copy and nothing on screen is reset.
+      if (result.data.id !== tpl.id) {
+        window.history.replaceState(
+          null,
+          "",
+          `/templates/${encodeURIComponent(result.data.id)}/editor`,
+        )
+      }
       setTpl((t) => ({ ...t, ...result.data, history: t.history }))
       if (baseline.current !== null || touched.current) baseline.current = savedKey
       setSave(dirty.current ? "dirty" : "saved")

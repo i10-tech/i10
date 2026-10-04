@@ -19,12 +19,14 @@ import {
 import { withTenant, type Database } from "../db/client.js"
 import {
   githubRepositories,
+  sharedTemplateDismissals,
   templateFolders,
   templateVersions,
   templates,
   type DeclaredVariable,
 } from "../db/core.js"
 import { LIST_CAP } from "../console/marketing/shared.js"
+import { SHARED_TEMPLATES, sharedVersion, type SharedTemplate } from "./shared.js"
 import { VersionCache } from "./version-cache.js"
 
 /**
@@ -82,6 +84,13 @@ export interface TemplateSummary {
     path: string
     removed: boolean
   } | null
+  /**
+   * One of the templates every workspace starts with, kept once for all of
+   * them (see shared.ts). Editing it makes the workspace its own copy under
+   * the same alias, which replaces it; deleting it hides it from this
+   * workspace alone.
+   */
+  shared: boolean
   created_at: string
   updated_at: string
 }
@@ -358,9 +367,127 @@ export function templateStore(
             removed: row.removedAt !== null,
           }
         : null,
+      shared: false,
       created_at: row.createdAt.toISOString(),
       updated_at: row.updatedAt.toISOString(),
     }
+  }
+
+  /** The workspace's own template under this alias - row security scopes it. */
+  const ownNamed = async (tx: Tx, name: string): Promise<string | null> => {
+    const [row] = await tx
+      .select({ id: templates.id })
+      .from(templates)
+      .where(eq(templates.name, name))
+      .limit(1)
+    return row?.id ?? null
+  }
+
+  /** The shared templates' aliases this workspace has deleted from its list. */
+  const dismissed = async (tx: Tx): Promise<Set<string>> =>
+    new Set(
+      (
+        await tx
+          .select({ name: sharedTemplateDismissals.name })
+          .from(sharedTemplateDismissals)
+      ).map((r) => r.name),
+    )
+
+  /**
+   * Records that this workspace deleted the shared template of that alias.
+   * Only this row is written; the shared template itself is never touched.
+   */
+  const dismiss = async (tx: Tx, tenantId: string, names: string[]) => {
+    const shared = names.filter((n) => SHARED_TEMPLATES.some((t) => t.name === n))
+    if (shared.length === 0) return
+    await tx
+      .insert(sharedTemplateDismissals)
+      .values(shared.map((name) => ({ tenantId, name })))
+      .onConflictDoNothing()
+  }
+
+  /** A shared template by its fixed id; console routes address it by id only. */
+  const sharedById = (id: string): SharedTemplate | undefined =>
+    SHARED_TEMPLATES.find((t) => t.templateId === id)
+
+  /**
+   * What a console route acting on `id` acts on: the workspace's own template,
+   * or - for a shared template's id - the workspace's own copy of it if it
+   * has one, else the shared template itself.
+   */
+  const addressed = async (
+    tx: Tx,
+    id: string,
+  ): Promise<{ own: string } | { shared: SharedTemplate }> => {
+    const shared = sharedById(id)
+    if (!shared) return { own: id }
+    const own = await ownNamed(tx, shared.name)
+    if (own) return { own }
+    // ⚠ DELETED HERE MEANS NOT FOUND HERE. The shared id is then treated as an
+    // id of this workspace's, which no row has, so every route answers 404.
+    if ((await dismissed(tx)).has(shared.name)) return { own: id }
+    return { shared }
+  }
+
+  /**
+   * The workspace's own copy of a shared template, made now if there is none:
+   * its draft is the shared one as written, and the shared version is copied
+   * in as v1 and made live, so a send by the alias renders exactly what it
+   * did a moment ago until the copy is published.
+   *
+   * ⚠ IDEMPOTENT UNDER A RACE. Two autosaves landing together both try the
+   * insert; the alias is unique per workspace, so one wins and the other
+   * reads the winner's row.
+   */
+  const fork = async (
+    tx: Tx,
+    tenantId: string,
+    shared: SharedTemplate,
+    name = shared.name,
+    title = shared.title,
+  ): Promise<string> => {
+    const existing = name === shared.name ? await ownNamed(tx, name) : null
+    if (existing) return existing
+    const [row] = await tx
+      .insert(templates)
+      .values({
+        tenantId,
+        name,
+        title,
+        kind: "html",
+        source: "managed",
+        subject: shared.subject,
+        previewText: shared.previewText,
+        variables: shared.variables,
+        html: shared.html,
+        text: shared.text,
+      })
+      .onConflictDoNothing({ target: [templates.tenantId, templates.name] })
+      .returning({ id: templates.id })
+    if (!row) return (await ownNamed(tx, name))!
+    const v = shared.version
+    const [version] = await tx
+      .insert(templateVersions)
+      .values({
+        tenantId,
+        templateId: row.id,
+        number: 1,
+        kind: "html",
+        subject: v.subject,
+        previewText: shared.previewText,
+        html: v.html,
+        text: v.text,
+        nonce: v.nonce,
+        variables: v.variables,
+      })
+      .returning({ id: templateVersions.id, createdAt: templateVersions.createdAt })
+    // ⚠ STAMPED WITH THE VERSION'S TIME, as `insertVersion` does: the copy is
+    // exactly what is live, so it must not read as having unpublished changes.
+    await tx
+      .update(templates)
+      .set({ liveVersionId: version!.id, updatedAt: version!.createdAt })
+      .where(eq(templates.id, row.id))
+    return row.id
   }
 
   /**
@@ -515,6 +642,39 @@ export function templateStore(
     return row!
   }
 
+  const removeMany = async (tenantId: string, ids: string[]): Promise<string[]> => {
+    let valid = ids.filter((id) => UUID.test(id))
+    if (valid.length === 0) return []
+    return withTenant(db, tenantId, async (tx) => {
+      // A shared id means the workspace's own copy once it has one.
+      valid = await Promise.all(
+        valid.map(async (id) => {
+          const shared = sharedById(id)
+          return (shared && (await ownNamed(tx, shared.name))) || id
+        }),
+      )
+      const deleted = await tx
+        .delete(templates)
+        .where(inArray(templates.id, valid))
+        .returning({ id: templates.id, name: templates.name })
+      /*
+       * ⚠ A SHARED TEMPLATE IS DELETED FOR THIS WORKSPACE ONLY: a dismissal
+       * row is written and the shared template is untouched, for us and for
+       * every other workspace. Deleting the workspace's own copy writes one
+       * too, or the shared original would reappear behind it.
+       */
+      const gone = await dismissed(tx)
+      const shared = valid
+        .map((id) => sharedById(id))
+        .filter((t): t is SharedTemplate => t !== undefined && !gone.has(t.name))
+      await dismiss(tx, tenantId, [
+        ...deleted.map((d) => d.name),
+        ...shared.map((t) => t.name),
+      ])
+      return [...deleted.map((d) => d.id), ...shared.map((t) => t.templateId)]
+    })
+  }
+
   return {
     async list(tenantId) {
       return withTenant(db, tenantId, async (tx) => {
@@ -547,7 +707,7 @@ export function templateStore(
           .orderBy(templates.name)
           .limit(LIST_CAP)
 
-        return rows.map((r) => ({
+        const own: TemplateSummary[] = rows.map((r) => ({
           id: r.id,
           name: r.name,
           title: r.title,
@@ -566,9 +726,17 @@ export function templateStore(
                 removed: r.removedAt !== null,
               }
             : null,
+          shared: false,
           created_at: r.createdAt.toISOString(),
           updated_at: r.updatedAt.toISOString(),
         }))
+        // ⚠ THE SHARED ONES THE WORKSPACE HAS NOT MADE ITS OWN, by alias: its
+        // own `welcome` replaces the shared `welcome`, here as at a send.
+        const names = new Set([...own.map((t) => t.name), ...(await dismissed(tx))])
+        const shared = SHARED_TEMPLATES.filter((t) => !names.has(t.name)).map(
+          (t): TemplateSummary => sharedSummary(t),
+        )
+        return [...own, ...shared].sort((a, b) => a.name.localeCompare(b.name))
       })
     },
 
@@ -632,6 +800,18 @@ export function templateStore(
     },
 
     async move(tenantId, ids, folderId) {
+      // ⚠ FILING A SHARED TEMPLATE IS AN EDIT OF IT: the workspace gets its
+      // own copy, and the copy is what moves. A folder is this workspace's.
+      if (ids.some((id) => sharedById(id))) {
+        ids = await withTenant(db, tenantId, async (tx) =>
+          Promise.all(
+            ids.map(async (id) => {
+              const shared = sharedById(id)
+              return shared ? fork(tx, tenantId, shared) : id
+            }),
+          ),
+        )
+      }
       const valid = ids.filter((id) => UUID.test(id))
       return withTenant(db, tenantId, async (tx) => {
         const target = await ownFolder(tx, folderId)
@@ -649,6 +829,21 @@ export function templateStore(
     async duplicate(tenantId, id) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        const which = await addressed(tx, id)
+        if ("shared" in which) {
+          const name = await freeName(tx, `${which.shared.name}-copy`)
+          return rowOf(
+            tx,
+            await fork(
+              tx,
+              tenantId,
+              which.shared,
+              name,
+              `${which.shared.title} (copy)`,
+            ),
+          )
+        }
+        id = which.own
         const [source] = await tx
           .select()
           .from(templates)
@@ -706,21 +901,17 @@ export function templateStore(
       })
     },
 
-    async deleteMany(tenantId, ids) {
-      const valid = ids.filter((id) => UUID.test(id))
-      if (valid.length === 0) return []
-      return withTenant(db, tenantId, async (tx) => {
-        const deleted = await tx
-          .delete(templates)
-          .where(inArray(templates.id, valid))
-          .returning({ id: templates.id })
-        return deleted.map((d) => d.id)
-      })
-    },
+    deleteMany: (tenantId, ids) => removeMany(tenantId, ids),
 
     async get(tenantId, id) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        // ⚠ A SHARED TEMPLATE'S ID OPENS THE WORKSPACE'S COPY ONCE THERE IS
+        // ONE, so a page left open on the shared id (the editor, after its
+        // first save made the copy) reloads onto the copy, not the original.
+        const which = await addressed(tx, id)
+        if ("shared" in which) return sharedDetail(which.shared)
+        id = which.own
         const row = await rowOf(tx, id)
         if (!row) return null
         const [template] = await tx
@@ -798,6 +989,13 @@ export function templateStore(
     async update(tenantId, id, patch) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        // ⚠ THE FIRST EDIT OF A SHARED TEMPLATE IS WHERE IT BECOMES THIS
+        // WORKSPACE'S. Until now it was one copy for everybody; from here the
+        // workspace may be sending it from its own code, so it is stored as
+        // theirs, isolated like any template they made, and the edit lands
+        // on that copy. The answer carries the copy's id.
+        const which = await addressed(tx, id)
+        id = "shared" in which ? await fork(tx, tenantId, which.shared) : which.own
         const set: Record<string, unknown> = { updatedAt: new Date() }
         if (patch.name !== undefined) set.name = patch.name.trim()
         if (patch.title !== undefined) set.title = patch.title?.trim() || null
@@ -871,6 +1069,8 @@ export function templateStore(
     async publish(tenantId, id) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        const which = await addressed(tx, id)
+        id = "shared" in which ? await fork(tx, tenantId, which.shared) : which.own
         const [draft] = await tx
           .select()
           .from(templates)
@@ -1021,6 +1221,11 @@ export function templateStore(
     async version(tenantId, id, number) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        const which = await addressed(tx, id)
+        if ("shared" in which) {
+          return number === 1 ? sharedVersionDetail(which.shared) : null
+        }
+        id = which.own
         const [row] = await tx
           .select({ version: templateVersions, live: templates.liveVersionId })
           .from(templateVersions)
@@ -1039,6 +1244,9 @@ export function templateStore(
     async promote(tenantId, id, number) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        const which = await addressed(tx, id)
+        if ("shared" in which) return number === 1 ? sharedDetail(which.shared) : null
+        id = which.own
         // ⚠ THE VERSION IS LOOKED UP UNDER THIS TEMPLATE, never by id alone: a
         // foreign key ignores row security, so pointing `live_version_id` at a
         // version id from somewhere else would be accepted by the database.
@@ -1063,6 +1271,18 @@ export function templateStore(
     async preview(tenantId, id, number, variables) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        const which = await addressed(tx, id)
+        if ("shared" in which) {
+          if (number !== 1) return null
+          const v = which.shared.version
+          const samples = buildProps(v.variables, (variable) => variable.preview)
+          const filled = fill(v, deepMerge(samples, variables ?? {}))
+          const result = filled.ok ? filled : fill(v, samples)
+          return result.ok
+            ? result.filled
+            : { subject: v.subject, html: v.html, text: v.text }
+        }
+        id = which.own
         const [v] = await tx
           .select()
           .from(templateVersions)
@@ -1088,6 +1308,18 @@ export function templateStore(
     async draftEmail(tenantId, id) {
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
+        const which = await addressed(tx, id)
+        if ("shared" in which) {
+          const v = which.shared.version
+          const filled = fill(
+            v,
+            buildProps(v.variables, (x) => x.fallback ?? `{{{ ${x.path} }}}`),
+          )
+          return filled.ok
+            ? { ...filled.filled, from: null, reply_to: null }
+            : { problems: ["The template's variables could not be filled."] }
+        }
+        id = which.own
         const [draft] = await tx
           .select()
           .from(templates)
@@ -1147,14 +1379,7 @@ export function templateStore(
     },
 
     async delete(tenantId, id) {
-      if (!UUID.test(id)) return false
-      return withTenant(db, tenantId, async (tx) => {
-        const deleted = await tx
-          .delete(templates)
-          .where(eq(templates.id, id))
-          .returning({ id: templates.id })
-        return deleted.length > 0
-      })
+      return (await removeMany(tenantId, [id])).length > 0
     },
 
     lookup(tenantId) {
@@ -1166,6 +1391,12 @@ export function templateStore(
          * transaction only when this process has not seen it, and then kept.
          */
         async versionIdFor(ref) {
+          // ⚠ A SHARED TEMPLATE'S FIXED ID MEANS ITS ALIAS, so a send by
+          // either reaches the workspace's own copy once there is one.
+          const shared = SHARED_TEMPLATES.find(
+            (t) => t.templateId === ref.id || t.name === ref.id,
+          )
+          if (shared) ref = { ...ref, id: shared.name }
           return withTenant(db, tenantId, async (tx) => {
             const byId = UUID.test(ref.id)
             const which = byId ? eq(templates.id, ref.id) : eq(templates.name, ref.id)
@@ -1183,7 +1414,15 @@ export function templateStore(
               )
               .where(which)
               .limit(1)
-            if (!row) return null
+            if (!row) {
+              // ⚠ THE SHARED VERSION ONLY WHEN THE WORKSPACE HAS NO TEMPLATE
+              // OF THAT NAME AT ALL. Its own `welcome` with no such version
+              // is a not-found, never a silent fall back to ours.
+              if (!shared || (ref.version !== undefined && ref.version !== 1))
+                return null
+              if (await ownNamed(tx, shared.name)) return null
+              return (await dismissed(tx)).has(shared.name) ? null : shared.versionId
+            }
             if (!versions.get(tenantId, row.id)) {
               const [v] = await tx
                 .select()
@@ -1196,6 +1435,8 @@ export function templateStore(
           })
         },
         async version(versionId) {
+          const shared = sharedVersion(versionId)
+          if (shared) return shared.version
           const cached = versions.get(tenantId, versionId)
           if (cached) return cached
           if (!UUID.test(versionId)) return null
@@ -1394,4 +1635,70 @@ function isUniqueViolation(error: unknown): boolean {
     e = (e as { cause?: unknown }).cause
   }
   return false
+}
+
+function sharedSummary(t: SharedTemplate): TemplateSummary {
+  const at = t.createdAt.toISOString()
+  return {
+    id: t.templateId,
+    name: t.name,
+    title: t.title,
+    folder_id: null,
+    kind: "html",
+    source: "managed",
+    subject: t.subject,
+    version: 1,
+    published_at: at,
+    versions: 1,
+    github: null,
+    shared: true,
+    created_at: at,
+    updated_at: at,
+  }
+}
+
+function sharedVersionSummary(t: SharedTemplate): VersionSummary {
+  return {
+    id: t.versionId,
+    number: 1,
+    kind: "html",
+    subject: t.subject,
+    variables: t.version.variables,
+    runtime: null,
+    path: null,
+    commit_sha: null,
+    from: null,
+    reply_to: null,
+    preview_text: t.previewText,
+    live: true,
+    created_at: t.createdAt.toISOString(),
+  }
+}
+
+function sharedVersionDetail(t: SharedTemplate): VersionDetail {
+  const v = t.version
+  return {
+    ...sharedVersionSummary(t),
+    source: null,
+    files: null,
+    design: null,
+    display: {
+      html: displaySkeleton(v.html, v.nonce, v.variables),
+      text: displaySkeleton(v.text, v.nonce, v.variables),
+    },
+  }
+}
+
+function sharedDetail(t: SharedTemplate): TemplateRow & { history: VersionSummary[] } {
+  return {
+    ...sharedSummary(t),
+    html: t.html,
+    text: t.text,
+    design: null,
+    from: null,
+    reply_to: null,
+    preview_text: t.previewText,
+    variables: t.variables,
+    history: [sharedVersionSummary(t)],
+  }
 }
