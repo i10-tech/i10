@@ -33,7 +33,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: retention
-              image: ghcr.io/i10-tech/i10-api:prod-41e2cdaebaec3d25241f7f49a80266772a90ee81@sha256:38ce0d7b43dcad2ab2bb277c02cab7fe2daa43eac5f05b292a0bae3eac6a0f95
+              image: ghcr.io/i10-tech/i10-api:prod-1eebfad6584e6ee6e09d2fae2384c22f0b8a485c@sha256:c4b3ab36b5f2654f80b680cd168fb4ce61b3896e68c956d4e331c577a67f7ecf
               imagePullPolicy: Always
               command: ["bun", "dist/retention.js"]
               envFrom:
