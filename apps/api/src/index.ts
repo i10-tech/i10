@@ -77,6 +77,7 @@ import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
+import { parseAllowList, vetHost } from "./webhooks/egress.js"
 import { offlineTenantSuppressions, sesTenantSuppressions } from "./suppressions/ses.js"
 import { suppressionStore } from "./suppressions/store.js"
 import { deviceStore } from "./devices/store.js"
@@ -341,6 +342,17 @@ if (Boolean(env.DNS_OAUTH_BROKER_URL) !== Boolean(env.DNS_OAUTH_BROKER_SECRET)) 
  * visible, rather than a silent downgrade to unsigned or plaintext.
  */
 const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
+
+/**
+ * Registration-time egress check for webhook endpoints: refuse a hostname that
+ * already resolves somewhere private. The real control runs at delivery
+ * (webhooks/deliver.ts); this only gives the customer the answer up front.
+ */
+const webhookEgressAllow = parseAllowList(env.WEBHOOK_EGRESS_ALLOW)
+const endpointVetting = {
+  vet: (host: string) =>
+    vetHost(host, { allow: webhookEgressAllow, signal: AbortSignal.timeout(3_000) }),
+}
 // ⚠ `maxAttempts` HERE, NOT ONLY ON THE WORKER'S QUEUE, BECAUSE THE BUDGET HAS
 // TWO HALVES. The value stamped on the job at `add()` is enforced as a ceiling
 // in `retry.lua`; the Worker's own value is what actually dead-letters. The
@@ -1286,7 +1298,9 @@ const app = createApp({
         }
       : {}),
     keys: { store: keyStore(db), cache: redisKeyCache(cache) },
-    ...(secrets ? { webhooks: webhookEndpointStore(db, secrets) } : {}),
+    ...(secrets
+      ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
+      : {}),
     // ⚠ THE SAME POLAR CLIENT AND THE SAME PRODUCT MAP `/billing` USES, NOT A
     // SECOND ONE. Two maps is two price lists, and the one that is wrong is
     // always the one a customer just bought from.
@@ -1323,7 +1337,7 @@ const app = createApp({
   }),
   ...(secrets && webhookQueue
     ? {
-        webhookEndpoints: webhookEndpointStore(db, secrets),
+        webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),
         sesWebhooks: {
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,

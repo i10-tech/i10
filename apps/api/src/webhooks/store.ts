@@ -16,6 +16,7 @@ import {
   type SignatureScheme,
 } from "./keys.js"
 import type { SecretBox } from "./signing.js"
+import type { EgressVerdict } from "./egress.js"
 
 /**
  * The customer-facing half of webhooks: registering endpoints.
@@ -107,9 +108,23 @@ const COLUMNS = {
 const shown = (key: { scheme: SignatureScheme; secret: string }) =>
   key.scheme === "hmac_sha256" ? key.secret : null
 
+export interface WebhookEndpointStoreOptions {
+  /**
+   * Resolves the endpoint's hostname at registration, so one that already
+   * points somewhere private is refused with a reason instead of failing on
+   * every event.
+   *
+   * ⚠ A COURTESY, NOT THE CONTROL. DNS can change after this answers; the
+   * control is the same check at delivery, in deliver.ts. A hostname that does
+   * not resolve YET is accepted - customers register before they deploy.
+   */
+  vet?: (host: string) => Promise<EgressVerdict>
+}
+
 export function webhookEndpointStore(
   db: Database,
   secrets: SecretBox,
+  opts: WebhookEndpointStoreOptions = {},
 ): WebhookEndpointStore {
   return {
     async create(tenantId, input) {
@@ -120,6 +135,16 @@ export function webhookEndpointStore(
       // rather than a 422.
       const verdict = checkEndpointUrl(input.url)
       if (!verdict.ok) return { status: "rejected" as const, reason: verdict.reason }
+
+      if (opts.vet) {
+        const egress = await opts.vet(new URL(input.url).hostname)
+        if (!egress.ok && egress.kind === "blocked") {
+          return {
+            status: "rejected" as const,
+            reason: `\`url\` must point at a public host: ${egress.reason}.`,
+          }
+        }
+      }
 
       const key = generateKey(input.signature_scheme ?? "hmac_sha256")
 

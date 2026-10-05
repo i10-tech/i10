@@ -8,14 +8,11 @@
  * reachable from the customer. Registering one turns our own delivery machinery
  * into a probe of our internal network.
  *
- * ⚠ AND THE MITIGATION HERE IS PARTIAL, WHICH IS WORTH KNOWING RATHER THAN
- * FORGETTING. These checks run on the string. A hostname that resolves to a
- * private address - a customer's own DNS pointing `hooks.example.com` at
- * 10.0.0.1, or a DNS answer that changes between this check and the request -
- * passes. Closing that needs resolution at delivery time with the resolved
- * address pinned for the connection, which is a socket-level change rather than
- * a validation one. Until then: this stops the obvious attempt, an egress
- * policy is what would stop the determined one.
+ * ⚠ AND THIS IS THE COURTESY, NOT THE CONTROL. These checks read the string,
+ * so a customer hears "refused" when they register rather than on the first
+ * event. A hostname whose DNS points somewhere private passes them; what
+ * stops it is egress.ts, which resolves and vets every address at delivery
+ * and connects only to the address it vetted.
  */
 
 /** Hostnames that are never a customer's endpoint. */

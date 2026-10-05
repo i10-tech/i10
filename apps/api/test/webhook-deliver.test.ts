@@ -37,6 +37,13 @@ function deps(over: Record<string, unknown> = {}) {
       markDelivered,
       markFailed,
       fetch: doFetch as unknown as typeof fetch,
+      // A public answer for every host. Vetting itself is covered in
+      // webhook-egress.test.ts; these tests are about what is sent.
+      vet: async () => ({
+        ok: true as const,
+        address: "93.184.215.14",
+        family: 4 as const,
+      }),
       log,
       maxAttempts: 5,
       ...over,
@@ -61,8 +68,14 @@ describe("a successful delivery", () => {
     expect(markDelivered).toHaveBeenCalledTimes(1)
 
     const [url, init] = requestOf(doFetch)
-    expect(url).toBe("https://hooks.example.com/i10")
+    // ⚠ PINNED: the vetted address in the URL, the customer's name in Host and
+    // in the TLS server name. See webhooks/egress.ts.
+    expect(url).toBe("https://93.184.215.14/i10")
     const headers = init.headers as Record<string, string>
+    expect(headers.host).toBe("hooks.example.com")
+    expect((init as { tls?: { serverName?: string } }).tls?.serverName).toBe(
+      "hooks.example.com",
+    )
     // ⚠ VERIFIED THE WAY A RECEIVER VERIFIES IT - the three Standard Webhooks
     // headers, with the id and timestamp read back off the request rather than
     // assumed. This is the assertion that would catch the sender and any

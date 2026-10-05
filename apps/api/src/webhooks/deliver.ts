@@ -3,6 +3,7 @@ import { envelope, type Logger, type WebhookEventType } from "./events.js"
 import { describeError } from "../errors.js"
 import { timestampFor } from "./signing.js"
 import { signWithKeys, type SigningKey } from "./keys.js"
+import { pinnedRequest, vetHost, type EgressVerdict } from "./egress.js"
 
 /**
  * Delivering one webhook.
@@ -69,10 +70,25 @@ export interface DeliverDeps {
     final: boolean,
   ) => Promise<void>
   fetch?: typeof fetch
+  /**
+   * Decides where a hostname may be connected to. Defaults to the system
+   * resolver with nothing allow-listed.
+   *
+   * ⚠ THE DEFAULT IS THE SAFE ONE ON PURPOSE. A caller that forgets to pass
+   * this gets full vetting, not none; only a test or the conformance lab has
+   * reason to replace it.
+   */
+  vet?: (host: string, signal: AbortSignal) => Promise<EgressVerdict>
   log: Logger
   timeoutMs?: number
   maxAttempts: number
 }
+
+/**
+ * The endpoint resolved somewhere we will not connect to, or did not resolve.
+ * An ordinary failed attempt as far as retries go: DNS can be fixed.
+ */
+class EgressRefused extends Error {}
 
 export async function deliverWebhook(
   job: WebhookJob,
@@ -97,12 +113,28 @@ export async function deliverWebhook(
   )
   const now = new Date()
   const doFetch = deps.fetch ?? fetch
+  // ⚠ ONE DEADLINE FOR RESOLUTION AND REQUEST TOGETHER. A resolver that never
+  // answers is the same silent socket as an endpoint that never answers, and
+  // it must not get a budget of its own on top of the request's.
+  const signal = AbortSignal.timeout(deps.timeoutMs ?? DELIVERY_TIMEOUT_MS)
+  const url = new URL(delivery.url)
 
   let outcome: DeliveryOutcome
   try {
-    const response = await doFetch(delivery.url, {
+    // ⚠ RESOLVED AND VETTED ON EVERY ATTEMPT, THEN CONNECTED TO BY ADDRESS.
+    // See egress.ts: the string check at registration cannot see what DNS says
+    // today, and connecting by name would resolve a second time.
+    const verdict = await (deps.vet ?? ((host, s) => vetHost(host, { signal: s })))(
+      url.hostname,
+      signal,
+    )
+    if (!verdict.ok) throw new EgressRefused(verdict.reason)
+    const pinned = pinnedRequest(url, verdict)
+
+    const response = await doFetch(pinned.url, {
       method: "POST",
       headers: {
+        host: pinned.host,
         "content-type": "application/json",
         "user-agent": "i10-webhooks/1",
         // ⚠ THESE THREE NAMES ARE THE STANDARD WEBHOOKS SPEC's, NOT OURS TO
@@ -116,11 +148,14 @@ export async function deliverWebhook(
       body,
       // ⚠ NOT OPTIONAL. See the note at the top of this file: a silent socket
       // is the failure that takes the whole queue down, not a 500.
-      signal: AbortSignal.timeout(deps.timeoutMs ?? DELIVERY_TIMEOUT_MS),
+      signal,
       // A customer's 302 to somewhere else is not somewhere we should sign a
       // payload for; refusing redirects keeps the request going only where they
       // registered it.
       redirect: "manual",
+      // The certificate is checked against the customer's hostname, not the
+      // address we connected to - which is what makes the pin safe for TLS.
+      ...(pinned.serverName ? { tls: { serverName: pinned.serverName } } : {}),
     })
 
     outcome =
@@ -136,7 +171,11 @@ export async function deliverWebhook(
             reason: `endpoint answered ${response.status}`,
           }
   } catch (err) {
-    outcome = { status: "failed", reason: describeError(err) }
+    outcome = {
+      status: "failed",
+      // Already a sentence for the customer; describeError would reword it.
+      reason: err instanceof EgressRefused ? err.message : describeError(err),
+    }
   }
 
   if (outcome.status === "delivered") {
