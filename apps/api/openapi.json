@@ -2213,6 +2213,122 @@
               "string",
               "null"
             ]
+          },
+          "until": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "hour",
+              "day"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "failed_attempts": {
+            "type": "integer"
+          },
+          "p50_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "string"
+                },
+                "delivered": {
+                  "type": "integer"
+                },
+                "failed": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                },
+                "attempts": {
+                  "type": "integer"
+                },
+                "failed_attempts": {
+                  "type": "integer"
+                },
+                "p50_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "p95_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "start",
+                "delivered",
+                "failed",
+                "pending",
+                "attempts",
+                "failed_attempts",
+                "p50_ms",
+                "p95_ms"
+              ]
+            }
+          },
+          "by_event_type": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "enum": [
+                    "email.sent",
+                    "email.delivered",
+                    "email.delivery_delayed",
+                    "email.bounced",
+                    "email.complained",
+                    "email.failed",
+                    "email.opened",
+                    "email.clicked",
+                    "email.unsubscribed",
+                    "webhook_endpoint.failing",
+                    "webhook_endpoint.disabled",
+                    "webhook_endpoint.recovered"
+                  ]
+                },
+                "delivered": {
+                  "type": "integer"
+                },
+                "failed": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "event_type",
+                "delivered",
+                "failed",
+                "pending"
+              ]
+            }
           }
         },
         "required": [
@@ -2224,7 +2340,15 @@
           "pending",
           "success_rate",
           "last_success_at",
-          "failing_since"
+          "failing_since",
+          "until",
+          "bucket",
+          "attempts",
+          "failed_attempts",
+          "p50_ms",
+          "p95_ms",
+          "series",
+          "by_event_type"
         ]
       },
       "SendTestEvent": {
@@ -2883,6 +3007,217 @@
         "required": [
           "data",
           "next_cursor"
+        ]
+      },
+      "WebhookStats": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "webhook_stats"
+            ]
+          },
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "hour",
+              "day"
+            ]
+          },
+          "delivered": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "success_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "failed_attempts": {
+            "type": "integer"
+          },
+          "p50_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "string"
+                },
+                "delivered": {
+                  "type": "integer"
+                },
+                "failed": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                },
+                "attempts": {
+                  "type": "integer"
+                },
+                "failed_attempts": {
+                  "type": "integer"
+                },
+                "p50_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "p95_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "start",
+                "delivered",
+                "failed",
+                "pending",
+                "attempts",
+                "failed_attempts",
+                "p50_ms",
+                "p95_ms"
+              ]
+            }
+          },
+          "by_event_type": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "enum": [
+                    "email.sent",
+                    "email.delivered",
+                    "email.delivery_delayed",
+                    "email.bounced",
+                    "email.complained",
+                    "email.failed",
+                    "email.opened",
+                    "email.clicked",
+                    "email.unsubscribed",
+                    "webhook_endpoint.failing",
+                    "webhook_endpoint.disabled",
+                    "webhook_endpoint.recovered"
+                  ]
+                },
+                "delivered": {
+                  "type": "integer"
+                },
+                "failed": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "event_type",
+                "delivered",
+                "failed",
+                "pending"
+              ]
+            }
+          },
+          "by_endpoint": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "endpoint_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "delivered": {
+                  "type": "integer"
+                },
+                "failed": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                },
+                "success_rate": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "attempts": {
+                  "type": "integer"
+                },
+                "failed_attempts": {
+                  "type": "integer"
+                },
+                "last_success_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "endpoint_id",
+                "delivered",
+                "failed",
+                "pending",
+                "success_rate",
+                "attempts",
+                "failed_attempts",
+                "last_success_at"
+              ]
+            }
+          }
+        },
+        "required": [
+          "object",
+          "since",
+          "until",
+          "bucket",
+          "delivered",
+          "failed",
+          "pending",
+          "success_rate",
+          "attempts",
+          "failed_attempts",
+          "p50_ms",
+          "p95_ms",
+          "series",
+          "by_event_type",
+          "by_endpoint"
         ]
       },
       "SuppressionList": {
@@ -5101,7 +5436,7 @@
     "/webhook-endpoints/{id}/stats": {
       "get": {
         "summary": "Get a webhook endpoint's delivery stats",
-        "description": "Counts of deliveries created since `since` (default: 24 hours ago).",
+        "description": "Deliveries created and attempts made between `since` and `until` (default: the last 24 hours), in total, in `hour` or `day` steps (at most 200), and by event type. The error rate is `failed_attempts / attempts`.",
         "tags": [
           "Webhooks"
         ],
@@ -5128,6 +5463,27 @@
             "required": false,
             "name": "since",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "until",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hour",
+                "day"
+              ]
+            },
+            "required": false,
+            "name": "bucket",
+            "in": "query"
           }
         ],
         "responses": {
@@ -5153,6 +5509,16 @@
           },
           "404": {
             "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The window is backwards, or has too many steps.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6196,6 +6562,94 @@
           },
           "501": {
             "description": "Webhooks are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-stats": {
+      "get": {
+        "summary": "Get webhook stats for the workspace",
+        "description": "Deliveries created and attempts made between `since` and `until` (default: the last 24 hours) across every endpoint: in total, in `hour` or `day` steps (at most 200), by event type, and by endpoint.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "until",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hour",
+                "day"
+              ]
+            },
+            "required": false,
+            "name": "bucket",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The window is backwards, or has too many steps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
             "content": {
               "application/json": {
                 "schema": {

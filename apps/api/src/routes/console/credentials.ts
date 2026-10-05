@@ -1,5 +1,6 @@
 import type { Hono } from "hono"
 import { WEBHOOK_EVENT_TYPES } from "../../webhooks/catalog.js"
+import { statsQuery, windowFrom } from "../webhook-stats.js"
 import {
   createReplayMissingSchema,
   createReplaySchema,
@@ -414,17 +415,20 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
 
   app.get("/webhook-endpoints/:id/stats", async (c) => {
     if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
-    const sinceRaw = c.req.query("since")
-    const since =
-      sinceRaw && !Number.isNaN(Date.parse(sinceRaw))
-        ? new Date(sinceRaw)
-        : new Date(Date.now() - 24 * 60 * 60 * 1000)
-    const stats = await d.webhooks.stats(
-      c.get("auth").tenantId,
-      c.req.param("id"),
-      since,
-    )
+    const id = asId(c.req.param("id"))
+    if (!id) return c.json(notFound("No endpoint with that id."), 404)
+    const window = consoleWindow(c.req.query())
+    if ("error" in window) return c.json(validation(window.error), 422)
+    const stats = await d.webhooks.stats(c.get("auth").tenantId, id, window)
     return stats ? c.json(stats) : c.json(notFound("No endpoint with that id."), 404)
+  })
+
+  // Across every endpoint (#300): the overview and the list's error rates.
+  app.get("/webhook-stats", async (c) => {
+    if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
+    const window = consoleWindow(c.req.query())
+    if ("error" in window) return c.json(validation(window.error), 422)
+    return c.json(await d.webhooks.workspaceStats(c.get("auth").tenantId, window))
   })
 
   app.post("/webhook-endpoints/:id/test", async (c) => {
@@ -608,4 +612,15 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       }),
     )
   })
+}
+
+/** A stats window from the console's query string; a malformed one is a 422. */
+function consoleWindow(q: Record<string, string>) {
+  const parsed = statsQuery.safeParse({
+    since: q.since || undefined,
+    until: q.until || undefined,
+    bucket: q.bucket || undefined,
+  })
+  if (!parsed.success) return { error: "Invalid window." }
+  return windowFrom(parsed.data)
 }

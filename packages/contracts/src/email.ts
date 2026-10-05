@@ -572,6 +572,44 @@ export const webhookDeliveryDetailSchema = webhookDeliverySchema.extend({
 })
 
 /** `GET /webhook-endpoints/{id}/stats`. */
+/**
+ * Stats over time (#300). Deliveries are counted by when they were created,
+ * attempts by when they were made - so a delivery created yesterday and
+ * retried today is yesterday's delivery and today's attempt.
+ */
+const webhookDeliveryCounts = {
+  delivered: z.number().int(),
+  failed: z.number().int(),
+  pending: z.number().int(),
+}
+
+const webhookAttemptCounts = {
+  /** Every request we made, retries included. */
+  attempts: z.number().int(),
+  /** Requests that did not get a 2xx: the error rate is this over `attempts`. */
+  failed_attempts: z.number().int(),
+  /** How long your endpoint took to answer, in milliseconds; null with no attempts. */
+  p50_ms: z.number().nullable(),
+  p95_ms: z.number().nullable(),
+}
+
+const webhookStatsWindow = {
+  /** The end of the window counted; `since` is its start, aligned to `bucket`. */
+  until: z.string(),
+  bucket: z.enum(["hour", "day"]),
+}
+
+export const webhookStatsBucketSchema = z.object({
+  start: z.string(),
+  ...webhookDeliveryCounts,
+  ...webhookAttemptCounts,
+})
+
+export const webhookEventTypeStatsSchema = z.object({
+  event_type: webhookEventName,
+  ...webhookDeliveryCounts,
+})
+
 export const webhookEndpointStatsSchema = z.object({
   object: z.literal("webhook_endpoint_stats"),
   endpoint_id: z.uuid(),
@@ -585,6 +623,34 @@ export const webhookEndpointStatsSchema = z.object({
   last_success_at: z.string().nullable(),
   /** When the current unbroken run of failures began; null while healthy. */
   failing_since: z.string().nullable(),
+  ...webhookStatsWindow,
+  ...webhookAttemptCounts,
+  /** The window in `bucket`-sized steps, oldest first, empty steps included. */
+  series: z.array(webhookStatsBucketSchema),
+  by_event_type: z.array(webhookEventTypeStatsSchema),
+})
+
+/** `GET /webhook-stats`: the same, across every endpoint in the workspace. */
+export const webhookStatsSchema = z.object({
+  object: z.literal("webhook_stats"),
+  since: z.string(),
+  ...webhookStatsWindow,
+  ...webhookDeliveryCounts,
+  success_rate: z.number().nullable(),
+  ...webhookAttemptCounts,
+  series: z.array(webhookStatsBucketSchema),
+  by_event_type: z.array(webhookEventTypeStatsSchema),
+  /** One row per endpoint that had any traffic in the window. */
+  by_endpoint: z.array(
+    z.object({
+      endpoint_id: z.uuid(),
+      ...webhookDeliveryCounts,
+      success_rate: z.number().nullable(),
+      attempts: z.number().int(),
+      failed_attempts: z.number().int(),
+      last_success_at: z.string().nullable(),
+    }),
+  ),
 })
 
 /** `POST /webhook-endpoints/{id}/test`: a sample event, marked as a test. */
@@ -667,6 +733,8 @@ export const createReplayMissingSchema = z.object({
 export type WebhookReplay = z.infer<typeof webhookReplaySchema>
 export type UpdateWebhookEndpoint = z.infer<typeof updateWebhookEndpointSchema>
 export type WebhookEndpointStats = z.infer<typeof webhookEndpointStatsSchema>
+export type WebhookStats = z.infer<typeof webhookStatsSchema>
+export type WebhookStatsBucket = z.infer<typeof webhookStatsBucketSchema>
 export type WebhookAttempt = z.infer<typeof webhookAttemptSchema>
 export type WebhookDelivery = z.infer<typeof webhookDeliverySchema>
 export type WebhookDeliveryDetail = z.infer<typeof webhookDeliveryDetailSchema>

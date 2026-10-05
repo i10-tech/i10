@@ -10,6 +10,7 @@ import { webhookPayloadSchema } from "@repo/contracts"
 import { dueDeliveries } from "../../src/webhooks/db.js"
 import type { WebhookEventType } from "../../src/webhooks/events.js"
 import { runHealthEmails, type HealthSummary } from "../../src/webhooks/health.js"
+import { statsWindow } from "../../src/webhooks/stats.js"
 import { webhookHistory, type WebhookHistory } from "../../src/webhooks/history.js"
 import { sendTestEvent } from "../../src/webhooks/test-events.js"
 import { createReplay, getReplay, resendDelivery } from "../../src/webhooks/replay.js"
@@ -606,21 +607,72 @@ suite("webhook conformance lab", () => {
 
     test("stats count a window", async () => {
       const t = await lab.workspace()
-      const ep = await lab.endpoint(t, "flaky/stats?n=1")
+      const ep = await lab.endpoint(t, "flaky/stats?n=1", {
+        events: ["email.delivered"],
+      })
       for (let k = 0; k < 3; k++) await lab.emit(t, { k })
       await until(
         async () =>
           (await lab.deliveries(ep.id)).every((d) => d.status === "delivered"),
         15_000,
       )
-      const s = await lab.store.stats(t, ep.id, new Date(Date.now() - 60_000))
+      const window = statsWindow({ since: new Date(Date.now() - 2 * 3_600_000) })
+      if ("error" in window) throw new Error(window.error)
+      const s = await lab.store.stats(t, ep.id, window)
       expect(s).toMatchObject({
         delivered: 3,
         failed: 0,
         pending: 0,
         success_rate: 1,
         failing_since: null,
+        bucket: "hour",
+        // Each delivery failed once, then succeeded: a perfect delivery rate
+        // and a 50% error rate, which is the number that says trouble.
+        attempts: 6,
+        failed_attempts: 3,
       })
+      expect(s!.p50_ms).not.toBeNull()
+      // Every hour in the window, empty ones included, and the counts in them.
+      expect(s!.series.length).toBeGreaterThanOrEqual(2)
+      expect(s!.series.reduce((n, b) => n + b.attempts, 0)).toBe(6)
+      expect(s!.series.reduce((n, b) => n + b.delivered, 0)).toBe(3)
+      expect(s!.by_event_type).toEqual([
+        { event_type: "email.delivered", delivered: 3, failed: 0, pending: 0 },
+      ])
+
+      // Workspace-wide: the same endpoint, plus one that only ever failed.
+      const dead = await lab.endpoint(t, "fail/stats-dead", { events: ["email.sent"] })
+      await lab.emit(t, { k: "x" }, { type: "email.sent" })
+      await until(
+        async () =>
+          (
+            await lab.owner`select count(*)::int as n from core.webhook_attempts
+                            where endpoint_id = ${dead.id}`
+          )[0]!.n >= 2,
+        8_000,
+      )
+      const w = await lab.store.workspaceStats(t, {
+        ...window,
+        until: new Date(),
+      })
+      const rows = new Map(w.by_endpoint.map((r) => [r.endpoint_id, r]))
+      expect(rows.get(ep.id)).toMatchObject({
+        delivered: 3,
+        attempts: 6,
+        success_rate: 1,
+      })
+      expect(rows.get(dead.id)!.failed_attempts).toBe(rows.get(dead.id)!.attempts)
+      expect(w.by_event_type.map((e) => e.event_type).sort()).toEqual([
+        "email.delivered",
+        "email.sent",
+      ])
+
+      // Another workspace's traffic is not counted.
+      const other = await lab.workspace()
+      expect(
+        (await lab.store.workspaceStats(other, { ...window, until: new Date() }))
+          .attempts,
+      ).toBe(0)
     })
   })
 

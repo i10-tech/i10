@@ -1592,6 +1592,9 @@ export const webhookAttempts = core.table(
   (t) => [
     index("webhook_attempts_delivery_idx").on(t.deliveryId, t.createdAt),
     index("webhook_attempts_endpoint_idx").on(t.endpointId, t.createdAt),
+    // Workspace-wide stats (#300): without it, RLS's tenant filter scans
+    // every workspace's attempts.
+    index("webhook_attempts_tenant_idx").on(t.tenantId, t.createdAt),
     pgPolicy("webhook_attempts_tenant", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
