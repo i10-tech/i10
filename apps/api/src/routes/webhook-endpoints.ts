@@ -2,6 +2,9 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi"
 import {
   createWebhookEndpointSchema,
   rotateWebhookSecretSchema,
+  sendTestEventSchema,
+  updateWebhookEndpointSchema,
+  webhookEndpointStatsSchema,
   webhookEndpointListSchema,
   webhookEndpointSchema,
   webhookEndpointWithSecretSchema,
@@ -291,3 +294,234 @@ webhookEndpoints.openapi(revokePrevious, async (c) => {
   if (!endpoint) return c.json(notFound, 404)
   return c.json(endpoint, 200)
 })
+
+const UpdateWebhookEndpoint = updateWebhookEndpointSchema.openapi(
+  "UpdateWebhookEndpoint",
+)
+const WebhookEndpointStats = webhookEndpointStatsSchema.openapi("WebhookEndpointStats")
+const SendTestEvent = sendTestEventSchema.openapi("SendTestEvent")
+const idParam = z.object({
+  id: z.uuid().openapi({ param: { name: "id", in: "path" } }),
+})
+const validationHook = (
+  result: { success: boolean; error?: { issues: { message: string }[] } },
+  c: { json: (body: unknown, status: 422) => Response },
+) => {
+  if (!result.success) {
+    return c.json(
+      {
+        statusCode: 422,
+        name: "validation_error" as const,
+        message: result.error?.issues[0]?.message ?? "Invalid request body.",
+      },
+      422,
+    )
+  }
+}
+
+const getOne = createRoute({
+  method: "get",
+  path: "/{id}",
+  summary: "Get a webhook endpoint",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: { params: idParam },
+  responses: {
+    200: {
+      description: "The endpoint. Never its secret, never its header values.",
+      content: { "application/json": { schema: webhookEndpointSchema } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such endpoint for this API key's tenant."),
+    501: errorResponse("Webhook endpoints are not configured."),
+  },
+})
+
+webhookEndpoints.openapi(getOne, async (c) => {
+  const store = c.get("webhookEndpoints")
+  if (!store) return c.json(notWired, 501)
+  const endpoint = await store.get(c.get("auth").tenantId, c.req.valid("param").id)
+  return endpoint ? c.json(endpoint, 200) : c.json(notFound, 404)
+})
+
+const update = createRoute({
+  method: "patch",
+  path: "/{id}",
+  summary: "Update a webhook endpoint",
+  description:
+    "Change any of its settings; `null` clears one that can be cleared. A new " +
+    "`url` gets the same checks as a new endpoint. `enabled: false` pauses it " +
+    "and `true` resumes it, clearing why it was switched off. `headers` " +
+    "replaces the whole set.",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: {
+    params: idParam,
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateWebhookEndpoint } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Updated.",
+      content: { "application/json": { schema: webhookEndpointSchema } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such endpoint for this API key's tenant."),
+    422: errorResponse("A field is not acceptable."),
+    501: errorResponse("Webhook endpoints are not configured."),
+  },
+})
+
+webhookEndpoints.openapi(
+  update,
+  async (c) => {
+    const store = c.get("webhookEndpoints")
+    if (!store) return c.json(notWired, 501)
+    const result = await store.update(
+      c.get("auth").tenantId,
+      c.req.valid("param").id,
+      c.req.valid("json"),
+    )
+    if (result.status === "not_found") return c.json(notFound, 404)
+    if (result.status === "rejected") {
+      return c.json(
+        { statusCode: 422, name: "validation_error" as const, message: result.reason },
+        422,
+      )
+    }
+    return c.json(result.endpoint, 200)
+  },
+  validationHook as never,
+)
+
+for (const [verb, enabled] of [
+  ["pause", false],
+  ["resume", true],
+] as const) {
+  const route = createRoute({
+    method: "post",
+    path: `/{id}/${verb}`,
+    summary: enabled ? "Resume a webhook endpoint" : "Pause a webhook endpoint",
+    description: enabled
+      ? "Starts delivering again, and clears why it was switched off."
+      : "Stops delivering. Events that happen while it is paused are not sent later.",
+    tags: ["Webhooks"],
+    security: [{ bearerAuth: [] }],
+    middleware: [requireApiKey] as const,
+    request: { params: idParam },
+    responses: {
+      200: {
+        description: enabled ? "Resumed." : "Paused.",
+        content: { "application/json": { schema: webhookEndpointSchema } },
+      },
+      401: errorResponse("The API key is missing, malformed, or unknown."),
+      404: errorResponse("No such endpoint for this API key's tenant."),
+      501: errorResponse("Webhook endpoints are not configured."),
+    },
+  })
+  webhookEndpoints.openapi(route, async (c) => {
+    const store = c.get("webhookEndpoints")
+    if (!store) return c.json(notWired, 501)
+    const result = await store.update(c.get("auth").tenantId, c.req.valid("param").id, {
+      enabled,
+    })
+    if (result.status !== "updated") return c.json(notFound, 404)
+    return c.json(result.endpoint, 200)
+  })
+}
+
+const stats = createRoute({
+  method: "get",
+  path: "/{id}/stats",
+  summary: "Get a webhook endpoint's delivery stats",
+  description: "Counts of deliveries created since `since` (default: 24 hours ago).",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: {
+    params: idParam,
+    query: z.object({ since: z.iso.datetime({ offset: true }).optional() }),
+  },
+  responses: {
+    200: {
+      description: "The stats.",
+      content: { "application/json": { schema: WebhookEndpointStats } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such endpoint for this API key's tenant."),
+    501: errorResponse("Webhook endpoints are not configured."),
+  },
+})
+
+webhookEndpoints.openapi(stats, async (c) => {
+  const store = c.get("webhookEndpoints")
+  if (!store) return c.json(notWired, 501)
+  const { since } = c.req.valid("query")
+  const result = await store.stats(
+    c.get("auth").tenantId,
+    c.req.valid("param").id,
+    since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000),
+  )
+  return result ? c.json(result, 200) : c.json(notFound, 404)
+})
+
+const test = createRoute({
+  method: "post",
+  path: "/{id}/test",
+  summary: "Send a test event to a webhook endpoint",
+  description:
+    "Sends a realistic sample of `event_type`, with `test: true` in its data. " +
+    "It is a real delivery: signed with the endpoint's keys, retried and " +
+    "logged like any other, so it shows exactly what your receiver will see.",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: {
+    params: idParam,
+    body: {
+      required: true,
+      content: { "application/json": { schema: SendTestEvent } },
+    },
+  },
+  responses: {
+    202: {
+      description: "Queued. Follow it with `GET /webhook-deliveries/{delivery_id}`.",
+      content: { "application/json": { schema: z.object({ delivery_id: z.uuid() }) } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such endpoint for this API key's tenant."),
+    409: errorResponse("The endpoint is paused or switched off."),
+    422: errorResponse("Not an event type."),
+    501: errorResponse("Webhooks are not configured."),
+  },
+})
+
+webhookEndpoints.openapi(
+  test,
+  async (c) => {
+    const send = c.get("webhookTests")
+    if (!send) return c.json(notWired, 501)
+    const result = await send(
+      c.get("auth").tenantId,
+      c.req.valid("param").id,
+      c.req.valid("json").event_type,
+    )
+    if (result.status === "not_found") return c.json(notFound, 404)
+    if (result.status === "paused") {
+      return c.json(
+        {
+          statusCode: 409,
+          name: "validation_error" as const,
+          message: "This endpoint is paused or switched off. Resume it first.",
+        },
+        409,
+      )
+    }
+    return c.json({ delivery_id: result.deliveryId }, 202)
+  },
+  validationHook as never,
+)

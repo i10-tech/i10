@@ -78,6 +78,8 @@ import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
+import { sendTestEvent } from "./webhooks/test-events.js"
+import type { WebhookEventType } from "./webhooks/events.js"
 import { parseAllowList, vetHost } from "./webhooks/egress.js"
 import { offlineTenantSuppressions, sesTenantSuppressions } from "./suppressions/ses.js"
 import { suppressionStore } from "./suppressions/store.js"
@@ -1297,6 +1299,15 @@ const app = createApp({
       ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
       : {}),
     webhookHistory: webhookHistory(db),
+    ...(webhookQueue
+      ? {
+          webhookTests: (
+            tenantId: string,
+            endpointId: string,
+            type: WebhookEventType,
+          ) => sendTestEvent(db, webhookQueue, tenantId, endpointId, type),
+        }
+      : {}),
     // ⚠ THE SAME POLAR CLIENT AND THE SAME PRODUCT MAP `/billing` USES, NOT A
     // SECOND ONE. Two maps is two price lists, and the one that is wrong is
     // always the one a customer just bought from.
@@ -1334,6 +1345,9 @@ const app = createApp({
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),
+        webhookHistory: webhookHistory(db),
+        webhookTests: (tenantId: string, endpointId: string, type: WebhookEventType) =>
+          sendTestEvent(db, webhookQueue, tenantId, endpointId, type),
         sesWebhooks: {
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,

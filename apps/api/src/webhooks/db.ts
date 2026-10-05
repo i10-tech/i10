@@ -14,7 +14,7 @@ import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
 import type { AttemptLog, DeliverDeps, DeliveryRecord } from "./deliver.js"
 import { policyForPlan } from "./schedule.js"
 import { liveRetiring } from "./keys.js"
-import type { EventOps, WebhookEventType } from "./events.js"
+import { domainOf, type EventOps, type WebhookEventType } from "./events.js"
 import type { SecretBox } from "./signing.js"
 
 /**
@@ -172,6 +172,9 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
         // ⚠ ONLY ENABLED ENDPOINTS, AND ONLY SUBSCRIBED ONES. A disabled
         // endpoint still exists so the customer can re-enable it; queueing for
         // it would mean a burst of stale events the moment they do.
+        const eventDomain = domainOf(event.data.from)
+        const eventTags = (event.data.tags as Record<string, string> | undefined) ?? {}
+
         // ⚠ SELECTED BY TAKING THE NEXT SEQUENCE NUMBER, IN ONE STATEMENT.
         // The update both finds the subscribed endpoints and hands each its
         // next number under the row lock, so two events recorded at once for
@@ -183,6 +186,12 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
             and(
               eq(webhookEndpoints.enabled, true),
               sql`${webhookEndpoints.events} @> ARRAY[${event.type}]::core.webhook_event_type[]`,
+              // ⚠ FILTERS NARROW, NEVER WIDEN: an endpoint with none set gets
+              // everything it subscribed to, as before (#281). A domain filter
+              // matches the sending domain; a tag filter needs every tag it
+              // names, with the same value, on the message.
+              sql`(${webhookEndpoints.filterDomains} is null or ${eventDomain}::text = any(${webhookEndpoints.filterDomains}))`,
+              sql`(${webhookEndpoints.filterTags} is null or ${JSON.stringify(eventTags)}::jsonb @> ${webhookEndpoints.filterTags})`,
             ),
           )
           .returning({
@@ -326,6 +335,7 @@ export function webhookDeliveryOps(
             lane: webhookDeliveries.lane,
             url: webhookEndpoints.url,
             rateLimit: webhookEndpoints.rateLimit,
+            headers: webhookEndpoints.headers,
             secretCiphertext: webhookEndpoints.secretCiphertext,
             signatureScheme: webhookEndpoints.signatureScheme,
             retiringSecrets: webhookEndpoints.retiringSecrets,
@@ -387,6 +397,7 @@ export function webhookDeliveryOps(
           firstFailedAt: row.firstFailedAt,
           lane: row.lane,
           rateLimit: row.rateLimit,
+          headers: row.headers ?? {},
         }
       })
     },

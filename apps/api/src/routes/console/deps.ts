@@ -192,6 +192,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
   webhooks?: WebhookEndpointStore
   /** A delivery's attempts, and expunging its payload (#280). */
   webhookHistory?: WebhookHistory
+  /** Sends a sample event to one endpoint (#281). */
+  webhookTests?: (
+    tenantId: string,
+    endpointId: string,
+    type: import("../../webhooks/events.js").WebhookEventType,
+  ) => Promise<import("../../webhooks/test-events.js").TestResult>
   dns?: DnsInspector
   /**
    * Why a delegated domain has not verified yet.

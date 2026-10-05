@@ -1361,6 +1361,20 @@ export const webhookEndpoints = core.table(
      * set one. Enforced across replicas (webhooks/fairness.ts).
      */
     rateLimit: integer("rate_limit"),
+    /**
+     * Headers the customer wants on every request, like an auth token for a
+     * gateway in front of their receiver. ⚠ CHECKED ON WRITE AGAINST THE
+     * RESERVED LIST (webhooks/headers.ts) AND APPLIED UNDER OURS ON SEND, so
+     * neither path can override a signing or transport header.
+     */
+    headers: jsonb("headers").$type<Record<string, string>>(),
+    /**
+     * Only events sent from these domains, when set. Svix calls this kind of
+     * filter "channels"; ours are the things a customer already has.
+     */
+    filterDomains: text("filter_domains").array(),
+    /** Only events whose message carries every one of these tags, when set. */
+    filterTags: jsonb("filter_tags").$type<Record<string, string>>(),
     /** The last `sequence` handed out for this endpoint. */
     nextSequence: bigint("next_sequence", { mode: "number" }).notNull().default(0),
     disabledAt: timestamp("disabled_at", { withTimezone: true }),

@@ -390,7 +390,39 @@ export const createWebhookEndpointSchema = z.object({
    * across all of i10's workers. Omit for no limit.
    */
   rate_limit: z.number().int().min(1).max(1000).optional(),
+  /**
+   * Headers to send on every request, such as a token for a gateway in front
+   * of your receiver. At most 20. Signing and transport headers
+   * (`webhook-*`, `svix-*`, `content-type`, `host`, ...) are refused.
+   */
+  headers: z.record(z.string(), z.string()).optional(),
+  /** Only events sent from these domains. */
+  filter_domains: z.array(z.string().min(1).max(253)).min(1).max(50).optional(),
+  /** Only events whose message carries every one of these tags. */
+  filter_tags: z.record(z.string(), z.string()).optional(),
 })
+
+/**
+ * `PATCH /webhook-endpoints/{id}`. Every field is optional; `null` clears one
+ * that can be cleared. Re-enabling clears why it was switched off.
+ */
+export const updateWebhookEndpointSchema = z
+  .object({
+    url: z.url().optional(),
+    events: z.array(webhookEventName).min(1).optional(),
+    description: z.string().max(255).nullable().optional(),
+    enabled: z.boolean().optional(),
+    rate_limit: z.number().int().min(1).max(1000).nullable().optional(),
+    headers: z.record(z.string(), z.string()).nullable().optional(),
+    filter_domains: z
+      .array(z.string().min(1).max(253))
+      .min(1)
+      .max(50)
+      .nullable()
+      .optional(),
+    filter_tags: z.record(z.string(), z.string()).nullable().optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update." })
 
 export const webhookEndpointSchema = z.object({
   object: z.literal("webhook_endpoint"),
@@ -408,6 +440,13 @@ export const webhookEndpointSchema = z.object({
   signature_scheme: webhookSignatureScheme,
   /** Deliveries a second, at most; null for no limit. */
   rate_limit: z.number().int().nullable(),
+  /**
+   * The names of the custom headers set on this endpoint. ⚠ NEVER THE VALUES:
+   * they are usually credentials, so they are write-only, like the secret.
+   */
+  header_names: z.array(z.string()),
+  filter_domains: z.array(z.string()).nullable(),
+  filter_tags: z.record(z.string(), z.string()).nullable(),
   /** The `whpk_` key to verify with, for `ed25519`; null for HMAC. Not a secret. */
   public_key: z.string().nullable(),
   /**
@@ -513,6 +552,32 @@ export const webhookDeliveryDetailSchema = webhookDeliverySchema.extend({
   attempt_log: z.array(webhookAttemptSchema),
 })
 
+/** `GET /webhook-endpoints/{id}/stats`. */
+export const webhookEndpointStatsSchema = z.object({
+  object: z.literal("webhook_endpoint_stats"),
+  endpoint_id: z.uuid(),
+  /** The window counted, from this time to now. */
+  since: z.string(),
+  delivered: z.number().int(),
+  failed: z.number().int(),
+  pending: z.number().int(),
+  /** delivered / (delivered + failed); null with nothing finished. */
+  success_rate: z.number().nullable(),
+  last_success_at: z.string().nullable(),
+  /** When the current unbroken run of failures began; null while healthy. */
+  failing_since: z.string().nullable(),
+})
+
+/** `POST /webhook-endpoints/{id}/test`: a sample event, marked as a test. */
+export const sendTestEventSchema = z.object({ event_type: webhookEventName })
+
+export const webhookDeliveryListSchema = z.object({
+  data: z.array(webhookDeliverySchema),
+  next_cursor: z.string().nullable(),
+})
+
+export type UpdateWebhookEndpoint = z.infer<typeof updateWebhookEndpointSchema>
+export type WebhookEndpointStats = z.infer<typeof webhookEndpointStatsSchema>
 export type WebhookAttempt = z.infer<typeof webhookAttemptSchema>
 export type WebhookDelivery = z.infer<typeof webhookDeliverySchema>
 export type WebhookDeliveryDetail = z.infer<typeof webhookDeliveryDetailSchema>

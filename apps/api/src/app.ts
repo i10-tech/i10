@@ -23,6 +23,16 @@ import {
   type StalwartWebhookDeps,
 } from "./routes/stalwart-events.js"
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
+import { webhookDeliveries } from "./routes/webhook-deliveries.js"
+import type { WebhookHistory } from "./webhooks/history.js"
+import type { TestResult } from "./webhooks/test-events.js"
+import type { WebhookEventType } from "./webhooks/events.js"
+
+type WebhookTests = (
+  tenantId: string,
+  endpointId: string,
+  type: WebhookEventType,
+) => Promise<TestResult>
 import { suppressionRoutes } from "./routes/suppressions.js"
 import type { SuppressionStore } from "./suppressions/store.js"
 import { trustedTemplateRoutes } from "./routes/trusted-templates.js"
@@ -80,6 +90,10 @@ export interface AppDeps {
   emailLookup?: EmailLookup
   /** Customer-managed webhook destinations, for `/webhook-endpoints`. */
   webhookEndpoints?: WebhookEndpointStore
+  /** Deliveries and attempts, for `/webhook-deliveries`. */
+  webhookHistory?: WebhookHistory
+  /** Test events, for `POST /webhook-endpoints/{id}/test`. */
+  webhookTests?: WebhookTests
   /**
    * The suppression list, for `/suppressions`. The same store the console uses.
    * Omitted in tests and in the OpenAPI generator, where the routes answer 501.
@@ -244,6 +258,7 @@ export function createApp(deps: AppDeps = {}) {
     deps.sendPath ||
     deps.emailLookup ||
     deps.webhookEndpoints ||
+    deps.webhookHistory ||
     deps.suppressions ||
     deps.trustedTemplates ||
     deps.domains ||
@@ -254,6 +269,8 @@ export function createApp(deps: AppDeps = {}) {
     const sendPath = deps.sendPath
     const lookup = deps.emailLookup
     const endpoints = deps.webhookEndpoints
+    const history = deps.webhookHistory
+    const tests = deps.webhookTests
     const suppressionList = deps.suppressions
     const trusted = deps.trustedTemplates
     const domainStore = deps.domains
@@ -264,6 +281,8 @@ export function createApp(deps: AppDeps = {}) {
       if (sendPath) c.set("sendPath", sendPath)
       if (lookup) c.set("emailLookup", lookup)
       if (endpoints) c.set("webhookEndpoints", endpoints)
+      if (history) c.set("webhookHistory", history)
+      if (tests) c.set("webhookTests", tests)
       if (suppressionList) c.set("suppressions", suppressionList)
       if (trusted) c.set("trustedTemplates", trusted)
       if (domainStore) c.set("domains", domainStore)
@@ -423,6 +442,7 @@ export function createApp(deps: AppDeps = {}) {
   // `/webhooks`, which is the inbound router below: one prefix for two opposite
   // authentication models is how a middleware mistake exposes the wrong half.
   app.route("/webhook-endpoints", webhookEndpoints)
+  app.route("/webhook-deliveries", webhookDeliveries)
   app.route("/suppressions", suppressionRoutes)
   app.route("/trusted-templates", trustedTemplateRoutes)
 

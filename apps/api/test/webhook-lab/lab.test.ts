@@ -8,6 +8,7 @@ import {
 } from "bun:test"
 import { dueDeliveries } from "../../src/webhooks/db.js"
 import { webhookHistory, type WebhookHistory } from "../../src/webhooks/history.js"
+import { sendTestEvent } from "../../src/webhooks/test-events.js"
 import { verifySignature } from "../../src/webhooks/signing.js"
 import { enabled, LAB, LAB_RULES, startLab, until, type Lab } from "./harness.js"
 
@@ -457,6 +458,170 @@ suite("webhook conformance lab", () => {
       const [left] =
         await lab.owner`select count(*)::int as n from core.webhook_attempts where delivery_id = ${row!.id}`
       expect(left!.n).toBe(0)
+    })
+  })
+
+  describe("endpoint options (#281)", () => {
+    test("custom headers arrive, and a reserved one is refused on write", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/custom-headers")
+      const ok = await lab.store.update(t, ep.id, {
+        headers: { "X-Gateway-Token": "abc" },
+      })
+      expect(ok.status).toBe("updated")
+      if (ok.status === "updated") {
+        expect(ok.endpoint.header_names).toEqual(["x-gateway-token"])
+        expect(JSON.stringify(ok.endpoint)).not.toContain("abc")
+      }
+      const bad = await lab.store.update(t, ep.id, {
+        headers: { "webhook-signature": "forged" },
+      })
+      expect(bad.status).toBe("rejected")
+      await lab.emit(t, { k: 1 })
+      const got = await until(() => lab.receiver.of("custom-headers")[0], 5_000)
+      expect(got!.headers["x-gateway-token"]).toBe("abc")
+      expect(got!.headers["webhook-signature"]).toMatch(/^v1,/)
+    })
+
+    test("a domain filter and a tag filter narrow what an endpoint receives", async () => {
+      const t = await lab.workspace()
+      const byDomain = await lab.endpoint(t, "ok/f-domain")
+      const byTag = await lab.endpoint(t, "ok/f-tag")
+      await lab.store.update(t, byDomain.id, { filter_domains: ["Mail.Acme.test"] })
+      await lab.store.update(t, byTag.id, { filter_tags: { category: "receipt" } })
+      await lab.emit(t, {
+        k: "acme-receipt",
+        from: "A <a@mail.acme.test>",
+        tags: { category: "receipt" },
+      })
+      await lab.emit(t, {
+        k: "other-receipt",
+        from: "b@other.test",
+        tags: { category: "receipt" },
+      })
+      await lab.emit(t, {
+        k: "acme-promo",
+        from: "a@mail.acme.test",
+        tags: { category: "promo" },
+      })
+      await Bun.sleep(1_500)
+      expect(
+        lab.receiver
+          .of("f-domain")
+          .map((r) => r.data.k)
+          .sort(),
+      ).toEqual(["acme-promo", "acme-receipt"])
+      expect(
+        lab.receiver
+          .of("f-tag")
+          .map((r) => r.data.k)
+          .sort(),
+      ).toEqual(["acme-receipt", "other-receipt"])
+    })
+
+    test("a paused endpoint receives nothing until it is resumed", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/paused")
+      await lab.store.update(t, ep.id, { enabled: false })
+      await lab.emit(t, { k: "while-paused" })
+      await lab.store.update(t, ep.id, { enabled: true })
+      await lab.emit(t, { k: "after" })
+      await until(() => lab.receiver.of("paused").length >= 1, 5_000)
+      await Bun.sleep(300)
+      expect(lab.receiver.of("paused").map((r) => r.data.k)).toEqual(["after"])
+    })
+
+    test("a new URL gets the same SSRF checks as a new endpoint", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/move")
+      for (const url of [
+        "http://hooks.example.com/x",
+        "https://10.0.0.1/x",
+        "https://intranet/x",
+      ]) {
+        expect((await lab.store.update(t, ep.id, { url })).status).toBe("rejected")
+      }
+    })
+
+    test("a test event is a real, signed delivery marked as a test", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/test-event")
+      const r = await sendTestEvent(lab.db, lab.engine.queue, t, ep.id, "email.bounced")
+      expect(r.status).toBe("queued")
+      const got = await until(() => lab.receiver.of("test-event")[0], 5_000)
+      const body = JSON.parse(got!.body)
+      expect(body).toMatchObject({
+        type: "email.bounced",
+        data: { test: true, bounce: { type: "permanent" } },
+      })
+      expect(body).not.toHaveProperty("sequence")
+      expect(
+        verifySignature(
+          ep.secret,
+          got!.headers["webhook-id"]!,
+          got!.body,
+          got!.headers["webhook-signature"]!,
+          got!.headers["webhook-timestamp"]!,
+        ),
+      ).toBe(true)
+      if (r.status === "queued") {
+        await until(
+          async () => (await history.get(t, r.deliveryId))?.status === "delivered",
+          3_000,
+        )
+        const detail = await history.get(t, r.deliveryId)
+        expect(detail!.attempt_log[0]!.trigger).toBe("test")
+      }
+      await lab.store.update(t, ep.id, { enabled: false })
+      expect(
+        (await sendTestEvent(lab.db, lab.engine.queue, t, ep.id, "email.sent")).status,
+      ).toBe("paused")
+    })
+
+    test("deliveries list newest first, filter, and page without repeats", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/listing")
+      for (let k = 0; k < 7; k++) await lab.emit(t, { k })
+      await until(
+        async () =>
+          (await lab.deliveries(ep.id)).every((d) => d.status === "delivered"),
+        5_000,
+      )
+      const seen: string[] = []
+      let cursor: string | undefined
+      do {
+        const page = await history.list(t, {
+          endpointId: ep.id,
+          limit: 3,
+          ...(cursor ? { cursor } : {}),
+        })
+        seen.push(...page.data.map((d) => d.id))
+        cursor = page.next_cursor ?? undefined
+      } while (cursor)
+      expect(seen).toHaveLength(7)
+      expect(new Set(seen).size).toBe(7)
+      expect(
+        (await history.list(t, { endpointId: ep.id, status: "failed" })).data,
+      ).toHaveLength(0)
+    })
+
+    test("stats count a window", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "flaky/stats?n=1")
+      for (let k = 0; k < 3; k++) await lab.emit(t, { k })
+      await until(
+        async () =>
+          (await lab.deliveries(ep.id)).every((d) => d.status === "delivered"),
+        15_000,
+      )
+      const s = await lab.store.stats(t, ep.id, new Date(Date.now() - 60_000))
+      expect(s).toMatchObject({
+        delivered: 3,
+        failed: 0,
+        pending: 0,
+        success_rate: 1,
+        failing_since: null,
+      })
     })
   })
 

@@ -1,5 +1,9 @@
 import type { Hono } from "hono"
-import { rotateWebhookSecretSchema } from "@repo/contracts"
+import {
+  rotateWebhookSecretSchema,
+  sendTestEventSchema,
+  updateWebhookEndpointSchema,
+} from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
 import { domainScope, scopedDomains } from "../../auth/scope.js"
 import { requireFreshAuth } from "../../middleware/session.js"
@@ -383,6 +387,61 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       return c.json(notFound("No endpoint with that id."), 404)
     if (result.status === "rejected") return c.json(validation(result.reason), 422)
     return c.json(result.endpoint)
+  })
+
+  app.patch("/webhook-endpoints/:id", async (c) => {
+    if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
+    const parsed = updateWebhookEndpointSchema.safeParse(await readJson(c))
+    if (!parsed.success) {
+      return c.json(
+        validation(parsed.error.issues[0]?.message ?? "Invalid update."),
+        422,
+      )
+    }
+    const result = await d.webhooks.update(
+      c.get("auth").tenantId,
+      c.req.param("id"),
+      parsed.data,
+    )
+    if (result.status === "not_found")
+      return c.json(notFound("No endpoint with that id."), 404)
+    if (result.status === "rejected") return c.json(validation(result.reason), 422)
+    return c.json(result.endpoint)
+  })
+
+  app.get("/webhook-endpoints/:id/stats", async (c) => {
+    if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
+    const sinceRaw = c.req.query("since")
+    const since =
+      sinceRaw && !Number.isNaN(Date.parse(sinceRaw))
+        ? new Date(sinceRaw)
+        : new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const stats = await d.webhooks.stats(
+      c.get("auth").tenantId,
+      c.req.param("id"),
+      since,
+    )
+    return stats ? c.json(stats) : c.json(notFound("No endpoint with that id."), 404)
+  })
+
+  app.post("/webhook-endpoints/:id/test", async (c) => {
+    if (!d.webhookTests) return c.json(notWired("Test events"), 501)
+    const parsed = sendTestEventSchema.safeParse(await readJson(c))
+    if (!parsed.success) return c.json(validation("Choose an event type."), 422)
+    const result = await d.webhookTests(
+      c.get("auth").tenantId,
+      c.req.param("id"),
+      parsed.data.event_type,
+    )
+    if (result.status === "not_found")
+      return c.json(notFound("No endpoint with that id."), 404)
+    if (result.status === "paused") {
+      return c.json(
+        validation("This endpoint is paused or switched off. Resume it first."),
+        409,
+      )
+    }
+    return c.json({ delivery_id: result.deliveryId }, 202)
   })
 
   app.post("/webhook-endpoints/:id/revoke-previous-secrets", async (c) => {

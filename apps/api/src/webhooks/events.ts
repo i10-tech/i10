@@ -221,6 +221,33 @@ const addressesOf = (recipients: SesRecipient[] | undefined): string[] =>
  * all - so changing relay, or SES changing a field, becomes a breaking change
  * for every customer. A small deliberate shape is one we own.
  */
+/**
+ * The tags the customer put on the send, as `{ name: value }`.
+ *
+ * ⚠ THEIRS ONLY. SES adds its own (`ses:*`: the source IP, the configuration
+ * set, the caller's identity) and we add `i10_message_id`; none of those are
+ * the customer's to see, and the source IP and caller identity are ours to
+ * keep. The contract already refuses an `i10_` prefix on the way in.
+ */
+export function customerTags(
+  raw: Record<string, string[] | undefined> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [name, values] of Object.entries(raw ?? {})) {
+    if (name.startsWith("ses:") || name.startsWith("i10_")) continue
+    const value = values?.[0]
+    if (typeof value === "string") out[name] = value
+  }
+  return out
+}
+
+/** The domain an address is at, lowercased, from `a@b.c` or `Name <a@b.c>`. */
+export function domainOf(address: unknown): string | null {
+  if (typeof address !== "string") return null
+  const m = address.match(/@([^\s>]+)>?\s*$/)
+  return m ? m[1]!.toLowerCase() : null
+}
+
 function publicData(
   type: WebhookEventType,
   event: SesNotification,
@@ -233,6 +260,7 @@ function publicData(
     to: event.mail?.destination ?? [],
     subject: event.mail?.commonHeaders?.subject ?? null,
     created_at: occurredAt.toISOString(),
+    tags: customerTags(event.mail?.tags),
   }
 
   switch (type) {

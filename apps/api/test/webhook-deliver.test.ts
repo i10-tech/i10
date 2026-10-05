@@ -24,6 +24,7 @@ const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
   firstFailedAt: null,
   lane: "ordered",
   rateLimit: null,
+  headers: {},
   ...over,
 })
 
