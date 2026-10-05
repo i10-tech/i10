@@ -1,4 +1,5 @@
 import type { Hono } from "hono"
+import { WEBHOOK_EVENT_TYPES } from "../../webhooks/catalog.js"
 import {
   createReplayMissingSchema,
   createReplaySchema,
@@ -573,6 +574,9 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     }
     return c.json({ id, payload_expunged: true })
   })
+
+  // The event catalog (#283), the same list the API serves.
+  app.get("/webhook-event-types", (c) => c.json({ data: WEBHOOK_EVENT_TYPES }))
 
   app.get("/webhook-deliveries", async (c) => {
     const { tenantId } = c.get("auth")

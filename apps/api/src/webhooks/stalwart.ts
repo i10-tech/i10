@@ -272,6 +272,10 @@ function publicData(
     to: recipients,
     subject: null,
     created_at: occurredAt.toISOString(),
+    // ⚠ PRESENT ON EVERY ROUTE (#283). A direct-route message's tags do not
+    // come back from Stalwart, so the object is empty rather than missing -
+    // the same shape SES's payloads have.
+    tags: {},
   }
 
   switch (type) {

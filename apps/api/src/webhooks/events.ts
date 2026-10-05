@@ -54,6 +54,8 @@ export interface NormalisedEvent {
 
 interface SesRecipient {
   emailAddress?: string
+  /** The receiving server's reply, on a bounced recipient. */
+  diagnosticCode?: string
 }
 
 interface SesNotification {
@@ -273,6 +275,11 @@ function publicData(
           type: (event.bounce?.bounceType ?? "undetermined").toLowerCase(),
           subtype: (event.bounce?.bounceSubType ?? "").toLowerCase() || null,
           recipients: addressesOf(event.bounce?.bouncedRecipients),
+          // ⚠ PRESENT ON EVERY ROUTE (#283): Stalwart reports its own words,
+          // and so do we, from the first recipient that has any.
+          diagnostic:
+            event.bounce?.bouncedRecipients?.find((r) => r.diagnosticCode)
+              ?.diagnosticCode ?? null,
         },
       }
     case "email.complained":
@@ -289,6 +296,8 @@ function publicData(
         delay: {
           type: event.deliveryDelay?.delayType ?? null,
           recipients: addressesOf(event.deliveryDelay?.delayedRecipients),
+          // SES does not say when it retries; Stalwart does. Null, not missing (#283).
+          next_retry: null,
         },
       }
     case "email.failed":

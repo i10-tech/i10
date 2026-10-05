@@ -32,6 +32,875 @@
       }
     },
     "schemas": {
+      "EmailSentEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.sent"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailDeliveredEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.delivered"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailDeliveryDelayedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.delivery_delayed"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "delay": {
+                "type": "object",
+                "properties": {
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "next_retry": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "recipients",
+                  "type",
+                  "next_retry"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags",
+              "delay"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailBouncedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.bounced"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "bounce": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "permanent",
+                      "transient",
+                      "undetermined"
+                    ]
+                  },
+                  "subtype": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "diagnostic": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "type",
+                  "subtype",
+                  "recipients",
+                  "diagnostic"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags",
+              "bounce"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailComplainedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.complained"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "complaint": {
+                "type": "object",
+                "properties": {
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "recipients",
+                  "type"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags",
+              "complaint"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailFailedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.failed"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailOpenedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.opened"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "open": {
+                "type": "object",
+                "properties": {
+                  "user_agent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "user_agent"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags",
+              "open"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailClickedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.clicked"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "click": {
+                "type": "object",
+                "properties": {
+                  "link": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "user_agent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "link",
+                  "user_agent"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags",
+              "click"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "EmailUnsubscribedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email.unsubscribed"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "email_id": {
+                "type": "string"
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "unsubscribe": {
+                "type": "object",
+                "properties": {
+                  "list": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "list",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "email_id",
+              "from",
+              "to",
+              "subject",
+              "created_at",
+              "tags",
+              "unsubscribe"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
       "SendEmailResponse": {
         "type": "object",
         "properties": {
@@ -1617,6 +2486,64 @@
           "payload",
           "payload_expunged_at",
           "attempt_log"
+        ]
+      },
+      "WebhookEventTypeList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "enum": [
+                    "webhook_event_type"
+                  ]
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "email.sent",
+                    "email.delivered",
+                    "email.delivery_delayed",
+                    "email.bounced",
+                    "email.complained",
+                    "email.failed",
+                    "email.opened",
+                    "email.clicked",
+                    "email.unsubscribed"
+                  ]
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "example": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "object",
+                "type",
+                "version",
+                "description",
+                "schema",
+                "example"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
         ]
       },
       "SuppressionList": {
@@ -4724,6 +5651,42 @@
         }
       }
     },
+    "/webhook-event-types": {
+      "get": {
+        "summary": "List webhook event types",
+        "description": "Every event i10 can send, with a JSON Schema for its `data` and an example. Payloads are checked against these schemas in i10's own tests, on every route mail can take.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEventTypeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/suppressions": {
       "get": {
         "tags": [
@@ -6149,5 +7112,213 @@
       }
     }
   },
-  "webhooks": {}
+  "webhooks": {
+    "email.sent": {
+      "post": {
+        "summary": "email.sent",
+        "description": "The mail server accepted the email for delivery. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailSentEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.delivered": {
+      "post": {
+        "summary": "email.delivered",
+        "description": "The recipient's server accepted it. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailDeliveredEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.delivery_delayed": {
+      "post": {
+        "summary": "email.delivery_delayed",
+        "description": "Delivery is being retried; the recipient's server deferred it for now. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailDeliveryDelayedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.bounced": {
+      "post": {
+        "summary": "email.bounced",
+        "description": "The recipient's server refused it. A permanent bounce suppresses the address. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailBouncedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.complained": {
+      "post": {
+        "summary": "email.complained",
+        "description": "The recipient marked it as spam. The address is suppressed. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailComplainedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.failed": {
+      "post": {
+        "summary": "email.failed",
+        "description": "It was refused before it left, and was not sent. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailFailedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.opened": {
+      "post": {
+        "summary": "email.opened",
+        "description": "The recipient opened it (tracking on). Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailOpenedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.clicked": {
+      "post": {
+        "summary": "email.clicked",
+        "description": "The recipient clicked a link in it (tracking on). Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailClickedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "email.unsubscribed": {
+      "post": {
+        "summary": "email.unsubscribed",
+        "description": "The recipient unsubscribed. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailUnsubscribedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    }
+  }
 }
