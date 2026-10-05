@@ -394,6 +394,36 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       : c.json(notFound("No endpoint with that id."), 404)
   })
 
+  app.get("/webhook-deliveries/:id", async (c) => {
+    if (!d.webhookHistory) return c.json(notWired("Webhook history"), 501)
+    const id = asId(c.req.param("id"))
+    if (!id) return c.json(notFound("No delivery with that id."), 404)
+    const detail = await d.webhookHistory.get(c.get("auth").tenantId, id)
+    return detail ? c.json(detail) : c.json(notFound("No delivery with that id."), 404)
+  })
+
+  /**
+   * ⚠ BEHIND A RECENT SIGN-IN: it removes data for good. Only a finished
+   * delivery can be expunged; a pending one would go out empty.
+   */
+  app.delete("/webhook-deliveries/:id/payload", requireFreshAuth, async (c) => {
+    if (!d.webhookHistory) return c.json(notWired("Webhook history"), 501)
+    const id = asId(c.req.param("id"))
+    if (!id) return c.json(notFound("No delivery with that id."), 404)
+    const result = await d.webhookHistory.expunge(c.get("auth").tenantId, id)
+    if (result === "not_found")
+      return c.json(notFound("No delivery with that id."), 404)
+    if (result === "pending") {
+      return c.json(
+        validation(
+          "This delivery is still being attempted. Expunge it once it has finished.",
+        ),
+        409,
+      )
+    }
+    return c.json({ id, payload_expunged: true })
+  })
+
   app.get("/webhook-deliveries", async (c) => {
     const { tenantId } = c.get("auth")
     const q = c.req.query()

@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test"
 import {
   deliverWebhook,
+  type AttemptLog,
   type DeliveryRecord,
   type FailureDecision,
 } from "../src/webhooks/deliver.js"
@@ -36,6 +37,7 @@ function deps(over: Record<string, unknown> = {}) {
       delivery: DeliveryRecord,
       outcome: { reason: string; responseStatus?: number },
       decision: FailureDecision,
+      attempt: AttemptLog,
     ) => Promise<void>
   >(async () => {})
   const log = { info: mock(), warn: mock(), error: mock() }
@@ -340,5 +342,96 @@ describe("ordered while healthy (#277, decision 1)", () => {
     expect(JSON.parse(String(requestOf(doFetch)[1].body))).not.toHaveProperty(
       "sequence",
     )
+  })
+})
+
+describe("the attempt log (#280)", () => {
+  const logOf = (d: ReturnType<typeof deps>, which: "delivered" | "failed") =>
+    which === "delivered"
+      ? (
+          d.markDelivered.mock.calls[0] as unknown as [
+            DeliveryRecord,
+            number,
+            AttemptLog,
+          ]
+        )[2]
+      : (
+          d.markFailed.mock.calls[0] as unknown as [
+            DeliveryRecord,
+            unknown,
+            FailureDecision,
+            AttemptLog,
+          ]
+        )[3]
+
+  it("keeps what was sent, but never the signature", async () => {
+    const d = deps()
+    await deliverWebhook(job, d.deps)
+    const log = logOf(d, "delivered")
+    expect(log.requestHeaders["webhook-id"]).toBe(record().id)
+    expect(log.requestHeaders).not.toHaveProperty("webhook-signature")
+    expect(log).toMatchObject({
+      attempt: 1,
+      trigger: "scheduled",
+      lane: "ordered",
+      responseStatus: 200,
+    })
+    expect(log.durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it("keeps the endpoint's answer, cut at 20KB", async () => {
+    const d = deps({
+      fetch: mock(
+        async () =>
+          new Response("x".repeat(50_000), {
+            status: 500,
+            headers: { "x-req": "abc" },
+          }),
+      ),
+    })
+    await deliverWebhook(job, d.deps)
+    const log = logOf(d, "failed")
+    expect(log.responseBody).toHaveLength(20_000)
+    expect(log.responseHeaders?.["x-req"]).toBe("abc")
+    expect(log).toMatchObject({ errorKind: "status", responseStatus: 500 })
+  })
+
+  it.each([
+    [Object.assign(new Error("aborted"), { name: "TimeoutError" }), "timeout"],
+    [
+      Object.assign(new Error("bad cert"), { code: "ERR_TLS_CERT_ALTNAME_INVALID" }),
+      "tls",
+    ],
+    [Object.assign(new Error("refused"), { code: "ECONNREFUSED" }), "connect"],
+  ])("names %s as %s", async (err, kind) => {
+    const d = deps({
+      fetch: mock(async () => {
+        throw err
+      }),
+    })
+    await deliverWebhook(job, d.deps)
+    expect(logOf(d, "failed")).toMatchObject({ errorKind: kind })
+    expect(logOf(d, "failed").responseStatus).toBeUndefined()
+  })
+
+  it("names a refused address as blocked, with nothing sent", async () => {
+    const d = deps({
+      vet: async () => ({
+        ok: false as const,
+        kind: "blocked" as const,
+        reason: "x resolves to 10.0.0.1",
+      }),
+    })
+    await deliverWebhook(job, d.deps)
+    expect(logOf(d, "failed")).toMatchObject({
+      errorKind: "blocked",
+      requestHeaders: {},
+    })
+  })
+
+  it("records the trigger the job carries", async () => {
+    const d = deps()
+    await deliverWebhook({ ...job, trigger: "manual" }, d.deps)
+    expect(logOf(d, "delivered").trigger).toBe("manual")
   })
 })

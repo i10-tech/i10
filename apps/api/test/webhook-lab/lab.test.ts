@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test"
 import { dueDeliveries } from "../../src/webhooks/db.js"
+import { webhookHistory, type WebhookHistory } from "../../src/webhooks/history.js"
 import { verifySignature } from "../../src/webhooks/signing.js"
 import { enabled, LAB, LAB_RULES, startLab, until, type Lab } from "./harness.js"
 
@@ -31,10 +32,12 @@ const suite = enabled ? describe : describe.skip
 const slow = process.env.WEBHOOKS_LAB_SLOW === "1" ? test : test.skip
 
 let lab: Lab
+let history: WebhookHistory
 
 suite("webhook conformance lab", () => {
   beforeAll(async () => {
     lab = await startLab()
+    history = webhookHistory(lab.db)
   })
   afterAll(async () => {
     await lab.stop()
@@ -377,6 +380,84 @@ suite("webhook conformance lab", () => {
       "custom endpoint headers cannot override signing headers (#281)",
       () => {},
     )
+  })
+
+  describe("history (#280)", () => {
+    test("every attempt is logged with what came back, and never the signature", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "flaky/logged?n=2")
+      await lab.emit(t, { k: 1 })
+      await until(
+        async () => (await lab.deliveries(ep.id))[0]?.status === "delivered",
+        10_000,
+      )
+      const [row] = await lab.deliveries(ep.id)
+      const detail = await history.get(t, row!.id)
+      expect(
+        detail!.attempt_log.map((a) => [a.attempt, a.response_status, a.response_body]),
+      ).toEqual([
+        [1, 500, "not yet"],
+        [2, 500, "not yet"],
+        [3, 200, "ok"],
+      ])
+      for (const a of detail!.attempt_log) {
+        expect(a.request_headers).not.toHaveProperty("webhook-signature")
+        expect(a.request_headers["webhook-id"]).toBe(row!.id)
+      }
+      expect(detail!.attempt_log[0]!.error_kind).toBe("status")
+    })
+
+    test("another workspace cannot see a delivery or its attempts", async () => {
+      const mine = await lab.workspace()
+      const theirs = await lab.workspace()
+      const ep = await lab.endpoint(theirs, "ok/private")
+      await lab.emit(theirs, { k: 1 })
+      await until(
+        async () => (await lab.deliveries(ep.id))[0]?.status === "delivered",
+        5_000,
+      )
+      const [row] = await lab.deliveries(ep.id)
+      expect(await history.get(mine, row!.id)).toBeNull()
+      expect(await history.expunge(mine, row!.id)).toBe("not_found")
+    })
+
+    test("a payload is expunged only once the delivery has finished", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "hang/expunge")
+      await lab.emit(t, { secret: "do not keep" })
+      await until(() => lab.receiver.of("expunge").length >= 1, 3_000)
+      const [row] = await lab.deliveries(ep.id)
+      expect(await history.expunge(t, row!.id)).toBe("pending")
+
+      const done = await lab.workspace()
+      const ok = await lab.endpoint(done, "ok/expunge-done")
+      await lab.emit(done, { secret: "do not keep" })
+      await until(
+        async () => (await lab.deliveries(ok.id))[0]?.status === "delivered",
+        5_000,
+      )
+      const [d] = await lab.deliveries(ok.id)
+      expect(await history.expunge(done, d!.id)).toBe("expunged")
+      const detail = await history.get(done, d!.id)
+      expect(detail!.payload).toEqual({})
+      expect(detail!.payload_expunged_at).not.toBeNull()
+      expect(detail!.attempt_log).toHaveLength(1)
+    })
+
+    test("attempts go with their delivery", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/cascade")
+      await lab.emit(t, { k: 1 })
+      await until(
+        async () => (await lab.deliveries(ep.id))[0]?.status === "delivered",
+        5_000,
+      )
+      const [row] = await lab.deliveries(ep.id)
+      await lab.owner`delete from core.webhook_deliveries where id = ${row!.id}`
+      const [left] =
+        await lab.owner`select count(*)::int as n from core.webhook_attempts where delivery_id = ${row!.id}`
+      expect(left!.n).toBe(0)
+    })
   })
 
   describe("durability", () => {

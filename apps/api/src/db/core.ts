@@ -1448,6 +1448,11 @@ export const webhookDeliveries = core.table(
     firstFailedAt: timestamp("first_failed_at", { withTimezone: true }),
     lane: webhookDeliveryLane("lane").notNull().default("ordered"),
     /**
+     * When the customer had the payload removed (#280). The row and its
+     * attempts stay, so the history still reads; only `payload` is emptied.
+     */
+    payloadExpungedAt: timestamp("payload_expunged_at", { withTimezone: true }),
+    /**
      * A worker's lease on this row while it is attempting it. A row whose lease
      * is live is never handed to a second worker, which is what makes the sweep
      * safe to run beside the queue; a lease left by a crash simply expires.
@@ -1463,6 +1468,82 @@ export const webhookDeliveries = core.table(
     index("webhook_deliveries_tenant_idx").on(t.tenantId, t.createdAt),
     // The queue for "what has not been delivered and is not moving".
     index("webhook_deliveries_pending_idx").on(t.status, t.createdAt),
+  ],
+)
+
+/** What started an attempt. Only `scheduled` exists until replay lands (#282). */
+export const webhookAttemptTrigger = core.enum("webhook_attempt_trigger", [
+  "scheduled",
+  "manual",
+  "recover",
+  "replay",
+  "test",
+])
+
+/** Why an attempt did not arrive, in categories a person can act on. */
+export const webhookAttemptError = core.enum("webhook_attempt_error", [
+  /** The endpoint answered, with something other than 2xx. */
+  "status",
+  /** It did not answer within the timeout. */
+  "timeout",
+  /** The connection was refused or dropped. */
+  "connect",
+  /** The certificate or the handshake failed. */
+  "tls",
+  /** It resolves somewhere we will not connect to (webhooks/egress.ts). */
+  "blocked",
+  /** Its name did not resolve. */
+  "unresolved",
+])
+
+/**
+ * One attempt to deliver one webhook: what we sent and what came back (#280).
+ *
+ * ⚠ THE DELIVERY ROW SAYS WHERE THINGS STAND; THIS SAYS HOW THEY GOT THERE.
+ * "Why is my endpoint not working" is answered by the response body the
+ * customer's own server returned at 3am, not by the last status code alone.
+ *
+ * ⚠ GONE WITH ITS DELIVERY, BY CASCADE, AND NOT PARTITIONED. Retention is per
+ * workspace and per plan (retention/expire.ts deletes deliveries by tenant and
+ * cutoff), so a time partition could never be dropped whole; deleting the
+ * delivery is what removes its attempts, for retention and for workspace
+ * deletion alike. The body is capped at 20KB and the signature is never kept.
+ */
+export const webhookAttempts = core.table(
+  "webhook_attempts",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id").notNull(),
+    deliveryId: uuid("delivery_id")
+      .notNull()
+      .references(() => webhookDeliveries.id, { onDelete: "cascade" }),
+    endpointId: uuid("endpoint_id").notNull(),
+    /** 1 for the first attempt. */
+    attempt: integer("attempt").notNull(),
+    trigger: webhookAttemptTrigger("trigger").notNull().default("scheduled"),
+    lane: webhookDeliveryLane("lane").notNull(),
+    url: text("url").notNull(),
+    /** What we sent, without `webhook-signature`. */
+    requestHeaders: jsonb("request_headers").$type<Record<string, string>>().notNull(),
+    responseStatus: integer("response_status"),
+    responseHeaders: jsonb("response_headers").$type<Record<string, string>>(),
+    /** The first 20KB of what came back. */
+    responseBody: text("response_body"),
+    durationMs: integer("duration_ms").notNull(),
+    errorKind: webhookAttemptError("error_kind"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("webhook_attempts_delivery_idx").on(t.deliveryId, t.createdAt),
+    index("webhook_attempts_endpoint_idx").on(t.endpointId, t.createdAt),
+    pgPolicy("webhook_attempts_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
   ],
 )
 

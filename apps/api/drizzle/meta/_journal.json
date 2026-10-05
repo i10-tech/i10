@@ -771,6 +771,13 @@
       "when": 1791221513731,
       "tag": "0109_webhook_rate_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1791221945494,
+      "tag": "0110_webhook_attempts",
+      "breakpoints": true
     }
   ]
 }

@@ -30,6 +30,8 @@ export interface WebhookJob {
    * of the job id, so each attempt is its own job (see `webhookJobId`).
    */
   attempt?: number
+  /** What started this attempt, for the attempt log. Default `scheduled`. */
+  trigger?: "scheduled" | "manual" | "recover" | "replay" | "test"
 }
 
 export interface EnqueueDeliveryOptions {
