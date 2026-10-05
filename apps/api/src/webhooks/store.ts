@@ -72,6 +72,7 @@ type Row = {
   disabledReason: string | null
   createdAt: Date
   signatureScheme: SignatureScheme
+  rateLimit: number | null
   publicKey: string | null
   retiringSecrets: RetiringSecret[]
 }
@@ -86,6 +87,7 @@ const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   disabled_reason: row.enabled ? null : row.disabledReason,
   created_at: row.createdAt.toISOString(),
   signature_scheme: row.signatureScheme,
+  rate_limit: row.rateLimit,
   public_key: row.publicKey,
   // Expired entries are not keys any more, whatever the row still holds.
   previous_secrets: liveRetiring(row.retiringSecrets, now).map((r) => ({
@@ -103,6 +105,7 @@ const COLUMNS = {
   disabledReason: webhookEndpoints.disabledReason,
   createdAt: webhookEndpoints.createdAt,
   signatureScheme: webhookEndpoints.signatureScheme,
+  rateLimit: webhookEndpoints.rateLimit,
   publicKey: webhookEndpoints.publicKey,
   retiringSecrets: webhookEndpoints.retiringSecrets,
 }
@@ -162,6 +165,7 @@ export function webhookEndpointStore(
             secretCiphertext: secrets.seal(key.secret),
             signatureScheme: key.scheme,
             publicKey: key.publicKey,
+            rateLimit: input.rate_limit ?? null,
           })
           .returning(COLUMNS)
 

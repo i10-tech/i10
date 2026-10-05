@@ -1298,6 +1298,7 @@ const ROUTES: [
           disabled_reason: null,
           created_at: ago(140),
           signature_scheme: "hmac_sha256" as const,
+          rate_limit: null,
           public_key: null,
           // A grace period in progress, so the warning line can be reviewed.
           previous_secrets: [
@@ -1331,6 +1332,7 @@ const ROUTES: [
         created_at: ago(140),
         signature_scheme: ed ? ("ed25519" as const) : ("hmac_sha256" as const),
         public_key: ed ? "whpk_3vYpPreviewPublicKeyOnlyNotARealKey0000000=" : null,
+        rate_limit: null,
         previous_secrets:
           b.previous_secret === "expire"
             ? [

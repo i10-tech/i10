@@ -648,6 +648,12 @@
               "ed25519"
             ]
           },
+          "rate_limit": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "public_key": {
             "type": [
               "string",
@@ -693,6 +699,7 @@
           "disabled_reason",
           "created_at",
           "signature_scheme",
+          "rate_limit",
           "public_key",
           "previous_secrets",
           "secret"
@@ -733,6 +740,11 @@
               "hmac_sha256",
               "ed25519"
             ]
+          },
+          "rate_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
           }
         },
         "required": [
@@ -804,6 +816,12 @@
                     "ed25519"
                   ]
                 },
+                "rate_limit": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "public_key": {
                   "type": [
                     "string",
@@ -843,6 +861,7 @@
                 "disabled_reason",
                 "created_at",
                 "signature_scheme",
+                "rate_limit",
                 "public_key",
                 "previous_secrets"
               ]
@@ -2070,6 +2089,12 @@
                         "ed25519"
                       ]
                     },
+                    "rate_limit": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
                     "public_key": {
                       "type": [
                         "string",
@@ -2109,6 +2134,7 @@
                     "disabled_reason",
                     "created_at",
                     "signature_scheme",
+                    "rate_limit",
                     "public_key",
                     "previous_secrets"
                   ]

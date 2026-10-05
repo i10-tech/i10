@@ -310,6 +310,8 @@ export interface WebhookEndpoint {
   disabled_reason: string | null
   created_at: string
   signature_scheme: "hmac_sha256" | "ed25519"
+  /** Deliveries a second, at most; null for no limit. */
+  rate_limit: number | null
   /** The `whpk_` key an Ed25519 endpoint is verified with. Not a secret. */
   public_key: string | null
   /** Keys a rotation replaced that still sign until `expires_at`. */

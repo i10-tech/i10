@@ -274,9 +274,9 @@ suite("webhook conformance lab", () => {
   })
 
   describe("fairness", () => {
-    // #278: concurrency is a shared pool of 8. Ten hanging endpoints from one
-    // workspace take every slot, and another workspace waits out the timeout.
-    test.failing("a quiet workspace is not delayed by a noisy one", async () => {
+    // #278: each workspace gets a quarter of the slots (2 of 8 here), so ten
+    // hanging endpoints from one cannot take the slot another one needs.
+    test("a quiet workspace is not delayed by a noisy one", async () => {
       const noisy = await lab.workspace()
       for (let i = 0; i < 10; i++) {
         await lab.endpoint(noisy, `hang/noisy-${i}`)
@@ -292,7 +292,35 @@ suite("webhook conformance lab", () => {
       expect(got!.at - sent).toBeLessThan(500)
     })
 
-    test.todo("a per-endpoint throttle is enforced (#278)", () => {})
+    // #278: Svix stores this and never reads it (40 events in 30ms at a limit
+    // of 2). Counted in Redis, so it would hold across replicas too.
+    test("a per-endpoint throttle is enforced", async () => {
+      const t = await lab.workspace()
+      await lab.endpoint(t, "ok/throttled", { rateLimit: 2 })
+      for (let k = 0; k < 6; k++) await lab.emit(t, { k })
+      await until(() => lab.receiver.of("throttled").length >= 6, 10_000)
+      const perSecond = new Map<number, number>()
+      for (const r of lab.receiver.of("throttled")) {
+        const s = Math.floor(r.at / 1000)
+        perSecond.set(s, (perSecond.get(s) ?? 0) + 1)
+      }
+      expect(Math.max(...perSecond.values())).toBeLessThanOrEqual(2)
+    })
+
+    // #278: after repeated timeouts the endpoint cools instead of holding a
+    // slot for every attempt. Without the breaker, the third attempt would
+    // come about 5s after the second (timeout penalty); with it, not for 10s.
+    test("an endpoint that keeps timing out cools before its next attempt", async () => {
+      const t = await lab.workspace()
+      await lab.endpoint(t, "hang/cooling")
+      await lab.emit(t, { k: 1 })
+      await until(() => lab.receiver.of("cooling").length >= 2, 12_000)
+      const second = lab.receiver.of("cooling")[1]!.at
+      await until(() => lab.receiver.of("cooling").length >= 3, 15_000)
+      const third = lab.receiver.of("cooling")[2]?.at
+      expect(third).toBeDefined()
+      expect(third! - second).toBeGreaterThanOrEqual(LAB.breaker.coolMs)
+    }, 40_000)
   })
 
   describe("SSRF", () => {

@@ -324,6 +324,7 @@ export function webhookDeliveryOps(
             firstFailedAt: webhookDeliveries.firstFailedAt,
             lane: webhookDeliveries.lane,
             url: webhookEndpoints.url,
+            rateLimit: webhookEndpoints.rateLimit,
             secretCiphertext: webhookEndpoints.secretCiphertext,
             signatureScheme: webhookEndpoints.signatureScheme,
             retiringSecrets: webhookEndpoints.retiringSecrets,
@@ -384,6 +385,7 @@ export function webhookDeliveryOps(
           sequence: row.sequence,
           firstFailedAt: row.firstFailedAt,
           lane: row.lane,
+          rateLimit: row.rateLimit,
         }
       })
     },
