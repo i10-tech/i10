@@ -58,6 +58,8 @@ export interface DeliveryRecord {
   lane: DeliveryLane
   /** The endpoint's deliveries-per-second limit, if the customer set one. */
   rateLimit: number | null
+  /** The customer's own headers for this endpoint, already checked on write. */
+  headers: Record<string, string>
 }
 
 export type DeliveryLane = "ordered" | "retry"
@@ -287,6 +289,9 @@ export async function deliverWebhook(
     const pinned = pinnedRequest(url, verdict)
 
     sent = {
+      // ⚠ THE CUSTOMER'S HEADERS FIRST, OURS AFTER, so ours win even if the
+      // reserved-name check on write were ever bypassed (webhooks/headers.ts).
+      ...delivery.headers,
       host: pinned.host,
       "content-type": "application/json",
       "user-agent": "i10-webhooks/1",

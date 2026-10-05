@@ -654,6 +654,30 @@
               "null"
             ]
           },
+          "header_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filter_domains": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "filter_tags": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
           "public_key": {
             "type": [
               "string",
@@ -700,6 +724,9 @@
           "created_at",
           "signature_scheme",
           "rate_limit",
+          "header_names",
+          "filter_domains",
+          "filter_tags",
           "public_key",
           "previous_secrets",
           "secret"
@@ -745,6 +772,28 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 1000
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "filter_domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "minItems": 1,
+            "maxItems": 50
+          },
+          "filter_tags": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -822,6 +871,30 @@
                     "null"
                   ]
                 },
+                "header_names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "filter_domains": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "filter_tags": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
                 "public_key": {
                   "type": [
                     "string",
@@ -862,6 +935,9 @@
                 "created_at",
                 "signature_scheme",
                 "rate_limit",
+                "header_names",
+                "filter_domains",
+                "filter_tags",
                 "public_key",
                 "previous_secrets"
               ]
@@ -897,6 +973,492 @@
         },
         "required": [
           "previous_secret"
+        ]
+      },
+      "UpdateWebhookEndpoint": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "email.sent",
+                "email.delivered",
+                "email.delivery_delayed",
+                "email.bounced",
+                "email.complained",
+                "email.failed",
+                "email.opened",
+                "email.clicked",
+                "email.unsubscribed"
+              ]
+            },
+            "minItems": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "rate_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "filter_domains": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "minItems": 1,
+            "maxItems": 50
+          },
+          "filter_tags": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "WebhookEndpointStats": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "webhook_endpoint_stats"
+            ]
+          },
+          "endpoint_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "since": {
+            "type": "string"
+          },
+          "delivered": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "success_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "last_success_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failing_since": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "endpoint_id",
+          "since",
+          "delivered",
+          "failed",
+          "pending",
+          "success_rate",
+          "last_success_at",
+          "failing_since"
+        ]
+      },
+      "SendTestEvent": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "email.sent",
+              "email.delivered",
+              "email.delivery_delayed",
+              "email.bounced",
+              "email.complained",
+              "email.failed",
+              "email.opened",
+              "email.clicked",
+              "email.unsubscribed"
+            ]
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "WebhookDeliveryList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "enum": [
+                    "webhook_delivery"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "endpoint_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "event_type": {
+                  "type": "string",
+                  "enum": [
+                    "email.sent",
+                    "email.delivered",
+                    "email.delivery_delayed",
+                    "email.bounced",
+                    "email.complained",
+                    "email.failed",
+                    "email.opened",
+                    "email.clicked",
+                    "email.unsubscribed"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "delivered",
+                    "failed"
+                  ]
+                },
+                "attempts": {
+                  "type": "integer"
+                },
+                "sequence": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "next_attempt_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "response_status": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "last_error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "occurred_at": {
+                  "type": "string"
+                },
+                "delivered_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "object",
+                "id",
+                "endpoint_id",
+                "event_type",
+                "status",
+                "attempts",
+                "sequence",
+                "next_attempt_at",
+                "response_status",
+                "last_error",
+                "occurred_at",
+                "delivered_at",
+                "created_at"
+              ]
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ]
+      },
+      "WebhookDeliveryDetail": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "webhook_delivery"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "endpoint_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "email.sent",
+              "email.delivered",
+              "email.delivery_delayed",
+              "email.bounced",
+              "email.complained",
+              "email.failed",
+              "email.opened",
+              "email.clicked",
+              "email.unsubscribed"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "delivered",
+              "failed"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "sequence": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "next_attempt_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "response_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "delivered_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "payload_expunged_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempt_log": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "enum": [
+                    "webhook_attempt"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "attempt": {
+                  "type": "integer"
+                },
+                "trigger": {
+                  "type": "string",
+                  "enum": [
+                    "scheduled",
+                    "manual",
+                    "recover",
+                    "replay",
+                    "test"
+                  ]
+                },
+                "lane": {
+                  "type": "string",
+                  "enum": [
+                    "ordered",
+                    "retry"
+                  ]
+                },
+                "url": {
+                  "type": "string"
+                },
+                "request_headers": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "response_status": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "response_headers": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "response_body": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "duration_ms": {
+                  "type": "integer"
+                },
+                "error_kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "status",
+                    "timeout",
+                    "connect",
+                    "tls",
+                    "blocked",
+                    "unresolved",
+                    null
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "object",
+                "id",
+                "attempt",
+                "trigger",
+                "lane",
+                "url",
+                "request_headers",
+                "response_status",
+                "response_headers",
+                "response_body",
+                "duration_ms",
+                "error_kind",
+                "error",
+                "created_at"
+              ]
+            }
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "endpoint_id",
+          "event_type",
+          "status",
+          "attempts",
+          "sequence",
+          "next_attempt_at",
+          "response_status",
+          "last_error",
+          "occurred_at",
+          "delivered_at",
+          "created_at",
+          "payload",
+          "payload_expunged_at",
+          "attempt_log"
         ]
       },
       "SuppressionList": {
@@ -1913,6 +2475,421 @@
             }
           }
         }
+      },
+      "get": {
+        "summary": "Get a webhook endpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoint. Never its secret, never its header values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "webhook_endpoint"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "email.sent",
+                          "email.delivered",
+                          "email.delivery_delayed",
+                          "email.bounced",
+                          "email.complained",
+                          "email.failed",
+                          "email.opened",
+                          "email.clicked",
+                          "email.unsubscribed"
+                        ]
+                      }
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "signature_scheme": {
+                      "type": "string",
+                      "enum": [
+                        "hmac_sha256",
+                        "ed25519"
+                      ]
+                    },
+                    "rate_limit": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "header_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_domains": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_tags": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "public_key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "previous_secrets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "signature_scheme": {
+                            "type": "string",
+                            "enum": [
+                              "hmac_sha256",
+                              "ed25519"
+                            ]
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "signature_scheme",
+                          "expires_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "url",
+                    "events",
+                    "description",
+                    "enabled",
+                    "disabled_reason",
+                    "created_at",
+                    "signature_scheme",
+                    "rate_limit",
+                    "header_names",
+                    "filter_domains",
+                    "filter_tags",
+                    "public_key",
+                    "previous_secrets"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update a webhook endpoint",
+        "description": "Change any of its settings; `null` clears one that can be cleared. A new `url` gets the same checks as a new endpoint. `enabled: false` pauses it and `true` resumes it, clearing why it was switched off. `headers` replaces the whole set.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWebhookEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "webhook_endpoint"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "email.sent",
+                          "email.delivered",
+                          "email.delivery_delayed",
+                          "email.bounced",
+                          "email.complained",
+                          "email.failed",
+                          "email.opened",
+                          "email.clicked",
+                          "email.unsubscribed"
+                        ]
+                      }
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "signature_scheme": {
+                      "type": "string",
+                      "enum": [
+                        "hmac_sha256",
+                        "ed25519"
+                      ]
+                    },
+                    "rate_limit": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "header_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_domains": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_tags": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "public_key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "previous_secrets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "signature_scheme": {
+                            "type": "string",
+                            "enum": [
+                              "hmac_sha256",
+                              "ed25519"
+                            ]
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "signature_scheme",
+                          "expires_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "url",
+                    "events",
+                    "description",
+                    "enabled",
+                    "disabled_reason",
+                    "created_at",
+                    "signature_scheme",
+                    "rate_limit",
+                    "header_names",
+                    "filter_domains",
+                    "filter_tags",
+                    "public_key",
+                    "previous_secrets"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field is not acceptable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/webhook-endpoints/{id}/rotate-secret": {
@@ -2095,6 +3072,30 @@
                         "null"
                       ]
                     },
+                    "header_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_domains": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_tags": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
                     "public_key": {
                       "type": [
                         "string",
@@ -2135,6 +3136,9 @@
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
+                    "header_names",
+                    "filter_domains",
+                    "filter_tags",
                     "public_key",
                     "previous_secrets"
                   ]
@@ -2164,6 +3168,874 @@
           },
           "501": {
             "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-endpoints/{id}/pause": {
+      "post": {
+        "summary": "Pause a webhook endpoint",
+        "description": "Stops delivering. Events that happen while it is paused are not sent later.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "webhook_endpoint"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "email.sent",
+                          "email.delivered",
+                          "email.delivery_delayed",
+                          "email.bounced",
+                          "email.complained",
+                          "email.failed",
+                          "email.opened",
+                          "email.clicked",
+                          "email.unsubscribed"
+                        ]
+                      }
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "signature_scheme": {
+                      "type": "string",
+                      "enum": [
+                        "hmac_sha256",
+                        "ed25519"
+                      ]
+                    },
+                    "rate_limit": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "header_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_domains": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_tags": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "public_key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "previous_secrets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "signature_scheme": {
+                            "type": "string",
+                            "enum": [
+                              "hmac_sha256",
+                              "ed25519"
+                            ]
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "signature_scheme",
+                          "expires_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "url",
+                    "events",
+                    "description",
+                    "enabled",
+                    "disabled_reason",
+                    "created_at",
+                    "signature_scheme",
+                    "rate_limit",
+                    "header_names",
+                    "filter_domains",
+                    "filter_tags",
+                    "public_key",
+                    "previous_secrets"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-endpoints/{id}/resume": {
+      "post": {
+        "summary": "Resume a webhook endpoint",
+        "description": "Starts delivering again, and clears why it was switched off.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "webhook_endpoint"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "email.sent",
+                          "email.delivered",
+                          "email.delivery_delayed",
+                          "email.bounced",
+                          "email.complained",
+                          "email.failed",
+                          "email.opened",
+                          "email.clicked",
+                          "email.unsubscribed"
+                        ]
+                      }
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "signature_scheme": {
+                      "type": "string",
+                      "enum": [
+                        "hmac_sha256",
+                        "ed25519"
+                      ]
+                    },
+                    "rate_limit": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "header_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_domains": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "filter_tags": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "public_key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "previous_secrets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "signature_scheme": {
+                            "type": "string",
+                            "enum": [
+                              "hmac_sha256",
+                              "ed25519"
+                            ]
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "signature_scheme",
+                          "expires_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "url",
+                    "events",
+                    "description",
+                    "enabled",
+                    "disabled_reason",
+                    "created_at",
+                    "signature_scheme",
+                    "rate_limit",
+                    "header_names",
+                    "filter_domains",
+                    "filter_tags",
+                    "public_key",
+                    "previous_secrets"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-endpoints/{id}/stats": {
+      "get": {
+        "summary": "Get a webhook endpoint's delivery stats",
+        "description": "Counts of deliveries created since `since` (default: 24 hours ago).",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-endpoints/{id}/test": {
+      "post": {
+        "summary": "Send a test event to a webhook endpoint",
+        "description": "Sends a realistic sample of `event_type`, with `test: true` in its data. It is a real delivery: signed with the endpoint's keys, retried and logged like any other, so it shows exactly what your receiver will see.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendTestEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued. Follow it with `GET /webhook-deliveries/{delivery_id}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivery_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "delivery_id"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The endpoint is paused or switched off.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not an event type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhooks are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-deliveries": {
+      "get": {
+        "summary": "List webhook deliveries",
+        "description": "Newest first. Filter by endpoint, status, event type and time; page with `cursor` from the previous response's `next_cursor`.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "endpoint_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z_.]{1,64}$"
+            },
+            "required": false,
+            "name": "event_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "after",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "before",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A filter is not acceptable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhooks are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-deliveries/{id}": {
+      "get": {
+        "summary": "Get a webhook delivery and its attempts",
+        "description": "The delivery, what it carried, and every attempt with what was sent (never the signature) and the first 20KB of what came back.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The delivery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such delivery for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhooks are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-deliveries/{id}/payload": {
+      "delete": {
+        "summary": "Expunge a webhook delivery's payload",
+        "description": "Empties what a finished delivery carried, for good. The delivery and its attempts stay, so the history still reads. A delivery still being attempted answers 409: it would otherwise go out empty.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Expunged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "payload_expunged": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "payload_expunged"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such delivery for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The delivery is still being attempted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhooks are not configured.",
             "content": {
               "application/json": {
                 "schema": {

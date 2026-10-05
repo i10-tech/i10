@@ -47,6 +47,9 @@ const endpoint = {
   created_at: "2026-09-03T10:00:00.000Z",
   signature_scheme: "hmac_sha256" as const,
   rate_limit: null,
+  header_names: [],
+  filter_domains: null,
+  filter_tags: null,
   public_key: null,
   previous_secrets: [],
 }
@@ -158,6 +161,19 @@ describe("/webhook-endpoints", () => {
       endpoint: { ...endpoint, secret: "whsec_new" },
     })),
     revokePreviousSecrets: mock(async () => endpoint),
+    get: mock(async (_t: string, id: string) => (id === endpoint.id ? endpoint : null)),
+    update: mock(async () => ({ status: "updated" as const, endpoint })),
+    stats: mock(async () => ({
+      object: "webhook_endpoint_stats" as const,
+      endpoint_id: endpoint.id,
+      since: "2026-10-04T00:00:00.000Z",
+      delivered: 9,
+      failed: 1,
+      pending: 0,
+      success_rate: 0.9,
+      last_success_at: null,
+      failing_since: null,
+    })),
   }
 
   const app = () => createApp({ apiKeyAuth, webhookEndpoints: store })
@@ -241,6 +257,70 @@ describe("/webhook-endpoints", () => {
 
   it("requires a key", async () => {
     expect((await app().request("/webhook-endpoints")).status).toBe(401)
+  })
+
+  describe("managing an endpoint (#281)", () => {
+    const req = (method: string, path: string, body?: unknown) =>
+      app().request(path, {
+        method,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${KEY}` },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+
+    it("gets one, and 404s for an id it does not hold", async () => {
+      expect((await req("GET", `/webhook-endpoints/${endpoint.id}`)).status).toBe(200)
+      expect(
+        (await req("GET", "/webhook-endpoints/0199a3f2-b4c1-7f3e-9d2a-000000000000"))
+          .status,
+      ).toBe(404)
+    })
+
+    it("updates, and refuses an empty patch or a bad field before the store", async () => {
+      store.update.mockClear()
+      expect(
+        (await req("PATCH", `/webhook-endpoints/${endpoint.id}`, { rate_limit: 5 }))
+          .status,
+      ).toBe(200)
+      expect(store.update).toHaveBeenCalledTimes(1)
+      expect((await req("PATCH", `/webhook-endpoints/${endpoint.id}`, {})).status).toBe(
+        422,
+      )
+      expect(
+        (await req("PATCH", `/webhook-endpoints/${endpoint.id}`, { rate_limit: 0 }))
+          .status,
+      ).toBe(422)
+      expect(
+        (await req("PATCH", `/webhook-endpoints/${endpoint.id}`, { events: [] }))
+          .status,
+      ).toBe(422)
+      expect(store.update).toHaveBeenCalledTimes(1)
+    })
+
+    it("pauses and resumes through the same update", async () => {
+      store.update.mockClear()
+      await req("POST", `/webhook-endpoints/${endpoint.id}/pause`)
+      await req("POST", `/webhook-endpoints/${endpoint.id}/resume`)
+      expect(store.update.mock.calls.map((c) => (c as unknown[])[2])).toEqual([
+        { enabled: false },
+        { enabled: true },
+      ])
+    })
+
+    it("answers stats for a window", async () => {
+      const res = await req(
+        "GET",
+        `/webhook-endpoints/${endpoint.id}/stats?since=2026-10-04T00:00:00Z`,
+      )
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ delivered: 9, success_rate: 0.9 })
+    })
+
+    it("answers 501 for a test event when sending is not wired", async () => {
+      const res = await req("POST", `/webhook-endpoints/${endpoint.id}/test`, {
+        event_type: "email.bounced",
+      })
+      expect(res.status).toBe(501)
+    })
   })
 
   // ⚠ NO DEFAULT FOR THE OLD SECRET (decision 7). A rotation that does not

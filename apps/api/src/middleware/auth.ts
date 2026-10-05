@@ -36,6 +36,14 @@ declare module "hono" {
     emailLookup?: import("../send/lookup.js").EmailLookup
     /** Customer-managed webhook destinations. */
     webhookEndpoints?: import("../webhooks/store.js").WebhookEndpointStore
+    /** Deliveries and their attempts (#280, #281). */
+    webhookHistory?: import("../webhooks/history.js").WebhookHistory
+    /** Sends a sample event to one endpoint (#281). */
+    webhookTests?: (
+      tenantId: string,
+      endpointId: string,
+      type: import("../webhooks/events.js").WebhookEventType,
+    ) => Promise<import("../webhooks/test-events.js").TestResult>
     /** Sending domains and their DNS records. */
     domains?: import("../domains/store.js").DomainStore
     /** The workspace's suppression list, ours and SES's. */
