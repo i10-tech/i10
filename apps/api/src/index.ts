@@ -79,6 +79,7 @@ import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
 import { sendTestEvent } from "./webhooks/test-events.js"
+import { webhookReplayOps } from "./webhooks/replay.js"
 import type { WebhookEventType } from "./webhooks/events.js"
 import { parseAllowList, vetHost } from "./webhooks/egress.js"
 import { offlineTenantSuppressions, sesTenantSuppressions } from "./suppressions/ses.js"
@@ -1306,6 +1307,7 @@ const app = createApp({
             endpointId: string,
             type: WebhookEventType,
           ) => sendTestEvent(db, webhookQueue, tenantId, endpointId, type),
+          webhookReplays: webhookReplayOps(db, webhookQueue),
         }
       : {}),
     // ⚠ THE SAME POLAR CLIENT AND THE SAME PRODUCT MAP `/billing` USES, NOT A
@@ -1348,6 +1350,7 @@ const app = createApp({
         webhookHistory: webhookHistory(db),
         webhookTests: (tenantId: string, endpointId: string, type: WebhookEventType) =>
           sendTestEvent(db, webhookQueue, tenantId, endpointId, type),
+        webhookReplays: webhookReplayOps(db, webhookQueue),
         sesWebhooks: {
           events: webhookEventOps({ db, queue: webhookQueue }),
           log,

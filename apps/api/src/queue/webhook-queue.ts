@@ -48,6 +48,12 @@ export interface EnqueueDeliveryOptions {
   orderMs: number
   /** Not before this many milliseconds from now: a scheduled retry. */
   delayMs?: number
+  /**
+   * Makes the job id unique to one request, for a resend or a replay. Without
+   * it a second resend of the same delivery would share an id with the first,
+   * which groupmq may still remember completing, and be dropped as a repeat.
+   */
+  jobTag?: string
 }
 
 export const WEBHOOK_NAMESPACE = "i10:webhooks"
@@ -94,8 +100,8 @@ export function createWebhookQueue(opts: WebhookQueueOptions): Queue<WebhookJob>
  * the name because a retry is a NEW job - reusing the first attempt's id would
  * be refused as a duplicate of a job groupmq still remembers completing.
  */
-export const webhookJobId = (deliveryId: string, attempt = 0): string =>
-  `wh:${deliveryId}:${attempt}`
+export const webhookJobId = (deliveryId: string, attempt = 0, tag?: string): string =>
+  `wh:${deliveryId}:${attempt}${tag ? `:${tag}` : ""}`
 
 export async function enqueueDelivery(
   queue: Queue<WebhookJob>,
@@ -105,7 +111,7 @@ export async function enqueueDelivery(
   const attempt = job.attempt ?? 0
   await queue.add({
     groupId: job.endpointId,
-    jobId: webhookJobId(job.deliveryId, attempt),
+    jobId: webhookJobId(job.deliveryId, attempt, opts.jobTag),
     data: { ...job, attempt },
     orderMs: opts.orderMs,
     // ⚠ A DELAYED JOB STILL HOLDS ITS GROUP (measured 2026-10-05: a delayed

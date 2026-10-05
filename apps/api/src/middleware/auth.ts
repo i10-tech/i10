@@ -36,6 +36,8 @@ declare module "hono" {
     emailLookup?: import("../send/lookup.js").EmailLookup
     /** Customer-managed webhook destinations. */
     webhookEndpoints?: import("../webhooks/store.js").WebhookEndpointStore
+    /** Resend and replay (#282). */
+    webhookReplays?: import("../webhooks/replay.js").WebhookReplayOps
     /** Deliveries and their attempts (#280, #281). */
     webhookHistory?: import("../webhooks/history.js").WebhookHistory
     /** Sends a sample event to one endpoint (#281). */

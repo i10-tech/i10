@@ -25,6 +25,7 @@ import {
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
 import { webhookDeliveries } from "./routes/webhook-deliveries.js"
 import type { WebhookHistory } from "./webhooks/history.js"
+import type { WebhookReplayOps } from "./webhooks/replay.js"
 import type { TestResult } from "./webhooks/test-events.js"
 import type { WebhookEventType } from "./webhooks/events.js"
 
@@ -94,6 +95,8 @@ export interface AppDeps {
   webhookHistory?: WebhookHistory
   /** Test events, for `POST /webhook-endpoints/{id}/test`. */
   webhookTests?: WebhookTests
+  /** Resend and replay. */
+  webhookReplays?: WebhookReplayOps
   /**
    * The suppression list, for `/suppressions`. The same store the console uses.
    * Omitted in tests and in the OpenAPI generator, where the routes answer 501.
@@ -271,6 +274,7 @@ export function createApp(deps: AppDeps = {}) {
     const endpoints = deps.webhookEndpoints
     const history = deps.webhookHistory
     const tests = deps.webhookTests
+    const replays = deps.webhookReplays
     const suppressionList = deps.suppressions
     const trusted = deps.trustedTemplates
     const domainStore = deps.domains
@@ -283,6 +287,7 @@ export function createApp(deps: AppDeps = {}) {
       if (endpoints) c.set("webhookEndpoints", endpoints)
       if (history) c.set("webhookHistory", history)
       if (tests) c.set("webhookTests", tests)
+      if (replays) c.set("webhookReplays", replays)
       if (suppressionList) c.set("suppressions", suppressionList)
       if (trusted) c.set("trustedTemplates", trusted)
       if (domainStore) c.set("domains", domainStore)

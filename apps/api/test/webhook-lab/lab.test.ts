@@ -9,6 +9,7 @@ import {
 import { dueDeliveries } from "../../src/webhooks/db.js"
 import { webhookHistory, type WebhookHistory } from "../../src/webhooks/history.js"
 import { sendTestEvent } from "../../src/webhooks/test-events.js"
+import { createReplay, getReplay, resendDelivery } from "../../src/webhooks/replay.js"
 import { verifySignature } from "../../src/webhooks/signing.js"
 import { enabled, LAB, LAB_RULES, startLab, until, type Lab } from "./harness.js"
 
@@ -622,6 +623,175 @@ suite("webhook conformance lab", () => {
         success_rate: 1,
         failing_since: null,
       })
+    })
+  })
+
+  describe("replay (#282)", () => {
+    const window = () => ({ since: new Date(Date.now() - 60 * 60_000) })
+    const finished = (t: string, id: string) =>
+      until(async () => {
+        const r = await getReplay(lab.db, t, id)
+        return r && (r.status === "done" || r.status === "failed") ? r : undefined
+      }, 15_000)
+
+    test("resend sends one finished delivery again, once, under the same id", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/resend")
+      await lab.emit(t, { k: 1 })
+      await until(
+        async () => (await lab.deliveries(ep.id))[0]?.status === "delivered",
+        5_000,
+      )
+      const [row] = await lab.deliveries(ep.id)
+      const r = await resendDelivery(lab.db, lab.engine.queue, t, row!.id)
+      expect(r.status).toBe("queued")
+      await until(() => lab.receiver.of("resend").length >= 2, 5_000)
+      const ids = lab.receiver.of("resend").map((x) => x.headers["webhook-id"])
+      expect(ids).toEqual([row!.id, row!.id])
+      const detail = await history.get(t, row!.id)
+      expect(detail!.attempt_log.map((a) => a.trigger)).toEqual(["scheduled", "manual"])
+    })
+
+    test("resend refuses a delivery that is still being attempted", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "hang/resend-pending")
+      await lab.emit(t, { k: 1 })
+      const [row] = await lab.deliveries(ep.id)
+      expect((await resendDelivery(lab.db, lab.engine.queue, t, row!.id)).status).toBe(
+        "pending",
+      )
+    })
+
+    test("replaying failures only resends the failed ones, one attempt each", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "failk/rf?k=0&n=5")
+      for (let k = 0; k < 3; k++) await lab.emit(t, { k })
+      // k=0 fails its whole budget (5 attempts here); 1 and 2 are delivered.
+      await until(
+        async () => (await lab.deliveries(ep.id)).every((d) => d.status !== "pending"),
+        30_000,
+      )
+      // The exhausted head switched the endpoint off (no success for the
+      // lab's stretch); the customer fixes their receiver and turns it back on.
+      await lab.store.update(t, ep.id, { enabled: true })
+      const before = lab.receiver.of("rf").length
+      const r = await createReplay(lab.db, t, ep.id, "replay", {
+        ...window(),
+        statuses: ["failed"],
+      })
+      if (r.status !== "created") throw new Error(r.status)
+      const done = await finished(t, r.replay.id)
+      expect(done).toMatchObject({ status: "done", queued: 1, examined: 1 })
+      await until(() => lab.receiver.of("rf").length > before, 5_000)
+      await Bun.sleep(500)
+      const resent = lab.receiver.of("rf").slice(before)
+      expect(resent.map((x) => x.data.k)).toEqual([0])
+      // k=0 now gets through (n=5 failures are spent), on the recover trigger.
+      const failed = (await lab.deliveries(ep.id)).find((d) => d.attempts > 1)!
+      const detail = await history.get(t, failed.id)
+      expect(detail!.status).toBe("delivered")
+      expect(detail!.attempt_log.at(-1)!.trigger).toBe("recover")
+    }, 60_000)
+
+    test("a replay that fails is one attempt and does not count against the endpoint", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "fail/rfail")
+      await lab.store.update(t, ep.id, { enabled: true })
+      await lab.emit(t, { k: 1 })
+      await until(
+        async () => (await lab.deliveries(ep.id))[0]?.status === "failed",
+        30_000,
+      )
+      await lab.owner`update core.webhook_endpoints set failing_since = null, enabled = true where id = ${ep.id}`
+      const before = lab.receiver.of("rfail").length
+      const r = await createReplay(lab.db, t, ep.id, "replay", {
+        ...window(),
+        statuses: ["failed"],
+      })
+      if (r.status !== "created") throw new Error(r.status)
+      await finished(t, r.replay.id)
+      await until(() => lab.receiver.of("rfail").length > before, 5_000)
+      await Bun.sleep(3_000)
+      expect(lab.receiver.of("rfail").length - before).toBe(1)
+      const [e] =
+        await lab.owner`select failing_since from core.webhook_endpoints where id = ${ep.id}`
+      expect(e!.failing_since).toBeNull()
+    }, 60_000)
+
+    test("replay-missing sends what an endpoint created later never got", async () => {
+      const t = await lab.workspace()
+      await lab.emit(t, { k: "early" }, { type: "email.delivered" })
+      await lab.emit(t, { k: "early" }, { type: "email.bounced" })
+      const ep = await lab.endpoint(t, "ok/missing", { events: ["email.delivered"] })
+      const r = await createReplay(lab.db, t, ep.id, "replay_missing", window())
+      if (r.status !== "created") throw new Error(r.status)
+      const done = await finished(t, r.replay.id)
+      expect(done).toMatchObject({ status: "done", queued: 1 })
+      const got = await until(() => lab.receiver.of("missing")[0], 5_000)
+      expect(JSON.parse(got!.body)).toMatchObject({
+        type: "email.delivered",
+        data: { email_id: expect.any(String) },
+      })
+      // Running it again finds nothing: it has a delivery now.
+      const again = await createReplay(lab.db, t, ep.id, "replay_missing", window())
+      if (again.status !== "created") throw new Error(again.status)
+      expect(await finished(t, again.replay.id)).toMatchObject({
+        status: "done",
+        queued: 0,
+      })
+    })
+
+    test("a replay resumes from its cursor after the worker restarts", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/resume")
+      for (let k = 0; k < 150; k++) await lab.emit(t, { k }, { enqueue: false })
+      await lab.owner`update core.webhook_deliveries set status = 'failed', next_attempt_at = null where endpoint_id = ${ep.id}`
+      const r = await createReplay(lab.db, t, ep.id, "replay", {
+        ...window(),
+        statuses: ["failed"],
+      })
+      if (r.status !== "created") throw new Error(r.status)
+      // Wait for the first batch, then restart the engine mid-replay.
+      await until(
+        async () => ((await getReplay(lab.db, t, r.replay.id))?.queued ?? 0) >= 100,
+        10_000,
+      )
+      await lab.restart(0)
+      const done = await finished(t, r.replay.id)
+      expect(done).toMatchObject({ status: "done", queued: 150, examined: 150 })
+      await until(() => lab.receiver.of("resume").length >= 150, 20_000)
+      const ks = new Set(lab.receiver.of("resume").map((x) => x.data.k))
+      expect(ks.size).toBe(150)
+    }, 60_000)
+
+    test("a replay to a switched-off endpoint is refused, not silently wasted", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/off")
+      await lab.store.update(t, ep.id, { enabled: false })
+      expect((await createReplay(lab.db, t, ep.id, "replay", window())).status).toBe(
+        "paused",
+      )
+    })
+
+    test("a window is refused when it is backwards or too wide", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/window")
+      const now = Date.now()
+      expect(
+        (
+          await createReplay(lab.db, t, ep.id, "replay", {
+            since: new Date(now),
+            until: new Date(now - 1),
+          })
+        ).status,
+      ).toBe("rejected")
+      expect(
+        (
+          await createReplay(lab.db, t, ep.id, "replay", {
+            since: new Date(now - 40 * 86_400_000),
+          })
+        ).status,
+      ).toBe("rejected")
     })
   })
 

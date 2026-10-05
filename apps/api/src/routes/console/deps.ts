@@ -192,6 +192,8 @@ export interface ConsoleDeps extends TenantAuthDeps {
   webhooks?: WebhookEndpointStore
   /** A delivery's attempts, and expunging its payload (#280). */
   webhookHistory?: WebhookHistory
+  /** Resend and replay (#282). */
+  webhookReplays?: import("../../webhooks/replay.js").WebhookReplayOps
   /** Sends a sample event to one endpoint (#281). */
   webhookTests?: (
     tenantId: string,

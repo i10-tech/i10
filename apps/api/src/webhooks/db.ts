@@ -461,11 +461,16 @@ export function webhookDeliveryOps(
           })
           .where(eq(webhookDeliveries.id, delivery.id))
 
-        // The failing run starts at the first failure after a success.
-        await tx
-          .update(webhookEndpoints)
-          .set({ failingSince: sql`coalesce(${webhookEndpoints.failingSince}, now())` })
-          .where(eq(webhookEndpoints.id, delivery.endpointId))
+        // The failing run starts at the first failure after a success. A
+        // replay that fails is not evidence about the endpoint; it does not
+        // start one.
+        if (decision.disable.kind !== "none")
+          await tx
+            .update(webhookEndpoints)
+            .set({
+              failingSince: sql`coalesce(${webhookEndpoints.failingSince}, now())`,
+            })
+            .where(eq(webhookEndpoints.id, delivery.endpointId))
 
         if (decision.disable.kind === "gone") {
           await tx
@@ -480,7 +485,7 @@ export function webhookDeliveryOps(
           return
         }
 
-        if (!final) return
+        if (!final || decision.disable.kind === "none") return
 
         // ⚠ JUDGED WHEN A DELIVERY RUNS OUT, AGAINST TIME, NOT A COUNT. Only an
         // endpoint with no success at all for the plan's stretch is switched

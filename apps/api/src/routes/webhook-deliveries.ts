@@ -172,3 +172,48 @@ webhookDeliveries.openapi(expunge, async (c) => {
   }
   return c.json({ id, payload_expunged: true as const }, 200)
 })
+
+const resend = createRoute({
+  method: "post",
+  path: "/{id}/resend",
+  summary: "Resend a webhook delivery",
+  description:
+    "Sends a finished delivery again, now, under the same `webhook-id` so your " +
+    "receiver can tell it is the same event. One attempt: if it fails, it is " +
+    "recorded and not retried. A delivery still being attempted answers 409.",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: { params: idParam },
+  responses: {
+    202: {
+      description: "Queued. Follow it with `GET /webhook-deliveries/{id}`.",
+      content: { "application/json": { schema: z.object({ delivery_id: z.uuid() }) } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such delivery for this API key's tenant."),
+    409: errorResponse("Still being attempted, or its endpoint is paused."),
+    501: errorResponse("Webhooks are not configured."),
+  },
+})
+
+webhookDeliveries.openapi(resend, async (c) => {
+  const replays = c.get("webhookReplays")
+  if (!replays) return c.json(notWired, 501)
+  const result = await replays.resend(c.get("auth").tenantId, c.req.valid("param").id)
+  if (result.status === "not_found") return c.json(notFound, 404)
+  if (result.status !== "queued") {
+    return c.json(
+      {
+        statusCode: 409,
+        name: "validation_error" as const,
+        message:
+          result.status === "pending"
+            ? "This delivery is still being attempted."
+            : "Its endpoint is paused or switched off. Resume it first.",
+      },
+      409,
+    )
+  }
+  return c.json({ delivery_id: result.deliveryId }, 202)
+})

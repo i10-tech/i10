@@ -21,6 +21,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 import type { RetiringSecret } from "../webhooks/keys.js"
+import type { ReplayFilter } from "../webhooks/replay.js"
 
 /**
  * The transactional product: tenants, their domains and keys, and the mail they
@@ -1554,6 +1555,67 @@ export const webhookAttempts = core.table(
     index("webhook_attempts_delivery_idx").on(t.deliveryId, t.createdAt),
     index("webhook_attempts_endpoint_idx").on(t.endpointId, t.createdAt),
     pgPolicy("webhook_attempts_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/** What a replay sends (#282). */
+export const webhookReplayKind = core.enum("webhook_replay_kind", [
+  /** Deliveries that already exist, filtered by status and event type. */
+  "replay",
+  /** Events the endpoint never received a delivery for. */
+  "replay_missing",
+])
+
+export const webhookReplayStatus = core.enum("webhook_replay_status", [
+  "queued",
+  "running",
+  "done",
+  "failed",
+])
+
+/**
+ * A replay running in the background (#282): what it was asked for, how far it
+ * has got, and whether it finished.
+ *
+ * ⚠ THE PROGRESS IS IN THE ROW, NOT IN A PROCESS. The worker takes a batch,
+ * queues it, and writes `cursor` before taking the next, under a lease - so a
+ * restart mid-replay resumes from the last batch instead of losing the replay
+ * or starting it again. Svix runs its recovery as an untracked task whose
+ * status URL 404s and which a restart loses.
+ */
+export const webhookReplays = core.table(
+  "webhook_replays",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id").notNull(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+    kind: webhookReplayKind("kind").notNull(),
+    /** `since`, `until`, and for `replay` the `statuses` and `event_type`. */
+    filter: jsonb("filter").$type<ReplayFilter>().notNull(),
+    status: webhookReplayStatus("status").notNull().default("queued"),
+    /** Deliveries sent so far. */
+    queued: integer("queued").notNull().default(0),
+    /** Rows looked at so far. */
+    examined: integer("examined").notNull().default(0),
+    /** Where the next batch starts: the last row's timestamp text and id. */
+    cursor: jsonb("cursor").$type<{ at: string; id: string } | null>(),
+    error: text("error"),
+    claimedUntil: timestamp("claimed_until", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("webhook_replays_endpoint_idx").on(t.endpointId, t.createdAt),
+    pgPolicy("webhook_replays_tenant", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
