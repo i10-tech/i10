@@ -174,6 +174,7 @@ describe("delivery during a grace period", () => {
           sequence: 1,
           firstFailedAt: null,
           lane: "ordered",
+          rateLimit: null,
         }),
         markDelivered: mock(async () => {}),
         markFailed: mock(async () => {}),

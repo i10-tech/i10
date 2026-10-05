@@ -50,8 +50,12 @@ export interface EnqueueDeliveryOptions {
 
 export const WEBHOOK_NAMESPACE = "i10:webhooks"
 
-/** Above every plan's attempt budget; see `createWebhookQueue`. */
-export const GROUPMQ_ATTEMPT_CEILING = 50
+/**
+ * Above every plan's attempt budget, and above the deferrals a busy workspace
+ * or a cooling endpoint can collect (engine.ts) - those re-queue the job
+ * through groupmq without being attempts. See `createWebhookQueue`.
+ */
+export const GROUPMQ_ATTEMPT_CEILING = 1_000
 
 export interface WebhookQueueOptions {
   redis: Redis

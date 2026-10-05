@@ -385,6 +385,11 @@ export const createWebhookEndpointSchema = z.object({
   description: z.string().max(255).optional(),
   /** Defaults to `hmac_sha256`. */
   signature_scheme: webhookSignatureScheme.optional(),
+  /**
+   * The most deliveries a second this endpoint will take, 1 to 1000. Held
+   * across all of i10's workers. Omit for no limit.
+   */
+  rate_limit: z.number().int().min(1).max(1000).optional(),
 })
 
 export const webhookEndpointSchema = z.object({
@@ -401,6 +406,8 @@ export const webhookEndpointSchema = z.object({
   disabled_reason: z.string().nullable(),
   created_at: z.string(),
   signature_scheme: webhookSignatureScheme,
+  /** Deliveries a second, at most; null for no limit. */
+  rate_limit: z.number().int().nullable(),
   /** The `whpk_` key to verify with, for `ed25519`; null for HMAC. Not a secret. */
   public_key: z.string().nullable(),
   /**

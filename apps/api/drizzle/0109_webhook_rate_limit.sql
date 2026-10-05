@@ -1,0 +1,1 @@
+ALTER TABLE "core"."webhook_endpoints" ADD COLUMN "rate_limit" integer;

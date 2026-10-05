@@ -64,6 +64,8 @@ export const LAB = {
   concurrency: 8,
   /** Production: 5 minutes. */
   holdMs: 2_000,
+  /** Production: 3 timeouts, then 30s doubling to 10 minutes. */
+  breaker: { threshold: 2, coolMs: 10_000, maxCoolMs: 20_000 },
 }
 
 const ALL_EVENTS: WebhookEventType[] = [
@@ -94,7 +96,7 @@ export interface Lab {
   endpoint: (
     tenantId: string,
     path: string,
-    opts?: { events?: WebhookEventType[]; host?: string },
+    opts?: { events?: WebhookEventType[]; host?: string; rateLimit?: number },
   ) => Promise<{ id: string; secret: string; url: string }>
   /** Records an event the way SES ingestion does, and queues its deliveries. */
   emit: (
@@ -184,6 +186,7 @@ export async function startLab(): Promise<Lab> {
       timeoutMs: LAB.timeoutMs,
       rules: LAB_RULES,
       holdMs: LAB.holdMs,
+      breaker: LAB.breaker,
       sweepEveryMs: LAB.sweepEveryMs,
       sweepGraceSeconds: LAB.sweepGraceSeconds,
       schedulerIntervalMs: 200,
@@ -211,9 +214,9 @@ export async function startLab(): Promise<Lab> {
       const key = generateKey("hmac_sha256")
       const url = `http://${opts.host ?? "lab.test"}:${receiver.port}/${path.replace(/^\//, "")}`
       const [row] = await owner`
-        insert into core.webhook_endpoints (tenant_id, url, secret_ciphertext, events)
+        insert into core.webhook_endpoints (tenant_id, url, secret_ciphertext, events, rate_limit)
         values (${tenantId}, ${url}, ${secrets.seal(key.secret)},
-                ${opts.events ?? ALL_EVENTS}::core.webhook_event_type[])
+                ${opts.events ?? ALL_EVENTS}::core.webhook_event_type[], ${opts.rateLimit ?? null})
         returning id`
       return { id: row!.id as string, secret: key.secret, url }
     },

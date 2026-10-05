@@ -14,6 +14,13 @@ import { DELIVERY_TIMEOUT_MS, deliverWebhook, type DeliveryLane } from "./delive
 import { vetHost, type Lookup, type VetOptions } from "./egress.js"
 import type { Logger } from "./events.js"
 import type { RetryRules } from "./schedule.js"
+import {
+  EndpointBreaker,
+  shareOf,
+  takeThrottleSlot,
+  WorkspaceShare,
+  type BreakerOptions,
+} from "./fairness.js"
 import type { SecretBox } from "./signing.js"
 
 /**
@@ -71,6 +78,8 @@ export interface WebhookEngineOptions {
   schedulerIntervalMs?: number
   /** How long a failing head may hold its endpoint. Production: 5 minutes. */
   holdMs?: number
+  /** The per-endpoint circuit breaker's settings. Production: fairness.ts. */
+  breaker?: BreakerOptions
 }
 
 export interface WebhookEngineHealth {
@@ -102,6 +111,13 @@ class RetryAt extends Error {
     super(`retry at ${at.toISOString()}`)
   }
 }
+
+/**
+ * Not now, and not an attempt: the endpoint is cooling, or its workspace is
+ * at its share. Re-queued in its group like a retry, but nothing is recorded
+ * on the delivery - its budget is untouched.
+ */
+class Defer extends RetryAt {}
 
 export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
   /*
@@ -135,28 +151,68 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
     lastSweepFound: 0,
     restarts: 0,
   }
+  // ⚠ THE RETRY LANE IS SMALLER. It only carries deliveries that have
+  // already failed for longer than the hold; it must never be able to take
+  // slots the ordered lane - where fresh events are - needs.
+  const concurrency: Record<DeliveryLane, number> = {
+    ordered: opts.concurrency,
+    retry: Math.max(2, Math.ceil(opts.concurrency / 4)),
+  }
+  const breaker = new EndpointBreaker(opts.breaker)
+  const throttlePrefix = opts.namespace ?? WEBHOOK_NAMESPACE
+
   const makeWorker = (lane: DeliveryLane) => {
     // Handed from `onError` to `backoff`; see the note on `backoff` below.
     // One per worker, so the two lanes never trade delays.
     let pendingDelayMs: number | null = null
+    const share = new WorkspaceShare(shareOf(concurrency[lane]))
     return new Worker<WebhookJob>({
       queue: queues[lane],
       name: `${opts.name}:${lane}`,
       handler: async (job) => {
         state.lastHandledAt = new Date()
-        const outcome = await deliverWebhook(job.data, {
-          ...ops,
-          vet: (host, signal) =>
-            vetHost(host, {
-              ...(opts.egressAllow ? { allow: opts.egressAllow } : {}),
-              ...(opts.lookup ? { lookup: opts.lookup } : {}),
-              signal,
-            }),
-          log: opts.log,
-          ...(opts.rules ? { rules: opts.rules } : {}),
-          ...(opts.holdMs !== undefined ? { holdMs: opts.holdMs } : {}),
-          timeoutMs,
-        })
+        const { tenantId, endpointId } = job.data
+
+        // ⚠ BOTH CHECKS COME BEFORE THE ROW IS EVEN READ, and both free the
+        // slot at once. A cooling endpoint is not tried; a workspace at its
+        // share waits its turn. Neither touches the delivery's budget.
+        const cooling = breaker.coolingUntil(endpointId)
+        if (cooling) throw new Defer(cooling)
+        if (!share.tryAcquire(tenantId)) {
+          throw new Defer(new Date(Date.now() + 250 + Math.random() * 750))
+        }
+
+        let outcome: Awaited<ReturnType<typeof deliverWebhook>>
+        try {
+          outcome = await deliverWebhook(job.data, {
+            ...ops,
+            vet: (host, signal) =>
+              vetHost(host, {
+                ...(opts.egressAllow ? { allow: opts.egressAllow } : {}),
+                ...(opts.lookup ? { lookup: opts.lookup } : {}),
+                signal,
+              }),
+            log: opts.log,
+            ...(opts.rules ? { rules: opts.rules } : {}),
+            ...(opts.holdMs !== undefined ? { holdMs: opts.holdMs } : {}),
+            timeoutMs,
+            beforeSend: async (delivery) => {
+              if (delivery.rateLimit) {
+                await takeThrottleSlot(
+                  opts.redis,
+                  throttlePrefix,
+                  endpointId,
+                  delivery.rateLimit,
+                )
+              }
+            },
+          })
+        } finally {
+          share.release(tenantId)
+        }
+        if (outcome.status === "delivered") breaker.record(endpointId, false)
+        else if (outcome.status === "failed")
+          breaker.record(endpointId, Boolean(outcome.timedOut))
 
         // ⚠ A RETRY IS THROWN, CARRYING ITS DELAY, AND THAT IS NOT AN ERROR
         // PATH. groupmq's own retry (retry.lua) puts the job back in its group
@@ -208,12 +264,16 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
       // ⚠ HOW MANY ENDPOINTS ARE IN FLIGHT AT ONCE, NOT HOW MANY EVENTS PER
       // ENDPOINT. groupmq runs one job per group, so this is a count of
       // distinct customer endpoints being POSTed to concurrently.
-      concurrency: opts.concurrency,
+      concurrency: concurrency[lane],
       schedulerIntervalMs: opts.schedulerIntervalMs ?? 1_000,
       // ⚠ NOT REPORTED TO SENTRY. A customer's endpoint having a bad afternoon
       // is recorded on the delivery row; this only fires when the handler
       // itself broke, which the row's lease and the sweep then recover.
       onError: (err, job) => {
+        if (err instanceof Defer) {
+          pendingDelayMs = Math.max(0, err.at.getTime() - Date.now())
+          return
+        }
         if (err instanceof RetryAt) {
           // ⚠ PLUS A SECOND, BECAUSE groupmq's retry.lua FLOORS REDIS'S CLOCK
           // TO THE SECOND and would otherwise fire up to 999ms early - which

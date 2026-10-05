@@ -56,6 +56,8 @@ export interface DeliveryRecord {
   firstFailedAt: Date | null
   /** Which queue it is retried on. */
   lane: DeliveryLane
+  /** The endpoint's deliveries-per-second limit, if the customer set one. */
+  rateLimit: number | null
 }
 
 export type DeliveryLane = "ordered" | "retry"
@@ -93,6 +95,8 @@ export type DeliveryOutcome =
       retryAt?: Date
       /** Where the retry runs; differs from the delivery's lane when it was just moved aside. */
       lane?: DeliveryLane
+      /** The endpoint never answered in time; what the circuit breaker counts. */
+      timedOut?: boolean
     }
 
 export interface DeliverDeps {
@@ -113,6 +117,11 @@ export interface DeliverDeps {
   rules?: RetryRules
   /** How long a failing head may hold its endpoint. Defaults to `HOLD_MS`. */
   holdMs?: number
+  /**
+   * Waits for the endpoint's turn under its rate limit, after the row is
+   * claimed and before anything is signed (so the timestamp is the send's).
+   */
+  beforeSend?: (delivery: DeliveryRecord) => Promise<void>
   fetch?: typeof fetch
   /**
    * Decides where a hostname may be connected to. Defaults to the system
@@ -146,6 +155,8 @@ export async function deliverWebhook(
     deps.log.info({ deliveryId: job.deliveryId }, "webhook delivery no longer pending")
     return { status: "skipped" }
   }
+
+  if (deps.beforeSend) await deps.beforeSend(delivery)
 
   const body = JSON.stringify(
     envelope(delivery.id, {
@@ -292,5 +303,6 @@ export async function deliverWebhook(
   // retry stays in its endpoint's group; on the final attempt there is nothing
   // to hand over - the row already says `failed`, and a customer's dead
   // endpoint must not fill the failed-job list a real bug needs.
-  return nextAttemptAt ? { ...outcome, retryAt: nextAttemptAt, lane } : outcome
+  const failed = signals.timedOut ? { ...outcome, timedOut: true } : outcome
+  return nextAttemptAt ? { ...failed, retryAt: nextAttemptAt, lane } : failed
 }

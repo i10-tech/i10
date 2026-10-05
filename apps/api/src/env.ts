@@ -582,8 +582,15 @@ const schema = z.object({
    */
   WEBHOOK_SECRET_KEY: z.string().min(32).optional(),
 
-  /** Provider webhook deliveries in flight per worker replica. */
-  WEBHOOK_CONCURRENCY: z.coerce.number().int().positive().max(100).default(8),
+  /**
+   * Webhook endpoints being POSTed to at once on the ordered lane, per worker
+   * replica; the retry lane gets a quarter of it.
+   *
+   * ⚠ A SLOT IS AN IN-FLIGHT `fetch`, NOT A CPU. It used to be 8, which ten
+   * slow endpoints could fill. Each workspace gets a quarter of the slots at
+   * most (webhooks/fairness.ts), so no one workspace fills them now.
+   */
+  WEBHOOK_CONCURRENCY: z.coerce.number().int().positive().max(256).default(32),
 
   /**
    * Private address ranges webhook delivery may connect to anyway, as

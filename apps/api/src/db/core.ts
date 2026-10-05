@@ -1356,6 +1356,11 @@ export const webhookEndpoints = core.table(
      * Svix does - an endpoint that answers even occasionally stays on.
      */
     failingSince: timestamp("failing_since", { withTimezone: true }),
+    /**
+     * The most deliveries a second this endpoint will take, if the customer
+     * set one. Enforced across replicas (webhooks/fairness.ts).
+     */
+    rateLimit: integer("rate_limit"),
     /** The last `sequence` handed out for this endpoint. */
     nextSequence: bigint("next_sequence", { mode: "number" }).notNull().default(0),
     disabledAt: timestamp("disabled_at", { withTimezone: true }),

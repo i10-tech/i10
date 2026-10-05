@@ -46,6 +46,7 @@ const endpoint = {
   disabled_reason: null,
   created_at: "2026-09-03T10:00:00.000Z",
   signature_scheme: "hmac_sha256" as const,
+  rate_limit: null,
   public_key: null,
   previous_secrets: [],
 }
