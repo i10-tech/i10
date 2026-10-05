@@ -20,6 +20,7 @@ import {
   vector,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
+import type { RetiringSecret } from "../webhooks/keys.js"
 
 /**
  * The transactional product: tenants, their domains and keys, and the mail they
@@ -119,6 +120,16 @@ export const webhookEventType = core.enum("webhook_event_type", [
   "email.opened",
   "email.clicked",
   "email.unsubscribed",
+])
+
+/**
+ * How an endpoint's webhooks are signed. Both are Standard Webhooks: `v1,`
+ * HMAC with a shared secret, `v1a,` Ed25519 verified with a public key. See
+ * webhooks/keys.ts.
+ */
+export const webhookSignatureScheme = core.enum("webhook_signature_scheme", [
+  "hmac_sha256",
+  "ed25519",
 ])
 
 export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
@@ -1283,6 +1294,29 @@ export const webhookEndpoints = core.table(
      * call is a far better target than the database.
      */
     secretCiphertext: text("secret_ciphertext").notNull(),
+
+    /** How `secret_ciphertext` signs. Changed only by a rotation. */
+    signatureScheme: webhookSignatureScheme("signature_scheme")
+      .notNull()
+      .default("hmac_sha256"),
+    /**
+     * The current key's `whpk_` public key, for ed25519. Not a secret, so
+     * readable at any time - it is what the customer verifies with.
+     */
+    publicKey: text("public_key"),
+    /**
+     * Keys a rotation replaced that the customer chose to keep signing for a
+     * while, each sealed like the current one and each with its own expiry.
+     *
+     * ⚠ EMPTY UNLESS THE CUSTOMER ASKED. Rotation has no default for the old
+     * key (docs/decisions/webhooks.md, decision 7), the expiry is capped at 72
+     * hours, and expired entries are dropped at the next rotation and ignored
+     * at signing. See webhooks/keys.ts.
+     */
+    retiringSecrets: jsonb("retiring_secrets")
+      .$type<RetiringSecret[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
 
     events: webhookEventType("events").array().notNull(),
 

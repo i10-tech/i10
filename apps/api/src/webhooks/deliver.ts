@@ -1,7 +1,8 @@
 import type { WebhookJob } from "../queue/webhook-queue.js"
 import { envelope, type Logger, type WebhookEventType } from "./events.js"
 import { describeError } from "../errors.js"
-import { signPayload, timestampFor } from "./signing.js"
+import { timestampFor } from "./signing.js"
+import { signWithKeys, type SigningKey } from "./keys.js"
 
 /**
  * Delivering one webhook.
@@ -36,8 +37,12 @@ export interface DeliveryRecord {
   tenantId: string
   endpointId: string
   url: string
-  /** Decrypted at read time by the adapter; never logged. */
-  secret: string
+  /**
+   * Every key that signs this attempt: the current one first, then any the
+   * customer chose to keep through a rotation. Decrypted at read time by the
+   * adapter; never logged.
+   */
+  keys: SigningKey[]
   eventType: WebhookEventType
   occurredAt: Date
   payload: Record<string, unknown>
@@ -106,7 +111,7 @@ export async function deliverWebhook(
         // the entire reason the format moved. All three are signed material.
         "webhook-id": delivery.id,
         "webhook-timestamp": timestampFor(now),
-        "webhook-signature": signPayload(delivery.secret, delivery.id, body, now),
+        "webhook-signature": signWithKeys(delivery.keys, delivery.id, body, now),
       },
       body,
       // ⚠ NOT OPTIONAL. See the note at the top of this file: a silent socket

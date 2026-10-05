@@ -4,15 +4,6 @@ import * as React from "react"
 import { Copy, KeyRound, SearchX, Trash2, Webhook } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
-import { CopyField } from "@repo/ui/components/copy"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -31,8 +22,8 @@ import {
 import { Status } from "@/components/status"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
-import { deleteWebhook, rotateWebhookSecret } from "@/lib/actions"
-import { useRetained } from "@/lib/react"
+import { deleteWebhook, revokePreviousWebhookSecrets } from "@/lib/actions"
+import { RotateSecretDialog } from "@/components/webhook-rotate-dialog"
 import type { WebhookEndpoint } from "@/lib/types"
 import { Time } from "@/components/time"
 import { toastDone, toastError } from "@/lib/toast"
@@ -53,8 +44,7 @@ import { RowMenu } from "@/components/list/row-menu"
  */
 export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
   const [deleting, setDeleting] = React.useState<WebhookEndpoint | null>(null)
-  const [rotated, setRotated] = React.useState<WebhookEndpoint | null>(null)
-  const shownRotated = useRetained(rotated)
+  const [rotating, setRotating] = React.useState<WebhookEndpoint | null>(null)
 
   const [query, setQuery] = React.useState("")
   const [state, setState] = React.useState("")
@@ -97,21 +87,40 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
         <Copy />
         Copy ID
       </DropdownMenuItem>
-      <DropdownMenuItem
-        onSelect={async () => {
-          const result = await rotateWebhookSecret(endpoint.id)
-          if (!result.ok) {
-            toastError("Could not rotate the secret", { description: result.error })
-            return
+      {endpoint.public_key && (
+        <DropdownMenuItem
+          onSelect={() =>
+            void navigator.clipboard.writeText(endpoint.public_key!).then(
+              () => toastDone("Public key copied"),
+              () => toastError("Could not copy the public key"),
+            )
           }
-          // No refresh: `rotateWebhookSecret` re-renders this page in its own
-          // response. See `run` in lib/actions.ts.
-          setRotated(result.data)
-        }}
-      >
+        >
+          <Copy />
+          Copy public key
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuItem onSelect={() => setRotating(endpoint)}>
         <KeyRound />
         Rotate signing secret
       </DropdownMenuItem>
+      {endpoint.previous_secrets.length > 0 && (
+        <DropdownMenuItem
+          onSelect={async () => {
+            const result = await revokePreviousWebhookSecrets(endpoint.id)
+            if (!result.ok) {
+              toastError("Could not revoke the previous secrets", {
+                description: result.error,
+              })
+              return
+            }
+            toastDone("Previous secrets revoked")
+          }}
+        >
+          <KeyRound />
+          Revoke previous secrets now
+        </DropdownMenuItem>
+      )}
       <DropdownMenuSeparator />
       <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(endpoint)}>
         <Trash2 />
@@ -186,6 +195,7 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
                   </div>
                 </div>
                 <Events events={endpoint.events} />
+                <PreviousSecrets endpoint={endpoint} />
                 <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
                   <Status status={endpoint.enabled ? "enabled" : "disabled"} />
                   <span>
@@ -258,29 +268,10 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
         }}
       />
 
-      <Dialog open={rotated !== null} onOpenChange={() => {}}>
-        <DialogContent
-          className="sm:max-w-lg"
-          showCloseButton={false}
-          onEscapeKeyDown={(event) => event.preventDefault()}
-          onPointerDownOutside={(event) => event.preventDefault()}
-        >
-          <DialogHeader>
-            <DialogTitle>Your new signing secret</DialogTitle>
-            <DialogDescription>
-              The previous secret stopped verifying the moment this was issued. Deploy
-              it before the next event arrives, or your handler will reject a legitimate
-              request.
-            </DialogDescription>
-          </DialogHeader>
-          {shownRotated?.secret && (
-            <CopyField value={shownRotated.secret} className="py-2" />
-          )}
-          <DialogFooter>
-            <Button onClick={() => setRotated(null)}>I have copied it</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RotateSecretDialog
+        endpoint={rotating}
+        onOpenChange={(open) => !open && setRotating(null)}
+      />
     </>
   )
 }
@@ -322,5 +313,30 @@ function Events({ events, compact = false }: { events: string[]; compact?: boole
         </Tooltip>
       )}
     </div>
+  )
+}
+
+/**
+ * ⚠ A SECRET THAT STILL SIGNS AFTER A ROTATION IS SAID OUT LOUD, with when it
+ * stops. It was the person's own choice, but a grace period they forgot about
+ * is exactly the window a leaked secret is useful in.
+ */
+function PreviousSecrets({ endpoint }: { endpoint: WebhookEndpoint }) {
+  const last = endpoint.previous_secrets
+    .map((p) => p.expires_at)
+    .sort()
+    .at(-1)
+  if (!last) return null
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-warning">
+      <KeyRound className="size-3.5" />
+      <span>
+        {endpoint.previous_secrets.length === 1
+          ? "A previous secret"
+          : `${endpoint.previous_secrets.length} previous secrets`}{" "}
+        still {endpoint.previous_secrets.length === 1 ? "signs" : "sign"} until{" "}
+        <Time iso={last} mode="exact" />
+      </span>
+    </p>
   )
 }

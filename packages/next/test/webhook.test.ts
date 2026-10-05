@@ -217,3 +217,40 @@ describe("createWebhookHandler", () => {
     )
   })
 })
+
+describe("ed25519 endpoints", () => {
+  /**
+   * ⚠ SVIX'S PUBLISHED v1a VECTOR (svix-webhooks, worker.rs), so this verifier
+   * is pinned to another implementation, not to i10's signer. The identical
+   * signature is produced in `apps/api/test/webhook-keys.test.ts`.
+   */
+  const keypair = Buffer.from(
+    "6Xb/dCcHpPea21PS1N9VY/NZW723CEc77N4rJCubMbfVKIDij2HKpMKkioLlX0dRqSKJp4AJ6p9lMicMFs6Kvg==",
+    "base64",
+  )
+  const PUBLIC = `whpk_${keypair.subarray(32).toString("base64")}`
+  const V1A =
+    "v1a,hnO3f9T8Ytu9HwrXslvumlUpqtNVqkhqw/enGzPCXe5BdqzCInXqYXFymVJaA7AZdpXwVLPo3mNl8EM+m7TBAg=="
+  const args = ['{"test": 2432232314}', "msg_p5jXN8AQM9LWM0D4loKWxJek"] as const
+
+  it("verifies a v1a signature with the whpk_ public key", () => {
+    expect(verifySignature(...args, V1A, "1614265330", PUBLIC, 1e10)).toBe(true)
+  })
+
+  it("rejects it for a different body, and ignores v1 entries", () => {
+    expect(
+      verifySignature('{"test": 1}', args[1], V1A, "1614265330", PUBLIC, 1e10),
+    ).toBe(false)
+    expect(verifySignature(...args, "v1,AAAA", "1614265330", PUBLIC, 1e10)).toBe(false)
+  })
+
+  it("finds the v1a entry in a mixed list, as during a scheme change", () => {
+    expect(verifySignature(...args, `v1,AAAA ${V1A}`, "1614265330", PUBLIC, 1e10)).toBe(
+      true,
+    )
+  })
+
+  it("returns false for a malformed public key rather than throwing", () => {
+    expect(verifySignature(...args, V1A, "1614265330", "whpk_short", 1e10)).toBe(false)
+  })
+})

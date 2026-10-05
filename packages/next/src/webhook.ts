@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto"
+import { createHmac, createPublicKey, timingSafeEqual, verify } from "node:crypto"
 
 export interface WebhookEvent {
   type: string
@@ -7,7 +7,11 @@ export interface WebhookEvent {
 }
 
 export interface WebhookHandlerOptions {
-  /** The signing secret shown once when the endpoint is created. */
+  /**
+   * What the endpoint signs with: the `whsec_` secret shown once when an HMAC
+   * endpoint is created or rotated, or the `whpk_` public key of an Ed25519
+   * endpoint (shown on every endpoint response).
+   */
   secret: string
   onEvent: (event: WebhookEvent) => Promise<void> | void
   /**
@@ -45,6 +49,12 @@ export function verifySignature(
   const sent = Number(timestamp)
   if (!Number.isFinite(sent)) return false
   if (Math.abs(Date.now() / 1000 - sent) > toleranceSeconds) return false
+
+  // An Ed25519 endpoint: verify `v1a,` entries with the public key. Nothing
+  // the receiver holds can be used to sign, which is the point of choosing it.
+  if (secret.startsWith("whpk_")) {
+    return verifyEd25519(rawBody, id, signature, timestamp, secret)
+  }
 
   // The secret is `whsec_` followed by base64, and the DECODED BYTES are what
   // key the HMAC. Keying with the printable string is the classic mistake here
@@ -111,4 +121,27 @@ export function createWebhookHandler(options: WebhookHandlerOptions) {
     await options.onEvent(JSON.parse(rawBody) as WebhookEvent)
     return new Response(null, { status: 204 })
   }
+}
+
+function verifyEd25519(
+  rawBody: string,
+  id: string,
+  signature: string,
+  timestamp: string,
+  publicKey: string,
+): boolean {
+  const raw = Buffer.from(publicKey.slice("whpk_".length), "base64")
+  if (raw.length !== 32) return false
+  const key = createPublicKey({
+    key: { kty: "OKP", crv: "Ed25519", x: raw.toString("base64url") },
+    format: "jwk",
+  })
+  const signed = Buffer.from(`${id}.${timestamp}.${rawBody}`)
+  for (const part of signature.split(" ")) {
+    const [version, encoded] = part.split(",", 2)
+    if (version !== "v1a" || !encoded) continue
+    const sig = Buffer.from(encoded, "base64")
+    if (sig.length === 64 && verify(null, signed, key, sig)) return true
+  }
+  return false
 }

@@ -635,8 +635,46 @@
           "created_at": {
             "type": "string"
           },
+          "signature_scheme": {
+            "type": "string",
+            "enum": [
+              "hmac_sha256",
+              "ed25519"
+            ]
+          },
+          "public_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "previous_secrets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "signature_scheme": {
+                  "type": "string",
+                  "enum": [
+                    "hmac_sha256",
+                    "ed25519"
+                  ]
+                },
+                "expires_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "signature_scheme",
+                "expires_at"
+              ]
+            }
+          },
           "secret": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -647,6 +685,9 @@
           "description",
           "enabled",
           "created_at",
+          "signature_scheme",
+          "public_key",
+          "previous_secrets",
           "secret"
         ]
       },
@@ -678,6 +719,13 @@
           "description": {
             "type": "string",
             "maxLength": 255
+          },
+          "signature_scheme": {
+            "type": "string",
+            "enum": [
+              "hmac_sha256",
+              "ed25519"
+            ]
           }
         },
         "required": [
@@ -735,6 +783,41 @@
                 },
                 "created_at": {
                   "type": "string"
+                },
+                "signature_scheme": {
+                  "type": "string",
+                  "enum": [
+                    "hmac_sha256",
+                    "ed25519"
+                  ]
+                },
+                "public_key": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "previous_secrets": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "signature_scheme": {
+                        "type": "string",
+                        "enum": [
+                          "hmac_sha256",
+                          "ed25519"
+                        ]
+                      },
+                      "expires_at": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "signature_scheme",
+                      "expires_at"
+                    ]
+                  }
                 }
               },
               "required": [
@@ -744,13 +827,43 @@
                 "events",
                 "description",
                 "enabled",
-                "created_at"
+                "created_at",
+                "signature_scheme",
+                "public_key",
+                "previous_secrets"
               ]
             }
           }
         },
         "required": [
           "data"
+        ]
+      },
+      "RotateWebhookSecret": {
+        "type": "object",
+        "properties": {
+          "previous_secret": {
+            "type": "string",
+            "enum": [
+              "revoke",
+              "expire"
+            ]
+          },
+          "expires_in": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 259200
+          },
+          "signature_scheme": {
+            "type": "string",
+            "enum": [
+              "hmac_sha256",
+              "ed25519"
+            ]
+          }
+        },
+        "required": [
+          "previous_secret"
         ]
       },
       "SuppressionList": {
@@ -1772,7 +1885,94 @@
     "/webhook-endpoints/{id}/rotate-secret": {
       "post": {
         "summary": "Rotate a webhook signing secret",
-        "description": "Issues a new signing secret and returns it once. ⚠ The old secret stops working immediately - deliveries in flight are signed with whichever secret was current when they were signed, so update your receiver first or accept a short window of rejected deliveries.",
+        "description": "Issues a new signing key and returns its secret once. You choose what happens to the key it replaces: `previous_secret: \"revoke\"` stops it immediately; `previous_secret: \"expire\"` with `expires_in` (60 to 259200 seconds, which is 72 hours) keeps it signing alongside the new one so you can deploy the new secret first. While both are live, every webhook carries one signature per key. At most 3 keys are live at once. Pass `signature_scheme` to switch between HMAC and Ed25519.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateWebhookSecret"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rotated. `secret` is shown only in this response (null for Ed25519, which you verify with `public_key`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No choice for the previous secret, an `expires_in` out of range, or too many live keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-endpoints/{id}/revoke-previous-secrets": {
+      "post": {
+        "summary": "Revoke previous webhook signing secrets",
+        "description": "Ends every grace period chosen at rotation, now. From this request on, only the current key signs. Use it when a previous secret may have leaked.",
         "tags": [
           "Webhooks"
         ],
@@ -1794,11 +1994,103 @@
         ],
         "responses": {
           "200": {
-            "description": "Rotated. `secret` is shown only in this response.",
+            "description": "Revoked. `previous_secrets` is now empty.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "webhook_endpoint"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "email.sent",
+                          "email.delivered",
+                          "email.delivery_delayed",
+                          "email.bounced",
+                          "email.complained",
+                          "email.failed",
+                          "email.opened",
+                          "email.clicked",
+                          "email.unsubscribed"
+                        ]
+                      }
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "signature_scheme": {
+                      "type": "string",
+                      "enum": [
+                        "hmac_sha256",
+                        "ed25519"
+                      ]
+                    },
+                    "public_key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "previous_secrets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "signature_scheme": {
+                            "type": "string",
+                            "enum": [
+                              "hmac_sha256",
+                              "ed25519"
+                            ]
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "signature_scheme",
+                          "expires_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "url",
+                    "events",
+                    "description",
+                    "enabled",
+                    "created_at",
+                    "signature_scheme",
+                    "public_key",
+                    "previous_secrets"
+                  ]
                 }
               }
             }

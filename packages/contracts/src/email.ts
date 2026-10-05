@@ -368,6 +368,14 @@ export const webhookEventName = z.enum([
   "email.unsubscribed",
 ])
 
+/**
+ * How webhooks to an endpoint are signed, both per Standard Webhooks:
+ * `hmac_sha256` (`v1,`) with a shared `whsec_` secret, or `ed25519` (`v1a,`)
+ * verified with a `whpk_` public key, so nothing the receiver stores can forge
+ * a webhook.
+ */
+export const webhookSignatureScheme = z.enum(["hmac_sha256", "ed25519"])
+
 /** `POST /webhook-endpoints` - where a customer wants their events delivered. */
 export const createWebhookEndpointSchema = z.object({
   /** ⚠ https, public, and not an IP literal - see webhooks/endpoints.ts. */
@@ -375,6 +383,8 @@ export const createWebhookEndpointSchema = z.object({
   /** At least one, because an endpoint subscribed to nothing is a silent bug. */
   events: z.array(webhookEventName).min(1),
   description: z.string().max(255).optional(),
+  /** Defaults to `hmac_sha256`. */
+  signature_scheme: webhookSignatureScheme.optional(),
 })
 
 export const webhookEndpointSchema = z.object({
@@ -385,6 +395,16 @@ export const webhookEndpointSchema = z.object({
   description: z.string().nullable(),
   enabled: z.boolean(),
   created_at: z.string(),
+  signature_scheme: webhookSignatureScheme,
+  /** The `whpk_` key to verify with, for `ed25519`; null for HMAC. Not a secret. */
+  public_key: z.string().nullable(),
+  /**
+   * Keys a rotation replaced that still sign until `expires_at`, because the
+   * customer chose a grace period. Never the key material itself.
+   */
+  previous_secrets: z.array(
+    z.object({ signature_scheme: webhookSignatureScheme, expires_at: z.string() }),
+  ),
 })
 
 /**
@@ -392,10 +412,38 @@ export const webhookEndpointSchema = z.object({
  * There is no "show me my signing secret" endpoint on purpose: such a call is a
  * far better target than the database it would read from, and every customer
  * who needs it has it at the moment they need it.
+ *
+ * `null` for `ed25519`: we keep the private key, and the customer verifies
+ * with `public_key`, which is on every endpoint response.
  */
 export const webhookEndpointWithSecretSchema = webhookEndpointSchema.extend({
-  secret: z.string(),
+  secret: z.string().nullable(),
 })
+
+/** The longest an old secret may keep signing after a rotation: 72 hours. */
+export const MAX_PREVIOUS_SECRET_SECONDS = 72 * 60 * 60
+
+/**
+ * `POST /webhook-endpoints/{id}/rotate-secret`.
+ *
+ * ⚠ NO DEFAULT FOR THE SECRET BEING REPLACED. A stolen secret that keeps
+ * verifying is not a risk i10 takes on silently, so the caller decides:
+ * `revoke` stops it at once; `expire` keeps it signing for `expires_in`
+ * seconds (60 to 259200, which is 72 hours) so receivers can deploy the new
+ * one first.
+ */
+export const rotateWebhookSecretSchema = z
+  .object({
+    previous_secret: z.enum(["revoke", "expire"]),
+    expires_in: z.number().int().min(60).max(MAX_PREVIOUS_SECRET_SECONDS).optional(),
+    /** Switch schemes on rotation. Defaults to the endpoint's current one. */
+    signature_scheme: webhookSignatureScheme.optional(),
+  })
+  .refine((b) => (b.previous_secret === "expire") === (b.expires_in !== undefined), {
+    message:
+      '`expires_in` is required with `previous_secret: "expire"` and not allowed with `"revoke"`.',
+    path: ["expires_in"],
+  })
 
 export const webhookEndpointListSchema = z.object({
   data: z.array(webhookEndpointSchema),
@@ -406,6 +454,8 @@ export type GetEmailResponse = z.infer<typeof getEmailResponseSchema>
 export type WebhookEventName = z.infer<typeof webhookEventName>
 export type CreateWebhookEndpoint = z.infer<typeof createWebhookEndpointSchema>
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>
+export type WebhookSignatureScheme = z.infer<typeof webhookSignatureScheme>
+export type RotateWebhookSecret = z.infer<typeof rotateWebhookSecretSchema>
 export type Address = z.infer<typeof addressSchema>
 export type Attachment = z.infer<typeof attachmentSchema>
 export type Tag = z.infer<typeof tagSchema>

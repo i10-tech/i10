@@ -1,4 +1,5 @@
 import type { Hono } from "hono"
+import { rotateWebhookSecretSchema } from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
 import { domainScope, scopedDomains } from "../../auth/scope.js"
 import { requireFreshAuth } from "../../middleware/session.js"
@@ -329,6 +330,10 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       ...(typeof body?.description === "string"
         ? { description: body.description }
         : {}),
+      ...(body?.signature_scheme === "ed25519" ||
+      body?.signature_scheme === "hmac_sha256"
+        ? { signature_scheme: body.signature_scheme }
+        : {}),
     })
 
     return created.status === "created"
@@ -345,12 +350,47 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       : c.json(notFound("No endpoint with that id."), 404)
   })
 
-  app.post("/webhook-endpoints/:id/rotate-secret", async (c) => {
+  /**
+   * ⚠ BEHIND A RECENT SIGN-IN, because the response is a new signing secret.
+   * A session somebody else is holding should not be able to mint one.
+   *
+   * ⚠ AND THE BODY MUST SAY WHAT HAPPENS TO THE OLD KEY. There is no default
+   * (docs/decisions/webhooks.md, decision 7): the console asks, as the API does.
+   */
+  app.post("/webhook-endpoints/:id/rotate-secret", requireFreshAuth, async (c) => {
     if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
     const { tenantId } = c.get("auth")
-    const rotated = await d.webhooks.rotateSecret(tenantId, c.req.param("id"))
-    return rotated
-      ? c.json(rotated)
+    const parsed = rotateWebhookSecretSchema.safeParse(await readJson(c))
+    if (!parsed.success) {
+      return c.json(
+        validation(
+          parsed.error.issues[0]?.message ??
+            "Say what happens to the current secret: `previous_secret` is `revoke` or `expire`.",
+        ),
+        422,
+      )
+    }
+    const body = parsed.data
+    const result = await d.webhooks.rotateSecret(
+      tenantId,
+      c.req.param("id"),
+      body.previous_secret === "expire"
+        ? { action: "expire", expiresInSeconds: body.expires_in! }
+        : { action: "revoke" },
+      body.signature_scheme,
+    )
+    if (result.status === "not_found")
+      return c.json(notFound("No endpoint with that id."), 404)
+    if (result.status === "rejected") return c.json(validation(result.reason), 422)
+    return c.json(result.endpoint)
+  })
+
+  app.post("/webhook-endpoints/:id/revoke-previous-secrets", async (c) => {
+    if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
+    const { tenantId } = c.get("auth")
+    const endpoint = await d.webhooks.revokePreviousSecrets(tenantId, c.req.param("id"))
+    return endpoint
+      ? c.json(endpoint)
       : c.json(notFound("No endpoint with that id."), 404)
   })
 

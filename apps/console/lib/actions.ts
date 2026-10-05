@@ -574,14 +574,36 @@ export async function deleteWebhook(id: string) {
   )
 }
 
-export async function rotateWebhookSecret(id: string) {
+/**
+ * ⚠ THE CHOICE FOR THE OLD SECRET IS REQUIRED. There is no default: the
+ * person rotating decides whether it stops now or keeps signing for a while
+ * (at most 72 hours). See docs/decisions/webhooks.md, decision 7.
+ */
+export async function rotateWebhookSecret(
+  id: string,
+  input: {
+    previous_secret: "revoke" | "expire"
+    expires_in?: number
+    signature_scheme?: "hmac_sha256" | "ed25519"
+  },
+) {
   return run(
     () =>
       api<WebhookEndpoint>(
         `/console/webhook-endpoints/${encodeURIComponent(id)}/rotate-secret`,
-        {
-          method: "POST",
-        },
+        { method: "POST", body: input },
+      ),
+    ["/webhooks", `/webhooks/${encodeURIComponent(id)}`],
+  )
+}
+
+/** Ends every grace period now; only the current key signs afterwards. */
+export async function revokePreviousWebhookSecrets(id: string) {
+  return run(
+    () =>
+      api<WebhookEndpoint>(
+        `/console/webhook-endpoints/${encodeURIComponent(id)}/revoke-previous-secrets`,
+        { method: "POST" },
       ),
     ["/webhooks", `/webhooks/${encodeURIComponent(id)}`],
   )

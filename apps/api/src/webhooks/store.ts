@@ -7,7 +7,15 @@ import { desc, eq } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { webhookEndpoints } from "../db/core.js"
 import { checkEndpointUrl } from "./endpoints.js"
-import { generateSecret, type SecretBox } from "./signing.js"
+import {
+  generateKey,
+  liveRetiring,
+  planRotation,
+  type PreviousSecretChoice,
+  type RetiringSecret,
+  type SignatureScheme,
+} from "./keys.js"
+import type { SecretBox } from "./signing.js"
 
 /**
  * The customer-facing half of webhooks: registering endpoints.
@@ -15,23 +23,43 @@ import { generateSecret, type SecretBox } from "./signing.js"
  * ⚠ THE SECRET IS GENERATED HERE, RETURNED ONCE, AND STORED SEALED. It is the
  * only thing that distinguishes our POST from anyone else's, so it is created
  * where it can be handed back in the same response and never held anywhere it
- * could be read again.
+ * could be read again. For ed25519 the private key never leaves us at all; the
+ * customer gets the public key, which is on every response.
  */
+
+/** An endpoint with the secret shown once. `null` for ed25519. */
+export type EndpointWithSecret = WebhookEndpoint & { secret: string | null }
+
+export type RotateResult =
+  | { status: "rotated"; endpoint: EndpointWithSecret }
+  | { status: "rejected"; reason: string }
+  | { status: "not_found" }
 
 export interface WebhookEndpointStore {
   create: (
     tenantId: string,
     input: CreateWebhookEndpoint,
   ) => Promise<
-    | { status: "created"; endpoint: WebhookEndpoint & { secret: string } }
+    | { status: "created"; endpoint: EndpointWithSecret }
     | { status: "rejected"; reason: string }
   >
   list: (tenantId: string) => Promise<WebhookEndpoint[]>
   remove: (tenantId: string, id: string) => Promise<boolean>
+  /**
+   * ⚠ `previous` HAS NO DEFAULT. What happens to the key being replaced is the
+   * customer's decision (docs/decisions/webhooks.md, decision 7).
+   */
   rotateSecret: (
     tenantId: string,
     id: string,
-  ) => Promise<(WebhookEndpoint & { secret: string }) | null>
+    previous: PreviousSecretChoice,
+    scheme?: SignatureScheme,
+  ) => Promise<RotateResult>
+  /** Ends every grace period now: only the current key signs from here on. */
+  revokePreviousSecrets: (
+    tenantId: string,
+    id: string,
+  ) => Promise<WebhookEndpoint | null>
 }
 
 type Row = {
@@ -41,9 +69,12 @@ type Row = {
   description: string | null
   enabled: boolean
   createdAt: Date
+  signatureScheme: SignatureScheme
+  publicKey: string | null
+  retiringSecrets: RetiringSecret[]
 }
 
-const present = (row: Row): WebhookEndpoint => ({
+const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   object: "webhook_endpoint",
   id: row.id,
   url: row.url,
@@ -51,6 +82,13 @@ const present = (row: Row): WebhookEndpoint => ({
   description: row.description,
   enabled: row.enabled,
   created_at: row.createdAt.toISOString(),
+  signature_scheme: row.signatureScheme,
+  public_key: row.publicKey,
+  // Expired entries are not keys any more, whatever the row still holds.
+  previous_secrets: liveRetiring(row.retiringSecrets, now).map((r) => ({
+    signature_scheme: r.scheme,
+    expires_at: r.expiresAt,
+  })),
 })
 
 const COLUMNS = {
@@ -60,7 +98,14 @@ const COLUMNS = {
   description: webhookEndpoints.description,
   enabled: webhookEndpoints.enabled,
   createdAt: webhookEndpoints.createdAt,
+  signatureScheme: webhookEndpoints.signatureScheme,
+  publicKey: webhookEndpoints.publicKey,
+  retiringSecrets: webhookEndpoints.retiringSecrets,
 }
+
+/** The secret a customer is shown: the HMAC secret, never an ed25519 private key. */
+const shown = (key: { scheme: SignatureScheme; secret: string }) =>
+  key.scheme === "hmac_sha256" ? key.secret : null
 
 export function webhookEndpointStore(
   db: Database,
@@ -76,7 +121,7 @@ export function webhookEndpointStore(
       const verdict = checkEndpointUrl(input.url)
       if (!verdict.ok) return { status: "rejected" as const, reason: verdict.reason }
 
-      const secret = generateSecret()
+      const key = generateKey(input.signature_scheme ?? "hmac_sha256")
 
       return withTenant(db, tenantId, async (tx) => {
         const [row] = await tx
@@ -86,13 +131,15 @@ export function webhookEndpointStore(
             url: input.url,
             description: input.description ?? null,
             events: input.events as never,
-            secretCiphertext: secrets.seal(secret),
+            secretCiphertext: secrets.seal(key.secret),
+            signatureScheme: key.scheme,
+            publicKey: key.publicKey,
           })
           .returning(COLUMNS)
 
         return {
           status: "created" as const,
-          endpoint: { ...present(row!), secret },
+          endpoint: { ...present(row!), secret: shown(key) },
         }
       })
     },
@@ -103,7 +150,7 @@ export function webhookEndpointStore(
           .select(COLUMNS)
           .from(webhookEndpoints)
           .orderBy(desc(webhookEndpoints.createdAt))
-        return rows.map(present)
+        return rows.map((r) => present(r))
       })
     },
 
@@ -117,15 +164,40 @@ export function webhookEndpointStore(
       })
     },
 
-    async rotateSecret(tenantId, id) {
-      const secret = generateSecret()
-
+    async rotateSecret(tenantId, id, previous, scheme) {
       return withTenant(db, tenantId, async (tx) => {
+        // ⚠ LOCKED, because the retiring list is read, extended and written
+        // back. Two rotations racing would otherwise each keep one old key and
+        // drop the other's.
+        const [current] = await tx
+          .select({
+            secretCiphertext: webhookEndpoints.secretCiphertext,
+            signatureScheme: webhookEndpoints.signatureScheme,
+            retiringSecrets: webhookEndpoints.retiringSecrets,
+          })
+          .from(webhookEndpoints)
+          .where(eq(webhookEndpoints.id, id))
+          .for("update")
+        if (!current) return { status: "not_found" as const }
+
+        const now = new Date()
+        const plan = planRotation(
+          { ciphertext: current.secretCiphertext, scheme: current.signatureScheme },
+          current.retiringSecrets,
+          previous,
+          now,
+        )
+        if (!plan.ok) return { status: "rejected" as const, reason: plan.reason }
+
+        const key = generateKey(scheme ?? current.signatureScheme)
         const [row] = await tx
           .update(webhookEndpoints)
           .set({
-            secretCiphertext: secrets.seal(secret),
-            updatedAt: new Date(),
+            secretCiphertext: secrets.seal(key.secret),
+            signatureScheme: key.scheme,
+            publicKey: key.publicKey,
+            retiringSecrets: plan.retiring,
+            updatedAt: now,
             // ⚠ ROTATION RE-ENABLES AND CLEARS THE FAILURE COUNT. A customer
             // rotating a secret is a customer who has just fixed their receiver;
             // leaving it disabled would mean the fix appears not to work.
@@ -136,7 +208,21 @@ export function webhookEndpointStore(
           .where(eq(webhookEndpoints.id, id))
           .returning(COLUMNS)
 
-        return row ? { ...present(row), secret } : null
+        return {
+          status: "rotated" as const,
+          endpoint: { ...present(row!, now), secret: shown(key) },
+        }
+      })
+    },
+
+    async revokePreviousSecrets(tenantId, id) {
+      return withTenant(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .update(webhookEndpoints)
+          .set({ retiringSecrets: [], updatedAt: new Date() })
+          .where(eq(webhookEndpoints.id, id))
+          .returning(COLUMNS)
+        return row ? present(row) : null
       })
     },
   }

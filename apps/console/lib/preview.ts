@@ -1296,9 +1296,58 @@ const ROUTES: [
           description: "Production handler",
           enabled: true,
           created_at: ago(140),
+          signature_scheme: "hmac_sha256" as const,
+          public_key: null,
+          // A grace period in progress, so the warning line can be reviewed.
+          previous_secrets: [
+            {
+              signature_scheme: "hmac_sha256" as const,
+              expires_at: new Date(Date.now() + 5 * 3600_000).toISOString(),
+            },
+          ],
         },
       ],
     }),
+  ],
+
+  [
+    /^\/console\/webhook-endpoints\/([^/]+)\/rotate-secret$/,
+    (m, _q, _method, body) => {
+      const b = (body ?? {}) as {
+        previous_secret?: string
+        expires_in?: number
+        signature_scheme?: string
+      }
+      const ed = b.signature_scheme === "ed25519"
+      return {
+        object: "webhook_endpoint" as const,
+        id: m[1]!,
+        url: "https://api.acme.com/webhooks/i10",
+        events: ["email.delivered", "email.bounced", "email.complained"],
+        description: "Production handler",
+        enabled: true,
+        created_at: ago(140),
+        signature_scheme: ed ? ("ed25519" as const) : ("hmac_sha256" as const),
+        public_key: ed ? "whpk_3vYpPreviewPublicKeyOnlyNotARealKey0000000=" : null,
+        previous_secrets:
+          b.previous_secret === "expire"
+            ? [
+                {
+                  signature_scheme: "hmac_sha256" as const,
+                  expires_at: new Date(
+                    Date.now() + (b.expires_in ?? 3600) * 1000,
+                  ).toISOString(),
+                },
+              ]
+            : [],
+        secret: ed ? null : "whsec_cHJldmlldy1vbmx5LW5vdC1hLXJlYWwtc2VjcmV0",
+      }
+    },
+  ],
+
+  [
+    /^\/console\/webhook-endpoints\/([^/]+)\/revoke-previous-secrets$/,
+    (m) => ({ id: m[1]!, previous_secrets: [] }),
   ],
 
   [

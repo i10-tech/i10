@@ -307,8 +307,16 @@ export interface WebhookEndpoint {
   description: string | null
   enabled: boolean
   created_at: string
-  /** ⚠ Only on create and on rotate. */
-  secret?: string
+  signature_scheme: "hmac_sha256" | "ed25519"
+  /** The `whpk_` key an Ed25519 endpoint is verified with. Not a secret. */
+  public_key: string | null
+  /** Keys a rotation replaced that still sign until `expires_at`. */
+  previous_secrets: {
+    signature_scheme: "hmac_sha256" | "ed25519"
+    expires_at: string
+  }[]
+  /** ⚠ Only on create and on rotate, and null for Ed25519. */
+  secret?: string | null
 }
 
 export interface DeliveryRow {

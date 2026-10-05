@@ -44,6 +44,9 @@ const endpoint = {
   description: null,
   enabled: true,
   created_at: "2026-09-03T10:00:00.000Z",
+  signature_scheme: "hmac_sha256" as const,
+  public_key: null,
+  previous_secrets: [],
 }
 
 const get = (app: ReturnType<typeof createApp>, path: string) =>
@@ -148,7 +151,11 @@ describe("/webhook-endpoints", () => {
     })),
     list: mock(async () => [endpoint]),
     remove: mock(async () => true),
-    rotateSecret: mock(async () => ({ ...endpoint, secret: "whsec_new" })),
+    rotateSecret: mock(async () => ({
+      status: "rotated" as const,
+      endpoint: { ...endpoint, secret: "whsec_new" },
+    })),
+    revokePreviousSecrets: mock(async () => endpoint),
   }
 
   const app = () => createApp({ apiKeyAuth, webhookEndpoints: store })
@@ -232,6 +239,93 @@ describe("/webhook-endpoints", () => {
 
   it("requires a key", async () => {
     expect((await app().request("/webhook-endpoints")).status).toBe(401)
+  })
+
+  // ⚠ NO DEFAULT FOR THE OLD SECRET (decision 7). A rotation that does not
+  // say what happens to it is refused before the store is asked.
+  describe("rotating a secret", () => {
+    const rotate = (body: unknown) =>
+      post(`/webhook-endpoints/${endpoint.id}/rotate-secret`, body)
+
+    it("refuses a rotation that does not choose for the previous secret", async () => {
+      store.rotateSecret.mockClear()
+      expect((await rotate({})).status).toBe(422)
+      expect(store.rotateSecret).not.toHaveBeenCalled()
+    })
+
+    it("revokes the previous secret when told to", async () => {
+      store.rotateSecret.mockClear()
+      const res = await rotate({ previous_secret: "revoke" })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ secret: "whsec_new" })
+      expect(store.rotateSecret.mock.calls[0]).toEqual([
+        expect.any(String),
+        endpoint.id,
+        { action: "revoke" },
+        undefined,
+      ] as never)
+    })
+
+    it("keeps the previous secret for the chosen time", async () => {
+      store.rotateSecret.mockClear()
+      const res = await rotate({
+        previous_secret: "expire",
+        expires_in: 3600,
+        signature_scheme: "ed25519",
+      })
+      expect(res.status).toBe(200)
+      expect(store.rotateSecret.mock.calls[0]).toEqual([
+        expect.any(String),
+        endpoint.id,
+        { action: "expire", expiresInSeconds: 3600 },
+        "ed25519",
+      ] as never)
+    })
+
+    it.each([
+      [{ previous_secret: "expire" }, "expire without a period"],
+      [{ previous_secret: "revoke", expires_in: 60 }, "revoke with a period"],
+      [{ previous_secret: "expire", expires_in: 59 }, "under a minute"],
+      [{ previous_secret: "expire", expires_in: 72 * 3600 + 1 }, "over 72 hours"],
+      [{ previous_secret: "keep" }, "an unknown choice"],
+    ])("refuses %j (%s)", async (body) => {
+      expect((await rotate(body)).status).toBe(422)
+    })
+
+    it("surfaces the store's refusal, such as too many live keys", async () => {
+      const full = createApp({
+        apiKeyAuth,
+        webhookEndpoints: {
+          ...store,
+          rotateSecret: async () => ({
+            status: "rejected" as const,
+            reason: "At most 3 signing secrets",
+          }),
+        },
+      })
+      const res = await full.request(
+        `/webhook-endpoints/${endpoint.id}/rotate-secret`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${KEY}`,
+          },
+          body: JSON.stringify({ previous_secret: "expire", expires_in: 3600 }),
+        },
+      )
+      expect(res.status).toBe(422)
+      expect(await res.json()).toMatchObject({ message: "At most 3 signing secrets" })
+    })
+
+    it("revokes previous secrets on request", async () => {
+      const res = await post(
+        `/webhook-endpoints/${endpoint.id}/revoke-previous-secrets`,
+        {},
+      )
+      expect(res.status).toBe(200)
+      expect(store.revokePreviousSecrets).toHaveBeenCalled()
+    })
   })
 
   it("answers 501 when the store is not wired", async () => {
