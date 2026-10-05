@@ -242,12 +242,37 @@ describe("/webhook-endpoints", () => {
       object: "webhook_endpoint_stats" as const,
       endpoint_id: endpoint.id,
       since: "2026-10-04T00:00:00.000Z",
+      until: "2026-10-04T02:00:00.000Z",
+      bucket: "hour" as const,
       delivered: 9,
       failed: 1,
       pending: 0,
       success_rate: 0.9,
       last_success_at: null,
       failing_since: null,
+      attempts: 12,
+      failed_attempts: 3,
+      p50_ms: 40,
+      p95_ms: 120,
+      series: [],
+      by_event_type: [],
+    })),
+    workspaceStats: mock(async () => ({
+      object: "webhook_stats" as const,
+      since: "2026-10-04T00:00:00.000Z",
+      until: "2026-10-04T02:00:00.000Z",
+      bucket: "hour" as const,
+      delivered: 9,
+      failed: 1,
+      pending: 0,
+      success_rate: 0.9,
+      attempts: 12,
+      failed_attempts: 3,
+      p50_ms: 40,
+      p95_ms: 120,
+      series: [],
+      by_event_type: [],
+      by_endpoint: [],
     })),
   }
 
@@ -384,10 +409,47 @@ describe("/webhook-endpoints", () => {
     it("answers stats for a window", async () => {
       const res = await req(
         "GET",
-        `/webhook-endpoints/${endpoint.id}/stats?since=2026-10-04T00:00:00Z`,
+        // Over a week, so the default step is a day.
+        `/webhook-endpoints/${endpoint.id}/stats?since=2026-10-04T00:00:00Z&until=2026-10-20T00:00:00Z`,
       )
       expect(res.status).toBe(200)
       expect(await res.json()).toMatchObject({ delivered: 9, success_rate: 0.9 })
+      const [, , window] = store.stats.mock.calls.at(-1) as unknown as [
+        string,
+        string,
+        { since: Date; until: Date; bucket: string },
+      ]
+      expect(window.since.toISOString()).toBe("2026-10-04T00:00:00.000Z")
+      expect(window.bucket).toBe("day")
+    })
+
+    it("refuses a backwards window or too many steps before the store", async () => {
+      store.stats.mockClear()
+      const backwards = await req(
+        "GET",
+        `/webhook-endpoints/${endpoint.id}/stats?since=2026-10-05T00:00:00Z&until=2026-10-04T00:00:00Z`,
+      )
+      expect(backwards.status).toBe(422)
+      const tooMany = await req(
+        "GET",
+        `/webhook-endpoints/${endpoint.id}/stats?since=2026-01-01T00:00:00Z&until=2026-10-01T00:00:00Z&bucket=hour`,
+      )
+      expect(tooMany.status).toBe(422)
+      expect(((await tooMany.json()) as { message: string }).message).toContain(
+        "at most 200",
+      )
+      expect(
+        (await req("GET", `/webhook-endpoints/${endpoint.id}/stats?bucket=week`))
+          .status,
+      ).toBe(422)
+      expect(store.stats).not.toHaveBeenCalled()
+    })
+
+    it("answers workspace stats", async () => {
+      const res = await req("GET", "/webhook-stats?bucket=hour")
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ object: "webhook_stats", attempts: 12 })
+      expect(store.workspaceStats).toHaveBeenCalledTimes(1)
     })
 
     it("answers 501 for a test event when sending is not wired", async () => {

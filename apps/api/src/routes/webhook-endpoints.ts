@@ -13,6 +13,7 @@ import {
   webhookEndpointWithSecretSchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
+import { invalidWindow, statsQuery, windowFrom } from "./webhook-stats.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 
 /**
@@ -441,14 +442,14 @@ const stats = createRoute({
   method: "get",
   path: "/{id}/stats",
   summary: "Get a webhook endpoint's delivery stats",
-  description: "Counts of deliveries created since `since` (default: 24 hours ago).",
+  description:
+    "Deliveries created and attempts made between `since` and `until` " +
+    "(default: the last 24 hours), in total, in `hour` or `day` steps (at most " +
+    "200), and by event type. The error rate is `failed_attempts / attempts`.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
   middleware: [requireApiKey] as const,
-  request: {
-    params: idParam,
-    query: z.object({ since: z.iso.datetime({ offset: true }).optional() }),
-  },
+  request: { params: idParam, query: statsQuery },
   responses: {
     200: {
       description: "The stats.",
@@ -456,21 +457,30 @@ const stats = createRoute({
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     404: errorResponse("No such endpoint for this API key's tenant."),
+    422: errorResponse("The window is backwards, or has too many steps."),
     501: errorResponse("Webhook endpoints are not configured."),
   },
 })
 
-webhookEndpoints.openapi(stats, async (c) => {
-  const store = c.get("webhookEndpoints")
-  if (!store) return c.json(notWired, 501)
-  const { since } = c.req.valid("query")
-  const result = await store.stats(
-    c.get("auth").tenantId,
-    c.req.valid("param").id,
-    since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000),
-  )
-  return result ? c.json(result, 200) : c.json(notFound, 404)
-})
+webhookEndpoints.openapi(
+  stats,
+  async (c) => {
+    const store = c.get("webhookEndpoints")
+    if (!store) return c.json(notWired, 501)
+    const window = windowFrom(c.req.valid("query"))
+    if ("error" in window) return c.json(invalidWindow(window.error), 422)
+    const result = await store.stats(
+      c.get("auth").tenantId,
+      c.req.valid("param").id,
+      window,
+    )
+    return result ? c.json(result, 200) : c.json(notFound, 404)
+  },
+  (result, c) => {
+    if (!result.success)
+      return c.json(invalidWindow(result.error.issues[0]?.message), 422)
+  },
+)
 
 const test = createRoute({
   method: "post",

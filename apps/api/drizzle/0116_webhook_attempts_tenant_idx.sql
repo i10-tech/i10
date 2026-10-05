@@ -1,0 +1,1 @@
+CREATE INDEX "webhook_attempts_tenant_idx" ON "core"."webhook_attempts" USING btree ("tenant_id","created_at");

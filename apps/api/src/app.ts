@@ -29,6 +29,7 @@ import {
   webhookEventTypes,
 } from "./routes/webhook-event-types.js"
 import { webhookHealthEvents } from "./routes/webhook-health-events.js"
+import { webhookStats } from "./routes/webhook-stats.js"
 import type { WebhookHistory } from "./webhooks/history.js"
 import type { WebhookReplayOps } from "./webhooks/replay.js"
 import type { TestResult } from "./webhooks/test-events.js"
@@ -455,6 +456,7 @@ export function createApp(deps: AppDeps = {}) {
   app.route("/webhook-deliveries", webhookDeliveries)
   app.route("/webhook-event-types", webhookEventTypes)
   app.route("/webhook-health-events", webhookHealthEvents)
+  app.route("/webhook-stats", webhookStats)
   registerWebhookEvents(app.openAPIRegistry as never)
   app.route("/suppressions", suppressionRoutes)
   app.route("/trusted-templates", trustedTemplateRoutes)

@@ -4,11 +4,18 @@ import type {
   WebhookEndpoint,
   WebhookEndpointStats,
   WebhookEventName,
+  WebhookStats,
 } from "@repo/contracts"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { webhookDeliveries, webhookEndpoints } from "../db/core.js"
 import { checkCustomHeaders } from "./headers.js"
+import {
+  collectByEndpoint,
+  collectStats,
+  successRate,
+  type StatsWindow,
+} from "./stats.js"
 import { checkEndpointUrl } from "./endpoints.js"
 import {
   generateKey,
@@ -74,12 +81,14 @@ export interface WebhookEndpointStore {
     | { status: "rejected"; reason: string }
     | { status: "not_found" }
   >
-  /** Counts over the window from `since` to now. */
+  /** Counts over a window, in steps, by event type (#300). */
   stats: (
     tenantId: string,
     id: string,
-    since: Date,
+    window: StatsWindow,
   ) => Promise<WebhookEndpointStats | null>
+  /** The same across every endpoint, with a row per endpoint. */
+  workspaceStats: (tenantId: string, window: StatsWindow) => Promise<WebhookStats>
 }
 
 type Row = {
@@ -424,7 +433,7 @@ export function webhookEndpointStore(
       })
     },
 
-    async stats(tenantId, id, since) {
+    async stats(tenantId, id, window) {
       return withTenant(db, tenantId, async (tx) => {
         const [endpoint] = await tx
           .select({
@@ -435,33 +444,45 @@ export function webhookEndpointStore(
           .where(eq(webhookEndpoints.id, id))
           .limit(1)
         if (!endpoint) return null
-        const [counts] = await tx
-          .select({
-            delivered: sql<number>`count(*) filter (where ${webhookDeliveries.status} = 'delivered')::int`,
-            failed: sql<number>`count(*) filter (where ${webhookDeliveries.status} = 'failed')::int`,
-            pending: sql<number>`count(*) filter (where ${webhookDeliveries.status} = 'pending')::int`,
-            lastSuccess: sql<Date | null>`max(${webhookDeliveries.deliveredAt})`,
-          })
+        const [last] = await tx
+          .select({ at: sql<Date | null>`max(${webhookDeliveries.deliveredAt})` })
           .from(webhookDeliveries)
           .where(
             and(
               eq(webhookDeliveries.endpointId, id),
-              sql`${webhookDeliveries.createdAt} >= ${since.toISOString()}::timestamptz`,
+              sql`${webhookDeliveries.createdAt} >= ${window.since.toISOString()}::timestamptz`,
+              sql`${webhookDeliveries.createdAt} < ${window.until.toISOString()}::timestamptz`,
             ),
           )
-        const finished = (counts?.delivered ?? 0) + (counts?.failed ?? 0)
+        const stats = await collectStats(tx, window, id)
         return {
           object: "webhook_endpoint_stats" as const,
           endpoint_id: id,
-          since: since.toISOString(),
-          delivered: counts?.delivered ?? 0,
-          failed: counts?.failed ?? 0,
-          pending: counts?.pending ?? 0,
-          success_rate: finished > 0 ? (counts!.delivered ?? 0) / finished : null,
-          last_success_at: counts?.lastSuccess
-            ? new Date(counts.lastSuccess).toISOString()
-            : null,
+          since: window.since.toISOString(),
+          until: window.until.toISOString(),
+          bucket: window.bucket,
+          ...stats,
+          success_rate: successRate(stats),
+          last_success_at: last?.at ? new Date(last.at).toISOString() : null,
           failing_since: endpoint.failingSince?.toISOString() ?? null,
+        }
+      })
+    },
+
+    async workspaceStats(tenantId, window) {
+      return withTenant(db, tenantId, async (tx) => {
+        const [stats, byEndpoint] = await Promise.all([
+          collectStats(tx, window),
+          collectByEndpoint(tx, window),
+        ])
+        return {
+          object: "webhook_stats" as const,
+          by_endpoint: byEndpoint,
+          since: window.since.toISOString(),
+          until: window.until.toISOString(),
+          bucket: window.bucket,
+          ...stats,
+          success_rate: successRate(stats),
         }
       })
     },
