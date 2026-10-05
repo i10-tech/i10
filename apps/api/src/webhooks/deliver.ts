@@ -4,6 +4,7 @@ import { describeError } from "../errors.js"
 import { timestampFor } from "./signing.js"
 import { signWithKeys, type SigningKey } from "./keys.js"
 import { pinnedRequest, vetHost, type EgressVerdict } from "./egress.js"
+import { webhookBackoff } from "../queue/webhook-queue.js"
 
 /**
  * Delivering one webhook.
@@ -52,8 +53,11 @@ export interface DeliveryRecord {
 
 export type DeliveryOutcome =
   | { status: "delivered"; responseStatus: number }
-  /** The endpoint answered, and said no. Retryable. */
-  | { status: "failed"; responseStatus?: number; reason: string }
+  /**
+   * It did not arrive. `retryAt` is when the next attempt is owed, already
+   * written to the row; absent when the budget is spent.
+   */
+  | { status: "failed"; responseStatus?: number; reason: string; retryAt?: Date }
 
 export interface DeliverDeps {
   /** Loads the row, or null if it is gone or already delivered. */
@@ -62,13 +66,17 @@ export interface DeliverDeps {
   markDelivered: (delivery: DeliveryRecord, responseStatus: number) => Promise<void>
   /**
    * Records one failed attempt. `final` means the retry budget is gone, and is
-   * what advances the endpoint towards being disabled.
+   * what advances the endpoint towards being disabled; otherwise
+   * `nextAttemptAt` is when the row is owed its next attempt.
    */
   markFailed: (
     delivery: DeliveryRecord,
     outcome: { reason: string; responseStatus?: number },
     final: boolean,
+    nextAttemptAt: Date | null,
   ) => Promise<void>
+  /** Milliseconds before attempt `n + 1`, given `n` attempts made. */
+  retryDelayMs?: (attemptsMade: number) => number
   fetch?: typeof fetch
   /**
    * Decides where a hostname may be connected to. Defaults to the system
@@ -184,7 +192,11 @@ export async function deliverWebhook(
   }
 
   // `attempts` is the count BEFORE this one, so this attempt is `attempts + 1`.
-  const final = delivery.attempts + 1 >= deps.maxAttempts
+  const made = delivery.attempts + 1
+  const final = made >= deps.maxAttempts
+  const retryAt = final
+    ? null
+    : new Date(Date.now() + (deps.retryDelayMs ?? webhookBackoff)(made))
   await deps.markFailed(
     delivery,
     {
@@ -192,13 +204,14 @@ export async function deliverWebhook(
       ...(outcome.responseStatus ? { responseStatus: outcome.responseStatus } : {}),
     },
     final,
+    retryAt,
   )
 
   deps.log.warn(
     {
       deliveryId: delivery.id,
       endpointId: delivery.endpointId,
-      attempt: delivery.attempts + 1,
+      attempt: made,
       status: outcome.responseStatus,
       reason: outcome.reason,
       final,
@@ -206,11 +219,10 @@ export async function deliverWebhook(
     "webhook delivery failed",
   )
 
-  // ⚠ THROWN SO groupmq SCHEDULES THE RETRY, BUT ONLY WHILE THERE IS BUDGET.
-  // Throwing on the final attempt too would make the job fail loudly for a
-  // failure the row has already recorded - and the customer's dead endpoint
-  // would fill the failed-job list that a real bug needs to be visible in.
-  if (!final) throw new Error(outcome.reason)
-
-  return outcome
+  // ⚠ RETURNED, NOT THROWN. The next attempt is a new job the engine queues
+  // for `retryAt`, on this delivery's own schedule; groupmq's retries are only
+  // for a handler that broke. And on the final attempt there is nothing to
+  // throw for: the row already says `failed`, and a customer's dead endpoint
+  // must not fill the failed-job list a real bug needs to be visible in.
+  return retryAt ? { ...outcome, retryAt } : outcome
 }

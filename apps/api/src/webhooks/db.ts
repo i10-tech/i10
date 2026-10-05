@@ -247,11 +247,50 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
  * The worker half: load a delivery, then record what happened to it.
  */
 export function webhookDeliveryOps(
-  opts: Omit<WebhookDbOptions, "queue">,
+  opts: Omit<WebhookDbOptions, "queue"> & {
+    /**
+     * How long one attempt may hold its row. Longer than the delivery timeout
+     * plus the bookkeeping around it; the sweep never touches a held row.
+     */
+    leaseSeconds?: number
+  },
 ): Pick<DeliverDeps, "load" | "markDelivered" | "markFailed"> {
   return {
     async load(job: WebhookJob): Promise<DeliveryRecord | null> {
       return withTenant(opts.db, job.tenantId, async (tx) => {
+        /*
+         * ⚠ CLAIMED, NOT READ. The row is leased to this worker for as long
+         * as one attempt can take, and only if nobody else holds it. That is
+         * what lets the sweep re-queue a row the queue may still hold: both
+         * jobs can arrive, and the second finds the lease taken and stops.
+         * A worker that crashes mid-attempt leaves a lease that simply
+         * expires, and the sweep picks the row up after it.
+         *
+         * ⚠ `pending` ONLY. A job for a row another worker has since delivered
+         * must find nothing rather than send the customer a second copy.
+         */
+        const claimed = await tx
+          .update(webhookDeliveries)
+          .set({
+            claimedUntil: sql`now() + ${`${opts.leaseSeconds ?? 120} seconds`}::interval`,
+          })
+          .where(
+            and(
+              eq(webhookDeliveries.id, job.deliveryId),
+              eq(webhookDeliveries.status, "pending"),
+              sql`(${webhookDeliveries.claimedUntil} is null or ${webhookDeliveries.claimedUntil} < now())`,
+              // ⚠ NOT BEFORE IT IS OWED. A second job for the same row - the
+              // sweep's, beside a retry the queue still holds - must not
+              // attempt early. The slack is not generosity: groupmq's
+              // retry.lua floors Redis's clock to the second, so its own
+              // retries fire up to a second early (measured 2026-10-05), and
+              // refusing those would skip the retry the queue was holding.
+              sql`(${webhookDeliveries.nextAttemptAt} is null or ${webhookDeliveries.nextAttemptAt} <= now() + interval '2 seconds')`,
+            ),
+          )
+          .returning({ id: webhookDeliveries.id })
+        if (claimed.length === 0) return null
+
         const rows = await tx
           .select({
             id: webhookDeliveries.id,
@@ -271,15 +310,7 @@ export function webhookDeliveryOps(
             webhookEndpoints,
             eq(webhookEndpoints.id, webhookDeliveries.endpointId),
           )
-          .where(
-            and(
-              eq(webhookDeliveries.id, job.deliveryId),
-              // ⚠ `pending` ONLY. A job re-enqueued by a sweep for a row another
-              // worker has since delivered must find nothing rather than send
-              // the customer a second copy.
-              eq(webhookDeliveries.status, "pending"),
-            ),
-          )
+          .where(eq(webhookDeliveries.id, job.deliveryId))
           .limit(1)
 
         const row = rows[0]
@@ -287,13 +318,17 @@ export function webhookDeliveryOps(
 
         // ⚠ A DISABLED ENDPOINT IS A TERMINAL ANSWER, NOT A SKIP. Returning null
         // and leaving the row `pending` would strand every delivery already
-        // queued for an endpoint that has just been switched off - permanently,
-        // because nothing sweeps them - and would make the pending count
-        // useless as a measure of what is still being retried.
+        // queued for an endpoint that has just been switched off - and the
+        // sweep would keep finding it, due and unclaimed, for ever.
         if (!row.enabled) {
           await tx
             .update(webhookDeliveries)
-            .set({ status: "failed", lastError: "endpoint disabled" })
+            .set({
+              status: "failed",
+              lastError: "endpoint disabled",
+              nextAttemptAt: null,
+              claimedUntil: null,
+            })
             .where(eq(webhookDeliveries.id, row.id))
           return null
         }
@@ -335,6 +370,8 @@ export function webhookDeliveryOps(
             responseStatus,
             deliveredAt: new Date(),
             lastError: null,
+            nextAttemptAt: null,
+            claimedUntil: null,
           })
           .where(eq(webhookDeliveries.id, delivery.id))
 
@@ -349,7 +386,7 @@ export function webhookDeliveryOps(
       })
     },
 
-    async markFailed(delivery, outcome, final) {
+    async markFailed(delivery, outcome, final, nextAttemptAt) {
       await withTenant(opts.db, delivery.tenantId, async (tx) => {
         await tx
           .update(webhookDeliveries)
@@ -361,6 +398,11 @@ export function webhookDeliveryOps(
             status: final ? "failed" : "pending",
             attempts: delivery.attempts + 1,
             lastError: outcome.reason.slice(0, 2000),
+            // ⚠ THE NEXT ATTEMPT IS WRITTEN HERE, IN THE SAME STATEMENT AS THE
+            // FAILURE, so a retry exists in Postgres before it exists in Redis.
+            // If queueing it then fails, the sweep finds it due.
+            nextAttemptAt: final ? null : nextAttemptAt,
+            claimedUntil: null,
             ...(outcome.responseStatus
               ? { responseStatus: outcome.responseStatus }
               : {}),
@@ -383,4 +425,45 @@ export function webhookDeliveryOps(
       })
     },
   }
+}
+
+/** A delivery the sweep found owed and unattended. */
+export interface DueDelivery {
+  id: string
+  tenantId: string
+  endpointId: string
+  occurredAt: Date
+  attempts: number
+  nextAttemptAt: Date
+}
+
+/**
+ * Deliveries due for longer than `graceSeconds` that no worker holds, across
+ * every tenant, through the one SECURITY DEFINER function written for it
+ * (migration 0104). See engine.ts for what the sweep does with them.
+ */
+export async function dueDeliveries(
+  db: Database,
+  graceSeconds: number,
+  limit: number,
+): Promise<DueDelivery[]> {
+  const rows = (await db.execute(sql`
+    select id::text, tenant_id::text, endpoint_id::text, occurred_at, attempts, next_attempt_at
+      from core.webhook_deliveries_due(${`${graceSeconds} seconds`}::interval, ${limit}::int)
+  `)) as unknown as Array<{
+    id: string
+    tenant_id: string
+    endpoint_id: string
+    occurred_at: string | Date
+    attempts: number
+    next_attempt_at: string | Date
+  }>
+  return rows.map((r) => ({
+    id: r.id,
+    tenantId: r.tenant_id,
+    endpointId: r.endpoint_id,
+    occurredAt: new Date(r.occurred_at),
+    attempts: r.attempts,
+    nextAttemptAt: new Date(r.next_attempt_at),
+  }))
 }

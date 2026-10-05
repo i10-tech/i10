@@ -360,9 +360,7 @@ const endpointVetting = {
 // WEBHOOK_MAX_ATTEMPTS - left to the default here, raising that variable would
 // make groupmq give up before `deliverWebhook` considers the attempt final, and
 // the row would sit `pending` forever with the endpoint never disabled.
-const webhookQueue = secrets
-  ? createWebhookQueue({ redis: queueRedis, maxAttempts: env.WEBHOOK_MAX_ATTEMPTS })
-  : null
+const webhookQueue = secrets ? createWebhookQueue({ redis: queueRedis }) : null
 
 log.info(
   { webhooks: Boolean(secrets) },

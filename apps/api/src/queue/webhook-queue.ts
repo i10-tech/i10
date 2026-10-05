@@ -25,6 +25,11 @@ export interface WebhookJob {
   deliveryId: string
   endpointId: string
   tenantId: string
+  /**
+   * Which attempt this job is: the row's `attempts` when it was queued. Part
+   * of the job id, so each attempt is its own job (see `webhookJobId`).
+   */
+  attempt?: number
 }
 
 export interface EnqueueDeliveryOptions {
@@ -39,14 +44,18 @@ export interface EnqueueDeliveryOptions {
    * per-endpoint guarantee real rather than incidental.
    */
   orderMs: number
+  /** Not before this many milliseconds from now: a scheduled retry. */
+  delayMs?: number
 }
 
 export const WEBHOOK_NAMESPACE = "i10:webhooks"
 
+/** Above every plan's attempt budget; see `createWebhookQueue`. */
+export const GROUPMQ_ATTEMPT_CEILING = 50
+
 export interface WebhookQueueOptions {
   redis: Redis
   jobTimeoutMs?: number
-  maxAttempts?: number
   /** Only the conformance lab passes this, so it never shares keys with a real queue. */
   namespace?: string
 }
@@ -59,58 +68,56 @@ export function createWebhookQueue(opts: WebhookQueueOptions): Queue<WebhookJob>
     // never handed to a second worker while the first is still waiting on it.
     jobTimeoutMs: opts.jobTimeoutMs ?? 60_000,
     /**
-     * ⚠ THE RETRY BUDGET IS A PRODUCT DECISION, NOT A TUNING KNOB. A receiver
-     * that is down for a deploy should not lose events; one that has been gone
-     * for a day is not coming back within this job's life. Five attempts on
-     * `webhookBackoff` spans roughly a quarter of an hour, which covers a
-     * deploy, a restart and a brief outage - and `consecutive_failures` on the
-     * endpoint is what handles the longer kind by switching it off.
+     * ⚠ NOT THE DELIVERY BUDGET, ONLY A CEILING ABOVE IT. The delivery row
+     * decides when a delivery is finished (deliver.ts, on its own schedule);
+     * groupmq re-queues each retry the handler asks for (engine.ts). This
+     * number only has to be higher than any plan's budget so groupmq never
+     * dead-letters a delivery the row says is still owed.
      */
-    maxAttempts: opts.maxAttempts ?? 5,
+    maxAttempts: GROUPMQ_ATTEMPT_CEILING,
     keepCompleted: 1_000,
     keepFailed: 10_000,
   })
 }
 
 /**
- * ⚠ THE DELIVERY ROW'S ID IS THE JOB ID, WHICH MAKES A DOUBLE ENQUEUE FREE.
- * The ingestion path can be retried by SNS, and a sweep may re-enqueue rows
- * that are still `pending`; both produce the same name, so groupmq collapses
- * them rather than delivering the customer's webhook twice.
+ * ⚠ ONE JOB ID PER ATTEMPT, WHICH MAKES A DOUBLE ENQUEUE FREE. The ingestion
+ * path can be retried by SNS, and the sweep may re-queue a row the queue still
+ * holds; both produce the same name for the same attempt, so groupmq collapses
+ * them rather than delivering the customer's webhook twice. The attempt is in
+ * the name because a retry is a NEW job - reusing the first attempt's id would
+ * be refused as a duplicate of a job groupmq still remembers completing.
  */
-export const webhookJobId = (deliveryId: string): string => `wh:${deliveryId}`
+export const webhookJobId = (deliveryId: string, attempt = 0): string =>
+  `wh:${deliveryId}:${attempt}`
 
 export async function enqueueDelivery(
   queue: Queue<WebhookJob>,
   job: WebhookJob,
   opts: EnqueueDeliveryOptions,
 ): Promise<void> {
+  const attempt = job.attempt ?? 0
   await queue.add({
     groupId: job.endpointId,
-    jobId: webhookJobId(job.deliveryId),
-    data: job,
+    jobId: webhookJobId(job.deliveryId, attempt),
+    data: { ...job, attempt },
     orderMs: opts.orderMs,
+    // ⚠ A DELAYED JOB STILL HOLDS ITS GROUP (measured 2026-10-05: a delayed
+    // retry with the earliest orderMs kept the endpoint's later events
+    // waiting). That is what keeps a retry in order with the events after it.
+    ...(opts.delayMs && opts.delayMs > 0 ? { delay: opts.delayMs } : {}),
   })
 }
 
 /**
- * Exponential, capped at eight minutes.
+ * Exponential, capped at eight minutes: the gap before attempt `n + 1`, in
+ * milliseconds, given `n` attempts made.
  *
- * ⚠ IT LIVES ON THE WORKER RATHER THAN THE QUEUE, WHICH IS EASY TO GET WRONG:
- * groupmq takes `maxAttempts` on both and `backoff` on the Worker only. Passed
- * to the Queue it is silently ignored - TypeScript catches it today, and the
- * failure if it ever stopped catching it is retries hammering a dead endpoint
- * every half second.
- *
- * ⚠ AND `maxAttempts` ON BOTH IS NOT BELT-AND-BRACES, IT IS TWO HALVES OF ONE
- * BUDGET. The Worker's value is what actually dead-letters - `handleJobFailure`
- * compares the next attempt against the WORKER's number - while the value the
- * enqueuing side stamps on the job is enforced separately, as a ceiling, inside
- * `retry.lua`. So the effective budget is the smaller of the two, and the two
- * have to come from the same variable. An earlier note here had this backwards
- * and said the enqueuing side decides; it does not, and following that would
- * have produced a worker that gives up before `deliverWebhook` calls the
- * attempt final, leaving the row `pending` and the endpoint never disabled.
+ * ⚠ THE DELIVERY SCHEDULE UNTIL PLANS SET THEIR OWN (#276), AND THE BACKOFF
+ * FOR A HANDLER THAT BROKE. A failed POST is not a broken handler: deliver.ts
+ * records it and asks for the next attempt at a time it chose, which
+ * engine.ts hands to groupmq exactly. This function is what groupmq falls back
+ * to when the handler itself threw.
  */
 export const webhookBackoff = (attempt: number): number =>
   Math.min(8 * 60_000, 2 ** attempt * 1_000)
