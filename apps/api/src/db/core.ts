@@ -1385,9 +1385,31 @@ export const webhookDeliveries = core.table(
 
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+    /**
+     * When this delivery is next owed an attempt. Null once it is delivered or
+     * has failed for good.
+     *
+     * ⚠ POSTGRES IS THE RECORD OF WHAT IS OWED; REDIS IS ONLY A PROMPT. A
+     * delayed retry used to exist only as a groupmq job, so a Redis that lost
+     * its data lost the retry, and a delivery whose enqueue failed after commit
+     * was never attempted at all. The sweep in webhooks/engine.ts re-queues any
+     * row that is due and that nothing is working on (#279).
+     */
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow(),
+    /**
+     * A worker's lease on this row while it is attempting it. A row whose lease
+     * is live is never handed to a second worker, which is what makes the sweep
+     * safe to run beside the queue; a lease left by a crash simply expires.
+     */
+    claimedUntil: timestamp("claimed_until", { withTimezone: true }),
   },
   (t) => [
     index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.createdAt),
+    // What the sweep reads: pending rows by when they are owed.
+    index("webhook_deliveries_due_idx")
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} = 'pending'`),
     index("webhook_deliveries_tenant_idx").on(t.tenantId, t.createdAt),
     // The queue for "what has not been delivered and is not moving".
     index("webhook_deliveries_pending_idx").on(t.status, t.createdAt),

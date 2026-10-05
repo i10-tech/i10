@@ -1,0 +1,3 @@
+ALTER TABLE "core"."webhook_deliveries" ADD COLUMN "next_attempt_at" timestamp with time zone DEFAULT now();--> statement-breakpoint
+ALTER TABLE "core"."webhook_deliveries" ADD COLUMN "claimed_until" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "webhook_deliveries_due_idx" ON "core"."webhook_deliveries" USING btree ("next_attempt_at") WHERE "core"."webhook_deliveries"."status" = 'pending';

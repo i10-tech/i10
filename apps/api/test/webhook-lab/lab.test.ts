@@ -270,9 +270,9 @@ suite("webhook conformance lab", () => {
   })
 
   describe("durability", () => {
-    // #279: the delayed retry lives only in Redis. Losing Redis's data loses
-    // it, and nothing in Postgres brings it back.
-    test.failing("a retry survives Redis losing its data", async () => {
+    // #279: the row says when the retry is owed, and the sweep re-queues it
+    // after Redis forgets.
+    test("a retry survives Redis losing its data", async () => {
       const t = await lab.workspace()
       const ep = await lab.endpoint(t, "flaky/lost?n=1")
       await lab.emit(t, { k: 1 })
@@ -285,21 +285,33 @@ suite("webhook conformance lab", () => {
       expect(delivered).toBe(true)
     })
 
-    // #279: rows committed but never queued (the enqueue failed after the
-    // commit) stay pending for ever; nothing sweeps them.
-    test.failing(
-      "a delivery whose enqueue failed after commit is still delivered",
-      async () => {
-        const t = await lab.workspace()
-        const ep = await lab.endpoint(t, "ok/unqueued")
-        await lab.emit(t, { k: 1 }, { enqueue: false })
-        const delivered = await until(
-          async () => (await lab.deliveries(ep.id))[0]?.status === "delivered",
-          10_000,
-        )
-        expect(delivered).toBe(true)
-      },
-    )
+    // #279: a row committed but never queued is due at once, and the sweep
+    // finds it.
+    test("a delivery whose enqueue failed after commit is still delivered", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/unqueued")
+      await lab.emit(t, { k: 1 }, { enqueue: false })
+      const delivered = await until(
+        async () => (await lab.deliveries(ep.id))[0]?.status === "delivered",
+        10_000,
+      )
+      expect(delivered).toBe(true)
+    })
+
+    // ⚠ THE LEASE IS WHAT LETS THE SWEEP RUN BESIDE THE QUEUE. A delivery
+    // being attempted right now is due and pending, and must still never be
+    // handed out a second time.
+    test("the sweep never takes a delivery a worker is attempting", async () => {
+      const t = await lab.workspace()
+      await lab.endpoint(t, "hang/leased")
+      await lab.emit(t, { k: 1 })
+      await until(() => lab.receiver.of("leased").length >= 1, 3_000)
+      // Past the sweep's grace, still inside the attempt's timeout.
+      await Bun.sleep(LAB.sweepGraceSeconds * 1000 + 200)
+      const found = await lab.engine.sweep()
+      expect(found).toBe(0)
+      expect(lab.receiver.of("leased")).toHaveLength(1)
+    })
 
     slow(
       "a delivery in flight when the worker dies is delivered after restart",

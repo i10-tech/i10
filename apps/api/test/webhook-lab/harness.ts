@@ -37,11 +37,14 @@ export const LAB = {
   maxAttempts: 5,
   /** Production: 10s. */
   timeoutMs: 1_500,
-  /**
-   * Production: 2^attempt seconds capped at 8 minutes. Measured in the lab
-   * with this function: attempts at about 0, 1, 3, 5 and 9 seconds.
-   */
-  backoff: (attempt: number) => Math.min(4_000, 2 ** attempt * 250),
+  /** Production: 2^n seconds capped at 8 minutes, before #276. */
+  // ⚠ WHOLE SECONDS, NOT LESS. groupmq's retry.lua floors Redis's clock to the
+  // second (`TIME[1] * 1000`), so a retry fires up to 999ms early; a 500ms
+  // step would be noise. 1s, 2s, 4s, 4s.
+  retryDelayMs: (attemptsMade: number) => Math.min(4_000, 2 ** attemptsMade * 500),
+  /** Production: every 30s, for rows due longer than 60s. */
+  sweepEveryMs: 500,
+  sweepGraceSeconds: 1,
   /** Production's default, so the fairness scenario measures the real number. */
   concurrency: 8,
 }
@@ -163,7 +166,10 @@ export async function startLab(): Promise<Lab> {
       maxAttempts: LAB.maxAttempts,
       concurrency: LAB.concurrency,
       timeoutMs: LAB.timeoutMs,
-      backoff: LAB.backoff,
+      retryDelayMs: LAB.retryDelayMs,
+      sweepEveryMs: LAB.sweepEveryMs,
+      sweepGraceSeconds: LAB.sweepGraceSeconds,
+      schedulerIntervalMs: 200,
       egressAllow: parseAllowList("127.0.0.1/32"),
       lookup,
     })

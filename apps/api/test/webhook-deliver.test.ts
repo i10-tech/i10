@@ -27,6 +27,7 @@ function deps(over: Record<string, unknown> = {}) {
       delivery: DeliveryRecord,
       outcome: { reason: string; responseStatus?: number },
       final: boolean,
+      nextAttemptAt: Date | null,
     ) => Promise<void>
   >(async () => {})
   const log = { info: mock(), warn: mock(), error: mock() }
@@ -129,7 +130,7 @@ describe("a failing delivery", () => {
     const { deps: d, markFailed } = deps({
       fetch: mock(async () => new Response("", { status })),
     })
-    await expect(deliverWebhook(job, d)).rejects.toThrow()
+    expect(await deliverWebhook(job, d)).toMatchObject({ status: "failed" })
     expect(markFailed).toHaveBeenCalledTimes(1)
   })
 
@@ -148,16 +149,16 @@ describe("a failing delivery", () => {
         throw timeout
       }),
     })
-    await expect(deliverWebhook(job, d)).rejects.toThrow()
+    await deliverWebhook(job, d)
     expect(markFailed.mock.calls[0]![1]).toMatchObject({
       reason: "timed out waiting for a response",
     })
   })
 
-  // ⚠ THROWN WHILE THERE IS BUDGET SO groupmq SCHEDULES THE RETRY, AND NOT ON
-  // THE LAST ATTEMPT - a customer's dead endpoint must not fill the failed-job
-  // list that a real bug needs to be visible in.
-  it("stops throwing once the budget is gone", async () => {
+  // ⚠ NEVER THROWN. The next attempt is returned as `retryAt` for the engine
+  // to schedule, and the last attempt has nothing to schedule - a customer's
+  // dead endpoint must not fill the failed-job list a real bug needs.
+  it("has no next attempt once the budget is gone", async () => {
     const { deps: d, markFailed } = deps({
       load: async () => record({ attempts: 4 }),
       fetch: mock(async () => new Response("", { status: 500 })),
@@ -166,7 +167,9 @@ describe("a failing delivery", () => {
     const outcome = await deliverWebhook(job, d)
 
     expect(outcome).toMatchObject({ status: "failed" })
+    expect(outcome).not.toHaveProperty("retryAt")
     expect(markFailed.mock.calls[0]![2]).toBe(true)
+    expect(markFailed.mock.calls[0]![3]).toBeNull()
   })
 
   it("marks intermediate attempts as not final", async () => {
@@ -174,8 +177,14 @@ describe("a failing delivery", () => {
       load: async () => record({ attempts: 1 }),
       fetch: mock(async () => new Response("", { status: 503 })),
     })
-    await expect(deliverWebhook(job, d)).rejects.toThrow()
+    const before = Date.now()
+    const outcome = await deliverWebhook(job, { ...d, retryDelayMs: () => 30_000 })
     expect(markFailed.mock.calls[0]![2]).toBe(false)
+    // ⚠ THE ROW LEARNS WHEN IT IS OWED IN THE SAME CALL THAT RECORDS THE
+    // FAILURE, before anything is queued, so the sweep can find it (#279).
+    const next = markFailed.mock.calls[0]![3] as Date
+    expect(next.getTime() - before).toBeGreaterThanOrEqual(30_000)
+    expect(outcome).toMatchObject({ status: "failed", retryAt: next })
   })
 
   // A customer's 302 to somewhere else is not somewhere we should sign a
