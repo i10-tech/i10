@@ -6,8 +6,9 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test"
+import { dueDeliveries } from "../../src/webhooks/db.js"
 import { verifySignature } from "../../src/webhooks/signing.js"
-import { enabled, LAB, startLab, until, type Lab } from "./harness.js"
+import { enabled, LAB, LAB_RULES, startLab, until, type Lab } from "./harness.js"
 
 /**
  * The webhook conformance lab (#273). Every scenario the Svix lab ran on
@@ -120,20 +121,19 @@ suite("webhook conformance lab", () => {
       expect(row?.last_error).toBeTruthy()
     })
 
-    // #276: Retry-After is not read today; the next attempt follows our own
-    // backoff (250ms here) whatever the endpoint asked for.
-    test.failing("Retry-After is honoured", async () => {
+    // #276: never before what the endpoint asked for.
+    test("Retry-After is honoured", async () => {
       const t = await lab.workspace()
       await lab.endpoint(t, "ratelimit/rl?s=3")
       await lab.emit(t, { k: 1 })
-      await until(() => lab.receiver.of("rl").length >= 2, 6_000)
+      await until(() => lab.receiver.of("rl").length >= 2, 8_000)
       const [a, b] = lab.receiver.of("rl")
-      expect(b!.at - a!.at).toBeGreaterThanOrEqual(2_900)
+      expect(b!.at - a!.at).toBeGreaterThanOrEqual(3_000)
     })
 
-    // #276: a 429 gets no penalty beyond the normal backoff. Measured: a 429
-    // and a 500 for the same event are retried at the same moments.
-    test.failing("a 429 is retried later than an ordinary failure", async () => {
+    // #276: Svix's 429 penalty never applies (a 429 and a 500 were retried at
+    // the same moments in its lab). Ours is a floor on the next gap.
+    test("a 429 waits at least the overload penalty, a 500 does not", async () => {
       const t = await lab.workspace()
       await lab.endpoint(t, "fail/plain500")
       await lab.endpoint(t, "ratelimit/rl-nohdr?s=0")
@@ -142,13 +142,60 @@ suite("webhook conformance lab", () => {
         () =>
           lab.receiver.of("plain500").length >= 2 &&
           lab.receiver.of("rl-nohdr").length >= 2,
-        5_000,
+        10_000,
       )
       const gap = (tag: string) => {
         const [a, b] = lab.receiver.of(tag)
         return b!.at - a!.at
       }
-      expect(gap("rl-nohdr")).toBeGreaterThan(gap("plain500") * 2)
+      expect(gap("rl-nohdr")).toBeGreaterThanOrEqual(
+        LAB_RULES.overloadPenaltySeconds * 1000,
+      )
+      expect(gap("plain500")).toBeLessThan(LAB_RULES.overloadPenaltySeconds * 1000)
+    })
+
+    // #276: the receiver said it is not coming back.
+    test("a 410 ends the delivery and disables the endpoint at once", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "gone/gone")
+      await lab.emit(t, { k: 1 })
+      const row = await until(async () => {
+        const [d] = await lab.deliveries(ep.id)
+        return d?.status === "failed" ? d : undefined
+      }, 5_000)
+      expect(row?.attempts).toBe(1)
+      const [endpoint] =
+        await lab.owner`select enabled, disabled_reason from core.webhook_endpoints where id = ${ep.id}`
+      expect(endpoint).toMatchObject({
+        enabled: false,
+        disabled_reason: "The endpoint answered 410 Gone.",
+      })
+    })
+
+    // #276: disabled for a stretch of time with no success, not a count.
+    test("an endpoint with no success for the plan's stretch is disabled when a delivery runs out", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "fail/stretch")
+      await lab.emit(t, { k: 1 })
+      const disabled = await until(async () => {
+        const [e] =
+          await lab.owner`select enabled, disabled_reason from core.webhook_endpoints where id = ${ep.id}`
+        return e && !e.enabled ? e : undefined
+      }, 25_000)
+      expect(disabled?.disabled_reason).toMatch(/^No successful delivery for/)
+    })
+
+    test("one success ends the failing run, so the endpoint stays on", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "flaky/recovers?n=1")
+      await lab.emit(t, { k: 1 })
+      await until(
+        async () => (await lab.deliveries(ep.id))[0]?.status === "delivered",
+        8_000,
+      )
+      const [e] =
+        await lab.owner`select enabled, failing_since from core.webhook_endpoints where id = ${ep.id}`
+      expect(e).toMatchObject({ enabled: true, failing_since: null })
     })
   })
 
@@ -303,13 +350,15 @@ suite("webhook conformance lab", () => {
     // handed out a second time.
     test("the sweep never takes a delivery a worker is attempting", async () => {
       const t = await lab.workspace()
-      await lab.endpoint(t, "hang/leased")
+      const ep = await lab.endpoint(t, "hang/leased")
       await lab.emit(t, { k: 1 })
       await until(() => lab.receiver.of("leased").length >= 1, 3_000)
-      // Past the sweep's grace, still inside the attempt's timeout.
+      const [row] = await lab.deliveries(ep.id)
+      // Past the sweep's grace, still inside the attempt's timeout. The sweep
+      // is global, so the question is whether THIS row is among what it finds.
       await Bun.sleep(LAB.sweepGraceSeconds * 1000 + 200)
-      const found = await lab.engine.sweep()
-      expect(found).toBe(0)
+      const due = await dueDeliveries(lab.db, LAB.sweepGraceSeconds, 500)
+      expect(due.map((d) => d.id)).not.toContain(row!.id)
       expect(lab.receiver.of("leased")).toHaveLength(1)
     })
 

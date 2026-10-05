@@ -582,13 +582,6 @@ const schema = z.object({
    */
   WEBHOOK_SECRET_KEY: z.string().min(32).optional(),
 
-  /**
-   * How many delivery attempts a webhook gets before the row is marked failed.
-   * The backoff is exponential and capped at eight minutes, so five attempts
-   * span roughly a quarter of an hour - enough for a deploy or a restart.
-   */
-  WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
-
   /** Provider webhook deliveries in flight per worker replica. */
   WEBHOOK_CONCURRENCY: z.coerce.number().int().positive().max(100).default(8),
 

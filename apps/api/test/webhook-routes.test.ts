@@ -43,6 +43,7 @@ const endpoint = {
   events: ["email.bounced" as const],
   description: null,
   enabled: true,
+  disabled_reason: null,
   created_at: "2026-09-03T10:00:00.000Z",
   signature_scheme: "hmac_sha256" as const,
   public_key: null,

@@ -12,6 +12,7 @@ import { dueDeliveries, webhookDeliveryOps } from "./db.js"
 import { DELIVERY_TIMEOUT_MS, deliverWebhook } from "./deliver.js"
 import { vetHost, type Lookup, type VetOptions } from "./egress.js"
 import type { Logger } from "./events.js"
+import type { RetryRules } from "./schedule.js"
 import type { SecretBox } from "./signing.js"
 
 /**
@@ -43,16 +44,14 @@ export interface WebhookEngineOptions {
   log: Logger
   /** Distinguishes this worker in groupmq's bookkeeping. */
   name: string
-  /** Attempts per delivery, the first included. */
-  maxAttempts: number
   /** Distinct endpoints in flight at once. */
   concurrency: number
   /** Private ranges delivery may reach anyway. Empty in production. */
   egressAllow?: VetOptions["allow"]
   /** The lab's resolver; production uses the system's. */
   lookup?: Lookup
-  /** Milliseconds before the next attempt, given attempts made. */
-  retryDelayMs?: (attemptsMade: number) => number
+  /** Retry timing. Production's are in schedule.ts; the lab passes a scaled copy. */
+  rules?: RetryRules
   /** How long an endpoint has to answer. */
   timeoutMs?: number
   /** groupmq namespace override, so a lab never shares keys with a real queue. */
@@ -113,7 +112,6 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
     // The attempt itself, resolution included, plus room to record it.
     leaseSeconds: Math.ceil(timeoutMs / 1000) + 30,
   })
-  const retryDelayMs = opts.retryDelayMs ?? webhookBackoff
   const sweepEveryMs = opts.sweepEveryMs ?? 30_000
   const sweepGraceSeconds = opts.sweepGraceSeconds ?? 60
 
@@ -140,8 +138,7 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
               signal,
             }),
           log: opts.log,
-          maxAttempts: opts.maxAttempts,
-          retryDelayMs,
+          ...(opts.rules ? { rules: opts.rules } : {}),
           timeoutMs,
         })
 
@@ -181,7 +178,11 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
       // itself broke, which the row's lease and the sweep then recover.
       onError: (err, job) => {
         if (err instanceof RetryAt) {
-          pendingDelayMs = Math.max(0, err.at.getTime() - Date.now())
+          // ⚠ PLUS A SECOND, BECAUSE groupmq's retry.lua FLOORS REDIS'S CLOCK
+          // TO THE SECOND and would otherwise fire up to 999ms early - which
+          // would retry an endpoint before the `Retry-After` it asked for.
+          // With it, a retry lands between its time and a second after.
+          pendingDelayMs = Math.max(0, err.at.getTime() - Date.now()) + 1_000
           return
         }
         pendingDelayMs = null

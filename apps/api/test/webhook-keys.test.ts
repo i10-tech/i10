@@ -170,6 +170,7 @@ describe("delivery during a grace period", () => {
           occurredAt: new Date(),
           payload: {},
           attempts: 0,
+          retryPolicy: "pro",
         }),
         markDelivered: mock(async () => {}),
         markFailed: mock(async () => {}),
@@ -180,7 +181,6 @@ describe("delivery during a grace period", () => {
           family: 4 as const,
         }),
         log: { info: mock(), warn: mock(), error: mock() },
-        maxAttempts: 5,
       },
     )
     const init = (doFetch.mock.calls[0] as unknown as [string, RequestInit])[1]

@@ -353,13 +353,9 @@ const endpointVetting = {
   vet: (host: string) =>
     vetHost(host, { allow: webhookEgressAllow, signal: AbortSignal.timeout(3_000) }),
 }
-// ⚠ `maxAttempts` HERE, NOT ONLY ON THE WORKER'S QUEUE, BECAUSE THE BUDGET HAS
-// TWO HALVES. The value stamped on the job at `add()` is enforced as a ceiling
-// in `retry.lua`; the Worker's own value is what actually dead-letters. The
-// effective budget is the smaller of the two, so both come from
-// WEBHOOK_MAX_ATTEMPTS - left to the default here, raising that variable would
-// make groupmq give up before `deliverWebhook` considers the attempt final, and
-// the row would sit `pending` forever with the endpoint never disabled.
+// The same queue settings as the worker's (createWebhookQueue), so the ceiling
+// groupmq stamps on each job matches. The delivery budget itself lives on the
+// delivery row, by plan - see webhooks/schedule.ts.
 const webhookQueue = secrets ? createWebhookQueue({ redis: queueRedis }) : null
 
 log.info(

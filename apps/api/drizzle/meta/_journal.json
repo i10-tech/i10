@@ -736,6 +736,20 @@
       "when": 1791219688310,
       "tag": "0104_webhook_deliveries_due",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1791220482817,
+      "tag": "0105_webhook_retry_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1791220483567,
+      "tag": "0106_webhook_drop_failure_count",
+      "breakpoints": true
     }
   ]
 }

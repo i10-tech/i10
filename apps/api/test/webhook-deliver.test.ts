@@ -1,5 +1,9 @@
 import { describe, expect, it, mock } from "bun:test"
-import { deliverWebhook, type DeliveryRecord } from "../src/webhooks/deliver.js"
+import {
+  deliverWebhook,
+  type DeliveryRecord,
+  type FailureDecision,
+} from "../src/webhooks/deliver.js"
 import { verifySignature } from "../src/webhooks/signing.js"
 
 const SECRET = "whsec_MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3"
@@ -14,6 +18,7 @@ const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
   occurredAt: new Date("2026-09-03T10:00:00Z"),
   payload: { email_id: "msg-1" },
   attempts: 0,
+  retryPolicy: "pro",
   ...over,
 })
 
@@ -26,8 +31,7 @@ function deps(over: Record<string, unknown> = {}) {
     (
       delivery: DeliveryRecord,
       outcome: { reason: string; responseStatus?: number },
-      final: boolean,
-      nextAttemptAt: Date | null,
+      decision: FailureDecision,
     ) => Promise<void>
   >(async () => {})
   const log = { info: mock(), warn: mock(), error: mock() }
@@ -46,7 +50,6 @@ function deps(over: Record<string, unknown> = {}) {
         family: 4 as const,
       }),
       log,
-      maxAttempts: 5,
       ...over,
     },
     markDelivered,
@@ -160,7 +163,8 @@ describe("a failing delivery", () => {
   // dead endpoint must not fill the failed-job list a real bug needs.
   it("has no next attempt once the budget is gone", async () => {
     const { deps: d, markFailed } = deps({
-      load: async () => record({ attempts: 4 }),
+      // Pro allows 8 attempts; this is the eighth.
+      load: async () => record({ attempts: 7 }),
       fetch: mock(async () => new Response("", { status: 500 })),
     })
 
@@ -168,8 +172,7 @@ describe("a failing delivery", () => {
 
     expect(outcome).toMatchObject({ status: "failed" })
     expect(outcome).not.toHaveProperty("retryAt")
-    expect(markFailed.mock.calls[0]![2]).toBe(true)
-    expect(markFailed.mock.calls[0]![3]).toBeNull()
+    expect(markFailed.mock.calls[0]![2].nextAttemptAt).toBeNull()
   })
 
   it("marks intermediate attempts as not final", async () => {
@@ -178,12 +181,13 @@ describe("a failing delivery", () => {
       fetch: mock(async () => new Response("", { status: 503 })),
     })
     const before = Date.now()
-    const outcome = await deliverWebhook(job, { ...d, retryDelayMs: () => 30_000 })
-    expect(markFailed.mock.calls[0]![2]).toBe(false)
+    const outcome = await deliverWebhook(job, d)
     // ⚠ THE ROW LEARNS WHEN IT IS OWED IN THE SAME CALL THAT RECORDS THE
     // FAILURE, before anything is queued, so the sweep can find it (#279).
-    const next = markFailed.mock.calls[0]![3] as Date
-    expect(next.getTime() - before).toBeGreaterThanOrEqual(30_000)
+    // Pro's second gap is 5 minutes, give or take 20% jitter.
+    const next = markFailed.mock.calls[0]![2].nextAttemptAt!
+    expect(next.getTime() - before).toBeGreaterThanOrEqual(240_000)
+    expect(next.getTime() - before).toBeLessThanOrEqual(360_500)
     expect(outcome).toMatchObject({ status: "failed", retryAt: next })
   })
 
@@ -204,5 +208,95 @@ describe("a delivery that no longer applies", () => {
     expect(await deliverWebhook(job, d)).toEqual({ status: "skipped" })
     expect(doFetch).not.toHaveBeenCalled()
     expect(markFailed).not.toHaveBeenCalled()
+  })
+})
+
+describe("what the endpoint says about itself (#276)", () => {
+  const failWith = (response: () => Response, attempts = 0) =>
+    deps({
+      load: async () => record({ attempts }),
+      fetch: mock(async () => response()),
+    })
+  const gapOf = async (d: ReturnType<typeof deps>) => {
+    const before = Date.now()
+    await deliverWebhook(job, d.deps)
+    return d.markFailed.mock.calls[0]![2].nextAttemptAt!.getTime() - before
+  }
+
+  it("waits at least a minute after a 429, whatever the schedule says", async () => {
+    // Pro's first gap is 5 seconds.
+    expect(
+      await gapOf(failWith(() => new Response("", { status: 429 }))),
+    ).toBeGreaterThanOrEqual(60_000)
+  })
+
+  it("waits at least a minute after a timeout", async () => {
+    const timeout = Object.assign(new Error("aborted"), { name: "TimeoutError" })
+    const d = deps({
+      fetch: mock(async () => {
+        throw timeout
+      }),
+    })
+    expect(await gapOf(d)).toBeGreaterThanOrEqual(60_000)
+  })
+
+  it("honours Retry-After in seconds, and jitter never shortens it", async () => {
+    for (let i = 0; i < 20; i++) {
+      const gap = await gapOf(
+        failWith(
+          () => new Response("", { status: 503, headers: { "retry-after": "120" } }),
+        ),
+      )
+      expect(gap).toBeGreaterThanOrEqual(120_000)
+    }
+  })
+
+  it("honours Retry-After as an HTTP date", async () => {
+    const at = new Date(Date.now() + 300_000).toUTCString()
+    const gap = await gapOf(
+      failWith(() => new Response("", { status: 503, headers: { "retry-after": at } })),
+    )
+    expect(gap).toBeGreaterThanOrEqual(298_000)
+  })
+
+  it("caps Retry-After at an hour", async () => {
+    const gap = await gapOf(
+      failWith(
+        () => new Response("", { status: 503, headers: { "retry-after": "86400" } }),
+      ),
+    )
+    expect(gap).toBeLessThanOrEqual(3_600_500)
+  })
+
+  it("ignores a Retry-After it cannot read", async () => {
+    const gap = await gapOf(
+      failWith(
+        () => new Response("", { status: 503, headers: { "retry-after": "soon" } }),
+      ),
+    )
+    expect(gap).toBeLessThan(10_000)
+  })
+
+  // ⚠ A 410 IS THE RECEIVER SAYING IT IS NOT COMING BACK. The delivery ends
+  // and the endpoint is switched off at once, with the reason recorded.
+  it("ends the delivery and disables the endpoint on 410 Gone", async () => {
+    const d = failWith(() => new Response("", { status: 410 }))
+    const outcome = await deliverWebhook(job, d.deps)
+    const decision = d.markFailed.mock.calls[0]![2]
+    expect(decision.nextAttemptAt).toBeNull()
+    expect(decision.disable).toEqual({
+      kind: "gone",
+      reason: "The endpoint answered 410 Gone.",
+    })
+    expect(outcome).not.toHaveProperty("retryAt")
+  })
+
+  it("asks for time-based disabling, by plan, on other failures", async () => {
+    const d = failWith(() => new Response("", { status: 500 }))
+    await deliverWebhook(job, d.deps)
+    expect(d.markFailed.mock.calls[0]![2].disable).toEqual({
+      kind: "after",
+      seconds: 5 * 86_400,
+    })
   })
 })

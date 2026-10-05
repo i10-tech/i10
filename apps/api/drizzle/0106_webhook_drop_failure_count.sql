@@ -1,0 +1,1 @@
+ALTER TABLE "core"."webhook_endpoints" DROP COLUMN "consecutive_failures";

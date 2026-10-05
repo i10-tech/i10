@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test"
-import { deliverWebhook, type DeliveryRecord } from "../src/webhooks/deliver.js"
+import {
+  deliverWebhook,
+  type DeliveryRecord,
+  type FailureDecision,
+} from "../src/webhooks/deliver.js"
 import {
   isPermittedAddress,
   parseAllowList,
@@ -203,6 +207,7 @@ const record = (url: string): DeliveryRecord => ({
   occurredAt: new Date("2026-09-03T10:00:00Z"),
   payload: { email_id: "msg-1" },
   attempts: 0,
+  retryPolicy: "pro",
 })
 const job = { deliveryId: record("x").id, endpointId: "ep-1", tenantId: "ten-1" }
 const log = { info: mock(), warn: mock(), error: mock() }
@@ -242,7 +247,6 @@ describe("delivery through a real socket", () => {
       vet: (host, signal) =>
         vetHost(host, { lookup, allow: parseAllowList("127.0.0.1/32"), signal }),
       log,
-      maxAttempts: 5,
     })
     expect(outcome).toEqual({ status: "delivered", responseStatus: 200 })
     expect(seen).toEqual([{ host: `hooks.test:${server.port}`, path: "/i10" }])
@@ -251,7 +255,11 @@ describe("delivery through a real socket", () => {
   it("never opens the socket when the address is refused", async () => {
     seen.length = 0
     const markFailed = mock<
-      (d: DeliveryRecord, o: { reason: string }, final: boolean) => Promise<void>
+      (
+        d: DeliveryRecord,
+        o: { reason: string },
+        decision: FailureDecision,
+      ) => Promise<void>
     >(async () => {})
     const doFetch = mock(async () => new Response("", { status: 200 }))
     const outcome = await deliverWebhook(job, {
@@ -261,7 +269,6 @@ describe("delivery through a real socket", () => {
       fetch: doFetch as unknown as typeof fetch,
       vet: (host, signal) => vetHost(host, { lookup, signal }),
       log,
-      maxAttempts: 1,
     })
     expect(outcome).toMatchObject({ status: "failed" })
     expect(doFetch).not.toHaveBeenCalled()
@@ -278,7 +285,6 @@ describe("delivery through a real socket", () => {
       markDelivered: mock(async () => {}),
       markFailed: mock(async () => {}),
       log,
-      maxAttempts: 1,
     })
     expect(outcome).toMatchObject({ status: "failed" })
     expect(seen).toEqual([])

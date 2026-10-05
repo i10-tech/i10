@@ -9,6 +9,7 @@ import { parseAllowList, type Lookup } from "../../src/webhooks/egress.js"
 import { startWebhookEngine, type WebhookEngine } from "../../src/webhooks/engine.js"
 import type { WebhookEventType } from "../../src/webhooks/events.js"
 import { generateKey } from "../../src/webhooks/keys.js"
+import type { PolicyRules, RetryRules } from "../../src/webhooks/schedule.js"
 import { secretBox } from "../../src/webhooks/signing.js"
 import { webhookEndpointStore } from "../../src/webhooks/store.js"
 import { startReceiver, type Receiver } from "./receiver.js"
@@ -32,16 +33,30 @@ export const DATABASE_URL = process.env.WEBHOOKS_TEST_DATABASE_URL
 export const REDIS_URL = process.env.WEBHOOKS_TEST_REDIS_URL
 export const enabled = Boolean(DATABASE_URL && REDIS_URL)
 
-/** The lab's clock: production's shapes, scaled down so a run takes seconds. */
+/**
+ * The lab's clock: production's rules (webhooks/schedule.ts), scaled down so a
+ * run takes seconds. Same code, smaller numbers.
+ */
+const LAB_POLICY: PolicyRules = { gaps: [1, 2, 4, 4], disableAfterSeconds: 3 }
+export const LAB_RULES: RetryRules = {
+  policies: {
+    free: LAB_POLICY,
+    pro: LAB_POLICY,
+    scale: LAB_POLICY,
+    enterprise: LAB_POLICY,
+  },
+  // Production: an hour.
+  retryAfterCapSeconds: 10,
+  // Production: a minute.
+  overloadPenaltySeconds: 4,
+  // Production: 20%. None here, so timings can be asserted.
+  jitter: 0,
+}
+
 export const LAB = {
-  maxAttempts: 5,
+  maxAttempts: LAB_POLICY.gaps.length + 1,
   /** Production: 10s. */
   timeoutMs: 1_500,
-  /** Production: 2^n seconds capped at 8 minutes, before #276. */
-  // ⚠ WHOLE SECONDS, NOT LESS. groupmq's retry.lua floors Redis's clock to the
-  // second (`TIME[1] * 1000`), so a retry fires up to 999ms early; a 500ms
-  // step would be noise. 1s, 2s, 4s, 4s.
-  retryDelayMs: (attemptsMade: number) => Math.min(4_000, 2 ** attemptsMade * 500),
   /** Production: every 30s, for rows due longer than 60s. */
   sweepEveryMs: 500,
   sweepGraceSeconds: 1,
@@ -163,10 +178,9 @@ export async function startLab(): Promise<Lab> {
       log,
       name: `lab:${namespace}`,
       namespace,
-      maxAttempts: LAB.maxAttempts,
       concurrency: LAB.concurrency,
       timeoutMs: LAB.timeoutMs,
-      retryDelayMs: LAB.retryDelayMs,
+      rules: LAB_RULES,
       sweepEveryMs: LAB.sweepEveryMs,
       sweepGraceSeconds: LAB.sweepGraceSeconds,
       schedulerIntervalMs: 200,

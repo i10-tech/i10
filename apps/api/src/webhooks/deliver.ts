@@ -4,7 +4,14 @@ import { describeError } from "../errors.js"
 import { timestampFor } from "./signing.js"
 import { signWithKeys, type SigningKey } from "./keys.js"
 import { pinnedRequest, vetHost, type EgressVerdict } from "./egress.js"
-import { webhookBackoff } from "../queue/webhook-queue.js"
+import {
+  isPermanentlyGone,
+  nextDelayMs,
+  RULES,
+  type FailureSignals,
+  type RetryPolicy,
+  type RetryRules,
+} from "./schedule.js"
 
 /**
  * Delivering one webhook.
@@ -26,14 +33,6 @@ import { webhookBackoff } from "../queue/webhook-queue.js"
 /** How long a customer's endpoint has to answer. */
 export const DELIVERY_TIMEOUT_MS = 10_000
 
-/**
- * ⚠ AFTER THIS MANY CONSECUTIVE FAILURES THE ENDPOINT IS SWITCHED OFF. Not a
- * courtesy to the customer - a protection for the queue. An endpoint whose host
- * no longer exists would otherwise take five attempts for every event that
- * tenant ever generates, forever, in a queue their neighbours share.
- */
-export const DISABLE_AFTER_FAILURES = 20
-
 export interface DeliveryRecord {
   id: string
   tenantId: string
@@ -49,6 +48,20 @@ export interface DeliveryRecord {
   occurredAt: Date
   payload: Record<string, unknown>
   attempts: number
+  /** Fixed when the event happened; decides the retry window. */
+  retryPolicy: RetryPolicy
+}
+
+/** What a failed attempt means for the delivery and for its endpoint. */
+export interface FailureDecision {
+  /** When the next attempt is owed; null when the budget is spent. */
+  nextAttemptAt: Date | null
+  /**
+   * ⚠ HOW THE ENDPOINT MAY BE SWITCHED OFF. `gone`: it answered 410, so at
+   * once. Otherwise, when this was the last attempt, only if it has had no
+   * success for `disableAfterSeconds` - a stretch of time, not a count.
+   */
+  disable: { kind: "gone"; reason: string } | { kind: "after"; seconds: number }
 }
 
 export type DeliveryOutcome =
@@ -65,18 +78,16 @@ export interface DeliverDeps {
   /** Records success, and clears the endpoint's failure count. */
   markDelivered: (delivery: DeliveryRecord, responseStatus: number) => Promise<void>
   /**
-   * Records one failed attempt. `final` means the retry budget is gone, and is
-   * what advances the endpoint towards being disabled; otherwise
-   * `nextAttemptAt` is when the row is owed its next attempt.
+   * Records one failed attempt and what it decided: when the delivery is next
+   * owed (or that it is finished), and whether the endpoint is switched off.
    */
   markFailed: (
     delivery: DeliveryRecord,
     outcome: { reason: string; responseStatus?: number },
-    final: boolean,
-    nextAttemptAt: Date | null,
+    decision: FailureDecision,
   ) => Promise<void>
-  /** Milliseconds before attempt `n + 1`, given `n` attempts made. */
-  retryDelayMs?: (attemptsMade: number) => number
+  /** Retry timing. Production's are in schedule.ts; the lab passes a scaled copy. */
+  rules?: RetryRules
   fetch?: typeof fetch
   /**
    * Decides where a hostname may be connected to. Defaults to the system
@@ -89,7 +100,6 @@ export interface DeliverDeps {
   vet?: (host: string, signal: AbortSignal) => Promise<EgressVerdict>
   log: Logger
   timeoutMs?: number
-  maxAttempts: number
 }
 
 /**
@@ -128,6 +138,8 @@ export async function deliverWebhook(
   const url = new URL(delivery.url)
 
   let outcome: DeliveryOutcome
+  // What the endpoint told us about itself, for the retry decision.
+  const signals: FailureSignals = {}
   try {
     // ⚠ RESOLVED AND VETTED ON EVERY ATTEMPT, THEN CONNECTED TO BY ADDRESS.
     // See egress.ts: the string check at registration cannot see what DNS says
@@ -166,6 +178,8 @@ export async function deliverWebhook(
       ...(pinned.serverName ? { tls: { serverName: pinned.serverName } } : {}),
     })
 
+    signals.status = response.status
+    signals.retryAfter = response.headers.get("retry-after")
     outcome =
       // ⚠ ANY 2xx IS SUCCESS, AND NOTHING ELSE IS. A 3xx is a redirect we
       // refused to follow; a 401 or 404 means their route moved. Treating "the
@@ -179,6 +193,8 @@ export async function deliverWebhook(
             reason: `endpoint answered ${response.status}`,
           }
   } catch (err) {
+    signals.timedOut =
+      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")
     outcome = {
       status: "failed",
       // Already a sentence for the customer; describeError would reword it.
@@ -193,18 +209,26 @@ export async function deliverWebhook(
 
   // `attempts` is the count BEFORE this one, so this attempt is `attempts + 1`.
   const made = delivery.attempts + 1
-  const final = made >= deps.maxAttempts
-  const retryAt = final
-    ? null
-    : new Date(Date.now() + (deps.retryDelayMs ?? webhookBackoff)(made))
+  const rules = deps.rules ?? RULES
+  const policy = rules.policies[delivery.retryPolicy]
+  const gone = isPermanentlyGone(signals.status)
+  // ⚠ A 410 ENDS THE DELIVERY AND THE ENDPOINT TOGETHER. The receiver said in
+  // so many words that it is not coming back; a day of retries would be noise
+  // at its door and at ours.
+  const delay = gone ? null : nextDelayMs(delivery.retryPolicy, made, signals, rules)
+  const nextAttemptAt = delay === null ? null : new Date(Date.now() + delay)
   await deps.markFailed(
     delivery,
     {
       reason: outcome.reason,
       ...(outcome.responseStatus ? { responseStatus: outcome.responseStatus } : {}),
     },
-    final,
-    retryAt,
+    {
+      nextAttemptAt,
+      disable: gone
+        ? { kind: "gone", reason: "The endpoint answered 410 Gone." }
+        : { kind: "after", seconds: policy.disableAfterSeconds },
+    },
   )
 
   deps.log.warn(
@@ -214,15 +238,14 @@ export async function deliverWebhook(
       attempt: made,
       status: outcome.responseStatus,
       reason: outcome.reason,
-      final,
+      final: nextAttemptAt === null,
     },
     "webhook delivery failed",
   )
 
-  // ⚠ RETURNED, NOT THROWN. The next attempt is a new job the engine queues
-  // for `retryAt`, on this delivery's own schedule; groupmq's retries are only
-  // for a handler that broke. And on the final attempt there is nothing to
-  // throw for: the row already says `failed`, and a customer's dead endpoint
-  // must not fill the failed-job list a real bug needs to be visible in.
-  return retryAt ? { ...outcome, retryAt } : outcome
+  // ⚠ RETURNED, NOT THROWN. The engine hands `retryAt` to groupmq so the
+  // retry stays in its endpoint's group; on the final attempt there is nothing
+  // to hand over - the row already says `failed`, and a customer's dead
+  // endpoint must not fill the failed-job list a real bug needs.
+  return nextAttemptAt ? { ...outcome, retryAt: nextAttemptAt } : outcome
 }
