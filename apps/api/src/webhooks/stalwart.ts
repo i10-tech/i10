@@ -1,6 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto"
-import type { WebhookEventName } from "@repo/contracts"
-import type { NormalisedEvent, Suppression } from "./events.js"
+import type { MailEventType, NormalisedEvent, Suppression } from "./events.js"
 
 /**
  * Delivery outcomes for the direct route, pushed by Stalwart.
@@ -106,7 +105,7 @@ export interface StalwartEventBatch {
  *                              would stop a customer's mail to somebody whose
  *                              mailbox works.
  */
-const TYPES: Record<string, WebhookEventName> = {
+const TYPES: Record<string, MailEventType> = {
   "delivery.delivered": "email.delivered",
   "delivery.rcpt-to-rejected": "email.bounced",
   "delivery.message-rejected": "email.bounced",
@@ -258,7 +257,7 @@ function suppressionsFor(
  * field a customer reads as the From would be worse than omitting it.
  */
 function publicData(
-  type: WebhookEventName,
+  type: MailEventType,
   event: StalwartEvent,
   messageId: string,
   occurredAt: Date,

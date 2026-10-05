@@ -26,6 +26,9 @@ import type { WebhookEventName } from "@repo/contracts"
  */
 export type WebhookEventType = WebhookEventName
 
+/** The events about mail, which come from a mail server (the rest are ours, #284). */
+export type MailEventType = Extract<WebhookEventType, `email.${string}`>
+
 /** An address SES told us to stop writing to, and why. */
 export interface Suppression {
   address: string
@@ -33,7 +36,7 @@ export interface Suppression {
 }
 
 export interface NormalisedEvent {
-  type: WebhookEventType
+  type: MailEventType
   /** i10's message id, from the `i10_message_id` tag. */
   messageId: string
   occurredAt: Date
@@ -117,7 +120,7 @@ interface SesNotification {
  * configuration set that publishes these only when the domain asked for them.
  * Nothing here decides it.
  */
-const TYPES: Record<string, WebhookEventType> = {
+const TYPES: Record<string, MailEventType> = {
   Send: "email.sent",
   Delivery: "email.delivered",
   Bounce: "email.bounced",

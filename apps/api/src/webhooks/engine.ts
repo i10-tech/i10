@@ -10,6 +10,7 @@ import {
   type WebhookJob,
 } from "../queue/webhook-queue.js"
 import { dueDeliveries, webhookDeliveryOps } from "./db.js"
+import { fanOutHealthEvent, unfannedHealthEvents } from "./health.js"
 import { runDueReplays } from "./replay.js"
 import { DELIVERY_TIMEOUT_MS, deliverWebhook, type DeliveryLane } from "./deliver.js"
 import { vetHost, type Lookup, type VetOptions } from "./egress.js"
@@ -81,6 +82,8 @@ export interface WebhookEngineOptions {
   holdMs?: number
   /** The per-endpoint circuit breaker's settings. Production: fairness.ts. */
   breaker?: BreakerOptions
+  /** No success for this long marks an endpoint failing. Production: health.ts. */
+  failingAfterSeconds?: number
 }
 
 export interface WebhookEngineHealth {
@@ -138,11 +141,39 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
   })
   const queues: Record<DeliveryLane, Queue<WebhookJob>> = { ordered, retry }
   const timeoutMs = opts.timeoutMs ?? DELIVERY_TIMEOUT_MS
+  /**
+   * A health change (#284) becomes `webhook_endpoint.*` deliveries to the
+   * workspace's other endpoints, on the ordered lane like any fresh event. If
+   * this fails, or the process stops first, the tick below finds the event
+   * still unfanned and does it.
+   */
+  const fanOut = async (tenantId: string, eventId: string) => {
+    const deliveries = await fanOutHealthEvent(opts.db, tenantId, eventId)
+    await Promise.all(
+      deliveries.map((d) =>
+        enqueueDelivery(
+          queues.ordered,
+          { deliveryId: d.id, endpointId: d.endpointId, tenantId: d.tenantId },
+          { orderMs: d.occurredAt.getTime() },
+        ),
+      ),
+    )
+  }
   const ops = webhookDeliveryOps({
     db: opts.db,
     secrets: opts.secrets,
     // The attempt itself, resolution included, plus room to record it.
     leaseSeconds: Math.ceil(timeoutMs / 1000) + 30,
+    ...(opts.failingAfterSeconds !== undefined
+      ? { failingAfterSeconds: opts.failingAfterSeconds }
+      : {}),
+    onHealthChange: (tenantId, eventId) =>
+      void fanOut(tenantId, eventId).catch((err: unknown) =>
+        opts.log.warn(
+          { err: String(err), eventId },
+          "could not fan out a webhook health change; the tick will",
+        ),
+      ),
   })
   const sweepEveryMs = opts.sweepEveryMs ?? 30_000
   const sweepGraceSeconds = opts.sweepGraceSeconds ?? 60
@@ -339,6 +370,11 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
           "webhook replays failed; next tick retries",
         ),
       )
+      for (const e of await unfannedHealthEvents(opts.db)) {
+        await fanOut(e.tenantId, e.id).catch((err: unknown) =>
+          opts.log.warn({ err: String(err), eventId: e.id }, "health fan-out failed"),
+        )
+      }
       const found = await sweep()
       if (found > 0) {
         opts.log.warn({ found }, "webhook sweep re-queued owed deliveries")

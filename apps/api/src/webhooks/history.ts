@@ -1,7 +1,12 @@
-import type { WebhookDelivery, WebhookDeliveryDetail } from "@repo/contracts"
+import type {
+  WebhookDelivery,
+  WebhookDeliveryDetail,
+  WebhookHealthEvent,
+} from "@repo/contracts"
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { webhookAttempts, webhookDeliveries } from "../db/core.js"
+import { listHealthEvents } from "./health.js"
 
 /**
  * Reading a delivery's history, and expunging what it carried (#280).
@@ -87,6 +92,11 @@ export interface WebhookHistory {
    * the endpoint.
    */
   expunge: (tenantId: string, deliveryId: string) => Promise<ExpungeResult>
+  /** Every change in an endpoint's health (#284), newest first. */
+  health: (
+    tenantId: string,
+    filter: { endpointId?: string; cursor?: string; limit?: number },
+  ) => Promise<{ data: WebhookHealthEvent[]; next_cursor: string | null }>
 }
 
 export function webhookHistory(db: Database): WebhookHistory {
@@ -187,5 +197,11 @@ export function webhookHistory(db: Database): WebhookHistory {
         return "expunged"
       })
     },
+
+    health: (tenantId, filter) =>
+      listHealthEvents(db, tenantId, {
+        ...filter,
+        limit: Math.min(Math.max(filter.limit ?? 50, 1), 100),
+      }),
   }
 }

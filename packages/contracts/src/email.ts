@@ -366,7 +366,18 @@ export const webhookEventName = z.enum([
    * dropped, but does not currently fire.
    */
   "email.unsubscribed",
+  /**
+   * About your own endpoints, not your mail (#284): one of them started
+   * failing, was switched off, or recovered. Subscribe a separate endpoint to
+   * these; an endpoint is never sent events about itself.
+   */
+  "webhook_endpoint.failing",
+  "webhook_endpoint.disabled",
+  "webhook_endpoint.recovered",
 ])
+
+/** Where an endpoint stands: `failing` and `disabled` are what you are told about. */
+export const webhookEndpointHealth = z.enum(["healthy", "failing", "disabled"])
 
 /**
  * How webhooks to an endpoint are signed, both per Standard Webhooks:
@@ -436,6 +447,14 @@ export const webhookEndpointSchema = z.object({
    * had no successful delivery for the plan's stretch (2 to 7 days).
    */
   disabled_reason: z.string().nullable(),
+  /**
+   * `failing` once nothing has succeeded for 15 minutes, `disabled` once i10
+   * switched it off, `healthy` again at the next success. Your own pause does
+   * not change it.
+   */
+  health: webhookEndpointHealth,
+  /** When `health` last changed; null if it never has. */
+  health_changed_at: z.string().nullable(),
   created_at: z.string(),
   signature_scheme: webhookSignatureScheme,
   /** Deliveries a second, at most; null for no limit. */
@@ -577,6 +596,29 @@ export const webhookDeliveryListSchema = z.object({
 })
 
 /**
+ * One change in an endpoint's health (#284), newest first in the list. The
+ * same changes are emailed to the workspace's owner and sent as
+ * `webhook_endpoint.*` webhooks to any endpoint subscribed to them.
+ */
+export const webhookHealthEventSchema = z.object({
+  object: z.literal("webhook_health_event"),
+  id: z.uuid(),
+  endpoint_id: z.uuid(),
+  kind: z.enum(["failing", "disabled", "recovered"]),
+  /** The endpoint's URL when it changed. */
+  url: z.string(),
+  /** The last error, or why it was switched off; null for a recovery. */
+  reason: z.string().nullable(),
+  failing_since: z.string().nullable(),
+  created_at: z.string(),
+})
+
+export const webhookHealthEventListSchema = z.object({
+  data: z.array(webhookHealthEventSchema),
+  next_cursor: z.string().nullable(),
+})
+
+/**
  * A replay running in the background. Poll it until `status` is `done` or
  * `failed`; `queued` counts the deliveries sent so far.
  */
@@ -632,6 +674,7 @@ export type WebhookDeliveryDetail = z.infer<typeof webhookDeliveryDetailSchema>
 export type EmailEventName = z.infer<typeof emailEventName>
 export type GetEmailResponse = z.infer<typeof getEmailResponseSchema>
 export type WebhookEventName = z.infer<typeof webhookEventName>
+export type WebhookHealthEvent = z.infer<typeof webhookHealthEventSchema>
 export type CreateWebhookEndpoint = z.infer<typeof createWebhookEndpointSchema>
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>
 export type WebhookSignatureScheme = z.infer<typeof webhookSignatureScheme>

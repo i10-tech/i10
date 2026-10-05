@@ -901,6 +901,213 @@
         ],
         "additionalProperties": false
       },
+      "WebhookEndpointFailingEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "webhook_endpoint.failing"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "endpoint_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "failing_since": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "endpoint_id",
+              "url",
+              "reason",
+              "failing_since",
+              "created_at"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "WebhookEndpointDisabledEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "webhook_endpoint.disabled"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "endpoint_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "failing_since": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "endpoint_id",
+              "url",
+              "reason",
+              "failing_since",
+              "created_at"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "WebhookEndpointRecoveredEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "webhook_endpoint.recovered"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "endpoint_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "failing_since": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "endpoint_id",
+              "url",
+              "reason",
+              "failing_since",
+              "created_at"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
       "SendEmailResponse": {
         "type": "object",
         "properties": {
@@ -1488,7 +1695,10 @@
                 "email.failed",
                 "email.opened",
                 "email.clicked",
-                "email.unsubscribed"
+                "email.unsubscribed",
+                "webhook_endpoint.failing",
+                "webhook_endpoint.disabled",
+                "webhook_endpoint.recovered"
               ]
             }
           },
@@ -1502,6 +1712,20 @@
             "type": "boolean"
           },
           "disabled_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "health": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "failing",
+              "disabled"
+            ]
+          },
+          "health_changed_at": {
             "type": [
               "string",
               "null"
@@ -1590,6 +1814,8 @@
           "description",
           "enabled",
           "disabled_reason",
+          "health",
+          "health_changed_at",
           "created_at",
           "signature_scheme",
           "rate_limit",
@@ -1621,7 +1847,10 @@
                 "email.failed",
                 "email.opened",
                 "email.clicked",
-                "email.unsubscribed"
+                "email.unsubscribed",
+                "webhook_endpoint.failing",
+                "webhook_endpoint.disabled",
+                "webhook_endpoint.recovered"
               ]
             },
             "minItems": 1
@@ -1705,7 +1934,10 @@
                       "email.failed",
                       "email.opened",
                       "email.clicked",
-                      "email.unsubscribed"
+                      "email.unsubscribed",
+                      "webhook_endpoint.failing",
+                      "webhook_endpoint.disabled",
+                      "webhook_endpoint.recovered"
                     ]
                   }
                 },
@@ -1719,6 +1951,20 @@
                   "type": "boolean"
                 },
                 "disabled_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "health": {
+                  "type": "string",
+                  "enum": [
+                    "healthy",
+                    "failing",
+                    "disabled"
+                  ]
+                },
+                "health_changed_at": {
                   "type": [
                     "string",
                     "null"
@@ -1801,6 +2047,8 @@
                 "description",
                 "enabled",
                 "disabled_reason",
+                "health",
+                "health_changed_at",
                 "created_at",
                 "signature_scheme",
                 "rate_limit",
@@ -1864,7 +2112,10 @@
                 "email.failed",
                 "email.opened",
                 "email.clicked",
-                "email.unsubscribed"
+                "email.unsubscribed",
+                "webhook_endpoint.failing",
+                "webhook_endpoint.disabled",
+                "webhook_endpoint.recovered"
               ]
             },
             "minItems": 1
@@ -1990,7 +2241,10 @@
               "email.failed",
               "email.opened",
               "email.clicked",
-              "email.unsubscribed"
+              "email.unsubscribed",
+              "webhook_endpoint.failing",
+              "webhook_endpoint.disabled",
+              "webhook_endpoint.recovered"
             ]
           }
         },
@@ -2132,7 +2386,10 @@
               "email.failed",
               "email.opened",
               "email.clicked",
-              "email.unsubscribed"
+              "email.unsubscribed",
+              "webhook_endpoint.failing",
+              "webhook_endpoint.disabled",
+              "webhook_endpoint.recovered"
             ]
           }
         },
@@ -2189,7 +2446,10 @@
                     "email.failed",
                     "email.opened",
                     "email.clicked",
-                    "email.unsubscribed"
+                    "email.unsubscribed",
+                    "webhook_endpoint.failing",
+                    "webhook_endpoint.disabled",
+                    "webhook_endpoint.recovered"
                   ]
                 },
                 "status": {
@@ -2297,7 +2557,10 @@
               "email.failed",
               "email.opened",
               "email.clicked",
-              "email.unsubscribed"
+              "email.unsubscribed",
+              "webhook_endpoint.failing",
+              "webhook_endpoint.disabled",
+              "webhook_endpoint.recovered"
             ]
           },
           "status": {
@@ -2513,7 +2776,10 @@
                     "email.failed",
                     "email.opened",
                     "email.clicked",
-                    "email.unsubscribed"
+                    "email.unsubscribed",
+                    "webhook_endpoint.failing",
+                    "webhook_endpoint.disabled",
+                    "webhook_endpoint.recovered"
                   ]
                 },
                 "version": {
@@ -2544,6 +2810,79 @@
         },
         "required": [
           "data"
+        ]
+      },
+      "WebhookHealthEventList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "enum": [
+                    "webhook_health_event"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "endpoint_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "failing",
+                    "disabled",
+                    "recovered"
+                  ]
+                },
+                "url": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "failing_since": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "object",
+                "id",
+                "endpoint_id",
+                "kind",
+                "url",
+                "reason",
+                "failing_since",
+                "created_at"
+              ]
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
         ]
       },
       "SuppressionList": {
@@ -3617,7 +3956,10 @@
                           "email.failed",
                           "email.opened",
                           "email.clicked",
-                          "email.unsubscribed"
+                          "email.unsubscribed",
+                          "webhook_endpoint.failing",
+                          "webhook_endpoint.disabled",
+                          "webhook_endpoint.recovered"
                         ]
                       }
                     },
@@ -3631,6 +3973,20 @@
                       "type": "boolean"
                     },
                     "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "healthy",
+                        "failing",
+                        "disabled"
+                      ]
+                    },
+                    "health_changed_at": {
                       "type": [
                         "string",
                         "null"
@@ -3713,6 +4069,8 @@
                     "description",
                     "enabled",
                     "disabled_reason",
+                    "health",
+                    "health_changed_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -3825,7 +4183,10 @@
                           "email.failed",
                           "email.opened",
                           "email.clicked",
-                          "email.unsubscribed"
+                          "email.unsubscribed",
+                          "webhook_endpoint.failing",
+                          "webhook_endpoint.disabled",
+                          "webhook_endpoint.recovered"
                         ]
                       }
                     },
@@ -3839,6 +4200,20 @@
                       "type": "boolean"
                     },
                     "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "healthy",
+                        "failing",
+                        "disabled"
+                      ]
+                    },
+                    "health_changed_at": {
                       "type": [
                         "string",
                         "null"
@@ -3921,6 +4296,8 @@
                     "description",
                     "enabled",
                     "disabled_reason",
+                    "health",
+                    "health_changed_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -4122,7 +4499,10 @@
                           "email.failed",
                           "email.opened",
                           "email.clicked",
-                          "email.unsubscribed"
+                          "email.unsubscribed",
+                          "webhook_endpoint.failing",
+                          "webhook_endpoint.disabled",
+                          "webhook_endpoint.recovered"
                         ]
                       }
                     },
@@ -4136,6 +4516,20 @@
                       "type": "boolean"
                     },
                     "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "healthy",
+                        "failing",
+                        "disabled"
+                      ]
+                    },
+                    "health_changed_at": {
                       "type": [
                         "string",
                         "null"
@@ -4218,6 +4612,8 @@
                     "description",
                     "enabled",
                     "disabled_reason",
+                    "health",
+                    "health_changed_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -4322,7 +4718,10 @@
                           "email.failed",
                           "email.opened",
                           "email.clicked",
-                          "email.unsubscribed"
+                          "email.unsubscribed",
+                          "webhook_endpoint.failing",
+                          "webhook_endpoint.disabled",
+                          "webhook_endpoint.recovered"
                         ]
                       }
                     },
@@ -4336,6 +4735,20 @@
                       "type": "boolean"
                     },
                     "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "healthy",
+                        "failing",
+                        "disabled"
+                      ]
+                    },
+                    "health_changed_at": {
                       "type": [
                         "string",
                         "null"
@@ -4418,6 +4831,8 @@
                     "description",
                     "enabled",
                     "disabled_reason",
+                    "health",
+                    "health_changed_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -4522,7 +4937,10 @@
                           "email.failed",
                           "email.opened",
                           "email.clicked",
-                          "email.unsubscribed"
+                          "email.unsubscribed",
+                          "webhook_endpoint.failing",
+                          "webhook_endpoint.disabled",
+                          "webhook_endpoint.recovered"
                         ]
                       }
                     },
@@ -4536,6 +4954,20 @@
                       "type": "boolean"
                     },
                     "disabled_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "healthy",
+                        "failing",
+                        "disabled"
+                      ]
+                    },
+                    "health_changed_at": {
                       "type": [
                         "string",
                         "null"
@@ -4618,6 +5050,8 @@
                     "description",
                     "enabled",
                     "disabled_reason",
+                    "health",
+                    "health_changed_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5676,6 +6110,92 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-health-events": {
+      "get": {
+        "summary": "List webhook endpoint health changes",
+        "description": "Newest first: each time an endpoint started failing (15 minutes with no successful delivery), was switched off, or recovered. Page with `cursor` from the previous response's `next_cursor`.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "endpoint_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookHealthEventList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A filter is not acceptable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhooks are not configured.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7309,6 +7829,75 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/EmailUnsubscribedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "webhook_endpoint.failing": {
+      "post": {
+        "summary": "webhook_endpoint.failing",
+        "description": "One of your endpoints has had no successful delivery for 15 minutes. Retries continue. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEndpointFailingEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "webhook_endpoint.disabled": {
+      "post": {
+        "summary": "webhook_endpoint.disabled",
+        "description": "i10 switched one of your endpoints off: it answered 410 Gone, or nothing succeeded for your plan's stretch. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEndpointDisabledEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "webhook_endpoint.recovered": {
+      "post": {
+        "summary": "webhook_endpoint.recovered",
+        "description": "An endpoint that was failing or disabled delivered successfully again. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEndpointRecoveredEvent"
               }
             }
           }

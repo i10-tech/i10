@@ -578,6 +578,19 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
   // The event catalog (#283), the same list the API serves.
   app.get("/webhook-event-types", (c) => c.json({ data: WEBHOOK_EVENT_TYPES }))
 
+  // Every change in an endpoint's health (#284): the console's event list.
+  app.get("/webhook-health-events", async (c) => {
+    if (!d.webhookHistory) return c.json(notWired("Webhook history"), 501)
+    const q = c.req.query()
+    return c.json(
+      await d.webhookHistory.health(c.get("auth").tenantId, {
+        ...(asId(q.endpoint_id) ? { endpointId: asId(q.endpoint_id)! } : {}),
+        ...(asId(q.cursor) ? { cursor: asId(q.cursor)! } : {}),
+        ...(q.limit ? { limit: Number(q.limit) || 50 } : {}),
+      }),
+    )
+  })
+
   app.get("/webhook-deliveries", async (c) => {
     const { tenantId } = c.get("auth")
     const q = c.req.query()

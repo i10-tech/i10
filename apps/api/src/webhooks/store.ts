@@ -97,7 +97,23 @@ type Row = {
   headers: Record<string, string> | null
   filterDomains: string[] | null
   filterTags: Record<string, string> | null
+  health: "healthy" | "failing" | "disabled"
+  healthChangedAt: Date | null
 }
+
+/**
+ * What switching an endpoint back on does to its health (#284).
+ *
+ * ⚠ ONE WE DISABLED COMES BACK `failing`, NOT `healthy`. Nothing has worked
+ * yet; the next success is the recovery the owner is told about, and further
+ * failures do not repeat a "failing" email they already had in the form of
+ * the disable. A customer's own pause never changed it, so nothing changes.
+ */
+const RESUMED_HEALTH = sql<
+  "healthy" | "failing" | "disabled"
+>`case when ${webhookEndpoints.health} = 'disabled' then 'failing'::core.webhook_endpoint_health else ${webhookEndpoints.health} end`
+
+const RESUMED_HEALTH_AT = sql<Date | null>`case when ${webhookEndpoints.health} = 'disabled' then now() else ${webhookEndpoints.healthChangedAt} end`
 
 const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   object: "webhook_endpoint",
@@ -107,6 +123,8 @@ const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   description: row.description,
   enabled: row.enabled,
   disabled_reason: row.enabled ? null : row.disabledReason,
+  health: row.health,
+  health_changed_at: row.healthChangedAt?.toISOString() ?? null,
   created_at: row.createdAt.toISOString(),
   signature_scheme: row.signatureScheme,
   rate_limit: row.rateLimit,
@@ -137,6 +155,8 @@ const COLUMNS = {
   headers: webhookEndpoints.headers,
   filterDomains: webhookEndpoints.filterDomains,
   filterTags: webhookEndpoints.filterTags,
+  health: webhookEndpoints.health,
+  healthChangedAt: webhookEndpoints.healthChangedAt,
 }
 
 /** Domains compared as DNS does: lowercased, without a trailing dot. */
@@ -325,6 +345,8 @@ export function webhookEndpointStore(
             failingSince: null,
             disabledAt: null,
             disabledReason: null,
+            health: RESUMED_HEALTH,
+            healthChangedAt: RESUMED_HEALTH_AT,
           })
           .where(eq(webhookEndpoints.id, id))
           .returning(COLUMNS)
@@ -383,7 +405,11 @@ export function webhookEndpointStore(
         // back on starts its failing clock afresh.
         set.disabledAt = patch.enabled ? null : new Date()
         set.disabledReason = patch.enabled ? null : "Paused."
-        if (patch.enabled) set.failingSince = null
+        if (patch.enabled) {
+          set.failingSince = null
+          set.health = RESUMED_HEALTH as never
+          set.healthChangedAt = RESUMED_HEALTH_AT as never
+        }
       }
 
       return withTenant(db, tenantId, async (tx) => {
