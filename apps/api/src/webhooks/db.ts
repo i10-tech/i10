@@ -15,6 +15,7 @@ import type { AttemptLog, DeliverDeps, DeliveryRecord } from "./deliver.js"
 import { policyForPlan } from "./schedule.js"
 import { liveRetiring } from "./keys.js"
 import { onDelivered, onDisabled, onFailed } from "./health.js"
+import { pollingRow } from "./kinds.js"
 import {
   domainOf,
   type EventOps,
@@ -203,6 +204,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
           .returning({
             id: webhookEndpoints.id,
             sequence: webhookEndpoints.nextSequence,
+            kind: webhookEndpoints.kind,
           })
 
         if (endpoints.length === 0) {
@@ -233,6 +235,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
               // would describe the message as it is then, not as it was when
               // the event happened.
               payload: event.data as never,
+              ...pollingRow(endpoint.kind),
             })),
           )
           .returning({
@@ -240,14 +243,21 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
             endpointId: webhookDeliveries.endpointId,
           })
 
+        // Only what is sent goes to the queue; a polling endpoint's rows wait
+        // for its poll (#301).
+        const sent = new Set(
+          endpoints.filter((e) => e.kind === "http").map((e) => e.id),
+        )
         return {
           status: "recorded" as const,
-          deliveries: deliveries.map((d) => ({
-            id: d.id,
-            endpointId: d.endpointId,
-            tenantId,
-            occurredAt: event.occurredAt,
-          })),
+          deliveries: deliveries
+            .filter((d) => sent.has(d.endpointId))
+            .map((d) => ({
+              id: d.id,
+              endpointId: d.endpointId,
+              tenantId,
+              occurredAt: event.occurredAt,
+            })),
         }
       })
     },
@@ -382,6 +392,18 @@ export function webhookDeliveryOps(
           return null
         }
 
+        // ⚠ A POLLING ENDPOINT IS NEVER SENT TO (#301). Its rows are written
+        // with no attempt owed, so this is a job that should not exist - a
+        // replay or a test queued by mistake. The row goes back to waiting for
+        // its poll, untouched, rather than failing or going anywhere.
+        if (row.url === null) {
+          await tx
+            .update(webhookDeliveries)
+            .set({ nextAttemptAt: null, claimedUntil: null })
+            .where(eq(webhookDeliveries.id, row.id))
+          return null
+        }
+
         return {
           id: row.id,
           tenantId: job.tenantId,
@@ -491,7 +513,7 @@ export function webhookDeliveryOps(
           updatedAt: new Date(),
         }
         const switchedOff = async (
-          row: { url: string; failingSince: Date | null } | undefined,
+          row: { url: string | null; failingSince: Date | null } | undefined,
           reason: string,
         ) => {
           if (row)

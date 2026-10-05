@@ -39,6 +39,7 @@ const email = {
 const endpoint = {
   object: "webhook_endpoint" as const,
   id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60bb",
+  kind: "http" as const,
   url: "https://hooks.example.com/i10",
   events: ["email.bounced" as const],
   description: null,
@@ -46,6 +47,8 @@ const endpoint = {
   disabled_reason: null,
   health: "healthy" as const,
   health_changed_at: null,
+  poll_cursor: null,
+  last_polled_at: null,
   created_at: "2026-09-03T10:00:00.000Z",
   signature_scheme: "hmac_sha256" as const,
   rate_limit: null,
@@ -198,6 +201,7 @@ describe("/webhook-health-events (#284)", () => {
         list: async () => ({ data: [], next_cursor: null }),
         get: async () => null,
         expunge: async () => "not_found" as const,
+        poll: async () => ({ status: "not_found" as const }),
         health,
       },
     })
@@ -220,6 +224,71 @@ describe("/webhook-health-events (#284)", () => {
 
   it("requires a key", async () => {
     expect((await app().request("/webhook-health-events")).status).toBe(401)
+  })
+})
+
+describe("GET /webhook-endpoints/{id}/poll (#301)", () => {
+  const event = {
+    id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60dd",
+    type: "email.delivered" as const,
+    created_at: "2026-10-06T10:00:00.000Z",
+    sequence: 4,
+    data: { email_id: "x" },
+  }
+  const poll = mock(async (_t: string, id: string, input: { cursor?: number }) =>
+    id === endpoint.id
+      ? input.cursor === 9
+        ? { status: "rejected" as const, reason: "That cursor is ahead." }
+        : {
+            status: "ok" as const,
+            data: [event],
+            next_cursor: "4",
+            done: true,
+            healthChange: null,
+          }
+      : id === ID
+        ? { status: "not_polling" as const }
+        : { status: "not_found" as const },
+  )
+  const app = () =>
+    createApp({
+      apiKeyAuth,
+      webhookHistory: {
+        list: async () => ({ data: [], next_cursor: null }),
+        get: async () => null,
+        expunge: async () => "not_found" as const,
+        health: async () => ({ data: [], next_cursor: null }),
+        poll,
+      },
+    })
+
+  it("returns the page, without the internals, and passes the cursor through", async () => {
+    const res = await get(
+      app(),
+      `/webhook-endpoints/${endpoint.id}/poll?cursor=3&limit=10`,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ data: [event], next_cursor: "4", done: true })
+    expect(poll).toHaveBeenLastCalledWith("ten-1", endpoint.id, {
+      cursor: 3,
+      limit: 10,
+    })
+  })
+
+  it("answers 409 for an HTTP endpoint, 404 for an unknown one, 422 for a bad cursor", async () => {
+    expect((await get(app(), `/webhook-endpoints/${ID}/poll`)).status).toBe(409)
+    expect(
+      (await get(app(), "/webhook-endpoints/0199a3f2-b4c1-7f3e-9d2a-000000000000/poll"))
+        .status,
+    ).toBe(404)
+    expect(
+      (await get(app(), `/webhook-endpoints/${endpoint.id}/poll?cursor=9`)).status,
+    ).toBe(422)
+    poll.mockClear()
+    expect(
+      (await get(app(), `/webhook-endpoints/${endpoint.id}/poll?cursor=-1`)).status,
+    ).toBe(422)
+    expect(poll).not.toHaveBeenCalled()
   })
 })
 

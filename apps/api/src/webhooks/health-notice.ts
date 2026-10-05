@@ -46,7 +46,7 @@ export function healthNotice({
       workspace: workspace.name,
       worst: summary.worst,
       lines: summary.lines.map((line) => ({
-        url: line.url,
+        url: line.url ?? `Polling endpoint ${line.endpointId}`,
         state: line.state,
         reason: line.reason,
         since: formatWhen(line.since),

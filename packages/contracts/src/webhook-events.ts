@@ -58,8 +58,8 @@ const recipientsOnly = (fields: Record<string, z.ZodType>) =>
 const endpointEvent = z
   .object({
     endpoint_id: z.string(),
-    /** The endpoint's URL when it changed. */
-    url: z.string(),
+    /** The endpoint's URL when it changed; null for a polling endpoint. */
+    url: z.string().nullable(),
     /** The last error, or why it was switched off; null for a recovery. */
     reason: z.string().nullable(),
     /** When its run of failures began; null for a recovery. */

@@ -1,10 +1,11 @@
 import type { Queue } from "groupmq"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { planAssignments, webhookDeliveries, webhookEndpoints } from "../db/core.js"
 import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
 import type { WebhookEventType } from "./events.js"
 import { exampleData } from "./examples.js"
+import { pollingRow } from "./kinds.js"
 import { policyForPlan } from "./schedule.js"
 
 /**
@@ -30,7 +31,11 @@ export async function sendTestEvent(
 ): Promise<TestResult> {
   const recorded = await withTenant(db, tenantId, async (tx) => {
     const [endpoint] = await tx
-      .select({ id: webhookEndpoints.id, enabled: webhookEndpoints.enabled })
+      .select({
+        id: webhookEndpoints.id,
+        enabled: webhookEndpoints.enabled,
+        kind: webhookEndpoints.kind,
+      })
       .from(webhookEndpoints)
       .where(eq(webhookEndpoints.id, endpointId))
       .limit(1)
@@ -41,6 +46,19 @@ export async function sendTestEvent(
       .from(planAssignments)
       .where(eq(planAssignments.tenantId, tenantId))
       .limit(1)
+    // ⚠ A POLLING ENDPOINT'S TEST IS PART OF ITS STREAM (#301). Its cursor is
+    // the sequence, so a test without one could never be polled; it takes the
+    // next number like any event and waits for the poll.
+    const polling = endpoint.kind === "polling"
+    const sequence = polling
+      ? (
+          await tx
+            .update(webhookEndpoints)
+            .set({ nextSequence: sql`${webhookEndpoints.nextSequence} + 1` })
+            .where(eq(webhookEndpoints.id, endpointId))
+            .returning({ sequence: webhookEndpoints.nextSequence })
+        )[0]!.sequence
+      : null
     const now = new Date()
     const [row] = await tx
       .insert(webhookDeliveries)
@@ -51,11 +69,14 @@ export async function sendTestEvent(
         occurredAt: now,
         payload: exampleData(type, now) as never,
         retryPolicy: policyForPlan(assignment?.planId),
+        sequence,
+        ...pollingRow(endpoint.kind),
       })
       .returning({ id: webhookDeliveries.id })
-    return { status: "recorded" as const, id: row!.id, occurredAt: now }
+    return { status: "recorded" as const, id: row!.id, occurredAt: now, polling }
   })
   if (recorded.status !== "recorded") return recorded
+  if (recorded.polling) return { status: "queued", deliveryId: recorded.id }
 
   // If this fails, the row is due now and the sweep sends it (as `scheduled`).
   await enqueueDelivery(

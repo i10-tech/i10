@@ -11,6 +11,7 @@ import {
   webhookEndpointListSchema,
   webhookEndpointSchema,
   webhookEndpointWithSecretSchema,
+  webhookPollSchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
 import { invalidWindow, statsQuery, windowFrom } from "./webhook-stats.js"
@@ -479,6 +480,100 @@ webhookEndpoints.openapi(
   (result, c) => {
     if (!result.success)
       return c.json(invalidWindow(result.error.issues[0]?.message), 422)
+  },
+)
+
+const Poll = webhookPollSchema.openapi("WebhookPoll")
+
+const poll = createRoute({
+  method: "get",
+  path: "/{id}/poll",
+  summary: "Poll a polling endpoint for its events",
+  description:
+    "For an endpoint created with `kind: polling`. Returns the events after " +
+    "`cursor`, oldest first, each the same body an HTTP endpoint is POSTed. " +
+    "Passing a cursor acknowledges every event up to it; without one, polling " +
+    "resumes after the last acknowledged. Pass an older cursor to read events " +
+    "again. Poll at least every 15 minutes while events are waiting, or the " +
+    "endpoint is reported as failing.",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: {
+    params: idParam,
+    query: z.object({
+      cursor: z
+        .string()
+        .regex(/^\d{1,15}$/, "`cursor` is the `next_cursor` of a previous poll.")
+        .optional(),
+      limit: z.coerce.number().int().min(1).max(250).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "The next page of events.",
+      content: { "application/json": { schema: Poll } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such endpoint for this API key's tenant."),
+    409: errorResponse("Not a polling endpoint, or it is paused."),
+    422: errorResponse("The cursor is malformed or ahead of the stream."),
+    501: errorResponse("Webhooks are not configured."),
+  },
+})
+
+webhookEndpoints.openapi(
+  poll,
+  async (c) => {
+    const history = c.get("webhookHistory")
+    if (!history) return c.json(notWired, 501)
+    const q = c.req.valid("query")
+    const result = await history.poll(c.get("auth").tenantId, c.req.valid("param").id, {
+      ...(q.cursor !== undefined ? { cursor: Number(q.cursor) } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    })
+    switch (result.status) {
+      case "not_found":
+        return c.json(notFound, 404)
+      case "not_polling":
+      case "paused":
+        return c.json(
+          {
+            statusCode: 409,
+            name: "validation_error" as const,
+            message:
+              result.status === "paused"
+                ? "This endpoint is paused or switched off. Resume it first."
+                : "This endpoint is sent its events; only a `polling` endpoint is polled.",
+          },
+          409,
+        )
+      case "rejected":
+        return c.json(
+          {
+            statusCode: 422,
+            name: "validation_error" as const,
+            message: result.reason,
+          },
+          422,
+        )
+      case "ok":
+        return c.json(
+          { data: result.data, next_cursor: result.next_cursor, done: result.done },
+          200,
+        )
+    }
+  },
+  (result, c) => {
+    if (!result.success)
+      return c.json(
+        {
+          statusCode: 422,
+          name: "validation_error" as const,
+          message: result.error.issues[0]?.message ?? "Invalid poll.",
+        },
+        422,
+      )
   },
 )
 
