@@ -174,6 +174,11 @@ describe("delivery during a grace period", () => {
         markDelivered: mock(async () => {}),
         markFailed: mock(async () => {}),
         fetch: doFetch as unknown as typeof fetch,
+        vet: async () => ({
+          ok: true as const,
+          address: "93.184.215.14",
+          family: 4 as const,
+        }),
         log: { info: mock(), warn: mock(), error: mock() },
         maxAttempts: 5,
       },

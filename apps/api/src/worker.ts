@@ -31,6 +31,7 @@ import { relayConfig } from "./send/relay.js"
 import type { Transport } from "./send/transport.js"
 import { webhookDeliveryOps } from "./webhooks/db.js"
 import { deliverWebhook } from "./webhooks/deliver.js"
+import { parseAllowList, vetHost } from "./webhooks/egress.js"
 import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
 import { objectStoreFrom } from "./content/object-store.js"
@@ -346,6 +347,9 @@ function startWebhookWorker() {
     maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
   })
   const ops = webhookDeliveryOps({ db, secrets })
+  // Empty everywhere but a laptop or the conformance lab; env.ts refuses it in
+  // production. See webhooks/egress.ts.
+  const egressAllow = parseAllowList(env.WEBHOOK_EGRESS_ALLOW)
 
   const worker = new Worker<WebhookJob>({
     queue,
@@ -353,6 +357,7 @@ function startWebhookWorker() {
     handler: (job) =>
       deliverWebhook(job.data, {
         ...ops,
+        vet: (host, signal) => vetHost(host, { allow: egressAllow, signal }),
         log,
         maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
       }),

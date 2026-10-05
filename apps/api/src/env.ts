@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { parseKeyring } from "./content/seal.js"
 import { SYSTEM_FROM } from "./system-mail.js"
+import { parseAllowList } from "./webhooks/egress.js"
 
 /**
  * Validated once at boot, and the process refuses to start without it.
@@ -592,6 +593,27 @@ const schema = z.object({
   WEBHOOK_CONCURRENCY: z.coerce.number().int().positive().max(100).default(8),
 
   /**
+   * Private address ranges webhook delivery may connect to anyway, as
+   * comma-separated CIDRs ("192.168.65.254/32"). For a laptop and the
+   * conformance lab, where the receiver is on a private address by definition.
+   *
+   * ⚠ REFUSED OUTRIGHT WHEN NODE_ENV IS production, staging included. Every
+   * range listed here is a range a customer's DNS can point our worker at; in
+   * a deployed cluster that is the database, Redis and the metadata service.
+   * See webhooks/egress.ts.
+   */
+  WEBHOOK_EGRESS_ALLOW: z
+    .string()
+    .optional()
+    .superRefine((value, ctx) => {
+      try {
+        parseAllowList(value)
+      } catch (err) {
+        ctx.addIssue({ code: "custom", message: String(err) })
+      }
+    }),
+
+  /**
    * ⚠ GUARDS THE QUEUE-DEPTH ENDPOINT THE AUTOSCALER READS. Queue depth is not
    * secret in a damaging way, but an unauthenticated endpoint that touches
    * Redis on every request is a free amplifier - and KEDA can send a bearer
@@ -1167,6 +1189,16 @@ const validated = schema.superRefine((env, ctx) => {
       code: "custom",
       path: [assets.find((k) => env[k] === undefined)!],
       message: `template images need all of ${assets.join(", ")} or none of them.`,
+    })
+  }
+
+  if (env.NODE_ENV === "production" && env.WEBHOOK_EGRESS_ALLOW?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["WEBHOOK_EGRESS_ALLOW"],
+      message:
+        `must not be set when NODE_ENV is production. It lets webhook delivery ` +
+        `reach private addresses, which in a cluster means our own services.`,
     })
   }
 
