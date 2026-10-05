@@ -24,6 +24,10 @@ import {
 } from "./routes/stalwart-events.js"
 import { webhookEndpoints } from "./routes/webhook-endpoints.js"
 import { webhookDeliveries } from "./routes/webhook-deliveries.js"
+import {
+  registerWebhookEvents,
+  webhookEventTypes,
+} from "./routes/webhook-event-types.js"
 import type { WebhookHistory } from "./webhooks/history.js"
 import type { WebhookReplayOps } from "./webhooks/replay.js"
 import type { TestResult } from "./webhooks/test-events.js"
@@ -448,6 +452,8 @@ export function createApp(deps: AppDeps = {}) {
   // authentication models is how a middleware mistake exposes the wrong half.
   app.route("/webhook-endpoints", webhookEndpoints)
   app.route("/webhook-deliveries", webhookDeliveries)
+  app.route("/webhook-event-types", webhookEventTypes)
+  registerWebhookEvents(app.openAPIRegistry as never)
   app.route("/suppressions", suppressionRoutes)
   app.route("/trusted-templates", trustedTemplateRoutes)
 

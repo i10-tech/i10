@@ -148,6 +148,33 @@ describe("last_event", () => {
   })
 })
 
+describe("/webhook-event-types (#283)", () => {
+  it("lists every event with a JSON Schema and an example", async () => {
+    const res = await get(createApp({ apiKeyAuth }), "/webhook-event-types")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      data: {
+        type: string
+        version: number
+        schema: { type?: string }
+        example: object
+      }[]
+    }
+    expect(body.data).toHaveLength(9)
+    for (const e of body.data) {
+      expect(e.version).toBe(1)
+      expect(e.schema.type).toBe("object")
+      expect(e.example).toHaveProperty("email_id")
+    }
+  })
+
+  it("requires a key", async () => {
+    expect(
+      (await createApp({ apiKeyAuth }).request("/webhook-event-types")).status,
+    ).toBe(401)
+  })
+})
+
 describe("/webhook-endpoints", () => {
   const store = {
     create: mock(async () => ({

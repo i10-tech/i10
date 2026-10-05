@@ -377,11 +377,6 @@ suite("webhook conformance lab", () => {
         ).toBe(true)
       }
     })
-
-    test.todo(
-      "custom endpoint headers cannot override signing headers (#281)",
-      () => {},
-    )
   })
 
   describe("history (#280)", () => {

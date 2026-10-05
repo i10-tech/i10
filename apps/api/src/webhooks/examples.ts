@@ -30,6 +30,7 @@ export function exampleData(
           type: "permanent",
           subtype: "general",
           recipients: ["ada@example.com"],
+          diagnostic: "smtp; 550 5.1.1 user unknown",
         },
       }
     case "email.complained":
@@ -37,7 +38,11 @@ export function exampleData(
     case "email.delivery_delayed":
       return {
         ...base,
-        delay: { type: "MailboxFull", recipients: ["ada@example.com"] },
+        delay: {
+          type: "MailboxFull",
+          recipients: ["ada@example.com"],
+          next_retry: null,
+        },
       }
     case "email.failed":
       return { ...base, reason: "Bad content" }
@@ -51,9 +56,10 @@ export function exampleData(
           user_agent: "Mozilla/5.0 (Macintosh)",
         },
       }
+    case "email.unsubscribed":
+      return { ...base, unsubscribe: { list: "newsletter", source: "header" } }
     case "email.sent":
     case "email.delivered":
-    case "email.unsubscribed":
       return base
   }
 }
