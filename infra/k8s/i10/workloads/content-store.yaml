@@ -36,7 +36,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: content-store
-              image: ghcr.io/i10-tech/i10-api:prod-5e7b80b53fa84f936ed5c2bc9dd29c33341a9999@sha256:1af29866845133a0d9c306e6a3b26640d80b1b0607ac67a181b2d2b1c5abda19
+              image: ghcr.io/i10-tech/i10-api:prod-336a67fc81aa4ba3ea6d8be1f416e3a1142f8d59@sha256:509cd17b3170f90b50d8cbebc1ccdbae48a58d158a4c75c441186c2fbce0fef9
               imagePullPolicy: Always
               command: ["bun", "dist/content-store.js"]
               envFrom:
