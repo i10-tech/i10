@@ -10,7 +10,8 @@
  *   /ratelimit/<tag>?s=3     429 with Retry-After: s
  *   /redirect/<tag>          302 to /ok/<tag>-redirected
  *   /jitter/<tag>            200 after a random 0-300ms
- *   /failk/<tag>?k=0         500 when the event's `data.k` equals k, else 200
+ *   /failk/<tag>?k=0&n=3     500 when the event's `data.k` equals k (for its
+ *                            first n deliveries, if n is given), else 200
  */
 
 export interface Received {
@@ -96,7 +97,8 @@ export function startReceiver(): Receiver {
           await Bun.sleep(Math.random() * 300)
           return new Response("ok")
         case "failk":
-          return String(data.k) === url.searchParams.get("k")
+          return String(data.k) === url.searchParams.get("k") &&
+            n <= Number(url.searchParams.get("n") ?? Infinity)
             ? new Response("not this one", { status: 500 })
             : new Response("ok")
         default:

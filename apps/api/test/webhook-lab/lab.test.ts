@@ -216,26 +216,61 @@ suite("webhook conformance lab", () => {
       )
     })
 
-    // #277: strict FIFO holds every later event behind a failing head for the
-    // head's whole retry budget. Decision 1 bounds that stall.
-    test.failing(
-      "a failing head does not hold the endpoint for its whole retry budget",
-      async () => {
-        const t = await lab.workspace()
-        const ep = await lab.endpoint(t, "failk/head?k=0")
-        const base = Date.now()
-        for (let k = 0; k < 5; k++) {
-          await lab.emit(t, { k }, { occurredAt: new Date(base + k), enqueue: false })
-        }
-        await lab.enqueuePending(ep.id)
-        // The head's budget is ~9s here. The others must not wait for it.
-        const rest = await until(
-          () => lab.receiver.of("head").filter((r) => r.data.k !== 0).length >= 4,
-          3_000,
-        )
-        expect(rest).toBe(true)
-      },
-    )
+    // #277: ordered while healthy. A failing head holds its endpoint for the
+    // hold (2s here, 5 minutes in production), then moves aside.
+    test("a failing head does not hold the endpoint for its whole retry budget", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "failk/head?k=0")
+      const base = Date.now()
+      for (let k = 0; k < 5; k++) {
+        await lab.emit(t, { k }, { occurredAt: new Date(base + k), enqueue: false })
+      }
+      await lab.enqueuePending(ep.id)
+      // The head's whole budget is ~15s here (gaps 1, 2, 4, 4s, each plus
+      // groupmq's second). The others must not wait for it.
+      const rest = await until(
+        () => lab.receiver.of("head").filter((r) => r.data.k !== 0).length >= 4,
+        6_000,
+      )
+      expect(rest).toBe(true)
+    })
+  })
+
+  describe("ordering after the hold", () => {
+    test("the event set aside is still delivered, on the retry lane, after the rest", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "failk/aside?k=0&n=3")
+      const base = Date.now()
+      for (let k = 0; k < 3; k++) {
+        await lab.emit(t, { k }, { occurredAt: new Date(base + k), enqueue: false })
+      }
+      await lab.enqueuePending(ep.id)
+      const done = await until(
+        async () =>
+          (await lab.deliveries(ep.id)).every((d) => d.status === "delivered"),
+        20_000,
+      )
+      expect(done).toBe(true)
+      const order = lab.receiver
+        .of("aside")
+        .filter((r) => r.data.k !== 0 || r.n === 4)
+        .map((r) => r.data.k)
+      // 1 and 2 went on without it; 0 arrived on its fourth attempt, last.
+      expect(order).toEqual([1, 2, 0])
+      const [lane] = await lab.owner`select lane from core.webhook_deliveries
+                                      where endpoint_id = ${ep.id} and (payload->>'k')::int = 0`
+      expect(lane!.lane).toBe("retry")
+    })
+
+    test("every event carries its place in the endpoint's stream", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/seq")
+      for (let k = 0; k < 3; k++) await lab.emit(t, { k })
+      await until(() => lab.receiver.of("seq").length >= 3, 5_000)
+      const seqs = lab.receiver.of("seq").map((r) => JSON.parse(r.body).sequence)
+      expect(seqs.sort()).toEqual([1, 2, 3])
+      expect(ep.id).toBeTruthy()
+    })
   })
 
   describe("fairness", () => {

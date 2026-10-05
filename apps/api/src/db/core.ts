@@ -140,6 +140,16 @@ export const webhookRetryPolicy = core.enum("webhook_retry_policy", [
   "enterprise",
 ])
 
+/**
+ * Which queue a delivery is retried on (docs/decisions/webhooks.md, decision
+ * 1). `ordered`: its endpoint's events wait behind it. `retry`: it failed for
+ * longer than the hold, so it was moved aside and the events behind it went on.
+ */
+export const webhookDeliveryLane = core.enum("webhook_delivery_lane", [
+  "ordered",
+  "retry",
+])
+
 export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
   "pending",
   "delivered",
@@ -1346,6 +1356,8 @@ export const webhookEndpoints = core.table(
      * Svix does - an endpoint that answers even occasionally stays on.
      */
     failingSince: timestamp("failing_since", { withTimezone: true }),
+    /** The last `sequence` handed out for this endpoint. */
+    nextSequence: bigint("next_sequence", { mode: "number" }).notNull().default(0),
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
     /** Why it was switched off, in words the customer is shown. */
     disabledReason: text("disabled_reason"),
@@ -1420,6 +1432,16 @@ export const webhookDeliveries = core.table(
      * window. ⚠ ON THE ROW, so a plan change never rewrites retries in flight.
      */
     retryPolicy: webhookRetryPolicy("retry_policy").notNull().default("free"),
+    /**
+     * This event's place in its endpoint's stream, from 1, in the payload as
+     * `sequence`. ⚠ THE ORDER IS KEPT WHILE THE ENDPOINT IS HEALTHY AND
+     * RECOVERABLE ALWAYS: a receiver that sees a gap knows something is still
+     * coming, and can reorder by this. Null for deliveries recorded before it.
+     */
+    sequence: bigint("sequence", { mode: "number" }),
+    /** When this delivery first failed; the hold is measured from it. */
+    firstFailedAt: timestamp("first_failed_at", { withTimezone: true }),
+    lane: webhookDeliveryLane("lane").notNull().default("ordered"),
     /**
      * A worker's lease on this row while it is attempting it. A row whose lease
      * is live is never handed to a second worker, which is what makes the sweep
