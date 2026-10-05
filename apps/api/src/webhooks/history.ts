@@ -178,6 +178,7 @@ export function webhookHistory(
           ...presentDelivery(d),
           payload: (d.payload as Record<string, unknown>) ?? {},
           payload_expunged_at: d.payloadExpungedAt?.toISOString() ?? null,
+          transformed: d.transformed ?? null,
           attempt_log: attempts.map((a) => ({
             object: "webhook_attempt" as const,
             id: a.id,
@@ -209,7 +210,9 @@ export function webhookHistory(
         if (d.status === "pending") return "pending"
         await tx
           .update(webhookDeliveries)
-          .set({ payload: {}, payloadExpungedAt: new Date() })
+          // ⚠ THE TRANSFORMED BODY TOO (#302). It is the same data in another
+          // shape, and expunging one copy of it would be a promise half kept.
+          .set({ payload: {}, transformed: null, payloadExpungedAt: new Date() })
           .where(eq(webhookDeliveries.id, deliveryId))
         return "expunged"
       })

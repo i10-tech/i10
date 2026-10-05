@@ -19,7 +19,15 @@ import { webhookHistory, type WebhookHistory } from "../../src/webhooks/history.
 import { sendTestEvent } from "../../src/webhooks/test-events.js"
 import { createReplay, getReplay, resendDelivery } from "../../src/webhooks/replay.js"
 import { verifySignature } from "../../src/webhooks/signing.js"
-import { enabled, LAB, LAB_RULES, startLab, until, type Lab } from "./harness.js"
+import {
+  enabled,
+  LAB,
+  LAB_RULES,
+  RENDERER_URL,
+  startLab,
+  until,
+  type Lab,
+} from "./harness.js"
 
 /**
  * The webhook conformance lab (#273). Every scenario the Svix lab ran on
@@ -1228,6 +1236,102 @@ suite("webhook conformance lab", () => {
       ])
       clearInterval(keepWatching)
       expect(seen![0]!.data).toMatchObject({ endpoint_id: id, url: null })
+    })
+  })
+
+  // The real sandbox: only with WEBHOOKS_TEST_RENDERER_URL (see harness.ts).
+  ;(RENDERER_URL ? describe : describe.skip)("transformations (#302)", () => {
+    const transformedOf = async (endpointId: string) =>
+      (
+        await lab.owner`select transformed from core.webhook_deliveries
+                         where endpoint_id = ${endpointId} order by created_at`
+      ).map(
+        (r) => r.transformed as { body: string; method: string; url: string } | null,
+      )
+
+    test("reshapes the webhook in the sandbox, signs what it made, and every retry sends the same bytes", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "flaky/tfm?n=1")
+      const saved = await lab.store.update(t, ep.id, {
+        transformation: {
+          code: `export default function handler(w: any) {
+            w.payload = { text: "event " + w.payload.type, k: w.payload.data.k, at: Date.now() }
+            w.method = "PUT"
+            w.headers = { "x-from": "transformation" }
+            return w
+          }`,
+          enabled: true,
+        },
+      })
+      expect(saved.status).toBe("updated")
+      await lab.emit(t, { k: 7 })
+      expect(await until(() => lab.receiver.of("tfm").length >= 2, 10_000)).toBe(true)
+      const [first, second] = lab.receiver.of("tfm")
+      // Fixed at the first attempt: the retry is byte for byte the same,
+      // `Date.now()` included.
+      expect(second!.body).toBe(first!.body)
+      expect(JSON.parse(second!.body)).toMatchObject({
+        text: "event email.delivered",
+        k: 7,
+      })
+      expect(second!.headers["x-from"]).toBe("transformation")
+      expect(
+        verifySignature(
+          ep.secret,
+          second!.headers["webhook-id"]!,
+          second!.body,
+          second!.headers["webhook-signature"]!,
+          second!.headers["webhook-timestamp"]!,
+        ),
+      ).toBe(true)
+      const [frozen] = await transformedOf(ep.id)
+      expect(frozen).toMatchObject({ method: "PUT", body: second!.body })
+    })
+
+    test("code that fails is refused on save; code that fails on an event fails that attempt, visibly", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/tfm-fail")
+      const loop = await lab.store.update(t, ep.id, {
+        transformation: {
+          code: "export default (w) => { while (true) {} }",
+          enabled: true,
+        },
+      })
+      expect(loop).toMatchObject({ status: "rejected" })
+      expect((loop as { reason: string }).reason).toContain("CPU")
+      const escape = await lab.store.update(t, ep.id, {
+        transformation: {
+          code: "export default (w) => ({ ...w, url: 'https://evil.example.net/' })",
+          enabled: true,
+        },
+      })
+      expect((escape as { reason: string }).reason).toContain("must stay on")
+
+      await lab.store.update(t, ep.id, {
+        transformation: {
+          code: `export default (w) => { if (w.payload.data.k === 2) throw new Error("no twos"); return w }`,
+          enabled: true,
+        },
+      })
+      const [id] = await lab.emit(t, { k: 2 })
+      const failed = await until(async () => {
+        const d = await history.get(t, id!)
+        return d && d.attempt_log.length > 0 ? d : undefined
+      }, 8_000)
+      expect(failed!.attempt_log[0]).toMatchObject({ error_kind: "transform" })
+      expect(failed!.attempt_log[0]!.error).toContain("no twos")
+      expect(lab.receiver.of("tfm-fail")).toHaveLength(0)
+
+      // Switched off, the code is kept and webhooks go as they are.
+      await lab.store.update(t, ep.id, {
+        transformation: {
+          code: `export default (w) => { throw new Error("off") }`,
+          enabled: false,
+        },
+      })
+      await lab.emit(t, { k: 3 })
+      const plain = await until(() => lab.receiver.of("tfm-fail")[0], 5_000)
+      expect(JSON.parse(plain!.body)).toMatchObject({ data: { k: 3 } })
     })
   })
 

@@ -388,6 +388,23 @@ export const webhookEndpointHealth = z.enum(["healthy", "failing", "disabled"])
 export const webhookSignatureScheme = z.enum(["hmac_sha256", "ed25519"])
 
 /** `POST /webhook-endpoints` - where a customer wants their events delivered. */
+/**
+ * A function that reshapes each webhook before it is signed and sent (#302).
+ * `export default function handler(webhook) { ... return webhook }`, where
+ * `webhook` is `{ payload, method, url, headers }`. It may change the payload,
+ * the method (POST, PUT or PATCH), the URL's path and query (never its
+ * origin) and your own headers (never the signing ones). It runs in a sandbox
+ * with no network and 50ms of CPU; nothing can be imported.
+ */
+export const webhookTransformationSchema = z.object({
+  code: z
+    .string()
+    .min(1)
+    .max(64 * 1024),
+  /** Off keeps the code but sends webhooks as they are. */
+  enabled: z.boolean(),
+})
+
 /** How an endpoint gets its events: POSTed to its URL, or pulled with a cursor. */
 export const webhookEndpointKind = z.enum(["http", "polling"])
 
@@ -422,6 +439,7 @@ export const createWebhookEndpointSchema = z.object({
   filter_domains: z.array(z.string().min(1).max(253)).min(1).max(50).optional(),
   /** Only events whose message carries every one of these tags. */
   filter_tags: z.record(z.string(), z.string()).optional(),
+  transformation: webhookTransformationSchema.optional(),
 })
 
 /**
@@ -443,6 +461,7 @@ export const updateWebhookEndpointSchema = z
       .nullable()
       .optional(),
     filter_tags: z.record(z.string(), z.string()).nullable().optional(),
+    transformation: webhookTransformationSchema.nullable().optional(),
   })
   .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update." })
 
@@ -474,6 +493,7 @@ export const webhookEndpointSchema = z.object({
    */
   poll_cursor: z.string().nullable(),
   last_polled_at: z.string().nullable(),
+  transformation: webhookTransformationSchema.nullable(),
   created_at: z.string(),
   signature_scheme: webhookSignatureScheme,
   /** Deliveries a second, at most; null for no limit. */
@@ -557,7 +577,8 @@ export const webhookAttemptSchema = z.object({
   duration_ms: z.number().int(),
   /** Why it did not arrive: `status`, `timeout`, `connect`, `tls`, `blocked` or `unresolved`. */
   error_kind: z
-    .enum(["status", "timeout", "connect", "tls", "blocked", "unresolved"])
+    /** `transform`: the endpoint's transformation failed, so nothing was sent (#302). */
+    .enum(["status", "timeout", "connect", "tls", "blocked", "unresolved", "transform"])
     .nullable(),
   error: z.string().nullable(),
   created_at: z.string(),
@@ -583,10 +604,25 @@ export const webhookDeliverySchema = z.object({
 })
 
 /** A delivery with what it carried and every attempt, oldest first. */
+/** What a transformation turned a webhook into: exactly what is sent. */
+export const webhookTransformedSchema = z.object({
+  method: z.enum(["POST", "PUT", "PATCH"]),
+  /** The path and query; it is always sent to the endpoint's own origin. */
+  url: z.string(),
+  headers: z.record(z.string(), z.string()),
+  body: z.string(),
+})
+
 export const webhookDeliveryDetailSchema = webhookDeliverySchema.extend({
   /** The event's `data`. Empty once expunged. */
   payload: z.record(z.string(), z.unknown()),
   payload_expunged_at: z.string().nullable(),
+  /**
+   * What the endpoint's transformation made of it, which is what was sent;
+   * null when it was sent as it is. Fixed at the first attempt, so every
+   * retry sends the same bytes. Emptied with the payload.
+   */
+  transformed: webhookTransformedSchema.nullable(),
   attempt_log: z.array(webhookAttemptSchema),
 })
 
@@ -679,6 +715,23 @@ export const webhookDeliveryListSchema = z.object({
   data: z.array(webhookDeliverySchema),
   next_cursor: z.string().nullable(),
 })
+
+/** `POST /webhook-endpoints/{id}/transformation/test`. */
+export const testWebhookTransformationSchema = z.object({
+  /** The code to try; defaults to the endpoint's own. */
+  code: z
+    .string()
+    .min(1)
+    .max(64 * 1024)
+    .optional(),
+  /** Which event's example to run it on; defaults to the first subscribed. */
+  event_type: webhookEventName.optional(),
+})
+
+export const webhookTransformationResultSchema = z.union([
+  z.object({ ok: z.literal(true), request: webhookTransformedSchema }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+])
 
 /**
  * `GET /webhook-endpoints/{id}/poll` (#301): the next events for a polling
@@ -787,6 +840,8 @@ export type GetEmailResponse = z.infer<typeof getEmailResponseSchema>
 export type WebhookEventName = z.infer<typeof webhookEventName>
 export type WebhookHealthEvent = z.infer<typeof webhookHealthEventSchema>
 export type WebhookPoll = z.infer<typeof webhookPollSchema>
+export type WebhookTransformed = z.infer<typeof webhookTransformedSchema>
+export type WebhookTransformation = z.infer<typeof webhookTransformationSchema>
 export type CreateWebhookEndpoint = z.infer<typeof createWebhookEndpointSchema>
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>
 export type WebhookSignatureScheme = z.infer<typeof webhookSignatureScheme>

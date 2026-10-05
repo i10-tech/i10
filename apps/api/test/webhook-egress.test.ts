@@ -213,6 +213,8 @@ const record = (url: string): DeliveryRecord => ({
   lane: "ordered",
   rateLimit: null,
   headers: {},
+  transformation: null,
+  transformed: null,
 })
 const job = { deliveryId: record("x").id, endpointId: "ep-1", tenantId: "ten-1" }
 const log = { info: mock(), warn: mock(), error: mock() }

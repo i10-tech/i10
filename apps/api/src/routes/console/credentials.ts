@@ -7,6 +7,7 @@ import {
   createReplaySchema,
   rotateWebhookSecretSchema,
   sendTestEventSchema,
+  testWebhookTransformationSchema,
   updateWebhookEndpointSchema,
 } from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
@@ -422,6 +423,27 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     if ("error" in window) return c.json(validation(window.error), 422)
     const stats = await d.webhooks.stats(c.get("auth").tenantId, id, window)
     return stats ? c.json(stats) : c.json(notFound("No endpoint with that id."), 404)
+  })
+
+  // Try a transformation on an example event (#302): saves and sends nothing.
+  app.post("/webhook-endpoints/:id/transformation/test", async (c) => {
+    if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
+    const id = asId(c.req.param("id"))
+    if (!id) return c.json(notFound("No endpoint with that id."), 404)
+    const parsed = testWebhookTransformationSchema.safeParse(await readJson(c))
+    if (!parsed.success)
+      return c.json(validation("Send `code` and an `event_type`."), 422)
+    const result = await d.webhooks.testTransformation(c.get("auth").tenantId, id, {
+      ...(parsed.data.code !== undefined ? { code: parsed.data.code } : {}),
+      ...(parsed.data.event_type !== undefined
+        ? { eventType: parsed.data.event_type }
+        : {}),
+    })
+    if (result.status === "not_found")
+      return c.json(notFound("No endpoint with that id."), 404)
+    if (result.status === "rejected") return c.json(validation(result.reason), 422)
+    if (result.status === "unavailable") return c.json(validation(result.reason), 503)
+    return c.json(result.result)
   })
 
   // Across every endpoint (#300): the overview and the list's error rates.

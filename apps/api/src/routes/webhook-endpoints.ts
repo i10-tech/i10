@@ -11,7 +11,9 @@ import {
   webhookEndpointListSchema,
   webhookEndpointSchema,
   webhookEndpointWithSecretSchema,
+  testWebhookTransformationSchema,
   webhookPollSchema,
+  webhookTransformationResultSchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
 import { invalidWindow, statsQuery, windowFrom } from "./webhook-stats.js"
@@ -482,6 +484,75 @@ webhookEndpoints.openapi(
       return c.json(invalidWindow(result.error.issues[0]?.message), 422)
   },
 )
+
+const TransformationResult = webhookTransformationResultSchema.openapi(
+  "WebhookTransformationResult",
+)
+
+const testTransformation = createRoute({
+  method: "post",
+  path: "/{id}/transformation/test",
+  summary: "Try a webhook transformation",
+  description:
+    "Runs `code` (or the endpoint's saved transformation) on an example of " +
+    "`event_type`, in the same sandbox and under the same checks as a real " +
+    "delivery, and returns exactly what would be sent. Saves and sends nothing.",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: {
+    params: idParam,
+    body: {
+      required: true,
+      content: { "application/json": { schema: testWebhookTransformationSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "What the transformation made, or why it failed.",
+      content: { "application/json": { schema: TransformationResult } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such endpoint for this API key's tenant."),
+    422: errorResponse("A polling endpoint, or no transformation to try."),
+    501: errorResponse("Webhook endpoints are not configured."),
+    503: errorResponse("Transformations cannot be run right now."),
+  },
+})
+
+webhookEndpoints.openapi(testTransformation, async (c) => {
+  const store = c.get("webhookEndpoints")
+  if (!store) return c.json(notWired, 501)
+  const body = c.req.valid("json")
+  const result = await store.testTransformation(
+    c.get("auth").tenantId,
+    c.req.valid("param").id,
+    {
+      ...(body.code !== undefined ? { code: body.code } : {}),
+      ...(body.event_type !== undefined ? { eventType: body.event_type } : {}),
+    },
+  )
+  switch (result.status) {
+    case "not_found":
+      return c.json(notFound, 404)
+    case "rejected":
+      return c.json(
+        { statusCode: 422, name: "validation_error" as const, message: result.reason },
+        422,
+      )
+    case "unavailable":
+      return c.json(
+        {
+          statusCode: 503,
+          name: "internal_server_error" as const,
+          message: result.reason,
+        },
+        503,
+      )
+    case "tried":
+      return c.json(result.result, 200)
+  }
+})
 
 const Poll = webhookPollSchema.openapi("WebhookPoll")
 

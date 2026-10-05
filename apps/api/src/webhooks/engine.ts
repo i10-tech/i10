@@ -12,6 +12,7 @@ import {
 import { dueDeliveries, webhookDeliveryOps } from "./db.js"
 import { fanOutAndEnqueue, fanOutHealthEvent, unfannedHealthEvents } from "./health.js"
 import { checkPollers } from "./poll.js"
+import type { Transformer } from "./transform.js"
 import { runDueReplays } from "./replay.js"
 import { DELIVERY_TIMEOUT_MS, deliverWebhook, type DeliveryLane } from "./deliver.js"
 import { vetHost, type Lookup, type VetOptions } from "./egress.js"
@@ -85,6 +86,11 @@ export interface WebhookEngineOptions {
   breaker?: BreakerOptions
   /** No success for this long marks an endpoint failing. Production: health.ts. */
   failingAfterSeconds?: number
+  /**
+   * Runs endpoints' transformations (#302). Without one, a delivery to an
+   * endpoint with a transformation switched on is deferred, never sent raw.
+   */
+  transformer?: Transformer
 }
 
 export interface WebhookEngineHealth {
@@ -220,6 +226,7 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
                 signal,
               }),
             log: opts.log,
+            ...(opts.transformer ? { transformer: opts.transformer } : {}),
             ...(opts.rules ? { rules: opts.rules } : {}),
             ...(opts.holdMs !== undefined ? { holdMs: opts.holdMs } : {}),
             timeoutMs,
@@ -237,6 +244,8 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
         } finally {
           share.release(tenantId)
         }
+        // Our transformation sandbox was out; nothing was attempted (#302).
+        if (outcome.status === "deferred") throw new Defer(outcome.until)
         if (outcome.status === "delivered") breaker.record(endpointId, false)
         else if (outcome.status === "failed")
           breaker.record(endpointId, Boolean(outcome.timedOut))

@@ -80,6 +80,7 @@ import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
 import { fanOutAndEnqueue, runHealthEmails } from "./webhooks/health.js"
 import { healthNotice } from "./webhooks/health-notice.js"
+import { transformer } from "./webhooks/transform.js"
 import { sendTestEvent } from "./webhooks/test-events.js"
 import { webhookReplayOps } from "./webhooks/replay.js"
 import type { WebhookEventType } from "./webhooks/events.js"
@@ -358,6 +359,16 @@ const webhookEgressAllow = parseAllowList(env.WEBHOOK_EGRESS_ALLOW)
 const endpointVetting = {
   vet: (host: string) =>
     vetHost(host, { allow: webhookEgressAllow, signal: AbortSignal.timeout(3_000) }),
+  // Transformations are tried in the renderer's sandbox before they are
+  // saved, and by the dry-run route (#302).
+  ...(env.TEMPLATE_RENDERER_URL && env.TEMPLATE_RENDERER_SECRET
+    ? {
+        transformer: transformer({
+          url: env.TEMPLATE_RENDERER_URL,
+          secret: env.TEMPLATE_RENDERER_SECRET,
+        }),
+      }
+    : {}),
 }
 // The same queue settings as the worker's (createWebhookQueue), so the ceiling
 // groupmq stamps on each job matches. The delivery budget itself lives on the

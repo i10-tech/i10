@@ -88,6 +88,12 @@ spec:
             # with it. The port defaults to 2525 in env.ts.
             - name: STALWART_RELAY_HOST
               value: i10-stalwart-mail.i10-prod.svc.cluster.local
+            # Webhook transformations (#302) run in the template renderer's
+            # sandbox, never in this process. The secret is already here
+            # through `i10-api`; without both, a delivery to an endpoint with a
+            # transformation is deferred rather than sent untransformed.
+            - name: TEMPLATE_RENDERER_URL
+              value: http://i10-template-renderer.i10-prod.svc.cluster.local
           resources:
             requests: { cpu: 100m, memory: 192Mi }
             limits: { memory: 512Mi }

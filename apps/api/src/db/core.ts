@@ -1348,6 +1348,14 @@ export const webhookEndpoints = core.table(
     pollCursor: bigint("poll_cursor", { mode: "number" }).notNull().default(0),
     /** When a polling endpoint was last polled; what its health is judged by. */
     lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    /**
+     * The customer's function that reshapes each webhook before it is signed
+     * (#302). Run in the renderer's sandbox, never in this process; see
+     * webhooks/transform.ts. Kept when switched off, so it can be switched
+     * back on.
+     */
+    transformation: text("transformation"),
+    transformationEnabled: boolean("transformation_enabled").notNull().default(false),
 
     /**
      * The signing secret, ENCRYPTED AT REST.
@@ -1538,6 +1546,18 @@ export const webhookDeliveries = core.table(
      */
     payloadExpungedAt: timestamp("payload_expunged_at", { withTimezone: true }),
     /**
+     * What the endpoint's transformation made of this delivery: the method,
+     * URL, headers and body actually sent (#302). Fixed at the first attempt
+     * that ran it, so every retry and resend sends the same bytes, and the
+     * history shows what left. Emptied with the payload.
+     */
+    transformed: jsonb("transformed").$type<{
+      method: "POST" | "PUT" | "PATCH"
+      url: string
+      headers: Record<string, string>
+      body: string
+    }>(),
+    /**
      * A worker's lease on this row while it is attempting it. A row whose lease
      * is live is never handed to a second worker, which is what makes the sweep
      * safe to run beside the queue; a lease left by a crash simply expires.
@@ -1581,6 +1601,8 @@ export const webhookAttemptError = core.enum("webhook_attempt_error", [
   "blocked",
   /** Its name did not resolve. */
   "unresolved",
+  /** The endpoint's transformation failed, so nothing was sent (#302). */
+  "transform",
 ])
 
 /**

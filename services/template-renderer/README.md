@@ -79,6 +79,35 @@ post '{"entry":"a.tsx","files":{"a.tsx":"const n = \"./b\"; const b = require(n)
 the files it imports, #234), and answers with the skeleton, the runtime id, and
 the template's exported `subject` or null.
 
+### `/transform` (#302)
+
+Runs a webhook endpoint's transformation: `{ code, input }`, where `input` is
+`{ payload, method, url, headers }`.
+
+- **The function:** the default (or `handler`) export, called with `input`.
+  Nothing can be imported.
+- **The isolate:** keyed by the code's hash, with no network, no bindings and
+  **50ms of CPU** (a twentieth of a template's), because it runs once per
+  delivery.
+- **Answers:** `200 { ok: true, value }` or `422 { ok: false, error }`. The API
+  treats any other status as the sandbox being unavailable, and defers the
+  delivery rather than failing it.
+- **Checked by the API:** everything it returns is checked before anything is
+  sent (`apps/api/src/webhooks/transform.ts`).
+
+Measured against celld on 2026-10-06:
+
+```bash
+IN='"input":{"payload":{},"method":"POST","url":"https://x.test/h","headers":{}}'
+tpost() { curl -s -X POST "$URL/transform" -H "authorization: Bearer $SECRET" --data "$1"; echo; }
+# CPU: 422 "exceeded CPU limit of 50 ms", in about 70ms
+tpost "{\"code\":\"export default (w) => { while (true) {} }\",$IN}"
+# network: 422 "exceeded subrequest limit of 0"
+tpost "{\"code\":\"export default async (w) => { await fetch('https://example.com'); return w }\",$IN}"
+# imports: 422, naming the specifier
+tpost "{\"code\":\"import fs from 'node:fs'\\nexport default (w) => fs.readFileSync('/etc/passwd')\",$IN}"
+```
+
 In the cluster, run them from a pod in `i10-prod`, since the Service has no
 route from outside.
 

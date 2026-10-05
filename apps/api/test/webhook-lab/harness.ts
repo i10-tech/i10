@@ -12,6 +12,7 @@ import { generateKey } from "../../src/webhooks/keys.js"
 import type { PolicyRules, RetryRules } from "../../src/webhooks/schedule.js"
 import { secretBox } from "../../src/webhooks/signing.js"
 import { webhookEndpointStore } from "../../src/webhooks/store.js"
+import { transformer } from "../../src/webhooks/transform.js"
 import { startReceiver, type Receiver } from "./receiver.js"
 
 /**
@@ -32,6 +33,15 @@ import { startReceiver, type Receiver } from "./receiver.js"
 export const DATABASE_URL = process.env.WEBHOOKS_TEST_DATABASE_URL
 export const REDIS_URL = process.env.WEBHOOKS_TEST_REDIS_URL
 export const enabled = Boolean(DATABASE_URL && REDIS_URL)
+/**
+ * The template renderer, for the transformation scenarios (#302): the real
+ * sandbox, run locally with `docker compose -f compose.dev.yaml up -d
+ * template-renderer` (http://localhost:8788, secret `local-dev-secret`).
+ */
+export const RENDERER_URL = process.env.WEBHOOKS_TEST_RENDERER_URL
+const labTransformer = RENDERER_URL
+  ? transformer({ url: RENDERER_URL, secret: "local-dev-secret" })
+  : undefined
 
 /**
  * The lab's clock: production's rules (webhooks/schedule.ts), scaled down so a
@@ -202,6 +212,7 @@ export async function startLab(): Promise<Lab> {
       holdMs: LAB.holdMs,
       breaker: LAB.breaker,
       failingAfterSeconds: LAB.failingAfterSeconds,
+      ...(labTransformer ? { transformer: labTransformer } : {}),
       sweepEveryMs: LAB.sweepEveryMs,
       sweepGraceSeconds: LAB.sweepGraceSeconds,
       schedulerIntervalMs: 200,
@@ -215,7 +226,11 @@ export async function startLab(): Promise<Lab> {
     redis,
     owner,
     db,
-    store: webhookEndpointStore(db, secrets),
+    store: webhookEndpointStore(
+      db,
+      secrets,
+      labTransformer ? { transformer: labTransformer } : {},
+    ),
 
     async workspace() {
       const id = crypto.randomUUID()
