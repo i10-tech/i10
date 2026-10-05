@@ -12,11 +12,6 @@ import {
   type SendClass,
   type SendJob,
 } from "./queue/send-queue.js"
-import {
-  createWebhookQueue,
-  webhookBackoff,
-  type WebhookJob,
-} from "./queue/webhook-queue.js"
 import { postgresMetering } from "./metering/service.js"
 import { resilient } from "./send/metering.js"
 import { SmtpTransport } from "@upyo/smtp"
@@ -29,9 +24,8 @@ import { domainSendingLookup } from "./send/signing-key.js"
 import { stalwartTransport } from "./send/stalwart.js"
 import { relayConfig } from "./send/relay.js"
 import type { Transport } from "./send/transport.js"
-import { webhookDeliveryOps } from "./webhooks/db.js"
-import { deliverWebhook } from "./webhooks/deliver.js"
-import { parseAllowList, vetHost } from "./webhooks/egress.js"
+import { startWebhookEngine } from "./webhooks/engine.js"
+import { parseAllowList } from "./webhooks/egress.js"
 import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
 import { objectStoreFrom } from "./content/object-store.js"
@@ -341,51 +335,20 @@ function startWebhookWorker() {
     return null
   }
 
-  const secrets = secretBox(env.WEBHOOK_SECRET_KEY)
-  const queue = createWebhookQueue({
+  const engine = startWebhookEngine({
+    db,
     redis: queueRedis,
-    maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
-  })
-  const ops = webhookDeliveryOps({ db, secrets })
-  // Empty everywhere but a laptop or the conformance lab; env.ts refuses it in
-  // production. See webhooks/egress.ts.
-  const egressAllow = parseAllowList(env.WEBHOOK_EGRESS_ALLOW)
-
-  const worker = new Worker<WebhookJob>({
-    queue,
+    secrets: secretBox(env.WEBHOOK_SECRET_KEY),
+    log,
     name: `${workerId}:webhooks`,
-    handler: (job) =>
-      deliverWebhook(job.data, {
-        ...ops,
-        vet: (host, signal) => vetHost(host, { allow: egressAllow, signal }),
-        log,
-        maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
-      }),
     maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
-    // ⚠ HOW MANY ENDPOINTS ARE IN FLIGHT AT ONCE, NOT HOW MANY EVENTS PER
-    // ENDPOINT. groupmq runs one job per group, so this is a count of distinct
-    // customer endpoints being POSTed to concurrently - every one of them a
-    // ten-second wait on somebody else's server, which is why it is worth
-    // being higher than the send worker's.
     concurrency: env.WEBHOOK_CONCURRENCY,
-    // ⚠ ON THE WORKER, NOT THE QUEUE - groupmq ignores it on the latter. See
-    // queue/webhook-queue.ts.
-    backoff: webhookBackoff,
-    // Deliberately quiet: a customer's endpoint being down is their operational
-    // problem, recorded on the delivery row, and logging it as an error here
-    // would drown the log in other people's outages.
-    //
-    // ⚠ AND NOT REPORTED TO SENTRY EITHER, FOR THE SAME REASON RATHER THAN BY
-    // OVERSIGHT. Every customer whose endpoint has a bad afternoon would raise
-    // an issue against us, spend the quota, and bury the failures that are
-    // actually ours. The delivery row is where this belongs.
-    onError: (err, job) =>
-      log.warn({ err, jobId: job?.id }, "webhook delivery job failed"),
+    // Empty everywhere but a laptop or the conformance lab; env.ts refuses it
+    // in production. See webhooks/egress.ts.
+    egressAllow: parseAllowList(env.WEBHOOK_EGRESS_ALLOW),
   })
-
-  worker.run()
   log.info({}, "webhook worker started")
-  return worker
+  return engine
 }
 
 const workers = [

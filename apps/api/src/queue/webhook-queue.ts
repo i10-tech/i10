@@ -47,12 +47,14 @@ export interface WebhookQueueOptions {
   redis: Redis
   jobTimeoutMs?: number
   maxAttempts?: number
+  /** Only the conformance lab passes this, so it never shares keys with a real queue. */
+  namespace?: string
 }
 
 export function createWebhookQueue(opts: WebhookQueueOptions): Queue<WebhookJob> {
   return new Queue<WebhookJob>({
     redis: opts.redis,
-    namespace: WEBHOOK_NAMESPACE,
+    namespace: opts.namespace ?? WEBHOOK_NAMESPACE,
     // Longer than any single POST is allowed to take, so a slow endpoint is
     // never handed to a second worker while the first is still waiting on it.
     jobTimeoutMs: opts.jobTimeoutMs ?? 60_000,
