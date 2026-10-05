@@ -341,7 +341,6 @@ function startWebhookWorker() {
     secrets: secretBox(env.WEBHOOK_SECRET_KEY),
     log,
     name: `${workerId}:webhooks`,
-    maxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
     concurrency: env.WEBHOOK_CONCURRENCY,
     // Empty everywhere but a laptop or the conformance lab; env.ts refuses it
     // in production. See webhooks/egress.ts.

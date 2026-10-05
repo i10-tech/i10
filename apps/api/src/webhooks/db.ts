@@ -3,6 +3,7 @@ import type { Queue } from "groupmq"
 import { withTenant, type Database } from "../db/client.js"
 import {
   messageEvents,
+  planAssignments,
   suppressions,
   webhookDeliveries,
   webhookEndpoints,
@@ -10,7 +11,7 @@ import {
 import { timestampFromUuidV7 } from "../ids.js"
 import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
 import type { DeliverDeps, DeliveryRecord } from "./deliver.js"
-import { DISABLE_AFTER_FAILURES } from "./deliver.js"
+import { policyForPlan } from "./schedule.js"
 import { liveRetiring } from "./keys.js"
 import type { EventOps, WebhookEventType } from "./events.js"
 import type { SecretBox } from "./signing.js"
@@ -184,12 +185,22 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
           return { status: "recorded" as const, deliveries: [] }
         }
 
+        // ⚠ THE PLAN IS READ HERE AND FROZEN ON EACH ROW, so the retry window
+        // is the one in force when the event happened (webhooks/schedule.ts).
+        const [assignment] = await tx
+          .select({ planId: planAssignments.planId })
+          .from(planAssignments)
+          .where(eq(planAssignments.tenantId, tenantId))
+          .limit(1)
+        const retryPolicy = policyForPlan(assignment?.planId)
+
         const deliveries = await tx
           .insert(webhookDeliveries)
           .values(
             endpoints.map((endpoint) => ({
               tenantId,
               endpointId: endpoint.id,
+              retryPolicy,
               eventType: event.type,
               occurredAt: event.occurredAt,
               messageId: event.messageId,
@@ -299,6 +310,7 @@ export function webhookDeliveryOps(
             payload: webhookDeliveries.payload,
             attempts: webhookDeliveries.attempts,
             occurredAt: webhookDeliveries.occurredAt,
+            retryPolicy: webhookDeliveries.retryPolicy,
             url: webhookEndpoints.url,
             secretCiphertext: webhookEndpoints.secretCiphertext,
             signatureScheme: webhookEndpoints.signatureScheme,
@@ -356,6 +368,7 @@ export function webhookDeliveryOps(
           occurredAt: row.occurredAt,
           payload: (row.payload as Record<string, unknown>) ?? {},
           attempts: row.attempts,
+          retryPolicy: row.retryPolicy,
         }
       })
     },
@@ -375,33 +388,37 @@ export function webhookDeliveryOps(
           })
           .where(eq(webhookDeliveries.id, delivery.id))
 
-        // ⚠ ONE SUCCESS CLEARS THE COUNTER. Without this an endpoint that fails
-        // nineteen times over a month and works in between would eventually be
-        // switched off for being intermittently reachable, which is what every
-        // endpoint on the internet is.
+        // ⚠ ONE SUCCESS ENDS THE FAILING RUN. An endpoint that works now and
+        // then is reachable, which is all disabling asks; only a stretch with
+        // no success at all counts against it.
         await tx
           .update(webhookEndpoints)
-          .set({ consecutiveFailures: 0, updatedAt: new Date() })
-          .where(eq(webhookEndpoints.id, delivery.endpointId))
+          .set({ failingSince: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(webhookEndpoints.id, delivery.endpointId),
+              sql`${webhookEndpoints.failingSince} is not null`,
+            ),
+          )
       })
     },
 
-    async markFailed(delivery, outcome, final, nextAttemptAt) {
+    async markFailed(delivery, outcome, decision) {
+      const final = decision.nextAttemptAt === null
       await withTenant(opts.db, delivery.tenantId, async (tx) => {
         await tx
           .update(webhookDeliveries)
           .set({
             // ⚠ STILL `pending` WHILE THERE IS BUDGET LEFT. Marking it failed on
-            // the first attempt would make the row lie for the fifteen minutes
-            // the retries take, and a sweep looking for stuck deliveries would
-            // never see it.
+            // the first attempt would make the row lie for as long as the
+            // retries take, and the sweep would never see it.
             status: final ? "failed" : "pending",
             attempts: delivery.attempts + 1,
             lastError: outcome.reason.slice(0, 2000),
             // ⚠ THE NEXT ATTEMPT IS WRITTEN HERE, IN THE SAME STATEMENT AS THE
             // FAILURE, so a retry exists in Postgres before it exists in Redis.
             // If queueing it then fails, the sweep finds it due.
-            nextAttemptAt: final ? null : nextAttemptAt,
+            nextAttemptAt: decision.nextAttemptAt,
             claimedUntil: null,
             ...(outcome.responseStatus
               ? { responseStatus: outcome.responseStatus }
@@ -409,19 +426,46 @@ export function webhookDeliveryOps(
           })
           .where(eq(webhookDeliveries.id, delivery.id))
 
+        // The failing run starts at the first failure after a success.
+        await tx
+          .update(webhookEndpoints)
+          .set({ failingSince: sql`coalesce(${webhookEndpoints.failingSince}, now())` })
+          .where(eq(webhookEndpoints.id, delivery.endpointId))
+
+        if (decision.disable.kind === "gone") {
+          await tx
+            .update(webhookEndpoints)
+            .set({
+              enabled: false,
+              disabledAt: new Date(),
+              disabledReason: decision.disable.reason,
+              updatedAt: new Date(),
+            })
+            .where(eq(webhookEndpoints.id, delivery.endpointId))
+          return
+        }
+
         if (!final) return
 
-        // ⚠ COUNTED ONLY WHEN THE WHOLE BUDGET IS GONE, so a five-attempt
-        // recovery does not count as five failures against the endpoint.
+        // ⚠ JUDGED WHEN A DELIVERY RUNS OUT, AGAINST TIME, NOT A COUNT. Only an
+        // endpoint with no success at all for the plan's stretch is switched
+        // off; the reason is kept so the customer is told why.
+        const days = Math.round(decision.disable.seconds / 86_400)
         await tx
           .update(webhookEndpoints)
           .set({
-            consecutiveFailures: sql`${webhookEndpoints.consecutiveFailures} + 1`,
-            enabled: sql`case when ${webhookEndpoints.consecutiveFailures} + 1 >= ${DISABLE_AFTER_FAILURES} then false else ${webhookEndpoints.enabled} end`,
-            disabledAt: sql`case when ${webhookEndpoints.consecutiveFailures} + 1 >= ${DISABLE_AFTER_FAILURES} then now() else ${webhookEndpoints.disabledAt} end`,
+            enabled: false,
+            disabledAt: new Date(),
+            disabledReason: `No successful delivery for ${days} day${days === 1 ? "" : "s"}.`,
             updatedAt: new Date(),
           })
-          .where(eq(webhookEndpoints.id, delivery.endpointId))
+          .where(
+            and(
+              eq(webhookEndpoints.id, delivery.endpointId),
+              eq(webhookEndpoints.enabled, true),
+              sql`${webhookEndpoints.failingSince} <= now() - ${`${decision.disable.seconds} seconds`}::interval`,
+            ),
+          )
       })
     },
   }

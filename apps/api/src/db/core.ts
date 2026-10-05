@@ -132,6 +132,14 @@ export const webhookSignatureScheme = core.enum("webhook_signature_scheme", [
   "ed25519",
 ])
 
+/** How a delivery is retried; fixed when it is created. See webhooks/schedule.ts. */
+export const webhookRetryPolicy = core.enum("webhook_retry_policy", [
+  "free",
+  "pro",
+  "scale",
+  "enterprise",
+])
+
 export const webhookDeliveryStatus = core.enum("webhook_delivery_status", [
   "pending",
   "delivered",
@@ -1323,14 +1331,24 @@ export const webhookEndpoints = core.table(
     enabled: boolean("enabled").notNull().default(true),
 
     /**
+     * When the endpoint's current unbroken run of failures began. Null while
+     * it is healthy; one success clears it.
+     *
      * ⚠ AN ENDPOINT THAT HAS FAILED LONG ENOUGH IS TURNED OFF, AND THAT IS A
      * PROTECTION FOR US RATHER THAN A COURTESY TO THEM. A customer who deletes
      * their receiver without deleting the endpoint would otherwise have every
      * event they ever generate retried against a dead host, forever, at our
      * expense - and the queue those retries sit in is shared.
+     *
+     * ⚠ LONG, NOT MANY. It used to be twenty exhausted deliveries in a row,
+     * which a busy workspace reaches in one bad half hour. Now it is a stretch
+     * of time with no success at all, set by plan (webhooks/schedule.ts), as
+     * Svix does - an endpoint that answers even occasionally stays on.
      */
-    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    failingSince: timestamp("failing_since", { withTimezone: true }),
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    /** Why it was switched off, in words the customer is shown. */
+    disabledReason: text("disabled_reason"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1397,6 +1415,11 @@ export const webhookDeliveries = core.table(
      * row that is due and that nothing is working on (#279).
      */
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow(),
+    /**
+     * The workspace's plan when the event happened, which decides the retry
+     * window. ⚠ ON THE ROW, so a plan change never rewrites retries in flight.
+     */
+    retryPolicy: webhookRetryPolicy("retry_policy").notNull().default("free"),
     /**
      * A worker's lease on this row while it is attempting it. A row whose lease
      * is live is never handed to a second worker, which is what makes the sweep

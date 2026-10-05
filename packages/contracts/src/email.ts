@@ -394,6 +394,11 @@ export const webhookEndpointSchema = z.object({
   events: z.array(webhookEventName),
   description: z.string().nullable(),
   enabled: z.boolean(),
+  /**
+   * Why i10 switched the endpoint off, when it did: it answered 410 Gone, or
+   * had no successful delivery for the plan's stretch (2 to 7 days).
+   */
+  disabled_reason: z.string().nullable(),
   created_at: z.string(),
   signature_scheme: webhookSignatureScheme,
   /** The `whpk_` key to verify with, for `ed25519`; null for HMAC. Not a secret. */

@@ -306,6 +306,8 @@ export interface WebhookEndpoint {
   events: string[]
   description: string | null
   enabled: boolean
+  /** Why i10 switched it off, when it did. */
+  disabled_reason: string | null
   created_at: string
   signature_scheme: "hmac_sha256" | "ed25519"
   /** The `whpk_` key an Ed25519 endpoint is verified with. Not a secret. */

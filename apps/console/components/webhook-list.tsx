@@ -196,6 +196,12 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
                 </div>
                 <Events events={endpoint.events} />
                 <PreviousSecrets endpoint={endpoint} />
+                {!endpoint.enabled && endpoint.disabled_reason && (
+                  <p className="text-xs text-warning">
+                    Switched off: {endpoint.disabled_reason} Once the receiver is fixed,
+                    rotating the signing secret turns it back on.
+                  </p>
+                )}
                 <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
                   <Status status={endpoint.enabled ? "enabled" : "disabled"} />
                   <span>

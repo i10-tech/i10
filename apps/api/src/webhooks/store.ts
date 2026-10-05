@@ -69,6 +69,7 @@ type Row = {
   events: string[]
   description: string | null
   enabled: boolean
+  disabledReason: string | null
   createdAt: Date
   signatureScheme: SignatureScheme
   publicKey: string | null
@@ -82,6 +83,7 @@ const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   events: row.events as WebhookEventName[],
   description: row.description,
   enabled: row.enabled,
+  disabled_reason: row.enabled ? null : row.disabledReason,
   created_at: row.createdAt.toISOString(),
   signature_scheme: row.signatureScheme,
   public_key: row.publicKey,
@@ -98,6 +100,7 @@ const COLUMNS = {
   events: webhookEndpoints.events,
   description: webhookEndpoints.description,
   enabled: webhookEndpoints.enabled,
+  disabledReason: webhookEndpoints.disabledReason,
   createdAt: webhookEndpoints.createdAt,
   signatureScheme: webhookEndpoints.signatureScheme,
   publicKey: webhookEndpoints.publicKey,
@@ -227,8 +230,9 @@ export function webhookEndpointStore(
             // rotating a secret is a customer who has just fixed their receiver;
             // leaving it disabled would mean the fix appears not to work.
             enabled: true,
-            consecutiveFailures: 0,
+            failingSince: null,
             disabledAt: null,
+            disabledReason: null,
           })
           .where(eq(webhookEndpoints.id, id))
           .returning(COLUMNS)

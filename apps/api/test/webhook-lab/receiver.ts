@@ -4,6 +4,7 @@
  *
  *   /ok/<tag>                200
  *   /fail/<tag>              500
+ *   /gone/<tag>              410
  *   /hang/<tag>              never answers
  *   /flaky/<tag>?n=2         500 for the first n deliveries of each webhook-id, then 200
  *   /ratelimit/<tag>?s=3     429 with Retry-After: s
@@ -70,6 +71,8 @@ export function startReceiver(): Receiver {
           return new Response("ok")
         case "fail":
           return new Response("boom", { status: 500 })
+        case "gone":
+          return new Response("gone", { status: 410 })
         case "hang":
           hanging++
           return new Promise<Response>((resolve) => {
