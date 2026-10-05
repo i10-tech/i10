@@ -576,6 +576,53 @@ export const webhookDeliveryListSchema = z.object({
   next_cursor: z.string().nullable(),
 })
 
+/**
+ * A replay running in the background. Poll it until `status` is `done` or
+ * `failed`; `queued` counts the deliveries sent so far.
+ */
+export const webhookReplaySchema = z.object({
+  object: z.literal("webhook_replay"),
+  id: z.uuid(),
+  endpoint_id: z.uuid(),
+  /** `replay`: existing deliveries. `replay_missing`: events it never got. */
+  kind: z.enum(["replay", "replay_missing"]),
+  status: z.enum(["queued", "running", "done", "failed"]),
+  filter: z.object({
+    since: z.string(),
+    until: z.string(),
+    statuses: z.array(z.enum(["delivered", "failed"])).optional(),
+    event_type: z.string().optional(),
+  }),
+  queued: z.number().int(),
+  examined: z.number().int(),
+  error: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  finished_at: z.string().nullable(),
+})
+
+/**
+ * `POST /webhook-endpoints/{id}/replay`. Sends this endpoint's deliveries in
+ * the window again, one attempt each. `statuses` defaults to `["failed"]`:
+ * replaying failures only is the common case.
+ */
+export const createReplaySchema = z.object({
+  since: z.iso.datetime({ offset: true }),
+  until: z.iso.datetime({ offset: true }).optional(),
+  statuses: z
+    .array(z.enum(["delivered", "failed"]))
+    .min(1)
+    .optional(),
+  event_type: webhookEventName.optional(),
+})
+
+/** `POST /webhook-endpoints/{id}/replay-missing`: events it never received. */
+export const createReplayMissingSchema = z.object({
+  since: z.iso.datetime({ offset: true }),
+  until: z.iso.datetime({ offset: true }).optional(),
+})
+
+export type WebhookReplay = z.infer<typeof webhookReplaySchema>
 export type UpdateWebhookEndpoint = z.infer<typeof updateWebhookEndpointSchema>
 export type WebhookEndpointStats = z.infer<typeof webhookEndpointStatsSchema>
 export type WebhookAttempt = z.infer<typeof webhookAttemptSchema>

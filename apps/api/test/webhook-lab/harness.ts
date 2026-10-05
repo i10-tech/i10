@@ -144,6 +144,18 @@ const lookup: Lookup = async (host) => {
   return answer.map(([address, family]) => ({ address, family }))
 }
 
+const SES_TYPE: Record<WebhookEventType, string> = {
+  "email.sent": "Send",
+  "email.delivered": "Delivery",
+  "email.bounced": "Bounce",
+  "email.complained": "Complaint",
+  "email.delivery_delayed": "DeliveryDelay",
+  "email.failed": "Reject",
+  "email.opened": "Open",
+  "email.clicked": "Click",
+  "email.unsubscribed": "Subscription",
+}
+
 export const until = async <T>(
   fn: () => T | Promise<T>,
   timeoutMs: number,
@@ -224,17 +236,38 @@ export async function startLab(): Promise<Lab> {
     async emit(tenantId, data, opts = {}) {
       const ops = webhookEventOps({ db, queue: lab.engine.queue })
       const occurredAt = opts.occurredAt ?? new Date()
+      const messageId = crypto.randomUUID()
+      const type = opts.type ?? "email.delivered"
       const recorded = await ops.record({
         tenantId,
         messageCreatedAt: occurredAt,
         event: {
-          type: opts.type ?? "email.delivered",
-          messageId: crypto.randomUUID(),
+          type,
+          messageId,
           occurredAt,
           sourceEventId: crypto.randomUUID(),
           suppress: [],
           data,
-          raw: {},
+          // ⚠ A REAL SES SHAPE, because replay-missing (#282) rebuilds `data`
+          // from what was stored, the way ingestion first read it.
+          raw: {
+            eventType: SES_TYPE[type],
+            mail: {
+              timestamp: occurredAt.toISOString(),
+              source: (data.from as string | undefined) ?? "Lab <lab@example.com>",
+              destination: ["someone@example.com"],
+              commonHeaders: { subject: "lab" },
+              tags: {
+                i10_message_id: [messageId],
+                ...Object.fromEntries(
+                  Object.entries(
+                    (data.tags as Record<string, string> | undefined) ?? {},
+                  ).map(([k, v]) => [k, [v]]),
+                ),
+              },
+            },
+            delivery: { timestamp: occurredAt.toISOString() },
+          },
         },
       })
       if (recorded.status !== "recorded") return []

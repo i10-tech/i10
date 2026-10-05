@@ -1,5 +1,7 @@
 import type { Hono } from "hono"
 import {
+  createReplayMissingSchema,
+  createReplaySchema,
   rotateWebhookSecretSchema,
   sendTestEventSchema,
   updateWebhookEndpointSchema,
@@ -442,6 +444,95 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       )
     }
     return c.json({ delivery_id: result.deliveryId }, 202)
+  })
+
+  app.post("/webhook-deliveries/:id/resend", async (c) => {
+    if (!d.webhookReplays) return c.json(notWired("Replays"), 501)
+    const id = asId(c.req.param("id"))
+    if (!id) return c.json(notFound("No delivery with that id."), 404)
+    const result = await d.webhookReplays.resend(c.get("auth").tenantId, id)
+    if (result.status === "not_found")
+      return c.json(notFound("No delivery with that id."), 404)
+    if (result.status === "pending") {
+      return c.json(validation("This delivery is still being attempted."), 409)
+    }
+    if (result.status === "paused") {
+      return c.json(
+        validation("Its endpoint is paused or switched off. Resume it first."),
+        409,
+      )
+    }
+    return c.json({ delivery_id: result.deliveryId }, 202)
+  })
+
+  for (const [path, kind, failedOnly] of [
+    ["replay", "replay", false],
+    ["recover", "replay", true],
+    ["replay-missing", "replay_missing", false],
+  ] as const) {
+    app.post(`/webhook-endpoints/:id/${path}`, async (c) => {
+      if (!d.webhookReplays) return c.json(notWired("Replays"), 501)
+      const schema =
+        kind === "replay" && !failedOnly
+          ? createReplaySchema
+          : createReplayMissingSchema
+      const parsed = schema.safeParse(await readJson(c))
+      if (!parsed.success) {
+        return c.json(
+          validation(parsed.error.issues[0]?.message ?? "Choose a window."),
+          422,
+        )
+      }
+      const body = parsed.data as {
+        since: string
+        until?: string
+        statuses?: ("delivered" | "failed")[]
+        event_type?: string
+      }
+      const result = await d.webhookReplays.create(
+        c.get("auth").tenantId,
+        c.req.param("id"),
+        kind,
+        {
+          since: new Date(body.since),
+          ...(body.until ? { until: new Date(body.until) } : {}),
+          ...(failedOnly
+            ? { statuses: ["failed" as const] }
+            : body.statuses
+              ? { statuses: body.statuses }
+              : {}),
+          ...(body.event_type ? { eventType: body.event_type } : {}),
+        },
+      )
+      if (result.status === "not_found")
+        return c.json(notFound("No endpoint with that id."), 404)
+      if (result.status === "paused") {
+        return c.json(
+          validation("This endpoint is paused or switched off. Resume it first."),
+          409,
+        )
+      }
+      if (result.status === "rejected") return c.json(validation(result.reason), 422)
+      return c.json(result.replay, 202)
+    })
+  }
+
+  app.get("/webhook-endpoints/:id/replays", async (c) => {
+    if (!d.webhookReplays) return c.json(notWired("Replays"), 501)
+    return c.json({
+      data: await d.webhookReplays.list(c.get("auth").tenantId, c.req.param("id")),
+    })
+  })
+
+  app.get("/webhook-endpoints/:id/replays/:replayId", async (c) => {
+    if (!d.webhookReplays) return c.json(notWired("Replays"), 501)
+    const replay = await d.webhookReplays.get(
+      c.get("auth").tenantId,
+      c.req.param("replayId"),
+    )
+    return replay && replay.endpoint_id === c.req.param("id")
+      ? c.json(replay)
+      : c.json(notFound("No such replay."), 404)
   })
 
   app.post("/webhook-endpoints/:id/revoke-previous-secrets", async (c) => {

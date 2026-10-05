@@ -10,6 +10,7 @@ import {
   type WebhookJob,
 } from "../queue/webhook-queue.js"
 import { dueDeliveries, webhookDeliveryOps } from "./db.js"
+import { runDueReplays } from "./replay.js"
 import { DELIVERY_TIMEOUT_MS, deliverWebhook, type DeliveryLane } from "./deliver.js"
 import { vetHost, type Lookup, type VetOptions } from "./egress.js"
 import type { Logger } from "./events.js"
@@ -329,6 +330,15 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
   const tick = async () => {
     if (closed) return
     try {
+      // Replays (#282) progress one batch each per tick, on whichever replica
+      // leases them first; they go on the retry lane, never in front of
+      // fresh events.
+      await runDueReplays(opts.db, queues.retry, opts.log).catch((err: unknown) =>
+        opts.log.warn(
+          { err: String(err) },
+          "webhook replays failed; next tick retries",
+        ),
+      )
       const found = await sweep()
       if (found > 0) {
         opts.log.warn({ found }, "webhook sweep re-queued owed deliveries")

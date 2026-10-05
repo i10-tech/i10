@@ -3,6 +3,9 @@ import {
   createWebhookEndpointSchema,
   rotateWebhookSecretSchema,
   sendTestEventSchema,
+  createReplayMissingSchema,
+  createReplaySchema,
+  webhookReplaySchema,
   updateWebhookEndpointSchema,
   webhookEndpointStatsSchema,
   webhookEndpointListSchema,
@@ -524,4 +527,208 @@ webhookEndpoints.openapi(
     return c.json({ delivery_id: result.deliveryId }, 202)
   },
   validationHook as never,
+)
+
+const Replay = webhookReplaySchema.openapi("WebhookReplay")
+const CreateReplay = createReplaySchema.openapi("CreateReplay")
+const CreateReplayMissing = createReplayMissingSchema.openapi("CreateReplayMissing")
+const replayResponses = {
+  202: {
+    description: "Started. Poll `GET /webhook-endpoints/{id}/replays/{replay_id}`.",
+    content: { "application/json": { schema: Replay } },
+  },
+  401: errorResponse("The API key is missing, malformed, or unknown."),
+  404: errorResponse("No such endpoint for this API key's tenant."),
+  409: errorResponse("The endpoint is paused or switched off."),
+  422: errorResponse("The window is not acceptable."),
+  501: errorResponse("Webhooks are not configured."),
+}
+
+const startReplay = async (
+  c: Parameters<Parameters<typeof webhookEndpoints.openapi>[1]>[0],
+  kind: "replay" | "replay_missing",
+  body: {
+    since: string
+    until?: string | undefined
+    statuses?: ("delivered" | "failed")[]
+    event_type?: string
+  },
+) => {
+  const replays = c.get("webhookReplays")
+  if (!replays) return c.json(notWired, 501)
+  const result = await replays.create(
+    c.get("auth").tenantId,
+    c.req.param("id")!,
+    kind,
+    {
+      since: new Date(body.since),
+      ...(body.until ? { until: new Date(body.until) } : {}),
+      ...(body.statuses ? { statuses: body.statuses } : {}),
+      ...(body.event_type ? { eventType: body.event_type } : {}),
+    },
+  )
+  if (result.status === "not_found") return c.json(notFound, 404)
+  if (result.status === "paused") {
+    return c.json(
+      {
+        statusCode: 409,
+        name: "validation_error" as const,
+        message: "This endpoint is paused or switched off. Resume it first.",
+      },
+      409,
+    )
+  }
+  if (result.status === "rejected") {
+    return c.json(
+      { statusCode: 422, name: "validation_error" as const, message: result.reason },
+      422,
+    )
+  }
+  return c.json(result.replay, 202)
+}
+
+webhookEndpoints.openapi(
+  createRoute({
+    method: "post",
+    path: "/{id}/replay",
+    summary: "Replay a webhook endpoint's deliveries",
+    description:
+      "Sends this endpoint's deliveries from the window again, in the background, " +
+      'one attempt each. `statuses` defaults to `["failed"]`, which replays ' +
+      'failures only; pass `["delivered", "failed"]` for everything. At most ' +
+      "31 days per replay.",
+    tags: ["Webhooks"],
+    security: [{ bearerAuth: [] }],
+    middleware: [requireApiKey] as const,
+    request: {
+      params: idParam,
+      body: {
+        required: true,
+        content: { "application/json": { schema: CreateReplay } },
+      },
+    },
+    responses: replayResponses,
+  }),
+  (c) => startReplay(c as never, "replay", c.req.valid("json")) as never,
+  validationHook as never,
+)
+
+webhookEndpoints.openapi(
+  createRoute({
+    method: "post",
+    path: "/{id}/recover",
+    summary: "Recover a webhook endpoint's failed deliveries",
+    description:
+      "Replay with failures only: every delivery that failed in the window, sent again.",
+    tags: ["Webhooks"],
+    security: [{ bearerAuth: [] }],
+    middleware: [requireApiKey] as const,
+    request: {
+      params: idParam,
+      body: {
+        required: true,
+        content: { "application/json": { schema: CreateReplayMissing } },
+      },
+    },
+    responses: replayResponses,
+  }),
+  (c) =>
+    startReplay(c as never, "replay", {
+      ...c.req.valid("json"),
+      statuses: ["failed"],
+    }) as never,
+  validationHook as never,
+)
+
+webhookEndpoints.openapi(
+  createRoute({
+    method: "post",
+    path: "/{id}/replay-missing",
+    summary: "Send a webhook endpoint the events it never received",
+    description:
+      "Every event in the window this endpoint is subscribed to (and passes its " +
+      "filters) but never got a delivery for, because it did not exist yet or " +
+      "was paused. Built from the stored event, exactly as it would have been.",
+    tags: ["Webhooks"],
+    security: [{ bearerAuth: [] }],
+    middleware: [requireApiKey] as const,
+    request: {
+      params: idParam,
+      body: {
+        required: true,
+        content: { "application/json": { schema: CreateReplayMissing } },
+      },
+    },
+    responses: replayResponses,
+  }),
+  (c) => startReplay(c as never, "replay_missing", c.req.valid("json")) as never,
+  validationHook as never,
+)
+
+webhookEndpoints.openapi(
+  createRoute({
+    method: "get",
+    path: "/{id}/replays",
+    summary: "List a webhook endpoint's replays",
+    tags: ["Webhooks"],
+    security: [{ bearerAuth: [] }],
+    middleware: [requireApiKey] as const,
+    request: { params: idParam },
+    responses: {
+      200: {
+        description: "The latest 50, newest first.",
+        content: {
+          "application/json": { schema: z.object({ data: z.array(Replay) }) },
+        },
+      },
+      401: errorResponse("The API key is missing, malformed, or unknown."),
+      501: errorResponse("Webhooks are not configured."),
+    },
+  }),
+  async (c) => {
+    const replays = c.get("webhookReplays")
+    if (!replays) return c.json(notWired, 501)
+    return c.json(
+      { data: await replays.list(c.get("auth").tenantId, c.req.valid("param").id) },
+      200,
+    )
+  },
+)
+
+webhookEndpoints.openapi(
+  createRoute({
+    method: "get",
+    path: "/{id}/replays/{replay_id}",
+    summary: "Get a replay's progress",
+    tags: ["Webhooks"],
+    security: [{ bearerAuth: [] }],
+    middleware: [requireApiKey] as const,
+    request: {
+      params: idParam.extend({
+        replay_id: z.uuid().openapi({ param: { name: "replay_id", in: "path" } }),
+      }),
+    },
+    responses: {
+      200: {
+        description: "The replay.",
+        content: { "application/json": { schema: Replay } },
+      },
+      401: errorResponse("The API key is missing, malformed, or unknown."),
+      404: errorResponse("No such replay."),
+      501: errorResponse("Webhooks are not configured."),
+    },
+  }),
+  async (c) => {
+    const replays = c.get("webhookReplays")
+    if (!replays) return c.json(notWired, 501)
+    const { id, replay_id } = c.req.valid("param")
+    const replay = await replays.get(c.get("auth").tenantId, replay_id)
+    if (!replay || replay.endpoint_id !== id) {
+      return c.json(
+        { statusCode: 404, name: "not_found" as const, message: "No such replay." },
+        404,
+      )
+    }
+    return c.json(replay, 200)
+  },
 )

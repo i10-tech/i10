@@ -105,7 +105,11 @@ export interface FailureDecision {
    * once. Otherwise, when this was the last attempt, only if it has had no
    * success for `disableAfterSeconds` - a stretch of time, not a count.
    */
-  disable: { kind: "gone"; reason: string } | { kind: "after"; seconds: number }
+  disable:
+    | { kind: "gone"; reason: string }
+    | { kind: "after"; seconds: number }
+    /** A replay or a resend: a person asked for one attempt, not a verdict. */
+    | { kind: "none" }
 }
 
 export type DeliveryOutcome =
@@ -385,7 +389,14 @@ export async function deliverWebhook(
   // ⚠ A 410 ENDS THE DELIVERY AND THE ENDPOINT TOGETHER. The receiver said in
   // so many words that it is not coming back; a day of retries would be noise
   // at its door and at ours.
-  const delay = gone ? null : nextDelayMs(delivery.retryPolicy, made, signals, rules)
+  // ⚠ A RESEND OR A REPLAY IS ONE ATTEMPT (#282), as in Svix. A person asked
+  // for it now; if it fails they see the attempt and decide, rather than the
+  // delivery quietly retrying for a day - and it is no evidence against the
+  // endpoint, so it never counts towards switching it off.
+  const asked =
+    job.trigger === "manual" || job.trigger === "recover" || job.trigger === "replay"
+  const delay =
+    gone || asked ? null : nextDelayMs(delivery.retryPolicy, made, signals, rules)
   const nextAttemptAt = delay === null ? null : new Date(Date.now() + delay)
 
   /*
@@ -415,7 +426,9 @@ export async function deliverWebhook(
       lane,
       disable: gone
         ? { kind: "gone", reason: "The endpoint answered 410 Gone." }
-        : { kind: "after", seconds: policy.disableAfterSeconds },
+        : asked
+          ? { kind: "none" }
+          : { kind: "after", seconds: policy.disableAfterSeconds },
     },
     log(delivery.lane),
   )
