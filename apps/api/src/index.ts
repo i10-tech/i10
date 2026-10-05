@@ -77,6 +77,7 @@ import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
+import { webhookHistory } from "./webhooks/history.js"
 import { parseAllowList, vetHost } from "./webhooks/egress.js"
 import { offlineTenantSuppressions, sesTenantSuppressions } from "./suppressions/ses.js"
 import { suppressionStore } from "./suppressions/store.js"
@@ -1295,6 +1296,7 @@ const app = createApp({
     ...(secrets
       ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
       : {}),
+    webhookHistory: webhookHistory(db),
     // ⚠ THE SAME POLAR CLIENT AND THE SAME PRODUCT MAP `/billing` USES, NOT A
     // SECOND ONE. Two maps is two price lists, and the one that is wrong is
     // always the one a customer just bought from.

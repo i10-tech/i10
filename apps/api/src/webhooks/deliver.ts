@@ -62,6 +62,30 @@ export interface DeliveryRecord {
 
 export type DeliveryLane = "ordered" | "retry"
 
+export type AttemptTrigger = "scheduled" | "manual" | "recover" | "replay" | "test"
+export type AttemptErrorKind =
+  "status" | "timeout" | "connect" | "tls" | "blocked" | "unresolved"
+
+/** One attempt, as the attempt log keeps it (#280). */
+export interface AttemptLog {
+  attempt: number
+  trigger: AttemptTrigger
+  lane: DeliveryLane
+  url: string
+  /** What we sent. ⚠ Never the signature. */
+  requestHeaders: Record<string, string>
+  responseStatus?: number
+  responseHeaders?: Record<string, string>
+  /** The first `RESPONSE_BODY_CAP` bytes of what came back. */
+  responseBody?: string
+  durationMs: number
+  errorKind?: AttemptErrorKind
+  error?: string
+}
+
+/** How much of an endpoint's answer the attempt log keeps. */
+export const RESPONSE_BODY_CAP = 20_000
+
 /**
  * How long a failing event may hold its endpoint's later events before it is
  * moved aside (docs/decisions/webhooks.md, decision 1).
@@ -102,8 +126,12 @@ export type DeliveryOutcome =
 export interface DeliverDeps {
   /** Loads the row, or null if it is gone or already delivered. */
   load: (job: WebhookJob) => Promise<DeliveryRecord | null>
-  /** Records success, and clears the endpoint's failure count. */
-  markDelivered: (delivery: DeliveryRecord, responseStatus: number) => Promise<void>
+  /** Records success and its attempt, and ends the endpoint's failing run. */
+  markDelivered: (
+    delivery: DeliveryRecord,
+    responseStatus: number,
+    attempt: AttemptLog,
+  ) => Promise<void>
   /**
    * Records one failed attempt and what it decided: when the delivery is next
    * owed (or that it is finished), and whether the endpoint is switched off.
@@ -112,6 +140,7 @@ export interface DeliverDeps {
     delivery: DeliveryRecord,
     outcome: { reason: string; responseStatus?: number },
     decision: FailureDecision,
+    attempt: AttemptLog,
   ) => Promise<void>
   /** Retry timing. Production's are in schedule.ts; the lab passes a scaled copy. */
   rules?: RetryRules
@@ -140,7 +169,70 @@ export interface DeliverDeps {
  * The endpoint resolved somewhere we will not connect to, or did not resolve.
  * An ordinary failed attempt as far as retries go: DNS can be fixed.
  */
-class EgressRefused extends Error {}
+class EgressRefused extends Error {
+  constructor(
+    message: string,
+    readonly kind: "blocked" | "unresolved",
+  ) {
+    super(message)
+  }
+}
+
+/**
+ * Reads at most `cap` bytes of a response and drops the rest. A receiver that
+ * streams a gigabyte back must not hold the worker or fill the attempt log.
+ */
+async function readCapped(
+  response: Response,
+  cap: number,
+): Promise<string | undefined> {
+  if (!response.body) return undefined
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    while (size < cap) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      size += value.byteLength
+    }
+  } catch {
+    // The deadline fired or the socket closed mid-body; keep what arrived.
+  } finally {
+    void reader.cancel().catch(() => {})
+  }
+  const all = new Uint8Array(Math.min(size, cap))
+  let at = 0
+  for (const c of chunks) {
+    const part = c.subarray(0, Math.max(0, all.length - at))
+    all.set(part, at)
+    at += part.length
+    if (at >= all.length) break
+  }
+  return new TextDecoder().decode(all)
+}
+
+const errorKindOf = (err: unknown): AttemptErrorKind => {
+  if (err instanceof EgressRefused) return err.kind
+  if (
+    err instanceof Error &&
+    (err.name === "TimeoutError" || err.name === "AbortError")
+  ) {
+    return "timeout"
+  }
+  const code = (err as { code?: unknown })?.code
+  if (typeof code === "string" && /CERT|TLS|SSL/.test(code)) return "tls"
+  return "connect"
+}
+
+const MAX_RESPONSE_HEADERS = 50
+const headersOf = (h: Headers): Record<string, string> =>
+  Object.fromEntries(
+    [...h.entries()]
+      .slice(0, MAX_RESPONSE_HEADERS)
+      .map(([k, v]) => [k, v.slice(0, 1024)]),
+  )
 
 export async function deliverWebhook(
   job: WebhookJob,
@@ -177,6 +269,12 @@ export async function deliverWebhook(
   let outcome: DeliveryOutcome
   // What the endpoint told us about itself, for the retry decision.
   const signals: FailureSignals = {}
+  // For the attempt log: what we sent, what came back, and how it failed.
+  let sent: Record<string, string> = {}
+  let received:
+    { status: number; headers: Record<string, string>; body?: string } | undefined
+  let errorKind: AttemptErrorKind | undefined
+  const startedAt = performance.now()
   try {
     // ⚠ RESOLVED AND VETTED ON EVERY ATTEMPT, THEN CONNECTED TO BY ADDRESS.
     // See egress.ts: the string check at registration cannot see what DNS says
@@ -185,21 +283,25 @@ export async function deliverWebhook(
       url.hostname,
       signal,
     )
-    if (!verdict.ok) throw new EgressRefused(verdict.reason)
+    if (!verdict.ok) throw new EgressRefused(verdict.reason, verdict.kind)
     const pinned = pinnedRequest(url, verdict)
 
+    sent = {
+      host: pinned.host,
+      "content-type": "application/json",
+      "user-agent": "i10-webhooks/1",
+      // ⚠ THESE THREE NAMES ARE THE STANDARD WEBHOOKS SPEC's, NOT OURS TO
+      // PICK. They are what lets a customer verify with any conforming
+      // library in any language rather than only with `@i10/next` - which is
+      // the entire reason the format moved. All three are signed material.
+      "webhook-id": delivery.id,
+      "webhook-timestamp": timestampFor(now),
+    }
     const response = await doFetch(pinned.url, {
       method: "POST",
+      // The signature goes on the request only; the attempt log keeps `sent`.
       headers: {
-        host: pinned.host,
-        "content-type": "application/json",
-        "user-agent": "i10-webhooks/1",
-        // ⚠ THESE THREE NAMES ARE THE STANDARD WEBHOOKS SPEC's, NOT OURS TO
-        // PICK. They are what lets a customer verify with any conforming
-        // library in any language rather than only with `@i10/next` - which is
-        // the entire reason the format moved. All three are signed material.
-        "webhook-id": delivery.id,
-        "webhook-timestamp": timestampFor(now),
+        ...sent,
         "webhook-signature": signWithKeys(delivery.keys, delivery.id, body, now),
       },
       body,
@@ -217,6 +319,12 @@ export async function deliverWebhook(
 
     signals.status = response.status
     signals.retryAfter = response.headers.get("retry-after")
+    received = {
+      status: response.status,
+      headers: headersOf(response.headers),
+      // Read inside the same deadline; a body that never ends is cut off.
+      body: await readCapped(response, RESPONSE_BODY_CAP),
+    }
     outcome =
       // ⚠ ANY 2xx IS SUCCESS, AND NOTHING ELSE IS. A 3xx is a redirect we
       // refused to follow; a 401 or 404 means their route moved. Treating "the
@@ -232,6 +340,7 @@ export async function deliverWebhook(
   } catch (err) {
     signals.timedOut =
       err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")
+    errorKind = errorKindOf(err)
     outcome = {
       status: "failed",
       // Already a sentence for the customer; describeError would reword it.
@@ -239,13 +348,32 @@ export async function deliverWebhook(
     }
   }
 
+  const made = delivery.attempts + 1
+  const log = (lane: DeliveryLane): AttemptLog => ({
+    attempt: made,
+    trigger: job.trigger ?? "scheduled",
+    lane,
+    url: delivery.url,
+    requestHeaders: sent,
+    ...(received
+      ? {
+          responseStatus: received.status,
+          responseHeaders: received.headers,
+          ...(received.body !== undefined ? { responseBody: received.body } : {}),
+        }
+      : {}),
+    durationMs: Math.round(performance.now() - startedAt),
+    ...(outcome.status === "failed"
+      ? { errorKind: errorKind ?? "status", error: outcome.reason.slice(0, 2000) }
+      : {}),
+  })
+
   if (outcome.status === "delivered") {
-    await deps.markDelivered(delivery, outcome.responseStatus)
+    await deps.markDelivered(delivery, outcome.responseStatus, log(delivery.lane))
     return outcome
   }
 
-  // `attempts` is the count BEFORE this one, so this attempt is `attempts + 1`.
-  const made = delivery.attempts + 1
+  // `attempts` is the count BEFORE this one, so this attempt is `made`.
   const rules = deps.rules ?? RULES
   const policy = rules.policies[delivery.retryPolicy]
   const gone = isPermanentlyGone(signals.status)
@@ -284,6 +412,7 @@ export async function deliverWebhook(
         ? { kind: "gone", reason: "The endpoint answered 410 Gone." }
         : { kind: "after", seconds: policy.disableAfterSeconds },
     },
+    log(delivery.lane),
   )
 
   deps.log.warn(

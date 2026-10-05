@@ -23,6 +23,7 @@ import type { DomainTransfers } from "../../domains/transfers.js"
 import type { KeyCache } from "../../auth/api-key.js"
 import type { KeyStore } from "../../auth/store.js"
 import type { WebhookEndpointStore } from "../../webhooks/store.js"
+import type { WebhookHistory } from "../../webhooks/history.js"
 import type { DnsInspector } from "../../console/dns.js"
 import type { DelegationChecker } from "../../console/delegation.js"
 import type { DnsConnectionStore } from "../../dns/connections.js"
@@ -189,6 +190,8 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   keys?: { store: KeyStore; cache?: KeyCache }
   webhooks?: WebhookEndpointStore
+  /** A delivery's attempts, and expunging its payload (#280). */
+  webhookHistory?: WebhookHistory
   dns?: DnsInspector
   /**
    * Why a delegated domain has not verified yet.

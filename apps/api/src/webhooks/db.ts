@@ -5,12 +5,13 @@ import {
   messageEvents,
   planAssignments,
   suppressions,
+  webhookAttempts,
   webhookDeliveries,
   webhookEndpoints,
 } from "../db/core.js"
 import { timestampFromUuidV7 } from "../ids.js"
 import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
-import type { DeliverDeps, DeliveryRecord } from "./deliver.js"
+import type { AttemptLog, DeliverDeps, DeliveryRecord } from "./deliver.js"
 import { policyForPlan } from "./schedule.js"
 import { liveRetiring } from "./keys.js"
 import type { EventOps, WebhookEventType } from "./events.js"
@@ -390,8 +391,9 @@ export function webhookDeliveryOps(
       })
     },
 
-    async markDelivered(delivery, responseStatus) {
+    async markDelivered(delivery, responseStatus, attempt) {
       await withTenant(opts.db, delivery.tenantId, async (tx) => {
+        await recordAttempt(tx, delivery, attempt)
         await tx
           .update(webhookDeliveries)
           .set({
@@ -420,9 +422,10 @@ export function webhookDeliveryOps(
       })
     },
 
-    async markFailed(delivery, outcome, decision) {
+    async markFailed(delivery, outcome, decision, attempt) {
       const final = decision.nextAttemptAt === null
       await withTenant(opts.db, delivery.tenantId, async (tx) => {
+        await recordAttempt(tx, delivery, attempt)
         await tx
           .update(webhookDeliveries)
           .set({
@@ -490,6 +493,35 @@ export function webhookDeliveryOps(
       })
     },
   }
+}
+
+/**
+ * One row in the attempt log, in the same transaction as the outcome it
+ * explains, so the log and the delivery can never disagree.
+ */
+async function recordAttempt(
+  tx: Parameters<Parameters<typeof withTenant>[2]>[0],
+  delivery: DeliveryRecord,
+  attempt: AttemptLog,
+): Promise<void> {
+  await tx.insert(webhookAttempts).values({
+    tenantId: delivery.tenantId,
+    deliveryId: delivery.id,
+    endpointId: delivery.endpointId,
+    attempt: attempt.attempt,
+    trigger: attempt.trigger,
+    lane: attempt.lane,
+    url: attempt.url,
+    requestHeaders: attempt.requestHeaders,
+    responseStatus: attempt.responseStatus ?? null,
+    responseHeaders: attempt.responseHeaders ?? null,
+    // ⚠ NUL IS THE ONE CHARACTER POSTGRES TEXT REFUSES, and a receiver's
+    // body is arbitrary bytes. Dropping it beats failing the whole outcome.
+    responseBody: attempt.responseBody?.replaceAll("\u0000", "") ?? null,
+    durationMs: attempt.durationMs,
+    errorKind: attempt.errorKind ?? null,
+    error: attempt.error ?? null,
+  })
 }
 
 /** A delivery the sweep found owed and unattended. */

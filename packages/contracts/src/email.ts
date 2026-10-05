@@ -461,6 +461,62 @@ export const webhookEndpointListSchema = z.object({
   data: z.array(webhookEndpointSchema),
 })
 
+/** One attempt to deliver a webhook: what was sent and what came back. */
+export const webhookAttemptSchema = z.object({
+  object: z.literal("webhook_attempt"),
+  id: z.uuid(),
+  /** 1 for the first. */
+  attempt: z.number().int(),
+  trigger: z.enum(["scheduled", "manual", "recover", "replay", "test"]),
+  /** `retry` once it failed for longer than the hold and was moved aside. */
+  lane: z.enum(["ordered", "retry"]),
+  url: z.string(),
+  /** What i10 sent, without `webhook-signature`. */
+  request_headers: z.record(z.string(), z.string()),
+  response_status: z.number().int().nullable(),
+  response_headers: z.record(z.string(), z.string()).nullable(),
+  /** The first 20KB of the endpoint's answer. */
+  response_body: z.string().nullable(),
+  duration_ms: z.number().int(),
+  /** Why it did not arrive: `status`, `timeout`, `connect`, `tls`, `blocked` or `unresolved`. */
+  error_kind: z
+    .enum(["status", "timeout", "connect", "tls", "blocked", "unresolved"])
+    .nullable(),
+  error: z.string().nullable(),
+  created_at: z.string(),
+})
+
+/** One event, to one endpoint, with how it went. */
+export const webhookDeliverySchema = z.object({
+  object: z.literal("webhook_delivery"),
+  id: z.uuid(),
+  endpoint_id: z.uuid(),
+  event_type: webhookEventName,
+  status: z.enum(["pending", "delivered", "failed"]),
+  attempts: z.number().int(),
+  /** Its place in the endpoint's stream. */
+  sequence: z.number().int().nullable(),
+  /** When the next attempt is due, while it is pending. */
+  next_attempt_at: z.string().nullable(),
+  response_status: z.number().int().nullable(),
+  last_error: z.string().nullable(),
+  occurred_at: z.string(),
+  delivered_at: z.string().nullable(),
+  created_at: z.string(),
+})
+
+/** A delivery with what it carried and every attempt, oldest first. */
+export const webhookDeliveryDetailSchema = webhookDeliverySchema.extend({
+  /** The event's `data`. Empty once expunged. */
+  payload: z.record(z.string(), z.unknown()),
+  payload_expunged_at: z.string().nullable(),
+  attempt_log: z.array(webhookAttemptSchema),
+})
+
+export type WebhookAttempt = z.infer<typeof webhookAttemptSchema>
+export type WebhookDelivery = z.infer<typeof webhookDeliverySchema>
+export type WebhookDeliveryDetail = z.infer<typeof webhookDeliveryDetailSchema>
+
 export type EmailEventName = z.infer<typeof emailEventName>
 export type GetEmailResponse = z.infer<typeof getEmailResponseSchema>
 export type WebhookEventName = z.infer<typeof webhookEventName>
