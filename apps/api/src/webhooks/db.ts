@@ -307,7 +307,10 @@ export function webhookDeliveryOps(
      */
     onHealthChange?: (tenantId: string, eventId: string) => void
   },
-): Pick<DeliverDeps, "load" | "markDelivered" | "markFailed"> {
+): Pick<
+  DeliverDeps,
+  "load" | "markDelivered" | "markFailed" | "saveTransformed" | "release"
+> {
   return {
     async load(job: WebhookJob): Promise<DeliveryRecord | null> {
       return withTenant(opts.db, job.tenantId, async (tx) => {
@@ -363,6 +366,9 @@ export function webhookDeliveryOps(
             signatureScheme: webhookEndpoints.signatureScheme,
             retiringSecrets: webhookEndpoints.retiringSecrets,
             enabled: webhookEndpoints.enabled,
+            transformation: webhookEndpoints.transformation,
+            transformationEnabled: webhookEndpoints.transformationEnabled,
+            transformed: webhookDeliveries.transformed,
           })
           .from(webhookDeliveries)
           .innerJoin(
@@ -433,8 +439,28 @@ export function webhookDeliveryOps(
           lane: row.lane,
           rateLimit: row.rateLimit,
           headers: row.headers ?? {},
+          transformation: row.transformationEnabled ? row.transformation : null,
+          transformed: row.transformed ?? null,
         }
       })
+    },
+
+    async saveTransformed(delivery, request) {
+      await withTenant(opts.db, delivery.tenantId, (tx) =>
+        tx
+          .update(webhookDeliveries)
+          .set({ transformed: request })
+          .where(eq(webhookDeliveries.id, delivery.id)),
+      )
+    },
+
+    async release(delivery) {
+      await withTenant(opts.db, delivery.tenantId, (tx) =>
+        tx
+          .update(webhookDeliveries)
+          .set({ claimedUntil: null })
+          .where(eq(webhookDeliveries.id, delivery.id)),
+      )
     },
 
     async markDelivered(delivery, responseStatus, attempt) {

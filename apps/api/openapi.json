@@ -1762,6 +1762,26 @@
               "null"
             ]
           },
+          "transformation": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 65536
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "enabled"
+            ]
+          },
           "created_at": {
             "type": "string"
           },
@@ -1850,6 +1870,7 @@
           "health_changed_at",
           "poll_cursor",
           "last_polled_at",
+          "transformation",
           "created_at",
           "signature_scheme",
           "rate_limit",
@@ -1933,6 +1954,23 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "transformation": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 65536
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "enabled"
+            ]
           }
         },
         "required": [
@@ -2032,6 +2070,26 @@
                     "null"
                   ]
                 },
+                "transformation": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 65536
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "enabled"
+                  ]
+                },
                 "created_at": {
                   "type": "string"
                 },
@@ -2114,6 +2172,7 @@
                 "health_changed_at",
                 "poll_cursor",
                 "last_polled_at",
+                "transformation",
                 "created_at",
                 "signature_scheme",
                 "rate_limit",
@@ -2233,6 +2292,26 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "transformation": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 65536
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "enabled"
+            ]
           }
         }
       },
@@ -2414,6 +2493,74 @@
           "p95_ms",
           "series",
           "by_event_type"
+        ]
+      },
+      "WebhookTransformationResult": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "request": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "POST",
+                      "PUT",
+                      "PATCH"
+                    ]
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "method",
+                  "url",
+                  "headers",
+                  "body"
+                ]
+              }
+            },
+            "required": [
+              "ok",
+              "request"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok",
+              "error"
+            ]
+          }
         ]
       },
       "WebhookPoll": {
@@ -2871,6 +3018,40 @@
               "null"
             ]
           },
+          "transformed": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "POST",
+                  "PUT",
+                  "PATCH"
+                ]
+              },
+              "url": {
+                "type": "string"
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "body": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "url",
+              "headers",
+              "body"
+            ]
+          },
           "attempt_log": {
             "type": "array",
             "items": {
@@ -2951,6 +3132,7 @@
                     "tls",
                     "blocked",
                     "unresolved",
+                    "transform",
                     null
                   ]
                 },
@@ -2999,6 +3181,7 @@
           "created_at",
           "payload",
           "payload_expunged_at",
+          "transformed",
           "attempt_log"
         ]
       },
@@ -4479,6 +4662,26 @@
                         "null"
                       ]
                     },
+                    "transformation": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 65536
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "enabled"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -4561,6 +4764,7 @@
                     "health_changed_at",
                     "poll_cursor",
                     "last_polled_at",
+                    "transformation",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -4731,6 +4935,26 @@
                         "null"
                       ]
                     },
+                    "transformation": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 65536
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "enabled"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -4813,6 +5037,7 @@
                     "health_changed_at",
                     "poll_cursor",
                     "last_polled_at",
+                    "transformation",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5072,6 +5297,26 @@
                         "null"
                       ]
                     },
+                    "transformation": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 65536
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "enabled"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -5154,6 +5399,7 @@
                     "health_changed_at",
                     "poll_cursor",
                     "last_polled_at",
+                    "transformation",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5316,6 +5562,26 @@
                         "null"
                       ]
                     },
+                    "transformation": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 65536
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "enabled"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -5398,6 +5664,7 @@
                     "health_changed_at",
                     "poll_cursor",
                     "last_polled_at",
+                    "transformation",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5560,6 +5827,26 @@
                         "null"
                       ]
                     },
+                    "transformation": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 65536
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "enabled"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -5642,6 +5929,7 @@
                     "health_changed_at",
                     "poll_cursor",
                     "last_polled_at",
+                    "transformation",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5784,6 +6072,127 @@
           },
           "501": {
             "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-endpoints/{id}/transformation/test": {
+      "post": {
+        "summary": "Try a webhook transformation",
+        "description": "Runs `code` (or the endpoint's saved transformation) on an example of `event_type`, in the same sandbox and under the same checks as a real delivery, and returns exactly what would be sent. Saves and sends nothing.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 65536
+                  },
+                  "event_type": {
+                    "type": "string",
+                    "enum": [
+                      "email.sent",
+                      "email.delivered",
+                      "email.delivery_delayed",
+                      "email.bounced",
+                      "email.complained",
+                      "email.failed",
+                      "email.opened",
+                      "email.clicked",
+                      "email.unsubscribed",
+                      "webhook_endpoint.failing",
+                      "webhook_endpoint.disabled",
+                      "webhook_endpoint.recovered"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What the transformation made, or why it failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTransformationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A polling endpoint, or no transformation to try.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Transformations cannot be run right now.",
             "content": {
               "application/json": {
                 "schema": {

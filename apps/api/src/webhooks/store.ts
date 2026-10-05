@@ -10,6 +10,9 @@ import { and, desc, eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { webhookDeliveries, webhookEndpoints } from "../db/core.js"
 import { checkCustomHeaders } from "./headers.js"
+import { envelope } from "./events.js"
+import { exampleData } from "./examples.js"
+import { applyTransformation, type Transformed, type Transformer } from "./transform.js"
 import {
   collectByEndpoint,
   collectStats,
@@ -89,6 +92,23 @@ export interface WebhookEndpointStore {
   ) => Promise<WebhookEndpointStats | null>
   /** The same across every endpoint, with a row per endpoint. */
   workspaceStats: (tenantId: string, window: StatsWindow) => Promise<WebhookStats>
+  /**
+   * Runs a transformation (the given code, or the endpoint's own) on an
+   * example event, and shows exactly what would be sent (#302). Saves nothing.
+   */
+  testTransformation: (
+    tenantId: string,
+    id: string,
+    input: { code?: string; eventType?: WebhookEventName },
+  ) => Promise<
+    | {
+        status: "tried"
+        result: { ok: true; request: Transformed } | { ok: false; error: string }
+      }
+    | { status: "rejected"; reason: string }
+    | { status: "unavailable"; reason: string }
+    | { status: "not_found" }
+  >
 }
 
 type Row = {
@@ -111,6 +131,8 @@ type Row = {
   filterTags: Record<string, string> | null
   health: "healthy" | "failing" | "disabled"
   healthChangedAt: Date | null
+  transformation: string | null
+  transformationEnabled: boolean
 }
 
 /**
@@ -140,6 +162,10 @@ const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   health_changed_at: row.healthChangedAt?.toISOString() ?? null,
   poll_cursor: row.kind === "polling" ? String(row.pollCursor) : null,
   last_polled_at: row.lastPolledAt?.toISOString() ?? null,
+  transformation:
+    row.transformation === null
+      ? null
+      : { code: row.transformation, enabled: row.transformationEnabled },
   created_at: row.createdAt.toISOString(),
   signature_scheme: row.signatureScheme,
   rate_limit: row.rateLimit,
@@ -175,6 +201,8 @@ const COLUMNS = {
   filterTags: webhookEndpoints.filterTags,
   health: webhookEndpoints.health,
   healthChangedAt: webhookEndpoints.healthChangedAt,
+  transformation: webhookEndpoints.transformation,
+  transformationEnabled: webhookEndpoints.transformationEnabled,
 }
 
 /** Domains compared as DNS does: lowercased, without a trailing dot. */
@@ -245,6 +273,62 @@ export interface WebhookEndpointStoreOptions {
    * not resolve YET is accepted - customers register before they deploy.
    */
   vet?: (host: string) => Promise<EgressVerdict>
+  /**
+   * The sandbox transformations are tried in before they are saved (#302).
+   * Without it, a transformation is refused rather than saved untested.
+   */
+  transformer?: Transformer
+}
+
+export type TransformationTry =
+  | { ok: true; request: Transformed }
+  | { ok: false; error: string }
+  | { ok: false; unavailable: true; error: string }
+
+/**
+ * Runs a transformation on an example event for an endpoint, as the worker
+ * would, and applies the same checks to what comes back. What saving one and
+ * the dry-run route both use, so neither can accept code the worker would
+ * refuse.
+ */
+export async function tryTransformation(
+  t: Transformer | undefined,
+  code: string,
+  endpointUrl: string,
+  eventType: WebhookEventName,
+): Promise<TransformationTry> {
+  if (!t) {
+    return {
+      ok: false,
+      unavailable: true,
+      error: "Transformations are not available on this deployment.",
+    }
+  }
+  const at = new Date()
+  const event = envelope("00000000-0000-7000-8000-000000000000", {
+    type: eventType,
+    occurredAt: at,
+    sequence: 1,
+    data: exampleData(eventType, at),
+  })
+  const call = await t.run(code, {
+    payload: event,
+    method: "POST",
+    url: endpointUrl,
+    headers: {},
+  })
+  if (call.status === "unavailable") {
+    return {
+      ok: false,
+      unavailable: true,
+      error: "Transformations cannot be checked right now. Try again shortly.",
+    }
+  }
+  if (call.status === "error") return { ok: false, error: call.error }
+  const applied = applyTransformation(endpointUrl, call.value)
+  return applied.ok
+    ? { ok: true, request: applied.request }
+    : { ok: false, error: applied.reason }
 }
 
 export function webhookEndpointStore(
@@ -262,9 +346,9 @@ export function webhookEndpointStore(
    * the API key that reads it, over TLS, from us.
    */
   const createPolling = async (tenantId: string, input: CreateWebhookEndpoint) => {
-    const extra = (["url", "headers", "rate_limit", "signature_scheme"] as const).find(
-      (k) => input[k] !== undefined,
-    )
+    const extra = (
+      ["url", "headers", "rate_limit", "signature_scheme", "transformation"] as const
+    ).find((k) => input[k] !== undefined)
     if (extra)
       return {
         status: "rejected" as const,
@@ -321,6 +405,20 @@ export function webhookEndpointStore(
       const options = checkOptions(input)
       if (!options.ok) return { status: "rejected" as const, reason: options.reason }
 
+      if (input.transformation) {
+        const tried = await tryTransformation(
+          opts.transformer,
+          input.transformation.code,
+          input.url,
+          input.events[0]!,
+        )
+        if (!tried.ok)
+          return {
+            status: "rejected" as const,
+            reason: `The transformation was refused: ${tried.error}`,
+          }
+      }
+
       const key = generateKey(input.signature_scheme ?? "hmac_sha256")
 
       return withTenant(db, tenantId, async (tx) => {
@@ -338,6 +436,8 @@ export function webhookEndpointStore(
             headers: options.headers ?? null,
             filterDomains: options.filterDomains ?? null,
             filterTags: options.filterTags ?? null,
+            transformation: input.transformation?.code ?? null,
+            transformationEnabled: input.transformation?.enabled ?? false,
           })
           .returning(COLUMNS)
 
@@ -459,8 +559,46 @@ export function webhookEndpointStore(
       const options = checkOptions(patch)
       if (!options.ok) return { status: "rejected" as const, reason: options.reason }
 
+      if (patch.transformation) {
+        const [current] = await withTenant(db, tenantId, (tx) =>
+          tx
+            .select({
+              kind: webhookEndpoints.kind,
+              url: webhookEndpoints.url,
+              events: webhookEndpoints.events,
+            })
+            .from(webhookEndpoints)
+            .where(eq(webhookEndpoints.id, id))
+            .limit(1),
+        )
+        if (!current) return { status: "not_found" as const }
+        const url = patch.url ?? current.url
+        if (current.kind === "polling" || url === null) {
+          return {
+            status: "rejected" as const,
+            reason:
+              "A polling endpoint has no `transformation`: nothing is sent to it.",
+          }
+        }
+        const tried = await tryTransformation(
+          opts.transformer,
+          patch.transformation.code,
+          url,
+          (patch.events ?? current.events)[0] as WebhookEventName,
+        )
+        if (!tried.ok)
+          return {
+            status: "rejected" as const,
+            reason: `The transformation was refused: ${tried.error}`,
+          }
+      }
+
       const set: Partial<typeof webhookEndpoints.$inferInsert> = {
         updatedAt: new Date(),
+      }
+      if (patch.transformation !== undefined) {
+        set.transformation = patch.transformation?.code ?? null
+        set.transformationEnabled = patch.transformation?.enabled ?? false
       }
       if (patch.url !== undefined) set.url = patch.url
       if (patch.events !== undefined) set.events = patch.events as never
@@ -544,6 +682,41 @@ export function webhookEndpointStore(
           failing_since: endpoint.failingSince?.toISOString() ?? null,
         }
       })
+    },
+
+    async testTransformation(tenantId, id, input) {
+      const [current] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({
+            url: webhookEndpoints.url,
+            events: webhookEndpoints.events,
+            transformation: webhookEndpoints.transformation,
+          })
+          .from(webhookEndpoints)
+          .where(eq(webhookEndpoints.id, id))
+          .limit(1),
+      )
+      if (!current) return { status: "not_found" as const }
+      if (current.url === null)
+        return {
+          status: "rejected" as const,
+          reason: "A polling endpoint has no `transformation`: nothing is sent to it.",
+        }
+      const code = input.code ?? current.transformation
+      if (!code)
+        return {
+          status: "rejected" as const,
+          reason: "This endpoint has no transformation; send `code` to try one.",
+        }
+      const tried = await tryTransformation(
+        opts.transformer,
+        code,
+        current.url,
+        input.eventType ?? (current.events[0] as WebhookEventName),
+      )
+      if ("unavailable" in tried)
+        return { status: "unavailable" as const, reason: tried.error }
+      return { status: "tried" as const, result: tried }
     },
 
     async workspaceStats(tenantId, window) {

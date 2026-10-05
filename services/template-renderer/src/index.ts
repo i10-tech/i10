@@ -18,6 +18,7 @@ import { canonicalFileSet } from "@repo/templates"
 import { compileTemplate } from "./compile.js"
 import { prepare } from "./request.js"
 import { messageOf, sandboxModules } from "./sandbox.js"
+import { prepareTransform, transformModules } from "./transform.js"
 
 interface Env {
   LOADER: WorkerLoader
@@ -55,7 +56,10 @@ async function sha256(text: string): Promise<string> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
-    if (request.method !== "POST" || url.pathname !== "/compile") {
+    if (
+      request.method !== "POST" ||
+      (url.pathname !== "/compile" && url.pathname !== "/transform")
+    ) {
       return json(404, { error: "not_found" })
     }
 
@@ -67,6 +71,8 @@ export default {
     if (!bearer || !sameSecret(bearer, env.RENDERER_SECRET)) {
       return json(401, { error: "unauthorized" })
     }
+
+    if (url.pathname === "/transform") return runTransform(request, env)
 
     let body: unknown
     try {
@@ -133,4 +139,74 @@ export default {
         })
       : json(422, compiled)
   },
+}
+
+/**
+ * ⚠ A TWENTIETH OF A TEMPLATE'S CPU (#302). A transformation reshapes one JSON
+ * object; one that needs more than 50ms is looping, and it runs on every
+ * delivery, so a slow one would be paid for on every webhook the workspace
+ * sends.
+ */
+const TRANSFORM_LIMITS = { cpuMs: 50, subRequests: 0 }
+const TRANSFORM_TIMEOUT_MS = 5_000
+/** What a transformation may hand back: a little over the body it may send. */
+const MAX_TRANSFORM_OUTPUT_BYTES = 512 * 1024
+
+async function runTransform(request: Request, env: Env): Promise<Response> {
+  const raw = await request.text()
+  let body: unknown
+  try {
+    body = JSON.parse(raw)
+  } catch {
+    return json(400, { error: "invalid_json" })
+  }
+  const prepared = prepareTransform(body, new TextEncoder().encode(raw).byteLength)
+  if (!prepared.ok) {
+    return prepared.status === 400
+      ? json(400, { error: prepared.error })
+      : json(422, { ok: false, error: prepared.error })
+  }
+
+  // ⚠ ONE ISOLATE PER FUNCTION, KEYED BY ITS CODE, so a workspace's every
+  // delivery reuses one warm isolate and no two workspaces ever share one
+  // unless they wrote the same bytes.
+  const id = `tfm:${await sha256(prepared.code)}`
+  const worker = env.LOADER.get(id, () => ({
+    compatibilityDate: COMPATIBILITY_DATE,
+    mainModule: "main.js",
+    modules: transformModules(prepared.code),
+    globalOutbound: null,
+    env: {},
+    limits: TRANSFORM_LIMITS,
+  }))
+  const entry = worker.getEntrypoint(undefined, { limits: TRANSFORM_LIMITS })
+  try {
+    const answer = await entry.fetch("https://sandbox/", {
+      method: "POST",
+      body: JSON.stringify(prepared.input),
+      signal: AbortSignal.timeout(TRANSFORM_TIMEOUT_MS),
+    })
+    const text = await answer.text()
+    if (new TextEncoder().encode(text).byteLength > MAX_TRANSFORM_OUTPUT_BYTES) {
+      return json(422, {
+        ok: false,
+        error: `The transformation returned more than ${MAX_TRANSFORM_OUTPUT_BYTES / 1024}KB.`,
+      })
+    }
+    const parsed = JSON.parse(text) as {
+      ok?: unknown
+      value?: unknown
+      error?: unknown
+    }
+    return parsed.ok === true
+      ? json(200, { ok: true, value: parsed.value })
+      : json(422, {
+          ok: false,
+          error: messageOf(parsed.error ?? "The transformation failed."),
+        })
+  } catch (error) {
+    // A throw at load, the CPU limit, the deadline: the function failing, and
+    // its author is the one who can fix it.
+    return json(422, { ok: false, error: messageOf(error) })
+  }
 }

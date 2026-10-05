@@ -218,7 +218,19 @@ Built in #284 (`apps/api/src/webhooks/health.ts`):
     failing, and after the plan's stretch it is disabled.
 - **Destinations:** deliver to SQS, Pub/Sub, Kafka or similar, not only HTTP.
 - **Transformations:** a customer-supplied function that reshapes the payload
-  per endpoint. The template renderer's sandbox is the precedent.
+  per endpoint. The template renderer's sandbox is the precedent. Built in
+  #302:
+  - The function runs in that same sandbox (`/transform`), never in the
+    worker, which holds the key to every signing secret. It gets an isolate
+    per function, no network, 50ms of CPU, and no imports.
+  - Nothing it returns is believed. The method must be POST, PUT or PATCH; the
+    path and query may change but the origin may not; custom headers follow
+    the reserved-name rule; the body is capped.
+  - It is signed after transforming. The result is fixed on the delivery at
+    the first attempt, so retries send the same bytes, and expunging the
+    payload empties it too.
+  - A failing function is a failed attempt (`transform`). Our sandbox being
+    down is a deferral, never charged to the customer.
 - Attempt stats and usage stats per endpoint and per event type. Built in
   #300:
   - Deliveries are counted by when they were created, attempts by when they

@@ -4,6 +4,7 @@ import { describeError } from "../errors.js"
 import { timestampFor } from "./signing.js"
 import { signWithKeys, type SigningKey } from "./keys.js"
 import { pinnedRequest, vetHost, type EgressVerdict } from "./egress.js"
+import { applyTransformation, type Transformed, type Transformer } from "./transform.js"
 import {
   isPermanentlyGone,
   nextDelayMs,
@@ -60,13 +61,17 @@ export interface DeliveryRecord {
   rateLimit: number | null
   /** The customer's own headers for this endpoint, already checked on write. */
   headers: Record<string, string>
+  /** The endpoint's transformation, when it has one switched on (#302). */
+  transformation: string | null
+  /** What the transformation made of this delivery, once it has run. */
+  transformed: Transformed | null
 }
 
 export type DeliveryLane = "ordered" | "retry"
 
 export type AttemptTrigger = "scheduled" | "manual" | "recover" | "replay" | "test"
 export type AttemptErrorKind =
-  "status" | "timeout" | "connect" | "tls" | "blocked" | "unresolved"
+  "status" | "timeout" | "connect" | "tls" | "blocked" | "unresolved" | "transform"
 
 /** One attempt, as the attempt log keeps it (#280). */
 export interface AttemptLog {
@@ -115,6 +120,12 @@ export interface FailureDecision {
 export type DeliveryOutcome =
   | { status: "delivered"; responseStatus: number }
   /**
+   * Not attempted, and not the customer's doing: our transformation sandbox
+   * did not answer. The row is released untouched - no attempt recorded, no
+   * budget spent, no mark against the endpoint - and tried again at `until`.
+   */
+  | { status: "deferred"; until: Date }
+  /**
    * It did not arrive. `retryAt` is when the next attempt is owed, already
    * written to the row; absent when the budget is spent.
    */
@@ -157,6 +168,12 @@ export interface DeliverDeps {
    * claimed and before anything is signed (so the timestamp is the send's).
    */
   beforeSend?: (delivery: DeliveryRecord) => Promise<void>
+  /** Runs an endpoint's transformation in the sandbox (#302). */
+  transformer?: Transformer
+  /** Fixes what a transformation produced onto the delivery, for every later attempt. */
+  saveTransformed?: (delivery: DeliveryRecord, request: Transformed) => Promise<void>
+  /** Lets go of a claimed row without recording anything, for a deferral. */
+  release?: (delivery: DeliveryRecord) => Promise<void>
   fetch?: typeof fetch
   /**
    * Decides where a hostname may be connected to. Defaults to the system
@@ -219,8 +236,12 @@ async function readCapped(
   return new TextDecoder().decode(all)
 }
 
+/** The endpoint's own transformation failed, so nothing was sent. */
+class TransformFailed extends Error {}
+
 const errorKindOf = (err: unknown): AttemptErrorKind => {
   if (err instanceof EgressRefused) return err.kind
+  if (err instanceof TransformFailed) return "transform"
   if (
     err instanceof Error &&
     (err.name === "TimeoutError" || err.name === "AbortError")
@@ -254,23 +275,73 @@ export async function deliverWebhook(
     return { status: "skipped" }
   }
 
-  if (deps.beforeSend) await deps.beforeSend(delivery)
+  const event = envelope(delivery.id, {
+    type: delivery.eventType,
+    occurredAt: delivery.occurredAt,
+    sequence: delivery.sequence,
+    data: delivery.payload,
+  })
 
-  const body = JSON.stringify(
-    envelope(delivery.id, {
-      type: delivery.eventType,
-      occurredAt: delivery.occurredAt,
-      sequence: delivery.sequence,
-      data: delivery.payload,
-    }),
-  )
+  /*
+   * ⚠ TRANSFORMED ONCE, THEN FIXED (#302). The first attempt runs the
+   * endpoint's function and stores what it made; every retry and resend sends
+   * those same bytes, so a receiver deduplicating on `webhook-id` never sees
+   * one id with two bodies - and editing the function later changes what new
+   * events become, not what an event already was. A function that fails is
+   * not stored, so the next attempt runs the (perhaps fixed) code again.
+   */
+  let request: Transformed = delivery.transformed ?? {
+    method: "POST",
+    url: delivery.url,
+    headers: delivery.headers,
+    body: JSON.stringify(event),
+  }
+  let transformError: string | undefined
+  if (!delivery.transformed && delivery.transformation) {
+    const call = deps.transformer
+      ? await deps.transformer.run(delivery.transformation, {
+          payload: event,
+          method: "POST",
+          url: delivery.url,
+          headers: delivery.headers,
+        })
+      : ({ status: "unavailable", error: "no transformer configured" } as const)
+    if (call.status === "unavailable") {
+      // ⚠ OURS, NOT THEIRS. Recording this as a failed attempt would spend the
+      // customer's retries and run their endpoint's disable clock on our
+      // outage. The row is released untouched and the job tried later.
+      deps.log.warn(
+        { deliveryId: delivery.id, err: call.error },
+        "webhook transformer unavailable; deferring",
+      )
+      await deps.release?.(delivery)
+      return { status: "deferred", until: new Date(Date.now() + 30_000) }
+    }
+    if (call.status === "error") {
+      transformError = `The transformation failed: ${call.error}`
+    } else {
+      const applied = applyTransformation(delivery.url, call.value)
+      if (!applied.ok)
+        transformError = `The transformation's result was refused: ${applied.reason}`
+      else {
+        request = applied.request
+        await deps.saveTransformed?.(delivery, request)
+      }
+    }
+  }
+
+  if (deps.beforeSend && !transformError) await deps.beforeSend(delivery)
+
+  const body = request.body
   const now = new Date()
   const doFetch = deps.fetch ?? fetch
   // ⚠ ONE DEADLINE FOR RESOLUTION AND REQUEST TOGETHER. A resolver that never
   // answers is the same silent socket as an endpoint that never answers, and
   // it must not get a budget of its own on top of the request's.
   const signal = AbortSignal.timeout(deps.timeoutMs ?? DELIVERY_TIMEOUT_MS)
-  const url = new URL(delivery.url)
+  // A transformed request carries a path; it always goes to the endpoint's
+  // current origin, which is the one vetted below.
+  const url = new URL(request.url, delivery.url)
 
   let outcome: DeliveryOutcome
   // What the endpoint told us about itself, for the retry decision.
@@ -282,6 +353,7 @@ export async function deliverWebhook(
   let errorKind: AttemptErrorKind | undefined
   const startedAt = performance.now()
   try {
+    if (transformError) throw new TransformFailed(transformError)
     // ⚠ RESOLVED AND VETTED ON EVERY ATTEMPT, THEN CONNECTED TO BY ADDRESS.
     // See egress.ts: the string check at registration cannot see what DNS says
     // today, and connecting by name would resolve a second time.
@@ -295,7 +367,7 @@ export async function deliverWebhook(
     sent = {
       // ⚠ THE CUSTOMER'S HEADERS FIRST, OURS AFTER, so ours win even if the
       // reserved-name check on write were ever bypassed (webhooks/headers.ts).
-      ...delivery.headers,
+      ...request.headers,
       host: pinned.host,
       "content-type": "application/json",
       "user-agent": "i10-webhooks/1",
@@ -307,7 +379,7 @@ export async function deliverWebhook(
       "webhook-timestamp": timestampFor(now),
     }
     const response = await doFetch(pinned.url, {
-      method: "POST",
+      method: request.method,
       // The signature goes on the request only; the attempt log keeps `sent`.
       headers: {
         ...sent,
@@ -353,7 +425,10 @@ export async function deliverWebhook(
     outcome = {
       status: "failed",
       // Already a sentence for the customer; describeError would reword it.
-      reason: err instanceof EgressRefused ? err.message : describeError(err),
+      reason:
+        err instanceof EgressRefused || err instanceof TransformFailed
+          ? err.message
+          : describeError(err),
     }
   }
 
@@ -362,7 +437,7 @@ export async function deliverWebhook(
     attempt: made,
     trigger: job.trigger ?? "scheduled",
     lane,
-    url: delivery.url,
+    url: url.toString(),
     requestHeaders: sent,
     ...(received
       ? {

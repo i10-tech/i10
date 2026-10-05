@@ -25,6 +25,7 @@ import { stalwartTransport } from "./send/stalwart.js"
 import { relayConfig } from "./send/relay.js"
 import type { Transport } from "./send/transport.js"
 import { startWebhookEngine } from "./webhooks/engine.js"
+import { transformer } from "./webhooks/transform.js"
 import { parseAllowList } from "./webhooks/egress.js"
 import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
@@ -345,6 +346,16 @@ function startWebhookWorker() {
     // Empty everywhere but a laptop or the conformance lab; env.ts refuses it
     // in production. See webhooks/egress.ts.
     egressAllow: parseAllowList(env.WEBHOOK_EGRESS_ALLOW),
+    // The renderer's sandbox runs endpoints' transformations (#302); this
+    // process never runs customer code.
+    ...(env.TEMPLATE_RENDERER_URL && env.TEMPLATE_RENDERER_SECRET
+      ? {
+          transformer: transformer({
+            url: env.TEMPLATE_RENDERER_URL,
+            secret: env.TEMPLATE_RENDERER_SECRET,
+          }),
+        }
+      : {}),
   })
   log.info({}, "webhook worker started")
   return engine

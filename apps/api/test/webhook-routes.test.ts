@@ -49,6 +49,7 @@ const endpoint = {
   health_changed_at: null,
   poll_cursor: null,
   last_polled_at: null,
+  transformation: null,
   created_at: "2026-09-03T10:00:00.000Z",
   signature_scheme: "hmac_sha256" as const,
   rate_limit: null,
@@ -326,6 +327,25 @@ describe("/webhook-endpoints", () => {
       series: [],
       by_event_type: [],
     })),
+    testTransformation: mock(
+      async (_t: string, _id: string, input: { code?: string }) =>
+        input.code === "broken"
+          ? { status: "tried" as const, result: { ok: false as const, error: "boom" } }
+          : input.code === "offline"
+            ? { status: "unavailable" as const, reason: "Try again shortly." }
+            : {
+                status: "tried" as const,
+                result: {
+                  ok: true as const,
+                  request: {
+                    method: "PUT" as const,
+                    url: "/i10?x=1",
+                    headers: {},
+                    body: "{}",
+                  },
+                },
+              },
+    ),
     workspaceStats: mock(async () => ({
       object: "webhook_stats" as const,
       since: "2026-10-04T00:00:00.000Z",
@@ -512,6 +532,38 @@ describe("/webhook-endpoints", () => {
           .status,
       ).toBe(422)
       expect(store.stats).not.toHaveBeenCalled()
+    })
+
+    it("tries a transformation and shows what would be sent, or why not", async () => {
+      const ok = await req(
+        "POST",
+        `/webhook-endpoints/${endpoint.id}/transformation/test`,
+        {
+          code: "export default (w) => w",
+          event_type: "email.bounced",
+        },
+      )
+      expect(ok.status).toBe(200)
+      expect(await ok.json()).toMatchObject({ ok: true, request: { method: "PUT" } })
+      expect(store.testTransformation).toHaveBeenLastCalledWith("ten-1", endpoint.id, {
+        code: "export default (w) => w",
+        eventType: "email.bounced",
+      })
+      const broken = await req(
+        "POST",
+        `/webhook-endpoints/${endpoint.id}/transformation/test`,
+        {
+          code: "broken",
+        },
+      )
+      expect(await broken.json()).toEqual({ ok: false, error: "boom" })
+      expect(
+        (
+          await req("POST", `/webhook-endpoints/${endpoint.id}/transformation/test`, {
+            code: "offline",
+          })
+        ).status,
+      ).toBe(503)
     })
 
     it("answers workspace stats", async () => {
