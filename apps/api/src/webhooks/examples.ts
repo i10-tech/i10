@@ -61,5 +61,24 @@ export function exampleData(
     case "email.sent":
     case "email.delivered":
       return base
+    case "webhook_endpoint.failing":
+    case "webhook_endpoint.disabled":
+    case "webhook_endpoint.recovered": {
+      const recovered = type === "webhook_endpoint.recovered"
+      return {
+        endpoint_id: "00000000-0000-7000-8000-000000000001",
+        url: "https://example.com/webhooks/i10",
+        reason: recovered
+          ? null
+          : type === "webhook_endpoint.disabled"
+            ? "No successful delivery for 5 days."
+            : "HTTP 503",
+        failing_since: recovered
+          ? null
+          : new Date(at.getTime() - 15 * 60_000).toISOString(),
+        created_at: at.toISOString(),
+        test: true,
+      }
+    }
   }
 }

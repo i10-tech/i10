@@ -19,6 +19,7 @@ import SendingStatus, { sendingStatusSubject } from "./templates/sending-status.
 import SendingHeld, { sendingHeldSubject } from "./templates/sending-held.js"
 import SecurityAlert, { securityAlertSubject } from "./templates/security-alert.js"
 import TemplateReview, { templateReviewSubject } from "./templates/template-review.js"
+import WebhookHealth, { webhookHealthSubject } from "./templates/webhook-health.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -361,6 +362,27 @@ export async function renderTemplateReview(
   const element = TemplateReview(props)
   return {
     subject: templateReviewSubject(props.decision, props.template),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+export type {
+  WebhookHealthLine,
+  WebhookHealthState,
+} from "./templates/webhook-health.js"
+
+/**
+ * The email telling a workspace owner that webhook endpoints started failing,
+ * were switched off, or recovered (#284). Sent by the API; see
+ * apps/api/src/webhooks/health.ts.
+ */
+export async function renderWebhookHealth(
+  props: React.ComponentProps<typeof WebhookHealth>,
+): Promise<RenderedEmail> {
+  const element = WebhookHealth(props)
+  return {
+    subject: webhookHealthSubject(props.worst, props.lines.length, props.workspace),
     html: await render(element),
     text: await render(element, { plainText: true }),
   }

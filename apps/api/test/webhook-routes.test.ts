@@ -44,6 +44,8 @@ const endpoint = {
   description: null,
   enabled: true,
   disabled_reason: null,
+  health: "healthy" as const,
+  health_changed_at: null,
   created_at: "2026-09-03T10:00:00.000Z",
   signature_scheme: "hmac_sha256" as const,
   rate_limit: null,
@@ -160,11 +162,13 @@ describe("/webhook-event-types (#283)", () => {
         example: object
       }[]
     }
-    expect(body.data).toHaveLength(9)
+    expect(body.data).toHaveLength(12)
     for (const e of body.data) {
       expect(e.version).toBe(1)
       expect(e.schema.type).toBe("object")
-      expect(e.example).toHaveProperty("email_id")
+      expect(e.example).toHaveProperty(
+        e.type.startsWith("email.") ? "email_id" : "endpoint_id",
+      )
     }
   })
 
@@ -172,6 +176,50 @@ describe("/webhook-event-types (#283)", () => {
     expect(
       (await createApp({ apiKeyAuth }).request("/webhook-event-types")).status,
     ).toBe(401)
+  })
+})
+
+describe("/webhook-health-events (#284)", () => {
+  const change = {
+    object: "webhook_health_event" as const,
+    id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60cc",
+    endpoint_id: endpoint.id,
+    kind: "failing" as const,
+    url: endpoint.url,
+    reason: "HTTP 503",
+    failing_since: "2026-10-06T10:00:00.000Z",
+    created_at: "2026-10-06T10:15:00.000Z",
+  }
+  const health = mock(async () => ({ data: [change], next_cursor: null }))
+  const app = () =>
+    createApp({
+      apiKeyAuth,
+      webhookHistory: {
+        list: async () => ({ data: [], next_cursor: null }),
+        get: async () => null,
+        expunge: async () => "not_found" as const,
+        health,
+      },
+    })
+
+  it("lists changes for the key's tenant, filtered by endpoint", async () => {
+    const res = await get(
+      app(),
+      `/webhook-health-events?endpoint_id=${endpoint.id}&limit=5`,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ data: [change], next_cursor: null })
+    expect(health).toHaveBeenCalledWith("ten-1", { endpointId: endpoint.id, limit: 5 })
+  })
+
+  it("refuses a malformed cursor before the store", async () => {
+    health.mockClear()
+    expect((await get(app(), "/webhook-health-events?cursor=nope")).status).toBe(422)
+    expect(health).not.toHaveBeenCalled()
+  })
+
+  it("requires a key", async () => {
+    expect((await app().request("/webhook-health-events")).status).toBe(401)
   })
 })
 

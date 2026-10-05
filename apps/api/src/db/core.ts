@@ -121,6 +121,33 @@ export const webhookEventType = core.enum("webhook_event_type", [
   "email.opened",
   "email.clicked",
   "email.unsubscribed",
+  /**
+   * ⚠ NOT FROM SES. The three below are about the customer's own endpoints
+   * (#284): we raise them when an endpoint starts failing, is switched off, or
+   * recovers. Svix calls these operational webhooks.
+   */
+  "webhook_endpoint.failing",
+  "webhook_endpoint.disabled",
+  "webhook_endpoint.recovered",
+])
+
+/**
+ * Where an endpoint stands, as far as telling its owner goes (#284). Moves
+ * only on evidence - a delivery's outcome - or when the endpoint is resumed.
+ */
+export const webhookEndpointHealth = core.enum("webhook_endpoint_health", [
+  "healthy",
+  /** No success for `FAILING_AFTER_SECONDS` (webhooks/health.ts). */
+  "failing",
+  /** We switched it off: a 410, or no success for the plan's stretch. */
+  "disabled",
+])
+
+/** A change in an endpoint's health: what the owner is told about. */
+export const webhookHealthChange = core.enum("webhook_health_change", [
+  "failing",
+  "disabled",
+  "recovered",
 ])
 
 /**
@@ -1381,6 +1408,17 @@ export const webhookEndpoints = core.table(
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
     /** Why it was switched off, in words the customer is shown. */
     disabledReason: text("disabled_reason"),
+    /**
+     * Where it stands for notifications (#284).
+     *
+     * ⚠ NOT `enabled`. A customer's own pause is not a health event and moves
+     * nothing here; only we, on a delivery's evidence, mark an endpoint failing
+     * or disabled. Resuming one we disabled makes it `failing` rather than
+     * `healthy`: nothing has worked yet, and the next success is the recovery
+     * worth telling them about.
+     */
+    health: webhookEndpointHealth("health").notNull().default("healthy"),
+    healthChangedAt: timestamp("health_changed_at", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1616,6 +1654,71 @@ export const webhookReplays = core.table(
   (t) => [
     index("webhook_replays_endpoint_idx").on(t.endpointId, t.createdAt),
     pgPolicy("webhook_replays_tenant", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Every change in an endpoint's health (#284): the console's event list, and
+ * the outbox the email and the operational webhooks are sent from.
+ *
+ * ⚠ WRITTEN IN THE SAME TRANSACTION AS THE CHANGE IT RECORDS, and only when the
+ * change actually happened - the guarded update in webhooks/db.ts returns a row
+ * once per transition, however many workers fail deliveries at the same time.
+ * That, not any check at send time, is what makes each change tell the owner
+ * once.
+ *
+ * ⚠ AND NOTHING IS SENT FROM INSIDE THAT TRANSACTION. Fanning out to the
+ * workspace's other endpoints locks their rows; doing it while the failing
+ * endpoint's row is locked deadlocks the moment two endpoints change at once.
+ * So the row is the promise, and `fanned_out_at` and `emailed_at` record that
+ * it was kept.
+ */
+export const webhookHealthEvents = core.table(
+  "webhook_health_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id").notNull(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+    kind: webhookHealthChange("kind").notNull(),
+    /** The endpoint's URL when it changed; it can be edited afterwards. */
+    url: text("url").notNull(),
+    /** In words the customer is shown: the last error, or why it was disabled. */
+    reason: text("reason"),
+    /** When the run of failures began, for `failing` and `disabled`. */
+    failingSince: timestamp("failing_since", { withTimezone: true }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When the operational webhooks for it were recorded. */
+    fannedOutAt: timestamp("fanned_out_at", { withTimezone: true }),
+    /** When the owner was emailed about it, or decided not to be (see health.ts). */
+    emailedAt: timestamp("emailed_at", { withTimezone: true }),
+    /**
+     * Handled without an email: a failure that recovered before the owner was
+     * told (see `summarize` in health.ts). Kept apart so it does not count as
+     * the last email sent.
+     */
+    emailSuppressed: boolean("email_suppressed").notNull().default(false),
+    /** Held by one API replica while it emails, so two never send it. */
+    emailClaimedUntil: timestamp("email_claimed_until", { withTimezone: true }),
+  },
+  (t) => [
+    index("webhook_health_events_tenant_idx").on(t.tenantId, t.occurredAt),
+    index("webhook_health_events_endpoint_idx").on(t.endpointId, t.occurredAt),
+    // The two backlogs the definer functions in migration 0115 scan.
+    index("webhook_health_events_unfanned_idx")
+      .on(t.occurredAt)
+      .where(sql`${t.fannedOutAt} is null`),
+    index("webhook_health_events_unemailed_idx")
+      .on(t.tenantId)
+      .where(sql`${t.emailedAt} is null`),
+    pgPolicy("webhook_health_events_tenant", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

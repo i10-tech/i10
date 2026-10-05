@@ -7,7 +7,7 @@ import * as schema from "../../src/db/schema.js"
 import { webhookEventOps } from "../../src/webhooks/db.js"
 import { parseAllowList, type Lookup } from "../../src/webhooks/egress.js"
 import { startWebhookEngine, type WebhookEngine } from "../../src/webhooks/engine.js"
-import type { WebhookEventType } from "../../src/webhooks/events.js"
+import type { MailEventType, WebhookEventType } from "../../src/webhooks/events.js"
 import { generateKey } from "../../src/webhooks/keys.js"
 import type { PolicyRules, RetryRules } from "../../src/webhooks/schedule.js"
 import { secretBox } from "../../src/webhooks/signing.js"
@@ -66,6 +66,8 @@ export const LAB = {
   holdMs: 2_000,
   /** Production: 3 timeouts, then 30s doubling to 10 minutes. */
   breaker: { threshold: 2, coolMs: 10_000, maxCoolMs: 20_000 },
+  /** Production: 15 minutes with no success (webhooks/health.ts). */
+  failingAfterSeconds: 1,
 }
 
 const ALL_EVENTS: WebhookEventType[] = [
@@ -102,7 +104,7 @@ export interface Lab {
   emit: (
     tenantId: string,
     data: Record<string, unknown>,
-    opts?: { type?: WebhookEventType; occurredAt?: Date; enqueue?: boolean },
+    opts?: { type?: MailEventType; occurredAt?: Date; enqueue?: boolean },
   ) => Promise<string[]>
   /**
    * Queues an endpoint's pending deliveries in one burst, newest first, the
@@ -144,7 +146,7 @@ const lookup: Lookup = async (host) => {
   return answer.map(([address, family]) => ({ address, family }))
 }
 
-const SES_TYPE: Record<WebhookEventType, string> = {
+const SES_TYPE: Record<MailEventType, string> = {
   "email.sent": "Send",
   "email.delivered": "Delivery",
   "email.bounced": "Bounce",
@@ -199,6 +201,7 @@ export async function startLab(): Promise<Lab> {
       rules: LAB_RULES,
       holdMs: LAB.holdMs,
       breaker: LAB.breaker,
+      failingAfterSeconds: LAB.failingAfterSeconds,
       sweepEveryMs: LAB.sweepEveryMs,
       sweepGraceSeconds: LAB.sweepGraceSeconds,
       schedulerIntervalMs: 200,

@@ -6,7 +6,10 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test"
+import { webhookPayloadSchema } from "@repo/contracts"
 import { dueDeliveries } from "../../src/webhooks/db.js"
+import type { WebhookEventType } from "../../src/webhooks/events.js"
+import { runHealthEmails, type HealthSummary } from "../../src/webhooks/health.js"
 import { webhookHistory, type WebhookHistory } from "../../src/webhooks/history.js"
 import { sendTestEvent } from "../../src/webhooks/test-events.js"
 import { createReplay, getReplay, resendDelivery } from "../../src/webhooks/replay.js"
@@ -787,6 +790,213 @@ suite("webhook conformance lab", () => {
           })
         ).status,
       ).toBe("rejected")
+    })
+  })
+
+  describe("health notifications (#284)", () => {
+    const OPS: WebhookEventType[] = [
+      "webhook_endpoint.failing",
+      "webhook_endpoint.disabled",
+      "webhook_endpoint.recovered",
+    ]
+    const changes = async (endpointId: string) =>
+      (
+        await lab.owner`select kind from core.webhook_health_events
+                         where endpoint_id = ${endpointId} order by occurred_at, id`
+      ).map((r) => r.kind as string)
+    const healthOf = async (endpointId: string) =>
+      (
+        await lab.owner`select health from core.webhook_endpoints where id = ${endpointId}`
+      )[0]!.health as string
+
+    test("a dead endpoint is reported failing once, then disabled once, however many deliveries fail", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "fail/h-dead")
+      for (let k = 0; k < 6; k++) await lab.emit(t, { k })
+      expect(
+        await until(async () => (await changes(ep.id)).includes("failing"), 8_000),
+      ).toBe(true)
+      expect(await healthOf(ep.id)).toBe("failing")
+      expect(
+        await until(async () => (await changes(ep.id)).includes("disabled"), 20_000),
+      ).toBe(true)
+      await Bun.sleep(500)
+      expect(await changes(ep.id)).toEqual(["failing", "disabled"])
+      expect(await healthOf(ep.id)).toBe("disabled")
+    })
+
+    test("a recovery is reported once, and only after a failure was", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "flaky/h-flaky?n=2")
+      await lab.emit(t, { k: 1 })
+      expect(
+        await until(async () => (await changes(ep.id)).includes("recovered"), 10_000),
+      ).toBe(true)
+      expect(await changes(ep.id)).toEqual(["failing", "recovered"])
+      expect(await healthOf(ep.id)).toBe("healthy")
+
+      // Healthy and succeeding: nothing more to say.
+      await lab.emit(t, { k: 2 })
+      await until(() => lab.receiver.of("h-flaky").some((r) => r.data.k === 2), 5_000)
+      await Bun.sleep(300)
+      expect(await changes(ep.id)).toEqual(["failing", "recovered"])
+    })
+
+    test("410 disables at once, without a failing first", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "gone/h-gone")
+      await lab.emit(t, { k: 1 })
+      await lab.emit(t, { k: 2 })
+      expect(await until(async () => (await changes(ep.id)).length > 0, 5_000)).toBe(
+        true,
+      )
+      await Bun.sleep(500)
+      expect(await changes(ep.id)).toEqual(["disabled"])
+      const [row] = await lab.owner`select reason from core.webhook_health_events
+                                    where endpoint_id = ${ep.id}`
+      expect(row!.reason).toContain("410")
+    })
+
+    test("the change goes as a strict webhook to the other endpoints subscribed, never to the one it is about", async () => {
+      const t = await lab.workspace()
+      const dead = await lab.endpoint(t, "gone/h-self", {
+        events: ["email.delivered", ...OPS],
+      })
+      const ops = await lab.endpoint(t, "ok/h-ops", { events: OPS })
+      // A mail filter on the ops endpoint must not hide a change from it.
+      await lab.owner`update core.webhook_endpoints set filter_domains = ${["nowhere.test"]}
+                      where id = ${ops.id}`
+      await lab.emit(t, { k: 1 })
+
+      const got = await until(() => lab.receiver.of("h-ops")[0], 8_000)
+      expect(got).toBeDefined()
+      const body = JSON.parse(got!.body) as Record<string, unknown>
+      expect(body.type).toBe("webhook_endpoint.disabled")
+      expect(
+        webhookPayloadSchema("webhook_endpoint.disabled").safeParse(body).success,
+      ).toBe(true)
+      expect(got!.data).toMatchObject({ endpoint_id: dead.id, url: dead.url })
+      expect(typeof got!.headers["webhook-signature"]).toBe("string")
+
+      await Bun.sleep(500)
+      expect(
+        lab.receiver.of("h-self").map((r) => JSON.parse(r.body).type as string),
+      ).toEqual(["email.delivered"])
+      const [fanned] =
+        await lab.owner`select fanned_out_at from core.webhook_health_events
+                                       where endpoint_id = ${dead.id}`
+      expect(fanned!.fanned_out_at).not.toBeNull()
+    })
+
+    test("a resumed endpoint comes back failing, and its next success is the recovery", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "gone/h-resume")
+      await lab.emit(t, { k: 1 })
+      expect(
+        await until(async () => (await healthOf(ep.id)) === "disabled", 5_000),
+      ).toBe(true)
+      // The customer fixes their receiver, then switches it back on.
+      await lab.owner`update core.webhook_endpoints
+                      set url = ${ep.url.replace("/gone/", "/ok/")} where id = ${ep.id}`
+      const resumed = await lab.store.update(t, ep.id, { enabled: true })
+      expect(resumed.status === "updated" && resumed.endpoint.health).toBe("failing")
+
+      await lab.emit(t, { k: 2 })
+      expect(
+        await until(async () => (await changes(ep.id)).includes("recovered"), 5_000),
+      ).toBe(true)
+      expect(await changes(ep.id)).toEqual(["disabled", "recovered"])
+      expect(await healthOf(ep.id)).toBe("healthy")
+    })
+
+    test("a customer's own pause is not a health change", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.endpoint(t, "ok/h-pause")
+      await lab.store.update(t, ep.id, { enabled: false })
+      await lab.store.update(t, ep.id, { enabled: true })
+      expect(await changes(ep.id)).toEqual([])
+      expect(await healthOf(ep.id)).toBe("healthy")
+    })
+
+    test("a change the worker never fanned out is fanned out by the tick", async () => {
+      const t = await lab.workspace()
+      const quiet = await lab.endpoint(t, "ok/h-quiet", { events: ["email.sent"] })
+      await lab.endpoint(t, "ok/h-late", { events: OPS })
+      // As a worker that stopped right after committing the change leaves it.
+      await lab.owner`insert into core.webhook_health_events
+                        (tenant_id, endpoint_id, kind, url, reason, failing_since, occurred_at)
+                      values (${t}, ${quiet.id}, 'failing', ${quiet.url}, 'HTTP 500',
+                              now() - interval '20 minutes', now() - interval '1 minute')`
+      const got = await until(() => lab.receiver.of("h-late")[0], 5_000)
+      expect(got).toBeDefined()
+      expect(JSON.parse(got!.body).type).toBe("webhook_endpoint.failing")
+    })
+
+    describe("email", () => {
+      const seed = (t: string, endpointId: string, kind: string, ago: string) =>
+        lab.owner`insert into core.webhook_health_events
+                    (tenant_id, endpoint_id, kind, url, occurred_at, fanned_out_at)
+                  values (${t}, ${endpointId}, ${kind}::core.webhook_health_change,
+                          'https://example.com/hook', now() - ${ago}::interval, now())`
+      const run = async (t: string) => {
+        const calls: HealthSummary[] = []
+        await runHealthEmails({
+          db: lab.db,
+          notify: async (tenantId, summary) => {
+            if (tenantId === t) calls.push(summary)
+          },
+        })
+        return calls
+      }
+
+      test("two replicas at once send one email, and it covers every change", async () => {
+        const t = await lab.workspace()
+        const a = await lab.endpoint(t, "ok/h-mail-a")
+        const b = await lab.endpoint(t, "ok/h-mail-b")
+        await seed(t, a.id, "failing", "2 minutes")
+        await seed(t, b.id, "disabled", "1 minute")
+        const [one, two] = await Promise.all([run(t), run(t)])
+        expect(one!.length + two!.length).toBe(1)
+        const summary = [...one!, ...two!][0]!
+        expect(summary.worst).toBe("disabled")
+        expect(summary.lines.map((l) => l.state)).toEqual(["disabled", "failing"])
+        const [left] =
+          await lab.owner`select count(*)::int as n from core.webhook_health_events
+                                       where tenant_id = ${t} and emailed_at is null`
+        expect(left!.n).toBe(0)
+        expect(await run(t)).toEqual([])
+      })
+
+      test("a failure that recovered before anyone was told is not sent, and does not hold back the next", async () => {
+        const t = await lab.workspace()
+        const a = await lab.endpoint(t, "ok/h-blip")
+        await seed(t, a.id, "failing", "3 minutes")
+        await seed(t, a.id, "recovered", "2 minutes")
+        expect(await run(t)).toEqual([])
+        const [row] = await lab.owner`select bool_and(email_suppressed) as s
+                                      from core.webhook_health_events where tenant_id = ${t}`
+        expect(row!.s).toBe(true)
+
+        await seed(t, a.id, "failing", "1 minute")
+        expect((await run(t)).map((s) => s.worst)).toEqual(["failing"])
+      })
+
+      test("within half an hour of the last email, changes wait, unless an endpoint was switched off", async () => {
+        const t = await lab.workspace()
+        const a = await lab.endpoint(t, "ok/h-wait-a")
+        const b = await lab.endpoint(t, "ok/h-wait-b")
+        await seed(t, a.id, "failing", "5 minutes")
+        expect(await run(t)).toHaveLength(1)
+
+        await seed(t, b.id, "failing", "1 minute")
+        expect(await run(t)).toEqual([])
+
+        await seed(t, a.id, "disabled", "0 minutes")
+        const [sent] = await run(t)
+        expect(sent!.worst).toBe("disabled")
+        // The change that waited goes in the same email.
+        expect(sent!.lines.map((l) => l.state).sort()).toEqual(["disabled", "failing"])
+      })
     })
   })
 

@@ -14,7 +14,13 @@ import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
 import type { AttemptLog, DeliverDeps, DeliveryRecord } from "./deliver.js"
 import { policyForPlan } from "./schedule.js"
 import { liveRetiring } from "./keys.js"
-import { domainOf, type EventOps, type WebhookEventType } from "./events.js"
+import { onDelivered, onDisabled, onFailed } from "./health.js"
+import {
+  domainOf,
+  type EventOps,
+  type MailEventType,
+  type WebhookEventType,
+} from "./events.js"
 import type { SecretBox } from "./signing.js"
 
 /**
@@ -29,7 +35,7 @@ import type { SecretBox } from "./signing.js"
 type Row = Record<string, unknown>
 
 /** Our public event names, mapped to the delivery log's own enum. */
-const EVENT_TO_LOG: Record<WebhookEventType, string> = {
+const EVENT_TO_LOG: Record<MailEventType, string> = {
   "email.sent": "sent",
   "email.delivered": "delivered",
   "email.delivery_delayed": "delivery_delayed",
@@ -283,6 +289,13 @@ export function webhookDeliveryOps(
      * plus the bookkeeping around it; the sweep never touches a held row.
      */
     leaseSeconds?: number
+    /** Nothing succeeding for this long marks an endpoint failing (#284). */
+    failingAfterSeconds?: number
+    /**
+     * Told each health change once its transaction has committed, to fan it
+     * out as `webhook_endpoint.*` webhooks. Must not throw.
+     */
+    onHealthChange?: (tenantId: string, eventId: string) => void
   },
 ): Pick<DeliverDeps, "load" | "markDelivered" | "markFailed"> {
   return {
@@ -403,7 +416,7 @@ export function webhookDeliveryOps(
     },
 
     async markDelivered(delivery, responseStatus, attempt) {
-      await withTenant(opts.db, delivery.tenantId, async (tx) => {
+      const changed = await withTenant(opts.db, delivery.tenantId, async (tx) => {
         await recordAttempt(tx, delivery, attempt)
         await tx
           .update(webhookDeliveries)
@@ -420,22 +433,17 @@ export function webhookDeliveryOps(
 
         // ⚠ ONE SUCCESS ENDS THE FAILING RUN. An endpoint that works now and
         // then is reachable, which is all disabling asks; only a stretch with
-        // no success at all counts against it.
-        await tx
-          .update(webhookEndpoints)
-          .set({ failingSince: null, updatedAt: new Date() })
-          .where(
-            and(
-              eq(webhookEndpoints.id, delivery.endpointId),
-              sql`${webhookEndpoints.failingSince} is not null`,
-            ),
-          )
+        // no success at all counts against it. If it had been failing, this
+        // is also the recovery its owner is told about (#284).
+        return onDelivered(tx, delivery.tenantId, delivery.endpointId)
       })
+      if (changed) opts.onHealthChange?.(delivery.tenantId, changed)
     },
 
     async markFailed(delivery, outcome, decision, attempt) {
       const final = decision.nextAttemptAt === null
-      await withTenant(opts.db, delivery.tenantId, async (tx) => {
+      const changed = await withTenant(opts.db, delivery.tenantId, async (tx) => {
+        const changes: string[] = []
         await recordAttempt(tx, delivery, attempt)
         await tx
           .update(webhookDeliveries)
@@ -472,33 +480,71 @@ export function webhookDeliveryOps(
             })
             .where(eq(webhookEndpoints.id, delivery.endpointId))
 
-        if (decision.disable.kind === "gone") {
-          await tx
-            .update(webhookEndpoints)
-            .set({
-              enabled: false,
-              disabledAt: new Date(),
-              disabledReason: decision.disable.reason,
-              updatedAt: new Date(),
-            })
-            .where(eq(webhookEndpoints.id, delivery.endpointId))
-          return
+        // ⚠ GUARDED ON `enabled`, SO A SECOND 410 IN FLIGHT DOES NOT REPORT A
+        // SECOND DISABLE. The row comes back only from the update that
+        // actually switched it off.
+        const disabled = {
+          enabled: false,
+          health: "disabled" as const,
+          healthChangedAt: new Date(),
+          disabledAt: new Date(),
+          updatedAt: new Date(),
+        }
+        const switchedOff = async (
+          row: { url: string; failingSince: Date | null } | undefined,
+          reason: string,
+        ) => {
+          if (row)
+            changes.push(
+              await onDisabled(tx, {
+                tenantId: delivery.tenantId,
+                endpointId: delivery.endpointId,
+                url: row.url,
+                reason,
+                failingSince: row.failingSince,
+              }),
+            )
         }
 
-        if (!final || decision.disable.kind === "none") return
+        if (decision.disable.kind === "gone") {
+          const [row] = await tx
+            .update(webhookEndpoints)
+            .set({ ...disabled, disabledReason: decision.disable.reason })
+            .where(
+              and(
+                eq(webhookEndpoints.id, delivery.endpointId),
+                eq(webhookEndpoints.enabled, true),
+              ),
+            )
+            .returning({
+              url: webhookEndpoints.url,
+              failingSince: webhookEndpoints.failingSince,
+            })
+          await switchedOff(row, decision.disable.reason)
+          return changes
+        }
+
+        if (decision.disable.kind !== "none") {
+          const failing = await onFailed(
+            tx,
+            delivery.tenantId,
+            delivery.endpointId,
+            outcome.reason,
+            opts.failingAfterSeconds,
+          )
+          if (failing) changes.push(failing)
+        }
+
+        if (!final || decision.disable.kind === "none") return changes
 
         // ⚠ JUDGED WHEN A DELIVERY RUNS OUT, AGAINST TIME, NOT A COUNT. Only an
         // endpoint with no success at all for the plan's stretch is switched
         // off; the reason is kept so the customer is told why.
         const days = Math.round(decision.disable.seconds / 86_400)
-        await tx
+        const reason = `No successful delivery for ${days} day${days === 1 ? "" : "s"}.`
+        const [row] = await tx
           .update(webhookEndpoints)
-          .set({
-            enabled: false,
-            disabledAt: new Date(),
-            disabledReason: `No successful delivery for ${days} day${days === 1 ? "" : "s"}.`,
-            updatedAt: new Date(),
-          })
+          .set({ ...disabled, disabledReason: reason })
           .where(
             and(
               eq(webhookEndpoints.id, delivery.endpointId),
@@ -506,7 +552,16 @@ export function webhookDeliveryOps(
               sql`${webhookEndpoints.failingSince} <= now() - ${`${decision.disable.seconds} seconds`}::interval`,
             ),
           )
+          .returning({
+            url: webhookEndpoints.url,
+            failingSince: webhookEndpoints.failingSince,
+          })
+        await switchedOff(row, reason)
+        return changes
       })
+      // ⚠ AFTER THE COMMIT, NEVER INSIDE IT. See `webhookHealthEvents` in
+      // core.ts: fanning out locks other endpoints' rows.
+      for (const id of changed) opts.onHealthChange?.(delivery.tenantId, id)
     },
   }
 }

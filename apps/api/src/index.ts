@@ -78,6 +78,8 @@ import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
+import { runHealthEmails } from "./webhooks/health.js"
+import { healthNotice } from "./webhooks/health-notice.js"
 import { sendTestEvent } from "./webhooks/test-events.js"
 import { webhookReplayOps } from "./webhooks/replay.js"
 import type { WebhookEventType } from "./webhooks/events.js"
@@ -716,6 +718,20 @@ const sesNotice =
   systemSender && consoleUrl
     ? ownerNotice({ db, clerk, sender: systemSender, consoleUrl })
     : undefined
+/**
+ * Webhook health emails (#284). The worker records each change; this process
+ * has Clerk and our sender, so it does the emailing, every 30 seconds, on
+ * every replica - rows are claimed, so a change is emailed once.
+ */
+if (systemSender && consoleUrl) {
+  const notify = healthNotice({ db, clerk, sender: systemSender, consoleUrl })
+  setInterval(() => {
+    runHealthEmails({ db, notify, log }).catch((error: unknown) =>
+      log.error({ err: error }, "webhook health emails failed"),
+    )
+  }, 30_000).unref()
+}
+
 const sesStatusChanges = sesStatusService({
   store: sesStatus,
   ...(sesNotice ? { notice: sesNotice } : {}),

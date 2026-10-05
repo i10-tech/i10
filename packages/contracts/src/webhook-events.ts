@@ -49,6 +49,28 @@ const bounce = z
 const recipientsOnly = (fields: Record<string, z.ZodType>) =>
   z.object({ recipients: z.array(z.string()), ...fields }).strict()
 
+/**
+ * About one of your own endpoints (#284), not about an email.
+ *
+ * ⚠ NO EMAIL FIELDS. These are not mail events, and pretending otherwise with
+ * nulls would make every receiver branch on which kind it got anyway.
+ */
+const endpointEvent = z
+  .object({
+    endpoint_id: z.string(),
+    /** The endpoint's URL when it changed. */
+    url: z.string(),
+    /** The last error, or why it was switched off; null for a recovery. */
+    reason: z.string().nullable(),
+    /** When its run of failures began; null for a recovery. */
+    failing_since: z.string().nullable(),
+    /** When the change happened (also the envelope's `created_at`). */
+    created_at: z.string(),
+    /** Present, and true, only on test events. */
+    test: z.literal(true).optional(),
+  })
+  .strict()
+
 export const webhookEventData = {
   "email.sent": base,
   "email.delivered": base,
@@ -80,6 +102,9 @@ export const webhookEventData = {
       .object({ list: z.string().nullable(), source: z.string().nullable() })
       .strict(),
   }),
+  "webhook_endpoint.failing": endpointEvent,
+  "webhook_endpoint.disabled": endpointEvent,
+  "webhook_endpoint.recovered": endpointEvent,
 } as const satisfies Record<z.infer<typeof webhookEventName>, z.ZodType>
 
 export interface WebhookEventCatalogEntry {
@@ -136,6 +161,24 @@ export const WEBHOOK_EVENT_CATALOG: readonly WebhookEventCatalogEntry[] = [
     type: "email.unsubscribed",
     version: 1,
     description: "The recipient unsubscribed.",
+  },
+  {
+    type: "webhook_endpoint.failing",
+    version: 1,
+    description:
+      "One of your endpoints has had no successful delivery for 15 minutes. Retries continue.",
+  },
+  {
+    type: "webhook_endpoint.disabled",
+    version: 1,
+    description:
+      "i10 switched one of your endpoints off: it answered 410 Gone, or nothing succeeded for your plan's stretch.",
+  },
+  {
+    type: "webhook_endpoint.recovered",
+    version: 1,
+    description:
+      "An endpoint that was failing or disabled delivered successfully again.",
   },
 ]
 

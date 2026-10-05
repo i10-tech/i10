@@ -178,6 +178,32 @@ not do, or does wrong.
 - Tell the workspace when an endpoint starts failing, is disabled, or recovers:
   in the console, by email, and optionally as a webhook to a separate endpoint.
 
+Built in #284 (`apps/api/src/webhooks/health.ts`):
+
+- **State, not counts.** Each endpoint has `health`: `healthy`, `failing`,
+  `disabled`. Every transition is a guarded update that matches only the row
+  still in the old state, and the change row is written in the same
+  transaction, so each change is reported once however many workers fail
+  deliveries at the same moment.
+- **Failing means 15 minutes with no success at all.** Long enough to ride out
+  a receiver's deploy, and always shorter than the shortest retry window
+  (free's, about 1h45m), so the owner hears before any event is given up on.
+  That is why exhausted deliveries are not a separate trigger.
+- **Disabled is reported at once,** without a failing first for a 410.
+  **Recovered** is the first success after failing or disabled. A customer's
+  own pause is not a health change; resuming an endpoint we disabled makes it
+  `failing`, so its next success is the recovery they hear about.
+- **Operational webhooks are event types,** `webhook_endpoint.failing`,
+  `.disabled` and `.recovered`, so they get signing, retries, history and
+  replay for free. An endpoint is never sent events about itself, and mail
+  filters do not apply to them.
+- **One email per workspace per batch,** to the owner, through our system
+  sender. At most one every 30 minutes, except that a disable goes at once.
+  A failure that recovered before the owner was told is not sent.
+- **Fan-out and email happen after the commit,** from the change row as an
+  outbox: fanning out inside the transaction locks other endpoints' rows and
+  deadlocks when two endpoints change together.
+
 ### Hosted-only Svix features worth having
 
 - **Polling endpoints:** the customer pulls events with a cursor instead of
