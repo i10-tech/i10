@@ -484,15 +484,28 @@ export interface WebhookPayload {
   id: string
   type: WebhookEventType
   created_at: string
+  /**
+   * This event's place in its endpoint's stream, from 1. Events arrive in
+   * this order while the endpoint is healthy; one that failed for longer than
+   * the hold is retried aside, so a receiver that sees a gap knows the missing
+   * number is still coming and can reorder by it (decision 1).
+   */
+  sequence?: number
   data: Record<string, unknown>
 }
 
 export const envelope = (
   deliveryId: string,
-  event: { type: WebhookEventType; occurredAt: Date; data: Record<string, unknown> },
+  event: {
+    type: WebhookEventType
+    occurredAt: Date
+    data: Record<string, unknown>
+    sequence?: number | null
+  },
 ): WebhookPayload => ({
   id: deliveryId,
   type: event.type,
   created_at: event.occurredAt.toISOString(),
+  ...(event.sequence != null ? { sequence: event.sequence } : {}),
   data: event.data,
 })

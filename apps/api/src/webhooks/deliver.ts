@@ -50,12 +50,28 @@ export interface DeliveryRecord {
   attempts: number
   /** Fixed when the event happened; decides the retry window. */
   retryPolicy: RetryPolicy
+  /** Its place in the endpoint's stream; null for rows from before #277. */
+  sequence: number | null
+  /** When it first failed, if it has. */
+  firstFailedAt: Date | null
+  /** Which queue it is retried on. */
+  lane: DeliveryLane
 }
+
+export type DeliveryLane = "ordered" | "retry"
+
+/**
+ * How long a failing event may hold its endpoint's later events before it is
+ * moved aside (docs/decisions/webhooks.md, decision 1).
+ */
+export const HOLD_MS = 5 * 60_000
 
 /** What a failed attempt means for the delivery and for its endpoint. */
 export interface FailureDecision {
   /** When the next attempt is owed; null when the budget is spent. */
   nextAttemptAt: Date | null
+  /** The lane the next attempt runs on. */
+  lane: DeliveryLane
   /**
    * ⚠ HOW THE ENDPOINT MAY BE SWITCHED OFF. `gone`: it answered 410, so at
    * once. Otherwise, when this was the last attempt, only if it has had no
@@ -70,7 +86,14 @@ export type DeliveryOutcome =
    * It did not arrive. `retryAt` is when the next attempt is owed, already
    * written to the row; absent when the budget is spent.
    */
-  | { status: "failed"; responseStatus?: number; reason: string; retryAt?: Date }
+  | {
+      status: "failed"
+      responseStatus?: number
+      reason: string
+      retryAt?: Date
+      /** Where the retry runs; differs from the delivery's lane when it was just moved aside. */
+      lane?: DeliveryLane
+    }
 
 export interface DeliverDeps {
   /** Loads the row, or null if it is gone or already delivered. */
@@ -88,6 +111,8 @@ export interface DeliverDeps {
   ) => Promise<void>
   /** Retry timing. Production's are in schedule.ts; the lab passes a scaled copy. */
   rules?: RetryRules
+  /** How long a failing head may hold its endpoint. Defaults to `HOLD_MS`. */
+  holdMs?: number
   fetch?: typeof fetch
   /**
    * Decides where a hostname may be connected to. Defaults to the system
@@ -126,6 +151,7 @@ export async function deliverWebhook(
     envelope(delivery.id, {
       type: delivery.eventType,
       occurredAt: delivery.occurredAt,
+      sequence: delivery.sequence,
       data: delivery.payload,
     }),
   )
@@ -217,6 +243,23 @@ export async function deliverWebhook(
   // at its door and at ours.
   const delay = gone ? null : nextDelayMs(delivery.retryPolicy, made, signals, rules)
   const nextAttemptAt = delay === null ? null : new Date(Date.now() + delay)
+
+  /*
+   * ⚠ ORDERED WHILE HEALTHY, AND ONLY WHILE (decision 1). On the ordered lane a
+   * retry keeps its endpoint's later events waiting behind it. Once waiting for
+   * the next attempt would hold them past the hold - measured from this
+   * delivery's FIRST failure - it moves to the retry lane and they go on. A
+   * receiver can still reorder by `sequence`. The move is one-way: an event
+   * that has been set aside is not put back in front of ones that went on.
+   */
+  const failingSince = delivery.firstFailedAt ?? new Date()
+  const lane: DeliveryLane =
+    delivery.lane === "ordered" &&
+    nextAttemptAt !== null &&
+    nextAttemptAt.getTime() - failingSince.getTime() > (deps.holdMs ?? HOLD_MS)
+      ? "retry"
+      : delivery.lane
+
   await deps.markFailed(
     delivery,
     {
@@ -225,6 +268,7 @@ export async function deliverWebhook(
     },
     {
       nextAttemptAt,
+      lane,
       disable: gone
         ? { kind: "gone", reason: "The endpoint answered 410 Gone." }
         : { kind: "after", seconds: policy.disableAfterSeconds },
@@ -239,6 +283,7 @@ export async function deliverWebhook(
       status: outcome.responseStatus,
       reason: outcome.reason,
       final: nextAttemptAt === null,
+      lane,
     },
     "webhook delivery failed",
   )
@@ -247,5 +292,5 @@ export async function deliverWebhook(
   // retry stays in its endpoint's group; on the final attempt there is nothing
   // to hand over - the row already says `failed`, and a customer's dead
   // endpoint must not fill the failed-job list a real bug needs.
-  return nextAttemptAt ? { ...outcome, retryAt: nextAttemptAt } : outcome
+  return nextAttemptAt ? { ...outcome, retryAt: nextAttemptAt, lane } : outcome
 }

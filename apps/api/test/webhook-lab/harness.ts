@@ -62,6 +62,8 @@ export const LAB = {
   sweepGraceSeconds: 1,
   /** Production's default, so the fairness scenario measures the real number. */
   concurrency: 8,
+  /** Production: 5 minutes. */
+  holdMs: 2_000,
 }
 
 const ALL_EVENTS: WebhookEventType[] = [
@@ -181,6 +183,7 @@ export async function startLab(): Promise<Lab> {
       concurrency: LAB.concurrency,
       timeoutMs: LAB.timeoutMs,
       rules: LAB_RULES,
+      holdMs: LAB.holdMs,
       sweepEveryMs: LAB.sweepEveryMs,
       sweepGraceSeconds: LAB.sweepGraceSeconds,
       schedulerIntervalMs: 200,

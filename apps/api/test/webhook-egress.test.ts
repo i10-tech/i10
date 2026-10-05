@@ -208,6 +208,9 @@ const record = (url: string): DeliveryRecord => ({
   payload: { email_id: "msg-1" },
   attempts: 0,
   retryPolicy: "pro",
+  sequence: 1,
+  firstFailedAt: null,
+  lane: "ordered",
 })
 const job = { deliveryId: record("x").id, endpointId: "ep-1", tenantId: "ten-1" }
 const log = { info: mock(), warn: mock(), error: mock() }

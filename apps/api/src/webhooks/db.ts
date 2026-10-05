@@ -171,15 +171,23 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
         // ⚠ ONLY ENABLED ENDPOINTS, AND ONLY SUBSCRIBED ONES. A disabled
         // endpoint still exists so the customer can re-enable it; queueing for
         // it would mean a burst of stale events the moment they do.
+        // ⚠ SELECTED BY TAKING THE NEXT SEQUENCE NUMBER, IN ONE STATEMENT.
+        // The update both finds the subscribed endpoints and hands each its
+        // next number under the row lock, so two events recorded at once for
+        // one endpoint can never share a number or skip one.
         const endpoints = await tx
-          .select({ id: webhookEndpoints.id })
-          .from(webhookEndpoints)
+          .update(webhookEndpoints)
+          .set({ nextSequence: sql`${webhookEndpoints.nextSequence} + 1` })
           .where(
             and(
               eq(webhookEndpoints.enabled, true),
               sql`${webhookEndpoints.events} @> ARRAY[${event.type}]::core.webhook_event_type[]`,
             ),
           )
+          .returning({
+            id: webhookEndpoints.id,
+            sequence: webhookEndpoints.nextSequence,
+          })
 
         if (endpoints.length === 0) {
           return { status: "recorded" as const, deliveries: [] }
@@ -201,6 +209,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
               tenantId,
               endpointId: endpoint.id,
               retryPolicy,
+              sequence: endpoint.sequence,
               eventType: event.type,
               occurredAt: event.occurredAt,
               messageId: event.messageId,
@@ -311,6 +320,9 @@ export function webhookDeliveryOps(
             attempts: webhookDeliveries.attempts,
             occurredAt: webhookDeliveries.occurredAt,
             retryPolicy: webhookDeliveries.retryPolicy,
+            sequence: webhookDeliveries.sequence,
+            firstFailedAt: webhookDeliveries.firstFailedAt,
+            lane: webhookDeliveries.lane,
             url: webhookEndpoints.url,
             secretCiphertext: webhookEndpoints.secretCiphertext,
             signatureScheme: webhookEndpoints.signatureScheme,
@@ -369,6 +381,9 @@ export function webhookDeliveryOps(
           payload: (row.payload as Record<string, unknown>) ?? {},
           attempts: row.attempts,
           retryPolicy: row.retryPolicy,
+          sequence: row.sequence,
+          firstFailedAt: row.firstFailedAt,
+          lane: row.lane,
         }
       })
     },
@@ -420,6 +435,10 @@ export function webhookDeliveryOps(
             // If queueing it then fails, the sweep finds it due.
             nextAttemptAt: decision.nextAttemptAt,
             claimedUntil: null,
+            firstFailedAt: sql`coalesce(${webhookDeliveries.firstFailedAt}, now())`,
+            // ⚠ MOVED ASIDE IN THE SAME STATEMENT THAT RECORDS THE FAILURE, so
+            // the sweep re-queues it onto the lane it now belongs to.
+            lane: decision.lane,
             ...(outcome.responseStatus
               ? { responseStatus: outcome.responseStatus }
               : {}),
@@ -473,6 +492,7 @@ export function webhookDeliveryOps(
 
 /** A delivery the sweep found owed and unattended. */
 export interface DueDelivery {
+  lane: "ordered" | "retry"
   id: string
   tenantId: string
   endpointId: string
@@ -492,7 +512,7 @@ export async function dueDeliveries(
   limit: number,
 ): Promise<DueDelivery[]> {
   const rows = (await db.execute(sql`
-    select id::text, tenant_id::text, endpoint_id::text, occurred_at, attempts, next_attempt_at
+    select id::text, tenant_id::text, endpoint_id::text, occurred_at, attempts, next_attempt_at, lane
       from core.webhook_deliveries_due(${`${graceSeconds} seconds`}::interval, ${limit}::int)
   `)) as unknown as Array<{
     id: string
@@ -501,6 +521,7 @@ export async function dueDeliveries(
     occurred_at: string | Date
     attempts: number
     next_attempt_at: string | Date
+    lane: "ordered" | "retry"
   }>
   return rows.map((r) => ({
     id: r.id,
@@ -509,5 +530,6 @@ export async function dueDeliveries(
     occurredAt: new Date(r.occurred_at),
     attempts: r.attempts,
     nextAttemptAt: new Date(r.next_attempt_at),
+    lane: r.lane,
   }))
 }

@@ -5,11 +5,12 @@ import {
   createWebhookQueue,
   enqueueDelivery,
   GROUPMQ_ATTEMPT_CEILING,
+  WEBHOOK_NAMESPACE,
   webhookBackoff,
   type WebhookJob,
 } from "../queue/webhook-queue.js"
 import { dueDeliveries, webhookDeliveryOps } from "./db.js"
-import { DELIVERY_TIMEOUT_MS, deliverWebhook } from "./deliver.js"
+import { DELIVERY_TIMEOUT_MS, deliverWebhook, type DeliveryLane } from "./deliver.js"
 import { vetHost, type Lookup, type VetOptions } from "./egress.js"
 import type { Logger } from "./events.js"
 import type { RetryRules } from "./schedule.js"
@@ -68,6 +69,8 @@ export interface WebhookEngineOptions {
    * fires. groupmq's default is 5s; ours is 1s, so a 5s retry is not a 10s one.
    */
   schedulerIntervalMs?: number
+  /** How long a failing head may hold its endpoint. Production: 5 minutes. */
+  holdMs?: number
 }
 
 export interface WebhookEngineHealth {
@@ -101,10 +104,22 @@ class RetryAt extends Error {
 }
 
 export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
-  const queue = createWebhookQueue({
+  /*
+   * ⚠ TWO LANES, TWO QUEUES (decision 1). `ordered` is where every delivery
+   * starts and where a retry keeps its endpoint's later events behind it.
+   * `retry` is where one goes after failing for longer than the hold, so the
+   * events behind it can go on. Separate queues, not separate groups in one:
+   * an event set aside must not sit in front of its endpoint's group at all.
+   */
+  const ordered = createWebhookQueue({
     redis: opts.redis,
     ...(opts.namespace ? { namespace: opts.namespace } : {}),
   })
+  const retry = createWebhookQueue({
+    redis: opts.redis,
+    namespace: `${opts.namespace ?? WEBHOOK_NAMESPACE}:retry`,
+  })
+  const queues: Record<DeliveryLane, Queue<WebhookJob>> = { ordered, retry }
   const timeoutMs = opts.timeoutMs ?? DELIVERY_TIMEOUT_MS
   const ops = webhookDeliveryOps({
     db: opts.db,
@@ -120,13 +135,13 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
     lastSweepFound: 0,
     restarts: 0,
   }
-  // Handed from `onError` to `backoff`; see the note on `backoff` below.
-  let pendingDelayMs: number | null = null
-
-  const makeWorker = () =>
-    new Worker<WebhookJob>({
-      queue,
-      name: opts.name,
+  const makeWorker = (lane: DeliveryLane) => {
+    // Handed from `onError` to `backoff`; see the note on `backoff` below.
+    // One per worker, so the two lanes never trade delays.
+    let pendingDelayMs: number | null = null
+    return new Worker<WebhookJob>({
+      queue: queues[lane],
+      name: `${opts.name}:${lane}`,
       handler: async (job) => {
         state.lastHandledAt = new Date()
         const outcome = await deliverWebhook(job.data, {
@@ -139,6 +154,7 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
             }),
           log: opts.log,
           ...(opts.rules ? { rules: opts.rules } : {}),
+          ...(opts.holdMs !== undefined ? { holdMs: opts.holdMs } : {}),
           timeoutMs,
         })
 
@@ -152,8 +168,29 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
         // so the "retry" ran at once (measured 2026-10-05: five attempts in
         // 30ms). The row already records `next_attempt_at`; if Redis loses
         // this job, the sweep re-queues it.
-        if (outcome.status === "failed" && outcome.retryAt) {
-          throw new RetryAt(outcome.retryAt)
+        if (outcome.status !== "failed" || !outcome.retryAt) return
+
+        if ((outcome.lane ?? lane) === lane) throw new RetryAt(outcome.retryAt)
+
+        // ⚠ MOVED ASIDE: the job completes here, which lets this endpoint's
+        // later events go on, and the retry is queued on the other lane's
+        // queue - a different queue, so groupmq's chaining does not touch it.
+        // If this enqueue fails, the row already says lane and time, and the
+        // sweep puts it there.
+        try {
+          await enqueueDelivery(
+            queues[outcome.lane!],
+            { ...job.data, attempt: (job.data.attempt ?? 0) + 1 },
+            {
+              orderMs: job.orderMs,
+              delayMs: Math.max(0, outcome.retryAt.getTime() - Date.now()),
+            },
+          )
+        } catch (err) {
+          opts.log.warn(
+            { err: String(err), deliveryId: job.data.deliveryId },
+            "could not move a webhook to the retry lane; the sweep will",
+          )
         }
       },
       // ⚠ THE DELAY THE HANDLER ASKED FOR, WHEN IT ASKED. groupmq calls
@@ -189,9 +226,15 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
         opts.log.warn({ err, jobId: job?.id }, "webhook delivery job failed")
       },
     })
+  }
 
-  let worker = makeWorker()
-  worker.run()
+  const start = () => {
+    const w = { ordered: makeWorker("ordered"), retry: makeWorker("retry") }
+    w.ordered.run()
+    w.retry.run()
+    return w
+  }
+  let workers = start()
 
   /**
    * Re-queues what the queue has lost.
@@ -206,7 +249,7 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
     await Promise.all(
       due.map((d) =>
         enqueueDelivery(
-          queue,
+          queues[d.lane],
           {
             deliveryId: d.id,
             endpointId: d.endpointId,
@@ -250,10 +293,10 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
         )
         stallTicks = 0
         state.restarts++
-        const old = worker
-        worker = makeWorker()
-        worker.run()
-        void old.close(0).catch(() => {})
+        const old = workers
+        workers = start()
+        void old.ordered.close(0).catch(() => {})
+        void old.retry.close(0).catch(() => {})
       }
     } catch (err) {
       opts.log.warn({ err: String(err) }, "webhook sweep failed; next tick retries")
@@ -262,13 +305,16 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
   const timer = setInterval(() => void tick(), sweepEveryMs)
 
   return {
-    queue,
+    queue: ordered,
     sweep,
     health: () => ({ ...state }),
     close: async (gracefulMs = 60_000) => {
       closed = true
       clearInterval(timer)
-      await worker.close(gracefulMs)
+      await Promise.all([
+        workers.ordered.close(gracefulMs),
+        workers.retry.close(gracefulMs),
+      ])
     },
   }
 }

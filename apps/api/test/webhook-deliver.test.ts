@@ -19,6 +19,9 @@ const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
   payload: { email_id: "msg-1" },
   attempts: 0,
   retryPolicy: "pro",
+  sequence: 7,
+  firstFailedAt: null,
+  lane: "ordered",
   ...over,
 })
 
@@ -112,6 +115,7 @@ describe("a successful delivery", () => {
       id: record().id,
       type: "email.bounced",
       created_at: "2026-09-03T10:00:00.000Z",
+      sequence: 7,
       data: { email_id: "msg-1" },
     })
   })
@@ -298,5 +302,42 @@ describe("what the endpoint says about itself (#276)", () => {
       kind: "after",
       seconds: 5 * 86_400,
     })
+  })
+})
+
+describe("ordered while healthy (#277, decision 1)", () => {
+  const failing = (over: Partial<DeliveryRecord>) =>
+    deps({
+      load: async () => record(over),
+      fetch: mock(async () => new Response("", { status: 500 })),
+    })
+
+  it("keeps a young failure on the ordered lane, holding the endpoint", async () => {
+    const d = failing({ attempts: 0 })
+    const outcome = await deliverWebhook(job, d.deps)
+    expect(d.markFailed.mock.calls[0]![2].lane).toBe("ordered")
+    expect(outcome).toMatchObject({ lane: "ordered" })
+  })
+
+  it("moves it to the retry lane once the next attempt would pass the hold", async () => {
+    // First failed six minutes ago; the hold is five.
+    const d = failing({ attempts: 2, firstFailedAt: new Date(Date.now() - 6 * 60_000) })
+    const outcome = await deliverWebhook(job, d.deps)
+    expect(d.markFailed.mock.calls[0]![2].lane).toBe("retry")
+    expect(outcome).toMatchObject({ lane: "retry" })
+  })
+
+  it("never moves one back once it has been set aside", async () => {
+    const d = failing({ attempts: 1, lane: "retry", firstFailedAt: new Date() })
+    await deliverWebhook(job, d.deps)
+    expect(d.markFailed.mock.calls[0]![2].lane).toBe("retry")
+  })
+
+  it("leaves the envelope without a sequence for rows from before it existed", async () => {
+    const { deps: dd, doFetch } = deps({ load: async () => record({ sequence: null }) })
+    await deliverWebhook(job, dd)
+    expect(JSON.parse(String(requestOf(doFetch)[1].body))).not.toHaveProperty(
+      "sequence",
+    )
   })
 })
