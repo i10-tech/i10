@@ -9,7 +9,7 @@ const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
   tenantId: "ten-1",
   endpointId: "ep-1",
   url: "https://hooks.example.com/i10",
-  secret: SECRET,
+  keys: [{ scheme: "hmac_sha256", secret: SECRET }],
   eventType: "email.bounced",
   occurredAt: new Date("2026-09-03T10:00:00Z"),
   payload: { email_id: "msg-1" },

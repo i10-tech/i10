@@ -11,6 +11,7 @@ import { timestampFromUuidV7 } from "../ids.js"
 import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
 import type { DeliverDeps, DeliveryRecord } from "./deliver.js"
 import { DISABLE_AFTER_FAILURES } from "./deliver.js"
+import { liveRetiring } from "./keys.js"
 import type { EventOps, WebhookEventType } from "./events.js"
 import type { SecretBox } from "./signing.js"
 
@@ -261,6 +262,8 @@ export function webhookDeliveryOps(
             occurredAt: webhookDeliveries.occurredAt,
             url: webhookEndpoints.url,
             secretCiphertext: webhookEndpoints.secretCiphertext,
+            signatureScheme: webhookEndpoints.signatureScheme,
+            retiringSecrets: webhookEndpoints.retiringSecrets,
             enabled: webhookEndpoints.enabled,
           })
           .from(webhookDeliveries)
@@ -300,7 +303,20 @@ export function webhookDeliveryOps(
           tenantId: job.tenantId,
           endpointId: row.endpointId,
           url: row.url,
-          secret: opts.secrets.open(row.secretCiphertext),
+          // ⚠ THE CURRENT KEY FIRST, THEN EVERY RETIRING KEY STILL IN ITS
+          // GRACE PERIOD. Expiry is judged now, at signing, so a key stops
+          // signing at the moment the customer chose even if nothing has
+          // touched the row since.
+          keys: [
+            {
+              scheme: row.signatureScheme,
+              secret: opts.secrets.open(row.secretCiphertext),
+            },
+            ...liveRetiring(row.retiringSecrets, new Date()).map((r) => ({
+              scheme: r.scheme,
+              secret: opts.secrets.open(r.ciphertext),
+            })),
+          ],
           eventType: row.eventType as WebhookEventType,
           occurredAt: row.occurredAt,
           payload: (row.payload as Record<string, unknown>) ?? {},

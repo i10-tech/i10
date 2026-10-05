@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi"
 import {
   createWebhookEndpointSchema,
+  rotateWebhookSecretSchema,
   webhookEndpointListSchema,
   webhookEndpointSchema,
   webhookEndpointWithSecretSchema,
@@ -173,15 +174,96 @@ webhookEndpoints.openapi(remove, async (c) => {
   )
 })
 
+const RotateWebhookSecret = rotateWebhookSecretSchema.openapi("RotateWebhookSecret")
+
 const rotate = createRoute({
   method: "post",
   path: "/{id}/rotate-secret",
   summary: "Rotate a webhook signing secret",
   description:
-    "Issues a new signing secret and returns it once. ⚠ The old secret stops " +
-    "working immediately - deliveries in flight are signed with whichever " +
-    "secret was current when they were signed, so update your receiver first " +
-    "or accept a short window of rejected deliveries.",
+    "Issues a new signing key and returns its secret once. You choose what " +
+    'happens to the key it replaces: `previous_secret: "revoke"` stops it ' +
+    'immediately; `previous_secret: "expire"` with `expires_in` (60 to ' +
+    "259200 seconds, which is 72 hours) keeps it signing alongside the new one " +
+    "so you can deploy the new secret first. While both are live, every " +
+    "webhook carries one signature per key. At most 3 keys are live at once. " +
+    "Pass `signature_scheme` to switch between HMAC and Ed25519.",
+  tags: ["Webhooks"],
+  security: [{ bearerAuth: [] }],
+  middleware: [requireApiKey] as const,
+  request: {
+    params: z.object({ id: z.uuid().openapi({ param: { name: "id", in: "path" } }) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: RotateWebhookSecret } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Rotated. `secret` is shown only in this response (null for Ed25519, " +
+        "which you verify with `public_key`).",
+      content: { "application/json": { schema: WebhookEndpointWithSecret } },
+    },
+    401: errorResponse("The API key is missing, malformed, or unknown."),
+    404: errorResponse("No such endpoint for this API key's tenant."),
+    422: errorResponse(
+      "No choice for the previous secret, an `expires_in` out of range, or too many live keys.",
+    ),
+    501: errorResponse("Webhook endpoints are not configured."),
+  },
+})
+
+webhookEndpoints.openapi(
+  rotate,
+  async (c) => {
+    const store = c.get("webhookEndpoints")
+    if (!store) return c.json(notWired, 501)
+
+    const auth = c.get("auth")
+    const { id } = c.req.valid("param")
+    const body = c.req.valid("json")
+    const result = await store.rotateSecret(
+      auth.tenantId,
+      id,
+      body.previous_secret === "expire"
+        ? { action: "expire", expiresInSeconds: body.expires_in! }
+        : { action: "revoke" },
+      body.signature_scheme,
+    )
+
+    if (result.status === "not_found") return c.json(notFound, 404)
+    if (result.status === "rejected") {
+      return c.json(
+        { statusCode: 422, name: "validation_error" as const, message: result.reason },
+        422,
+      )
+    }
+    return c.json(result.endpoint, 200)
+  },
+  (result, c) => {
+    if (!result.success) {
+      return c.json(
+        {
+          statusCode: 422,
+          name: "validation_error" as const,
+          message:
+            result.error.issues[0]?.message ??
+            "Say what happens to the current secret: `previous_secret` is `revoke` or `expire`.",
+        },
+        422,
+      )
+    }
+  },
+)
+
+const revokePrevious = createRoute({
+  method: "post",
+  path: "/{id}/revoke-previous-secrets",
+  summary: "Revoke previous webhook signing secrets",
+  description:
+    "Ends every grace period chosen at rotation, now. From this request on, " +
+    "only the current key signs. Use it when a previous secret may have leaked.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
   middleware: [requireApiKey] as const,
@@ -190,8 +272,8 @@ const rotate = createRoute({
   },
   responses: {
     200: {
-      description: "Rotated. `secret` is shown only in this response.",
-      content: { "application/json": { schema: WebhookEndpointWithSecret } },
+      description: "Revoked. `previous_secrets` is now empty.",
+      content: { "application/json": { schema: webhookEndpointSchema } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     404: errorResponse("No such endpoint for this API key's tenant."),
@@ -199,14 +281,13 @@ const rotate = createRoute({
   },
 })
 
-webhookEndpoints.openapi(rotate, async (c) => {
+webhookEndpoints.openapi(revokePrevious, async (c) => {
   const store = c.get("webhookEndpoints")
   if (!store) return c.json(notWired, 501)
 
   const auth = c.get("auth")
   const { id } = c.req.valid("param")
-  const rotated = await store.rotateSecret(auth.tenantId, id)
-
-  if (!rotated) return c.json(notFound, 404)
-  return c.json(rotated, 200)
+  const endpoint = await store.revokePreviousSecrets(auth.tenantId, id)
+  if (!endpoint) return c.json(notFound, 404)
+  return c.json(endpoint, 200)
 })
