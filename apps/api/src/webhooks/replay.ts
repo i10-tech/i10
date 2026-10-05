@@ -65,10 +65,16 @@ export const presentReplay = (r: ReplayRow): WebhookReplay => ({
   finished_at: r.finishedAt?.toISOString() ?? null,
 })
 
+/** Why a polling endpoint is never replayed: the cursor already does it (#301). */
+export const POLLING_REPLAY =
+  "A polling endpoint is not sent to, so there is nothing to replay: poll again from an earlier cursor to read its events again."
+
 export type ResendResult =
   | { status: "queued"; deliveryId: string }
   | { status: "pending" }
   | { status: "paused" }
+  /** A polling endpoint's events are read again by polling from an older cursor. */
+  | { status: "polling" }
   | { status: "not_found" }
 
 /**
@@ -88,6 +94,7 @@ export async function resendDelivery(
         attempts: webhookDeliveries.attempts,
         endpointId: webhookDeliveries.endpointId,
         enabled: webhookEndpoints.enabled,
+        kind: webhookEndpoints.kind,
       })
       .from(webhookDeliveries)
       .innerJoin(
@@ -97,6 +104,7 @@ export async function resendDelivery(
       .where(eq(webhookDeliveries.id, deliveryId))
       .limit(1)
     if (!d) return { status: "not_found" as const }
+    if (d.kind === "polling") return { status: "polling" as const }
     // Still being attempted: it already has a next attempt; a second would race it.
     if (d.status === "pending") return { status: "pending" as const }
     if (!d.enabled) return { status: "paused" as const }
@@ -175,11 +183,17 @@ export async function createReplay(
   }
   return withTenant(db, tenantId, async (tx) => {
     const [endpoint] = await tx
-      .select({ id: webhookEndpoints.id, enabled: webhookEndpoints.enabled })
+      .select({
+        id: webhookEndpoints.id,
+        enabled: webhookEndpoints.enabled,
+        kind: webhookEndpoints.kind,
+      })
       .from(webhookEndpoints)
       .where(eq(webhookEndpoints.id, endpointId))
       .limit(1)
     if (!endpoint) return { status: "not_found" as const }
+    if (endpoint.kind === "polling")
+      return { status: "rejected" as const, reason: POLLING_REPLAY }
     // ⚠ NOT TO A SWITCHED-OFF ENDPOINT. Every delivery would be refused by the
     // worker as "endpoint disabled" and the replay would look like it ran.
     if (!endpoint.enabled) return { status: "paused" as const }

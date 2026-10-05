@@ -928,7 +928,10 @@
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "reason": {
                 "type": [
@@ -997,7 +1000,10 @@
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "reason": {
                 "type": [
@@ -1066,7 +1072,10 @@
                 "type": "string"
               },
               "url": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "reason": {
                 "type": [
@@ -1678,8 +1687,18 @@
             "type": "string",
             "format": "uuid"
           },
-          "url": {
+          "kind": {
             "type": "string",
+            "enum": [
+              "http",
+              "polling"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uri"
           },
           "events": {
@@ -1726,6 +1745,18 @@
             ]
           },
           "health_changed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "poll_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_polled_at": {
             "type": [
               "string",
               "null"
@@ -1809,6 +1840,7 @@
         "required": [
           "object",
           "id",
+          "kind",
           "url",
           "events",
           "description",
@@ -1816,6 +1848,8 @@
           "disabled_reason",
           "health",
           "health_changed_at",
+          "poll_cursor",
+          "last_polled_at",
           "created_at",
           "signature_scheme",
           "rate_limit",
@@ -1830,6 +1864,13 @@
       "CreateWebhookEndpoint": {
         "type": "object",
         "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "http",
+              "polling"
+            ]
+          },
           "url": {
             "type": "string",
             "format": "uri"
@@ -1895,7 +1936,6 @@
           }
         },
         "required": [
-          "url",
           "events"
         ]
       },
@@ -1917,8 +1957,18 @@
                   "type": "string",
                   "format": "uuid"
                 },
-                "url": {
+                "kind": {
                   "type": "string",
+                  "enum": [
+                    "http",
+                    "polling"
+                  ]
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
                   "format": "uri"
                 },
                 "events": {
@@ -1965,6 +2015,18 @@
                   ]
                 },
                 "health_changed_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "poll_cursor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "last_polled_at": {
                   "type": [
                     "string",
                     "null"
@@ -2042,6 +2104,7 @@
               "required": [
                 "object",
                 "id",
+                "kind",
                 "url",
                 "events",
                 "description",
@@ -2049,6 +2112,8 @@
                 "disabled_reason",
                 "health",
                 "health_changed_at",
+                "poll_cursor",
+                "last_polled_at",
                 "created_at",
                 "signature_scheme",
                 "rate_limit",
@@ -2349,6 +2414,68 @@
           "p95_ms",
           "series",
           "by_event_type"
+        ]
+      },
+      "WebhookPoll": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "email.sent",
+                    "email.delivered",
+                    "email.delivery_delayed",
+                    "email.bounced",
+                    "email.complained",
+                    "email.failed",
+                    "email.opened",
+                    "email.clicked",
+                    "email.unsubscribed",
+                    "webhook_endpoint.failing",
+                    "webhook_endpoint.disabled",
+                    "webhook_endpoint.recovered"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "integer"
+                },
+                "data": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "created_at",
+                "sequence",
+                "data"
+              ]
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "done"
         ]
       },
       "SendTestEvent": {
@@ -2967,7 +3094,10 @@
                   ]
                 },
                 "url": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "reason": {
                   "type": [
@@ -4274,8 +4404,18 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "url": {
+                    "kind": {
                       "type": "string",
+                      "enum": [
+                        "http",
+                        "polling"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "format": "uri"
                     },
                     "events": {
@@ -4322,6 +4462,18 @@
                       ]
                     },
                     "health_changed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "poll_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "last_polled_at": {
                       "type": [
                         "string",
                         "null"
@@ -4399,6 +4551,7 @@
                   "required": [
                     "object",
                     "id",
+                    "kind",
                     "url",
                     "events",
                     "description",
@@ -4406,6 +4559,8 @@
                     "disabled_reason",
                     "health",
                     "health_changed_at",
+                    "poll_cursor",
+                    "last_polled_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -4501,8 +4656,18 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "url": {
+                    "kind": {
                       "type": "string",
+                      "enum": [
+                        "http",
+                        "polling"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "format": "uri"
                     },
                     "events": {
@@ -4549,6 +4714,18 @@
                       ]
                     },
                     "health_changed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "poll_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "last_polled_at": {
                       "type": [
                         "string",
                         "null"
@@ -4626,6 +4803,7 @@
                   "required": [
                     "object",
                     "id",
+                    "kind",
                     "url",
                     "events",
                     "description",
@@ -4633,6 +4811,8 @@
                     "disabled_reason",
                     "health",
                     "health_changed_at",
+                    "poll_cursor",
+                    "last_polled_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -4817,8 +4997,18 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "url": {
+                    "kind": {
                       "type": "string",
+                      "enum": [
+                        "http",
+                        "polling"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "format": "uri"
                     },
                     "events": {
@@ -4865,6 +5055,18 @@
                       ]
                     },
                     "health_changed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "poll_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "last_polled_at": {
                       "type": [
                         "string",
                         "null"
@@ -4942,6 +5144,7 @@
                   "required": [
                     "object",
                     "id",
+                    "kind",
                     "url",
                     "events",
                     "description",
@@ -4949,6 +5152,8 @@
                     "disabled_reason",
                     "health",
                     "health_changed_at",
+                    "poll_cursor",
+                    "last_polled_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5036,8 +5241,18 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "url": {
+                    "kind": {
                       "type": "string",
+                      "enum": [
+                        "http",
+                        "polling"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "format": "uri"
                     },
                     "events": {
@@ -5084,6 +5299,18 @@
                       ]
                     },
                     "health_changed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "poll_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "last_polled_at": {
                       "type": [
                         "string",
                         "null"
@@ -5161,6 +5388,7 @@
                   "required": [
                     "object",
                     "id",
+                    "kind",
                     "url",
                     "events",
                     "description",
@@ -5168,6 +5396,8 @@
                     "disabled_reason",
                     "health",
                     "health_changed_at",
+                    "poll_cursor",
+                    "last_polled_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5255,8 +5485,18 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "url": {
+                    "kind": {
                       "type": "string",
+                      "enum": [
+                        "http",
+                        "polling"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "format": "uri"
                     },
                     "events": {
@@ -5303,6 +5543,18 @@
                       ]
                     },
                     "health_changed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "poll_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "last_polled_at": {
                       "type": [
                         "string",
                         "null"
@@ -5380,6 +5632,7 @@
                   "required": [
                     "object",
                     "id",
+                    "kind",
                     "url",
                     "events",
                     "description",
@@ -5387,6 +5640,8 @@
                     "disabled_reason",
                     "health",
                     "health_changed_at",
+                    "poll_cursor",
+                    "last_polled_at",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5529,6 +5784,112 @@
           },
           "501": {
             "description": "Webhook endpoints are not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook-endpoints/{id}/poll": {
+      "get": {
+        "summary": "Poll a polling endpoint for its events",
+        "description": "For an endpoint created with `kind: polling`. Returns the events after `cursor`, oldest first, each the same body an HTTP endpoint is POSTed. Passing a cursor acknowledges every event up to it; without one, polling resumes after the last acknowledged. Pass an older cursor to read events again. Poll at least every 15 minutes while events are waiting, or the endpoint is reported as failing.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{1,15}$"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 250
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The next page of events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookPoll"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such endpoint for this API key's tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not a polling endpoint, or it is paused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The cursor is malformed or ahead of the stream.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Webhooks are not configured.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6429,7 +6790,7 @@
             }
           },
           "409": {
-            "description": "Still being attempted, or its endpoint is paused.",
+            "description": "Still being attempted, its endpoint is paused, or it belongs to a polling endpoint.",
             "content": {
               "application/json": {
                 "schema": {

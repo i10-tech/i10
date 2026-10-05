@@ -207,11 +207,23 @@ Built in #284 (`apps/api/src/webhooks/health.ts`):
 ### Hosted-only Svix features worth having
 
 - **Polling endpoints:** the customer pulls events with a cursor instead of
-  exposing a URL.
+  exposing a URL. Built in #301:
+  - The cursor is the per-endpoint `sequence`, so there is no second queue.
+  - Passing a cursor back acknowledges everything up to it, which marks those
+    deliveries `delivered`. An older cursor reads them again, which is the
+    replay.
+  - Rows owe no attempt (`next_attempt_at` null), so neither the worker nor
+    the sweep ever touches them.
+  - Health applies: a poller with events waiting and no poll for 15 minutes is
+    failing, and after the plan's stretch it is disabled.
 - **Destinations:** deliver to SQS, Pub/Sub, Kafka or similar, not only HTTP.
 - **Transformations:** a customer-supplied function that reshapes the payload
   per endpoint. The template renderer's sandbox is the precedent.
-- Attempt stats and usage stats per endpoint and per event type.
+- Attempt stats and usage stats per endpoint and per event type. Built in
+  #300:
+  - Deliveries are counted by when they were created, attempts by when they
+    were made.
+  - The error rate is failed attempts over attempts, not failed deliveries.
 
 ### Console
 

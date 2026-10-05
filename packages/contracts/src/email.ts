@@ -388,9 +388,20 @@ export const webhookEndpointHealth = z.enum(["healthy", "failing", "disabled"])
 export const webhookSignatureScheme = z.enum(["hmac_sha256", "ed25519"])
 
 /** `POST /webhook-endpoints` - where a customer wants their events delivered. */
+/** How an endpoint gets its events: POSTed to its URL, or pulled with a cursor. */
+export const webhookEndpointKind = z.enum(["http", "polling"])
+
 export const createWebhookEndpointSchema = z.object({
-  /** ⚠ https, public, and not an IP literal - see webhooks/endpoints.ts. */
-  url: z.url(),
+  /**
+   * `polling` endpoints have no URL: you pull their events from
+   * `GET /webhook-endpoints/{id}/poll`. Defaults to `http`.
+   */
+  kind: webhookEndpointKind.optional(),
+  /**
+   * Required for `http`, refused for `polling`. ⚠ https, public, and not an
+   * IP literal - see webhooks/endpoints.ts.
+   */
+  url: z.url().optional(),
   /** At least one, because an endpoint subscribed to nothing is a silent bug. */
   events: z.array(webhookEventName).min(1),
   description: z.string().max(255).optional(),
@@ -438,7 +449,9 @@ export const updateWebhookEndpointSchema = z
 export const webhookEndpointSchema = z.object({
   object: z.literal("webhook_endpoint"),
   id: z.uuid(),
-  url: z.url(),
+  kind: webhookEndpointKind,
+  /** Null for a `polling` endpoint. */
+  url: z.url().nullable(),
   events: z.array(webhookEventName),
   description: z.string().nullable(),
   enabled: z.boolean(),
@@ -455,6 +468,12 @@ export const webhookEndpointSchema = z.object({
   health: webhookEndpointHealth,
   /** When `health` last changed; null if it never has. */
   health_changed_at: z.string().nullable(),
+  /**
+   * For `polling`: the cursor you last acknowledged, where a poll without one
+   * resumes, and when you last polled. Null for `http`.
+   */
+  poll_cursor: z.string().nullable(),
+  last_polled_at: z.string().nullable(),
   created_at: z.string(),
   signature_scheme: webhookSignatureScheme,
   /** Deliveries a second, at most; null for no limit. */
@@ -662,6 +681,30 @@ export const webhookDeliveryListSchema = z.object({
 })
 
 /**
+ * `GET /webhook-endpoints/{id}/poll` (#301): the next events for a polling
+ * endpoint, oldest first, each exactly the body an HTTP endpoint would have
+ * been POSTed.
+ */
+export const webhookPollSchema = z.object({
+  data: z.array(
+    z.object({
+      id: z.uuid(),
+      type: webhookEventName,
+      created_at: z.string(),
+      sequence: z.number().int(),
+      data: z.record(z.string(), z.unknown()),
+    }),
+  ),
+  /**
+   * Pass this back as `cursor` on the next poll. That acknowledges everything
+   * up to it; pass an older one to read events again.
+   */
+  next_cursor: z.string(),
+  /** True when this page reached the end of what is waiting. */
+  done: z.boolean(),
+})
+
+/**
  * One change in an endpoint's health (#284), newest first in the list. The
  * same changes are emailed to the workspace's owner and sent as
  * `webhook_endpoint.*` webhooks to any endpoint subscribed to them.
@@ -671,8 +714,8 @@ export const webhookHealthEventSchema = z.object({
   id: z.uuid(),
   endpoint_id: z.uuid(),
   kind: z.enum(["failing", "disabled", "recovered"]),
-  /** The endpoint's URL when it changed. */
-  url: z.string(),
+  /** The endpoint's URL when it changed; null for a polling endpoint. */
+  url: z.string().nullable(),
   /** The last error, or why it was switched off; null for a recovery. */
   reason: z.string().nullable(),
   failing_since: z.string().nullable(),
@@ -743,6 +786,7 @@ export type EmailEventName = z.infer<typeof emailEventName>
 export type GetEmailResponse = z.infer<typeof getEmailResponseSchema>
 export type WebhookEventName = z.infer<typeof webhookEventName>
 export type WebhookHealthEvent = z.infer<typeof webhookHealthEventSchema>
+export type WebhookPoll = z.infer<typeof webhookPollSchema>
 export type CreateWebhookEndpoint = z.infer<typeof createWebhookEndpointSchema>
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>
 export type WebhookSignatureScheme = z.infer<typeof webhookSignatureScheme>

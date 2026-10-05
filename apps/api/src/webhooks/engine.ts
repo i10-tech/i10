@@ -10,7 +10,8 @@ import {
   type WebhookJob,
 } from "../queue/webhook-queue.js"
 import { dueDeliveries, webhookDeliveryOps } from "./db.js"
-import { fanOutHealthEvent, unfannedHealthEvents } from "./health.js"
+import { fanOutAndEnqueue, fanOutHealthEvent, unfannedHealthEvents } from "./health.js"
+import { checkPollers } from "./poll.js"
 import { runDueReplays } from "./replay.js"
 import { DELIVERY_TIMEOUT_MS, deliverWebhook, type DeliveryLane } from "./deliver.js"
 import { vetHost, type Lookup, type VetOptions } from "./egress.js"
@@ -167,13 +168,7 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
     ...(opts.failingAfterSeconds !== undefined
       ? { failingAfterSeconds: opts.failingAfterSeconds }
       : {}),
-    onHealthChange: (tenantId, eventId) =>
-      void fanOut(tenantId, eventId).catch((err: unknown) =>
-        opts.log.warn(
-          { err: String(err), eventId },
-          "could not fan out a webhook health change; the tick will",
-        ),
-      ),
+    onHealthChange: fanOutAndEnqueue(opts.db, queues.ordered, opts.log),
   })
   const sweepEveryMs = opts.sweepEveryMs ?? 30_000
   const sweepGraceSeconds = opts.sweepGraceSeconds ?? 60
@@ -370,6 +365,20 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
           "webhook replays failed; next tick retries",
         ),
       )
+      // Pollers that went quiet with events waiting (#301): their health
+      // changes fan out like any other.
+      const quiet = await checkPollers(opts.db, {
+        ...(opts.failingAfterSeconds !== undefined
+          ? { failingAfterSeconds: opts.failingAfterSeconds }
+          : {}),
+        ...(opts.rules ? { rules: opts.rules } : {}),
+      }).catch((err: unknown) => {
+        opts.log.warn({ err: String(err) }, "poller health check failed")
+        return []
+      })
+      for (const change of quiet) {
+        await fanOut(change.tenantId, change.eventId).catch(() => {})
+      }
       for (const e of await unfannedHealthEvents(opts.db)) {
         await fanOut(e.tenantId, e.id).catch((err: unknown) =>
           opts.log.warn({ err: String(err), eventId: e.id }, "health fan-out failed"),

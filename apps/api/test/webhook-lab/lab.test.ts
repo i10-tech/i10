@@ -9,7 +9,11 @@ import {
 import { webhookPayloadSchema } from "@repo/contracts"
 import { dueDeliveries } from "../../src/webhooks/db.js"
 import type { WebhookEventType } from "../../src/webhooks/events.js"
-import { runHealthEmails, type HealthSummary } from "../../src/webhooks/health.js"
+import {
+  fanOutAndEnqueue,
+  runHealthEmails,
+  type HealthSummary,
+} from "../../src/webhooks/health.js"
 import { statsWindow } from "../../src/webhooks/stats.js"
 import { webhookHistory, type WebhookHistory } from "../../src/webhooks/history.js"
 import { sendTestEvent } from "../../src/webhooks/test-events.js"
@@ -43,7 +47,10 @@ let history: WebhookHistory
 suite("webhook conformance lab", () => {
   beforeAll(async () => {
     lab = await startLab()
-    history = webhookHistory(lab.db)
+    history = webhookHistory(lab.db, {
+      onHealthChange: (t, id) =>
+        fanOutAndEnqueue(lab.db, lab.engine.queue, { warn: () => {} })(t, id),
+    })
   })
   afterAll(async () => {
     await lab.stop()
@@ -1049,6 +1056,178 @@ suite("webhook conformance lab", () => {
         // The change that waited goes in the same email.
         expect(sent!.lines.map((l) => l.state).sort()).toEqual(["disabled", "failing"])
       })
+    })
+  })
+
+  describe("polling endpoints (#301)", () => {
+    const poller = async (t: string, events?: WebhookEventType[]) => {
+      const r = await lab.store.create(t, {
+        kind: "polling",
+        events: events ?? ["email.delivered"],
+      })
+      if (r.status !== "created") throw new Error(JSON.stringify(r))
+      expect(r.endpoint.secret).toBeNull()
+      expect(r.endpoint.url).toBeNull()
+      return r.endpoint.id
+    }
+    const pollOk = async (
+      t: string,
+      id: string,
+      input: { cursor?: number; limit?: number } = {},
+    ) => {
+      const r = await history.poll(t, id, input)
+      if (r.status !== "ok") throw new Error(JSON.stringify(r))
+      return r
+    }
+    const statuses = async (id: string) =>
+      (
+        await lab.owner`select status from core.webhook_deliveries
+                         where endpoint_id = ${id} order by sequence`
+      ).map((r) => r.status as string)
+
+    test("is never sent to, and its events are pulled in order, acknowledged by the cursor", async () => {
+      const t = await lab.workspace()
+      const id = await poller(t)
+      for (let k = 1; k <= 3; k++) await lab.emit(t, { k })
+      await Bun.sleep(1_000)
+      const [attempts] =
+        await lab.owner`select count(*)::int as n from core.webhook_attempts
+                                         where endpoint_id = ${id}`
+      expect(attempts!.n).toBe(0)
+      expect(
+        (await dueDeliveries(lab.db, 0, 500)).filter((d) => d.endpointId === id),
+      ).toEqual([])
+
+      const first = await pollOk(t, id)
+      expect(first.data.map((e) => [e.sequence, e.data.k])).toEqual([
+        [1, 1],
+        [2, 2],
+        [3, 3],
+      ])
+      expect(first.data[0]!.type).toBe("email.delivered")
+      expect(first).toMatchObject({ next_cursor: "3", done: true })
+      // Read, not acknowledged: still waiting.
+      expect(await statuses(id)).toEqual(["pending", "pending", "pending"])
+
+      expect((await pollOk(t, id, { cursor: 3 })).data).toEqual([])
+      expect(await statuses(id)).toEqual(["delivered", "delivered", "delivered"])
+      // Without a cursor it resumes after the last acknowledged.
+      expect((await pollOk(t, id)).data).toEqual([])
+      // An older cursor reads them again.
+      expect((await pollOk(t, id, { cursor: 0 })).data).toHaveLength(3)
+      const [row] =
+        await lab.owner`select poll_cursor, last_polled_at from core.webhook_endpoints
+                                    where id = ${id}`
+      expect(Number(row!.poll_cursor)).toBe(3)
+      expect(row!.last_polled_at).not.toBeNull()
+    })
+
+    test("pages, and acknowledges only what was passed back", async () => {
+      const t = await lab.workspace()
+      const id = await poller(t)
+      for (let k = 1; k <= 5; k++) await lab.emit(t, { k })
+      const a = await pollOk(t, id, { limit: 2 })
+      expect(a.data.map((e) => e.sequence)).toEqual([1, 2])
+      expect(a.done).toBe(false)
+      const b = await pollOk(t, id, { cursor: Number(a.next_cursor), limit: 2 })
+      expect(b.data.map((e) => e.sequence)).toEqual([3, 4])
+      expect(await statuses(id)).toEqual([
+        "delivered",
+        "delivered",
+        "pending",
+        "pending",
+        "pending",
+      ])
+    })
+
+    test("refuses what it should", async () => {
+      const t = await lab.workspace()
+      const id = await poller(t)
+      const http = await lab.endpoint(t, "ok/poll-http")
+      await lab.emit(t, { k: 1 })
+      expect(await history.poll(t, id, { cursor: 99 })).toMatchObject({
+        status: "rejected",
+      })
+      expect((await history.poll(t, http.id, {})).status).toBe("not_polling")
+      expect((await history.poll(await lab.workspace(), id, {})).status).toBe(
+        "not_found",
+      )
+      // Nothing to send to, so nothing to rotate, point elsewhere, or replay.
+      expect(
+        (await lab.store.rotateSecret(t, id, { revoke: true } as never)).status,
+      ).toBe("rejected")
+      expect((await lab.store.update(t, id, { rate_limit: 5 })).status).toBe("rejected")
+      expect(
+        (await createReplay(lab.db, t, id, "replay", { since: new Date(0) })).status,
+      ).toBe("rejected")
+      const [d] =
+        await lab.owner`select id from core.webhook_deliveries where endpoint_id = ${id}`
+      await pollOk(t, id, { cursor: 1 })
+      expect(
+        (await resendDelivery(lab.db, lab.engine.queue, t, d!.id as string)).status,
+      ).toBe("polling")
+      // Paused, it is not polled.
+      await lab.store.update(t, id, { enabled: false })
+      expect((await history.poll(t, id, {})).status).toBe("paused")
+    })
+
+    test("a test event is part of its stream", async () => {
+      const t = await lab.workspace()
+      const id = await poller(t)
+      await lab.emit(t, { k: 1 })
+      expect(
+        (await sendTestEvent(lab.db, lab.engine.queue, t, id, "email.bounced")).status,
+      ).toBe("queued")
+      const page = await pollOk(t, id)
+      expect(page.data.map((e) => [e.sequence, e.type])).toEqual([
+        [1, "email.delivered"],
+        [2, "email.bounced"],
+      ])
+      expect(page.data[1]!.data.test).toBe(true)
+    })
+
+    test("one that stops collecting is reported failing, then disabled; polling again recovers it", async () => {
+      const t = await lab.workspace()
+      const id = await poller(t)
+      // A poller can collect the health of the workspace's other endpoints too.
+      const watcher = await poller(t, [
+        "webhook_endpoint.failing",
+        "webhook_endpoint.disabled",
+        "webhook_endpoint.recovered",
+      ])
+      await lab.emit(t, { k: 1 })
+      // The watcher keeps polling, as an operational poller would; one that
+      // stopped would be judged like any other.
+      const keepWatching = setInterval(() => void history.poll(t, watcher, {}), 200)
+      const kinds = async () =>
+        (
+          await lab.owner`select kind from core.webhook_health_events
+                           where endpoint_id = ${id} order by occurred_at, id`
+        ).map((r) => r.kind as string)
+      expect(
+        await until(async () => (await kinds()).includes("disabled"), 10_000),
+      ).toBe(true)
+      expect(await kinds()).toEqual(["failing", "disabled"])
+      const [off] = await lab.owner`select disabled_reason from core.webhook_endpoints
+                                    where id = ${id}`
+      expect(off!.disabled_reason).toContain("Not polled")
+
+      await lab.store.update(t, id, { enabled: true })
+      await pollOk(t, id, { cursor: 1 })
+      expect(await kinds()).toEqual(["failing", "disabled", "recovered"])
+
+      // The watcher collects all three as webhook_endpoint.* events.
+      const seen = await until(async () => {
+        const page = await pollOk(t, watcher, { cursor: 0 })
+        return page.data.length >= 3 ? page.data : undefined
+      }, 5_000)
+      expect(seen!.map((e) => e.type)).toEqual([
+        "webhook_endpoint.failing",
+        "webhook_endpoint.disabled",
+        "webhook_endpoint.recovered",
+      ])
+      clearInterval(keepWatching)
+      expect(seen![0]!.data).toMatchObject({ endpoint_id: id, url: null })
     })
   })
 

@@ -1,0 +1,1 @@
+ALTER TABLE "core"."webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_url_by_kind" CHECK (("core"."webhook_endpoints"."kind" = 'polling') = ("core"."webhook_endpoints"."url" is null));

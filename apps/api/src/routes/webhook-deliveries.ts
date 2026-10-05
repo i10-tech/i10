@@ -5,6 +5,7 @@ import {
   webhookDeliverySchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
+import { POLLING_REPLAY } from "../webhooks/replay.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 
 /**
@@ -192,7 +193,9 @@ const resend = createRoute({
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
     404: errorResponse("No such delivery for this API key's tenant."),
-    409: errorResponse("Still being attempted, or its endpoint is paused."),
+    409: errorResponse(
+      "Still being attempted, its endpoint is paused, or it belongs to a polling endpoint.",
+    ),
     501: errorResponse("Webhooks are not configured."),
   },
 })
@@ -210,7 +213,9 @@ webhookDeliveries.openapi(resend, async (c) => {
         message:
           result.status === "pending"
             ? "This delivery is still being attempted."
-            : "Its endpoint is paused or switched off. Resume it first.",
+            : result.status === "polling"
+              ? POLLING_REPLAY
+              : "Its endpoint is paused or switched off. Resume it first.",
       },
       409,
     )

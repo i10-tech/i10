@@ -1,6 +1,7 @@
 import type { Hono } from "hono"
 import { WEBHOOK_EVENT_TYPES } from "../../webhooks/catalog.js"
 import { statsQuery, windowFrom } from "../webhook-stats.js"
+import { POLLING_REPLAY } from "../../webhooks/replay.js"
 import {
   createReplayMissingSchema,
   createReplaySchema,
@@ -467,6 +468,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
         409,
       )
     }
+    if (result.status === "polling") return c.json(validation(POLLING_REPLAY), 409)
     return c.json({ delivery_id: result.deliveryId }, 202)
   })
 

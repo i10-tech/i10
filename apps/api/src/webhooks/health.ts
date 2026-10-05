@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto"
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import type { WebhookHealthEvent } from "@repo/contracts"
+import type { Queue } from "groupmq"
 import { withTenant, type Database } from "../db/client.js"
+import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
 import {
   planAssignments,
   webhookDeliveries,
   webhookEndpoints,
   webhookHealthEvents,
 } from "../db/core.js"
+import { pollingRow } from "./kinds.js"
 import { policyForPlan } from "./schedule.js"
 
 /**
@@ -63,7 +66,7 @@ async function recordChange(
     tenantId: string
     endpointId: string
     kind: HealthKind
-    url: string
+    url: string | null
     reason: string | null
     failingSince: Date | null
   },
@@ -116,7 +119,7 @@ export async function onDelivered(
     tenantId,
     endpointId,
     kind: "recovered",
-    url: String(row.url),
+    url: row.url === null ? null : String(row.url),
     reason: null,
     failingSince: null,
   })
@@ -166,7 +169,7 @@ export const onDisabled = (
   input: {
     tenantId: string
     endpointId: string
-    url: string
+    url: string | null
     reason: string
     failingSince: Date | null
   },
@@ -226,7 +229,11 @@ export async function fanOutHealthEvent(
           sql`${webhookEndpoints.events} @> ARRAY[${type}]::core.webhook_event_type[]`,
         ),
       )
-      .returning({ id: webhookEndpoints.id, sequence: webhookEndpoints.nextSequence })
+      .returning({
+        id: webhookEndpoints.id,
+        sequence: webhookEndpoints.nextSequence,
+        kind: webhookEndpoints.kind,
+      })
 
     await tx
       .update(webhookHealthEvents)
@@ -257,15 +264,19 @@ export async function fanOutHealthEvent(
           eventType: type,
           occurredAt: event.occurredAt,
           payload: data as never,
+          ...pollingRow(endpoint.kind),
         })),
       )
       .returning({ id: webhookDeliveries.id, endpointId: webhookDeliveries.endpointId })
-    return rows.map((r) => ({
-      id: r.id,
-      endpointId: r.endpointId,
-      tenantId,
-      occurredAt: event.occurredAt,
-    }))
+    const sent = new Set(endpoints.filter((e) => e.kind === "http").map((e) => e.id))
+    return rows
+      .filter((r) => sent.has(r.endpointId))
+      .map((r) => ({
+        id: r.id,
+        endpointId: r.endpointId,
+        tenantId,
+        occurredAt: event.occurredAt,
+      }))
   })
 }
 
@@ -292,7 +303,7 @@ export interface HealthEventRow {
   id: string
   endpointId: string
   kind: HealthKind
-  url: string
+  url: string | null
   reason: string | null
   failingSince: Date | null
   occurredAt: Date
@@ -301,7 +312,7 @@ export interface HealthEventRow {
 /** One line of the email: where an endpoint stands now. */
 export interface HealthLine {
   endpointId: string
-  url: string
+  url: string | null
   state: HealthKind
   reason: string | null
   since: Date
@@ -520,3 +531,34 @@ export async function listHealthEvents(
     next_cursor: rows.length > limit ? page[page.length - 1]!.id : null,
   }
 }
+
+/**
+ * Fans a change out and queues what it recorded, logging rather than throwing:
+ * the tick's backlog sweep is the safety net for a failure here. The worker's
+ * engine and the API's poll route both report changes through this.
+ */
+export const fanOutAndEnqueue =
+  (
+    db: Database,
+    queue: Queue<WebhookJob>,
+    log: { warn: (o: object, m: string) => void },
+  ) =>
+  (tenantId: string, eventId: string): void =>
+    void fanOutHealthEvent(db, tenantId, eventId)
+      .then((deliveries) =>
+        Promise.all(
+          deliveries.map((d) =>
+            enqueueDelivery(
+              queue,
+              { deliveryId: d.id, endpointId: d.endpointId, tenantId: d.tenantId },
+              { orderMs: d.occurredAt.getTime() },
+            ),
+          ),
+        ),
+      )
+      .catch((err: unknown) =>
+        log.warn(
+          { err: String(err), eventId },
+          "could not fan out a webhook health change; the tick will",
+        ),
+      )

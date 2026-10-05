@@ -7,6 +7,7 @@ import {
   index,
   integer,
   jsonb,
+  check,
   pgPolicy,
   pgSchema,
   halfvec,
@@ -129,6 +130,15 @@ export const webhookEventType = core.enum("webhook_event_type", [
   "webhook_endpoint.failing",
   "webhook_endpoint.disabled",
   "webhook_endpoint.recovered",
+])
+
+/**
+ * How an endpoint receives its events (#301): we POST them to its URL, or the
+ * customer pulls them from the poll route with a cursor.
+ */
+export const webhookEndpointKind = core.enum("webhook_endpoint_kind", [
+  "http",
+  "polling",
 ])
 
 /**
@@ -1322,9 +1332,22 @@ export const webhookEndpoints = core.table(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
 
-    /** ⚠ https only, and never a private address - see webhooks/endpoints.ts. */
-    url: text("url").notNull(),
+    kind: webhookEndpointKind("kind").notNull().default("http"),
+    /**
+     * ⚠ https only, and never a private address - see webhooks/endpoints.ts.
+     * Null for a polling endpoint, which has nowhere to be sent to; the
+     * worker never loads one (webhooks/db.ts).
+     */
+    url: text("url"),
     description: text("description"),
+    /**
+     * For a polling endpoint, the highest `sequence` the customer has
+     * acknowledged by passing it back as their cursor (#301). Where a poll
+     * without a cursor resumes.
+     */
+    pollCursor: bigint("poll_cursor", { mode: "number" }).notNull().default(0),
+    /** When a polling endpoint was last polled; what its health is judged by. */
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
 
     /**
      * The signing secret, ENCRYPTED AT REST.
@@ -1423,7 +1446,16 @@ export const webhookEndpoints = core.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("webhook_endpoints_tenant_idx").on(t.tenantId)],
+  (t) => [
+    index("webhook_endpoints_tenant_idx").on(t.tenantId),
+    // ⚠ A URL EXACTLY WHEN THERE IS SOMETHING TO SEND TO (#301). The worker
+    // reads a null URL as "polling, never send"; an HTTP endpoint without one
+    // would sit silently unattempted.
+    check(
+      "webhook_endpoints_url_by_kind",
+      sql`(${t.kind} = 'polling') = (${t.url} is null)`,
+    ),
+  ],
 )
 
 /**
@@ -1514,6 +1546,8 @@ export const webhookDeliveries = core.table(
   },
   (t) => [
     index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.createdAt),
+    // A polling endpoint's stream, read in order from its cursor (#301).
+    index("webhook_deliveries_sequence_idx").on(t.endpointId, t.sequence),
     // What the sweep reads: pending rows by when they are owed.
     index("webhook_deliveries_due_idx")
       .on(t.nextAttemptAt)
@@ -1691,8 +1725,11 @@ export const webhookHealthEvents = core.table(
       .notNull()
       .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
     kind: webhookHealthChange("kind").notNull(),
-    /** The endpoint's URL when it changed; it can be edited afterwards. */
-    url: text("url").notNull(),
+    /**
+     * The endpoint's URL when it changed; it can be edited afterwards. Null
+     * for a polling endpoint, which has none.
+     */
+    url: text("url"),
     /** In words the customer is shown: the last error, or why it was disabled. */
     reason: text("reason"),
     /** When the run of failures began, for `failing` and `disabled`. */

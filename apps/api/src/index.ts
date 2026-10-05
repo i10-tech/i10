@@ -78,7 +78,7 @@ import { webhookEventOps } from "./webhooks/db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
-import { runHealthEmails } from "./webhooks/health.js"
+import { fanOutAndEnqueue, runHealthEmails } from "./webhooks/health.js"
 import { healthNotice } from "./webhooks/health-notice.js"
 import { sendTestEvent } from "./webhooks/test-events.js"
 import { webhookReplayOps } from "./webhooks/replay.js"
@@ -363,6 +363,14 @@ const endpointVetting = {
 // groupmq stamps on each job matches. The delivery budget itself lives on the
 // delivery row, by plan - see webhooks/schedule.ts.
 const webhookQueue = secrets ? createWebhookQueue({ redis: queueRedis }) : null
+/**
+ * What the API reads webhook history with. A poll that brings a quiet poller
+ * back reports the recovery here, fanned out at once (#301).
+ */
+const history = webhookHistory(
+  db,
+  webhookQueue ? { onHealthChange: fanOutAndEnqueue(db, webhookQueue, log) } : {},
+)
 
 log.info(
   { webhooks: Boolean(secrets) },
@@ -1315,7 +1323,7 @@ const app = createApp({
     ...(secrets
       ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
       : {}),
-    webhookHistory: webhookHistory(db),
+    webhookHistory: history,
     ...(webhookQueue
       ? {
           webhookTests: (
@@ -1363,7 +1371,7 @@ const app = createApp({
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),
-        webhookHistory: webhookHistory(db),
+        webhookHistory: history,
         webhookTests: (tenantId: string, endpointId: string, type: WebhookEventType) =>
           sendTestEvent(db, webhookQueue, tenantId, endpointId, type),
         webhookReplays: webhookReplayOps(db, webhookQueue),

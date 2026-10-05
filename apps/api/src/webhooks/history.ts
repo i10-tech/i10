@@ -7,6 +7,7 @@ import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { webhookAttempts, webhookDeliveries } from "../db/core.js"
 import { listHealthEvents } from "./health.js"
+import { pollEndpoint, type PollResult } from "./poll.js"
 
 /**
  * Reading a delivery's history, and expunging what it carried (#280).
@@ -92,6 +93,12 @@ export interface WebhookHistory {
    * the endpoint.
    */
   expunge: (tenantId: string, deliveryId: string) => Promise<ExpungeResult>
+  /** The next events for a polling endpoint, acknowledging up to `cursor` (#301). */
+  poll: (
+    tenantId: string,
+    endpointId: string,
+    input: { cursor?: number; limit?: number },
+  ) => Promise<PollResult>
   /** Every change in an endpoint's health (#284), newest first. */
   health: (
     tenantId: string,
@@ -99,7 +106,17 @@ export interface WebhookHistory {
   ) => Promise<{ data: WebhookHealthEvent[]; next_cursor: string | null }>
 }
 
-export function webhookHistory(db: Database): WebhookHistory {
+export function webhookHistory(
+  db: Database,
+  opts: {
+    /**
+     * Told a health change a poll caused (a quiet poller recovering), after
+     * it commits, to fan it out at once rather than at the tick's backlog
+     * sweep. Must not throw.
+     */
+    onHealthChange?: (tenantId: string, eventId: string) => void
+  } = {},
+): WebhookHistory {
   return {
     async list(tenantId, filter) {
       const limit = Math.min(Math.max(filter.limit ?? 50, 1), 100)
@@ -196,6 +213,13 @@ export function webhookHistory(db: Database): WebhookHistory {
           .where(eq(webhookDeliveries.id, deliveryId))
         return "expunged"
       })
+    },
+
+    async poll(tenantId, endpointId, input) {
+      const result = await pollEndpoint(db, tenantId, endpointId, input)
+      if (result.status === "ok" && result.healthChange)
+        opts.onHealthChange?.(tenantId, result.healthChange)
+      return result
     },
 
     health: (tenantId, filter) =>

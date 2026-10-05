@@ -93,7 +93,10 @@ export interface WebhookEndpointStore {
 
 type Row = {
   id: string
-  url: string
+  kind: "http" | "polling"
+  url: string | null
+  pollCursor: number
+  lastPolledAt: Date | null
   events: string[]
   description: string | null
   enabled: boolean
@@ -127,6 +130,7 @@ const RESUMED_HEALTH_AT = sql<Date | null>`case when ${webhookEndpoints.health} 
 const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   object: "webhook_endpoint",
   id: row.id,
+  kind: row.kind,
   url: row.url,
   events: row.events as WebhookEventName[],
   description: row.description,
@@ -134,6 +138,8 @@ const present = (row: Row, now = new Date()): WebhookEndpoint => ({
   disabled_reason: row.enabled ? null : row.disabledReason,
   health: row.health,
   health_changed_at: row.healthChangedAt?.toISOString() ?? null,
+  poll_cursor: row.kind === "polling" ? String(row.pollCursor) : null,
+  last_polled_at: row.lastPolledAt?.toISOString() ?? null,
   created_at: row.createdAt.toISOString(),
   signature_scheme: row.signatureScheme,
   rate_limit: row.rateLimit,
@@ -151,7 +157,10 @@ const present = (row: Row, now = new Date()): WebhookEndpoint => ({
 
 const COLUMNS = {
   id: webhookEndpoints.id,
+  kind: webhookEndpoints.kind,
   url: webhookEndpoints.url,
+  pollCursor: webhookEndpoints.pollCursor,
+  lastPolledAt: webhookEndpoints.lastPolledAt,
   events: webhookEndpoints.events,
   description: webhookEndpoints.description,
   enabled: webhookEndpoints.enabled,
@@ -243,8 +252,54 @@ export function webhookEndpointStore(
   secrets: SecretBox,
   opts: WebhookEndpointStoreOptions = {},
 ): WebhookEndpointStore {
+  /**
+   * A polling endpoint (#301): no URL, so nothing to vet; no request, so no
+   * headers, rate limit or signature to choose. Filters still narrow what it
+   * collects.
+   *
+   * ⚠ A KEY IS STILL MADE AND SEALED, AND NEVER SHOWN. The column cannot be
+   * empty, and a key nobody holds signs nothing - polling is authenticated by
+   * the API key that reads it, over TLS, from us.
+   */
+  const createPolling = async (tenantId: string, input: CreateWebhookEndpoint) => {
+    const extra = (["url", "headers", "rate_limit", "signature_scheme"] as const).find(
+      (k) => input[k] !== undefined,
+    )
+    if (extra)
+      return {
+        status: "rejected" as const,
+        reason: `A polling endpoint has no \`${extra}\`: nothing is sent to it.`,
+      }
+    const options = checkOptions(input)
+    if (!options.ok) return { status: "rejected" as const, reason: options.reason }
+    const key = generateKey("hmac_sha256")
+    return withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(webhookEndpoints)
+        .values({
+          tenantId,
+          kind: "polling",
+          url: null,
+          description: input.description ?? null,
+          events: input.events as never,
+          secretCiphertext: secrets.seal(key.secret),
+          filterDomains: options.filterDomains ?? null,
+          filterTags: options.filterTags ?? null,
+        })
+        .returning(COLUMNS)
+      return {
+        status: "created" as const,
+        endpoint: { ...present(row!), secret: null },
+      }
+    })
+  }
+
   return {
     async create(tenantId, input) {
+      if (input.kind === "polling") return createPolling(tenantId, input)
+      if (input.url === undefined)
+        return { status: "rejected" as const, reason: "`url` is required." }
+
       // ⚠ THE URL IS CHECKED BEFORE IT IS STORED, NOT BEFORE IT IS FETCHED.
       // Validating at delivery time would mean a customer can register anything
       // and only find out it is refused when the first event silently fails -
@@ -320,6 +375,7 @@ export function webhookEndpointStore(
         // drop the other's.
         const [current] = await tx
           .select({
+            kind: webhookEndpoints.kind,
             secretCiphertext: webhookEndpoints.secretCiphertext,
             signatureScheme: webhookEndpoints.signatureScheme,
             retiringSecrets: webhookEndpoints.retiringSecrets,
@@ -328,6 +384,11 @@ export function webhookEndpointStore(
           .where(eq(webhookEndpoints.id, id))
           .for("update")
         if (!current) return { status: "not_found" as const }
+        if (current.kind === "polling")
+          return {
+            status: "rejected" as const,
+            reason: "A polling endpoint is not signed, so it has no secret to rotate.",
+          }
 
         const now = new Date()
         const plan = planRotation(
@@ -422,6 +483,22 @@ export function webhookEndpointStore(
       }
 
       return withTenant(db, tenantId, async (tx) => {
+        const sending = (["url", "headers", "rate_limit"] as const).find(
+          (k) => patch[k] !== undefined,
+        )
+        if (sending) {
+          const [current] = await tx
+            .select({ kind: webhookEndpoints.kind })
+            .from(webhookEndpoints)
+            .where(eq(webhookEndpoints.id, id))
+            .limit(1)
+          if (!current) return { status: "not_found" as const }
+          if (current.kind === "polling")
+            return {
+              status: "rejected" as const,
+              reason: `A polling endpoint has no \`${sending}\`: nothing is sent to it.`,
+            }
+        }
         const [row] = await tx
           .update(webhookEndpoints)
           .set(set)
