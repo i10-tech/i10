@@ -19,7 +19,7 @@
     "@iconify-json/ph": "^1.2.0",
     "@scalar/api-reference": "^1.67.0",
     "@scalar/astro": "^0.4.17",
-    "astro": "~7.2.9",
+    "astro": "~7.3.2",
     "astro-og-canvas": "^0.13.0",
     "canvaskit-wasm": "^0.42.0",
     "clsx": "^2.1.1",
