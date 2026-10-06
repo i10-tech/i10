@@ -139,6 +139,8 @@ export const webhookEventType = core.enum("webhook_event_type", [
 export const webhookEndpointKind = core.enum("webhook_endpoint_kind", [
   "http",
   "polling",
+  /** A `SendMessage` to the customer's Amazon SQS queue instead of a POST (#303). */
+  "sqs",
 ])
 
 /**
@@ -1356,6 +1358,13 @@ export const webhookEndpoints = core.table(
      */
     transformation: text("transformation"),
     transformationEnabled: boolean("transformation_enabled").notNull().default(false),
+    /**
+     * For an SQS destination (#303): the customer's access key id, shown so
+     * they can tell which key is in use, and its secret, sealed like a
+     * signing secret and never returned.
+     */
+    awsAccessKeyId: text("aws_access_key_id"),
+    awsSecretCiphertext: text("aws_secret_ciphertext"),
 
     /**
      * The signing secret, ENCRYPTED AT REST.

@@ -24,6 +24,7 @@ import {
   LAB,
   LAB_RULES,
   RENDERER_URL,
+  SQS_URL,
   startLab,
   until,
   type Lab,
@@ -1332,6 +1333,126 @@ suite("webhook conformance lab", () => {
       await lab.emit(t, { k: 3 })
       const plain = await until(() => lab.receiver.of("tfm-fail")[0], 5_000)
       expect(JSON.parse(plain!.body)).toMatchObject({ data: { k: 3 } })
+    })
+  })
+
+  // A real SQS API: only with WEBHOOKS_TEST_SQS_URL (see harness.ts).
+  ;(SQS_URL ? describe : describe.skip)("SQS destinations (#303)", () => {
+    test("each event is a message on the queue, in order on FIFO, verifiable like a request", async () => {
+      const t = await lab.workspace()
+      const queue = `lab-${t.slice(0, 8)}.fifo`
+      const ep = await lab.sqsEndpoint(t, queue)
+      for (let k = 1; k <= 3; k++) await lab.emit(t, { k })
+      expect(
+        await until(
+          async () =>
+            (await lab.deliveries(ep.id)).filter((d) => d.status === "delivered")
+              .length === 3,
+          10_000,
+        ),
+      ).toBe(true)
+
+      const got = (await lab.sqs("ReceiveMessage", {
+        QueueUrl: ep.url,
+        MaxNumberOfMessages: 10,
+        MessageAttributeNames: ["All"],
+      })) as {
+        Messages: Array<{
+          Body: string
+          MessageAttributes: Record<string, { StringValue: string }>
+        }>
+      }
+      expect(got.Messages.map((m) => JSON.parse(m.Body).sequence)).toEqual([1, 2, 3])
+      for (const m of got.Messages) {
+        const attr = (k: string) => m.MessageAttributes[k]!.StringValue
+        expect(attr("webhook-id")).toBe(JSON.parse(m.Body).id)
+        expect(attr("webhook-event-type")).toBe("email.delivered")
+        expect(
+          verifySignature(
+            ep.secret,
+            attr("webhook-id"),
+            m.Body,
+            attr("webhook-signature"),
+            attr("webhook-timestamp"),
+          ),
+        ).toBe(true)
+      }
+
+      // The attempt log names the queue, and never keeps the AWS signature.
+      const [first] = await lab.deliveries(ep.id)
+      const detail = await history.get(t, first!.id)
+      expect(detail!.attempt_log[0]!.url).toBe(ep.url)
+      expect(detail!.attempt_log[0]!.request_headers).not.toHaveProperty(
+        "authorization",
+      )
+      expect(detail!.attempt_log[0]!.request_headers["x-amz-target"]).toBe(
+        "AmazonSQS.SendMessage",
+      )
+    })
+
+    test("a queue that does not exist is a failed attempt with SQS's own answer, retried", async () => {
+      const t = await lab.workspace()
+      const ep = await lab.sqsEndpoint(t, `missing-${t.slice(0, 8)}`, { create: false })
+      const [id] = await lab.emit(t, { k: 1 })
+      const d = await until(async () => {
+        const x = await history.get(t, id!)
+        return x && x.attempt_log.length > 0 ? x : undefined
+      }, 8_000)
+      expect(d!.attempt_log[0]!.response_status).toBe(400)
+      expect(d!.attempt_log[0]!.response_body).toMatch(
+        /NonExistentQueue|QueueDoesNotExist/,
+      )
+      expect(d!.status).toBe("pending")
+      void ep
+    })
+
+    test("the store takes only AWS's own queue URLs and keeps the secret key to itself", async () => {
+      const t = await lab.workspace()
+      const creds = {
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      }
+      const bad = await lab.store.create(t, {
+        kind: "sqs",
+        url: "https://sqs.evil.example.net/123456789012/q",
+        events: ["email.sent"],
+        aws_credentials: creds,
+      })
+      expect(bad).toMatchObject({ status: "rejected" })
+      expect(
+        await lab.store.create(t, {
+          kind: "sqs",
+          url: "https://sqs.eu-west-1.amazonaws.com/123456789012/orders.fifo",
+          events: ["email.sent"],
+        }),
+      ).toMatchObject({ status: "rejected", reason: "`aws_credentials` is required." })
+      const ok = await lab.store.create(t, {
+        kind: "sqs",
+        url: "https://sqs.eu-west-1.amazonaws.com/123456789012/orders.fifo",
+        events: ["email.sent"],
+        aws_credentials: creds,
+      })
+      if (ok.status !== "created") throw new Error(JSON.stringify(ok))
+      expect(ok.endpoint).toMatchObject({
+        kind: "sqs",
+        aws_access_key_id: creds.access_key_id,
+      })
+      expect(JSON.stringify(ok.endpoint)).not.toContain(creds.secret_access_key)
+      const [row] =
+        await lab.owner`select aws_secret_ciphertext from core.webhook_endpoints
+                                    where id = ${ok.endpoint.id}`
+      expect(row!.aws_secret_ciphertext).not.toContain(creds.secret_access_key)
+      // HTTP-only options are refused on it, and it cannot be pointed off AWS.
+      expect(
+        (await lab.store.update(t, ok.endpoint.id, { headers: { "x-a": "1" } })).status,
+      ).toBe("rejected")
+      expect(
+        (
+          await lab.store.update(t, ok.endpoint.id, {
+            url: "https://hooks.example.com/x",
+          })
+        ).status,
+      ).toBe("rejected")
     })
   })
 

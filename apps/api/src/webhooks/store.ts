@@ -10,6 +10,7 @@ import { and, desc, eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { webhookDeliveries, webhookEndpoints } from "../db/core.js"
 import { checkCustomHeaders } from "./headers.js"
+import { checkCredentials, parseQueueUrl } from "./sqs.js"
 import { envelope } from "./events.js"
 import { exampleData } from "./examples.js"
 import { applyTransformation, type Transformed, type Transformer } from "./transform.js"
@@ -113,7 +114,7 @@ export interface WebhookEndpointStore {
 
 type Row = {
   id: string
-  kind: "http" | "polling"
+  kind: "http" | "polling" | "sqs"
   url: string | null
   pollCursor: number
   lastPolledAt: Date | null
@@ -133,6 +134,7 @@ type Row = {
   healthChangedAt: Date | null
   transformation: string | null
   transformationEnabled: boolean
+  awsAccessKeyId: string | null
 }
 
 /**
@@ -166,6 +168,7 @@ const present = (row: Row, now = new Date()): WebhookEndpoint => ({
     row.transformation === null
       ? null
       : { code: row.transformation, enabled: row.transformationEnabled },
+  aws_access_key_id: row.awsAccessKeyId,
   created_at: row.createdAt.toISOString(),
   signature_scheme: row.signatureScheme,
   rate_limit: row.rateLimit,
@@ -203,6 +206,7 @@ const COLUMNS = {
   healthChangedAt: webhookEndpoints.healthChangedAt,
   transformation: webhookEndpoints.transformation,
   transformationEnabled: webhookEndpoints.transformationEnabled,
+  awsAccessKeyId: webhookEndpoints.awsAccessKeyId,
 }
 
 /** Domains compared as DNS does: lowercased, without a trailing dot. */
@@ -347,7 +351,14 @@ export function webhookEndpointStore(
    */
   const createPolling = async (tenantId: string, input: CreateWebhookEndpoint) => {
     const extra = (
-      ["url", "headers", "rate_limit", "signature_scheme", "transformation"] as const
+      [
+        "url",
+        "headers",
+        "rate_limit",
+        "signature_scheme",
+        "transformation",
+        "aws_credentials",
+      ] as const
     ).find((k) => input[k] !== undefined)
     if (extra)
       return {
@@ -378,9 +389,70 @@ export function webhookEndpointStore(
     })
   }
 
+  /**
+   * An SQS destination (#303): the queue URL must be AWS's own SQS host, the
+   * keys are sealed, and nothing HTTP-shaped applies - no headers, no
+   * transformation. Events are still signed, and the signature travels as a
+   * message attribute.
+   */
+  const createSqs = async (tenantId: string, input: CreateWebhookEndpoint) => {
+    const extra = (["headers", "transformation"] as const).find(
+      (k) => input[k] !== undefined,
+    )
+    if (extra)
+      return {
+        status: "rejected" as const,
+        reason: `An SQS endpoint has no \`${extra}\`: it is sent to a queue, not a URL.`,
+      }
+    if (input.url === undefined)
+      return {
+        status: "rejected" as const,
+        reason: "`url` is required: the queue URL.",
+      }
+    const queue = parseQueueUrl(input.url)
+    if ("error" in queue) return { status: "rejected" as const, reason: queue.error }
+    if (!input.aws_credentials)
+      return { status: "rejected" as const, reason: "`aws_credentials` is required." }
+    const creds = checkCredentials(input.aws_credentials)
+    if (!creds.ok) return { status: "rejected" as const, reason: creds.reason }
+    const options = checkOptions(input)
+    if (!options.ok) return { status: "rejected" as const, reason: options.reason }
+    const key = generateKey(input.signature_scheme ?? "hmac_sha256")
+    return withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(webhookEndpoints)
+        .values({
+          tenantId,
+          kind: "sqs",
+          url: input.url!,
+          description: input.description ?? null,
+          events: input.events as never,
+          secretCiphertext: secrets.seal(key.secret),
+          signatureScheme: key.scheme,
+          publicKey: key.publicKey,
+          rateLimit: input.rate_limit ?? null,
+          filterDomains: options.filterDomains ?? null,
+          filterTags: options.filterTags ?? null,
+          awsAccessKeyId: creds.credentials.accessKeyId,
+          awsSecretCiphertext: secrets.seal(creds.credentials.secretAccessKey),
+        })
+        .returning(COLUMNS)
+      return {
+        status: "created" as const,
+        endpoint: { ...present(row!), secret: shown(key) },
+      }
+    })
+  }
+
   return {
     async create(tenantId, input) {
       if (input.kind === "polling") return createPolling(tenantId, input)
+      if (input.kind === "sqs") return createSqs(tenantId, input)
+      if (input.aws_credentials)
+        return {
+          status: "rejected" as const,
+          reason: "Only an `sqs` endpoint takes `aws_credentials`.",
+        }
       if (input.url === undefined)
         return { status: "rejected" as const, reason: "`url` is required." }
 
@@ -573,11 +645,10 @@ export function webhookEndpointStore(
         )
         if (!current) return { status: "not_found" as const }
         const url = patch.url ?? current.url
-        if (current.kind === "polling" || url === null) {
+        if (current.kind !== "http" || url === null) {
           return {
             status: "rejected" as const,
-            reason:
-              "A polling endpoint has no `transformation`: nothing is sent to it.",
+            reason: `A${current.kind === "sqs" ? "n SQS" : " polling"} endpoint has no \`transformation\`: only an HTTP endpoint's request can be reshaped.`,
           }
         }
         const tried = await tryTransformation(
@@ -621,21 +692,38 @@ export function webhookEndpointStore(
       }
 
       return withTenant(db, tenantId, async (tx) => {
-        const sending = (["url", "headers", "rate_limit"] as const).find(
-          (k) => patch[k] !== undefined,
-        )
-        if (sending) {
+        const kindBound = (
+          ["url", "headers", "rate_limit", "aws_credentials"] as const
+        ).filter((k) => patch[k] !== undefined)
+        if (kindBound.length > 0) {
           const [current] = await tx
             .select({ kind: webhookEndpoints.kind })
             .from(webhookEndpoints)
             .where(eq(webhookEndpoints.id, id))
             .limit(1)
           if (!current) return { status: "not_found" as const }
-          if (current.kind === "polling")
+          const refused =
+            current.kind === "polling"
+              ? kindBound[0]
+              : current.kind === "sqs"
+                ? kindBound.find((k) => k === "headers")
+                : kindBound.find((k) => k === "aws_credentials")
+          if (refused)
             return {
               status: "rejected" as const,
-              reason: `A polling endpoint has no \`${sending}\`: nothing is sent to it.`,
+              reason: `A${current.kind === "http" ? "n HTTP" : current.kind === "sqs" ? "n SQS" : " polling"} endpoint has no \`${refused}\`.`,
             }
+          if (current.kind === "sqs" && patch.url !== undefined) {
+            const queue = parseQueueUrl(patch.url)
+            if ("error" in queue)
+              return { status: "rejected" as const, reason: queue.error }
+          }
+          if (patch.aws_credentials) {
+            const creds = checkCredentials(patch.aws_credentials)
+            if (!creds.ok) return { status: "rejected" as const, reason: creds.reason }
+            set.awsAccessKeyId = creds.credentials.accessKeyId
+            set.awsSecretCiphertext = secrets.seal(creds.credentials.secretAccessKey)
+          }
         }
         const [row] = await tx
           .update(webhookEndpoints)

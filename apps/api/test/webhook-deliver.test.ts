@@ -27,6 +27,7 @@ const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
   headers: {},
   transformation: null,
   transformed: null,
+  sqs: null,
   ...over,
 })
 

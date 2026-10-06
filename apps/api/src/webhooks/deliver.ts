@@ -6,6 +6,12 @@ import { signWithKeys, type SigningKey } from "./keys.js"
 import { pinnedRequest, vetHost, type EgressVerdict } from "./egress.js"
 import { applyTransformation, type Transformed, type Transformer } from "./transform.js"
 import {
+  parseQueueUrl,
+  sqsSendMessage,
+  type AwsCredentials,
+  type QueueAddress,
+} from "./sqs.js"
+import {
   isPermanentlyGone,
   nextDelayMs,
   RULES,
@@ -65,6 +71,11 @@ export interface DeliveryRecord {
   transformation: string | null
   /** What the transformation made of this delivery, once it has run. */
   transformed: Transformed | null
+  /**
+   * For an SQS destination (#303), the keys to sign `SendMessage` with; `url`
+   * is then the queue URL. Null for an HTTP endpoint.
+   */
+  sqs: AwsCredentials | null
 }
 
 export type DeliveryLane = "ordered" | "retry"
@@ -174,6 +185,11 @@ export interface DeliverDeps {
   saveTransformed?: (delivery: DeliveryRecord, request: Transformed) => Promise<void>
   /** Lets go of a claimed row without recording anything, for a deferral. */
   release?: (delivery: DeliveryRecord) => Promise<void>
+  /**
+   * Reads an SQS queue URL. Production's accepts only AWS's own SQS hosts;
+   * the conformance lab's also accepts its local queue.
+   */
+  parseQueue?: (url: string) => QueueAddress | { error: string }
   fetch?: typeof fetch
   /**
    * Decides where a hostname may be connected to. Defaults to the system
@@ -343,6 +359,16 @@ export async function deliverWebhook(
   // current origin, which is the one vetted below.
   const url = new URL(request.url, delivery.url)
 
+  // ⚠ AN SQS DESTINATION IS THE SAME DELIVERY WITH A DIFFERENT LAST HOP
+  // (#303): the signed envelope becomes a SendMessage, the Standard Webhooks
+  // headers become message attributes, and the API call goes to the queue's
+  // own SQS host - checked again here, not only on write.
+  let target = url
+  let sqsError: string | undefined
+  const queue = delivery.sqs ? (deps.parseQueue ?? parseQueueUrl)(delivery.url) : null
+  if (queue && "error" in queue) sqsError = queue.error
+  else if (queue) target = new URL(`${queue.endpoint}/`)
+
   let outcome: DeliveryOutcome
   // What the endpoint told us about itself, for the retry decision.
   const signals: FailureSignals = {}
@@ -354,15 +380,16 @@ export async function deliverWebhook(
   const startedAt = performance.now()
   try {
     if (transformError) throw new TransformFailed(transformError)
+    if (sqsError) throw new EgressRefused(sqsError, "blocked")
     // ⚠ RESOLVED AND VETTED ON EVERY ATTEMPT, THEN CONNECTED TO BY ADDRESS.
     // See egress.ts: the string check at registration cannot see what DNS says
     // today, and connecting by name would resolve a second time.
     const verdict = await (deps.vet ?? ((host, s) => vetHost(host, { signal: s })))(
-      url.hostname,
+      target.hostname,
       signal,
     )
     if (!verdict.ok) throw new EgressRefused(verdict.reason, verdict.kind)
-    const pinned = pinnedRequest(url, verdict)
+    const pinned = pinnedRequest(target, verdict)
 
     sent = {
       // ⚠ THE CUSTOMER'S HEADERS FIRST, OURS AFTER, so ours win even if the
@@ -378,14 +405,49 @@ export async function deliverWebhook(
       "webhook-id": delivery.id,
       "webhook-timestamp": timestampFor(now),
     }
-    const response = await doFetch(pinned.url, {
+    const signature = signWithKeys(delivery.keys, delivery.id, body, now)
+    let wire: { method: string; headers: Record<string, string>; body: string } = {
       method: request.method,
       // The signature goes on the request only; the attempt log keeps `sent`.
-      headers: {
-        ...sent,
-        "webhook-signature": signWithKeys(delivery.keys, delivery.id, body, now),
-      },
+      headers: { ...sent, "webhook-signature": signature },
       body,
+    }
+    if (queue && !("error" in queue) && delivery.sqs) {
+      const message = await sqsSendMessage({
+        queue,
+        queueUrl: delivery.url,
+        credentials: delivery.sqs,
+        body,
+        attributes: {
+          "webhook-id": delivery.id,
+          "webhook-timestamp": sent["webhook-timestamp"]!,
+          "webhook-signature": signature,
+          "webhook-event-type": delivery.eventType,
+        },
+        groupId: delivery.endpointId,
+        deduplicationId: delivery.id,
+        now,
+      })
+      // What the log keeps of it: the AWS headers but never `authorization`,
+      // and the webhook's own headers as the attributes they became.
+      sent = {
+        ...Object.fromEntries(
+          Object.entries(message.headers).filter(([k]) => k !== "authorization"),
+        ),
+        host: pinned.host,
+        "webhook-id": delivery.id,
+        "webhook-timestamp": sent["webhook-timestamp"]!,
+      }
+      wire = {
+        method: "POST",
+        headers: { ...message.headers, host: pinned.host },
+        body: message.body,
+      }
+    }
+    const response = await doFetch(pinned.url, {
+      method: wire.method,
+      headers: wire.headers,
+      body: wire.body,
       // ⚠ NOT OPTIONAL. See the note at the top of this file: a silent socket
       // is the failure that takes the whole queue down, not a 500.
       signal,
@@ -437,7 +499,7 @@ export async function deliverWebhook(
     attempt: made,
     trigger: job.trigger ?? "scheduled",
     lane,
-    url: url.toString(),
+    url: delivery.sqs ? delivery.url : url.toString(),
     requestHeaders: sent,
     ...(received
       ? {

@@ -178,6 +178,7 @@ describe("delivery during a grace period", () => {
           headers: {},
           transformation: null,
           transformed: null,
+          sqs: null,
         }),
         markDelivered: mock(async () => {}),
         markFailed: mock(async () => {}),

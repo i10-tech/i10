@@ -4,5 +4,5 @@
  * until a poll acknowledges it. Every path that writes delivery rows spreads
  * this in: ingestion, health fan-out, test events.
  */
-export const pollingRow = (kind: "http" | "polling") =>
+export const pollingRow = (kind: "http" | "polling" | "sqs") =>
   kind === "polling" ? { nextAttemptAt: null } : {}
