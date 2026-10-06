@@ -217,6 +217,19 @@ Built in #284 (`apps/api/src/webhooks/health.ts`):
   - Health applies: a poller with events waiting and no poll for 15 minutes is
     failing, and after the plan's stretch it is disabled.
 - **Destinations:** deliver to SQS, Pub/Sub, Kafka or similar, not only HTTP.
+  SQS built in #303:
+  - The same engine with a different last hop: a SigV4-signed `SendMessage`,
+    signed by AWS's own signer, sent through our vetted, address-pinned fetch.
+  - Only `https://sqs.<region>.amazonaws.com/<account>/<queue>`, checked on
+    write and again at every send.
+  - The Standard Webhooks headers travel as message attributes, so a consumer
+    verifies exactly as an HTTP receiver does.
+  - FIFO queues get the endpoint as the group and the delivery as the
+    deduplication id.
+  - The customer's keys are sealed and never returned. Assuming a customer
+    role instead of storing keys is the better long-term shape; it needs an
+    STS permission on our side first.
+  - Pub/Sub and Kafka wait until someone asks.
 - **Transformations:** a customer-supplied function that reshapes the payload
   per endpoint. The template renderer's sandbox is the precedent. Built in
   #302:

@@ -13,6 +13,7 @@ import type { PolicyRules, RetryRules } from "../../src/webhooks/schedule.js"
 import { secretBox } from "../../src/webhooks/signing.js"
 import { webhookEndpointStore } from "../../src/webhooks/store.js"
 import { transformer } from "../../src/webhooks/transform.js"
+import { parseQueueUrl, type QueueAddress } from "../../src/webhooks/sqs.js"
 import { startReceiver, type Receiver } from "./receiver.js"
 
 /**
@@ -39,6 +40,28 @@ export const enabled = Boolean(DATABASE_URL && REDIS_URL)
  * template-renderer` (http://localhost:8788, secret `local-dev-secret`).
  */
 export const RENDERER_URL = process.env.WEBHOOKS_TEST_RENDERER_URL
+/**
+ * A local SQS for the destination scenarios (#303): ElasticMQ, run with
+ * `docker run -p 9324:9324 softwaremill/elasticmq-native`. Given as
+ * `http://127.0.0.1:9324`, an address the lab already allow-lists.
+ */
+export const SQS_URL = process.env.WEBHOOKS_TEST_SQS_URL
+const labQueue = (url: string): QueueAddress | { error: string } => {
+  const m = SQS_URL
+    ? new RegExp(
+        `^${SQS_URL.replace(/[.]/g, "\\.")}/(\\d{12})/([\\w-]+(\\.fifo)?)$`,
+      ).exec(url)
+    : null
+  return m
+    ? {
+        region: "us-east-1",
+        account: m[1]!,
+        name: m[2]!,
+        fifo: Boolean(m[3]),
+        endpoint: SQS_URL!,
+      }
+    : parseQueueUrl(url)
+}
 const labTransformer = RENDERER_URL
   ? transformer({ url: RENDERER_URL, secret: "local-dev-secret" })
   : undefined
@@ -110,6 +133,14 @@ export interface Lab {
     path: string,
     opts?: { events?: WebhookEventType[]; host?: string; rateLimit?: number },
   ) => Promise<{ id: string; secret: string; url: string }>
+  /** An SQS destination on the local queue, which it creates. */
+  sqsEndpoint: (
+    tenantId: string,
+    queue: string,
+    opts?: { create?: boolean; events?: WebhookEventType[] },
+  ) => Promise<{ id: string; secret: string; url: string }>
+  /** Calls the local SQS's JSON API, for setting up and reading queues. */
+  sqs: (action: string, body: object) => Promise<Record<string, unknown>>
   /** Records an event the way SES ingestion does, and queues its deliveries. */
   emit: (
     tenantId: string,
@@ -213,6 +244,7 @@ export async function startLab(): Promise<Lab> {
       breaker: LAB.breaker,
       failingAfterSeconds: LAB.failingAfterSeconds,
       ...(labTransformer ? { transformer: labTransformer } : {}),
+      parseQueue: labQueue,
       sweepEveryMs: LAB.sweepEveryMs,
       sweepGraceSeconds: LAB.sweepGraceSeconds,
       schedulerIntervalMs: 200,
@@ -238,6 +270,37 @@ export async function startLab(): Promise<Lab> {
                   values (${id}, ${`lab-${id.slice(0, 8)}`}, 'Lab', ${`lab-${id}`})`
       tenants.push(id)
       return id
+    },
+
+    async sqs(action, body) {
+      const res = await fetch(`${SQS_URL}/`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-amz-json-1.0",
+          "x-amz-target": `AmazonSQS.${action}`,
+        },
+        body: JSON.stringify(body),
+      })
+      return (await res.json()) as Record<string, unknown>
+    },
+
+    async sqsEndpoint(tenantId, queue, opts = {}) {
+      if (opts.create !== false) {
+        await lab.sqs("CreateQueue", {
+          QueueName: queue,
+          ...(queue.endsWith(".fifo") ? { Attributes: { FifoQueue: "true" } } : {}),
+        })
+      }
+      const key = generateKey("hmac_sha256")
+      const url = `${SQS_URL}/000000000000/${queue}`
+      const [row] = await owner`
+        insert into core.webhook_endpoints
+          (tenant_id, kind, url, secret_ciphertext, events, aws_access_key_id, aws_secret_ciphertext)
+        values (${tenantId}, 'sqs', ${url}, ${secrets.seal(key.secret)},
+                ${opts.events ?? ALL_EVENTS}::core.webhook_event_type[],
+                'AKIALABLABLABLAB0000', ${secrets.seal("lab-secret-access-key-0000")})
+        returning id`
+      return { id: row!.id as string, secret: key.secret, url }
     },
 
     async endpoint(tenantId, path, opts = {}) {

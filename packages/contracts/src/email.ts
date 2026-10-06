@@ -406,19 +406,32 @@ export const webhookTransformationSchema = z.object({
 })
 
 /** How an endpoint gets its events: POSTed to its URL, or pulled with a cursor. */
-export const webhookEndpointKind = z.enum(["http", "polling"])
+export const webhookEndpointKind = z.enum(["http", "polling", "sqs"])
+
+/**
+ * For an `sqs` endpoint: keys for an IAM user that can do nothing but
+ * `sqs:SendMessage` on that one queue. Write-only; never returned.
+ */
+export const awsCredentialsSchema = z.object({
+  access_key_id: z.string().min(16).max(128),
+  secret_access_key: z.string().min(16).max(256),
+})
 
 export const createWebhookEndpointSchema = z.object({
   /**
    * `polling` endpoints have no URL: you pull their events from
-   * `GET /webhook-endpoints/{id}/poll`. Defaults to `http`.
+   * `GET /webhook-endpoints/{id}/poll`. `sqs` endpoints send each event to
+   * an Amazon SQS queue. Defaults to `http`.
    */
   kind: webhookEndpointKind.optional(),
   /**
-   * Required for `http`, refused for `polling`. ⚠ https, public, and not an
-   * IP literal - see webhooks/endpoints.ts.
+   * Required for `http` and `sqs`, refused for `polling`. For `sqs`, the queue
+   * URL, `https://sqs.<region>.amazonaws.com/<account>/<queue>`. ⚠ https,
+   * public, and not an IP literal - see webhooks/endpoints.ts.
    */
   url: z.url().optional(),
+  /** Required for `sqs`, refused otherwise. */
+  aws_credentials: awsCredentialsSchema.optional(),
   /** At least one, because an endpoint subscribed to nothing is a silent bug. */
   events: z.array(webhookEventName).min(1),
   description: z.string().max(255).optional(),
@@ -462,6 +475,8 @@ export const updateWebhookEndpointSchema = z
       .optional(),
     filter_tags: z.record(z.string(), z.string()).nullable().optional(),
     transformation: webhookTransformationSchema.nullable().optional(),
+    /** For `sqs`: new keys, replacing the old at once. */
+    aws_credentials: awsCredentialsSchema.optional(),
   })
   .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update." })
 
@@ -494,6 +509,8 @@ export const webhookEndpointSchema = z.object({
   poll_cursor: z.string().nullable(),
   last_polled_at: z.string().nullable(),
   transformation: webhookTransformationSchema.nullable(),
+  /** For `sqs`: the access key id in use. The secret is never returned. */
+  aws_access_key_id: z.string().nullable(),
   created_at: z.string(),
   signature_scheme: webhookSignatureScheme,
   /** Deliveries a second, at most; null for no limit. */

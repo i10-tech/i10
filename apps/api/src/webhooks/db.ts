@@ -246,7 +246,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
         // Only what is sent goes to the queue; a polling endpoint's rows wait
         // for its poll (#301).
         const sent = new Set(
-          endpoints.filter((e) => e.kind === "http").map((e) => e.id),
+          endpoints.filter((e) => e.kind !== "polling").map((e) => e.id),
         )
         return {
           status: "recorded" as const,
@@ -369,6 +369,9 @@ export function webhookDeliveryOps(
             transformation: webhookEndpoints.transformation,
             transformationEnabled: webhookEndpoints.transformationEnabled,
             transformed: webhookDeliveries.transformed,
+            kind: webhookEndpoints.kind,
+            awsAccessKeyId: webhookEndpoints.awsAccessKeyId,
+            awsSecretCiphertext: webhookEndpoints.awsSecretCiphertext,
           })
           .from(webhookDeliveries)
           .innerJoin(
@@ -441,6 +444,14 @@ export function webhookDeliveryOps(
           headers: row.headers ?? {},
           transformation: row.transformationEnabled ? row.transformation : null,
           transformed: row.transformed ?? null,
+          // ⚠ OPENED HERE, AT SEND, LIKE THE SIGNING KEYS, and never logged.
+          sqs:
+            row.kind === "sqs" && row.awsAccessKeyId && row.awsSecretCiphertext
+              ? {
+                  accessKeyId: row.awsAccessKeyId,
+                  secretAccessKey: opts.secrets.open(row.awsSecretCiphertext),
+                }
+              : null,
         }
       })
     },

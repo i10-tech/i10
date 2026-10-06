@@ -50,6 +50,7 @@ const endpoint = {
   poll_cursor: null,
   last_polled_at: null,
   transformation: null,
+  aws_access_key_id: null,
   created_at: "2026-09-03T10:00:00.000Z",
   signature_scheme: "hmac_sha256" as const,
   rate_limit: null,

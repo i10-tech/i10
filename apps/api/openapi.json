@@ -1691,7 +1691,8 @@
             "type": "string",
             "enum": [
               "http",
-              "polling"
+              "polling",
+              "sqs"
             ]
           },
           "url": {
@@ -1780,6 +1781,12 @@
             "required": [
               "code",
               "enabled"
+            ]
+          },
+          "aws_access_key_id": {
+            "type": [
+              "string",
+              "null"
             ]
           },
           "created_at": {
@@ -1871,6 +1878,7 @@
           "poll_cursor",
           "last_polled_at",
           "transformation",
+          "aws_access_key_id",
           "created_at",
           "signature_scheme",
           "rate_limit",
@@ -1889,12 +1897,32 @@
             "type": "string",
             "enum": [
               "http",
-              "polling"
+              "polling",
+              "sqs"
             ]
           },
           "url": {
             "type": "string",
             "format": "uri"
+          },
+          "aws_credentials": {
+            "type": "object",
+            "properties": {
+              "access_key_id": {
+                "type": "string",
+                "minLength": 16,
+                "maxLength": 128
+              },
+              "secret_access_key": {
+                "type": "string",
+                "minLength": 16,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "access_key_id",
+              "secret_access_key"
+            ]
           },
           "events": {
             "type": "array",
@@ -1999,7 +2027,8 @@
                   "type": "string",
                   "enum": [
                     "http",
-                    "polling"
+                    "polling",
+                    "sqs"
                   ]
                 },
                 "url": {
@@ -2090,6 +2119,12 @@
                     "enabled"
                   ]
                 },
+                "aws_access_key_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "created_at": {
                   "type": "string"
                 },
@@ -2173,6 +2208,7 @@
                 "poll_cursor",
                 "last_polled_at",
                 "transformation",
+                "aws_access_key_id",
                 "created_at",
                 "signature_scheme",
                 "rate_limit",
@@ -2311,6 +2347,25 @@
             "required": [
               "code",
               "enabled"
+            ]
+          },
+          "aws_credentials": {
+            "type": "object",
+            "properties": {
+              "access_key_id": {
+                "type": "string",
+                "minLength": 16,
+                "maxLength": 128
+              },
+              "secret_access_key": {
+                "type": "string",
+                "minLength": 16,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "access_key_id",
+              "secret_access_key"
             ]
           }
         }
@@ -4591,7 +4646,8 @@
                       "type": "string",
                       "enum": [
                         "http",
-                        "polling"
+                        "polling",
+                        "sqs"
                       ]
                     },
                     "url": {
@@ -4682,6 +4738,12 @@
                         "enabled"
                       ]
                     },
+                    "aws_access_key_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -4765,6 +4827,7 @@
                     "poll_cursor",
                     "last_polled_at",
                     "transformation",
+                    "aws_access_key_id",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -4864,7 +4927,8 @@
                       "type": "string",
                       "enum": [
                         "http",
-                        "polling"
+                        "polling",
+                        "sqs"
                       ]
                     },
                     "url": {
@@ -4955,6 +5019,12 @@
                         "enabled"
                       ]
                     },
+                    "aws_access_key_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -5038,6 +5108,7 @@
                     "poll_cursor",
                     "last_polled_at",
                     "transformation",
+                    "aws_access_key_id",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5226,7 +5297,8 @@
                       "type": "string",
                       "enum": [
                         "http",
-                        "polling"
+                        "polling",
+                        "sqs"
                       ]
                     },
                     "url": {
@@ -5317,6 +5389,12 @@
                         "enabled"
                       ]
                     },
+                    "aws_access_key_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -5400,6 +5478,7 @@
                     "poll_cursor",
                     "last_polled_at",
                     "transformation",
+                    "aws_access_key_id",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5491,7 +5570,8 @@
                       "type": "string",
                       "enum": [
                         "http",
-                        "polling"
+                        "polling",
+                        "sqs"
                       ]
                     },
                     "url": {
@@ -5582,6 +5662,12 @@
                         "enabled"
                       ]
                     },
+                    "aws_access_key_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -5665,6 +5751,7 @@
                     "poll_cursor",
                     "last_polled_at",
                     "transformation",
+                    "aws_access_key_id",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",
@@ -5756,7 +5843,8 @@
                       "type": "string",
                       "enum": [
                         "http",
-                        "polling"
+                        "polling",
+                        "sqs"
                       ]
                     },
                     "url": {
@@ -5847,6 +5935,12 @@
                         "enabled"
                       ]
                     },
+                    "aws_access_key_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -5930,6 +6024,7 @@
                     "poll_cursor",
                     "last_polled_at",
                     "transformation",
+                    "aws_access_key_id",
                     "created_at",
                     "signature_scheme",
                     "rate_limit",

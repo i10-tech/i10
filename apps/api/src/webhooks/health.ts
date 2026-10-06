@@ -268,7 +268,7 @@ export async function fanOutHealthEvent(
         })),
       )
       .returning({ id: webhookDeliveries.id, endpointId: webhookDeliveries.endpointId })
-    const sent = new Set(endpoints.filter((e) => e.kind === "http").map((e) => e.id))
+    const sent = new Set(endpoints.filter((e) => e.kind !== "polling").map((e) => e.id))
     return rows
       .filter((r) => sent.has(r.endpointId))
       .map((r) => ({

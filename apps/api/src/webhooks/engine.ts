@@ -12,6 +12,7 @@ import {
 import { dueDeliveries, webhookDeliveryOps } from "./db.js"
 import { fanOutAndEnqueue, fanOutHealthEvent, unfannedHealthEvents } from "./health.js"
 import { checkPollers } from "./poll.js"
+import type { QueueAddress } from "./sqs.js"
 import type { Transformer } from "./transform.js"
 import { runDueReplays } from "./replay.js"
 import { DELIVERY_TIMEOUT_MS, deliverWebhook, type DeliveryLane } from "./deliver.js"
@@ -91,6 +92,8 @@ export interface WebhookEngineOptions {
    * endpoint with a transformation switched on is deferred, never sent raw.
    */
   transformer?: Transformer
+  /** The lab's queue-URL reader, which also accepts its local SQS; see deliver.ts. */
+  parseQueue?: (url: string) => QueueAddress | { error: string }
 }
 
 export interface WebhookEngineHealth {
@@ -227,6 +230,7 @@ export function startWebhookEngine(opts: WebhookEngineOptions): WebhookEngine {
               }),
             log: opts.log,
             ...(opts.transformer ? { transformer: opts.transformer } : {}),
+            ...(opts.parseQueue ? { parseQueue: opts.parseQueue } : {}),
             ...(opts.rules ? { rules: opts.rules } : {}),
             ...(opts.holdMs !== undefined ? { holdMs: opts.holdMs } : {}),
             timeoutMs,

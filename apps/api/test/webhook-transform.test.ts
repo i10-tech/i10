@@ -137,6 +137,7 @@ const record = (over: Partial<DeliveryRecord> = {}): DeliveryRecord => ({
   headers: {},
   transformation: "export default (w) => w",
   transformed: null,
+  sqs: null,
   ...over,
 })
 const job = { deliveryId: record().id, endpointId: "ep-1", tenantId: "ten-1" }
