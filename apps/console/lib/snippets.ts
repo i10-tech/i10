@@ -14,7 +14,9 @@ export interface ApiSnippet {
   code: { label: string; code: string }[]
 }
 
-const BASE = "https://api.i10.tech"
+/** The public API, where a polling endpoint is pulled from. */
+export const API_ORIGIN = "https://api.i10.tech"
+const BASE = API_ORIGIN
 
 const curl = (method: string, path: string, body?: string) =>
   [

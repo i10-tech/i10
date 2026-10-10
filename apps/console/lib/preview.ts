@@ -33,6 +33,8 @@
  * protection is that turning it on is deliberate.
  */
 
+import { webhookRoutes } from "@/lib/preview-webhooks"
+
 export const PREVIEW =
   process.env.NODE_ENV !== "production" && process.env.CONSOLE_PREVIEW === "1"
 
@@ -1284,100 +1286,8 @@ const ROUTES: [
     }),
   ],
 
-  [
-    /^\/console\/webhook-endpoints$/,
-    () => ({
-      data: [
-        {
-          object: "webhook_endpoint" as const,
-          id: "5f7a1c00-0000-4000-8000-000000000001",
-          url: "https://api.acme.com/webhooks/i10",
-          events: ["email.delivered", "email.bounced", "email.complained"],
-          description: "Production handler",
-          enabled: true,
-          disabled_reason: null,
-          created_at: ago(140),
-          signature_scheme: "hmac_sha256" as const,
-          rate_limit: null,
-          public_key: null,
-          // A grace period in progress, so the warning line can be reviewed.
-          previous_secrets: [
-            {
-              signature_scheme: "hmac_sha256" as const,
-              expires_at: new Date(Date.now() + 5 * 3600_000).toISOString(),
-            },
-          ],
-        },
-      ],
-    }),
-  ],
-
-  [
-    /^\/console\/webhook-endpoints\/([^/]+)\/rotate-secret$/,
-    (m, _q, _method, body) => {
-      const b = (body ?? {}) as {
-        previous_secret?: string
-        expires_in?: number
-        signature_scheme?: string
-      }
-      const ed = b.signature_scheme === "ed25519"
-      return {
-        object: "webhook_endpoint" as const,
-        id: m[1]!,
-        url: "https://api.acme.com/webhooks/i10",
-        events: ["email.delivered", "email.bounced", "email.complained"],
-        description: "Production handler",
-        enabled: true,
-        disabled_reason: null,
-        created_at: ago(140),
-        signature_scheme: ed ? ("ed25519" as const) : ("hmac_sha256" as const),
-        public_key: ed ? "whpk_3vYpPreviewPublicKeyOnlyNotARealKey0000000=" : null,
-        rate_limit: null,
-        previous_secrets:
-          b.previous_secret === "expire"
-            ? [
-                {
-                  signature_scheme: "hmac_sha256" as const,
-                  expires_at: new Date(
-                    Date.now() + (b.expires_in ?? 3600) * 1000,
-                  ).toISOString(),
-                },
-              ]
-            : [],
-        secret: ed ? null : "whsec_cHJldmlldy1vbmx5LW5vdC1hLXJlYWwtc2VjcmV0",
-      }
-    },
-  ],
-
-  [
-    /^\/console\/webhook-endpoints\/([^/]+)\/revoke-previous-secrets$/,
-    (m) => ({ id: m[1]!, previous_secrets: [] }),
-  ],
-
-  [
-    /^\/console\/webhook-deliveries$/,
-    (_m, query) => ({
-      data: Array.from({ length: 16 }, (_, i) => ({
-        id: `6f7a1c00-0000-4000-8000-${(i + 1).toString().padStart(12, "0")}`,
-        endpoint_id: "5f7a1c00-0000-4000-8000-000000000001",
-        endpoint_url: "https://api.acme.com/webhooks/i10",
-        event_type: ["email.delivered", "email.bounced", "email.complained"][i % 3]!,
-        status: i % 6 === 0 ? "failed" : "delivered",
-        attempts: i % 6 === 0 ? 8 : 1,
-        response_status: i % 6 === 0 ? 500 : 200,
-        last_error: i % 6 === 0 ? "500 Internal Server Error" : null,
-        occurred_at: ago(0, i),
-        delivered_at: i % 6 === 0 ? null : ago(0, i),
-        created_at: ago(0, i),
-      })).filter(
-        (d) =>
-          (!q(query, "status") || d.status === q(query, "status")) &&
-          (!q(query, "event_type") || d.event_type === q(query, "event_type")) &&
-          (!q(query, "endpoint_id") || d.endpoint_id === q(query, "endpoint_id")),
-      ),
-      nextCursor: null,
-    }),
-  ],
+  // ⚠ THE WEBHOOK SCREENS' FIXTURES LIVE IN THEIR OWN MODULE (#286).
+  ...webhookRoutes(PREVIEW_NOT_FOUND),
 
   [
     // ⚠ AT RISK IN PREVIEW, so the amber banner, the rail pill and the

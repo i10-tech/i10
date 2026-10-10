@@ -4,6 +4,7 @@ import { statsQuery, windowFrom } from "../webhook-stats.js"
 import { POLLING_REPLAY } from "../../webhooks/replay.js"
 import {
   createReplayMissingSchema,
+  createWebhookEndpointSchema,
   createReplaySchema,
   rotateWebhookSecretSchema,
   sendTestEventSchema,
@@ -329,26 +330,37 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     return c.json({ data: await d.webhooks.list(tenantId) })
   })
 
+  /**
+   * ⚠ THE WHOLE CREATE CONTRACT, AS THE PUBLIC API TAKES IT. This route once
+   * picked out `url`, `events`, `description` and the scheme by hand, so a
+   * polling or SQS endpoint, headers, filters and a rate limit could be made
+   * through the API and not through the console.
+   */
   app.post("/webhook-endpoints", async (c) => {
     if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
     const { tenantId } = c.get("auth")
-    const body = await readJson(c)
+    const parsed = createWebhookEndpointSchema.safeParse(await readJson(c))
+    if (!parsed.success) {
+      return c.json(
+        validation(parsed.error.issues[0]?.message ?? "Invalid endpoint."),
+        422,
+      )
+    }
 
-    const created = await d.webhooks.create(tenantId, {
-      url: typeof body?.url === "string" ? body.url : "",
-      events: Array.isArray(body?.events) ? body.events : [],
-      ...(typeof body?.description === "string"
-        ? { description: body.description }
-        : {}),
-      ...(body?.signature_scheme === "ed25519" ||
-      body?.signature_scheme === "hmac_sha256"
-        ? { signature_scheme: body.signature_scheme }
-        : {}),
-    })
-
+    const created = await d.webhooks.create(tenantId, parsed.data)
     return created.status === "created"
       ? c.json(created.endpoint, 201)
       : c.json(validation(created.reason), 422)
+  })
+
+  app.get("/webhook-endpoints/:id", async (c) => {
+    if (!d.webhooks) return c.json(notWired("Webhooks"), 501)
+    const id = asId(c.req.param("id"))
+    if (!id) return c.json(notFound("No endpoint with that id."), 404)
+    const endpoint = await d.webhooks.get(c.get("auth").tenantId, id)
+    return endpoint
+      ? c.json(endpoint)
+      : c.json(notFound("No endpoint with that id."), 404)
   })
 
   app.delete("/webhook-endpoints/:id", async (c) => {

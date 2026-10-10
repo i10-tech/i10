@@ -61,6 +61,11 @@ const TONE: Record<string, { tone: Tone; label: string }> = {
   // Webhook endpoints and deliveries.
   enabled: { tone: "success", label: "Enabled" },
   disabled: { tone: "neutral", label: "Disabled" },
+  // An endpoint's health (#284), and a replay running in the background.
+  failing: { tone: "warning", label: "Failing" },
+  recovered: { tone: "success", label: "Recovered" },
+  running: { tone: "info", label: "Running" },
+  done: { tone: "success", label: "Done" },
 
   // Broadcasts.
   draft: { tone: "neutral", label: "Draft" },

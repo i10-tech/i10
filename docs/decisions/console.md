@@ -83,6 +83,9 @@ delegation, route split).
 
 /api-keys                 List, create (shown once), rotate, revoke
 /webhooks                 Endpoints and deliveries, as two tabs on one page
+/webhooks/[id]            One endpoint: stats, health, deliveries, replays,
+                          transformation, settings (#286)
+/webhooks/deliveries/[id] One delivery: payload, what was sent, every attempt
 /mailboxes                i10-only: human mailboxes on your domains
 
 /settings                 Workspace name, identifiers, danger zone
