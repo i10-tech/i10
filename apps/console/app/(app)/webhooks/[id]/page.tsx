@@ -17,6 +17,7 @@ import { ReplaysPanel } from "@/components/webhooks/replays-panel"
 import { StatsPanel } from "@/components/webhooks/stats-panel"
 import { TransformationPanel } from "@/components/webhooks/transformation-panel"
 import { tryApi } from "@/lib/api"
+import { rangeStart } from "@/lib/range"
 import type {
   DeliveryRow,
   Page as ApiPage,
@@ -83,6 +84,9 @@ export default async function WebhookEndpointPage({
     window?: string
     status?: string
     event_type?: string
+    http_class?: string
+    q?: string
+    days?: string
     cursor?: string
   }>
 }) {
@@ -115,6 +119,9 @@ export default async function WebhookEndpointPage({
         endpoint_id: endpoint.id,
         status: query.status,
         event_type: query.event_type,
+        http_class: query.http_class,
+        q: query.q,
+        since: rangeStart(query.days),
         cursor: query.cursor,
         limit: 50,
       },

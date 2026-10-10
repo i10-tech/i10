@@ -3,7 +3,21 @@ import type {
   WebhookDeliveryDetail,
   WebhookHealthEvent,
 } from "@repo/contracts"
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm"
+import {
+  and,
+  asc,
+  between,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { webhookAttempts, webhookDeliveries } from "../db/core.js"
 import { listHealthEvents } from "./health.js"
@@ -38,16 +52,101 @@ export const presentDelivery = (d: DeliveryRow): WebhookDelivery => ({
 
 export type ExpungeResult = "expunged" | "pending" | "not_found"
 
+/** What a delivery's last response says, in the bands a person acts on. */
+export const DELIVERY_HTTP_CLASSES = ["2xx", "4xx", "5xx", "none"] as const
+export type DeliveryHttpClass = (typeof DELIVERY_HTTP_CLASSES)[number]
+
 export interface DeliveryFilter {
   endpointId?: string
   status?: "pending" | "delivered" | "failed"
   eventType?: string
   /** Created at or after. */
-  after?: Date
+  since?: Date
   /** Created before. */
-  before?: Date
+  until?: Date
+  /**
+   * The band of `response_status`, the last status any attempt saw. `none` is
+   * attempted, undelivered and never answered: every attempt timed out, was
+   * refused, failed its handshake or its transformation.
+   */
+  httpClass?: DeliveryHttpClass
+  /** A prefix of the delivery's id or of the message it is about. */
+  q?: string
   cursor?: string
   limit?: number
+}
+
+/**
+ * The uuids that start with a hex prefix, as the closed range between the
+ * smallest and the largest of them; null when `q` cannot begin a uuid.
+ *
+ * ⚠ A RANGE, NOT `id::text LIKE 'abc%'`. Postgres orders uuids by their bytes,
+ * which is the order of their hex, so every uuid with a prefix sits between
+ * the prefix padded with 0s and the prefix padded with fs - and that is a
+ * range the primary key's btree answers. The text cast reads every row the
+ * workspace has. Dashes are dropped so a pasted id matches however it is cut.
+ */
+export function uuidPrefixRange(q: string): { lo: string; hi: string } | null {
+  const hex = q.trim().toLowerCase().replaceAll("-", "")
+  if (!/^[0-9a-f]{1,32}$/.test(hex)) return null
+  const uuid = (h: string) =>
+    `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+  return { lo: uuid(hex.padEnd(32, "0")), hi: uuid(hex.padEnd(32, "f")) }
+}
+
+/**
+ * A delivery filter as WHERE clauses, for the API's list and the console's.
+ *
+ * ⚠ EVERY CLAUSE IS ON THE ROW ITSELF, never on the page, so the keyset cursor
+ * on (created_at, id) stays exact under any filter: the next page is simply
+ * the matching rows older than the last one shown. A filter applied after the
+ * fetch would return short or empty pages with more behind them.
+ */
+export function deliveryConditions(filter: DeliveryFilter): SQL[] {
+  const where: SQL[] = []
+  if (filter.endpointId) where.push(eq(webhookDeliveries.endpointId, filter.endpointId))
+  if (filter.status) where.push(eq(webhookDeliveries.status, filter.status))
+  // As text: an unknown event name matches nothing rather than failing a cast.
+  if (filter.eventType)
+    where.push(sql`${webhookDeliveries.eventType}::text = ${filter.eventType}`)
+  if (filter.since)
+    where.push(
+      sql`${webhookDeliveries.createdAt} >= ${filter.since.toISOString()}::timestamptz`,
+    )
+  if (filter.until)
+    where.push(
+      sql`${webhookDeliveries.createdAt} < ${filter.until.toISOString()}::timestamptz`,
+    )
+  if (filter.httpClass === "none") {
+    // ⚠ ATTEMPTED AND NOT DELIVERED. A delivery still waiting for its first
+    // try has no status yet, and neither does one a polling endpoint fetched
+    // (webhooks/poll.ts) - neither is an endpoint that never answers.
+    where.push(
+      isNull(webhookDeliveries.responseStatus),
+      gt(webhookDeliveries.attempts, 0),
+      ne(webhookDeliveries.status, "delivered"),
+    )
+  } else if (filter.httpClass) {
+    const floor = Number(filter.httpClass[0]) * 100
+    where.push(
+      gte(webhookDeliveries.responseStatus, floor),
+      lt(webhookDeliveries.responseStatus, floor + 100),
+    )
+  }
+  if (filter.q !== undefined) {
+    const range = uuidPrefixRange(filter.q)
+    // ⚠ NOTHING, NOT EVERYTHING, for a search that cannot be an id: ignoring
+    // it would answer "acme" with the whole log, as if it had matched.
+    where.push(
+      range
+        ? or(
+            between(webhookDeliveries.id, range.lo, range.hi),
+            between(webhookDeliveries.messageId, range.lo, range.hi),
+          )!
+        : sql`false`,
+    )
+  }
+  return where
 }
 
 /**
@@ -122,21 +221,7 @@ export function webhookHistory(
       const limit = Math.min(Math.max(filter.limit ?? 50, 1), 100)
       const cursor = filter.cursor ? decodeCursor(filter.cursor) : null
       return withTenant(db, tenantId, async (tx) => {
-        const where: SQL[] = []
-        if (filter.endpointId)
-          where.push(eq(webhookDeliveries.endpointId, filter.endpointId))
-        if (filter.status) where.push(eq(webhookDeliveries.status, filter.status))
-        // As text: an unknown event name matches nothing rather than failing a cast.
-        if (filter.eventType)
-          where.push(sql`${webhookDeliveries.eventType}::text = ${filter.eventType}`)
-        if (filter.after)
-          where.push(
-            sql`${webhookDeliveries.createdAt} >= ${filter.after.toISOString()}::timestamptz`,
-          )
-        if (filter.before)
-          where.push(
-            sql`${webhookDeliveries.createdAt} < ${filter.before.toISOString()}::timestamptz`,
-          )
+        const where = deliveryConditions(filter)
         if (cursor) {
           where.push(
             sql`(${webhookDeliveries.createdAt}, ${webhookDeliveries.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`,

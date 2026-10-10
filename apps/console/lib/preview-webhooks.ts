@@ -294,6 +294,20 @@ function catalog() {
 
 type Status = "pending" | "delivered" | "failed"
 
+/**
+ * How long ago the i-th delivery was made: minutes apart at the top, days
+ * apart at the bottom, so each date range in the filter keeps a different
+ * number of rows.
+ */
+const deliveryAge = (i: number) => Math.round(i ** 2.2 * 6 * 60_000)
+
+/**
+ * The message a delivery is about, which the search matches by prefix. Rows do
+ * not carry it, as the API's do not; eight messages share the forty rows.
+ */
+const messageOf = (deliveryId: string) =>
+  `0e5a1c0${Number(deliveryId.slice(-2)) % 8}${deliveryId.slice(8)}`
+
 /** Forty deliveries across the HTTP and SQS endpoints, newest first. */
 function deliveries() {
   const eps = endpoints()
@@ -312,6 +326,8 @@ function deliveries() {
       status,
       attempts:
         status === "delivered" ? (i % 7 === 3 ? 2 : 1) : status === "failed" ? 8 : 2,
+      // ⚠ A 403 BESIDE THE 503s, AND THE SLACK TRANSFORM THAT NEVER SENDS
+      // ANYTHING, so every band of the response filter has rows to show.
       response_status:
         ep.kind === "polling"
           ? null
@@ -319,18 +335,47 @@ function deliveries() {
             ? 200
             : ep.id === E.slack
               ? null
-              : 503,
+              : status === "pending"
+                ? 502
+                : ep.id === E.sqs && i % 8 === 2
+                  ? 403
+                  : 503,
       last_error:
         status === "delivered"
           ? null
           : ep.id === E.slack
             ? "Transformation failed: TypeError: Cannot read properties of undefined (reading 'join')"
-            : "503 Service Unavailable",
-      occurred_at: at(i * 37 * 60_000 + 5_000),
-      delivered_at: status === "delivered" ? at(i * 37 * 60_000) : null,
-      created_at: at(i * 37 * 60_000),
+            : status === "pending"
+              ? "502 Bad Gateway"
+              : ep.id === E.sqs && i % 8 === 2
+                ? "403 AccessDenied: the key cannot send to this queue"
+                : "503 Service Unavailable",
+      occurred_at: at(deliveryAge(i) + 5_000),
+      delivered_at: status === "delivered" ? at(deliveryAge(i)) : null,
+      created_at: at(deliveryAge(i)),
     }
   })
+}
+
+/** `http_class` as the API reads it: `none` is attempted, undelivered, unanswered. */
+function inClass(
+  d: { response_status: number | null; attempts: number; status: Status },
+  band: string | undefined,
+) {
+  const status = d.response_status
+  if (!band) return true
+  if (band === "none")
+    return status === null && d.attempts > 0 && d.status !== "delivered"
+  return status !== null && Math.floor(status / 100) === Number(band[0])
+}
+
+/** The API's id search: a hex prefix, dashes ignored; anything else matches nothing. */
+function matchesId(ids: string[], search: string | undefined) {
+  if (!search) return true
+  const hex = (v: string) => v.toLowerCase().replaceAll("-", "")
+  const prefix = hex(search.trim())
+  if (!/^[0-9a-f]{1,32}$/.test(prefix)) return false
+  return ids.some((id) => hex(id).startsWith(prefix))
 }
 
 function attempt(
@@ -417,7 +462,17 @@ function deliveryDetail(id: string) {
         kind: "timeout",
         error: "No answer within 10 seconds.",
       }),
-      attempt(3, url, t0 - 65_000, { status: 503, body: '{"error":"maintenance"}' }),
+      attempt(
+        3,
+        url,
+        t0 - 65_000,
+        row.response_status === 403
+          ? {
+              status: 403,
+              body: "<AccessDenied>Not authorized for sqs:SendMessage</AccessDenied>",
+            }
+          : { status: 503, body: '{"error":"maintenance"}' },
+      ),
       attempt(4, url, t0 - 10 * 60_000, {
         kind: "connect",
         error: "connect ECONNREFUSED",
@@ -843,7 +898,11 @@ export function webhookRoutes(notFound: symbol): Route[] {
           (d) =>
             (!q(query, "status") || d.status === q(query, "status")) &&
             (!q(query, "event_type") || d.event_type === q(query, "event_type")) &&
-            (!q(query, "endpoint_id") || d.endpoint_id === q(query, "endpoint_id")),
+            (!q(query, "endpoint_id") || d.endpoint_id === q(query, "endpoint_id")) &&
+            (!q(query, "since") || d.created_at >= q(query, "since")!) &&
+            (!q(query, "until") || d.created_at < q(query, "until")!) &&
+            inClass(d, q(query, "http_class")) &&
+            matchesId([d.id, messageOf(d.id)], q(query, "q")),
         ),
         nextCursor: null,
       }),

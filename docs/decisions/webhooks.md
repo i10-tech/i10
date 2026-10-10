@@ -261,6 +261,16 @@ All of the above, as console screens. Our UI, our design. Built in #286:
   with "Try it", and every setting by section.
 - `/webhooks/deliveries/[id]` shows the payload, what a transformation sent,
   and each attempt's request and response, with resend and expunge.
+- Both deliveries lists filter by date range, status, response class
+  (`2xx`, `4xx`, `5xx`, or `none`: attempted, undelivered and never answered)
+  and event, and search by a prefix of the delivery's id or its message's, as
+  Polar's dashboard does. The API takes the same as `since`, `until`,
+  `http_class` and `q` (`after` and `before` stay as deprecated aliases). The
+  class reads `response_status`, the last status any attempt saw, so a
+  timeout after a 503 still counts as 5xx. The search is a uuid range, not
+  `LIKE`, so the primary key and `webhook_deliveries_message_idx` answer it;
+  a uuidv7's first 12 hex digits are its millisecond, so a short prefix
+  matches everything written in that moment.
 - Creating asks for the kind first, then only that kind's fields.
 
 ---

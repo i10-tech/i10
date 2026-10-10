@@ -13,6 +13,8 @@ import {
   ListToolbar,
   UrlClearFilters,
   UrlFilterSelect,
+  UrlRangeSelect,
+  UrlSearchField,
 } from "@/components/list/toolbar"
 import { ListRegion, UrlList, useUrlList } from "@/components/list/url-state"
 import { LoadMore } from "@/components/load-more"
@@ -37,6 +39,11 @@ import { Time } from "@/components/time"
  * ⚠ EACH ROW OPENS THE DELIVERY'S OWN PAGE (#286): the payload, what was sent,
  * and every attempt with its request and response. The row used to unfold the
  * last error alone, which is the one thing that is never enough.
+ *
+ * ⚠ THE SEARCH IS AN ID PREFIX, NOT TEXT. Somebody arrives here holding an id -
+ * the `webhook-id` their receiver logged, or the email they are asking about -
+ * so the box matches the start of a delivery's id or of its message's, and the
+ * response filter answers "which of these never got an answer at all".
  */
 export function DeliveriesTable({
   deliveries,
@@ -53,16 +60,29 @@ export function DeliveriesTable({
   /** False on an endpoint's own page, where every row is that endpoint's. */
   showEndpoint?: boolean
 }) {
-  const filters = showEndpoint
-    ? ["status", "event_type", "endpoint_id"]
-    : ["status", "event_type"]
+  const filters = [
+    "q",
+    "days",
+    "status",
+    "http_class",
+    "event_type",
+    ...(showEndpoint ? ["endpoint_id"] : []),
+  ]
   return (
     <UrlList className="space-y-4">
       <ListToolbar>
+        <UrlSearchField
+          param="q"
+          placeholder="Delivery or message id"
+          label="Search deliveries by delivery or message id"
+          className="min-w-60"
+        />
+        <UrlRangeSelect className={HALF} />
         <UrlFilterSelect
           param="status"
           label="Delivery status"
           allLabel="All statuses"
+          className={HALF}
           options={[
             {
               value: "delivered",
@@ -74,11 +94,18 @@ export function DeliveriesTable({
           ]}
         />
         <UrlFilterSelect
+          param="http_class"
+          label="Response"
+          allLabel="All responses"
+          options={RESPONSE_CLASSES}
+          className={HALF}
+        />
+        <UrlFilterSelect
           param="event_type"
           label="Event"
           allLabel="All events"
           options={eventTypes.map((type) => ({ value: type, label: type }))}
-          className="w-56"
+          className={cn("w-56", HALF)}
         />
         {showEndpoint && endpoints.length > 1 && (
           <UrlFilterSelect
@@ -86,7 +113,7 @@ export function DeliveriesTable({
             label="Endpoint"
             allLabel="All endpoints"
             options={endpoints.map((e) => ({ value: e.id, label: shortName(e) }))}
-            className="w-64"
+            className={cn("w-64", HALF)}
           />
         )}
         <UrlClearFilters params={filters} />
@@ -102,6 +129,24 @@ export function DeliveriesTable({
     </UrlList>
   )
 }
+
+/**
+ * Two filters to a row on a phone, under the full-width search. Five selects
+ * at their desktop widths stacked one per row, each a different length.
+ */
+const HALF = "max-sm:w-[calc(50%-0.25rem)]"
+
+/** The bands of `response_status`, as the API's `http_class` takes them. */
+// ⚠ THE CODE ALONE, beside the Response column it filters: "4xx Client error"
+// did not fit the trigger at half a phone's width.
+const RESPONSE_CLASSES = [
+  { value: "2xx", label: "2xx", icon: <StatusDot tone="success" /> },
+  { value: "4xx", label: "4xx", icon: <StatusDot tone="warning" /> },
+  { value: "5xx", label: "5xx", icon: <StatusDot tone="danger" /> },
+  // Attempted, undelivered and never answered: timeouts, refused connections,
+  // failed handshakes or transformations. A polled delivery is not one.
+  { value: "none", label: "No response", icon: <StatusDot tone="neutral" /> },
+]
 
 function DeliveryRows({
   deliveries,
@@ -124,7 +169,7 @@ function DeliveryRows({
         title={filtered ? "No delivery matches" : "No deliveries yet"}
         description={
           filtered
-            ? "Try another status or event, or clear the filters."
+            ? "Try another filter, or the start of a different id, or clear the filters."
             : "Once mail starts moving, every event we send appears here with its response. Send a test event to see one now."
         }
         secondary={

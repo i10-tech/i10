@@ -1,0 +1,1 @@
+CREATE INDEX "webhook_deliveries_message_idx" ON "core"."webhook_deliveries" USING btree ("message_id");

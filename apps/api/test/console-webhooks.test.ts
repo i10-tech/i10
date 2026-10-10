@@ -117,3 +117,55 @@ describe("GET /console/webhook-endpoints/:id", () => {
     }
   })
 })
+
+describe("GET /console/webhook-deliveries filters", () => {
+  function appListing(seen: { filter?: unknown }) {
+    return createApp({
+      console: {
+        sessions,
+        tenants,
+        webhooks: {} as WebhookEndpointStore,
+        queries: {
+          listDeliveries: async (_tenant: string, filter: unknown) => {
+            seen.filter = filter
+            return { data: [], nextCursor: null }
+          },
+        } as unknown as ConsoleDeps["queries"],
+        usage: {} as ConsoleDeps["usage"],
+        onboarding: {} as ConsoleDeps["onboarding"],
+        profile: {} as ConsoleDeps["profile"],
+        marketing: {} as ConsoleDeps["marketing"],
+        log: { error: () => {}, warn: () => {} },
+      },
+    })
+  }
+
+  it("passes time, response class and search to the query", async () => {
+    const seen: { filter?: unknown } = {}
+    const res = await appListing(seen).request(
+      "/console/webhook-deliveries?since=2026-10-01T00:00:00.000Z&until=2026-10-02T00:00:00.000Z&http_class=none&q=0199a3f2",
+      { headers: BEARER },
+    )
+    expect(res.status).toBe(200)
+    expect(seen.filter).toEqual({
+      since: new Date("2026-10-01T00:00:00.000Z"),
+      until: new Date("2026-10-02T00:00:00.000Z"),
+      httpClass: "none",
+      q: "0199a3f2",
+    })
+  })
+
+  /*
+   * ⚠ A SEARCH THAT CANNOT BE AN ID IS STILL PASSED ON: the query answers it
+   * with nothing. Dropping it, as a bad time or class is dropped, would show
+   * the whole log under a search box that says "acme".
+   */
+  it("drops a bad time or class, and keeps a search that cannot match", async () => {
+    const seen: { filter?: unknown } = {}
+    await appListing(seen).request(
+      "/console/webhook-deliveries?since=yesterday&http_class=3xx&q=acme",
+      { headers: BEARER },
+    )
+    expect(seen.filter).toEqual({ q: "acme" })
+  })
+})

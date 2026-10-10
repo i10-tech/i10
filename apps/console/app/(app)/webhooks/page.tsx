@@ -16,6 +16,7 @@ import { UrlTabs } from "@/components/list/url-tabs"
 import { WebhookList } from "@/components/webhook-list"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
+import { rangeStart } from "@/lib/range"
 import { SNIPPETS } from "@/lib/snippets"
 import { WebhookAttentionBanner } from "@/components/webhooks/attention-banner"
 import type {
@@ -52,6 +53,9 @@ export default async function WebhooksPage({
     cursor?: string
     status?: string
     event_type?: string
+    http_class?: string
+    q?: string
+    days?: string
     endpoint_id?: string
   }>
 }) {
@@ -70,6 +74,9 @@ export default async function WebhooksPage({
         cursor: params.cursor,
         status: params.status,
         event_type: params.event_type,
+        http_class: params.http_class,
+        q: params.q,
+        since: rangeStart(params.days),
         endpoint_id: params.endpoint_id,
         limit: 50,
       },
