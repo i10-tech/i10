@@ -1,20 +1,14 @@
 "use client"
 
-import * as React from "react"
-import { AnimatePresence, motion } from "motion/react"
+import Link from "next/link"
 import { ChevronRight, SearchX, Send } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import { Status, StatusDot } from "@/components/status"
 import { cn } from "cn"
 import { EmptyState } from "@/components/empty-state"
-import {
-  ListCell,
-  ListHead,
-  ListHeader,
-  ListTable,
-  rowClass,
-} from "@/components/list/table"
+import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
+import { MotionBody, MotionRow } from "@/components/list/motion"
 import {
   ListToolbar,
   UrlClearFilters,
@@ -22,14 +16,12 @@ import {
 } from "@/components/list/toolbar"
 import { ListRegion, UrlList, useUrlList } from "@/components/list/url-state"
 import { LoadMore } from "@/components/load-more"
-import { WEBHOOK_EVENTS } from "@/components/webhook-events"
+import { shortName } from "@/lib/webhooks"
 import type { DeliveryRow, WebhookEndpoint } from "@/lib/types"
 import { Time } from "@/components/time"
 
-const FILTERS = ["status", "event_type", "endpoint_id"]
-
 /**
- * Every attempt we have made to call a customer's endpoint.
+ * Every delivery we have made, or are still making, to a customer's endpoint.
  *
  * ⚠ `response_status` IS THE COLUMN PEOPLE COME FOR. "It is not working" almost
  * always resolves to a 401 from their own auth middleware, a 404 from a route
@@ -38,19 +30,32 @@ const FILTERS = ["status", "event_type", "endpoint_id"]
  * glance.
  *
  * ⚠ AND A PENDING DELIVERY IS NOT A FAILED ONE. Retries run on a backoff for
- * hours; a row that says `pending` with three attempts is working as designed,
+ * hours; a row that says `retrying` with three attempts is working as designed,
  * and colouring it red would have somebody rewriting a handler that is about to
  * succeed.
+ *
+ * ⚠ EACH ROW OPENS THE DELIVERY'S OWN PAGE (#286): the payload, what was sent,
+ * and every attempt with its request and response. The row used to unfold the
+ * last error alone, which is the one thing that is never enough.
  */
 export function DeliveriesTable({
   deliveries,
   nextCursor,
   endpoints,
+  eventTypes,
+  showEndpoint = true,
 }: {
   deliveries: DeliveryRow[]
   nextCursor: string | null
   endpoints: WebhookEndpoint[]
+  /** From the catalog; the event filter's choices. */
+  eventTypes: string[]
+  /** False on an endpoint's own page, where every row is that endpoint's. */
+  showEndpoint?: boolean
 }) {
+  const filters = showEndpoint
+    ? ["status", "event_type", "endpoint_id"]
+    : ["status", "event_type"]
   return (
     <UrlList className="space-y-4">
       <ListToolbar>
@@ -72,25 +77,27 @@ export function DeliveriesTable({
           param="event_type"
           label="Event"
           allLabel="All events"
-          options={WEBHOOK_EVENTS.map((e) => ({ value: e.value, label: e.value }))}
-          className="w-52"
+          options={eventTypes.map((type) => ({ value: type, label: type }))}
+          className="w-56"
         />
-        {endpoints.length > 1 && (
+        {showEndpoint && endpoints.length > 1 && (
           <UrlFilterSelect
             param="endpoint_id"
             label="Endpoint"
             allLabel="All endpoints"
-            options={endpoints.map((e) => ({
-              value: e.id,
-              label: e.url.replace(/^https?:\/\//, ""),
-            }))}
+            options={endpoints.map((e) => ({ value: e.id, label: shortName(e) }))}
             className="w-64"
           />
         )}
-        <UrlClearFilters params={FILTERS} />
+        <UrlClearFilters params={filters} />
       </ListToolbar>
       <ListRegion>
-        <DeliveryRows deliveries={deliveries} nextCursor={nextCursor} />
+        <DeliveryRows
+          deliveries={deliveries}
+          nextCursor={nextCursor}
+          filters={filters}
+          showEndpoint={showEndpoint}
+        />
       </ListRegion>
     </UrlList>
   )
@@ -99,13 +106,16 @@ export function DeliveriesTable({
 function DeliveryRows({
   deliveries,
   nextCursor,
+  filters,
+  showEndpoint,
 }: {
   deliveries: DeliveryRow[]
   nextCursor: string | null
+  filters: string[]
+  showEndpoint: boolean
 }) {
   const { params, commit } = useUrlList()
-  const filtered = FILTERS.some((f) => params.get(f))
-  const [expanded, setExpanded] = React.useState<string | null>(null)
+  const filtered = filters.some((f) => params.get(f))
 
   if (deliveries.length === 0) {
     return (
@@ -115,14 +125,14 @@ function DeliveryRows({
         description={
           filtered
             ? "Try another status or event, or clear the filters."
-            : "Once an endpoint exists and mail starts moving, every attempt we make appears here with its response."
+            : "Once mail starts moving, every event we send appears here with its response. Send a test event to see one now."
         }
         secondary={
           filtered ? (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => commit((p) => FILTERS.forEach((f) => p.delete(f)))}
+              onClick={() => commit((p) => filters.forEach((f) => p.delete(f)))}
             >
               Clear filters
             </Button>
@@ -136,148 +146,88 @@ function DeliveryRows({
     <div className="space-y-4">
       <ListTable>
         <ListHeader>
-          <ListHead className="w-8 pr-0" />
           <ListHead>Event</ListHead>
           <ListHead className="w-[8rem]">Status</ListHead>
           <ListHead className="w-[6rem]">Response</ListHead>
-          <ListHead className="hidden lg:table-cell">Endpoint</ListHead>
-          <ListHead className="w-[6rem] text-right">Attempts</ListHead>
+          {showEndpoint && (
+            <ListHead className="hidden lg:table-cell">Endpoint</ListHead>
+          )}
+          <ListHead className="hidden w-[6rem] text-right sm:table-cell">
+            Attempts
+          </ListHead>
           <ListHead className="w-[9rem] text-right">When</ListHead>
+          <ListHead className="w-8 pl-0" />
         </ListHeader>
-        {/* No `divide-y`: the folded detail rows would each draw a second line. */}
-        <tbody>
+        <MotionBody>
           {deliveries.map((delivery) => {
-            const open = expanded === delivery.id
-            const failing = delivery.last_error !== null
-
+            const href = `/webhooks/deliveries/${delivery.id}`
             return (
-              <React.Fragment key={delivery.id}>
-                <tr
-                  className={cn(
-                    rowClass,
-                    "cursor-pointer border-t animate-in fade-in-0 duration-300 first:border-t-0",
-                    open && "bg-muted/40",
-                  )}
-                  onClick={() => setExpanded(open ? null : delivery.id)}
-                  aria-expanded={open}
-                >
-                  <ListCell className="pr-0">
-                    <ChevronRight
-                      className={cn(
-                        "size-3.5 text-muted-foreground transition-transform duration-200",
-                        open && "rotate-90",
-                      )}
-                    />
-                  </ListCell>
-                  <ListCell>
+              <MotionRow key={delivery.id} href={href}>
+                <ListCell>
+                  <Link href={href} className="outline-none focus-visible:underline">
                     <Badge variant="outline" className="font-mono text-2xs">
                       {delivery.event_type}
                     </Badge>
-                  </ListCell>
-                  <ListCell>
-                    <Status
-                      status={
-                        delivery.status === "delivered"
-                          ? "delivered"
-                          : delivery.status === "failed"
-                            ? "failed"
-                            : "queued"
-                      }
-                      label={
-                        delivery.status === "pending" ? "retrying" : delivery.status
-                      }
-                    />
-                  </ListCell>
-                  <ListCell>
-                    {delivery.response_status === null ? (
-                      <span className="text-xs text-muted-foreground">-</span>
-                    ) : (
-                      <span
-                        className={cn(
-                          "tabular font-mono text-xs",
-                          delivery.response_status >= 400 && "text-danger",
-                          delivery.response_status < 300 && "text-success",
-                        )}
-                      >
-                        {delivery.response_status}
-                      </span>
-                    )}
-                  </ListCell>
+                  </Link>
+                </ListCell>
+                <ListCell>
+                  <DeliveryStatus status={delivery.status} />
+                </ListCell>
+                <ListCell>
+                  <ResponseCode status={delivery.response_status} />
+                </ListCell>
+                {showEndpoint && (
                   <ListCell className="hidden max-w-0 lg:table-cell">
                     <span className="block truncate font-mono text-xs text-muted-foreground">
                       {/*
-                       * ⚠ A DELETED ENDPOINT LEAVES ITS DELIVERIES BEHIND - the
-                       * API left-joins for exactly this reason. "(deleted)" is
-                       * more useful than an empty cell, because the history of
-                       * a removed endpoint is usually what somebody is looking
-                       * for right after removing it.
+                       * ⚠ NULL IS A POLLING ENDPOINT OR A DELETED ONE: the API
+                       * left-joins so a removed endpoint's history stays, and
+                       * the two cannot be told apart from this row.
                        */}
-                      {delivery.endpoint_url ?? "(deleted endpoint)"}
+                      {delivery.endpoint_url ?? "No URL"}
                     </span>
                   </ListCell>
-                  <ListCell className="tabular text-right text-xs text-muted-foreground">
-                    {delivery.attempts}
-                  </ListCell>
-                  <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
-                    <Time iso={delivery.created_at} />
-                  </ListCell>
-                </tr>
-
-                <tr>
-                  <td colSpan={7} className="p-0">
-                    <AnimatePresence initial={false}>
-                      {open && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                          className="overflow-hidden bg-muted/20"
-                        >
-                          <dl className="grid gap-3 px-4 py-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-                            <div>
-                              <dt className="text-muted-foreground">Event occurred</dt>
-                              <dd className="mt-0.5 font-mono">
-                                <Time iso={delivery.occurred_at} mode="exact" />
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-muted-foreground">Delivered</dt>
-                              <dd className="mt-0.5 font-mono">
-                                {delivery.delivered_at ? (
-                                  <Time iso={delivery.delivered_at} mode="exact" />
-                                ) : (
-                                  "-"
-                                )}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-2">
-                              <dt className="text-muted-foreground">Delivery ID</dt>
-                              <dd className="mt-0.5 font-mono break-all">
-                                {delivery.id}
-                              </dd>
-                            </div>
-                            {failing && (
-                              <div className="sm:col-span-2 lg:col-span-4">
-                                <dt className="text-muted-foreground">Last error</dt>
-                                <dd className="mt-1 overflow-x-auto rounded-md border border-danger/25 bg-danger/5 px-3 py-2 font-mono text-2xs whitespace-pre-wrap">
-                                  {delivery.last_error}
-                                </dd>
-                              </div>
-                            )}
-                          </dl>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </td>
-                </tr>
-              </React.Fragment>
+                )}
+                <ListCell className="tabular hidden text-right text-xs text-muted-foreground sm:table-cell">
+                  {delivery.attempts}
+                </ListCell>
+                <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
+                  <Time iso={delivery.created_at} />
+                </ListCell>
+                <ListCell className="pl-0">
+                  <ChevronRight className="size-3.5 text-muted-foreground" />
+                </ListCell>
+              </MotionRow>
             )
           })}
-        </tbody>
+        </MotionBody>
       </ListTable>
 
       <LoadMore cursor={nextCursor} />
     </div>
+  )
+}
+
+export function DeliveryStatus({ status }: { status: DeliveryRow["status"] }) {
+  return (
+    <Status
+      status={status === "pending" ? "queued" : status}
+      label={status === "pending" ? "Retrying" : undefined}
+    />
+  )
+}
+
+export function ResponseCode({ status }: { status: number | null }) {
+  if (status === null) return <span className="text-xs text-muted-foreground">-</span>
+  return (
+    <span
+      className={cn(
+        "tabular font-mono text-xs",
+        status >= 400 && "text-danger",
+        status < 300 && "text-success",
+      )}
+    >
+      {status}
+    </span>
   )
 }

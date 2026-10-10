@@ -1,7 +1,17 @@
 "use client"
 
 import * as React from "react"
-import { Copy, KeyRound, SearchX, Trash2, Webhook } from "lucide-react"
+import {
+  Copy,
+  Inbox,
+  KeyRound,
+  Layers,
+  Pause,
+  Play,
+  SearchX,
+  Trash2,
+  Webhook,
+} from "lucide-react"
 import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import {
@@ -22,12 +32,28 @@ import {
 import { Status } from "@/components/status"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
-import { deleteWebhook, revokePreviousWebhookSecrets } from "@/lib/actions"
+import {
+  deleteWebhook,
+  revokePreviousWebhookSecrets,
+  updateWebhook,
+} from "@/lib/actions"
 import { RotateSecretDialog } from "@/components/webhook-rotate-dialog"
-import type { WebhookEndpoint } from "@/lib/types"
+import type { WebhookEndpoint, WebhookStats } from "@/lib/types"
+import {
+  KIND_LABEL,
+  STATE_LABEL,
+  endpointName,
+  endpointState,
+  errorRate,
+  formatErrorRate,
+  rateTone,
+  type EndpointState,
+} from "@/lib/webhooks"
 import { Time } from "@/components/time"
 import { toastDone, toastError } from "@/lib/toast"
 import { RowMenu } from "@/components/list/row-menu"
+import Link from "next/link"
+import { cn } from "cn"
 
 /**
  * The endpoints, as cards rather than a table.
@@ -41,8 +67,19 @@ import { RowMenu } from "@/components/list/row-menu"
  * ⚠ AND A DISABLED ENDPOINT SAYS SO LOUDLY. The API disables an endpoint after
  * repeated failures; from the customer's side their handler simply stopped
  * being called, with nothing to explain it. This badge is the explanation.
+ *
+ * ⚠ THE ERROR RATE IS OVER THE LAST 24 HOURS AND COUNTS ATTEMPTS, retries
+ * included (#300): a receiver that only answers on the third try is shown as
+ * the problem it is. An endpoint with no traffic shows a dash, not 0%.
  */
-export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
+export function WebhookList({
+  endpoints,
+  stats,
+}: {
+  endpoints: WebhookEndpoint[]
+  /** The last 24 hours across the workspace; null when it could not be read. */
+  stats: WebhookStats | null
+}) {
   const [deleting, setDeleting] = React.useState<WebhookEndpoint | null>(null)
   const [rotating, setRotating] = React.useState<WebhookEndpoint | null>(null)
 
@@ -55,27 +92,48 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
       <EmptyState
         icon={<Webhook />}
         title="No endpoints yet"
-        description="Add one to receive delivery, bounce and complaint events as they happen - rather than polling for them."
+        description="Add one to receive delivery, bounce and complaint events as they happen: posted to your URL, sent to an SQS queue, or waiting for you to fetch."
       />
     )
   }
+
+  const rates = new Map(
+    (stats?.by_endpoint ?? []).map((row) => [
+      row.endpoint_id,
+      errorRate(row.attempts, row.failed_attempts),
+    ]),
+  )
 
   const q = query.trim().toLowerCase()
   const shown = endpoints.filter(
     (e) =>
       (!q ||
-        e.url.toLowerCase().includes(q) ||
+        endpointName(e).toLowerCase().includes(q) ||
         (e.description ?? "").toLowerCase().includes(q) ||
         e.events.some((event) => event.includes(q))) &&
-      (!state || (state === "enabled") === e.enabled),
+      (!state || endpointState(e) === state),
   )
   const clear = () => {
     setQuery("")
     setState("")
   }
 
+  const setEnabled = async (endpoint: WebhookEndpoint, enabled: boolean) => {
+    const result = await updateWebhook(endpoint.id, { enabled })
+    if (!result.ok) {
+      toastError(
+        enabled ? "Could not resume the endpoint" : "Could not pause the endpoint",
+        {
+          description: result.error,
+        },
+      )
+      return
+    }
+    toastDone(enabled ? "Endpoint resumed" : "Endpoint paused")
+  }
+
   const menu = (endpoint: WebhookEndpoint) => (
-    <RowMenu label={endpoint.url}>
+    <RowMenu label={endpointName(endpoint)}>
       <DropdownMenuItem
         onSelect={() =>
           void navigator.clipboard.writeText(endpoint.id).then(
@@ -100,10 +158,12 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
           Copy public key
         </DropdownMenuItem>
       )}
-      <DropdownMenuItem onSelect={() => setRotating(endpoint)}>
-        <KeyRound />
-        Rotate signing secret
-      </DropdownMenuItem>
+      {endpoint.kind !== "polling" && (
+        <DropdownMenuItem onSelect={() => setRotating(endpoint)}>
+          <KeyRound />
+          Rotate signing secret
+        </DropdownMenuItem>
+      )}
       {endpoint.previous_secrets.length > 0 && (
         <DropdownMenuItem
           onSelect={async () => {
@@ -119,6 +179,17 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
         >
           <KeyRound />
           Revoke previous secrets now
+        </DropdownMenuItem>
+      )}
+      {endpoint.enabled ? (
+        <DropdownMenuItem onSelect={() => void setEnabled(endpoint, false)}>
+          <Pause />
+          Pause endpoint
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem onSelect={() => void setEnabled(endpoint, true)}>
+          <Play />
+          {endpoint.health === "disabled" ? "Turn back on" : "Resume endpoint"}
         </DropdownMenuItem>
       )}
       <DropdownMenuSeparator />
@@ -143,10 +214,9 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
           onValueChange={setState}
           label="State"
           allLabel="All endpoints"
-          options={[
-            { value: "enabled", label: "Enabled" },
-            { value: "disabled", label: "Disabled" },
-          ]}
+          options={(["healthy", "failing", "disabled", "paused"] as const).map(
+            (value) => ({ value, label: STATE_LABEL[value] }),
+          )}
         />
         <ViewToggle value={view} onChange={setView} />
       </ListToolbar>
@@ -176,37 +246,37 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
               <ListCard
                 key={endpoint.id}
                 id={endpoint.id}
+                href={`/webhooks/${endpoint.id}`}
                 menu={menu(endpoint)}
-                muted={!endpoint.enabled}
+                muted={!endpoint.enabled && endpoint.health !== "disabled"}
               >
                 <div className="flex min-w-0 items-center gap-3 pr-8">
                   <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
-                    <Webhook className="size-4" />
+                    <KindIcon kind={endpoint.kind} />
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate font-mono text-sm" title={endpoint.url}>
-                      {endpoint.url}
+                    <p
+                      className="truncate font-mono text-sm"
+                      title={endpointName(endpoint)}
+                    >
+                      {endpointName(endpoint)}
                     </p>
-                    {endpoint.description && (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {endpoint.description}
-                      </p>
-                    )}
+                    <p className="truncate text-xs text-muted-foreground">
+                      {KIND_LABEL[endpoint.kind]}
+                      {endpoint.description && ` · ${endpoint.description}`}
+                    </p>
                   </div>
                 </div>
                 <Events events={endpoint.events} />
                 <PreviousSecrets endpoint={endpoint} />
-                {!endpoint.enabled && endpoint.disabled_reason && (
-                  <p className="text-xs text-warning">
-                    Switched off: {endpoint.disabled_reason} Once the receiver is fixed,
-                    rotating the signing secret turns it back on.
+                {endpoint.health === "disabled" && endpoint.disabled_reason && (
+                  <p className="text-xs text-danger">
+                    Switched off by i10: {endpoint.disabled_reason}
                   </p>
                 )}
-                <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
-                  <Status status={endpoint.enabled ? "enabled" : "disabled"} />
-                  <span>
-                    Added <Time iso={endpoint.created_at} />
-                  </span>
+                <div className="mt-auto flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <EndpointStatus state={endpointState(endpoint)} />
+                  <ErrorRate rate={rates.get(endpoint.id) ?? null} />
                 </div>
               </ListCard>
             ))}
@@ -216,8 +286,9 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
             <ListHeader>
               <ListHead>Endpoint</ListHead>
               <ListHead className="w-[9rem]">Status</ListHead>
+              <ListHead className="hidden w-[7rem] sm:table-cell">Kind</ListHead>
               <ListHead className="hidden md:table-cell">Events</ListHead>
-              <ListHead className="w-[9rem] text-right">Added</ListHead>
+              <ListHead className="w-[7rem] text-right">Error rate</ListHead>
               <ListHead className="w-12">
                 <span className="sr-only">Actions</span>
               </ListHead>
@@ -226,12 +297,21 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
               {shown.map((endpoint) => (
                 <MotionRow
                   key={endpoint.id}
-                  className={endpoint.enabled ? undefined : "opacity-60"}
+                  href={`/webhooks/${endpoint.id}`}
+                  className={
+                    !endpoint.enabled && endpoint.health !== "disabled"
+                      ? "opacity-60"
+                      : undefined
+                  }
                 >
                   <ListCell className="max-w-0">
-                    <p className="truncate font-mono text-xs" title={endpoint.url}>
-                      {endpoint.url}
-                    </p>
+                    <Link
+                      href={`/webhooks/${endpoint.id}`}
+                      className="block truncate font-mono text-xs outline-none hover:underline focus-visible:underline"
+                      title={endpointName(endpoint)}
+                    >
+                      {endpointName(endpoint)}
+                    </Link>
                     {endpoint.description && (
                       <p className="truncate text-xs text-muted-foreground">
                         {endpoint.description}
@@ -239,13 +319,16 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
                     )}
                   </ListCell>
                   <ListCell>
-                    <Status status={endpoint.enabled ? "enabled" : "disabled"} />
+                    <EndpointStatus state={endpointState(endpoint)} />
+                  </ListCell>
+                  <ListCell className="hidden text-xs text-muted-foreground sm:table-cell">
+                    {KIND_LABEL[endpoint.kind]}
                   </ListCell>
                   <ListCell className="hidden md:table-cell">
                     <Events events={endpoint.events} compact />
                   </ListCell>
-                  <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
-                    <Time iso={endpoint.created_at} />
+                  <ListCell className="text-right text-xs">
+                    <ErrorRate rate={rates.get(endpoint.id) ?? null} bare />
                   </ListCell>
                   <ListCell className="py-1.5 text-right">{menu(endpoint)}</ListCell>
                 </MotionRow>
@@ -262,7 +345,7 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
         description="Events stop being delivered to it immediately. Past delivery attempts stay in the log."
         confirmLabel="Delete endpoint"
         doneLabel="Deleted"
-        confirmWord={deleting?.url}
+        confirmWord={deleting ? endpointName(deleting) : undefined}
         onConfirm={async () => {
           if (!deleting) return false
           const result = await deleteWebhook(deleting.id)
@@ -280,6 +363,45 @@ export function WebhookList({ endpoints }: { endpoints: WebhookEndpoint[] }) {
       />
     </>
   )
+}
+
+export function KindIcon({
+  kind,
+  className,
+}: {
+  kind: WebhookEndpoint["kind"]
+  className?: string
+}) {
+  const Icon = kind === "polling" ? Inbox : kind === "sqs" ? Layers : Webhook
+  return <Icon className={className ?? "size-4"} />
+}
+
+/** Where an endpoint stands, in the same words as its page. */
+export function EndpointStatus({ state }: { state: EndpointState }) {
+  return (
+    <Status
+      status={state === "disabled" ? "failed" : state === "paused" ? "disabled" : state}
+      label={STATE_LABEL[state]}
+    />
+  )
+}
+
+function ErrorRate({ rate, bare = false }: { rate: number | null; bare?: boolean }) {
+  const tone = rateTone(rate)
+  const value = (
+    <span
+      className={cn(
+        "tabular",
+        tone === "danger" && "text-danger",
+        tone === "warning" && "text-warning",
+        !tone && rate !== null && "text-foreground",
+      )}
+    >
+      {formatErrorRate(rate)}
+    </span>
+  )
+  if (bare) return value
+  return <span>{value} errors, 24h</span>
 }
 
 /**

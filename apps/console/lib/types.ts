@@ -299,36 +299,71 @@ export interface CreatedApiKey extends Omit<
   secret: string
 }
 
+export type WebhookEndpointKind = "http" | "polling" | "sqs"
+export type WebhookHealth = "healthy" | "failing" | "disabled"
+export type WebhookSignatureScheme = "hmac_sha256" | "ed25519"
+
+/** A function that reshapes each webhook before it is signed and sent (#302). */
+export interface WebhookTransformation {
+  code: string
+  /** Off keeps the code but sends webhooks as they are. */
+  enabled: boolean
+}
+
+/**
+ * ⚠ HAND-WRITTEN, AND IT MUST FOLLOW `webhookEndpointSchema` IN
+ * packages/contracts/src/email.ts. The console does not depend on the
+ * contracts package; a field added there and not here is a field the console
+ * cannot show.
+ */
 export interface WebhookEndpoint {
   object: "webhook_endpoint"
   id: string
-  url: string
+  /** `http` is POSTed to, `polling` is pulled from, `sqs` is sent to a queue. */
+  kind: WebhookEndpointKind
+  /** Null for a polling endpoint; the queue URL for SQS. */
+  url: string | null
   events: string[]
   description: string | null
   enabled: boolean
-  /** Why i10 switched it off, when it did. */
+  /** Why it is off: i10's reason, or "Paused." when the customer paused it. */
   disabled_reason: string | null
+  /** `failing` after 15 minutes with no success, `disabled` once i10 switched it off. */
+  health: WebhookHealth
+  health_changed_at: string | null
+  /** For polling: the last acknowledged cursor, and when it was last polled. */
+  poll_cursor: string | null
+  last_polled_at: string | null
+  transformation: WebhookTransformation | null
+  /** For SQS: the access key id in use. The secret is never returned. */
+  aws_access_key_id: string | null
   created_at: string
-  signature_scheme: "hmac_sha256" | "ed25519"
+  signature_scheme: WebhookSignatureScheme
   /** Deliveries a second, at most; null for no limit. */
   rate_limit: number | null
+  /** The names of the custom headers. Never the values: they are write-only. */
+  header_names: string[]
+  filter_domains: string[] | null
+  filter_tags: Record<string, string> | null
   /** The `whpk_` key an Ed25519 endpoint is verified with. Not a secret. */
   public_key: string | null
   /** Keys a rotation replaced that still sign until `expires_at`. */
   previous_secrets: {
-    signature_scheme: "hmac_sha256" | "ed25519"
+    signature_scheme: WebhookSignatureScheme
     expires_at: string
   }[]
   /** ⚠ Only on create and on rotate, and null for Ed25519. */
   secret?: string | null
 }
 
+export type WebhookDeliveryStatus = "pending" | "delivered" | "failed"
+
 export interface DeliveryRow {
   id: string
   endpoint_id: string
   endpoint_url: string | null
   event_type: string
-  status: string
+  status: WebhookDeliveryStatus
   attempts: number
   response_status: number | null
   last_error: string | null
@@ -336,6 +371,169 @@ export interface DeliveryRow {
   delivered_at: string | null
   created_at: string
 }
+
+export type WebhookErrorKind =
+  "status" | "timeout" | "connect" | "tls" | "blocked" | "unresolved" | "transform"
+
+/** One attempt to deliver a webhook: what was sent and what came back. */
+export interface WebhookAttempt {
+  object: "webhook_attempt"
+  id: string
+  /** 1 for the first. */
+  attempt: number
+  trigger: "scheduled" | "manual" | "recover" | "replay" | "test"
+  /** `retry` once it failed for longer than the hold and was moved aside. */
+  lane: "ordered" | "retry"
+  url: string
+  /** What i10 sent, without `webhook-signature`. */
+  request_headers: Record<string, string>
+  response_status: number | null
+  response_headers: Record<string, string> | null
+  /** The first 20KB of the endpoint's answer. */
+  response_body: string | null
+  duration_ms: number
+  error_kind: WebhookErrorKind | null
+  error: string | null
+  created_at: string
+}
+
+/** What a transformation turned a webhook into: exactly what is sent. */
+export interface WebhookTransformed {
+  method: "POST" | "PUT" | "PATCH"
+  url: string
+  headers: Record<string, string>
+  body: string
+}
+
+/** `GET /console/webhook-deliveries/:id`. */
+export interface WebhookDeliveryDetail {
+  object: "webhook_delivery"
+  id: string
+  endpoint_id: string
+  event_type: string
+  status: WebhookDeliveryStatus
+  attempts: number
+  sequence: number | null
+  next_attempt_at: string | null
+  response_status: number | null
+  last_error: string | null
+  occurred_at: string
+  delivered_at: string | null
+  created_at: string
+  /** The event's `data`. Empty once expunged. */
+  payload: Record<string, unknown>
+  payload_expunged_at: string | null
+  transformed: WebhookTransformed | null
+  /** Oldest first. */
+  attempt_log: WebhookAttempt[]
+}
+
+interface WebhookCounts {
+  delivered: number
+  failed: number
+  pending: number
+}
+
+interface WebhookAttemptCounts {
+  /** Every request we made, retries included. */
+  attempts: number
+  /** Requests that did not get a 2xx: the error rate is this over `attempts`. */
+  failed_attempts: number
+  p50_ms: number | null
+  p95_ms: number | null
+}
+
+export interface WebhookStatsBucket extends WebhookCounts, WebhookAttemptCounts {
+  start: string
+}
+
+export interface WebhookEventTypeStats extends WebhookCounts {
+  event_type: string
+}
+
+/** `GET /console/webhook-endpoints/:id/stats`. */
+export interface WebhookEndpointStats extends WebhookCounts, WebhookAttemptCounts {
+  object: "webhook_endpoint_stats"
+  endpoint_id: string
+  since: string
+  until: string
+  bucket: "hour" | "day"
+  /** delivered / (delivered + failed); null with nothing finished. */
+  success_rate: number | null
+  last_success_at: string | null
+  /** When the current unbroken run of failures began; null while healthy. */
+  failing_since: string | null
+  series: WebhookStatsBucket[]
+  by_event_type: WebhookEventTypeStats[]
+}
+
+/** `GET /console/webhook-stats`: the same across the workspace, per endpoint. */
+export interface WebhookStats extends WebhookCounts, WebhookAttemptCounts {
+  object: "webhook_stats"
+  since: string
+  until: string
+  bucket: "hour" | "day"
+  success_rate: number | null
+  series: WebhookStatsBucket[]
+  by_event_type: WebhookEventTypeStats[]
+  by_endpoint: (WebhookCounts & {
+    endpoint_id: string
+    success_rate: number | null
+    attempts: number
+    failed_attempts: number
+    last_success_at: string | null
+  })[]
+}
+
+/** One change in an endpoint's health (#284), newest first. */
+export interface WebhookHealthEvent {
+  object: "webhook_health_event"
+  id: string
+  endpoint_id: string
+  kind: "failing" | "disabled" | "recovered"
+  url: string | null
+  /** The last error, or why it was switched off; null for a recovery. */
+  reason: string | null
+  failing_since: string | null
+  created_at: string
+}
+
+/** A replay running in the background; poll until `done` or `failed`. */
+export interface WebhookReplay {
+  object: "webhook_replay"
+  id: string
+  endpoint_id: string
+  /** `replay`: existing deliveries. `replay_missing`: events it never got. */
+  kind: "replay" | "replay_missing"
+  status: "queued" | "running" | "done" | "failed"
+  filter: {
+    since: string
+    until: string
+    statuses?: ("delivered" | "failed")[]
+    event_type?: string
+  }
+  /** Deliveries sent so far. */
+  queued: number
+  examined: number
+  error: string | null
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+/** One entry of `GET /console/webhook-event-types` (#283). */
+export interface WebhookEventType {
+  object: "webhook_event_type"
+  type: string
+  version: number
+  description: string
+  schema: Record<string, unknown>
+  example: Record<string, unknown>
+}
+
+/** `POST /console/webhook-endpoints/:id/transformation/test`. */
+export type WebhookTransformationResult =
+  { ok: true; request: WebhookTransformed } | { ok: false; error: string }
 
 export interface SuppressionRow {
   address: string

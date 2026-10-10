@@ -14,6 +14,7 @@ import {
   indentWithTab,
 } from "@codemirror/commands"
 import { html } from "@codemirror/lang-html"
+import { javascript } from "@codemirror/lang-javascript"
 import {
   bracketMatching,
   indentOnInput,
@@ -30,6 +31,7 @@ import {
   placeholder,
 } from "@codemirror/view"
 import { classHighlighter } from "@lezer/highlight"
+import "./code-editor.css"
 
 /**
  * The HTML editor of the Code view: CodeMirror 6, with HTML highlighting,
@@ -48,10 +50,19 @@ export function CodeEditor({
   value,
   onChange,
   className,
+  language = "html",
+  label = "HTML",
+  hint = "Start writing your email template…",
 }: {
   value: string
   onChange: (value: string) => void
   className?: string
+  /** `javascript` for a webhook transformation (#286). Fixed at mount. */
+  language?: "html" | "javascript"
+  /** The editor's accessible name. */
+  label?: string
+  /** The placeholder in an empty document. */
+  hint?: string
 }) {
   const host = React.useRef<HTMLDivElement>(null)
   const view = React.useRef<EditorView | null>(null)
@@ -73,10 +84,12 @@ export function CodeEditor({
           bracketMatching(),
           closeBrackets(),
           autocompletion(),
-          html({ autoCloseTags: true, selfClosingTags: true }),
+          language === "javascript"
+            ? javascript()
+            : html({ autoCloseTags: true, selfClosingTags: true }),
           syntaxHighlighting(classHighlighter),
           EditorView.lineWrapping,
-          placeholder("Start writing your email template…"),
+          placeholder(hint),
           keymap.of([
             ...closeBracketsKeymap,
             ...defaultKeymap,
@@ -88,7 +101,7 @@ export function CodeEditor({
             if (update.docChanged) changed(update.state.doc.toString())
           }),
           EditorView.contentAttributes.of({
-            "aria-label": "HTML",
+            "aria-label": label,
             spellcheck: "false",
           }),
         ],

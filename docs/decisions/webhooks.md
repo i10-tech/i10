@@ -252,7 +252,16 @@ Built in #284 (`apps/api/src/webhooks/health.ts`):
 
 ### Console
 
-All of the above, as console screens. Our UI, our design.
+All of the above, as console screens. Our UI, our design. Built in #286:
+
+- The list shows each endpoint's kind, health and 24-hour error rate, with a
+  banner when one is failing or switched off.
+- `/webhooks/[id]` has the stats over 24 hours, 7 or 30 days, the health
+  history, deliveries, replays with live progress, the transformation editor
+  with "Try it", and every setting by section.
+- `/webhooks/deliveries/[id]` shows the payload, what a transformation sent,
+  and each attempt's request and response, with resend and expunge.
+- Creating asks for the kind first, then only that kind's fields.
 
 ---
 

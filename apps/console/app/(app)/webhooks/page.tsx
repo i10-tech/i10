@@ -17,7 +17,15 @@ import { WebhookList } from "@/components/webhook-list"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { SNIPPETS } from "@/lib/snippets"
-import type { DeliveryRow, Page as ApiPage, WebhookEndpoint } from "@/lib/types"
+import { WebhookAttentionBanner } from "@/components/webhooks/attention-banner"
+import type {
+  DeliveryRow,
+  Page as ApiPage,
+  WebhookEndpoint,
+  WebhookEventType,
+  WebhookStats,
+} from "@/lib/types"
+import { windowQuery } from "@/lib/webhooks"
 
 export const metadata: Metadata = { title: "Webhooks" }
 
@@ -49,7 +57,13 @@ export default async function WebhooksPage({
 }) {
   const params = await searchParams
 
-  const [endpoints, deliveries] = await Promise.all([
+  /*
+   * ⚠ THE STATS AND THE CATALOG FAIL QUIETLY. Without stats the list shows a
+   * dash for each error rate; without the catalog the create dialog has no
+   * events to offer and says so. Neither is worth an error in place of the
+   * endpoints themselves.
+   */
+  const [endpoints, deliveries, stats, catalog] = await Promise.all([
     tryApi<{ data: WebhookEndpoint[] }>("/console/webhook-endpoints"),
     tryApi<ApiPage<DeliveryRow>>("/console/webhook-deliveries", {
       query: {
@@ -60,7 +74,10 @@ export default async function WebhooksPage({
         limit: 50,
       },
     }),
+    tryApi<WebhookStats>("/console/webhook-stats", { query: windowQuery("24h") }),
+    tryApi<{ data: WebhookEventType[] }>("/console/webhook-event-types"),
   ])
+  const types = catalog.ok ? catalog.data.data : []
 
   return (
     <Page>
@@ -69,16 +86,18 @@ export default async function WebhooksPage({
           <PageTitle>Webhooks</PageTitle>
           <PageActions>
             <ApiButton snippet={SNIPPETS.webhooks} />
-            <CreateWebhookButton autoOpen={params.new === "1"} />
+            <CreateWebhookButton autoOpen={params.new === "1"} catalog={types} />
           </PageActions>
         </PageHeaderRow>
         <PageDescription>
-          We POST every delivery event to your endpoints, signed so you can verify it
-          came from us. Failed deliveries are retried with backoff.
+          Every event about your mail, signed so you can verify it came from us: posted
+          to your URL, sent to an SQS queue, or held for you to fetch. Failed deliveries
+          are retried with backoff.
         </PageDescription>
       </PageHeader>
 
-      <PageBody>
+      <PageBody className="space-y-6">
+        {endpoints.ok && <WebhookAttentionBanner endpoints={endpoints.data.data} />}
         <UrlTabs
           value={params.tab === "deliveries" ? "deliveries" : undefined}
           fallback="endpoints"
@@ -102,7 +121,10 @@ export default async function WebhooksPage({
                 message={endpoints.error.message}
               />
             ) : (
-              <WebhookList endpoints={endpoints.data.data} />
+              <WebhookList
+                endpoints={endpoints.data.data}
+                stats={stats.ok ? stats.data : null}
+              />
             )}
           </TabsContent>
 
@@ -117,6 +139,7 @@ export default async function WebhooksPage({
                 deliveries={deliveries.data.data}
                 nextCursor={deliveries.data.nextCursor}
                 endpoints={endpoints.ok ? endpoints.data.data : []}
+                eventTypes={types.map((t) => t.type)}
               />
             )}
           </TabsContent>

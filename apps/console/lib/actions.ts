@@ -23,6 +23,11 @@ import type {
   VerifiedDomain,
   TransferOffer,
   WebhookEndpoint,
+  WebhookEndpointKind,
+  WebhookReplay,
+  WebhookSignatureScheme,
+  WebhookTransformation,
+  WebhookTransformationResult,
   Workspace,
 } from "@/lib/types"
 
@@ -548,11 +553,21 @@ export async function rotateApiKey(id: string) {
 
 // ── Webhooks ────────────────────────────────────────────────────────────────
 
-export async function createWebhook(input: {
-  url: string
+export interface CreateWebhookInput {
+  kind: WebhookEndpointKind
+  /** Required for `http` and `sqs` (the queue URL); never for `polling`. */
+  url?: string
   events: string[]
   description?: string
-}) {
+  signature_scheme?: WebhookSignatureScheme
+  rate_limit?: number
+  headers?: Record<string, string>
+  filter_domains?: string[]
+  filter_tags?: Record<string, string>
+  aws_credentials?: { access_key_id: string; secret_access_key: string }
+}
+
+export async function createWebhook(input: CreateWebhookInput) {
   return run(
     () =>
       api<WebhookEndpoint>("/console/webhook-endpoints", {
@@ -560,6 +575,130 @@ export async function createWebhook(input: {
         body: input,
       }),
     ["/webhooks"],
+  )
+}
+
+/**
+ * Every edit to an endpoint, pausing and resuming included. `null` clears a
+ * field that can be cleared.
+ *
+ * ⚠ `headers` REPLACES THE WHOLE SET. Their values are write-only, so there is
+ * nothing to merge with: a person changing one header types every value again.
+ */
+export interface WebhookPatch {
+  url?: string
+  events?: string[]
+  description?: string | null
+  enabled?: boolean
+  rate_limit?: number | null
+  headers?: Record<string, string> | null
+  filter_domains?: string[] | null
+  filter_tags?: Record<string, string> | null
+  transformation?: WebhookTransformation | null
+  aws_credentials?: { access_key_id: string; secret_access_key: string }
+}
+
+export async function updateWebhook(id: string, patch: WebhookPatch) {
+  return run(
+    () =>
+      api<WebhookEndpoint>(`/console/webhook-endpoints/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: patch,
+      }),
+    ["/webhooks", `/webhooks/${encodeURIComponent(id)}`],
+  )
+}
+
+/** A sample event, marked as a test, through the real delivery path. */
+export async function sendWebhookTest(id: string, eventType: string) {
+  return run(
+    () =>
+      api<{ delivery_id: string }>(
+        `/console/webhook-endpoints/${encodeURIComponent(id)}/test`,
+        { method: "POST", body: { event_type: eventType } },
+      ),
+    [`/webhooks/${encodeURIComponent(id)}`],
+  )
+}
+
+/** Runs code on an example event and shows what would be sent. Saves nothing. */
+export async function tryWebhookTransformation(
+  id: string,
+  input: { code: string; event_type: string },
+) {
+  return run(() =>
+    api<WebhookTransformationResult>(
+      `/console/webhook-endpoints/${encodeURIComponent(id)}/transformation/test`,
+      { method: "POST", body: input },
+    ),
+  )
+}
+
+export async function resendWebhookDelivery(id: string) {
+  return run(
+    () =>
+      api<{ delivery_id: string }>(
+        `/console/webhook-deliveries/${encodeURIComponent(id)}/resend`,
+        { method: "POST" },
+      ),
+    [`/webhooks/deliveries/${encodeURIComponent(id)}`],
+  )
+}
+
+/** ⚠ Behind a recent sign-in on the API: it removes the body for good. */
+export async function expungeWebhookPayload(id: string) {
+  return run(
+    () =>
+      api<{ id: string; payload_expunged: true }>(
+        `/console/webhook-deliveries/${encodeURIComponent(id)}/payload`,
+        { method: "DELETE" },
+      ),
+    [`/webhooks/deliveries/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
+ * The three bulk sends, each a background task the page then follows:
+ * `recover` resends failures only, `replay` a filtered range, and
+ * `replay-missing` the events the endpoint never got.
+ */
+export type ReplayMode = "recover" | "replay" | "replay-missing"
+
+export async function startWebhookReplay(
+  id: string,
+  mode: ReplayMode,
+  body: {
+    since: string
+    until?: string
+    statuses?: ("delivered" | "failed")[]
+    event_type?: string
+  },
+) {
+  return run(
+    () =>
+      api<WebhookReplay>(
+        `/console/webhook-endpoints/${encodeURIComponent(id)}/${mode}`,
+        { method: "POST", body },
+      ),
+    [`/webhooks/${encodeURIComponent(id)}`],
+  )
+}
+
+/** One replay's progress, for the poll that follows it. Revalidates nothing. */
+export async function getWebhookReplay(id: string, replayId: string) {
+  return run(() =>
+    api<WebhookReplay>(
+      `/console/webhook-endpoints/${encodeURIComponent(id)}/replays/${encodeURIComponent(replayId)}`,
+    ),
+  )
+}
+
+/** A read, for the progress poll: revalidates nothing. */
+export async function listWebhookReplays(id: string) {
+  return run(() =>
+    api<{ data: WebhookReplay[] }>(
+      `/console/webhook-endpoints/${encodeURIComponent(id)}/replays`,
+    ),
   )
 }
 
