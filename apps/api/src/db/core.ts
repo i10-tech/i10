@@ -1582,6 +1582,9 @@ export const webhookDeliveries = core.table(
       .on(t.nextAttemptAt)
       .where(sql`${t.status} = 'pending'`),
     index("webhook_deliveries_tenant_idx").on(t.tenantId, t.createdAt),
+    // The deliveries' search (webhooks/history.ts): an id prefix is a range,
+    // matched against the delivery's id (the primary key) or its message's.
+    index("webhook_deliveries_message_idx").on(t.messageId),
     // The queue for "what has not been delivered and is not moving".
     index("webhook_deliveries_pending_idx").on(t.status, t.createdAt),
   ],

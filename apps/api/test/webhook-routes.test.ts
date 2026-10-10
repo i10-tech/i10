@@ -229,6 +229,60 @@ describe("/webhook-health-events (#284)", () => {
   })
 })
 
+describe("GET /webhook-deliveries filters", () => {
+  const list = mock(async () => ({ data: [], next_cursor: null }))
+  const app = () =>
+    createApp({
+      apiKeyAuth,
+      webhookHistory: {
+        list,
+        get: async () => null,
+        expunge: async () => "not_found" as const,
+        poll: async () => ({ status: "not_found" as const }),
+        health: async () => ({ data: [], next_cursor: null }),
+      },
+    })
+
+  it("passes time, response class and id prefix to the store", async () => {
+    const res = await get(
+      app(),
+      "/webhook-deliveries?since=2026-10-01T00:00:00Z&until=2026-10-02T00:00:00Z&http_class=4xx&q=0199a3f2-b4",
+    )
+    expect(res.status).toBe(200)
+    expect(list).toHaveBeenLastCalledWith("ten-1", {
+      since: new Date("2026-10-01T00:00:00Z"),
+      until: new Date("2026-10-02T00:00:00Z"),
+      httpClass: "4xx",
+      q: "0199a3f2-b4",
+    })
+  })
+
+  it("still takes after and before, as since and until", async () => {
+    await get(
+      app(),
+      "/webhook-deliveries?after=2026-10-01T00:00:00Z&before=2026-10-02T00:00:00Z",
+    )
+    expect(list).toHaveBeenLastCalledWith("ten-1", {
+      since: new Date("2026-10-01T00:00:00Z"),
+      until: new Date("2026-10-02T00:00:00Z"),
+    })
+  })
+
+  it("refuses a search that cannot be an id, an unknown class, and both names for a bound", async () => {
+    list.mockClear()
+    for (const query of [
+      "q=acme",
+      "q=%25",
+      "http_class=3xx",
+      "since=2026-10-01T00:00:00Z&after=2026-10-01T00:00:00Z",
+      "until=2026-10-01T00:00:00Z&before=2026-10-01T00:00:00Z",
+    ]) {
+      expect((await get(app(), `/webhook-deliveries?${query}`)).status).toBe(422)
+    }
+    expect(list).not.toHaveBeenCalled()
+  })
+})
+
 describe("GET /webhook-endpoints/{id}/poll (#301)", () => {
   const event = {
     id: "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f60dd",

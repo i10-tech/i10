@@ -1,6 +1,7 @@
 import type { Hono } from "hono"
 import { WEBHOOK_EVENT_TYPES } from "../../webhooks/catalog.js"
 import { statsQuery, windowFrom } from "../webhook-stats.js"
+import { DELIVERY_HTTP_CLASSES } from "../../webhooks/history.js"
 import { POLLING_REPLAY } from "../../webhooks/replay.js"
 import {
   createReplayMissingSchema,
@@ -634,6 +635,9 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
   app.get("/webhook-deliveries", async (c) => {
     const { tenantId } = c.get("auth")
     const q = c.req.query()
+    const since = asDate(q.since)
+    const until = asDate(q.until)
+    const httpClass = DELIVERY_HTTP_CLASSES.find((band) => band === q.http_class)
     return c.json(
       await d.queries.listDeliveries(tenantId, {
         ...(asId(q.endpoint_id) ? { endpointId: asId(q.endpoint_id)! } : {}),
@@ -643,11 +647,24 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
         ...(q.event_type && /^[a-z_.]{1,64}$/.test(q.event_type)
           ? { eventType: q.event_type }
           : {}),
+        ...(since ? { since } : {}),
+        ...(until ? { until } : {}),
+        ...(httpClass ? { httpClass } : {}),
+        // ⚠ PASSED ON EVEN WHEN IT CANNOT BE AN ID, so "acme" answers "no
+        // delivery matches" rather than quietly showing every delivery.
+        ...(q.q?.trim() ? { q: q.q } : {}),
         ...(q.cursor ? { cursor: q.cursor } : {}),
         ...(q.limit ? { limit: Number(q.limit) } : {}),
       }),
     )
   })
+}
+
+/** A time from the console's query string, or nothing when it is not one. */
+function asDate(value: string | undefined): Date | undefined {
+  if (!value) return undefined
+  const at = new Date(value)
+  return Number.isNaN(at.getTime()) ? undefined : at
 }
 
 /** A stats window from the console's query string; a malformed one is a 422. */

@@ -6947,7 +6947,7 @@
     "/webhook-deliveries": {
       "get": {
         "summary": "List webhook deliveries",
-        "description": "Newest first. Filter by endpoint, status, event type and time; page with `cursor` from the previous response's `next_cursor`.",
+        "description": "Newest first. Filter by endpoint, status, event type, time, the class of the last response, or an id prefix; page with `cursor` from the previous response's `next_cursor`. Every filter applies to the rows themselves, so a page is short only when the list is finished.",
         "tags": [
           "Webhooks"
         ],
@@ -6991,19 +6991,74 @@
           {
             "schema": {
               "type": "string",
-              "format": "date-time"
+              "format": "date-time",
+              "description": "Created at or after this time."
             },
             "required": false,
+            "description": "Created at or after this time.",
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Created before this time."
+            },
+            "required": false,
+            "description": "Created before this time.",
+            "name": "until",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Deprecated: use `since`."
+            },
+            "required": false,
+            "description": "Deprecated: use `since`.",
+            "deprecated": true,
             "name": "after",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "format": "date-time"
+              "format": "date-time",
+              "description": "Deprecated: use `until`."
             },
             "required": false,
+            "description": "Deprecated: use `until`.",
+            "deprecated": true,
             "name": "before",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2xx",
+                "4xx",
+                "5xx",
+                "none"
+              ],
+              "description": "The class of the last status any attempt received. `none` is attempted, not delivered and never answered: timeouts, refused connections, failed handshakes or transformations."
+            },
+            "required": false,
+            "description": "The class of the last status any attempt received. `none` is attempted, not delivered and never answered: timeouts, refused connections, failed handshakes or transformations.",
+            "name": "http_class",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F-]{1,36}$",
+              "description": "A prefix of the delivery's id, or of the id of the message it is about. Dashes are ignored."
+            },
+            "required": false,
+            "description": "A prefix of the delivery's id, or of the id of the message it is about. Dashes are ignored.",
+            "name": "q",
             "in": "query"
           },
           {

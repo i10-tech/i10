@@ -18,6 +18,7 @@ import {
 } from "../db/core.js"
 import { lastEvent, PRUNE_WINDOW_MS } from "../send/lookup.js"
 import { timestampFromUuidV7 } from "../ids.js"
+import { deliveryConditions, type DeliveryFilter } from "../webhooks/history.js"
 
 /**
  * Everything the console reads that no other caller needs.
@@ -191,13 +192,8 @@ export interface EmailFilters {
 }
 
 /** The delivery log's filters, all optional and combined with AND. */
-export interface DeliveryFilters {
-  endpointId?: string
-  status?: "pending" | "delivered" | "failed"
-  eventType?: string
-  cursor?: string
-  limit?: number
-}
+/** The same filters as the API's list (#281), built by the same function. */
+export type DeliveryFilters = DeliveryFilter
 
 /** The request log's filters, all optional and combined with AND. */
 export interface RequestFilters {
@@ -704,14 +700,7 @@ export function consoleQueries(
       const cursor = decodeCursor(opts.cursor)
 
       return withTenant(db, tenantId, async (tx) => {
-        const where: SQL[] = []
-        if (opts.endpointId)
-          where.push(eq(webhookDeliveries.endpointId, opts.endpointId))
-        if (opts.status) where.push(eq(webhookDeliveries.status, opts.status))
-        // ⚠ COMPARED AS TEXT: an event name the enum does not know is a filter
-        // that matches nothing, not a 500 from a failed cast.
-        if (opts.eventType)
-          where.push(sql`${webhookDeliveries.eventType}::text = ${opts.eventType}`)
+        const where = deliveryConditions(opts)
         if (cursor) {
           where.push(
             sql`(${webhookDeliveries.createdAt}, ${webhookDeliveries.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`,

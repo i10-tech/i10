@@ -371,14 +371,20 @@ export function UrlFilterMulti({
 // ── Date range ─────────────────────────────────────────────────────────────
 
 /** Resend's "Last 15 days", as `?days=`. */
-export function UrlRangeSelect({ param = "days" }: { param?: string }) {
+export function UrlRangeSelect({
+  param = "days",
+  className,
+}: {
+  param?: string
+  className?: string
+}) {
   return (
     <UrlFilterSelect
       param={param}
       options={RANGES.map((r) => ({ ...r }))}
       allLabel="All time"
       label="Date range"
-      className="w-40"
+      className={cn("w-40", className)}
     />
   )
 }

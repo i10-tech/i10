@@ -5,6 +5,7 @@ import {
   webhookDeliverySchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
+import { DELIVERY_HTTP_CLASSES } from "../webhooks/history.js"
 import { POLLING_REPLAY } from "../webhooks/replay.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 
@@ -35,24 +36,68 @@ const list = createRoute({
   path: "/",
   summary: "List webhook deliveries",
   description:
-    "Newest first. Filter by endpoint, status, event type and time; page with " +
-    "`cursor` from the previous response's `next_cursor`.",
+    "Newest first. Filter by endpoint, status, event type, time, the class of " +
+    "the last response, or an id prefix; page with `cursor` from the previous " +
+    "response's `next_cursor`. Every filter applies to the rows themselves, so " +
+    "a page is short only when the list is finished.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
   middleware: [requireApiKey] as const,
   request: {
-    query: z.object({
-      endpoint_id: z.uuid().optional(),
-      status: z.enum(["pending", "delivered", "failed"]).optional(),
-      event_type: z
-        .string()
-        .regex(/^[a-z_.]{1,64}$/)
-        .optional(),
-      after: z.iso.datetime({ offset: true }).optional(),
-      before: z.iso.datetime({ offset: true }).optional(),
-      cursor: z.string().max(512).optional(),
-      limit: z.coerce.number().int().min(1).max(100).optional(),
-    }),
+    query: z
+      .object({
+        endpoint_id: z.uuid().optional(),
+        status: z.enum(["pending", "delivered", "failed"]).optional(),
+        event_type: z
+          .string()
+          .regex(/^[a-z_.]{1,64}$/)
+          .optional(),
+        since: z.iso.datetime({ offset: true }).optional().openapi({
+          description: "Created at or after this time.",
+        }),
+        until: z.iso.datetime({ offset: true }).optional().openapi({
+          description: "Created before this time.",
+        }),
+        // ⚠ KEPT, BECAUSE THEY SHIPPED. Every other webhook route says
+        // since/until, so these became aliases rather than the names.
+        after: z.iso
+          .datetime({ offset: true })
+          .optional()
+          .openapi({
+            description: "Deprecated: use `since`.",
+            param: { deprecated: true },
+          }),
+        before: z.iso
+          .datetime({ offset: true })
+          .optional()
+          .openapi({
+            description: "Deprecated: use `until`.",
+            param: { deprecated: true },
+          }),
+        http_class: z
+          .enum(DELIVERY_HTTP_CLASSES)
+          .optional()
+          .openapi({
+            description:
+              "The class of the last status any attempt received. `none` is " +
+              "attempted, not delivered and never answered: timeouts, refused " +
+              "connections, failed handshakes or transformations.",
+          }),
+        q: z
+          .string()
+          .regex(/^[0-9a-fA-F-]{1,36}$/, "`q` must be the start of an id.")
+          .optional()
+          .openapi({
+            description:
+              "A prefix of the delivery's id, or of the id of the message it " +
+              "is about. Dashes are ignored.",
+          }),
+        cursor: z.string().max(512).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .refine((q) => !(q.since && q.after) && !(q.until && q.before), {
+        message: "Use `since` and `until`, not their deprecated aliases as well.",
+      }),
   },
   responses: {
     200: {
@@ -71,12 +116,16 @@ webhookDeliveries.openapi(
     const history = c.get("webhookHistory")
     if (!history) return c.json(notWired, 501)
     const q = c.req.valid("query")
+    const since = q.since ?? q.after
+    const until = q.until ?? q.before
     const page = await history.list(c.get("auth").tenantId, {
       ...(q.endpoint_id ? { endpointId: q.endpoint_id } : {}),
       ...(q.status ? { status: q.status } : {}),
       ...(q.event_type ? { eventType: q.event_type } : {}),
-      ...(q.after ? { after: new Date(q.after) } : {}),
-      ...(q.before ? { before: new Date(q.before) } : {}),
+      ...(since ? { since: new Date(since) } : {}),
+      ...(until ? { until: new Date(until) } : {}),
+      ...(q.http_class ? { httpClass: q.http_class } : {}),
+      ...(q.q ? { q: q.q } : {}),
       ...(q.cursor ? { cursor: q.cursor } : {}),
       ...(q.limit ? { limit: q.limit } : {}),
     })
