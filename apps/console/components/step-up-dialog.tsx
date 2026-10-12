@@ -368,9 +368,7 @@ export function StepUpDialog({
    * nothing - the countdown picks up where it was. See lib/code-send.tsx.
    */
   const codes = useCodeSend(
-    screen === "email_code" ||
-      screen === "phone_code" ||
-      screen === "phone_code_2fa"
+    screen === "email_code" || screen === "phone_code" || screen === "phone_code_2fa"
       ? `step-up:${screen}`
       : null,
   )

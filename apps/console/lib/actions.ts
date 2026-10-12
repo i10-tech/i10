@@ -541,7 +541,10 @@ export async function teamDomainSuggestions() {
 export async function enableTeamDomain(name: string) {
   return run(
     () =>
-      api<{ name: string }>("/console/team/domains", { method: "POST", body: { name } }),
+      api<{ name: string }>("/console/team/domains", {
+        method: "POST",
+        body: { name },
+      }),
     [],
     { refreshCaller: false },
   )

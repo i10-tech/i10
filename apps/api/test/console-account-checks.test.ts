@@ -13,7 +13,9 @@ describe("classify", () => {
     expect(classify({ status: 422, errors: [] })).toBe("wrong")
   })
   test("no_password_set is its own answer", () => {
-    expect(classify({ status: 400, errors: [{ code: "no_password_set" }] })).toBe("none")
+    expect(classify({ status: 400, errors: [{ code: "no_password_set" }] })).toBe(
+      "none",
+    )
   })
   test("an outage is never wrong", () => {
     expect(classify({ status: 429 })).toBe("unavailable")

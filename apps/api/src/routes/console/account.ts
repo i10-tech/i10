@@ -133,7 +133,12 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     const { userId, orgId } = c.get("user")
     const body = await readJson(c)
     const name = typeof body?.name === "string" ? body.name : ""
-    const outcome = await claimTeamDomain(d.teamDomains, { tenantId, userId, orgId, name })
+    const outcome = await claimTeamDomain(d.teamDomains, {
+      tenantId,
+      userId,
+      orgId,
+      name,
+    })
     if (outcome === "created") return c.json({ name: name.trim().toLowerCase() }, 201)
     if (outcome === "forbidden")
       return c.json(

@@ -12,7 +12,11 @@ import type { SsoProvider } from "../_lib/providers"
 import { consentPromptFor } from "../_lib/oidc"
 import { markSignInAttempt } from "../_lib/last-used"
 import { LastUsedBadge } from "./last-used-badge"
-import { AppleIcon, GitHubIcon, GoogleIcon } from "@repo/ui/components/i10/provider-icons"
+import {
+  AppleIcon,
+  GitHubIcon,
+  GoogleIcon,
+} from "@repo/ui/components/i10/provider-icons"
 
 /**
  * The SSO buttons, on both pages.

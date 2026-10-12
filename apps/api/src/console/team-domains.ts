@@ -23,7 +23,8 @@ export interface TeamDomainDeps {
   create(orgId: string, name: string): Promise<void>
 }
 
-export type ClaimOutcome = "created" | "not_verified" | "forbidden" | "no_org" | "exists"
+export type ClaimOutcome =
+  "created" | "not_verified" | "forbidden" | "no_org" | "exists"
 
 export async function claimTeamDomain(
   d: TeamDomainDeps,

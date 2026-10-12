@@ -1214,10 +1214,7 @@ const app = createApp({
                 limit: 100,
               })
               const membership = data.find((m) => m.organization.id === orgId)
-              return (
-                membership?.permissions.includes("org:sys_domains:manage") ??
-                false
-              )
+              return membership?.permissions.includes("org:sys_domains:manage") ?? false
             },
             create: async (orgId: string, name: string) => {
               await clerk.organizations.createOrganizationDomain({
